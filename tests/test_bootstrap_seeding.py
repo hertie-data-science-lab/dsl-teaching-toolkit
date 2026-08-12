@@ -864,6 +864,56 @@ def test_propagate_secret_reds_when_the_org_secret_write_fails(monkeypatch, caps
     assert "bootstrap incomplete" in capsys.readouterr().err
 
 
+def test_mail_secrets_propagate_to_a_course_org_but_not_a_cohort(monkeypatch):
+    # Both workflows that send mail ("Send enrolment codes", "Distribute grades") run in
+    # the COURSE org, so propagating to a cohort would only spread the mailbox credentials
+    # into an org that never uses them.
+    _stub_bootstrap(monkeypatch)
+    monkeypatch.setenv("DSL_BOT_TOKEN", "s3cret")
+    monkeypatch.setattr(bc, "set_org_secret", lambda *a, **k: True)
+    monkeypatch.setattr(bc.site, "sync_site", lambda c, o: 0)
+    propagated: list[str] = []
+    monkeypatch.setattr(
+        bc, "propagate_mail_secrets", lambda org: propagated.append(org) or 0
+    )
+
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "bootstrap_course",
+            "--org",
+            "Cohort-f2026",
+            "--cohort",
+            "--course",
+            "Course-Org",
+            "--propagate-secret",
+        ],
+    )
+    assert bc.main() == 0
+    assert propagated == []
+
+    monkeypatch.setattr(
+        "sys.argv", ["bootstrap_course", "--org", "Course-Org", "--propagate-secret"]
+    )
+    assert bc.main() == 0
+    assert propagated == ["Course-Org"]
+
+
+def test_bootstrap_reds_when_a_mail_secret_write_fails(monkeypatch, capsys):
+    # The propagation count used to be discarded, reporting a green bootstrap for a course
+    # org that cannot send a single enrolment code or grade email.
+    _stub_bootstrap(monkeypatch)
+    monkeypatch.setenv("DSL_BOT_TOKEN", "s3cret")
+    monkeypatch.setattr(bc, "set_org_secret", lambda *a, **k: True)
+    monkeypatch.setattr(bc, "propagate_mail_secrets", lambda org: 2)
+    monkeypatch.setattr(
+        "sys.argv", ["bootstrap_course", "--org", "Course-Org", "--propagate-secret"]
+    )
+
+    assert bc.main() == 1
+    assert "bootstrap incomplete" in capsys.readouterr().err
+
+
 def test_set_org_secret_sends_the_value_over_stdin(monkeypatch):
     # Never an argv --body: the org bootstrap runs on a shared runner, where `ps` would
     # expose the bot token to anything else on the box. Both the org secret and the

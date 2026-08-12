@@ -1,7 +1,8 @@
 """bootstrap-course -- one-time setup for a new course org.
 
 Sets up org-level infrastructure that persists across semesters:
-- DSL_BOT_TOKEN secret (required for all workflows)
+- DSL_BOT_TOKEN secret (required for all workflows), plus - on a course org - the
+  central GRAPH_*/SMTP_* mail secrets, when a mailbox is configured centrally
 - Faculty teams (instructors, course-admin); cohort bootstrap adds students + auditors
 - Org settings (2FA enforcement, Pages default branch)
 - Profile README (.github repo with description)
@@ -114,7 +115,23 @@ def _cohort_tag(org: str) -> tuple[str, int]:
     return f"{m.group(1).lower()}{m.group(2)}", int(m.group(2))
 
 
-def set_org_secret(org: str, secret_name: str, secret_value: str) -> bool:
+# The repos an org-level secret is scoped to (`visibility=selected`): the ones that run
+# toolkit workflows. Only those that actually exist are listed - a course org has just
+# `.github`, a cohort org all three.
+INFRA_REPOS = [".github", "welcome", "classroom-config"]
+
+
+def _infra_repos(org: str) -> list[str]:
+    """The INFRA_REPOS that exist in `org` (never empty - `.github` is the fallback).
+
+    One `repo_exists` call per repo, so callers setting several secrets at once compute
+    this once and pass it to set_org_secret rather than re-probing per secret."""
+    return [r for r in INFRA_REPOS if repo_exists(org, r)] or [".github"]
+
+
+def set_org_secret(
+    org: str, secret_name: str, secret_value: str, repos: list[str] | None = None
+) -> bool:
     """Create or update an org secret, scoped to the infra repos that need it.
 
     The token must reach the **public** `.github` (faculty & instructors workflows), `welcome`
@@ -128,10 +145,10 @@ def set_org_secret(org: str, secret_name: str, secret_value: str) -> bool:
     private/faculty-only, the same trust tier as `.github`.
 
     The value goes over stdin - `gh secret set` reads it from there whenever `--body` is
-    omitted - never argv, so it is not visible in `ps` to anyone on the runner."""
-    infra = [
-        r for r in (".github", "welcome", "classroom-config") if repo_exists(org, r)
-    ] or [".github"]
+    omitted - never argv, so it is not visible in `ps` to anyone on the runner.
+
+    `repos` overrides the scoping probe with an already-computed list (see _infra_repos)."""
+    infra = repos or _infra_repos(org)
     code, out = gh(
         "secret",
         "set",
@@ -169,6 +186,59 @@ def set_org_secret(org: str, secret_name: str, secret_value: str) -> bool:
             log_err(f"failed to set repo secret on {org}/{r}: {rout[:200]}")
             mirror_failures += 1
     return mirror_failures == 0
+
+
+# The mail-transport secrets the enrolment-code and grade-distribution workflows need, in
+# the exact names dsl_course.mailer reads (graph_config_from_env / smtp_config_from_env):
+# Graph is preferred, SMTP is the fallback, and mailer picks whichever set is complete. They
+# are held ONCE as secrets on the CENTRAL repo (one shared no-reply mailbox for every
+# course) and copied onto each course org from the central Bootstrap workflow's env, exactly
+# like DSL_BOT_TOKEN - otherwise every course org would need the same nine secrets pasted
+# into its settings by hand before it could email anyone.
+MAIL_SECRETS = [
+    "GRAPH_TENANT_ID",
+    "GRAPH_CLIENT_ID",
+    "GRAPH_CLIENT_SECRET",
+    "GRAPH_SENDER",
+    "SMTP_HOST",
+    "SMTP_USER",
+    "SMTP_PASSWORD",
+    "SMTP_PORT",
+    "SMTP_FROM",
+]
+
+
+def propagate_mail_secrets(org: str) -> int:
+    """Copy the centrally-configured MAIL_SECRETS from env onto `org`, returning how many
+    failed to write (so a partial propagation reds the bootstrap like every other step).
+
+    Called for course orgs only (see _run's step 4b): both workflows that send mail ("Send
+    enrolment codes", "Distribute grades") run there, so the credentials would sit unused
+    in a cohort.
+
+    Scoping is the bot token's (set_org_secret): `visibility=selected` over the existing
+    infra repos, so the mail credentials reach the public `.github` repo those workflows
+    run in, and no student-facing/content repo. The existence probe runs once here and is
+    reused for all nine rather than re-probing the org per secret.
+
+    Whichever transport is configured centrally is what propagates: unset secrets are
+    skipped silently (Actions hands an undeclared secret to the step as an EMPTY string,
+    so empty means absent, not "set to blank"). Values are never logged."""
+    log_step("Propagating mail secrets")
+    present = [(n, os.environ.get(n, "").strip()) for n in MAIL_SECRETS]
+    present = [(n, v) for n, v in present if v]
+    if not present:
+        log(
+            "  no mail secrets configured centrally - skipped (set GRAPH_*/SMTP_* on the "
+            "central repo to enable enrolment-code and grade emails)"
+        )
+        return 0
+    repos = _infra_repos(org)
+    failures = sum(
+        not set_org_secret(org, name, value, repos) for name, value in present
+    )
+    log_ok(f"{len(present) - failures} mail secret(s) propagated")
+    return failures
 
 
 # Faculty role teams - created in EVERY org (course + cohort): instructors run the workflows
@@ -693,8 +763,9 @@ def main() -> int:
     parser.add_argument(
         "--propagate-secret",
         action="store_true",
-        help="Set DSL_BOT_TOKEN on this org to the DSL_BOT_TOKEN env value "
-        "(lets the central bootstrap auto-provision the token - no manual per-org step).",
+        help="Set DSL_BOT_TOKEN on this org to the DSL_BOT_TOKEN env value, plus - on a "
+        "course org - any GRAPH_*/SMTP_* mail secrets present in env (lets the central "
+        "bootstrap auto-provision them - no manual per-org step).",
     )
     parser.add_argument(
         "--admins",
@@ -880,6 +951,15 @@ def _run(args: argparse.Namespace) -> int:
                 "Run bootstrap with --set-secret <path> to add it, "
                 f"or set it manually at https://github.com/{args.org}/settings/secrets/actions"
             )
+
+    # 4b. Mail secrets - the same central-env propagation as the bot token, so a course
+    # org can email enrolment codes and grades without anyone pasting nine secrets into
+    # its settings. Course orgs only: "Send enrolment codes" and "Distribute grades" both
+    # run there, so a cohort would only be holding unused credentials. A no-op when
+    # nothing is configured centrally; a partial write reds the bootstrap like any other
+    # failed step, rather than reporting green over an org that cannot send mail.
+    if (args.set_secret or args.propagate_secret) and not args.cohort:
+        failures += propagate_mail_secrets(args.org)
 
     # 5. Generate the org-overview README now that all repos exist (clickable index).
     seed.update_profile_readme(args.org, org_name, course_name)
