@@ -1,0 +1,120 @@
+name: Validate schedule
+
+# Seeded into a cohort's private classroom-config repo as
+# .github/workflows/validate-schedule.yml. Checks schedule.yml the moment it changes, in
+# the repo it lives in - faculty edit here, so the verdict belongs here rather than behind
+# a button in the course org.
+#
+# It CANNOT block the commit: workflows run after the push has landed, and branch
+# protection needs a paid plan on a private repo. So it does the two things it can:
+#   1. fails, which puts a red X against the offending commit;
+#   2. opens an issue assigned to whoever pushed, which actually notifies them - a red X
+#      only works if someone looks. The issue is closed automatically by the next commit
+#      that parses clean, so it tracks the current state rather than accumulating.
+#
+# Validation runs the SAME parser the hourly scheduler uses (dsl_course.schedule), checked
+# out from the public central repo. A second implementation - a JSON schema, a hand-rolled
+# checker - could drift, and its failure mode is the worst one available: passing a file
+# the scheduler will silently drop entries from.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - schedule.yml
+  pull_request:
+    paths:
+      - schedule.yml
+  workflow_dispatch:
+
+# contents: read is what the ambient GITHUB_TOKEN needs to check this private repo out.
+# issues: write is the escalation path this workflow exists for (see the header); the issue
+# steps below run on DSL_BOT_TOKEN, so this is the declared intent rather than the token in
+# use, and it stays at the two scopes rather than the default all.
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Pinned to full commit SHAs: these steps share a job with DSL_BOT_TOKEN, and a
+      # mutable tag is whatever the tag currently points at. Comment = the version.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          path: cohort
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          repository: __CENTRAL__
+          ref: __CENTRAL_REF__
+          path: central
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r central/requirements.txt
+
+      - name: Validate schedule.yml
+        id: validate
+        working-directory: central
+        run: |
+          set +e
+          python3 -m dsl_course.schedule --file ../cohort/schedule.yml --validate > report.txt 2>&1
+          echo "rc=$?" >> "$GITHUB_OUTPUT"
+          {
+            echo "## schedule.yml"
+            echo ""
+            echo '```'
+            cat report.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          cat report.txt
+          # Carry the report to the issue step, which only runs when this one fails.
+          # The delimiter has a random suffix on purpose: report.txt is derived from a
+          # faculty-authored schedule.yml, and a line equal to the delimiter would end the
+          # heredoc early and let the rest of the file inject arbitrary step outputs.
+          {
+            echo "report<<REPORT_EOF_ba31d7c94f68"
+            cat report.txt
+            echo "REPORT_EOF_ba31d7c94f68"
+          } >> "$GITHUB_OUTPUT"
+          exit 0
+
+      - name: Open an issue naming what was dropped
+        if: steps.validate.outputs.rc != '0' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
+          ACTOR: ${{ github.actor }}
+          SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          REPORT: ${{ steps.validate.outputs.report }}
+        run: |
+          title="schedule.yml has entries the scheduler cannot read"
+          existing=$(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number --jq '.[0].number')
+          body=$(printf '%s\n\n```\n%s\n```\n\nCommit: %s\nRun: %s\n\nA dropped entry is silently absent from the term plan - no release, or no deadline, snapshot or autograding. Fix `schedule.yml` on `main` and this issue closes itself.\n\nField reference: https://github.com/%s/blob/main/docs/07-schedule-releases.md' \
+            "Validation of \`schedule.yml\` failed." "$REPORT" "$SHA" "$RUN_URL" "__CENTRAL__")
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" --title "$title" --body "$body" --assignee "$ACTOR" || \
+              gh issue create --repo "$REPO" --title "$title" --body "$body"
+          fi
+
+      - name: Close the issue once the schedule parses clean
+        if: steps.validate.outputs.rc == '0' && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          title="schedule.yml has entries the scheduler cannot read"
+          for n in $(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number --jq '.[].number'); do
+            gh issue close "$n" --repo "$REPO" --comment "schedule.yml now parses with nothing dropped."
+          done
+
+      - name: Fail the run so the commit carries a red X
+        if: steps.validate.outputs.rc != '0'
+        run: |
+          echo "::error file=schedule.yml::schedule.yml has entries the scheduler cannot read - see the run summary"
+          exit 1

@@ -1,0 +1,25 @@
+name: Join team
+description: Join or form a team for a group assignment
+title: "Join team"
+labels: ["team-formation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        To **form a new team**, pick a team name nobody is using yet. To **join an existing team**, use its exact name.
+  - type: input
+    id: assignment
+    attributes:
+      label: Assignment
+      description: The assignment slug for this group project (ask the teaching team if unsure).
+      placeholder: "e.g. assignment-4-project"
+    validations:
+      required: true
+  - type: input
+    id: team
+    attributes:
+      label: Team
+      description: "Team name (letters, numbers, dashes). Create a new one or join an existing team."
+      placeholder: "e.g. team-x"
+    validations:
+      required: true

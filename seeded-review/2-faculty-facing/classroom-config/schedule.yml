@@ -1,0 +1,49 @@
+# This cohort's schedule + auto-release plan. Edit here. 
+#
+# Times are Europe/Berlin unless you set `timezone:`; the Scheduled release cron runs hourly, so times are honoured to the hour.
+#
+# Each block encodes BEHAVIOUR:
+#   releases:     entries that DEPLOY materials (course org -> this cohort org)
+#   assignments:  each assignment's handout / due / grading lifecycle
+#   events:       display-only calendar rows - nothing deploys
+#
+# Changing a date later? Just commit the edit to this file on main; the hourly cron reads
+# whatever is on main at each tick, so the change simply takes effect within the hour.
+# Only already-fired ONE-SHOT actions don't rewind: a release already shipped stays
+# shipped, and a snapshot/autograde that already ran needs its marker deleted to redo.
+#
+# What follows is a SKELETON: uncomment and fill what you want. For a full worked term -
+# a real release plan, a group project, exams - see `schedule.yml.sample`.
+
+# timezone: Europe/Berlin           
+# semester_start: 
+# semester_end: 
+
+# releases:                         
+#   lecture-1:                      
+#     event_datetime:               # what the site's schedule shows
+#     title:                        # OPTIONAL (default: prettified label)
+#     tbc: false                    # OPTIONAL: site marks it "(TBC)" next to the event_datetime (default: false)
+#     deploy:                       
+#       - course_source_repo:       # REQUIRED 
+#         course_source_path:       # REQUIRED - folder or file to copy
+#         cohort_dest_repo:         # default: materials
+#         cohort_dest_path:         # default: same as course_source_path
+#         deploy_datetime:          # default: the event_datetime
+#
+# assignments:                      
+#   assignment-1:
+#     course_source_repo:           # REQUIRED 
+#     cohort_dest_repo:             # OPTIONAL (default: the slug (here would be assignment-1))
+#     handout_datetime:             # Omit  if you hand out via the manual "Release assignment" button (which auto-records it here for you)
+#     due_datetime:                 # a bare date -> end of that day (23:59:59)
+#     grading_datetime:             # OPTIONAL: snapshot freezes + autograder fires (default: due_datetime). Not shown to students
+#     type: group                   # OPTIONAL: group | individual (also settable in the template's grading.yml; default: individual)
+#     max_team_size:                # OPTIONAL, group only: the welcome "Join team" flow  refuses a member beyond this (default: 5)
+
+# events:                           # DISPLAY-ONLY calendar rows - nothing deploys
+#   final-exam:
+#     type:                         # OPTIONAL: exam | special_event (default:  special_event). `exam` colours the row as an exam
+#     title:                        # OPTIONAL row label (default: prettified label)
+#     event_datetime:               # bare date -> whole day;
+#                                   # `event_datetime: tbc` -> an undated TBC row

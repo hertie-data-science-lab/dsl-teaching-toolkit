@@ -1,0 +1,6 @@
+# This cohort org points back to its persistent course org. Read by the
+# classroom-config dispatchers (dispatch-sync / dispatch-sync-site) to find where
+# to fire Sync membership / Sync site. Identity + schedule live elsewhere (the
+# course org's dsl-course.yml and this cohort's classroom-config/schedule.yml).
+course: hertie-dsl-demo-course-e1234
+org: hertie-dsl-demo-f2026

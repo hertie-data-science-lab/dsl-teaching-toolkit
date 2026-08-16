@@ -4,6 +4,13 @@
 pythonpath = [".", "tests"]
 testpaths = ["tests"]
 
+[tool.ruff]
+# TEMPORARY - remove together with the directory itself, before this branch merges.
+# seeded-review/ holds rendered copies of what the generators emit, kept byte-identical to
+# their output so an edit there can be diffed straight back. Formatting them would break
+# that equality against the generator, which is the whole point of the directory.
+extend-exclude = ["seeded-review"]
+
 [tool.ruff.lint]
 ignore = [
     # `date.today()` is deliberate wherever it appears: access windows (people.yml
