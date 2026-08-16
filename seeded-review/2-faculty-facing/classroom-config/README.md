@@ -31,7 +31,7 @@ One row per student. Leave `github_handle`, `github_id`& `enrol_code` blank - th
 
 A push to this file triggers **Sync membership** automatically, reconciling the `students` and `auditors` teams to match (a deleted row revokes access on that same push).
 
-## `grades/\<assignment\>.csv` - marks (optional, when returning grades)
+## `grades/<assignment>.csv` - marks (optional, when returning grades)
 
 One file per assignment,
 
