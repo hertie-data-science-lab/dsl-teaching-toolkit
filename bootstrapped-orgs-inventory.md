@@ -9,6 +9,7 @@
 | [hertie-dsl-demo-course-e1234](https://github.com/hertie-dsl-demo-course-e1234) | Machine Learning Fundamentals (Demo) | E1234 |
 | [hertie-intro-to-data-science-c11](https://github.com/hertie-intro-to-data-science-c11) | Introduction to Data Science | C11 |
 | [hertie-maths-data-science-C23](https://github.com/hertie-maths-data-science-C23) | Maths for Data Science | GRAD-C23 |
+| [hertie-nlp-e1282](https://github.com/hertie-nlp-e1282) | Natural Language Processing | E1282 |
 
 ## Cohort orgs
 
