@@ -48,6 +48,7 @@ org_name: DSL Demo Course        # names the ORG - the websites never show it
 course_name: Deep Learning       # the cohort websites' title
 course_code: E1234               # shown beside it
 course_description: One or two sentences, on one line - the sites' blurb
+site_link_extensions: [pdf, html]  # optional - link ONLY these file types on the sites
 people:
   course_admins:
     - github_handle: "janedoe"   # admin on the course org + every cohort
@@ -62,8 +63,13 @@ passing, revokes on the next sync. This org's `instructors`/`teaching_assistants
 display-only cards; TAs are declared per cohort in [`people.yml`](#peopleyml).
 Runbook: [05](05-manage-teaching-team.md).
 
-`course_name` / `course_code` / `course_description` are the three fields that reach every
+`course_name` / `course_code` / `course_description` are the fields that reach every
 cohort website - a push here re-syncs them all: [11](11-configure-cohort-site.md).
+
+`site_link_extensions` narrows what each session row **links**, never what it ships. Unset
+(the default), a row lists the files at its session folder's root plus one link per
+subfolder, so a rendered Quarto/Rmd deck links the deck rather than its hundreds of assets;
+set, only these file types are listed, plus a link to the folder itself.
 
 ### `students.csv`
 
@@ -219,8 +225,9 @@ repos, never orgs. Every release is idempotent - re-runs are no-ops.
 `grading_datetime` under `assignments:`.)
 
 Per entry: `event_datetime` (required - when the thing happens; the site schedule shows it,
-and it is the default fire time), `title` (optional
-row label), and the `deploy` actions. A deploy item may carry its own
+and it is the default fire time), `title` and `description` (optional - the session's name,
+shown beside its ordinal, and a sentence about it on the Lectures tab), and the `deploy`
+actions. A deploy item may carry its own
 `deploy_datetime` to ship earlier or later than the calendar event.
 Assignments take no entry here: their whole lifecycle (handout_datetime/due_datetime/grading_datetime) lives under
 `assignments:` below (an `assignment:` action is also supported, for handing out by hand).
@@ -260,7 +267,8 @@ releases:
   session_2:
     event_datetime: 2026-09-15T10:00  # the class - what the site announces
     tbc: false                        # true = provisional date, shown "(TBC)"
-    title: Linear regression          # site row label (default: prettified entry label)
+    title: Linear regression          # the session's name, beside its "Session 2" ordinal
+    description: Least squares by hand  # a sentence about it, on the Lectures tab
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: lectures/02_intro

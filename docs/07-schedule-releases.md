@@ -28,13 +28,14 @@ Two scalars sit alongside them - `semester_start:` and `semester_end:` - which b
 
 Use this for releasing teaching materials, code, datasets, anything else.
 
-Each entry is a label you choose (`lecture-1`, `lab-1`, `bonus-dataset` - it is yours to declare here, and it is what the site shows unless you give a `title:`). Each entry holds:
+Each entry is a label you choose (`lecture-1`, `lab-1`, `bonus-dataset`) - yours, and never shown to students: the site names a row by its ordinal (`Session 1`, `Lab 1`), taken from the session folder the deploy lands in, plus your `title:` if you give one. Each entry holds:
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `event_datetime` | **yes** | - | when the class happens - what the site's schedule shows, and the default fire time for this entry's deploys |
 | `deploy` (nested entry) | no | - | the copies this entry ships (a nested list - see below) |
-| `title` | no | prettified label | the row label, where this entry shows on the site |
+| `title` | no | - | the session's name, shown beside its ordinal ("Session 1 / Probability Theory") on the schedule, Lectures, Materials and Labs tabs |
+| `description` | no | - | a sentence about the session, shown under its heading on the Lectures tab |
 | `tbc` | no | `false` | signals the date is provisional: it fires as normal just the deployed site marks it **(TBC)** |
 
 
@@ -43,7 +44,7 @@ NB: **the calendar event is not the release.**
   - However, a deploy can also carry its own separate `deploy_datetime:` to ship its files earlier (or later) than the class they belong to. 
   - If nothing needs to ship at all, the row belongs under `events:`, not here.
 
-NB: **a row appears as soon as you write it, not when it ships.** Every dated `releases:` entry gets its schedule row from the moment it lands on `main` - so writing the term up front publishes the whole term. Until its files ship the row carries no links and says so ("Materials for session 3 are not released yet - they appear in `materials/lectures/03_week-3`..."), then picks up the links on release. Exactly how an assignment's row appears the day its template repo exists rather than the day it hands out. An entry with `event_datetime: tbc` has nowhere to sit on a dated table, so it waits for a real date.
+NB: **a row appears as soon as you write it, not when it ships.** Every dated `releases:` entry gets its schedule row from the moment it lands on `main` - so writing the term up front publishes the whole term. Until its files ship the row carries no links and says so ("Materials for session 3 are not released yet - they will appear in `materials/lectures/03_week-3` when released."), then picks up the links on release. Exactly how an assignment's row appears the day its template repo exists rather than the day it hands out. An entry with `event_datetime: tbc` has nowhere to sit on a dated table, so it waits for a real date.
 
 Nested under `deploy:` we havee the following:
 
@@ -104,6 +105,28 @@ releases:
         cohort_dest_repo: lab_materials
 
 ```
+
+### Releasing solutions after the class
+
+A deploy fires on its own `deploy_datetime`, and a release only ever **adds** files - so a
+second copy into the same session folder is how solutions reach students after the lab:
+
+```yaml
+  lab_02:
+    event_datetime: 2026-09-17T14:00
+    title: Your first classifier
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: labs/02_intro          # the empty scripts, at lab time
+      - course_source_repo: course-materials-f2026
+        course_source_path: solutions/labs/02_intro   # staged OUTSIDE labs/02_intro
+        cohort_dest_path: labs/02_intro/solutions
+        deploy_datetime: 2026-09-17T18:00          # after the lab
+```
+
+Both land on the same Lab row; the solutions links appear at 18:00 and never overwrite the
+scripts. **Stage the solutions outside the folder you release as the lab** - a `solutions/`
+inside `labs/02_intro` ships with the 14:00 copy.
 
 ## `assignments:` 
 
