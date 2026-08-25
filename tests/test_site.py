@@ -127,10 +127,16 @@ def test_session_dates_ignores_non_ordinal_deploys():
 RELEASED = [("materials", "lectures", "02_week-2")]
 
 
+def _row(when, **kw):
+    """The plan's view of a row - what `_lecture_entry` renders from. Built here so a test
+    states only the plan fields it is actually about."""
+    return site._PlannedRow(when=when, **kw)
+
+
 def test_lecture_entry_shows_real_time_from_a_datetime(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
     md = site._lecture_entry(
-        "Cohort", "2", datetime(2026, 9, 15, 14, 30, tzinfo=BERLIN), RELEASED
+        "Cohort", "2", _row(datetime(2026, 9, 15, 14, 30, tzinfo=BERLIN)), RELEASED
     )
     assert "date: 2026-09-15T14:30:00" in md
     assert "not released yet" not in md
@@ -138,17 +144,17 @@ def test_lecture_entry_shows_real_time_from_a_datetime(monkeypatch):
 
 def test_lecture_entry_falls_back_to_0900_for_a_bare_date(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
-    md = site._lecture_entry("Cohort", "2", date(2026, 9, 15), RELEASED)
+    md = site._lecture_entry("Cohort", "2", _row(date(2026, 9, 15)), RELEASED)
     assert "date: 2026-09-15T09:00:00" in md
 
 
 def test_lecture_entry_renders_a_lab_row_as_its_own_type(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
-    md = site._lecture_entry("Cohort", "3", date(2026, 9, 17), RELEASED, "lab")
+    md = site._lecture_entry("Cohort", "3", _row(date(2026, 9, 17)), RELEASED, "lab")
     assert "type: lab" in md
     assert 'title: "Lab 3"' in md
     assert "Session 3" not in md
-    lec = site._lecture_entry("Cohort", "3", date(2026, 9, 15), RELEASED)
+    lec = site._lecture_entry("Cohort", "3", _row(date(2026, 9, 15)), RELEASED)
     assert "type: lecture" in lec and 'title: "Session 3"' in lec
 
 
@@ -157,10 +163,10 @@ def test_only_the_unreleased_row_carries_the_theme_flag(monkeypatch):
     # what tells a placeholder apart from a released folder that holds no files.
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
     assert "unreleased: true" not in site._lecture_entry(
-        "Cohort", "2", date(2026, 9, 15), RELEASED
+        "Cohort", "2", _row(date(2026, 9, 15)), RELEASED
     )
     assert "unreleased: true" in site._lecture_entry(
-        "Cohort", "2", date(2026, 9, 15), []
+        "Cohort", "2", _row(date(2026, 9, 15)), []
     )
 
 
@@ -942,10 +948,12 @@ def test_a_row_carries_the_title_and_description_the_plan_declared(monkeypatch):
     out = site._lecture_entry(
         "Cohort-f2026",
         "1",
-        datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN),
+        _row(
+            datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN),
+            subtitle="Probability Theory",
+            description="Sample spaces and Bayes' rule.",
+        ),
         RELEASED,
-        subtitle="Probability Theory",
-        description="Sample spaces and Bayes' rule.",
     )
     # `title` stays the ordinal - what the theme has always assumed it is - and the
     # declared name rides `subtitle` beside it.
@@ -959,7 +967,7 @@ def test_a_row_omits_the_declared_fields_it_was_not_given(monkeypatch):
     # render an empty line where there should be nothing at all.
     monkeypatch.setattr(site, "_session_files", lambda *a: [("s.pdf", "https://x/1")])
     out = site._lecture_entry(
-        "Cohort-f2026", "1", datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN), RELEASED
+        "Cohort-f2026", "1", _row(datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN)), RELEASED
     )
     assert "subtitle:" not in out and "description:" not in out
 
@@ -968,11 +976,13 @@ def test_an_unreleased_row_still_says_what_the_session_is_about():
     out = site._lecture_entry(
         "Cohort-f2026",
         "3",
-        datetime(2026, 9, 15, 10, 0, tzinfo=BERLIN),
+        _row(
+            datetime(2026, 9, 15, 10, 0, tzinfo=BERLIN),
+            dests={"materials/lectures/03_week-3": None},
+            subtitle="Expectation",
+            description="Linearity of expectation.",
+        ),
         [],
-        planned_dests=["materials/lectures/03_week-3"],
-        subtitle="Expectation",
-        description="Linearity of expectation.",
     )
     # What the session covers is known the day the plan is written, so it is published
     # then - the term reads as a syllabus from day one. Only the FILES wait for release,

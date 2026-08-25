@@ -175,7 +175,7 @@ def test_lecture_entry_labels_links_by_repo_or_subpath():
         entry = site._lecture_entry(
             "Cohort-f2026",
             "1",
-            date(2026, 9, 7),
+            site._PlannedRow(when=date(2026, 9, 7)),
             [("labs", "", "01_intro"), ("materials", "lectures", "01_intro")],
         )
     assert "https://x/1" in entry and "https://x/2" in entry
@@ -407,7 +407,10 @@ def test_the_allowlist_never_leaves_a_public_file_unreachable(tmp_path):
     (tmp_path / "notes.pdf").write_text("x")
     (tmp_path / "libs" / "style.css").write_text("x")
     names = [n for n, _ in site._public_links(tmp_path, "/m/session-1")]
-    assert names == ["deck.html", "notes.pdf"]  # root files listed, the asset served only
+    assert names == [
+        "deck.html",
+        "notes.pdf",
+    ]  # root files listed, the asset served only
 
 
 def test_link_extensions_accepts_a_list_or_a_bare_string():
@@ -612,21 +615,24 @@ def test_index_gives_a_non_ordinal_directory_its_own_section(monkeypatch):
 
 
 def test_theme_pages_split_readings_out_only_where_there_is_an_index():
-    cohort = site._theme_pages("gated.", "citations.", all_materials=True)
+    cohort = site._theme_pages(cohort=True)
     assert "layout: readings" in cohort["readings.md"]
     assert "layout: materials" in cohort["materials.md"]
     assert "All Materials" in cohort["materials.md"]
     # A public course site has no cohort repos to index, so /materials/ stays the readings
     # page it has always been rather than becoming an empty catch-all.
-    public = site._theme_pages("", "", all_materials=False)
+    public = site._theme_pages(cohort=False)
     assert "readings.md" not in public
     assert "layout: readings" in public["materials.md"]
     assert "permalink: /materials/" in public["materials.md"]
-    assert "gated." not in public["labs.md"]  # public site claims no student gate
+    # The public site hosts what it lists, so it claims no student gate.
+    assert site.COHORT_ACCESS_NOTE not in public["labs.md"]
+    assert site.COHORT_ACCESS_NOTE in cohort["labs.md"]
+    assert site.COHORT_READINGS_NOTE in cohort["readings.md"]
 
 
 def test_nav_lists_readings_before_all_materials():
-    nav = yaml.safe_load(site._nav_yaml())["items"]
+    nav = yaml.safe_load(site._nav_yaml(cohort=True))["items"]
     assert [i["name"] for i in nav] == [
         "Home",
         "Schedule",
@@ -637,3 +643,22 @@ def test_nav_lists_readings_before_all_materials():
         "All Materials",
     ]
     assert all(i["url"] and i["icon_class"] for i in nav)
+
+
+def test_no_nav_tab_can_point_at_a_page_this_site_does_not_get():
+    # The tab bar and the pages come from one table, so the public site cannot ship a
+    # Readings tab pointing at a page only cohort sites generate.
+    for cohort in (True, False):
+        tabs = {
+            i["url"] for i in yaml.safe_load(site._nav_yaml(cohort=cohort))["items"]
+        }
+        generated = {
+            f"/{f.removesuffix('.md')}/" for f in site._theme_pages(cohort=cohort)
+        }
+        # Every generated page has a tab, and every tab is either a generated page or one
+        # of the theme's own (Home, Schedule, Assignments).
+        assert generated <= tabs
+        assert tabs - generated == {"/", "/schedule/", "/assignments/"}
+    assert "/readings/" not in {
+        i["url"] for i in yaml.safe_load(site._nav_yaml(cohort=False))["items"]
+    }
