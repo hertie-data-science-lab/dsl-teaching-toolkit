@@ -235,12 +235,22 @@ def scaffold_materials(org: str, tag: str) -> int:
         # A stub, not a .gitkeep: a text file here IS the published reading list (its
         # contents are inlined on the site's Materials tab), and an empty folder gave no
         # sign of that - the tab then reads blank with nothing to explain why.
+        # Shaped like a Hertie syllabus's readings block, so a course team can paste
+        # theirs straight in: `Required Readings` / `Optional Readings` as sub-headings,
+        # and any further category (some syllabi add `Application Readings`) works the
+        # same way - the site renders whatever headings this file has, nested under the
+        # session's own.
         "readings/01_session-1/reading.md": (
             b"# Session 1 readings\n\n"
+            b"## Required Readings\n\n"
             b"- Author, *Title*, ch. 1.\n"
             b'- Author (2026), "Paper title", doi:...\n\n'
-            b"This file is the reading list students see. Put reading PDFs in this folder "
-            b"too - they are linked, never published.\n"
+            b"## Optional Readings\n\n"
+            b"- Author, *Title*, ch. 2.\n\n"
+            b"This file IS the reading list students see on the site's Readings tab - the\n"
+            b"session's learning objectives come from `description:` in schedule.yml. Put\n"
+            b"reading PDFs in this folder too: they are linked for enrolled students,\n"
+            b"never published.\n"
         ),
         "labs/01_session-1/.gitkeep": b"",
         "SYLLABUS.md": f"# {tag} syllabus\n\nReplace with the real syllabus.\n".encode(),
