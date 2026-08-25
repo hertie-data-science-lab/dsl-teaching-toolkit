@@ -41,6 +41,22 @@ class FakeRepo:
             self.put_file(org, repo, path, content, message)
         return True
 
+    def refresh_stubs(self, org, repo, files, message, create=False):
+        """One commit for whatever is absent-and-wanted, or still carries the stub mark."""
+        failures = 0
+        for path, content in files.items():
+            current = self.files.get((repo, path))
+            if current is None:
+                if create and not self.put_file(org, repo, path, content, message):
+                    failures += 1
+                continue
+            if utils.is_untouched_stub(current):
+                if not self.put_file(org, repo, path, content, message):
+                    failures += 1
+            else:
+                self.skips.append(f"{repo}/{path}")
+        return failures
+
     def written(self, repo):
         return {path for r, path in self.writes if r == repo}
 
@@ -55,6 +71,7 @@ def fake(monkeypatch):
     monkeypatch.setattr(utils, "get_file_content", f.get_file_content)
     monkeypatch.setattr(utils, "put_file", f.put_file)
     monkeypatch.setattr(utils, "put_files", f.put_files)
+    monkeypatch.setattr(scaffold, "refresh_stubs", f.refresh_stubs)
     monkeypatch.setattr(scaffold, "put_file", f.put_file)
     monkeypatch.setattr(utils, "log_skip", lambda msg: f.skips.append(msg))
     monkeypatch.setattr(scaffold, "log_skip", lambda msg: f.skips.append(msg))
@@ -77,6 +94,10 @@ def test_fresh_materials_repo_gets_the_full_skeleton(fake):
         "README.md",
         "MAINTAINING.md",
         "SYLLABUS.md",
+        # The filled example beside the stub, on the repo's `<file>.sample` convention.
+        # SYSTEM-owned like MAINTAINING.md, so a repo scaffolded before it existed picks it
+        # up on the next Refresh.
+        "SYLLABUS.md.sample",
         "lectures/01_session-1/.gitkeep",
         # Readings get a stub rather than a .gitkeep: a text file in here IS the reading
         # list published on the cohort site, and an empty folder gave no sign of that.
@@ -258,4 +279,127 @@ def test_the_seeded_readme_would_be_withheld_from_a_release(fake):
 
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     seeded = fake.files[("course-materials-f2026", "README.md")]
-    assert deploy._is_unedited_readme("README.md", seeded)
+    assert deploy._is_withheld_stub("README.md", seeded)
+
+
+def test_the_syllabus_stub_is_faculty_owned_and_the_sample_is_refreshed(fake):
+    # The stub is the faculty's own document, so a re-run must not revert it; the filled
+    # example beside it is ours, so a re-run MUST refresh it - that is how a course
+    # scaffolded before it existed gets one.
+    written = "# Real syllabus\n\nBy faculty.\n"
+    fake.files[("course-materials-f2026", "SYLLABUS.md")] = written
+    fake.files[("course-materials-f2026", "SYLLABUS.md.sample")] = "# stale example\n"
+
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    assert fake.files[("course-materials-f2026", "SYLLABUS.md")] == written
+    assert "SYLLABUS.md" not in fake.written("course-materials-f2026")
+    assert "SYLLABUS.md.sample" in fake.written("course-materials-f2026")
+    assert (
+        fake.files[("course-materials-f2026", "SYLLABUS.md.sample")]
+        != "# stale example\n"
+    )
+
+
+def test_the_syllabus_stub_carries_the_standard_sections(fake):
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    stub = fake.files[("course-materials-f2026", "SYLLABUS.md")]
+    for heading in (
+        "## 1. General information",
+        "## 2. Course contents and learning objectives",
+        "### Prerequisites",
+        "## 3. Grading and assignments",
+        "## 4. General readings",
+        "## 5. Course sessions and readings",
+    ):
+        assert heading in stub
+    # It must say that the name, and its capitalisation, is what releases it - the trap the
+    # sample schedule used to set - and that a PDF releases just as readily, which is what
+    # ITDS actually uses.
+    assert "capitalisation" in stub and "SYLLABUS.pdf" in stub
+
+
+def test_the_syllabus_sample_is_never_released_to_students():
+    # A whole-repo release must not ship our example syllabus into a cohort.
+    from dsl_course import deploy
+
+    assert "SYLLABUS.md.sample" in deploy.ROOT_RELEASE_EXCLUDED
+
+
+def test_a_stub_is_refreshed_while_it_is_still_ours(fake):
+    # The point of the mark: an improvement reaches the courses ALREADY running, not just
+    # the next repo scaffolded. `SYLLABUS.md` was create-only, so the three live courses
+    # kept the first stub the toolkit ever shipped.
+    fake.files[("course-materials-f2026", "SYLLABUS.md")] = (
+        "# f2026 syllabus\n\nReplace with the real syllabus.\n"  # what we used to seed
+    )
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    refreshed = fake.files[("course-materials-f2026", "SYLLABUS.md")]
+    assert "## 1. General information" in refreshed
+    assert "Optional - delete this file" in refreshed
+
+
+def test_a_stub_faculty_have_written_over_is_never_touched_again(fake):
+    # They take ownership by removing the mark, which writing their own does.
+    mine = "# Machine Learning - syllabus\n\nWritten by faculty.\n"
+    fake.files[("course-materials-f2026", "SYLLABUS.md")] = mine
+    fake.files[("course-materials-f2026", "readings/01_session-1/reading.md")] = (
+        "- Mine\n"
+    )
+
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    assert fake.files[("course-materials-f2026", "SYLLABUS.md")] == mine
+    assert (
+        fake.files[("course-materials-f2026", "readings/01_session-1/reading.md")]
+        == "- Mine\n"
+    )
+    assert "course-materials-f2026/SYLLABUS.md" in fake.skips
+
+
+def test_every_seeded_stub_carries_the_mark_that_makes_it_refreshable(fake):
+    # If a stub ships without the mark it is frozen forever, which is the bug this fixes -
+    # so the mark is asserted on what the scaffold actually writes.
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    for path in ("SYLLABUS.md", "readings/01_session-1/reading.md"):
+        assert utils.STUB_MARK in fake.files[("course-materials-f2026", path)], path
+
+
+def test_refresh_improves_an_existing_stub_but_never_creates_one(monkeypatch):
+    # The gap this closes: `seed.refresh` runs nightly over every content repo, but the
+    # stubs were only ever written by the scaffold - so a course scaffolded last month kept
+    # whatever the toolkit first shipped. Refresh now converges them.
+    #
+    # `create=False` is what makes that safe over EVERY content repo:
+    # discover_content_repos returns the code and dataset repos too, and seeding a syllabus
+    # into `lecture-code-f2026` would be nonsense.
+    from dsl_course import seed
+
+    f = FakeRepo()
+    monkeypatch.setattr(utils, "get_file_content", f.get_file_content)
+    monkeypatch.setattr(utils, "put_file", f.put_file)
+    monkeypatch.setattr(utils, "log_skip", lambda msg: f.skips.append(msg))
+    monkeypatch.setattr(seed, "refresh_stubs", f.refresh_stubs)
+    # A materials repo with the stub we used to ship, and a code repo with no stub at all.
+    f.files[("course-materials-f2026", "SYLLABUS.md")] = (
+        "# f2026 syllabus\n\nReplace with the real syllabus.\n"
+    )
+
+    assert seed._refresh_stubs("Org", "course-materials-f2026") == 0
+    assert seed._refresh_stubs("Org", "lecture-code-f2026") == 0
+
+    assert (
+        "## 1. General information"
+        in f.files[("course-materials-f2026", "SYLLABUS.md")]
+    )
+    # Nothing was created anywhere - not the code repo's syllabus, not the materials repo's
+    # missing readings stub.
+    assert ("lecture-code-f2026", "SYLLABUS.md") not in f.files
+    assert ("course-materials-f2026", "readings/01_session-1/reading.md") not in f.files
+
+
+def test_the_scaffold_and_refresh_converge_the_same_stub_list():
+    # One list, so a stub added to the scaffold is converged everywhere without a second
+    # edit somewhere else.
+    assert sorted(scaffold.refreshable_stubs("f2026")) == [
+        "SYLLABUS.md",
+        "readings/01_session-1/reading.md",
+    ]

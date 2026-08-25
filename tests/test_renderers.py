@@ -60,6 +60,9 @@ ALL_RENDERED = {
     "distribute_grades": workflows_render.render_distribute_grades(["Cohort-f2026"]),
     "bootstrap_cohort": workflows_render.render_bootstrap_cohort(),
     "refresh": workflows_render.render_refresh(),
+    "generate_syllabus": workflows_render.render_generate_syllabus(
+        ["course-materials-f2026"], ["Cohort-f2026"]
+    ),
     "new_materials": workflows_render.render_new_materials(),
     "new_assignment": workflows_render.render_new_assignment(),
     "sync_site": workflows_render.render_sync_site(["Cohort-f2026"]),
@@ -478,7 +481,7 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
     assert len(commits) == 1
     repo, files, deleted = commits[0]
     assert repo == ".github"
-    assert len(files) == 16
+    assert len(files) == 17  # + Generate syllabus
     assert all(path.startswith(".github/workflows/") for path in files)
     assert deleted == [
         ".github/workflows/sync-enrolment.yml",

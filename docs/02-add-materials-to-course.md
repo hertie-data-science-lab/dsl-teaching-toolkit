@@ -41,7 +41,8 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
                             Use `## Required Readings` / `## Optional Readings`
                             sub-headings to mirror the Hertie syllabus format
    labs/01_session-1/       any files 
-   SYLLABUS.md              optional (any root file matching *syllabus*)
+   SYLLABUS.md              optional - or any name you like (SYLLABUS.pdf, ...):
+                            a root file releases by being named as the path
    ```
 
    Any top-level directory holding ordinal-prefixed subdirectories is releasable:

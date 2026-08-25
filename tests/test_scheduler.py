@@ -1362,4 +1362,4 @@ def test_withholding_the_stub_is_visible_without_failing_the_run(monkeypatch, ca
     assert errors == 0
     assert "::warning::" in captured.err
     assert "was NOT released" in captured.err
-    assert "Rewrite it as the students' overview" in captured.err
+    assert "Write it for students, then release again." in captured.err

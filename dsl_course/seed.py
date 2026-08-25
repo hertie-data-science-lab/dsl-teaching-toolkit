@@ -58,7 +58,9 @@ from .utils import (
     log_step,
     put_file,
     put_files,
+    refresh_stubs,
     repo_is_archived,
+    term_tag,
 )
 from .welcome import (
     refresh_classroom_samples,
@@ -69,6 +71,7 @@ from .workflows_render import (
     render_bootstrap_cohort,
     render_central_release,
     render_distribute_grades,
+    render_generate_syllabus,
     render_grade_assignment,
     render_new_assignment,
     render_new_materials,
@@ -213,6 +216,9 @@ def seed_github_workflows(course_org: str) -> int:
             cohorts, assignments
         ),
         ".github/workflows/new-materials.yml": render_new_materials(),
+        ".github/workflows/generate-syllabus.yml": render_generate_syllabus(
+            source_repos, cohorts
+        ),
         ".github/workflows/new-assignment.yml": render_new_assignment(),
         ".github/workflows/sync-site.yml": render_sync_site(cohorts),
         ".github/workflows/publish-site.yml": render_publish_site(source_repos),
@@ -295,6 +301,41 @@ def _propagate_repo_secret(course_org: str, repos: list[str]) -> int:
     return failures
 
 
+def _refresh_stubs(course_org: str, repo: str) -> int:
+    """Bring a content repo's seeded STUBS up to date, without creating any.
+
+    The scaffold's stubs improve over time - the syllabus grew the standard Hertie sections,
+    the reading list grew Required/Optional headings - and were create-only, so a course
+    scaffolded a month ago kept whatever the toolkit first shipped and every later
+    improvement reached new repos only. They now carry a mark, so a stub can be refreshed
+    while it is still ours and is never touched once faculty write over it
+    (`utils.seed_or_refresh_stub`).
+
+    `create=False` is the whole reason this is safe to run over EVERY content repo:
+    `discover_content_repos` returns the code and dataset repos too, and seeding a syllabus
+    into `lecture-code-f2026` would be nonsense. Creating stays the scaffold's job, because
+    only the scaffold knows what kind of repo it just made; this only improves what is
+    already there.
+
+    Two reads per stub per repo, so a handful of calls per org per night."""
+    # Local import: `scaffold` imports this module, so a module-level one is a cycle. Same
+    # shape as `scheduler`'s import of `deploy`.
+    from . import scaffold
+
+    # `course-materials-f2026` -> `f2026`, which is all the stubs interpolate. A repo with
+    # no term tag is not one the materials scaffold made, and rewriting its stub would head
+    # the file `#  syllabus` - so it is left alone rather than refreshed into nonsense.
+    tag = term_tag(repo)
+    if tag is None:
+        return 0
+    return refresh_stubs(
+        course_org,
+        repo,
+        scaffold.refreshable_stubs(tag),
+        "docs: refresh the scaffold stubs",
+    )
+
+
 def refresh(course_org: str) -> int:
     """Refresh both layers: the run-from-repo content actions in every content repo,
     AND the central org-level workflows in .github; repopulate dropdowns; rebuild the
@@ -320,6 +361,7 @@ def refresh(course_org: str) -> int:
     failures = 0
     for repo in sorted(targets):
         failures += _push_workflows(course_org, repo, cohorts, assignments)
+        failures += _refresh_stubs(course_org, repo)
     failures += _propagate_repo_secret(course_org, targets)
     failures += seed_github_workflows(course_org)
     failures += _write_heartbeat(course_org)

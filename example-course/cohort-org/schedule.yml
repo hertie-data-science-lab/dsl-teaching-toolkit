@@ -11,7 +11,9 @@ releases:
     title: Course opens
     deploy:
       - course_source_repo: course-materials-f2026
-        course_source_path: syllabus.md     # a root file
+        course_source_path: SYLLABUS.md     # a root file - name it exactly as it
+                                            # is in the repo (the runner is case
+                                            # sensitive)
   lecture-1:
     event_datetime: 2026-09-01T10:00
     title: Perceptrons and gradient descent   # the session's name, beside "Session 1"

@@ -36,10 +36,13 @@ from .schedule import Deploy
 from .utils import (
     FACULTY_ONLY_HEADING,
     GIT_ENV,
+    SYLLABUS_SAMPLE_FILE,
+    SYLLABUS_SESSIONS_FILE,
     create_repo,
     gh,
     git,
     grant_read_teams,
+    is_untouched_stub,
     log,
     log_err,
     log_ok,
@@ -54,30 +57,32 @@ _GIT_ENV = GIT_ENV
 NEVER_COPIED = frozenset({".git"})
 
 # Additionally skipped when the WHOLE repo is released (`course_source_path: /`), and only
-# at the repo root. These are the faculty side of a materials repo by contract: `.github`
-# holds the Release buttons and their bot-token wiring, and scaffold writes MAINTAINING.md
-# into every materials repo describing it as "never released ... not deployed to the cohort
-# org" (see scaffold.py). Named here so that promise and this mechanism are one fact rather
-# than two that drift. Naming either path explicitly still releases it - this is what "give
-# me everything" means, not a ban.
-ROOT_RELEASE_EXCLUDED = frozenset({".github", "MAINTAINING.md"})
+# at the repo root: `.github` holds the Release buttons and their bot-token wiring,
+# MAINTAINING.md is the maintainer guide, the syllabus sample is the filled example faculty
+# copy from, and the sessions block is what the Generate syllabus button builds for them to
+# paste. Each is written by this toolkit describing itself as never released, so each is
+# named here - and named FROM `utils`, not re-spelled, so the exclusion cannot lapse the
+# next time one is renamed. Naming any of these paths explicitly still releases it: that is
+# what "give me everything" means, not a ban.
+ROOT_RELEASE_EXCLUDED = frozenset(
+    {".github", "MAINTAINING.md", SYLLABUS_SAMPLE_FILE, SYLLABUS_SESSIONS_FILE}
+)
 
-# A README the scaffold wrote and nobody rewrote. It is addressed to faculty - "replace
-# this placeholder", a section headed "delete this section before releasing", a link to
-# MAINTAINING.md and the course org's Actions tab - and releasing it publishes all of that
-# to students as their course overview. That is what happened in a live cohort, in three
-# repos at once, and nothing said so.
+# Root documents this toolkit seeds as stubs for faculty to write over. Released once
+# written; withheld while still ours, because shipping either as-is publishes faculty
+# instructions and empty tables to students as their course overview or their syllabus.
 #
-# Both markers come from scaffold.py itself, so this guard cannot lapse the next time that
-# wording is edited. A README that keeps ONE of them may be a real overview quoting the
-# stub, so both must be present - and either way the fix is ten seconds of editing.
+# The syllabus joined this the moment the site began PINNING it on the landing page: an
+# unwritten stub would otherwise be the most prominent link on the course's front page.
+WITHHELD_ROOT_STUBS = ("README.md", "SYLLABUS.md")
+
 UNEDITED_README_MARKERS = ("**Replace this placeholder.**", FACULTY_ONLY_HEADING)
 
 
-def _warn_unedited_readme(source_org: str, repo: str) -> None:
+def _warn_withheld_stub(source_org: str, repo: str, path: str) -> None:
     """Say what was withheld and how to fix it - visibly, but WITHOUT failing the release.
 
-    Withholding an unedited placeholder is this guard working, not a fault: the release did
+    Withholding an unwritten stub is this guard working, not a fault: the release did
     exactly what it should. Counting it as an error reddened a run whose every other copy
     shipped, and - because the hourly scheduler drives the same `deploy_many` - would have
     reddened the Scheduled release cron every hour, forever, for any course that never
@@ -85,29 +90,34 @@ def _warn_unedited_readme(source_org: str, repo: str) -> None:
 
     So it takes the channel this codebase already uses for "true, worth seeing, not a
     failure" (see `templates/classroom-config/validate-schedule.yml`): a `::warning::`
-    annotation on a green run. It surfaces on the run summary without touching the exit
-    code, and outside Actions it is just a line of text."""
+    annotation on a green run, which touches no exit code."""
     fix = (
-        f"{source_org}/{repo}/README.md was NOT released - it is still the scaffold "
-        "placeholder, addressed to faculty and linking MAINTAINING.md. Everything else in "
-        "this release shipped. Rewrite it as the students' overview (delete the "
-        '"For faculty & instructors" section and the "Replace this placeholder" note), '
-        "then release again."
+        f"{source_org}/{repo}/{path} was NOT released - it is still the scaffold stub, "
+        "written for faculty rather than students. Everything else in this release "
+        "shipped. Write it for students, then release again."
     )
     log(f"  (withheld) {fix}")
     # Straight to stderr as a workflow command, so the run summary carries it too.
     print(f"::warning::{fix}", file=sys.stderr)
 
 
-def _is_unedited_readme(path: str, text: str) -> bool:
-    """Whether a copy is the scaffold's own placeholder README rather than a real one.
+def _is_withheld_stub(path: str, text: str) -> bool:
+    """Whether a copy is one of the root stubs this toolkit seeds, still unwritten.
 
-    The ROOT `README.md` only - `path` must be exactly that, not merely end in it. A
-    `README.md` inside a session folder is the faculty's own writing about that session,
-    and the stub only ever exists at the repo root."""
-    if path.strip("/") != "README.md":
+    The ROOT file only - `path` must be exactly one of `WITHHELD_ROOT_STUBS`, not merely end
+    in it. A `README.md` inside a session folder is the faculty's own writing about that
+    session, and these stubs only ever exist at the repo root.
+
+    Two tests, because the two files are marked differently: `SYLLABUS.md` carries the
+    `dsl-stub:` mark every seeded stub now carries, while the README predates it and is
+    recognised by its own placeholder text - both markers required there, so a real overview
+    that happens to quote the stub still ships."""
+    name = path.strip("/")
+    if name not in WITHHELD_ROOT_STUBS:
         return False
-    return all(marker in text for marker in UNEDITED_README_MARKERS)
+    if name == "README.md":
+        return all(marker in text for marker in UNEDITED_README_MARKERS)
+    return is_untouched_stub(text)
 
 
 def _resolve_within(base: Path, rel: str) -> Path | None:
@@ -253,25 +263,27 @@ def deploy_many(
                 # `README.md`, which is faculty writing about the section, not the stub.
                 withheld = frozenset()
                 if srcp == src_root:
-                    src_readme = srcp / "README.md"
-                    if src_readme.is_file() and _is_unedited_readme(
-                        "README.md",
-                        src_readme.read_text(encoding="utf-8", errors="replace"),
-                    ):
-                        withheld = frozenset({"README.md"})
-                        _warn_unedited_readme(source_org, d.course_source_repo)
+                    for stub in WITHHELD_ROOT_STUBS:
+                        f = srcp / stub
+                        if f.is_file() and _is_withheld_stub(
+                            stub, f.read_text(encoding="utf-8", errors="replace")
+                        ):
+                            withheld |= {stub}
+                            _warn_withheld_stub(source_org, d.course_source_repo, stub)
                 shutil.copytree(
                     srcp,
                     destp,
                     dirs_exist_ok=True,
                     ignore=_copy_ignore(srcp if srcp == src_root else None, withheld),
                 )
-            elif _is_unedited_readme(
+            elif _is_withheld_stub(
                 d.course_source_path, srcp.read_text(encoding="utf-8", errors="replace")
             ):
                 # Named outright rather than swept up by a whole-repo release: nothing else
                 # was asked for, so this copy is simply a no-op.
-                _warn_unedited_readme(source_org, d.course_source_repo)
+                _warn_withheld_stub(
+                    source_org, d.course_source_repo, d.course_source_path
+                )
                 continue
             else:
                 destp.parent.mkdir(parents=True, exist_ok=True)

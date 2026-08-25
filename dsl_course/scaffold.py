@@ -39,6 +39,7 @@ from .utils import (
     log_skip,
     log_step,
     put_file,
+    refresh_stubs,
     repo_exists,
     seed_files_if_absent,
     seed_if_absent,
@@ -49,6 +50,154 @@ WEBSITE_TEMPLATE_ORG = "hertie-data-science-lab"
 WEBSITE_TEMPLATE = "course-website-template"
 
 _GIT_ENV = GIT_ENV
+
+_SYLLABUS_STUB = """\
+# {tag} syllabus
+
+*Optional - delete this file if your course does not need it.*
+
+<!-- dsl-stub: still the scaffold's, so the toolkit keeps it up to date. Delete this
+     comment (or just write over the file) and it is yours - never touched again.
+
+     FACULTY & INSTRUCTORS: this is the students' syllabus, and it is yours to write - the
+     headings below are the standard Hertie shape, so delete what your course does not use.
+     Release it by naming this file as the release path (see MAINTAINING.md); the name and
+     its capitalisation must match exactly, and any format works - rename this to
+     SYLLABUS.pdf and release that instead if you author in Word.
+     A filled example sits beside this file in SYLLABUS.md.sample. -->
+
+## 1. General information
+
+| | |
+| --- | --- |
+| Instructor | |
+| E-mail | |
+| Office hours | |
+| Term | {tag} |
+| Sessions | |
+| Language of instruction | English |
+
+## 2. Course contents and learning objectives
+
+### Course contents
+
+### Main learning objectives
+
+### Target group
+
+### Prerequisites
+
+## 3. Grading and assignments
+
+| Component | Weight | Due |
+| --- | --- | --- |
+| | | |
+
+## 4. General readings
+
+## 5. Course sessions and readings
+
+<!-- The course website publishes this session by session, built from
+     `classroom-config/schedule.yml` (each session's title and learning objectives) and
+     each session's `readings/NN_.../` folder (its reading list). If you also list the
+     sessions here - Hertie syllabi normally do - keep the two in step, or students will
+     read one and see the other. -->
+"""
+
+_SYLLABUS_SAMPLE = """\
+# Foundations of Machine Learning (Demo) - E1234 - syllabus
+
+*Optional - a worked example to copy from; delete it if you do not want it.*
+
+<!-- A FILLED example, kept current by the toolkit - copy from it, do not edit it (your
+     edits are overwritten). Your own syllabus is SYLLABUS.md beside this file. This file
+     is never released to students. -->
+
+## 1. General information
+
+| | |
+| --- | --- |
+| Instructor | Prof. Jane Doe |
+| E-mail | doe@hertie-school.org |
+| Office hours | Tuesdays 14:00-15:00, or by appointment |
+| Term | Fall 2026 (7 September - 18 December) |
+| Sessions | Tuesdays 10:00-12:00; lab Thursdays 14:00-16:00 |
+| Language of instruction | English |
+
+## 2. Course contents and learning objectives
+
+### Course contents
+
+An applied introduction to machine learning for public policy. We build up from linear
+models to neural networks, and spend as much time on what a model cannot tell you as on
+what it can.
+
+### Main learning objectives
+
+By the end of the course students can:
+
+- state what a supervised learning problem is, and recognise when a question is not one;
+- fit, tune and honestly evaluate a model, distinguishing training from test error;
+- read a published ML result critically, including its choice of baseline.
+
+### Target group
+
+MPP and MDS students in their second year. No prior ML required.
+
+### Prerequisites
+
+Statistics 1 or equivalent; comfort writing a function and reading a data frame in Python
+or R.
+
+## 3. Grading and assignments
+
+| Component | Weight | Due |
+| --- | --- | --- |
+| Problem set 1 | 20% | 13 October |
+| Problem set 2 | 20% | 27 October |
+| Group project | 40% | 15 November |
+| Participation | 20% | continuous |
+
+Late work loses one grade step per 24 hours. Extensions are granted before the deadline,
+not after it.
+
+## 4. General readings
+
+No required textbook. Both of these are free and used throughout:
+
+- James, Witten, Hastie & Tibshirani, *An Introduction to Statistical Learning*.
+  <https://www.statlearning.com/>
+- Goodfellow, Bengio & Courville, *Deep Learning*. <https://www.deeplearningbook.org/>
+
+## 5. Course sessions and readings
+
+Session titles, learning objectives and readings are published on the course website, and
+are generated from `classroom-config/schedule.yml` and each session's `readings/` folder -
+so they stay in step with what is actually released.
+"""
+
+# The seeded reading list, shaped like a Hertie syllabus's readings block so a course
+# team can paste theirs straight in: `Required Readings` / `Optional Readings` as
+# sub-headings, and any further category (some syllabi add `Application Readings`)
+# works the same way - the site renders whatever headings this file has, nested under
+# the session's own. A stub rather than a `.gitkeep`: a text file here IS the published
+# reading list, and an empty folder gave no sign of that - the tab read blank with
+# nothing to explain why.
+_READINGS_STUB = (
+    b"# Session 1 readings\n\n"
+    b"<!-- dsl-stub: still the scaffold's, so the toolkit keeps it up to date.\n"
+    b"     Write your own reading list over it and it is yours. Optional - delete\n"
+    b"     this file if this session has no readings. -->\n\n"
+    b"## Required Readings\n\n"
+    b"- Author, *Title*, ch. 1.\n"
+    b'- Author (2026), "Paper title", doi:...\n\n'
+    b"## Optional Readings\n\n"
+    b"- Author, *Title*, ch. 2.\n\n"
+    b"This file IS the reading list students see on the site's Readings tab - the\n"
+    b"session's learning objectives come from `description:` in schedule.yml. Put\n"
+    b"reading PDFs in this folder too: they are linked for enrolled students,\n"
+    b"never published.\n"
+)
 
 _GRADING_YML = """\
 # How the Grade assignment button autogrades this assignment (after the grading_deadline in schedule.yml).
@@ -115,6 +264,19 @@ def _notebook(title_lines: list[str], code: str) -> str:
     return json.dumps(nb, indent=1) + "\n"
 
 
+def refreshable_stubs(tag: str) -> dict[str, bytes]:
+    """The seeded files that are stubs rather than skeletons - improvable later, while they
+    still carry the mark (see `utils.seed_or_refresh_stub`).
+
+    Named here, where they are written, and read by `seed.refresh` so the nightly
+    convergence reaches repos scaffolded before a stub improved. One list rather than two
+    that drift: a stub added here is converged everywhere without a second edit."""
+    return {
+        "SYLLABUS.md": _SYLLABUS_STUB.format(tag=tag).encode(),
+        "readings/01_session-1/reading.md": _READINGS_STUB,
+    }
+
+
 def scaffold_materials(org: str, tag: str) -> int:
     repo = f"course-materials-{tag}"
     log_step(f"Scaffolding {org}/{repo}")
@@ -135,8 +297,8 @@ def scaffold_materials(org: str, tag: str) -> int:
         "operate this course:\n\n"
         "| Action | What it does |\n"
         "| --- | --- |\n"
-        "| **Release materials** | Copy session folders (+ optional syllabus/README) into a "
-        "cohort's `materials` repo. |\n"
+        "| **Release materials** | Copy session folders - or any path, including a root file "
+        "like your syllabus - into a cohort's `materials` repo. |\n"
         "| **Release assignment** | Freeze an assignment template, then generate one private "
         "repo per student. |\n"
         "| **New materials repo** | Scaffold another structured materials repo. |\n"
@@ -186,7 +348,9 @@ def scaffold_materials(org: str, tag: str) -> int:
         "| --- | --- | --- |\n"
         "| `lectures/`, `readings/` (and any section folders) session content | Yes, when you "
         "Release that session | The released files are copied into the cohort `materials` repo. |\n"
-        "| `SYLLABUS.md`, `README.md` (root) | Only if you toggle them on at release | Write "
+        "| root files - `SYLLABUS.md`, `README.md`, or any name you use | Yes, when you name "
+        "the file as the release path | A root file is released like any other path: type "
+        "`SYLLABUS.pdf` (or whatever yours is called) as the `course_source_path`. Write "
         "`README.md` for students; it replaces the placeholder. |\n"
         "| `MAINTAINING.md` (this file) | No | Your reference; never released. Leave it in the "
         "repo. |\n"
@@ -204,7 +368,9 @@ def scaffold_materials(org: str, tag: str) -> int:
         "other files in it are linked, not published\n"
         "- `labs/01_session-1/` - one folder per session's lab (delete the `labs/` folder "
         "if your course has none)\n"
-        "- `*syllabus*`, `README.md` (root) - released via the syllabus / README toggles\n\n"
+        "- root files - your syllabus under any name (`SYLLABUS.md`, `SYLLABUS.pdf`, ...) "
+        "and `README.md`: released by naming the file as the release path, exactly as it is "
+        "spelled here (the runner is case sensitive)\n\n"
         "Add more sessions by creating `lectures/02_session-2/`, `readings/02_session-2/`, ... "
         "(only the ordinal prefix matters - name the rest whatever you like), or add a whole "
         "new section (e.g. `datasets/01_intro/`) - then run **Refresh actions** so the session "
@@ -218,6 +384,17 @@ def scaffold_materials(org: str, tag: str) -> int:
         "file is hosted and downloadable - you carry the copyright responsibility).\n"
     )
     failures = 0
+    # The filled syllabus example: SYSTEM-owned like MAINTAINING.md, so it is refreshed
+    # rather than frozen - a repo scaffolded before this existed gets it on the next
+    # Refresh, which is the half of this that helps the courses already running.
+    if not put_file(
+        org,
+        repo,
+        "SYLLABUS.md.sample",
+        _SYLLABUS_SAMPLE.encode(),
+        "docs: syllabus example",
+    ):
+        failures += 1
     # MAINTAINING.md is SYSTEM-owned generated docs, built from the actions table above (like
     # classroom-config's README contract): it must refresh on a re-run when the toolkit
     # changes it, so it's written unconditionally with put_file - never frozen create-only. A
@@ -229,31 +406,21 @@ def scaffold_materials(org: str, tag: str) -> int:
     # USER-owned skeletons: create-only, so a re-run against a repo faculty have since
     # authored must not revert their README/SYLLABUS to the stub or resurrect a deleted
     # starter directory. A failed seed (an absent file whose write failed) reds the scaffold.
+    # Stubs that REFRESH while they are still ours (see utils.seed_or_refresh_stub): the
+    # improvement then reaches the courses already running, not just the next repo
+    # scaffolded. Written before the create-only set below so a re-run's log reads in the
+    # order the rules apply.
+    failures += refresh_stubs(
+        org, repo, refreshable_stubs(tag), "init: scaffold stubs", create=True
+    )
+
     user_files = {
         "README.md": readme.encode(),
         "lectures/01_session-1/.gitkeep": b"",
         # A stub, not a .gitkeep: a text file here IS the published reading list (its
         # contents are inlined on the site's Materials tab), and an empty folder gave no
         # sign of that - the tab then reads blank with nothing to explain why.
-        # Shaped like a Hertie syllabus's readings block, so a course team can paste
-        # theirs straight in: `Required Readings` / `Optional Readings` as sub-headings,
-        # and any further category (some syllabi add `Application Readings`) works the
-        # same way - the site renders whatever headings this file has, nested under the
-        # session's own.
-        "readings/01_session-1/reading.md": (
-            b"# Session 1 readings\n\n"
-            b"## Required Readings\n\n"
-            b"- Author, *Title*, ch. 1.\n"
-            b'- Author (2026), "Paper title", doi:...\n\n'
-            b"## Optional Readings\n\n"
-            b"- Author, *Title*, ch. 2.\n\n"
-            b"This file IS the reading list students see on the site's Readings tab - the\n"
-            b"session's learning objectives come from `description:` in schedule.yml. Put\n"
-            b"reading PDFs in this folder too: they are linked for enrolled students,\n"
-            b"never published.\n"
-        ),
         "labs/01_session-1/.gitkeep": b"",
-        "SYLLABUS.md": f"# {tag} syllabus\n\nReplace with the real syllabus.\n".encode(),
     }
     # One commit for the skeleton: all five carried the same subject anyway, so writing
     # them one at a time opened a repo faculty then author by hand with five identical
