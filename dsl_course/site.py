@@ -821,6 +821,11 @@ def _planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], _Planne
     order (deduped - two deploys of one entry can name the same one) so a placeholder row
     can name where its materials are going to appear."""
     out: dict[tuple[str, str], _PlannedRow] = {}
+    # When the entry that currently names each row happens, so the name is decided by the
+    # plan's DATES rather than by the order it happens to be written in. Reading "first
+    # non-empty wins" off the list order silently depended on `_parse_releases` having
+    # sorted it, and gave a different name to anyone building a Schedule directly.
+    titled_at: dict[tuple[str, str], datetime] = {}
     for release in sched.releases:
         if release.when is None:
             continue  # event_datetime: tbc - undated, can't place a session
@@ -837,12 +842,17 @@ def _planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], _Planne
             # collected, so the consumer is a plain join and the returned value means
             # what the docstring says it does.
             row.dests[f"{d.cohort_dest_repo}/{dest}"] = None
-            # First non-empty wins. `sched.releases` is sorted by event_datetime, so that
-            # is "the earliest entry naming this row is the one that titles it" - the same
-            # entry the row takes its date from.
-            row.subtitle = row.subtitle or release.title
-            row.description = row.description or release.description
             row.readings_planned = row.readings_planned or section == READINGS_SECTION
+            # A row is NAMED by the same entry it is DATED by: the earliest one touching
+            # it. Title and description are adopted as a pair - they describe one session,
+            # and taking the name from one entry and the blurb from another would read as
+            # a mismatch nobody wrote.
+            if (release.title or release.description) and (
+                key not in titled_at or release.when < titled_at[key]
+            ):
+                titled_at[key] = release.when
+                row.subtitle = release.title
+                row.description = release.description
     return out
 
 

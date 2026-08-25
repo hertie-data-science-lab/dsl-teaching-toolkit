@@ -934,3 +934,106 @@ def test_display_only_rows_come_from_events_alone(monkeypatch, tmp_path):
         ),
     )
     assert "Guest Lecture" not in "".join(plan.collections["_events"].values())
+
+
+# ------------------------------------------------- a session's declared name + blurb
+def test_a_row_carries_the_title_and_description_the_plan_declared(monkeypatch):
+    monkeypatch.setattr(site, "_session_files", lambda *a: [("s.pdf", "https://x/1")])
+    out = site._lecture_entry(
+        "Cohort-f2026",
+        "1",
+        datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN),
+        RELEASED,
+        subtitle="Probability Theory",
+        description="Sample spaces and Bayes' rule.",
+    )
+    # `title` stays the ordinal - what the theme has always assumed it is - and the
+    # declared name rides `subtitle` beside it.
+    assert 'title: "Session 1"' in out
+    assert 'subtitle: "Probability Theory"' in out
+    assert 'description: "Sample spaces and Bayes\' rule."' in out
+
+
+def test_a_row_omits_the_declared_fields_it_was_not_given(monkeypatch):
+    # Omitted, not written blank: the theme tests for them, so an empty string would
+    # render an empty line where there should be nothing at all.
+    monkeypatch.setattr(site, "_session_files", lambda *a: [("s.pdf", "https://x/1")])
+    out = site._lecture_entry(
+        "Cohort-f2026", "1", datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN), RELEASED
+    )
+    assert "subtitle:" not in out and "description:" not in out
+
+
+def test_an_unreleased_row_keeps_its_title_but_drops_its_description():
+    out = site._lecture_entry(
+        "Cohort-f2026",
+        "3",
+        datetime(2026, 9, 15, 10, 0, tzinfo=BERLIN),
+        [],
+        planned_dests=["materials/lectures/03_week-3"],
+        subtitle="Expectation",
+        description="Linearity of expectation.",
+    )
+    assert 'subtitle: "Expectation"' in out
+    # The row's own prose already says it is unreleased; a blurb beside it would print a
+    # second sentence saying the same thing on the Lectures tab.
+    assert "description:" not in out
+    assert "will appear in `materials/lectures/03_week-3` when released." in out
+
+
+def test_the_plan_carries_a_rows_title_description_and_readings(monkeypatch):
+    s = _sched(
+        [
+            Release(
+                "lecture-1",
+                datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN),
+                deploy=[
+                    Deploy("cm", "lectures/01_a", "materials", None),
+                    Deploy("cm", "readings/01_a", "materials", None),
+                ],
+                title="Probability Theory",
+                description="Sample spaces.",
+            )
+        ]
+    )
+    row = site._planned_sessions(s)[("1", "lecture")]
+    assert row.subtitle == "Probability Theory"
+    assert row.description == "Sample spaces."
+    # Readings are lecture material, so they land on this row - and the row knows a
+    # reading list is coming even before it ships.
+    assert row.readings_planned is True
+
+
+def test_the_earliest_entry_naming_a_row_is_the_one_that_titles_it():
+    # Same rule as the row's DATE: releases are sorted by event_datetime, so the entry the
+    # row takes its date from is the entry it takes its name from.
+    s = _sched(
+        [
+            Release(
+                "late",
+                datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "lectures/02_x", "materials", None)],
+                title="Second billing",
+            ),
+            Release(
+                "early",
+                datetime(2026, 9, 10, 9, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "readings/02_y", "materials", None)],
+                title="Random Variables",
+            ),
+        ]
+    )
+    assert site._planned_sessions(s)[("2", "lecture")].subtitle == "Random Variables"
+
+
+def test_a_row_with_no_readings_in_the_plan_never_reports_them_pending():
+    s = _sched(
+        [
+            Release(
+                "lecture-1",
+                datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "lectures/01_a", "materials", None)],
+            )
+        ]
+    )
+    assert site._planned_sessions(s)[("1", "lecture")].readings_planned is False

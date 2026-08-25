@@ -12,6 +12,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import pytest
+import yaml
 
 from dsl_course import site, utils
 
@@ -317,3 +318,166 @@ def test_session_files_real_failure_raises(monkeypatch):
     monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: HTTP 500 Server Error"))
     with pytest.raises(RuntimeError, match="could not read the file tree"):
         site._session_files("Cohort-f2026", "materials", "lectures", "03_x")
+
+
+# --------------------------------------------------------------- display link shaping
+# A released session folder is copied WHOLESALE, so a rendered Quarto/Rmd deck arrives as
+# one deliverable plus hundreds of assets. These pin the split between what SHIPS (all of
+# it, recursively - `_session_files`) and what a row LISTS (`_shape_links`). The shape
+# below is the real `lectures/01_introduction` of hertie-intro-to-data-science-f2025,
+# whose site carried 200 links for this one session.
+ITDS_SESSION_01 = [
+    ("01-introduction.Rmd", "https://x/rmd"),
+    ("01-introduction.html", "https://x/html"),
+    ("01-introduction.pdf", "https://x/pdf"),
+    ("01-introduction_files/figure-html/indeed-1.svg", "https://x/fig"),
+    ("add_hertie_logo.html", "https://x/logo"),
+    ("libs/fabric/fabric.min.js", "https://x/fabric"),
+    ("libs/remark-css/metropolis.css", "https://x/metro"),
+    ("pics/1_1_hello.png", "https://x/p1"),
+    ("pics/1_2_data.png", "https://x/p2"),
+    ("simons-touch.css", "https://x/css"),
+]
+TREE = "https://github.com/o/r/tree/main/lectures/01_introduction"
+
+
+def test_shape_links_lists_root_files_and_folds_subfolders():
+    names = [n for n, _ in site._shape_links(ITDS_SESSION_01, TREE, frozenset())]
+    # 10 blobs -> 5 root files + one entry per subfolder, in path order, files first.
+    assert names == [
+        "01-introduction.Rmd",
+        "01-introduction.html",
+        "01-introduction.pdf",
+        "add_hertie_logo.html",
+        "simons-touch.css",
+        "01-introduction_files/ (1 file)",
+        "libs/ (2 files)",
+        "pics/ (2 files)",
+    ]
+
+
+def test_shape_links_points_a_folded_folder_at_its_tree():
+    got = dict(site._shape_links(ITDS_SESSION_01, TREE, frozenset()))
+    assert got["pics/ (2 files)"] == f"{TREE}/pics"
+    # A file still links to the file, not to its folder.
+    assert got["01-introduction.pdf"] == "https://x/pdf"
+
+
+def test_shape_links_allowlist_matches_at_any_depth_and_offers_the_folder():
+    names = [
+        n for n, _ in site._shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf", "css"}))
+    ]
+    # Nothing is hidden without a way back: the browse link is the escape hatch.
+    assert names == [
+        "01-introduction.pdf",
+        "libs/remark-css/metropolis.css",
+        "simons-touch.css",
+        site._BROWSE_ALL,
+    ]
+    assert dict(site._shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf"})))[
+        site._BROWSE_ALL
+    ] == TREE
+
+
+def test_shape_links_leaves_a_flat_folder_untouched():
+    # The worked example's shape: no subfolders, so there is nothing to fold and the row
+    # reads exactly as it did before any of this.
+    flat = [("slides.md", "https://x/1"), ("demo.py", "https://x/2")]
+    assert site._shape_links(flat, TREE, frozenset()) == flat
+
+
+def test_ext_reads_the_extension_not_a_dotted_directory():
+    assert site._ext("notes.PDF") == "pdf"
+    assert site._ext("Makefile") == ""
+    assert site._ext("libs/remark-css/metropolis.css") == "css"
+    # A dot in a directory name is not the file's extension.
+    assert site._ext("v1.2/README") == ""
+
+
+def test_link_extensions_accepts_a_list_or_a_bare_string():
+    assert site._link_extensions({"site_link_extensions": [".PDF", "html"]}) == frozenset(
+        {"pdf", "html"}
+    )
+    # The shape faculty reach for first; refusing it would only mean a silently
+    # unfiltered site.
+    assert site._link_extensions({"site_link_extensions": "pdf, html"}) == frozenset(
+        {"pdf", "html"}
+    )
+    assert site._link_extensions({}) == frozenset()
+    assert site._link_extensions({"site_link_extensions": []}) == frozenset()
+
+
+# --------------------------------------------------------------- reading lists + blocks
+def test_block_survives_an_indented_first_line():
+    # Without the explicit `|2` indicator YAML would take the block's indentation from its
+    # first line, and every following line would look like the end of the block - breaking
+    # the whole file, not just this field.
+    out = site._block("reading_list", "   - indented\n- flush")
+    assert yaml.safe_load(out)["reading_list"] == "   - indented\n- flush\n"
+
+
+def test_block_keeps_liquid_verbatim_and_expands_tabs():
+    # Front matter is data, not a template, so no `{% raw %}` fence is needed here.
+    text = "a\tb\n{{ site.x }} {% if y %}"
+    assert yaml.safe_load(site._block("k", text))["k"] == "a   b\n{{ site.x }} {% if y %}\n"
+
+
+def _readings_sources():
+    return [("materials", "readings", "01_week-1"), ("materials", "lectures", "01_x")]
+
+
+def test_released_reading_list_inlines_text_and_ignores_the_pdf(monkeypatch):
+    files = {
+        ("materials", "readings", "01_week-1"): [
+            ("reading.md", "u"),
+            ("blitzstein_ch1.pdf", "u"),
+        ],
+        ("materials", "lectures", "01_x"): [("slides.pdf", "u")],
+    }
+    monkeypatch.setattr(
+        site, "_session_files", lambda o, r, s, f: files.get((r, s, f), [])
+    )
+    monkeypatch.setattr(
+        site,
+        "get_file_content",
+        lambda org, repo, path: "- Blitzstein, ch. 1-2."
+        if path.endswith("reading.md")
+        else "",
+    )
+    out = site._released_reading_list("Cohort-f2026", _readings_sources())
+    # The citation text is the list; the PDF is left to the links beside it (this site
+    # repo is public, so it never hosts the reading itself).
+    assert out == "- Blitzstein, ch. 1-2."
+
+
+def test_released_reading_list_propagates_a_read_failure(monkeypatch):
+    # A rate-limited read must not republish the row with the reading list silently
+    # emptied - same rule as every other fail-loud read in this module.
+    monkeypatch.setattr(
+        site, "_session_files", lambda o, r, s, f: [("reading.md", "u")]
+    )
+
+    def boom(*a, **k):
+        raise RuntimeError("could not read")
+
+    monkeypatch.setattr(site, "get_file_content", boom)
+    with pytest.raises(RuntimeError):
+        site._released_reading_list("Cohort-f2026", [("materials", "readings", "01_a")])
+
+
+def test_row_links_drops_the_citation_file_it_already_inlined(monkeypatch):
+    monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(
+        site,
+        "_session_files",
+        lambda o, r, s, f: [("reading.md", "https://x/md"), ("ch1.pdf", "https://x/pdf")],
+    )
+    names = [
+        n for n, _ in site._row_links("C", "materials", "readings", "01_a", frozenset())
+    ]
+    assert names == ["ch1.pdf"]  # reading.md IS the list, not a download beside it
+    # Any other section keeps its text files - only `readings` is inlined.
+    names = [
+        n for n, _ in site._row_links("C", "materials", "lectures", "01_a", frozenset())
+    ]
+    assert "reading.md" in names
