@@ -353,3 +353,44 @@ def test_every_seeded_stub_carries_the_mark_that_makes_it_refreshable(fake):
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     for path in ("SYLLABUS.md", "readings/01_session-1/reading.md"):
         assert utils.STUB_MARK in fake.files[("course-materials-f2026", path)], path
+
+
+def test_refresh_improves_an_existing_stub_but_never_creates_one(monkeypatch):
+    # The gap this closes: `seed.refresh` runs nightly over every content repo, but the
+    # stubs were only ever written by the scaffold - so a course scaffolded last month kept
+    # whatever the toolkit first shipped. Refresh now converges them.
+    #
+    # `create=False` is what makes that safe over EVERY content repo:
+    # discover_content_repos returns the code and dataset repos too, and seeding a syllabus
+    # into `lecture-code-f2026` would be nonsense.
+    from dsl_course import seed
+
+    f = FakeRepo()
+    monkeypatch.setattr(utils, "get_file_content", f.get_file_content)
+    monkeypatch.setattr(utils, "put_file", f.put_file)
+    monkeypatch.setattr(utils, "log_skip", lambda msg: f.skips.append(msg))
+    # A materials repo with the stub we used to ship, and a code repo with no stub at all.
+    f.files[("course-materials-f2026", "SYLLABUS.md")] = (
+        "# f2026 syllabus\n\nReplace with the real syllabus.\n"
+    )
+
+    assert seed._refresh_stubs("Org", "course-materials-f2026") == 0
+    assert seed._refresh_stubs("Org", "lecture-code-f2026") == 0
+
+    assert (
+        "## 1. General information"
+        in f.files[("course-materials-f2026", "SYLLABUS.md")]
+    )
+    # Nothing was created anywhere - not the code repo's syllabus, not the materials repo's
+    # missing readings stub.
+    assert ("lecture-code-f2026", "SYLLABUS.md") not in f.files
+    assert ("course-materials-f2026", "readings/01_session-1/reading.md") not in f.files
+
+
+def test_the_scaffold_and_refresh_converge_the_same_stub_list():
+    # One list, so a stub added to the scaffold is converged everywhere without a second
+    # edit somewhere else.
+    assert sorted(scaffold.refreshable_stubs("f2026")) == [
+        "SYLLABUS.md",
+        "readings/01_session-1/reading.md",
+    ]

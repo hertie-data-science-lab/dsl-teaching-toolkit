@@ -914,15 +914,24 @@ def is_untouched_stub(text: str | None) -> bool:
 
 
 def seed_or_refresh_stub(
-    org: str, repo: str, path: str, content: bytes, message: str
+    org: str, repo: str, path: str, content: bytes, message: str, create: bool = True
 ) -> bool:
     """Write a stub when the path is absent OR still carries the stub mark; otherwise leave
     it exactly as faculty left it.
 
     The middle ground between `seed_if_absent` (frozen at whatever we first shipped) and
-    `put_file` (clobbers real work). Returns True whenever the file is now as intended,
-    False only when a write was attempted and failed - same contract as `seed_if_absent`."""
+    `put_file` (clobbers real work).
+
+    `create=False` refreshes an existing stub but never creates one, which is how the
+    nightly convergence reaches repos scaffolded before a stub improved WITHOUT seeding a
+    syllabus into a repo that is not a materials repo. Creating is the scaffold's job,
+    because only the scaffold knows what kind of repo it just made.
+
+    Returns True whenever the file is now as intended, False only when a write was attempted
+    and failed - same contract as `seed_if_absent`."""
     current = get_file_content(org, repo, path)
+    if current is None and not create:
+        return True
     if current is not None and not is_untouched_stub(current):
         log_skip(f"{repo}/{path}")
         return True

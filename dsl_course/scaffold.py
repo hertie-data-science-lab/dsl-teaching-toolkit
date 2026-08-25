@@ -52,7 +52,7 @@ WEBSITE_TEMPLATE = "course-website-template"
 _GIT_ENV = GIT_ENV
 
 _SYLLABUS_STUB = """\
-# {course} syllabus
+# {tag} syllabus
 
 *Optional - delete this file if your course does not need it.*
 
@@ -264,6 +264,19 @@ def _notebook(title_lines: list[str], code: str) -> str:
     return json.dumps(nb, indent=1) + "\n"
 
 
+def refreshable_stubs(tag: str) -> dict[str, bytes]:
+    """The seeded files that are stubs rather than skeletons - improvable later, while they
+    still carry the mark (see `utils.seed_or_refresh_stub`).
+
+    Named here, where they are written, and read by `seed.refresh` so the nightly
+    convergence reaches repos scaffolded before a stub improved. One list rather than two
+    that drift: a stub added here is converged everywhere without a second edit."""
+    return {
+        "SYLLABUS.md": _SYLLABUS_STUB.format(tag=tag).encode(),
+        "readings/01_session-1/reading.md": _READINGS_STUB,
+    }
+
+
 def scaffold_materials(org: str, tag: str) -> int:
     repo = f"course-materials-{tag}"
     log_step(f"Scaffolding {org}/{repo}")
@@ -397,10 +410,7 @@ def scaffold_materials(org: str, tag: str) -> int:
     # improvement then reaches the courses already running, not just the next repo
     # scaffolded. Written before the create-only set below so a re-run's log reads in the
     # order the rules apply.
-    for path, body in {
-        "SYLLABUS.md": _SYLLABUS_STUB.format(course=tag, tag=tag).encode(),
-        "readings/01_session-1/reading.md": _READINGS_STUB,
-    }.items():
+    for path, body in refreshable_stubs(tag).items():
         if not seed_or_refresh_stub(
             org, repo, path, body, "init: refresh scaffold stub"
         ):
