@@ -398,6 +398,18 @@ def test_ext_reads_the_extension_not_a_dotted_directory():
     assert site._ext("v1.2/README") == ""
 
 
+def test_the_allowlist_never_leaves_a_public_file_unreachable(tmp_path):
+    # Jekyll serves no directory index, so the public site has no folder link and no
+    # browse-the-folder escape hatch. An allowlist there would copy a file, serve it, and
+    # link it from nowhere - so `site_link_extensions` governs the cohort site only.
+    (tmp_path / "libs").mkdir()
+    (tmp_path / "deck.html").write_text("x")
+    (tmp_path / "notes.pdf").write_text("x")
+    (tmp_path / "libs" / "style.css").write_text("x")
+    names = [n for n, _ in site._public_links(tmp_path, "/m/session-1")]
+    assert names == ["deck.html", "notes.pdf"]  # root files listed, the asset served only
+
+
 def test_link_extensions_accepts_a_list_or_a_bare_string():
     assert site._link_extensions(
         {"site_link_extensions": [".PDF", "html"]}

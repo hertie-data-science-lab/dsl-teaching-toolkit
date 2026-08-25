@@ -71,9 +71,10 @@ from .utils import (
 # Public course site: served folder for the hosted section files, and the text-file
 # extensions treated as the (publishable) reading list rather than copyrighted material.
 PUBLIC_MATERIALS_DIR = "public-materials"
-READING_LIST_EXTS = {".md", ".markdown", ".txt", ".bib"}
-# The same set as bare extensions, for `_ext` (which reports 'md', not '.md').
-_READING_LIST_EXT_SET = frozenset(e.lstrip(".") for e in READING_LIST_EXTS)
+# Bare, not dotted: every test goes through `_ext`, so one spelling serves both sites. Two
+# spellings of one convention is how they come to disagree - and they had, on a name like
+# `.bib`, where `Path.suffix` reports nothing and `_ext` reports the extension.
+READING_LIST_EXTS = frozenset({"md", "markdown", "txt", "bib"})
 # The one section with copyright semantics of its own (--readings-mode); every OTHER
 # section a repo happens to have is published as files, whatever it's called.
 READINGS_SECTION = "readings"
@@ -507,6 +508,27 @@ def _repo_tree(org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     return branch, repo_tree(org, repo, branch, "blob")
 
 
+def _source_prefix(subpath: str, folder: str) -> str:
+    """Where a discovered session folder sits in its repo - `subpath/folder`, or the bare
+    folder when the release landed at the repo root. Stated once: three callers need it,
+    and a fourth copy of the rule is how they come to disagree (same argument
+    `_deploy_dest` makes for the deploy side)."""
+    return f"{subpath}/{folder}" if subpath else folder
+
+
+def _source_section(repo: str, subpath: str) -> str:
+    """The section a DISCOVERED release source belongs to - its subpath, or the repo itself
+    when the folder sits at the root. The read-side twin of `_deploy_section`, which names
+    this rule in its own docstring; both must answer alike or a row's kind, its reading
+    list and its index heading disagree about the same folder."""
+    return subpath or repo
+
+
+def _gh_url(org: str, repo: str, branch: str, kind: str, path: str) -> str:
+    """A GitHub `blob`/`tree` URL for a path in a repo. One template, three callers."""
+    return f"https://github.com/{org}/{repo}/{kind}/{branch}/{quote(path)}"
+
+
 def _session_files(
     org: str, repo: str, subpath: str, folder: str
 ) -> list[tuple[str, str]]:
@@ -522,11 +544,10 @@ def _session_files(
     no API call per session or per subfolder; names are the path relative to the session
     folder, so nested files stay distinguishable, and the ordering is by path for a
     stable diff."""
-    prefix = f"{subpath}/{folder}" if subpath else folder
+    prefix = _source_prefix(subpath, folder)
     branch, paths = _repo_tree(org, repo)
-    base = f"https://github.com/{org}/{repo}/blob/{branch}"
     return [
-        (path[len(prefix) + 1 :], f"{base}/{quote(path)}")
+        (path[len(prefix) + 1 :], _gh_url(org, repo, branch, "blob", path))
         for path in paths
         if path.startswith(f"{prefix}/")
     ]
@@ -604,9 +625,8 @@ def _session_links(
     """`_session_files` shaped for display (`_shape_links`), with the session folder's own
     GitHub tree URL for the folder links. The branch comes from the memoised `_repo_tree`,
     so naming the folder costs no extra API call."""
-    prefix = f"{subpath}/{folder}" if subpath else folder
     branch, _paths = _repo_tree(org, repo)
-    tree = f"https://github.com/{org}/{repo}/tree/{branch}/{quote(prefix)}"
+    tree = _gh_url(org, repo, branch, "tree", _source_prefix(subpath, folder))
     return _shape_links(_session_files(org, repo, subpath, folder), tree, allow)
 
 
@@ -618,9 +638,9 @@ def _row_links(
     ARE the reading list; listing them again as downloads beside it says the same thing
     twice. The same rule the public site's `reading-list` mode already follows."""
     links = _session_links(org, repo, subpath, folder, allow)
-    if (subpath or repo) != READINGS_SECTION:
+    if _source_section(repo, subpath) != READINGS_SECTION:
         return links
-    return [(n, u) for n, u in links if _ext(n) not in _READING_LIST_EXT_SET]
+    return [(n, u) for n, u in links if _ext(n) not in READING_LIST_EXTS]
 
 
 def _released_reading_list(cohort_org: str, sources: list[tuple[str, str, str]]) -> str:
@@ -637,11 +657,11 @@ def _released_reading_list(cohort_org: str, sources: list[tuple[str, str, str]])
     must not republish the row with the reading list silently emptied."""
     parts = []
     for repo, subpath, folder in sources:
-        if (subpath or repo) != READINGS_SECTION:
+        if _source_section(repo, subpath) != READINGS_SECTION:
             continue
-        prefix = f"{subpath}/{folder}" if subpath else folder
+        prefix = _source_prefix(subpath, folder)
         for name, _url in _session_files(cohort_org, repo, subpath, folder):
-            if _ext(name) not in _READING_LIST_EXT_SET:
+            if _ext(name) not in READING_LIST_EXTS:
                 continue
             text = (
                 get_file_content(cohort_org, repo, f"{prefix}/{name}") or ""
@@ -831,7 +851,10 @@ def _lecture_entry(
         flags = ""
         links = _links_block(
             [
-                (subpath or repo, _row_links(cohort_org, repo, subpath, folder, allow))
+                (
+                    _source_section(repo, subpath),
+                    _row_links(cohort_org, repo, subpath, folder, allow),
+                )
                 for repo, subpath, folder in sources
             ]
         )
@@ -981,7 +1004,7 @@ def _deploy_dest(deploy: schedule.Deploy) -> str:
 def _deploy_section(deploy: schedule.Deploy) -> str:
     """The section a deploy lands in - the top-level directory of its destination path,
     or the destination repo itself when the path is a bare session folder (a release into
-    a repo that IS one section). The same `subpath or repo` shape discovery reports for
+    a repo that IS one section). The read-side twin is `_source_section`, which reports for
     an already-released folder, so both sides classify a row the same way."""
     head, sep, _ = _deploy_dest(deploy).partition("/")
     return head if sep else deploy.cohort_dest_repo
@@ -1402,7 +1425,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # lecture's row (and never shows up twice, on the schedule and the labs page).
         sources_by_row: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
         for repo, subpath, folder, n in release_sources:
-            key = (str(n), _row_kind(subpath or repo))
+            key = (str(n), _row_kind(_source_section(repo, subpath)))
             sources_by_row.setdefault(key, []).append((repo, subpath, folder))
         assignments = seed.discover_assignments(course_org)
         # A persistent course org holds per-year templates (assignment-*-fYYYY); a cohort
@@ -1452,7 +1475,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
             sources = sources_by_row.get((s, kind), [])
             # The plan ships readings for this row, but no readings section has landed yet.
             pending = bool(row and row.readings_planned) and READINGS_SECTION not in {
-                subpath or repo for repo, subpath, _folder in sources
+                _source_section(repo, subpath) for repo, subpath, _folder in sources
             }
             return _lecture_entry(
                 cohort_org,
@@ -1553,9 +1576,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
     return _sync_site_repo(cohort_org, build)
 
 
-def _public_links(
-    local_dir: Path, url_prefix: str, allow: frozenset[str] = frozenset()
-) -> list[tuple[str, str]]:
+def _public_links(local_dir: Path, url_prefix: str) -> list[tuple[str, str]]:
     """(display-name, site-relative URL) for the files of a copied session folder that the
     page LISTS - not every file it serves.
 
@@ -1566,20 +1587,21 @@ def _public_links(
 
     Every file stays COPIED and served whatever this returns - a rendered deck's `libs/`
     and `<name>_files/` must remain reachable at their original relative paths or the
-    `.html` loads with no styles and no figures. This only decides what is listed, on the
-    same rule as the cohort site (`_shape_links`): by default the files at the session
-    folder's root, or with an allowlist the matching files at any depth. A subfolder gets
-    no link of its own here - Jekyll serves no directory index, so there would be nothing
-    behind it."""
+    `.html` loads with no styles and no figures. Only the LISTING is filtered, to the same
+    depth rule as the cohort site's default: the files at the session folder's root.
+
+    `site_link_extensions` deliberately does NOT apply here. Jekyll serves no directory
+    index, so this host has no folder link and no "browse the folder" escape hatch to
+    offer: a file the allowlist excluded would be copied, addressable, and reachable from
+    nowhere on the site. The default rule already does the job the allowlist was added for
+    - it lists a deck rather than its several hundred assets - so the cohort site takes the
+    extra narrowing and this one keeps every listed file reachable."""
     out = []
     for p in sorted(local_dir.rglob("*")):
         if not p.is_file():
             continue
         rel = p.relative_to(local_dir).as_posix()
-        if allow:
-            if _ext(rel) not in allow:
-                continue
-        elif "/" in rel:
+        if "/" in rel:
             continue  # an asset of a root deliverable: served, not listed
         out.append((rel, f"{url_prefix}/{quote(rel)}"))
     return out
@@ -1595,7 +1617,7 @@ def _reading_list_md(readings_session_dir: Path) -> str:
     for p in sorted(readings_session_dir.rglob("*")):
         if not p.is_file():
             continue
-        if p.suffix.lower() in READING_LIST_EXTS:
+        if _ext(p.name) in READING_LIST_EXTS:
             text = p.read_text(encoding="utf-8", errors="replace").strip()
             if text:
                 parts.append(text)
@@ -1669,9 +1691,6 @@ def sync_public_site(
             f"file sections={'on' if include_lectures else 'off'}"
         )
         meta = _yaml_file(course_org, ".github", "dsl-course.yml")
-        # What each session row LISTS, out of everything it serves - one rule with the
-        # cohort site, read from the same course-level declaration.
-        allow = _link_extensions(meta)
         # A course site spans years and has no per-cohort schedule.yml to read (that's
         # cohort-scoped), so the date is a neutral fallback that only orders the session
         # entries.
@@ -1719,7 +1738,7 @@ def sync_public_site(
                         continue
                     dest = site_session / section
                     shutil.copytree(sec_src, dest, dirs_exist_ok=True)
-                    links = _public_links(dest, f"{url_base}/{section}", allow)
+                    links = _public_links(dest, f"{url_base}/{section}")
                     if links:
                         rows = (
                             lab_links if _row_kind(section) == "lab" else section_links
@@ -1731,9 +1750,7 @@ def sync_public_site(
                     if readings_mode == "actual-readings":
                         dest = site_session / READINGS_SECTION
                         shutil.copytree(read_src, dest, dirs_exist_ok=True)
-                        links = _public_links(
-                            dest, f"{url_base}/{READINGS_SECTION}", allow
-                        )
+                        links = _public_links(dest, f"{url_base}/{READINGS_SECTION}")
                         if links:
                             section_links.append((READINGS_SECTION, links))
                     elif readings_mode == "reading-list":
