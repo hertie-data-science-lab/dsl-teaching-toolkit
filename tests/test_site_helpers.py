@@ -155,7 +155,9 @@ def test_public_links_are_site_relative(tmp_path):
 def test_public_lecture_entry_reading_list_mode_has_no_links():
     e = site._public_lecture_entry("1", date(2025, 1, 1), [], "- Smith 2020")
     assert "links: []" in e
-    assert "### Reading list" in e and "Smith 2020" in e
+    # The citation text rides the front matter, not the body: both sites then feed the
+    # theme's Materials layout from one field, and it needs no `{% raw %}` fence.
+    assert "reading_list: |" in e and "Smith 2020" in e
     assert "enrolled" not in e  # public-facing, no student gate language
 
 

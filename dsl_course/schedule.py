@@ -9,6 +9,8 @@ lifecycle, `events` are display-only calendar rows.
     releases:                        # the auto-release plan - label ->
       lecture_02:                    # {event_datetime + deploys}. Each deploy ships at its
         event_datetime: 2026-09-15T10:00   # deploy_datetime (default: the event itself).
+        title: Linear regression           # optional, display-only: the session's name,
+        description: Least squares by hand # and a sentence about what is in it.
         deploy:                            # Labels are free identifiers.
           - course_source_repo: course-materials-f2026   # course_source_repo + course_source_path
             course_source_path: lectures/02_intro        # are the only required keys;
@@ -203,7 +205,10 @@ class Release:
     when: datetime | None
     deploy: list[Deploy] = field(default_factory=list)
     assignment: str | None = None
-    title: str = ""  # display-only: overrides the prettified label on the site
+    title: str = ""  # display-only: the session's name, beside its ordinal on the site
+    # display-only: a sentence about the session, shown under its heading on the Lectures
+    # tab. `title` names the session, this says what is in it.
+    description: str = ""
     # `tbc: true` next to a REAL date = a provisional sketch: everything fires at that
     # date as normal, but the site marks it "(TBC)" to signal it may still move.
     tbc: bool = False
@@ -327,7 +332,9 @@ def _require_mapping(
 KNOWN_TOP_LEVEL = frozenset(
     {"timezone", "releases", "semester_start", "semester_end", "assignments", "events"}
 )
-KNOWN_RELEASE = frozenset({"event_datetime", "deploy", "assignment", "title", "tbc"})
+KNOWN_RELEASE = frozenset(
+    {"event_datetime", "deploy", "assignment", "title", "description", "tbc"}
+)
 KNOWN_DEPLOY = frozenset(
     {
         "course_source_repo",
@@ -508,6 +515,7 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Release
                 deploy=_parse_deploy(entry.get("deploy"), tz, drops, str(label)),
                 assignment=str(assignment) if assignment else None,
                 title=str(entry.get("title") or ""),
+                description=str(entry.get("description") or ""),
                 tbc=tbc,
             )
         )

@@ -34,7 +34,7 @@ def _sched(releases: list[Release]) -> Schedule:
 
 def _row_dates(sched: Schedule) -> dict[tuple[str, str], datetime]:
     """The dating half of `_planned_sessions` - which row happens when."""
-    return {key: when for key, (when, _) in site._planned_sessions(sched).items()}
+    return {key: row.when for key, row in site._planned_sessions(sched).items()}
 
 
 def test_session_dates_maps_folder_ordinal_and_section_to_release_when():
@@ -520,7 +520,9 @@ def test_an_unreleased_row_names_where_its_materials_will_land(monkeypatch, tmp_
     body = plan.collections["_lectures"]["session-03.md"]
     assert "`lecture-materials/lectures/03_week-3`" in body
     assert "`lecture-materials/readings/03_week-3`" in body
-    assert "`Cohort-f2026`" in body
+    # The row says what is coming and where, and stops there - naming the cohort org as
+    # well made the schedule table's cell two clauses long for no reader's benefit.
+    assert "`Cohort-f2026`" not in body
 
 
 def test_a_released_row_replaces_its_placeholder_with_links(monkeypatch, tmp_path):
