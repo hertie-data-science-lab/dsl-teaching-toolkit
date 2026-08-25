@@ -491,3 +491,137 @@ def test_row_links_drops_the_citation_file_it_already_inlined(monkeypatch):
         n for n, _ in site._row_links("C", "materials", "lectures", "01_a", frozenset())
     ]
     assert "reading.md" in names
+
+
+# ------------------------------------------------------- the All Materials catch-all index
+# The two shapes real cohorts actually have. Both must land where a reader expects, and the
+# ordinal must decide only the LEVEL a section is read at - never whether a file is listed.
+DEMO_REPOS = {  # repo per section, ordinals at the repo root
+    "lectures": ("01_introduction/slides.md", "01_introduction/demo.py", "README.md"),
+    "readings": ("01_introduction/reading-list.md",),
+}
+MATHS_REPOS = {  # one materials repo, sections inside it
+    "materials": (
+        "lectures/01_lecture/deck.html",
+        "lectures/01_lecture/media/img.png",
+        "labs/01_lab/lab.ipynb",
+        "datasets/housing.csv",
+        "SYLLABUS.md",
+        ".DS_Store",
+        ".github/workflows/x.yml",
+    )
+}
+
+
+def _index(monkeypatch, repos):
+    monkeypatch.setattr(
+        site, "_repo_tree", lambda o, r: ("main", tuple(sorted(repos[r])))
+    )
+    return yaml.safe_load(site._materials_index("Cohort-f2026", list(repos)))[
+        "sections"
+    ]
+
+
+def test_index_reads_a_repo_per_section_cohort(monkeypatch):
+    got = {
+        s["name"]: [e["name"] for e in s["entries"]]
+        for s in _index(monkeypatch, DEMO_REPOS)
+    }
+    # The repo names the section, its ordinal folders are the entries - and the root
+    # README.md, which no session ordinal covers, is finally listed somewhere.
+    assert got == {
+        "lectures": ["01_introduction/", "README.md"],
+        "readings": ["01_introduction/"],
+    }
+
+
+def test_index_reads_a_single_materials_repo_cohort(monkeypatch):
+    sections = _index(monkeypatch, MATHS_REPOS)
+    got = {s["name"]: [e["name"] for e in s["entries"]] for s in sections}
+    # Each top-level directory is its own section here, and `datasets/` needs no ordinal
+    # anywhere to appear. The root SYLLABUS.md takes the repo's name.
+    assert got == {
+        "datasets": ["housing.csv"],
+        "labs": ["01_lab/"],
+        "lectures": ["01_lecture/"],
+        "materials": ["SYLLABUS.md"],
+    }
+    # Plumbing is not material.
+    assert ".DS_Store" not in str(sections) and ".github" not in str(sections)
+
+
+def test_index_folds_a_directory_to_one_counted_link(monkeypatch):
+    lectures = next(
+        s for s in _index(monkeypatch, MATHS_REPOS) if s["name"] == "lectures"
+    )
+    entry = lectures["entries"][0]
+    # Never the directory's contents: one of these holds a couple of thousand files.
+    assert entry["name"] == "01_lecture/" and entry["files"] == 2
+    assert entry["url"].endswith("/tree/main/lectures/01_lecture")
+    assert lectures["files"] == 2
+
+
+def test_index_links_a_file_as_a_blob_and_counts_no_files(monkeypatch):
+    datasets = next(
+        s for s in _index(monkeypatch, MATHS_REPOS) if s["name"] == "datasets"
+    )
+    entry = datasets["entries"][0]
+    assert entry["url"].endswith("/blob/main/datasets/housing.csv")
+    assert "files" not in entry  # a file is not a folder with a count
+
+
+def test_index_is_empty_yaml_when_nothing_is_released(monkeypatch):
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
+    assert yaml.safe_load(site._materials_index("Cohort-f2026", ["materials"])) == {
+        "sections": []
+    }
+    # And with no repos at all, without touching the tree.
+    assert yaml.safe_load(site._materials_index("Cohort-f2026", [])) == {"sections": []}
+
+
+def test_index_puts_directories_before_files(monkeypatch):
+    # Both in ONE section, which needs the ordinal shape: a non-ordinal directory would
+    # become a section of its own rather than an entry beside the root file.
+    repos = {"m": ("01_zzz/a.txt", "aaa.md")}
+    entries = [e["name"] for e in _index(monkeypatch, repos)[0]["entries"]]
+    # A directory listing: the structure is what a reader scans first, unlike a session
+    # row, which leads with its deliverables.
+    assert entries == ["01_zzz/", "aaa.md"]
+
+
+def test_index_gives_a_non_ordinal_directory_its_own_section(monkeypatch):
+    # The rule that makes both cohort shapes work: an ordinal child means the REPO is the
+    # section, a non-ordinal one means the DIRECTORY is.
+    sections = _index(monkeypatch, {"m": ("handbook/rules.md", "aaa.md")})
+    assert {s["name"]: [e["name"] for e in s["entries"]] for s in sections} == {
+        "handbook": ["rules.md"],
+        "m": ["aaa.md"],
+    }
+
+
+def test_theme_pages_split_readings_out_only_where_there_is_an_index():
+    cohort = site._theme_pages("gated.", "citations.", all_materials=True)
+    assert "layout: readings" in cohort["readings.md"]
+    assert "layout: materials" in cohort["materials.md"]
+    assert "All Materials" in cohort["materials.md"]
+    # A public course site has no cohort repos to index, so /materials/ stays the readings
+    # page it has always been rather than becoming an empty catch-all.
+    public = site._theme_pages("", "", all_materials=False)
+    assert "readings.md" not in public
+    assert "layout: readings" in public["materials.md"]
+    assert "permalink: /materials/" in public["materials.md"]
+    assert "gated." not in public["labs.md"]  # public site claims no student gate
+
+
+def test_nav_lists_readings_before_all_materials():
+    nav = yaml.safe_load(site._nav_yaml())["items"]
+    assert [i["name"] for i in nav] == [
+        "Home",
+        "Schedule",
+        "Lectures",
+        "Labs",
+        "Readings",
+        "Assignments",
+        "All Materials",
+    ]
+    assert all(i["url"] and i["icon_class"] for i in nav)

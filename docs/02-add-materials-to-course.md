@@ -51,6 +51,8 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
    *NB: a session folder is released whole, subfolders included - but the site lists its root files plus one link per subfolder, so a rendered deck links the deck rather than its hundreds of assets ([11](11-configure-cohort-site.md)).*
 
+   *NB: material with no `NN_` session folder (a root `SYLLABUS.md`, a flat `datasets/`) still releases, and appears on the cohort site's **All Materials** tab - the Lectures/Labs/Readings tabs are keyed on the session ordinal.*
+
 3. **Run Refresh actions** in the course org's `.github` Actions tab. 
    - This updates the `session` dropdown and each section's checkbox with what you just pushed.
 

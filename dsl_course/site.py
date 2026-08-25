@@ -157,12 +157,12 @@ def _set_config(text: str, key: str, value: str) -> str:
 
 
 # The session pages. Their CONTENT is a theme layout (dsl-jekyll-theme's
-# `_layouts/lectures.html` / `materials.html` / `labs.html`), so these are the front matter
-# that points at it plus the page's own intro line. Owned here, not left to the site
-# template, because a template edit only reaches orgs created after it - the rendering used
-# to live as inline Liquid in each site repo, and by the time it needed changing there were
-# seven live sites to hand-patch. Every later change to how sessions render now ships from
-# the theme alone.
+# `_layouts/lectures.html`, `labs.html`, `readings.html`, `materials.html`), so these are
+# the front matter that points at one plus the page's own intro line. Owned here, not left
+# to the site template, because a template edit only reaches orgs created after it - the
+# rendering used to live as inline Liquid in each site repo, and by the time it needed
+# changing there were seven live sites to hand-patch. Every later change to how sessions
+# render now ships from the theme alone.
 #
 # `_overwritten_edits` still reports a hand edit these replace, as it does for any other
 # generated surface. (It does NOT fire on the first sync that takes them over: the page a
@@ -171,39 +171,92 @@ def _set_config(text: str, key: str, value: str) -> str:
 # The access sentences are the caller's, not the layout's: a COHORT site links its files
 # into the private materials repo, while the public open-courseware site hosts them for
 # anyone - so "visible to enrolled students" is true of one and false of the other.
-def _theme_pages(access_note: str, readings_note: str) -> dict[str, str]:
+def _page(layout: str, title: str, permalink: str, intro: str, note: str) -> str:
+    """One generated page: front matter naming a theme layout, then its intro line."""
+    return (
+        f"---\nlayout: {layout}\ntitle: {title}\npermalink: {permalink}\n---\n\n"
+        + intro
+        + (f" {note}" if note else "")
+        + "\n"
+    )
+
+
+def _theme_pages(
+    access_note: str, readings_note: str, all_materials: bool
+) -> dict[str, str]:
     """The `{path: content}` for the pages whose rendering lives in the theme.
 
-    `access_note` closes the Lectures and Labs intros, `readings_note` the Materials one -
+    `access_note` closes the Lectures and Labs intros, `readings_note` the readings one -
     readings need their own sentence, because the citation LIST is public even where the
-    files behind it are not."""
+    files behind it are not.
 
-    def page(layout: str, title: str, intro: str, note: str) -> str:
-        return (
-            f"---\nlayout: {layout}\ntitle: {title}\npermalink: /{layout}/\n---\n\n"
-            + intro
-            + (f" {note}" if note else "")
-            + "\n"
-        )
-
-    return {
-        "lectures.md": page(
+    `all_materials` splits readings onto their own tab and gives `/materials/` to the
+    complete index (see `_materials_index`). A public course site passes False: it has no
+    cohort repos to index, so its `/materials/` stays the readings page it has always been."""
+    pages = {
+        "lectures.md": _page(
             "lectures",
             "Lectures",
+            "/lectures/",
             "Lecture slides by session (lab exercises are on the [Labs](/labs/) tab).",
             access_note,
         ),
-        "labs.md": page(
+        "labs.md": _page(
             "labs",
             "Labs",
+            "/labs/",
             "Lab exercises by session (lecture slides are on the "
             "[Lectures](/lectures/) tab).",
             access_note,
         ),
-        "materials.md": page(
-            "materials", "Materials", "Readings by session.", readings_note
-        ),
     }
+    if not all_materials:
+        pages["materials.md"] = _page(
+            "readings",
+            "Materials",
+            "/materials/",
+            "Readings by session.",
+            readings_note,
+        )
+        return pages
+    pages["readings.md"] = _page(
+        "readings", "Readings", "/readings/", "Readings by session.", readings_note
+    )
+    pages["materials.md"] = _page(
+        "materials",
+        "All Materials",
+        "/materials/",
+        "Everything released to this cohort, whether or not it belongs to a session. "
+        "Folders open on GitHub.",
+        access_note,
+    )
+    return pages
+
+
+# The tabs, in reading order. Generated for the same reason the pages are: a tab added here
+# has to reach the sites that already exist, not just the next org bootstrapped.
+_NAV = (
+    ("/", "Home", "fa fa-home fa-lg"),
+    ("/schedule/", "Schedule", "fas fa-calendar-alt"),
+    ("/lectures/", "Lectures", "fas fa-book-reader"),
+    ("/labs/", "Labs", "fas fa-flask"),
+    ("/readings/", "Readings", "fas fa-book"),
+    ("/assignments/", "Assignments", "fas fa-user-graduate"),
+    ("/materials/", "All Materials", "fas fa-folder-open"),
+)
+
+
+def _nav_yaml() -> str:
+    """`_data/nav.yml` - the site's tab bar (the theme's `_includes/nav.html` reads it)."""
+    rows = "".join(
+        f"- url: {url}\n  name: {name}\n  icon_class: {icon}\n\n"
+        for url, name, icon in _NAV
+    )
+    return (
+        "# Generated by `python3 -m dsl_course.site sync`. Rewritten on every sync - add a\n"
+        "# page of your own as a file in the repo and link it from `index.md` instead.\n"
+        "items:\n" + rows.rstrip() + "\n"
+    )
 
 
 # A cohort site is public but its materials are not: every link points into the private
@@ -596,6 +649,89 @@ def _released_reading_list(cohort_org: str, sources: list[tuple[str, str, str]])
             if text:
                 parts.append(text)
     return "\n\n".join(parts)
+
+
+def _index_entry(repo: str, path: str) -> tuple[str, str, bool, str]:
+    """(section, entry name, is-a-directory, path to the entry) for one released blob, for
+    the All Materials index.
+
+    The ordinal decides only the LEVEL a section is read at, never whether a file shows up:
+
+    - a repo whose top-level directories are session folders (`01_intro/...`) IS one
+      section, and those folders are its entries - the shape a cohort gets from
+      `cohort_dest_repo: lectures`;
+    - a repo holding `lectures/`, `labs/`, `datasets/` gives one section EACH, their own
+      children as entries - the shape from a single `materials` repo;
+    - a file at a repo's root takes the repo's name as its section, which is how a released
+      `SYLLABUS.md` reaches the site at all. Every other page is keyed on a session
+      ordinal, so until this index existed a root file was released and then invisible.
+
+    Both live cohort shapes therefore land where a reader expects, and nothing needs an
+    ordinal to be listed. Same reading as `_deploy_section` - head-of-path, else the repo -
+    one level down."""
+    head, sep, rest = path.partition("/")
+    if not sep:
+        return repo, head, False, head
+    if session_number(head) is not None:
+        return repo, head, True, head
+    nxt, deeper, _rest = rest.partition("/")
+    return head, nxt, bool(deeper), f"{head}/{nxt}"
+
+
+def _materials_index(cohort_org: str, content_repos: list[str]) -> str:
+    """`_data/materials.yml` - every file released to this cohort, grouped into sections
+    and folded one level, for the All Materials tab.
+
+    The catch-all. Every other page is curated: a row exists because the schedule named a
+    session, and its links are the files of that session. This is the complete index, so
+    it answers the two questions the curated pages cannot - a student's "what do I have?"
+    and a teaching team's "did my file actually ship?" - including material no session
+    ordinal covers.
+
+    Folded, for the same reason the session rows are (`_shape_links`): a directory holds up
+    to a couple of thousand files, so an entry that is a directory is ONE counted link to
+    its tree, never its contents. Dotfiles are skipped as plumbing (`.gitkeep`, a stray
+    `.DS_Store`, `.github`), so they are not mistaken for material.
+
+    Directories lead, then files, both alphabetically: this is a directory listing, where
+    the structure is what a reader scans - unlike a session row, which leads with the
+    deliverables because there the files ARE the material."""
+    # section -> entry path -> (display name, is-dir, url, file count)
+    found: dict[str, dict[str, list]] = {}
+    for repo in sorted(content_repos):
+        branch, paths = _repo_tree(cohort_org, repo)
+        base = f"https://github.com/{cohort_org}/{repo}"
+        for path in paths:
+            if any(part.startswith(".") for part in path.split("/")):
+                continue  # plumbing, not material
+            section, name, is_dir, entry = _index_entry(repo, path)
+            kind = "tree" if is_dir else "blob"
+            row = found.setdefault(section, {}).setdefault(
+                f"{repo}/{entry}",
+                [name, is_dir, f"{base}/{kind}/{branch}/{quote(entry)}", 0],
+            )
+            row[3] += 1
+    out = [
+        "# Generated by `python3 -m dsl_course.site sync` - every released file,",
+        "# grouped by section. Edit nothing here; it is rewritten on every sync.",
+        "sections:",
+    ]
+    for section in sorted(found):
+        entries = sorted(
+            found[section].values(), key=lambda e: (not e[1], e[0].lower())
+        )
+        out.append(f'  - name: "{_q(section)}"')
+        out.append(f"    files: {sum(e[3] for e in entries)}")
+        out.append("    entries:")
+        for name, is_dir, url, count in entries:
+            label = f"{name}/" if is_dir else name
+            out.append(f'      - name: "{_q(label)}"')
+            out.append(f"        url: {url}")
+            if is_dir:
+                out.append(f"        files: {count}")
+    if not found:
+        out[-1] = "sections: []"
+    return "\n".join(out) + "\n"
 
 
 # A week's lecture and its lab are two separate rows of the theme's schedule table, and
@@ -1384,7 +1520,13 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                     _yaml_file(cohort_org, "classroom-config", "people.yml"),
                     edit_at=f"{cohort_org}/classroom-config/people.yml",
                 ),
-                **_theme_pages(COHORT_ACCESS_NOTE, COHORT_READINGS_NOTE),
+                "_data/nav.yml": _nav_yaml(),
+                # The catch-all index behind the All Materials tab: every released file,
+                # including what no session ordinal covers.
+                "_data/materials.yml": _materials_index(cohort_org, content_repos),
+                **_theme_pages(
+                    COHORT_ACCESS_NOTE, COHORT_READINGS_NOTE, all_materials=True
+                ),
             },
             # Assignment handout/due dates come from schedule.yml when set (keyed on the
             # assignment slug), else a synthesised fortnightly cadence.
@@ -1642,7 +1784,8 @@ def sync_public_site(
                     edit_at=f"the `people:` block of {course_org}/.github/dsl-course.yml",
                     include_tas=False,
                 ),
-                **_theme_pages("", ""),
+                # No cohort repos to index, so `/materials/` stays the readings page.
+                **_theme_pages("", "", all_materials=False),
                 # Persist the settings THIS publish used, in the site repo itself, so the
                 # daily cron can repeat it with no inputs (see resync_public_site).
                 PUBLISH_CONFIG: (
