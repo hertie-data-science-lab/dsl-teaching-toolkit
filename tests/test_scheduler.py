@@ -1255,8 +1255,10 @@ UNEDITED = (
 
 def test_a_whole_repo_release_withholds_an_unedited_readme(monkeypatch):
     # The incident: a whole-repo release carried the scaffold's faculty-facing README to
-    # students as their course overview. Everything else must still ship, and the run must
-    # go red so somebody fixes it - a silent skip reads as a broken release.
+    # students as their course overview. Everything else must still ship - and the run stays
+    # GREEN, because withholding a placeholder is the guard working, not a fault. The
+    # scheduler drives this same deploy_many, so counting it would have reddened the hourly
+    # cron forever for any course that never rewrote its README.
     errors, landed = _run_release(
         monkeypatch,
         lambda p: _seed_source(p, UNEDITED),
@@ -1264,7 +1266,7 @@ def test_a_whole_repo_release_withholds_an_unedited_readme(monkeypatch):
     )
     assert "README.md" not in landed
     assert {"SYLLABUS.md", "lectures/01_intro/slides.pdf"} <= landed
-    assert errors == 1
+    assert errors == 0
 
 
 def test_a_whole_repo_release_ships_a_real_readme(monkeypatch):
@@ -1284,7 +1286,8 @@ def test_naming_an_unedited_readme_directly_withholds_it(monkeypatch):
         lambda p: _seed_source(p, UNEDITED),
         [Deploy("cm", "README.md", "materials", None)],
     )
-    assert landed == set() and errors == 1
+    # Named outright, so nothing else was asked for: the copy is simply a no-op.
+    assert landed == set() and errors == 0
 
 
 def test_a_section_release_never_guards_that_sections_own_readme(monkeypatch):
@@ -1342,6 +1345,21 @@ def test_withholding_the_stub_never_deletes_the_cohorts_own_readme(monkeypatch):
     errors, _changed = deploy.deploy_many(
         "Course-Org", "Cohort-Org", [Deploy("cm", "/", "materials", None)], sync=False
     )
-    assert errors == 1  # still reported
+    assert errors == 0  # reported, not failed
     assert landed["README.md"] == good  # untouched, not replaced and not removed
     assert "SYLLABUS.md" in landed  # everything else still shipped
+
+
+def test_withholding_the_stub_is_visible_without_failing_the_run(monkeypatch, capsys):
+    # "True, worth seeing, not a failure" - the channel validate-schedule.yml already uses.
+    # A green run needs the annotation, or the withholding is invisible on the run summary.
+    errors, _landed = _run_release(
+        monkeypatch,
+        lambda p: _seed_source(p, UNEDITED),
+        [Deploy("cm", "/", "materials", None)],
+    )
+    captured = capsys.readouterr()
+    assert errors == 0
+    assert "::warning::" in captured.err
+    assert "was NOT released" in captured.err
+    assert "Rewrite it as the students' overview" in captured.err

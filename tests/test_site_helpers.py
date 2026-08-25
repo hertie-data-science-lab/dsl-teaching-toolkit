@@ -393,6 +393,32 @@ def test_shape_links_leaves_a_flat_folder_untouched():
     assert site._shape_links(flat, TREE, frozenset()) == flat
 
 
+def test_shape_links_skips_plumbing_like_the_index_does():
+    # A `.gitkeep` holding an otherwise-empty session folder open was being offered to
+    # students as a download. The All Materials index already skipped these, so the two
+    # pages gave different answers about the same folder.
+    blobs = [
+        (".gitkeep", "https://x/keep"),
+        ("slides.pdf", "https://x/pdf"),
+        (".DS_Store", "https://x/ds"),
+        ("media/.gitkeep", "https://x/mk"),
+        ("media/fig.png", "https://x/fig"),
+    ]
+    names = [n for n, _ in site._shape_links(blobs, TREE, frozenset())]
+    # The dotfile inside `media/` is not counted either, so the fold reads truthfully.
+    assert names == ["slides.pdf", "media/ (1 file)"]
+    # And an allowlist cannot resurrect one.
+    assert [
+        n for n, _ in site._shape_links(blobs, TREE, frozenset({"gitkeep", "pdf"}))
+    ] == ["slides.pdf", site._BROWSE_ALL]
+
+
+def test_a_folder_holding_only_plumbing_disappears_rather_than_reading_as_empty():
+    blobs = [("deck.html", "https://x/1"), ("empty/.gitkeep", "https://x/2")]
+    names = [n for n, _ in site._shape_links(blobs, TREE, frozenset())]
+    assert names == ["deck.html"]  # not "empty/ (0 files)"
+
+
 def test_ext_reads_the_extension_not_a_dotted_directory():
     assert site._ext("notes.PDF") == "pdf"
     assert site._ext("Makefile") == ""
