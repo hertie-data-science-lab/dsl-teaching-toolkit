@@ -25,6 +25,7 @@ from pathlib import Path
 
 from . import seed
 from .utils import (
+    FACULTY_ONLY_HEADING,
     GIT_ENV,
     create_repo,
     generate_from_template,
@@ -153,6 +154,8 @@ def scaffold_materials(org: str, tag: str) -> int:
     # release only copies section folders, the syllabus, and README.md).
     readme = (
         "<!-- FACULTY & INSTRUCTORS: replace the content below with a real, student-facing\n"
+        # Ends up verbatim in the line below; deploy.py refuses to ship a README still
+        # containing it (see UNEDITED_README_MARKERS), so the two must stay one string.
         "     overview of your course materials. Release materials with the 'include README'\n"
         "     toggle copies THIS file into the cohort's materials repo, where enrolled\n"
         "     students read it - so write it for them, not as internal notes. How this source\n"
@@ -163,7 +166,7 @@ def scaffold_materials(org: str, tag: str) -> int:
         "> released materials. Add a short overview of the course, how the materials are\n"
         "> organised, and anything students should read first.\n\n"
         "---\n\n"
-        "## For faculty & instructors (delete this section before releasing the README)\n\n"
+        f"## For faculty & instructors ({FACULTY_ONLY_HEADING})\n\n"
         "- **How to populate & operate this repo:** see [`MAINTAINING.md`](MAINTAINING.md) - "
         "it explains what to edit, what gets released to students, and what to leave alone. "
         "`MAINTAINING.md` is **not** deployed to the cohort org; leave it here as a persistent "

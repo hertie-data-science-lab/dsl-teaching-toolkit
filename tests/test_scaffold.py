@@ -247,3 +247,15 @@ def test_an_unrelated_feature_solution_branch_does_not_block_the_scaffold(
 
     _clone_ok(monkeypatch, git_fake)
     assert scaffold.scaffold_assignment("Org", "1", "f2026") == 0
+
+
+def test_the_seeded_readme_would_be_withheld_from_a_release(fake):
+    # The end-to-end coupling: the file scaffold actually writes must trip deploy's guard,
+    # so an unedited placeholder cannot reach students as their course overview. If the
+    # stub's wording is ever edited without the sentinel, this fails here rather than
+    # silently on a live release.
+    from dsl_course import deploy
+
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    seeded = fake.files[("course-materials-f2026", "README.md")]
+    assert deploy._is_unedited_readme("README.md", seeded)

@@ -34,6 +34,7 @@ from pathlib import Path
 
 from .schedule import Deploy
 from .utils import (
+    FACULTY_ONLY_HEADING,
     GIT_ENV,
     create_repo,
     gh,
@@ -60,6 +61,41 @@ NEVER_COPIED = frozenset({".git"})
 # than two that drift. Naming either path explicitly still releases it - this is what "give
 # me everything" means, not a ban.
 ROOT_RELEASE_EXCLUDED = frozenset({".github", "MAINTAINING.md"})
+
+# A README the scaffold wrote and nobody rewrote. It is addressed to faculty - "replace
+# this placeholder", a section headed "delete this section before releasing", a link to
+# MAINTAINING.md and the course org's Actions tab - and releasing it publishes all of that
+# to students as their course overview. That is what happened in a live cohort, in three
+# repos at once, and nothing said so.
+#
+# Both markers come from scaffold.py itself, so this guard cannot lapse the next time that
+# wording is edited. A README that keeps ONE of them may be a real overview quoting the
+# stub, so both must be present - and either way the fix is ten seconds of editing.
+UNEDITED_README_MARKERS = ("**Replace this placeholder.**", FACULTY_ONLY_HEADING)
+
+
+def _warn_unedited_readme(source_org: str, repo: str) -> None:
+    """Say what was withheld and how to fix it. Loud and counted (the run goes red): a
+    silent skip would read as "the README just didn't ship", which is the same symptom as
+    a broken release."""
+    log_err(
+        f"NOT released: {source_org}/{repo}/README.md is still the scaffold placeholder "
+        "(it is addressed to faculty and links MAINTAINING.md). Everything else in this "
+        "release shipped. Rewrite it as the students' overview - delete the "
+        '"For faculty & instructors" section and the "Replace this placeholder" note - '
+        "then release again."
+    )
+
+
+def _is_unedited_readme(path: str, text: str) -> bool:
+    """Whether a copy is the scaffold's own placeholder README rather than a real one.
+
+    The ROOT `README.md` only - `path` must be exactly that, not merely end in it. A
+    `README.md` inside a session folder is the faculty's own writing about that session,
+    and the stub only ever exists at the repo root."""
+    if path.strip("/") != "README.md":
+        return False
+    return all(marker in text for marker in UNEDITED_README_MARKERS)
 
 
 def _resolve_within(base: Path, rel: str) -> Path | None:
@@ -192,6 +228,27 @@ def deploy_many(
                     dirs_exist_ok=True,
                     ignore=_copy_ignore(srcp if srcp == src_root else None),
                 )
+                # A WHOLE-REPO release carries the root README along, which is how the
+                # placeholder actually reached students. Only then: a copy of one section
+                # picks up that section's own `README.md`, which is faculty writing about
+                # the section, not the stub.
+                stub = destp / "README.md"
+                if (
+                    srcp == src_root
+                    and stub.is_file()
+                    and _is_unedited_readme(
+                        "README.md", stub.read_text(encoding="utf-8", errors="replace")
+                    )
+                ):
+                    stub.unlink()
+                    _warn_unedited_readme(source_org, d.course_source_repo)
+                    errors += 1
+            elif _is_unedited_readme(
+                d.course_source_path, srcp.read_text(encoding="utf-8", errors="replace")
+            ):
+                _warn_unedited_readme(source_org, d.course_source_repo)
+                errors += 1
+                continue
             else:
                 destp.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(srcp, destp)

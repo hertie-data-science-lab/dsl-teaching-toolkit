@@ -324,3 +324,53 @@ def test_naming_the_faculty_side_explicitly_still_releases_it(tmp_path):
     # course_source_path is a subpath copy, which excludes nothing but `.git`.
     ignore = deploy._copy_ignore(None)
     assert ignore(str(tmp_path), [".git", ".github", "MAINTAINING.md"]) == {".git"}
+
+
+# ----------------------------------------------------- the unedited-README guard
+# The scaffold's README is addressed to FACULTY - "replace this placeholder", a section
+# headed "delete this section before releasing", a link to MAINTAINING.md and the course
+# org's Actions tab. Releasing it publishes all of that to students as their course
+# overview, which is what happened in a live cohort, in three repos at once, silently.
+
+
+def _scaffold_readme() -> str:
+    """A README shaped like the one scaffold seeds. Built from the SHARED sentinel, so it
+    cannot drift from the guard; that the real seeded file trips the guard is asserted
+    end-to-end in test_scaffold.py."""
+    return (
+        "<!-- FACULTY & INSTRUCTORS: replace the content below -->\n\n"
+        "# Course materials\n\n"
+        "> **Replace this placeholder.** This file becomes the students' README.\n\n"
+        f"## For faculty & instructors ({utils.FACULTY_ONLY_HEADING})\n\n"
+        "- see MAINTAINING.md\n"
+    )
+
+
+def test_the_scaffold_readme_is_recognised_as_unedited():
+    assert deploy._is_unedited_readme("README.md", _scaffold_readme())
+
+
+def test_a_real_readme_is_released():
+    real = "# Foundations of Machine Learning\n\nWelcome. Slides go up Tuesdays.\n"
+    assert not deploy._is_unedited_readme("README.md", real)
+
+
+def test_a_readme_quoting_one_marker_is_still_released():
+    # Both markers must be present. A real overview that happens to quote the stub - or a
+    # half-edited one where the faculty section is already gone - is the faculty's writing,
+    # and withholding it would be the guard overreaching.
+    half = f"# Real overview\n\nWe kept a note: {utils.FACULTY_ONLY_HEADING}\n"
+    assert not deploy._is_unedited_readme("README.md", half)
+    assert not deploy._is_unedited_readme(
+        "README.md", "# Real\n\n> **Replace this placeholder.** (quoted)\n"
+    )
+
+
+def test_only_a_root_readme_is_guarded():
+    # A README inside a section or session folder is the faculty's own writing about that
+    # folder; the stub only ever exists at the repo root. Matching on the file NAME rather
+    # than the whole path would have withheld those too.
+    for nested in ("lectures/01_intro/README.md", "labs/README.md", "docs/README.md"):
+        assert not deploy._is_unedited_readme(nested, _scaffold_readme())
+    assert deploy._is_unedited_readme("README.md", _scaffold_readme())
+    assert deploy._is_unedited_readme("/README.md", _scaffold_readme())
