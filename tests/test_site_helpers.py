@@ -393,30 +393,30 @@ def test_shape_links_leaves_a_flat_folder_untouched():
     assert site._shape_links(flat, TREE, frozenset()) == flat
 
 
-def test_shape_links_skips_plumbing_like_the_index_does():
-    # A `.gitkeep` holding an otherwise-empty session folder open was being offered to
-    # students as a download. The All Materials index already skipped these, so the two
-    # pages gave different answers about the same folder.
+def test_shape_links_lists_dotfiles_like_any_other_file():
+    # No name filter, deliberately. The exclusion list this would need cannot be written
+    # honestly: `__pycache__/` and `node_modules/` are clutter and are not dotted, while
+    # `.Rprofile` is course material an R course's students need. So the page says what was
+    # released, and clutter is fixed by not releasing it.
+    # Path-sorted, as `_session_files` hands them over ('.R' sorts before '.g').
     blobs = [
+        (".Rprofile", "https://x/rprofile"),
         (".gitkeep", "https://x/keep"),
-        ("slides.pdf", "https://x/pdf"),
-        (".DS_Store", "https://x/ds"),
         ("media/.gitkeep", "https://x/mk"),
         ("media/fig.png", "https://x/fig"),
+        ("slides.pdf", "https://x/pdf"),
     ]
     names = [n for n, _ in site._shape_links(blobs, TREE, frozenset())]
-    # The dotfile inside `media/` is not counted either, so the fold reads truthfully.
-    assert names == ["slides.pdf", "media/ (1 file)"]
-    # And an allowlist cannot resurrect one.
-    assert [
-        n for n, _ in site._shape_links(blobs, TREE, frozenset({"gitkeep", "pdf"}))
-    ] == ["slides.pdf", site._BROWSE_ALL]
+    # `.gitkeep` rides along: the cost of not hiding `.Rprofile`, and it disappears by
+    # itself the moment real content lands in that folder.
+    assert names == [".Rprofile", ".gitkeep", "slides.pdf", "media/ (2 files)"]
 
 
-def test_a_folder_holding_only_plumbing_disappears_rather_than_reading_as_empty():
-    blobs = [("deck.html", "https://x/1"), ("empty/.gitkeep", "https://x/2")]
-    names = [n for n, _ in site._shape_links(blobs, TREE, frozenset())]
-    assert names == ["deck.html"]  # not "empty/ (0 files)"
+def test_the_index_lists_dotfiles_too(monkeypatch):
+    # Same rule on the other page, which is the point of not having two.
+    repos = {"m": ("01_lab/.Rprofile", "01_lab/lab.R", "01_lab/.gitkeep")}
+    entry = _index(monkeypatch, repos)[0]["entries"][0]
+    assert entry["name"] == "01_lab/" and entry["files"] == 3
 
 
 def test_ext_reads_the_extension_not_a_dotted_directory():
@@ -596,14 +596,19 @@ def test_index_reads_a_single_materials_repo_cohort(monkeypatch):
     got = {s["name"]: [e["name"] for e in s["entries"]] for s in sections}
     # Each top-level directory is its own section here, and `datasets/` needs no ordinal
     # anywhere to appear. The root SYLLABUS.md takes the repo's name.
+    #
+    # `.DS_Store` and `.github/` show up too, which is the deliberate cost of filtering
+    # nothing by name: a rule about dots would also hide `.Rprofile`. Neither can normally
+    # reach a cohort repo - `deploy.ROOT_RELEASE_EXCLUDED` never releases a root `.github`,
+    # and OS cruft only arrives if someone commits it - so if either is here, it was
+    # released on purpose and saying so is right.
     assert got == {
+        ".github": ["workflows/"],
         "datasets": ["housing.csv"],
         "labs": ["01_lab/"],
         "lectures": ["01_lecture/"],
-        "materials": ["SYLLABUS.md"],
+        "materials": [".DS_Store", "SYLLABUS.md"],
     }
-    # Plumbing is not material.
-    assert ".DS_Store" not in str(sections) and ".github" not in str(sections)
 
 
 def test_index_folds_a_directory_to_one_counted_link(monkeypatch):
