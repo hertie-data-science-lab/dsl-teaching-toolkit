@@ -105,26 +105,20 @@ def test_uploaded_files_are_named_alongside_the_overlay(wired):
     assert "- READINGS.md" not in out
 
 
-def test_a_pdf_only_session_is_not_invisible(monkeypatch):
+def test_a_pdf_only_session_is_not_invisible(monkeypatch, wired):
     # The bug: a session whose readings are files and no prose used to render as a heading
     # with NOTHING under it - the one destination where uploading a reading and writing no
-    # citations left the session blank.
-    tree = ("lectures/01_intro/deck.html", "readings/01_week-1/blitzstein.pdf")
-    sched = Schedule(
-        releases=[
-            Release(
-                "lecture-1",
-                datetime(2026, 9, 1, 10, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "lectures/01_intro", "materials", None)],
-                title="Probability Theory",
-            )
-        ]
+    # citations left the session blank. Overrides only what differs from `wired`, so a new
+    # dependency in `build` cannot leave this test wired half the old way.
+    monkeypatch.setattr(
+        syllabus,
+        "repo_tree",
+        lambda o, r, b, k: ("lectures/01_intro/deck.html", "readings/01_week-1/x.pdf"),
     )
-    monkeypatch.setattr(syllabus.schedule, "load", lambda org: sched)
-    monkeypatch.setattr(syllabus, "default_branch", lambda o, r: "main")
-    monkeypatch.setattr(syllabus, "repo_tree", lambda o, r, b, k: tree)
     monkeypatch.setattr(syllabus, "get_file_content", lambda o, r, p: "")
-    assert "- blitzstein.pdf" in syllabus.build("Course", "Cohort-f2026", "cm")[0]
+    out = wired()
+    assert "- x.pdf" in out
+    assert "### Session 1: Probability Theory" in out
 
 
 def test_the_generated_block_is_never_released_to_students():

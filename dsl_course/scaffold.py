@@ -27,6 +27,7 @@ from . import seed
 from .utils import (
     FACULTY_ONLY_HEADING,
     GIT_ENV,
+    READING_OVERLAY_FILE,
     create_repo,
     generate_from_template,
     gh,
@@ -180,9 +181,9 @@ so they stay in step with what is actually released.
 # team can paste theirs straight in: `Required Readings` / `Optional Readings` as
 # sub-headings, and any further category (some syllabi add `Application Readings`)
 # works the same way - the site renders whatever headings this file has, nested under
-# the session's own. A stub rather than a `.gitkeep`: a text file here IS the published
-# reading list, and an empty folder gave no sign of that - the tab read blank with
-# nothing to explain why.
+# the session's own. A stub rather than a `.gitkeep`: the folder's files are listed
+# automatically, but nothing about an empty folder said so, nor that this file is where
+# an online reading goes - the tab read blank with nothing to explain why.
 _READINGS_STUB = (
     b"# Session 1 readings\n\n"
     b"<!-- dsl-stub: still the scaffold's, so the toolkit keeps it up to date.\n"
@@ -277,7 +278,7 @@ def refreshable_stubs(tag: str) -> dict[str, bytes]:
     that drift: a stub added here is converged everywhere without a second edit."""
     return {
         "SYLLABUS.md": _SYLLABUS_STUB.format(tag=tag).encode(),
-        "readings/01_session-1/READINGS.md": _READINGS_STUB,
+        f"readings/01_session-1/{READING_OVERLAY_FILE}": _READINGS_STUB,
     }
 
 

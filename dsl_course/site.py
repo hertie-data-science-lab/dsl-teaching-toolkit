@@ -48,6 +48,7 @@ from . import schedule, seed
 from .assign import assignment_slug
 from .utils import (
     GIT_ENV,
+    READING_OVERLAY_NAMES,
     _acting_login,
     active_today,
     discover_sections,
@@ -82,11 +83,10 @@ PUBLIC_MATERIALS_DIR = "public-materials"
 # So: one filename is the overlay; everything else in the folder is a file, whatever it is.
 # The overlay is optional - a session with only PDFs needs nothing written - and additive: it
 # renders ABOVE the file list, never instead of it (see `_readings_block`).
-READING_OVERLAY_STEM = "readings"
-# Bare, not dotted: every test goes through `_ext`, so one spelling serves both sites. Two
-# spellings of one convention is how they come to disagree - and they had, on a name like
-# `.bib`, where `Path.suffix` reports nothing and `_ext` reports the extension.
-READING_OVERLAY_EXTS = frozenset({"md", "markdown", "txt", "bib"})
+# `READING_OVERLAY_NAMES` lives in utils, beside the other generated faculty-side filenames,
+# because `scaffold` seeds the file and this module and `syllabus` match on it. Its name
+# equals `READINGS_SECTION` below by coincidence - a file stem and a folder name - not by
+# derivation.
 # The one section with copyright semantics of its own (--readings-mode); every OTHER
 # section a repo happens to have is published as files, whatever it's called.
 READINGS_SECTION = "readings"
@@ -635,13 +635,11 @@ def _is_reading_overlay(name: str) -> bool:
     The ONE test that decides prose-vs-file for a readings folder, by NAME rather than by
     extension - see `READING_OVERLAY_STEM` for why that distinction is the whole point.
     Takes a path or a bare name; only the last segment is read, so it works on the repo-tree
-    paths, the release-relative names and the local filenames its three callers each hold."""
-    base = name.rsplit("/", 1)[-1]
-    stem = base.rsplit(".", 1)[0] if "." in base else base
-    return stem.lower() == READING_OVERLAY_STEM and _ext(base) in READING_OVERLAY_EXTS
+    paths, the release-relative names and the local filenames its callers each hold."""
+    return name.rsplit("/", 1)[-1].lower() in READING_OVERLAY_NAMES
 
 
-def _readings_block(names: list[str], read_overlay) -> str:
+def _readings_block(names: list[str], read_overlay: Callable[[str], str | None]) -> str:
     """A session's reading list: its overlay prose, then every OTHER file by name.
 
     THE rule, in one place, because its three readers - the cohort site, the public course
@@ -655,10 +653,13 @@ def _readings_block(names: list[str], read_overlay) -> str:
     - overlay only - the URL-only week, one line of markdown and no citation format imposed;
     - both - prose on top, files beneath.
 
-    `names` is every path in the session's readings folder; `read_overlay` reads one of them
-    (callers differ: a local file, a released blob, the course org's staging copy). Raw
-    filenames, deliberately: deriving "Blitzstein 2019 ch.1" from `blitzstein-ch1.pdf` would
-    be inventing a citation. Faculty who want that write it in the overlay.
+    `names` is every path in the session's readings folder; `read_overlay` reads one of them,
+    and is a callable because its two callers hold different transports - the public site a
+    local file, the syllabus a blob in the course org. Lazy, so only the overlay is ever
+    fetched: reading eagerly would pull every PDF over the API just to find the prose.
+
+    Raw filenames, deliberately: deriving "Blitzstein 2019 ch.1" from `blitzstein-ch1.pdf`
+    would be inventing a citation. Faculty who want that write it in the overlay.
 
     The overlay is never ALSO listed as a download - its content is already on the page."""
     prose, files = [], []
@@ -1950,11 +1951,10 @@ def _reading_list_md(readings_session_dir: Path) -> str:
     then every other file by NAME only - so the public sees WHAT to read without the
     copyrighted bytes being published. This mode links nothing, so naming the files here is
     the only way they appear at all."""
-    files = [p for p in sorted(readings_session_dir.rglob("*")) if p.is_file()]
-    by_name = {str(p.relative_to(readings_session_dir)): p for p in files}
+    d = readings_session_dir
     return _readings_block(
-        list(by_name),
-        lambda n: by_name[n].read_text(encoding="utf-8", errors="replace"),
+        [p.relative_to(d).as_posix() for p in d.rglob("*") if p.is_file()],
+        lambda n: (d / n).read_text(encoding="utf-8", errors="replace"),
     )
 
 
