@@ -135,6 +135,7 @@ def _row(when, **kw):
 
 def test_lecture_entry_shows_real_time_from_a_datetime(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     md = site._lecture_entry(
         "Cohort", "2", _row(datetime(2026, 9, 15, 14, 30, tzinfo=BERLIN)), RELEASED
     )
@@ -144,12 +145,14 @@ def test_lecture_entry_shows_real_time_from_a_datetime(monkeypatch):
 
 def test_lecture_entry_falls_back_to_0900_for_a_bare_date(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     md = site._lecture_entry("Cohort", "2", _row(date(2026, 9, 15)), RELEASED)
     assert "date: 2026-09-15T09:00:00" in md
 
 
 def test_lecture_entry_renders_a_lab_row_as_its_own_type(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     md = site._lecture_entry("Cohort", "3", _row(date(2026, 9, 17)), RELEASED, "lab")
     assert "type: lab" in md
     assert 'title: "Lab 3"' in md
@@ -162,6 +165,7 @@ def test_only_the_unreleased_row_carries_the_theme_flag(monkeypatch):
     # The prose says it, but a flag is what lets the theme badge or grey the row - and
     # what tells a placeholder apart from a released folder that holds no files.
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     assert "unreleased: true" not in site._lecture_entry(
         "Cohort", "2", _row(date(2026, 9, 15)), RELEASED
     )
@@ -326,6 +330,11 @@ def _plan(
     monkeypatch.setattr(
         site, "_session_files", files or (lambda org, repo, subpath, folder: [])
     )
+    # The memoised tree, which `_session_links` reads the default branch from to build its
+    # folder-link URLs. Stubbed even where `_session_files` is faked: without it the fake
+    # covers the file list but the branch lookup still reaches GitHub, which passes on an
+    # authenticated dev box and fails in CI.
+    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", ()))
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
     assert site.sync_site("Course-Org", "Cohort-f2026") == 0
     return captured["plan"]
@@ -945,6 +954,7 @@ def test_display_only_rows_come_from_events_alone(monkeypatch, tmp_path):
 # ------------------------------------------------- a session's declared name + blurb
 def test_a_row_carries_the_title_and_description_the_plan_declared(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [("s.pdf", "https://x/1")])
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     out = site._lecture_entry(
         "Cohort-f2026",
         "1",
@@ -966,6 +976,7 @@ def test_a_row_omits_the_declared_fields_it_was_not_given(monkeypatch):
     # Omitted, not written blank: the theme tests for them, so an empty string would
     # render an empty line where there should be nothing at all.
     monkeypatch.setattr(site, "_session_files", lambda *a: [("s.pdf", "https://x/1")])
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     out = site._lecture_entry(
         "Cohort-f2026", "1", _row(datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN)), RELEASED
     )

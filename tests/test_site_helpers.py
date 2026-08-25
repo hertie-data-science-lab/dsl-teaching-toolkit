@@ -171,7 +171,10 @@ def test_lecture_entry_labels_links_by_repo_or_subpath():
             ],  # nested: label = subpath
         }.get((repo, subpath), [])
 
-    with patch.object(site, "_session_files", side_effect=fake_session_files):
+    with (
+        patch.object(site, "_session_files", side_effect=fake_session_files),
+        patch.object(site, "_repo_tree", return_value=("main", ())),
+    ):
         entry = site._lecture_entry(
             "Cohort-f2026",
             "1",
@@ -500,7 +503,7 @@ def test_released_reading_list_propagates_a_read_failure(monkeypatch):
 
 
 def test_row_links_drops_the_citation_file_it_already_inlined(monkeypatch):
-    monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", ()))
     monkeypatch.setattr(
         site,
         "_session_files",
