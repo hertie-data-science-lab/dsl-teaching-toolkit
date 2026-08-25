@@ -42,6 +42,7 @@ from .utils import (
     repo_exists,
     seed_files_if_absent,
     seed_if_absent,
+    seed_or_refresh_stub,
     set_repo_topics,
 )
 
@@ -53,7 +54,12 @@ _GIT_ENV = GIT_ENV
 _SYLLABUS_STUB = """\
 # {course} syllabus
 
-<!-- FACULTY & INSTRUCTORS: this is the students' syllabus, and it is yours to write - the
+*Optional - delete this file if your course does not need it.*
+
+<!-- dsl-stub: still the scaffold's, so the toolkit keeps it up to date. Delete this
+     comment (or just write over the file) and it is yours - never touched again.
+
+     FACULTY & INSTRUCTORS: this is the students' syllabus, and it is yours to write - the
      headings below are the standard Hertie shape, so delete what your course does not use.
      Release it by naming this file as the release path (see MAINTAINING.md); the name and
      its capitalisation must match exactly, and any format works - rename this to
@@ -100,6 +106,8 @@ _SYLLABUS_STUB = """\
 
 _SYLLABUS_SAMPLE = """\
 # Foundations of Machine Learning (Demo) - E1234 - syllabus
+
+*Optional - a worked example to copy from; delete it if you do not want it.*
 
 <!-- A FILLED example, kept current by the toolkit - copy from it, do not edit it (your
      edits are overwritten). Your own syllabus is SYLLABUS.md beside this file. This file
@@ -167,6 +175,29 @@ Session titles, learning objectives and readings are published on the course web
 are generated from `classroom-config/schedule.yml` and each session's `readings/` folder -
 so they stay in step with what is actually released.
 """
+
+# The seeded reading list, shaped like a Hertie syllabus's readings block so a course
+# team can paste theirs straight in: `Required Readings` / `Optional Readings` as
+# sub-headings, and any further category (some syllabi add `Application Readings`)
+# works the same way - the site renders whatever headings this file has, nested under
+# the session's own. A stub rather than a `.gitkeep`: a text file here IS the published
+# reading list, and an empty folder gave no sign of that - the tab read blank with
+# nothing to explain why.
+_READINGS_STUB = (
+    b"# Session 1 readings\n\n"
+    b"<!-- dsl-stub: still the scaffold's, so the toolkit keeps it up to date.\n"
+    b"     Write your own reading list over it and it is yours. Optional - delete\n"
+    b"     this file if this session has no readings. -->\n\n"
+    b"## Required Readings\n\n"
+    b"- Author, *Title*, ch. 1.\n"
+    b'- Author (2026), "Paper title", doi:...\n\n'
+    b"## Optional Readings\n\n"
+    b"- Author, *Title*, ch. 2.\n\n"
+    b"This file IS the reading list students see on the site's Readings tab - the\n"
+    b"session's learning objectives come from `description:` in schedule.yml. Put\n"
+    b"reading PDFs in this folder too: they are linked for enrolled students,\n"
+    b"never published.\n"
+)
 
 _GRADING_YML = """\
 # How the Grade assignment button autogrades this assignment (after the grading_deadline in schedule.yml).
@@ -362,31 +393,26 @@ def scaffold_materials(org: str, tag: str) -> int:
     # USER-owned skeletons: create-only, so a re-run against a repo faculty have since
     # authored must not revert their README/SYLLABUS to the stub or resurrect a deleted
     # starter directory. A failed seed (an absent file whose write failed) reds the scaffold.
+    # Stubs that REFRESH while they are still ours (see utils.seed_or_refresh_stub): the
+    # improvement then reaches the courses already running, not just the next repo
+    # scaffolded. Written before the create-only set below so a re-run's log reads in the
+    # order the rules apply.
+    for path, body in {
+        "SYLLABUS.md": _SYLLABUS_STUB.format(course=tag, tag=tag).encode(),
+        "readings/01_session-1/reading.md": _READINGS_STUB,
+    }.items():
+        if not seed_or_refresh_stub(
+            org, repo, path, body, "init: refresh scaffold stub"
+        ):
+            failures += 1
+
     user_files = {
         "README.md": readme.encode(),
         "lectures/01_session-1/.gitkeep": b"",
         # A stub, not a .gitkeep: a text file here IS the published reading list (its
         # contents are inlined on the site's Materials tab), and an empty folder gave no
         # sign of that - the tab then reads blank with nothing to explain why.
-        # Shaped like a Hertie syllabus's readings block, so a course team can paste
-        # theirs straight in: `Required Readings` / `Optional Readings` as sub-headings,
-        # and any further category (some syllabi add `Application Readings`) works the
-        # same way - the site renders whatever headings this file has, nested under the
-        # session's own.
-        "readings/01_session-1/reading.md": (
-            b"# Session 1 readings\n\n"
-            b"## Required Readings\n\n"
-            b"- Author, *Title*, ch. 1.\n"
-            b'- Author (2026), "Paper title", doi:...\n\n'
-            b"## Optional Readings\n\n"
-            b"- Author, *Title*, ch. 2.\n\n"
-            b"This file IS the reading list students see on the site's Readings tab - the\n"
-            b"session's learning objectives come from `description:` in schedule.yml. Put\n"
-            b"reading PDFs in this folder too: they are linked for enrolled students,\n"
-            b"never published.\n"
-        ),
         "labs/01_session-1/.gitkeep": b"",
-        "SYLLABUS.md": _SYLLABUS_STUB.format(course=tag, tag=tag).encode(),
     }
     # One commit for the skeleton: all five carried the same subject anyway, so writing
     # them one at a time opened a repo faculty then author by hand with five identical

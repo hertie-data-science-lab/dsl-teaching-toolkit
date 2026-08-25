@@ -889,6 +889,46 @@ def seed_if_absent(
     return put_file(org, repo, path, content, message)
 
 
+# The mark that says a seeded stub is STILL the scaffold's - present in every stub we write,
+# and the one thing that makes it safe to improve. A stub is refreshed while it carries the
+# mark and never touched again once faculty remove it, which they do by writing their own
+# (each stub tells them so). Without this a stub was create-only forever: the courses
+# already running kept the first version we ever shipped, and every later improvement
+# reached new repos only.
+#
+# The legacy strings are the stubs we shipped before the mark existed, so the repos that
+# have those pick the new versions up too. Nothing is ever added here that a faculty member
+# might plausibly have typed themselves.
+STUB_MARK = "dsl-stub:"
+LEGACY_STUB_MARKS = (
+    "Replace with the real syllabus.",
+    "This file is the reading list students see.",
+)
+
+
+def is_untouched_stub(text: str | None) -> bool:
+    """Whether `text` is still a stub this toolkit seeded, rather than faculty writing."""
+    if text is None:
+        return False
+    return STUB_MARK in text or any(m in text for m in LEGACY_STUB_MARKS)
+
+
+def seed_or_refresh_stub(
+    org: str, repo: str, path: str, content: bytes, message: str
+) -> bool:
+    """Write a stub when the path is absent OR still carries the stub mark; otherwise leave
+    it exactly as faculty left it.
+
+    The middle ground between `seed_if_absent` (frozen at whatever we first shipped) and
+    `put_file` (clobbers real work). Returns True whenever the file is now as intended,
+    False only when a write was attempted and failed - same contract as `seed_if_absent`."""
+    current = get_file_content(org, repo, path)
+    if current is not None and not is_untouched_stub(current):
+        log_skip(f"{repo}/{path}")
+        return True
+    return put_file(org, repo, path, content, message)
+
+
 def seed_files_if_absent(
     org: str, repo: str, files: dict[str, bytes], message: str
 ) -> bool:

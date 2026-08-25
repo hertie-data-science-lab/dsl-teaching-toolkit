@@ -41,6 +41,14 @@ class FakeRepo:
             self.put_file(org, repo, path, content, message)
         return True
 
+    def seed_or_refresh_stub(self, org, repo, path, content, message):
+        """Write while the file is absent or still carries the stub mark; else leave it."""
+        current = self.files.get((repo, path))
+        if current is not None and not utils.is_untouched_stub(current):
+            self.skips.append(f"{repo}/{path}")
+            return True
+        return self.put_file(org, repo, path, content, message)
+
     def written(self, repo):
         return {path for r, path in self.writes if r == repo}
 
@@ -55,6 +63,7 @@ def fake(monkeypatch):
     monkeypatch.setattr(utils, "get_file_content", f.get_file_content)
     monkeypatch.setattr(utils, "put_file", f.put_file)
     monkeypatch.setattr(utils, "put_files", f.put_files)
+    monkeypatch.setattr(scaffold, "seed_or_refresh_stub", f.seed_or_refresh_stub)
     monkeypatch.setattr(scaffold, "put_file", f.put_file)
     monkeypatch.setattr(utils, "log_skip", lambda msg: f.skips.append(msg))
     monkeypatch.setattr(scaffold, "log_skip", lambda msg: f.skips.append(msg))
@@ -306,3 +315,41 @@ def test_the_syllabus_sample_is_never_released_to_students():
     from dsl_course import deploy
 
     assert "SYLLABUS.md.sample" in deploy.ROOT_RELEASE_EXCLUDED
+
+
+def test_a_stub_is_refreshed_while_it_is_still_ours(fake):
+    # The point of the mark: an improvement reaches the courses ALREADY running, not just
+    # the next repo scaffolded. `SYLLABUS.md` was create-only, so the three live courses
+    # kept the first stub the toolkit ever shipped.
+    fake.files[("course-materials-f2026", "SYLLABUS.md")] = (
+        "# f2026 syllabus\n\nReplace with the real syllabus.\n"  # what we used to seed
+    )
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    refreshed = fake.files[("course-materials-f2026", "SYLLABUS.md")]
+    assert "## 1. General information" in refreshed
+    assert "Optional - delete this file" in refreshed
+
+
+def test_a_stub_faculty_have_written_over_is_never_touched_again(fake):
+    # They take ownership by removing the mark, which writing their own does.
+    mine = "# Machine Learning - syllabus\n\nWritten by faculty.\n"
+    fake.files[("course-materials-f2026", "SYLLABUS.md")] = mine
+    fake.files[("course-materials-f2026", "readings/01_session-1/reading.md")] = (
+        "- Mine\n"
+    )
+
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    assert fake.files[("course-materials-f2026", "SYLLABUS.md")] == mine
+    assert (
+        fake.files[("course-materials-f2026", "readings/01_session-1/reading.md")]
+        == "- Mine\n"
+    )
+    assert "course-materials-f2026/SYLLABUS.md" in fake.skips
+
+
+def test_every_seeded_stub_carries_the_mark_that_makes_it_refreshable(fake):
+    # If a stub ships without the mark it is frozen forever, which is the bug this fixes -
+    # so the mark is asserted on what the scaffold actually writes.
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    for path in ("SYLLABUS.md", "readings/01_session-1/reading.md"):
+        assert utils.STUB_MARK in fake.files[("course-materials-f2026", path)], path
