@@ -36,10 +36,13 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
    ```
    lectures/01_session-1/   any files - slides, demo code, notebooks …
-   readings/01_session-1/   a text file (reading.md/.txt/.bib) IS the reading list
-                            published on the cohort site; other files are linked.
-                            Use `## Required Readings` / `## Optional Readings`
-                            sub-headings to mirror the Hertie syllabus format
+   readings/01_session-1/   just drop the readings in - every file here is listed
+                            and linked for enrolled students automatically.
+                            READINGS.md (or .txt/.bib) is OPTIONAL, for what a file
+                            cannot say: a link to read online, or a citation. It is
+                            published publicly (the files never are), and a bare URL
+                            on its own line is fine. Use `## Required Readings` /
+                            `## Optional Readings` to mirror the Hertie syllabus
    labs/01_session-1/       any files 
    SYLLABUS.md              optional - or any name you like (SYLLABUS.pdf, ...):
                             a root file releases by being named as the path

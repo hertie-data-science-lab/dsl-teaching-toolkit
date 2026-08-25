@@ -186,17 +186,21 @@ so they stay in step with what is actually released.
 _READINGS_STUB = (
     b"# Session 1 readings\n\n"
     b"<!-- dsl-stub: still the scaffold's, so the toolkit keeps it up to date.\n"
-    b"     Write your own reading list over it and it is yours. Optional - delete\n"
-    b"     this file if this session has no readings. -->\n\n"
+    b"     Write over it and it is yours. This file is OPTIONAL - delete it and the\n"
+    b"     files you put in this folder are still listed. -->\n\n"
+    b"Drop the readings themselves into this folder - PDFs, slides, notebooks,\n"
+    b"anything. Every file here is listed and linked for enrolled students\n"
+    b"automatically; you do not have to name them here as well.\n\n"
+    b"This file is for what a file cannot say: a link to read online, or a proper\n"
+    b"citation. Anything goes - a bare URL on its own line is fine.\n\n"
     b"## Required Readings\n\n"
     b"- Author, *Title*, ch. 1.\n"
-    b'- Author (2026), "Paper title", doi:...\n\n'
+    b"- https://example.org/an-online-reading\n\n"
     b"## Optional Readings\n\n"
     b"- Author, *Title*, ch. 2.\n\n"
-    b"This file IS the reading list students see on the site's Readings tab - the\n"
-    b"session's learning objectives come from `description:` in schedule.yml. Put\n"
-    b"reading PDFs in this folder too: they are linked for enrolled students,\n"
-    b"never published.\n"
+    b"What you write here is PUBLIC (it is a citation list); the files beside it\n"
+    b"are not - they stay behind the enrolled-student gate. The session's learning\n"
+    b"objectives come from `description:` in schedule.yml.\n"
 )
 
 _GRADING_YML = """\
@@ -273,7 +277,7 @@ def refreshable_stubs(tag: str) -> dict[str, bytes]:
     that drift: a stub added here is converged everywhere without a second edit."""
     return {
         "SYLLABUS.md": _SYLLABUS_STUB.format(tag=tag).encode(),
-        "readings/01_session-1/reading.md": _READINGS_STUB,
+        "readings/01_session-1/READINGS.md": _READINGS_STUB,
     }
 
 
@@ -363,9 +367,10 @@ def scaffold_materials(org: str, tag: str) -> int:
         "Any top-level directory containing at least one ordinal-prefixed subdirectory "
         "(`01_`, `02_`, `03_`, ...) is a releasable section - no config to declare it:\n\n"
         "- `lectures/01_session-1/` - one folder per session's lecture files\n"
-        "- `readings/01_session-1/` - one folder per session's readings. A text file here "
-        "(`reading.md`, `.txt`, `.bib`) IS the reading list shown on the cohort site; "
-        "other files in it are linked, not published\n"
+        "- `readings/01_session-1/` - one folder per session's readings. Drop the readings "
+        "in and every file is listed and linked for enrolled students automatically. "
+        "`READINGS.md` (or `.txt`/`.bib`) is OPTIONAL, for what a file cannot say - a link "
+        "to read online, or a citation; it is published publicly, the files never are\n"
         "- `labs/01_session-1/` - one folder per session's lab (delete the `labs/` folder "
         "if your course has none)\n"
         "- root files - your syllabus under any name (`SYLLABUS.md`, `SYLLABUS.pdf`, ...) "

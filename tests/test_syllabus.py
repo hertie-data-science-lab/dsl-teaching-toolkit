@@ -28,7 +28,7 @@ READING = (
 TREE = (
     "SYLLABUS.md",
     "lectures/01_intro/deck.html",
-    "readings/01_week-1/reading.md",
+    "readings/01_week-1/READINGS.md",
     "readings/01_week-1/blitzstein.pdf",
 )
 
@@ -59,7 +59,7 @@ def wired(monkeypatch):
     monkeypatch.setattr(
         syllabus,
         "get_file_content",
-        lambda o, r, p: READING if p.endswith("reading.md") else "",
+        lambda o, r, p: READING if p.endswith("READINGS.md") else "",
     )
     return lambda: syllabus.build("Course", "Cohort-f2026", "cm")[0]
 
@@ -94,9 +94,37 @@ def test_a_session_without_readings_still_appears(wired):
     assert out.count("Required Readings") == 1
 
 
-def test_only_the_citation_text_is_used_never_the_pdf(monkeypatch, wired):
-    # `blitzstein.pdf` sits in the same folder. A syllabus quotes the list, not the file.
-    assert "blitzstein.pdf" not in wired()
+def test_uploaded_files_are_named_alongside_the_overlay(wired):
+    # The overlay's prose leads, and the files follow by NAME - never their bytes. Listing
+    # them is what stops a session whose readings are PDFs coming out as a bare heading.
+    out = wired()
+    assert "- Blitzstein & Hwang, ch. 1-2." in out  # the prose
+    assert "- blitzstein.pdf" in out  # ...and the file beside it
+    assert out.index("Blitzstein & Hwang") < out.index("- blitzstein.pdf")
+    # The overlay is never ALSO listed as a file - its content is already on the page.
+    assert "- READINGS.md" not in out
+
+
+def test_a_pdf_only_session_is_not_invisible(monkeypatch):
+    # The bug: a session whose readings are files and no prose used to render as a heading
+    # with NOTHING under it - the one destination where uploading a reading and writing no
+    # citations left the session blank.
+    tree = ("lectures/01_intro/deck.html", "readings/01_week-1/blitzstein.pdf")
+    sched = Schedule(
+        releases=[
+            Release(
+                "lecture-1",
+                datetime(2026, 9, 1, 10, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "lectures/01_intro", "materials", None)],
+                title="Probability Theory",
+            )
+        ]
+    )
+    monkeypatch.setattr(syllabus.schedule, "load", lambda org: sched)
+    monkeypatch.setattr(syllabus, "default_branch", lambda o, r: "main")
+    monkeypatch.setattr(syllabus, "repo_tree", lambda o, r, b, k: tree)
+    monkeypatch.setattr(syllabus, "get_file_content", lambda o, r, p: "")
+    assert "- blitzstein.pdf" in syllabus.build("Course", "Cohort-f2026", "cm")[0]
 
 
 def test_the_generated_block_is_never_released_to_students():

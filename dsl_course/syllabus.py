@@ -27,11 +27,10 @@ import sys
 
 from . import schedule
 from .site import (
-    READING_LIST_EXTS,
     READINGS_SECTION,
     _demote_headings,
-    _ext,
     _planned_sessions,
+    _readings_block,
 )
 from .utils import (
     SYLLABUS_SESSIONS_FILE,
@@ -52,8 +51,13 @@ _READINGS_SHIFT = 3
 
 
 def _readings_for(course_org: str, repo: str, paths: tuple[str, ...], n: int) -> str:
-    """The citation text session `n`'s `readings/NN_.../` folder holds, or "" when it has
-    none. The folder is matched on its ordinal prefix, since faculty choose the rest."""
+    """Session `n`'s reading list from its `readings/NN_.../` folder, or "" when it has none.
+    The folder is matched on its ordinal prefix, since faculty choose the rest.
+
+    `_readings_block`'s rule, so the syllabus says what the two websites say. It used to keep
+    only citation-extension files, which made a session whose readings are PDFs come out as a
+    bare heading with nothing under it - the one destination where uploading a reading and
+    writing no prose left NOTHING at all."""
     prefix = next(
         (
             f"{READINGS_SECTION}/{q.split('/')[1]}"
@@ -66,14 +70,10 @@ def _readings_for(course_org: str, repo: str, paths: tuple[str, ...], n: int) ->
     )
     if prefix is None:
         return ""
-    parts = []
-    for path in paths:
-        if not path.startswith(f"{prefix}/") or _ext(path) not in READING_LIST_EXTS:
-            continue
-        text = (get_file_content(course_org, repo, path) or "").strip()
-        if text:
-            parts.append(text)
-    return "\n\n".join(parts)
+    return _readings_block(
+        [p[len(prefix) + 1 :] for p in paths if p.startswith(f"{prefix}/")],
+        lambda name: get_file_content(course_org, repo, f"{prefix}/{name}"),
+    )
 
 
 def build(course_org: str, cohort_org: str, source_repo: str) -> tuple[str, int]:

@@ -101,7 +101,7 @@ def test_fresh_materials_repo_gets_the_full_skeleton(fake):
         "lectures/01_session-1/.gitkeep",
         # Readings get a stub rather than a .gitkeep: a text file in here IS the reading
         # list published on the cohort site, and an empty folder gave no sign of that.
-        "readings/01_session-1/reading.md",
+        "readings/01_session-1/READINGS.md",
         "labs/01_session-1/.gitkeep",
     }
     assert fake.skips == []
@@ -342,14 +342,14 @@ def test_a_stub_faculty_have_written_over_is_never_touched_again(fake):
     # They take ownership by removing the mark, which writing their own does.
     mine = "# Machine Learning - syllabus\n\nWritten by faculty.\n"
     fake.files[("course-materials-f2026", "SYLLABUS.md")] = mine
-    fake.files[("course-materials-f2026", "readings/01_session-1/reading.md")] = (
+    fake.files[("course-materials-f2026", "readings/01_session-1/READINGS.md")] = (
         "- Mine\n"
     )
 
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     assert fake.files[("course-materials-f2026", "SYLLABUS.md")] == mine
     assert (
-        fake.files[("course-materials-f2026", "readings/01_session-1/reading.md")]
+        fake.files[("course-materials-f2026", "readings/01_session-1/READINGS.md")]
         == "- Mine\n"
     )
     assert "course-materials-f2026/SYLLABUS.md" in fake.skips
@@ -359,7 +359,7 @@ def test_every_seeded_stub_carries_the_mark_that_makes_it_refreshable(fake):
     # If a stub ships without the mark it is frozen forever, which is the bug this fixes -
     # so the mark is asserted on what the scaffold actually writes.
     assert scaffold.scaffold_materials("Org", "f2026") == 0
-    for path in ("SYLLABUS.md", "readings/01_session-1/reading.md"):
+    for path in ("SYLLABUS.md", "readings/01_session-1/READINGS.md"):
         assert utils.STUB_MARK in fake.files[("course-materials-f2026", path)], path
 
 
@@ -393,7 +393,10 @@ def test_refresh_improves_an_existing_stub_but_never_creates_one(monkeypatch):
     # Nothing was created anywhere - not the code repo's syllabus, not the materials repo's
     # missing readings stub.
     assert ("lecture-code-f2026", "SYLLABUS.md") not in f.files
-    assert ("course-materials-f2026", "readings/01_session-1/reading.md") not in f.files
+    assert (
+        "course-materials-f2026",
+        "readings/01_session-1/READINGS.md",
+    ) not in f.files
 
 
 def test_the_scaffold_and_refresh_converge_the_same_stub_list():
@@ -401,5 +404,5 @@ def test_the_scaffold_and_refresh_converge_the_same_stub_list():
     # edit somewhere else.
     assert sorted(scaffold.refreshable_stubs("f2026")) == [
         "SYLLABUS.md",
-        "readings/01_session-1/reading.md",
+        "readings/01_session-1/READINGS.md",
     ]
