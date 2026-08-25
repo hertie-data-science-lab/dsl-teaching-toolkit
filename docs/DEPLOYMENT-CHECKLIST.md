@@ -48,7 +48,7 @@ org_name: DSL Demo Course        # names the ORG - the websites never show it
 course_name: Deep Learning       # the cohort websites' title
 course_code: E1234               # shown beside it
 course_description: One or two sentences, on one line - the sites' blurb
-site_link_extensions: [pdf, html]  # optional - link ONLY these file types on the sites
+site_link_extensions: [pdf, html]  # optional - cohort sites only; see below
 people:
   course_admins:
     - github_handle: "janedoe"   # admin on the course org + every cohort
@@ -66,10 +66,14 @@ Runbook: [05](05-manage-teaching-team.md).
 `course_name` / `course_code` / `course_description` are the fields that reach every
 cohort website - a push here re-syncs them all: [11](11-configure-cohort-site.md).
 
-`site_link_extensions` narrows what each session row **links**, never what it ships. Unset
-(the default), a row lists the files at its session folder's root plus one link per
-subfolder, so a rendered Quarto/Rmd deck links the deck rather than its hundreds of assets;
-set, only these file types are listed, plus a link to the folder itself.
+`site_link_extensions` narrows what each session row **links** on the **cohort** sites,
+never what it ships. Unset (the default), a row lists the files at its session folder's root
+plus one link per subfolder, so a rendered Quarto/Rmd deck links the deck rather than its
+hundreds of assets; set, only these file types are listed, plus a link to the folder itself.
+
+It does **not** apply to the public open-courseware site, which serves its files itself and
+has no directory listing to fall back on - a file excluded there would be published and
+linked from nowhere. That site always lists each session folder's root files.
 
 ### `students.csv`
 

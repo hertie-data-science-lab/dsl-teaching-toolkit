@@ -1300,3 +1300,48 @@ def test_a_section_release_never_guards_that_sections_own_readme(monkeypatch):
     )
     # Mirrored dest, so it lands at `lectures/README.md` - shipped, and not counted.
     assert landed == {"lectures/README.md"} and errors == 0
+
+
+def test_withholding_the_stub_never_deletes_the_cohorts_own_readme(monkeypatch):
+    # The sequel to the incident: the placeholder leaked, faculty fixed it by editing the
+    # README in the COHORT repo (the fastest fix students see), and the course-org source
+    # is still the stub. Withholding by deleting after the copy would stage that fix as a
+    # deletion on the next whole-repo release - while the log said everything else shipped.
+    good = "# Foundations of ML\n\nWritten by faculty, in the cohort repo.\n"
+    landed: dict[str, str] = {}
+
+    def fake_gh(*args):
+        if args[:2] == ("repo", "clone"):
+            spec, dest = args[2], args[3]
+            path = Path(dest)
+            path.mkdir(parents=True, exist_ok=True)
+            if spec.startswith("Course-Org/"):
+                _seed_source(path, UNEDITED)
+            else:
+                (path / "README.md").write_text(good)  # the cohort's existing good one
+            return (0, "")
+        return (0, "")
+
+    def fake_git(*args):
+        if "add" in args:
+            wd = Path(args[1])
+            landed.clear()
+            landed.update(
+                {
+                    q.relative_to(wd).as_posix(): q.read_text()
+                    for q in wd.rglob("*")
+                    if q.is_file()
+                }
+            )
+        return _git_with_staged_changes(*args)
+
+    monkeypatch.setattr(deploy, "gh", fake_gh)
+    monkeypatch.setattr(deploy, "git", fake_git)
+    monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    errors, _changed = deploy.deploy_many(
+        "Course-Org", "Cohort-Org", [Deploy("cm", "/", "materials", None)], sync=False
+    )
+    assert errors == 1  # still reported
+    assert landed["README.md"] == good  # untouched, not replaced and not removed
+    assert "SYLLABUS.md" in landed  # everything else still shipped

@@ -110,18 +110,26 @@ def _resolve_within(base: Path, rel: str) -> Path | None:
     return target if target.is_relative_to(base_r) else None
 
 
-def _copy_ignore(whole_repo_root: Path | None):
+def _copy_ignore(
+    whole_repo_root: Path | None, extra_root_skips: frozenset[str] = frozenset()
+):
     """A copytree `ignore` filter: NEVER_COPIED at every depth, plus ROOT_RELEASE_EXCLUDED
-    at `whole_repo_root` when a whole repo is being released (None for a subpath copy).
+    and `extra_root_skips` at `whole_repo_root` when a whole repo is being released (None
+    for a subpath copy).
 
     Root-anchored deliberately, rather than `shutil.ignore_patterns`, which matches by
     basename at every level of the walk - that would also drop a `labs/.github/`, which is
-    the faculty member's own content and nothing to do with the release plumbing."""
+    the faculty member's own content and nothing to do with the release plumbing.
+
+    `extra_root_skips` is decided per release rather than by contract - currently a README
+    still carrying the scaffold placeholder. Skipping the COPY rather than deleting the
+    result afterwards is what keeps a withheld file from touching the destination: a
+    delete-after-copy stages a deletion of whatever the cohort repo already had there."""
 
     def ignore(dirpath: str, names: list[str]) -> set[str]:
         skip = {n for n in names if n in NEVER_COPIED}
         if whole_repo_root is not None and Path(dirpath) == whole_repo_root:
-            skip |= {n for n in names if n in ROOT_RELEASE_EXCLUDED}
+            skip |= {n for n in names if n in ROOT_RELEASE_EXCLUDED | extra_root_skips}
         return skip
 
     return ignore
@@ -222,27 +230,31 @@ def deploy_many(
                 errors += 1
                 continue
             if srcp.is_dir():
+                # A WHOLE-REPO release carries the root README along, which is how the
+                # placeholder actually reached students. Checked on the SOURCE and skipped
+                # before the copy, never deleted after it: faculty who fixed a leaked
+                # placeholder by editing the cohort repo's own README would otherwise have
+                # that fix staged as a deletion by the next release - while the log said
+                # everything else shipped.
+                #
+                # Whole-repo only: a copy of one section picks up that section's own
+                # `README.md`, which is faculty writing about the section, not the stub.
+                withheld = frozenset()
+                if srcp == src_root:
+                    src_readme = srcp / "README.md"
+                    if src_readme.is_file() and _is_unedited_readme(
+                        "README.md",
+                        src_readme.read_text(encoding="utf-8", errors="replace"),
+                    ):
+                        withheld = frozenset({"README.md"})
+                        _warn_unedited_readme(source_org, d.course_source_repo)
+                        errors += 1
                 shutil.copytree(
                     srcp,
                     destp,
                     dirs_exist_ok=True,
-                    ignore=_copy_ignore(srcp if srcp == src_root else None),
+                    ignore=_copy_ignore(srcp if srcp == src_root else None, withheld),
                 )
-                # A WHOLE-REPO release carries the root README along, which is how the
-                # placeholder actually reached students. Only then: a copy of one section
-                # picks up that section's own `README.md`, which is faculty writing about
-                # the section, not the stub.
-                stub = destp / "README.md"
-                if (
-                    srcp == src_root
-                    and stub.is_file()
-                    and _is_unedited_readme(
-                        "README.md", stub.read_text(encoding="utf-8", errors="replace")
-                    )
-                ):
-                    stub.unlink()
-                    _warn_unedited_readme(source_org, d.course_source_repo)
-                    errors += 1
             elif _is_unedited_readme(
                 d.course_source_path, srcp.read_text(encoding="utf-8", errors="replace")
             ):

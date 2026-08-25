@@ -153,9 +153,11 @@ def scaffold_materials(org: str, tag: str) -> int:
     # for faculty & instructors lives in MAINTAINING.md (a root file that is never released:
     # release only copies section folders, the syllabus, and README.md).
     readme = (
+        # Two lines below carry deploy.py's UNEDITED_README_MARKERS - the "Replace this
+        # placeholder" note and FACULTY_ONLY_HEADING. A release refuses to ship a README
+        # still holding BOTH, so edit this stub's wording freely but keep those two intact
+        # (test_scaffold.py asserts the seeded file still trips the guard).
         "<!-- FACULTY & INSTRUCTORS: replace the content below with a real, student-facing\n"
-        # Ends up verbatim in the line below; deploy.py refuses to ship a README still
-        # containing it (see UNEDITED_README_MARKERS), so the two must stay one string.
         "     overview of your course materials. Release materials with the 'include README'\n"
         "     toggle copies THIS file into the cohort's materials repo, where enrolled\n"
         "     students read it - so write it for them, not as internal notes. How this source\n"

@@ -413,6 +413,18 @@ def test_the_allowlist_never_leaves_a_public_file_unreachable(tmp_path):
     ]  # root files listed, the asset served only
 
 
+def test_public_links_lists_nested_files_when_nothing_sits_at_the_root(tmp_path):
+    # The fold means "these are the assets of that deliverable". With no root file they are
+    # not assets, they are the material - and this host has no folder link to offer
+    # instead, so folding them would serve them and link them from nowhere. Worse, a
+    # section with no links is skipped, so the session would get no page at all.
+    (tmp_path / "handouts").mkdir()
+    (tmp_path / "handouts" / "notes.pdf").write_text("x")
+    (tmp_path / "handouts" / "extra.pdf").write_text("x")
+    names = [n for n, _ in site._public_links(tmp_path, "/m/session-1")]
+    assert names == ["handouts/extra.pdf", "handouts/notes.pdf"]
+
+
 def test_link_extensions_accepts_a_list_or_a_bare_string():
     assert site._link_extensions(
         {"site_link_extensions": [".PDF", "html"]}
@@ -646,8 +658,8 @@ def test_nav_lists_readings_before_all_materials():
 
 
 def test_no_nav_tab_can_point_at_a_page_this_site_does_not_get():
-    # The tab bar and the pages come from one table, so the public site cannot ship a
-    # Readings tab pointing at a page only cohort sites generate.
+    # The tab bar and the pages come from one table, and BOTH syncs generate the nav - so
+    # the public site cannot ship a Readings tab pointing at a page only cohort sites get.
     for cohort in (True, False):
         tabs = {
             i["url"] for i in yaml.safe_load(site._nav_yaml(cohort=cohort))["items"]
@@ -655,10 +667,24 @@ def test_no_nav_tab_can_point_at_a_page_this_site_does_not_get():
         generated = {
             f"/{f.removesuffix('.md')}/" for f in site._theme_pages(cohort=cohort)
         }
-        # Every generated page has a tab, and every tab is either a generated page or one
-        # of the theme's own (Home, Schedule, Assignments).
-        assert generated <= tabs
-        assert tabs - generated == {"/", "/schedule/", "/assignments/"}
-    assert "/readings/" not in {
-        i["url"] for i in yaml.safe_load(site._nav_yaml(cohort=False))["items"]
+        assert generated <= tabs  # every generated page has a tab
+        # ...and every remaining tab is one of the theme's own, never an orphan.
+        assert tabs - generated <= {"/", "/schedule/", "/assignments/"}
+    public = {i["url"] for i in yaml.safe_load(site._nav_yaml(cohort=False))["items"]}
+    cohort_tabs = {
+        i["url"] for i in yaml.safe_load(site._nav_yaml(cohort=True))["items"]
     }
+    assert "/readings/" not in public  # a cohort-only page, so a cohort-only tab
+    # `sync_public_site` empties the _assignments collection deliberately, so a tab there
+    # would lead to a blank page.
+    assert "/assignments/" not in public
+    assert "/assignments/" in cohort_tabs
+
+
+def test_nav_order_does_not_depend_on_a_string_tie_break():
+    # Assignments used to be pinned to integer position 5, which tied with the fourth
+    # generated page - so the tab order came down to comparing "/assignments/" against
+    # "/materials/". It now follows the page it belongs behind.
+    names = [i["name"] for i in yaml.safe_load(site._nav_yaml(cohort=True))["items"]]
+    assert names.index("Assignments") == names.index("Readings") + 1
+    assert names.index("All Materials") == names.index("Assignments") + 1
