@@ -164,27 +164,41 @@ def _set_config(text: str, key: str, value: str) -> str:
 # to hand-patch. Every later change to how sessions render now ships from the theme alone.
 #
 # `_overwritten_edits` still reports a hand edit these replace, as it does for any other
-# generated surface.
-THEME_PAGES = {
-    "materials.md": (
-        "---\n"
-        "layout: materials\n"
-        "title: Materials\n"
-        "permalink: /materials/\n"
-        "---\n\n"
-        "Readings by session. Citation lists are public; the files themselves are "
-        "visible to enrolled students.\n"
-    ),
-    "labs.md": (
-        "---\n"
-        "layout: labs\n"
-        "title: Labs\n"
-        "permalink: /labs/\n"
-        "---\n\n"
-        "Lab exercises by session (lecture slides are on the [Lectures](/lectures/) tab). "
-        "Released materials are visible to enrolled students.\n"
-    ),
-}
+# generated surface. (It does NOT fire on the first sync that takes them over: the page a
+# site was generated with was authored by the token account, which reads as a machine.)
+#
+# The access sentence is the caller's, not the layout's: a COHORT site links its files into
+# the private materials repo, while the public open-courseware site hosts them for anyone -
+# so "visible to enrolled students" is true of one and false of the other.
+def _theme_pages(access_note: str) -> dict[str, str]:
+    """The `{path: content}` for the two pages whose rendering lives in the theme."""
+    tail = f" {access_note}" if access_note else ""
+    return {
+        "materials.md": (
+            "---\n"
+            "layout: materials\n"
+            "title: Materials\n"
+            "permalink: /materials/\n"
+            "---\n\n"
+            f"Readings by session.{tail}\n"
+        ),
+        "labs.md": (
+            "---\n"
+            "layout: labs\n"
+            "title: Labs\n"
+            "permalink: /labs/\n"
+            "---\n\n"
+            "Lab exercises by session (lecture slides are on the "
+            f"[Lectures](/lectures/) tab).{tail}\n"
+        ),
+    }
+
+
+# A cohort site is public but its materials are not: every link points into the private
+# cohort repo, so only enrolled members can open one.
+COHORT_ACCESS_NOTE = (
+    "Citation lists are public; the files themselves are visible to enrolled students."
+)
 
 
 def _site_repo(org: str) -> str:
@@ -1354,7 +1368,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                     _yaml_file(cohort_org, "classroom-config", "people.yml"),
                     edit_at=f"{cohort_org}/classroom-config/people.yml",
                 ),
-                **THEME_PAGES,
+                **_theme_pages(COHORT_ACCESS_NOTE),
             },
             # Assignment handout/due dates come from schedule.yml when set (keyed on the
             # assignment slug), else a synthesised fortnightly cadence.
@@ -1612,7 +1626,7 @@ def sync_public_site(
                     edit_at=f"the `people:` block of {course_org}/.github/dsl-course.yml",
                     include_tas=False,
                 ),
-                **THEME_PAGES,
+                **_theme_pages(""),
                 # Persist the settings THIS publish used, in the site repo itself, so the
                 # daily cron can repeat it with no inputs (see resync_public_site).
                 PUBLISH_CONFIG: (
