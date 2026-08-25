@@ -34,6 +34,7 @@ from pathlib import Path
 
 from .schedule import Deploy
 from .utils import (
+    FACULTY_ONLY_HEADING,
     GIT_ENV,
     create_repo,
     gh,
@@ -61,6 +62,41 @@ NEVER_COPIED = frozenset({".git"})
 # me everything" means, not a ban.
 ROOT_RELEASE_EXCLUDED = frozenset({".github", "MAINTAINING.md"})
 
+# A README the scaffold wrote and nobody rewrote. It is addressed to faculty - "replace
+# this placeholder", a section headed "delete this section before releasing", a link to
+# MAINTAINING.md and the course org's Actions tab - and releasing it publishes all of that
+# to students as their course overview. That is what happened in a live cohort, in three
+# repos at once, and nothing said so.
+#
+# Both markers come from scaffold.py itself, so this guard cannot lapse the next time that
+# wording is edited. A README that keeps ONE of them may be a real overview quoting the
+# stub, so both must be present - and either way the fix is ten seconds of editing.
+UNEDITED_README_MARKERS = ("**Replace this placeholder.**", FACULTY_ONLY_HEADING)
+
+
+def _warn_unedited_readme(source_org: str, repo: str) -> None:
+    """Say what was withheld and how to fix it. Loud and counted (the run goes red): a
+    silent skip would read as "the README just didn't ship", which is the same symptom as
+    a broken release."""
+    log_err(
+        f"NOT released: {source_org}/{repo}/README.md is still the scaffold placeholder "
+        "(it is addressed to faculty and links MAINTAINING.md). Everything else in this "
+        "release shipped. Rewrite it as the students' overview - delete the "
+        '"For faculty & instructors" section and the "Replace this placeholder" note - '
+        "then release again."
+    )
+
+
+def _is_unedited_readme(path: str, text: str) -> bool:
+    """Whether a copy is the scaffold's own placeholder README rather than a real one.
+
+    The ROOT `README.md` only - `path` must be exactly that, not merely end in it. A
+    `README.md` inside a session folder is the faculty's own writing about that session,
+    and the stub only ever exists at the repo root."""
+    if path.strip("/") != "README.md":
+        return False
+    return all(marker in text for marker in UNEDITED_README_MARKERS)
+
 
 def _resolve_within(base: Path, rel: str) -> Path | None:
     """Resolve `rel` under the clone `base`, or None if it escapes it.
@@ -74,18 +110,26 @@ def _resolve_within(base: Path, rel: str) -> Path | None:
     return target if target.is_relative_to(base_r) else None
 
 
-def _copy_ignore(whole_repo_root: Path | None):
+def _copy_ignore(
+    whole_repo_root: Path | None, extra_root_skips: frozenset[str] = frozenset()
+):
     """A copytree `ignore` filter: NEVER_COPIED at every depth, plus ROOT_RELEASE_EXCLUDED
-    at `whole_repo_root` when a whole repo is being released (None for a subpath copy).
+    and `extra_root_skips` at `whole_repo_root` when a whole repo is being released (None
+    for a subpath copy).
 
     Root-anchored deliberately, rather than `shutil.ignore_patterns`, which matches by
     basename at every level of the walk - that would also drop a `labs/.github/`, which is
-    the faculty member's own content and nothing to do with the release plumbing."""
+    the faculty member's own content and nothing to do with the release plumbing.
+
+    `extra_root_skips` is decided per release rather than by contract - currently a README
+    still carrying the scaffold placeholder. Skipping the COPY rather than deleting the
+    result afterwards is what keeps a withheld file from touching the destination: a
+    delete-after-copy stages a deletion of whatever the cohort repo already had there."""
 
     def ignore(dirpath: str, names: list[str]) -> set[str]:
         skip = {n for n in names if n in NEVER_COPIED}
         if whole_repo_root is not None and Path(dirpath) == whole_repo_root:
-            skip |= {n for n in names if n in ROOT_RELEASE_EXCLUDED}
+            skip |= {n for n in names if n in ROOT_RELEASE_EXCLUDED | extra_root_skips}
         return skip
 
     return ignore
@@ -186,12 +230,37 @@ def deploy_many(
                 errors += 1
                 continue
             if srcp.is_dir():
+                # A WHOLE-REPO release carries the root README along, which is how the
+                # placeholder actually reached students. Checked on the SOURCE and skipped
+                # before the copy, never deleted after it: faculty who fixed a leaked
+                # placeholder by editing the cohort repo's own README would otherwise have
+                # that fix staged as a deletion by the next release - while the log said
+                # everything else shipped.
+                #
+                # Whole-repo only: a copy of one section picks up that section's own
+                # `README.md`, which is faculty writing about the section, not the stub.
+                withheld = frozenset()
+                if srcp == src_root:
+                    src_readme = srcp / "README.md"
+                    if src_readme.is_file() and _is_unedited_readme(
+                        "README.md",
+                        src_readme.read_text(encoding="utf-8", errors="replace"),
+                    ):
+                        withheld = frozenset({"README.md"})
+                        _warn_unedited_readme(source_org, d.course_source_repo)
+                        errors += 1
                 shutil.copytree(
                     srcp,
                     destp,
                     dirs_exist_ok=True,
-                    ignore=_copy_ignore(srcp if srcp == src_root else None),
+                    ignore=_copy_ignore(srcp if srcp == src_root else None, withheld),
                 )
+            elif _is_unedited_readme(
+                d.course_source_path, srcp.read_text(encoding="utf-8", errors="replace")
+            ):
+                _warn_unedited_readme(source_org, d.course_source_repo)
+                errors += 1
+                continue
             else:
                 destp.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(srcp, destp)

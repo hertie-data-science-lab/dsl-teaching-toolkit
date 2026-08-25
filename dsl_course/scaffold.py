@@ -25,6 +25,7 @@ from pathlib import Path
 
 from . import seed
 from .utils import (
+    FACULTY_ONLY_HEADING,
     GIT_ENV,
     create_repo,
     generate_from_template,
@@ -152,6 +153,10 @@ def scaffold_materials(org: str, tag: str) -> int:
     # for faculty & instructors lives in MAINTAINING.md (a root file that is never released:
     # release only copies section folders, the syllabus, and README.md).
     readme = (
+        # Two lines below carry deploy.py's UNEDITED_README_MARKERS - the "Replace this
+        # placeholder" note and FACULTY_ONLY_HEADING. A release refuses to ship a README
+        # still holding BOTH, so edit this stub's wording freely but keep those two intact
+        # (test_scaffold.py asserts the seeded file still trips the guard).
         "<!-- FACULTY & INSTRUCTORS: replace the content below with a real, student-facing\n"
         "     overview of your course materials. Release materials with the 'include README'\n"
         "     toggle copies THIS file into the cohort's materials repo, where enrolled\n"
@@ -163,7 +168,7 @@ def scaffold_materials(org: str, tag: str) -> int:
         "> released materials. Add a short overview of the course, how the materials are\n"
         "> organised, and anything students should read first.\n\n"
         "---\n\n"
-        "## For faculty & instructors (delete this section before releasing the README)\n\n"
+        f"## For faculty & instructors ({FACULTY_ONLY_HEADING})\n\n"
         "- **How to populate & operate this repo:** see [`MAINTAINING.md`](MAINTAINING.md) - "
         "it explains what to edit, what gets released to students, and what to leave alone. "
         "`MAINTAINING.md` is **not** deployed to the cohort org; leave it here as a persistent "
@@ -194,7 +199,9 @@ def scaffold_materials(org: str, tag: str) -> int:
         "Any top-level directory containing at least one ordinal-prefixed subdirectory "
         "(`01_`, `02_`, `03_`, ...) is a releasable section - no config to declare it:\n\n"
         "- `lectures/01_session-1/` - one folder per session's lecture files\n"
-        "- `readings/01_session-1/` - one folder per session's readings\n"
+        "- `readings/01_session-1/` - one folder per session's readings. A text file here "
+        "(`reading.md`, `.txt`, `.bib`) IS the reading list shown on the cohort site; "
+        "other files in it are linked, not published\n"
         "- `labs/01_session-1/` - one folder per session's lab (delete the `labs/` folder "
         "if your course has none)\n"
         "- `*syllabus*`, `README.md` (root) - released via the syllabus / README toggles\n\n"
@@ -225,7 +232,16 @@ def scaffold_materials(org: str, tag: str) -> int:
     user_files = {
         "README.md": readme.encode(),
         "lectures/01_session-1/.gitkeep": b"",
-        "readings/01_session-1/.gitkeep": b"",
+        # A stub, not a .gitkeep: a text file here IS the published reading list (its
+        # contents are inlined on the site's Materials tab), and an empty folder gave no
+        # sign of that - the tab then reads blank with nothing to explain why.
+        "readings/01_session-1/reading.md": (
+            b"# Session 1 readings\n\n"
+            b"- Author, *Title*, ch. 1.\n"
+            b'- Author (2026), "Paper title", doi:...\n\n'
+            b"This file is the reading list students see. Put reading PDFs in this folder "
+            b"too - they are linked, never published.\n"
+        ),
         "labs/01_session-1/.gitkeep": b"",
         "SYLLABUS.md": f"# {tag} syllabus\n\nReplace with the real syllabus.\n".encode(),
     }

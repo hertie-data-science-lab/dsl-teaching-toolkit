@@ -16,6 +16,10 @@ You never edit what the site shows - you edit the file it reads, and it re-syncs
 | Schedule rows, exams, assignment due dates | cohort `classroom-config/schedule.yml` ([07](07-schedule-releases.md)) | `releases`, `events`, `assignments` (there is no `exams:` key - an exam is an `events:` entry with `type: exam`) |
 | A hand-written entry in the **Updates** box | site repo | add a file under `_announcements/` with `date:` + `description:` front matter. The box shows the newest 7 items (releases feed it automatically); older ones roll off as new ones arrive - delete the file to pull one early |
 | Materials links | *nothing to set* | the row appears as soon as `schedule.yml` names the session, marked "not released yet"; the links fill in as you [release](08-release-materials-to-cohort.md) |
+| A session's name + blurb | cohort `classroom-config/schedule.yml` ([07](07-schedule-releases.md)) | `title`, `description` on the `releases:` entry |
+| Readings on the **Readings** tab | course materials repo | a text file in `readings/NN_.../` (`reading.md`, `.txt`, `.bib`) is the reading list, published as written once that folder is released. Other files there are linked into the private repo - this site is public, so it never hosts a reading |
+| The **All Materials** tab | *nothing to set* | every file released to the cohort, grouped by section and folded (a folder is one link with a count). The only page not keyed on a session ordinal, so a released `SYLLABUS.md` or a flat `datasets/` appears here and nowhere else |
+| Which files each session links | course org `.github/dsl-course.yml` | *nothing to set* by default: a session lists its root files plus one link per subfolder, so a rendered deck lists the deck and not its assets. `site_link_extensions: [pdf, html]` narrows it further. Everything you release ships either way |
 
 ## What never to touch
 
@@ -26,6 +30,9 @@ repo linking the overwritten commit and naming the file to edit instead.
 |---|---|
 | `_lectures/`, `_assignments/`, `_events/` | each directory is **deleted and rebuilt** every sync - a file you drop in here vanishes |
 | `_data/people.yml` | overwritten from `classroom-config/people.yml` |
+| `lectures.md`, `labs.md`, `readings.md`, `materials.md` | front-matter stubs pointing at the shared theme layouts, so a change to how sessions render reaches every site at once |
+| `_data/nav.yml` | the tab bar - generated, so a new tab reaches sites that already exist. Add a page of your own as a file and link it from `index.md` |
+| `_data/materials.yml` | the All Materials index, rebuilt from what each cohort repo actually holds |
 | `_config.yml` keys `course_name`, `course_code`, `course_semester`, `course_description`, `github_org` | overwritten from the sources in the table above |
 
 **Everything else in the site repo is yours and survives forever** - a custom `index.md` or any

@@ -123,6 +123,13 @@ def git(*args: str, cwd: str | None = None) -> tuple[int, str]:
     return result.returncode, (result.stdout + result.stderr).strip()
 
 
+# The faculty-only heading in the materials README that `scaffold` seeds. `deploy` refuses
+# to release a README still containing it, so the sentinel is declared ONCE here - the
+# writer and the guard both import it, and neither can lapse when the wording is edited.
+# Here rather than in `scaffold` so that `deploy`, which the scheduler calls, does not pull
+# the whole scaffold/seed chain in for one string.
+FACULTY_ONLY_HEADING = "delete this section before releasing the README"
+
 # Bot identity + disabled hooks for engine-made commits. Spread into git() calls in the
 # clone/commit/push paths of release/site/scaffold/assign: git("-C", wd, *GIT_ENV, ...).
 GIT_ENV = [

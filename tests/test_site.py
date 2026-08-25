@@ -34,7 +34,7 @@ def _sched(releases: list[Release]) -> Schedule:
 
 def _row_dates(sched: Schedule) -> dict[tuple[str, str], datetime]:
     """The dating half of `_planned_sessions` - which row happens when."""
-    return {key: when for key, (when, _) in site._planned_sessions(sched).items()}
+    return {key: row.when for key, row in site._planned_sessions(sched).items()}
 
 
 def test_session_dates_maps_folder_ordinal_and_section_to_release_when():
@@ -127,10 +127,17 @@ def test_session_dates_ignores_non_ordinal_deploys():
 RELEASED = [("materials", "lectures", "02_week-2")]
 
 
+def _row(when, **kw):
+    """The plan's view of a row - what `_lecture_entry` renders from. Built here so a test
+    states only the plan fields it is actually about."""
+    return site._PlannedRow(when=when, **kw)
+
+
 def test_lecture_entry_shows_real_time_from_a_datetime(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     md = site._lecture_entry(
-        "Cohort", "2", datetime(2026, 9, 15, 14, 30, tzinfo=BERLIN), RELEASED
+        "Cohort", "2", _row(datetime(2026, 9, 15, 14, 30, tzinfo=BERLIN)), RELEASED
     )
     assert "date: 2026-09-15T14:30:00" in md
     assert "not released yet" not in md
@@ -138,17 +145,19 @@ def test_lecture_entry_shows_real_time_from_a_datetime(monkeypatch):
 
 def test_lecture_entry_falls_back_to_0900_for_a_bare_date(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
-    md = site._lecture_entry("Cohort", "2", date(2026, 9, 15), RELEASED)
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
+    md = site._lecture_entry("Cohort", "2", _row(date(2026, 9, 15)), RELEASED)
     assert "date: 2026-09-15T09:00:00" in md
 
 
 def test_lecture_entry_renders_a_lab_row_as_its_own_type(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
-    md = site._lecture_entry("Cohort", "3", date(2026, 9, 17), RELEASED, "lab")
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
+    md = site._lecture_entry("Cohort", "3", _row(date(2026, 9, 17)), RELEASED, "lab")
     assert "type: lab" in md
     assert 'title: "Lab 3"' in md
     assert "Session 3" not in md
-    lec = site._lecture_entry("Cohort", "3", date(2026, 9, 15), RELEASED)
+    lec = site._lecture_entry("Cohort", "3", _row(date(2026, 9, 15)), RELEASED)
     assert "type: lecture" in lec and 'title: "Session 3"' in lec
 
 
@@ -156,11 +165,12 @@ def test_only_the_unreleased_row_carries_the_theme_flag(monkeypatch):
     # The prose says it, but a flag is what lets the theme badge or grey the row - and
     # what tells a placeholder apart from a released folder that holds no files.
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     assert "unreleased: true" not in site._lecture_entry(
-        "Cohort", "2", date(2026, 9, 15), RELEASED
+        "Cohort", "2", _row(date(2026, 9, 15)), RELEASED
     )
     assert "unreleased: true" in site._lecture_entry(
-        "Cohort", "2", date(2026, 9, 15), []
+        "Cohort", "2", _row(date(2026, 9, 15)), []
     )
 
 
@@ -320,6 +330,11 @@ def _plan(
     monkeypatch.setattr(
         site, "_session_files", files or (lambda org, repo, subpath, folder: [])
     )
+    # The memoised tree, which `_session_links` reads the default branch from to build its
+    # folder-link URLs. Stubbed even where `_session_files` is faked: without it the fake
+    # covers the file list but the branch lookup still reaches GitHub, which passes on an
+    # authenticated dev box and fails in CI.
+    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", ()))
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
     assert site.sync_site("Course-Org", "Cohort-f2026") == 0
     return captured["plan"]
@@ -520,7 +535,9 @@ def test_an_unreleased_row_names_where_its_materials_will_land(monkeypatch, tmp_
     body = plan.collections["_lectures"]["session-03.md"]
     assert "`lecture-materials/lectures/03_week-3`" in body
     assert "`lecture-materials/readings/03_week-3`" in body
-    assert "`Cohort-f2026`" in body
+    # The row says what is coming and where, and stops there - naming the cohort org as
+    # well made the schedule table's cell two clauses long for no reader's benefit.
+    assert "`Cohort-f2026`" not in body
 
 
 def test_a_released_row_replaces_its_placeholder_with_links(monkeypatch, tmp_path):
@@ -932,3 +949,113 @@ def test_display_only_rows_come_from_events_alone(monkeypatch, tmp_path):
         ),
     )
     assert "Guest Lecture" not in "".join(plan.collections["_events"].values())
+
+
+# ------------------------------------------------- a session's declared name + blurb
+def test_a_row_carries_the_title_and_description_the_plan_declared(monkeypatch):
+    monkeypatch.setattr(site, "_session_files", lambda *a: [("s.pdf", "https://x/1")])
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
+    out = site._lecture_entry(
+        "Cohort-f2026",
+        "1",
+        _row(
+            datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN),
+            subtitle="Probability Theory",
+            description="Sample spaces and Bayes' rule.",
+        ),
+        RELEASED,
+    )
+    # `title` stays the ordinal - what the theme has always assumed it is - and the
+    # declared name rides `subtitle` beside it.
+    assert 'title: "Session 1"' in out
+    assert 'subtitle: "Probability Theory"' in out
+    assert 'description: "Sample spaces and Bayes\' rule."' in out
+
+
+def test_a_row_omits_the_declared_fields_it_was_not_given(monkeypatch):
+    # Omitted, not written blank: the theme tests for them, so an empty string would
+    # render an empty line where there should be nothing at all.
+    monkeypatch.setattr(site, "_session_files", lambda *a: [("s.pdf", "https://x/1")])
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
+    out = site._lecture_entry(
+        "Cohort-f2026", "1", _row(datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN)), RELEASED
+    )
+    assert "subtitle:" not in out and "description:" not in out
+
+
+def test_an_unreleased_row_still_says_what_the_session_is_about():
+    out = site._lecture_entry(
+        "Cohort-f2026",
+        "3",
+        _row(
+            datetime(2026, 9, 15, 10, 0, tzinfo=BERLIN),
+            dests={"materials/lectures/03_week-3": None},
+            subtitle="Expectation",
+            description="Linearity of expectation.",
+        ),
+        [],
+    )
+    # What the session covers is known the day the plan is written, so it is published
+    # then - the term reads as a syllabus from day one. Only the FILES wait for release,
+    # which is what the body says.
+    assert 'subtitle: "Expectation"' in out
+    assert 'description: "Linearity of expectation."' in out
+    assert "will appear in `materials/lectures/03_week-3` when released." in out
+
+
+def test_the_plan_carries_a_rows_title_description_and_readings(monkeypatch):
+    s = _sched(
+        [
+            Release(
+                "lecture-1",
+                datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN),
+                deploy=[
+                    Deploy("cm", "lectures/01_a", "materials", None),
+                    Deploy("cm", "readings/01_a", "materials", None),
+                ],
+                title="Probability Theory",
+                description="Sample spaces.",
+            )
+        ]
+    )
+    row = site._planned_sessions(s)[("1", "lecture")]
+    assert row.subtitle == "Probability Theory"
+    assert row.description == "Sample spaces."
+    # Readings are lecture material, so they land on this row - and the row knows a
+    # reading list is coming even before it ships.
+    assert row.readings_planned is True
+
+
+def test_the_earliest_entry_naming_a_row_is_the_one_that_titles_it():
+    # Same rule as the row's DATE: releases are sorted by event_datetime, so the entry the
+    # row takes its date from is the entry it takes its name from.
+    s = _sched(
+        [
+            Release(
+                "late",
+                datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "lectures/02_x", "materials", None)],
+                title="Second billing",
+            ),
+            Release(
+                "early",
+                datetime(2026, 9, 10, 9, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "readings/02_y", "materials", None)],
+                title="Random Variables",
+            ),
+        ]
+    )
+    assert site._planned_sessions(s)[("2", "lecture")].subtitle == "Random Variables"
+
+
+def test_a_row_with_no_readings_in_the_plan_never_reports_them_pending():
+    s = _sched(
+        [
+            Release(
+                "lecture-1",
+                datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "lectures/01_a", "materials", None)],
+            )
+        ]
+    )
+    assert site._planned_sessions(s)[("1", "lecture")].readings_planned is False

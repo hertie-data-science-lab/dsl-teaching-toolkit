@@ -9,10 +9,40 @@ that only asserts we wrote the call we wrote; its real failure modes need a live
 
 from __future__ import annotations
 
+import subprocess
+
 import pytest
 import yaml
 
 from dsl_course import site
+
+
+@pytest.fixture(autouse=True)
+def _no_live_gh(monkeypatch):
+    """Refuse any live `gh` call from a test.
+
+    Nothing here is meant to reach GitHub (see the module docstring), but a tokenless CI
+    box and an authenticated dev box disagree about what happens when something does: CI
+    errors and the developer's machine quietly succeeds against real orgs. That is how a
+    test that stubbed `site._session_files` but not `site._repo_tree` passed locally for a
+    whole branch and failed only on the PR.
+
+    Guards the `gh` BINARY rather than `utils.gh`, so the retry ladder and return-pair
+    contract of `utils.gh` itself stay testable, and `git` against a tmp repo still runs. A
+    test that legitimately fakes `gh` or `git` sets its own after this fixture and wins."""
+    real_run = subprocess.run
+
+    def guarded(cmd, *args, **kwargs):
+        # `gh <cmd> --help` reads gh's own built-in flag list: no network, no auth, and it
+        # is how test_gh_contract.py proves a flag the code passes really exists.
+        if cmd and cmd[0] == "gh" and "--help" not in cmd:
+            raise AssertionError(
+                f"live `{' '.join(map(str, cmd[:3]))}` from a test - stub what the code "
+                "under test reads (site._repo_tree, utils.get_file_content, ...) instead."
+            )
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", guarded)
 
 
 @pytest.fixture(autouse=True)

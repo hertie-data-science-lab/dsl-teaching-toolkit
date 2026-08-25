@@ -12,6 +12,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 import pytest
+import yaml
 
 from dsl_course import site, utils
 
@@ -155,7 +156,9 @@ def test_public_links_are_site_relative(tmp_path):
 def test_public_lecture_entry_reading_list_mode_has_no_links():
     e = site._public_lecture_entry("1", date(2025, 1, 1), [], "- Smith 2020")
     assert "links: []" in e
-    assert "### Reading list" in e and "Smith 2020" in e
+    # The citation text rides the front matter, not the body: both sites then feed the
+    # theme's Materials layout from one field, and it needs no `{% raw %}` fence.
+    assert "reading_list: |" in e and "Smith 2020" in e
     assert "enrolled" not in e  # public-facing, no student gate language
 
 
@@ -168,11 +171,14 @@ def test_lecture_entry_labels_links_by_repo_or_subpath():
             ],  # nested: label = subpath
         }.get((repo, subpath), [])
 
-    with patch.object(site, "_session_files", side_effect=fake_session_files):
+    with (
+        patch.object(site, "_session_files", side_effect=fake_session_files),
+        patch.object(site, "_repo_tree", return_value=("main", ())),
+    ):
         entry = site._lecture_entry(
             "Cohort-f2026",
             "1",
-            date(2026, 9, 7),
+            site._PlannedRow(when=date(2026, 9, 7)),
             [("labs", "", "01_intro"), ("materials", "lectures", "01_intro")],
         )
     assert "https://x/1" in entry and "https://x/2" in entry
@@ -315,3 +321,373 @@ def test_session_files_real_failure_raises(monkeypatch):
     monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: HTTP 500 Server Error"))
     with pytest.raises(RuntimeError, match="could not read the file tree"):
         site._session_files("Cohort-f2026", "materials", "lectures", "03_x")
+
+
+# --------------------------------------------------------------- display link shaping
+# A released session folder is copied WHOLESALE, so a rendered Quarto/Rmd deck arrives as
+# one deliverable plus hundreds of assets. These pin the split between what SHIPS (all of
+# it, recursively - `_session_files`) and what a row LISTS (`_shape_links`). The shape
+# below is the real `lectures/01_introduction` of hertie-intro-to-data-science-f2025,
+# whose site carried 200 links for this one session.
+ITDS_SESSION_01 = [
+    ("01-introduction.Rmd", "https://x/rmd"),
+    ("01-introduction.html", "https://x/html"),
+    ("01-introduction.pdf", "https://x/pdf"),
+    ("01-introduction_files/figure-html/indeed-1.svg", "https://x/fig"),
+    ("add_hertie_logo.html", "https://x/logo"),
+    ("libs/fabric/fabric.min.js", "https://x/fabric"),
+    ("libs/remark-css/metropolis.css", "https://x/metro"),
+    ("pics/1_1_hello.png", "https://x/p1"),
+    ("pics/1_2_data.png", "https://x/p2"),
+    ("simons-touch.css", "https://x/css"),
+]
+TREE = "https://github.com/o/r/tree/main/lectures/01_introduction"
+
+
+def test_shape_links_lists_root_files_and_folds_subfolders():
+    names = [n for n, _ in site._shape_links(ITDS_SESSION_01, TREE, frozenset())]
+    # 10 blobs -> 5 root files + one entry per subfolder, in path order, files first.
+    assert names == [
+        "01-introduction.Rmd",
+        "01-introduction.html",
+        "01-introduction.pdf",
+        "add_hertie_logo.html",
+        "simons-touch.css",
+        "01-introduction_files/ (1 file)",
+        "libs/ (2 files)",
+        "pics/ (2 files)",
+    ]
+
+
+def test_shape_links_points_a_folded_folder_at_its_tree():
+    got = dict(site._shape_links(ITDS_SESSION_01, TREE, frozenset()))
+    assert got["pics/ (2 files)"] == f"{TREE}/pics"
+    # A file still links to the file, not to its folder.
+    assert got["01-introduction.pdf"] == "https://x/pdf"
+
+
+def test_shape_links_allowlist_matches_at_any_depth_and_offers_the_folder():
+    names = [
+        n
+        for n, _ in site._shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf", "css"}))
+    ]
+    # Nothing is hidden without a way back: the browse link is the escape hatch.
+    assert names == [
+        "01-introduction.pdf",
+        "libs/remark-css/metropolis.css",
+        "simons-touch.css",
+        site._BROWSE_ALL,
+    ]
+    assert (
+        dict(site._shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf"})))[
+            site._BROWSE_ALL
+        ]
+        == TREE
+    )
+
+
+def test_shape_links_leaves_a_flat_folder_untouched():
+    # The worked example's shape: no subfolders, so there is nothing to fold and the row
+    # reads exactly as it did before any of this.
+    flat = [("slides.md", "https://x/1"), ("demo.py", "https://x/2")]
+    assert site._shape_links(flat, TREE, frozenset()) == flat
+
+
+def test_ext_reads_the_extension_not_a_dotted_directory():
+    assert site._ext("notes.PDF") == "pdf"
+    assert site._ext("Makefile") == ""
+    assert site._ext("libs/remark-css/metropolis.css") == "css"
+    # A dot in a directory name is not the file's extension.
+    assert site._ext("v1.2/README") == ""
+
+
+def test_the_allowlist_never_leaves_a_public_file_unreachable(tmp_path):
+    # Jekyll serves no directory index, so the public site has no folder link and no
+    # browse-the-folder escape hatch. An allowlist there would copy a file, serve it, and
+    # link it from nowhere - so `site_link_extensions` governs the cohort site only.
+    (tmp_path / "libs").mkdir()
+    (tmp_path / "deck.html").write_text("x")
+    (tmp_path / "notes.pdf").write_text("x")
+    (tmp_path / "libs" / "style.css").write_text("x")
+    names = [n for n, _ in site._public_links(tmp_path, "/m/session-1")]
+    assert names == [
+        "deck.html",
+        "notes.pdf",
+    ]  # root files listed, the asset served only
+
+
+def test_public_links_lists_nested_files_when_nothing_sits_at_the_root(tmp_path):
+    # The fold means "these are the assets of that deliverable". With no root file they are
+    # not assets, they are the material - and this host has no folder link to offer
+    # instead, so folding them would serve them and link them from nowhere. Worse, a
+    # section with no links is skipped, so the session would get no page at all.
+    (tmp_path / "handouts").mkdir()
+    (tmp_path / "handouts" / "notes.pdf").write_text("x")
+    (tmp_path / "handouts" / "extra.pdf").write_text("x")
+    names = [n for n, _ in site._public_links(tmp_path, "/m/session-1")]
+    assert names == ["handouts/extra.pdf", "handouts/notes.pdf"]
+
+
+def test_link_extensions_accepts_a_list_or_a_bare_string():
+    assert site._link_extensions(
+        {"site_link_extensions": [".PDF", "html"]}
+    ) == frozenset({"pdf", "html"})
+    # The shape faculty reach for first; refusing it would only mean a silently
+    # unfiltered site.
+    assert site._link_extensions({"site_link_extensions": "pdf, html"}) == frozenset(
+        {"pdf", "html"}
+    )
+    assert site._link_extensions({}) == frozenset()
+    assert site._link_extensions({"site_link_extensions": []}) == frozenset()
+
+
+# --------------------------------------------------------------- reading lists + blocks
+def test_block_survives_an_indented_first_line():
+    # Without the explicit `|2` indicator YAML would take the block's indentation from its
+    # first line, and every following line would look like the end of the block - breaking
+    # the whole file, not just this field.
+    out = site._block("reading_list", "   - indented\n- flush")
+    assert yaml.safe_load(out)["reading_list"] == "   - indented\n- flush\n"
+
+
+def test_block_keeps_liquid_verbatim_and_expands_tabs():
+    # Front matter is data, not a template, so no `{% raw %}` fence is needed here.
+    text = "a\tb\n{{ site.x }} {% if y %}"
+    assert (
+        yaml.safe_load(site._block("k", text))["k"]
+        == "a   b\n{{ site.x }} {% if y %}\n"
+    )
+
+
+def _readings_sources():
+    return [("materials", "readings", "01_week-1"), ("materials", "lectures", "01_x")]
+
+
+def test_released_reading_list_inlines_text_and_ignores_the_pdf(monkeypatch):
+    files = {
+        ("materials", "readings", "01_week-1"): [
+            ("reading.md", "u"),
+            ("blitzstein_ch1.pdf", "u"),
+        ],
+        ("materials", "lectures", "01_x"): [("slides.pdf", "u")],
+    }
+    monkeypatch.setattr(
+        site, "_session_files", lambda o, r, s, f: files.get((r, s, f), [])
+    )
+    monkeypatch.setattr(
+        site,
+        "get_file_content",
+        lambda org, repo, path: (
+            "- Blitzstein, ch. 1-2." if path.endswith("reading.md") else ""
+        ),
+    )
+    out = site._released_reading_list("Cohort-f2026", _readings_sources())
+    # The citation text is the list; the PDF is left to the links beside it (this site
+    # repo is public, so it never hosts the reading itself).
+    assert out == "- Blitzstein, ch. 1-2."
+
+
+def test_released_reading_list_propagates_a_read_failure(monkeypatch):
+    # A rate-limited read must not republish the row with the reading list silently
+    # emptied - same rule as every other fail-loud read in this module.
+    monkeypatch.setattr(
+        site, "_session_files", lambda o, r, s, f: [("reading.md", "u")]
+    )
+
+    def boom(*a, **k):
+        raise RuntimeError("could not read")
+
+    monkeypatch.setattr(site, "get_file_content", boom)
+    with pytest.raises(RuntimeError):
+        site._released_reading_list("Cohort-f2026", [("materials", "readings", "01_a")])
+
+
+def test_row_links_drops_the_citation_file_it_already_inlined(monkeypatch):
+    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", ()))
+    monkeypatch.setattr(
+        site,
+        "_session_files",
+        lambda o, r, s, f: [
+            ("reading.md", "https://x/md"),
+            ("ch1.pdf", "https://x/pdf"),
+        ],
+    )
+    names = [
+        n for n, _ in site._row_links("C", "materials", "readings", "01_a", frozenset())
+    ]
+    assert names == ["ch1.pdf"]  # reading.md IS the list, not a download beside it
+    # Any other section keeps its text files - only `readings` is inlined.
+    names = [
+        n for n, _ in site._row_links("C", "materials", "lectures", "01_a", frozenset())
+    ]
+    assert "reading.md" in names
+
+
+# ------------------------------------------------------- the All Materials catch-all index
+# The two shapes real cohorts actually have. Both must land where a reader expects, and the
+# ordinal must decide only the LEVEL a section is read at - never whether a file is listed.
+DEMO_REPOS = {  # repo per section, ordinals at the repo root
+    "lectures": ("01_introduction/slides.md", "01_introduction/demo.py", "README.md"),
+    "readings": ("01_introduction/reading-list.md",),
+}
+MATHS_REPOS = {  # one materials repo, sections inside it
+    "materials": (
+        "lectures/01_lecture/deck.html",
+        "lectures/01_lecture/media/img.png",
+        "labs/01_lab/lab.ipynb",
+        "datasets/housing.csv",
+        "SYLLABUS.md",
+        ".DS_Store",
+        ".github/workflows/x.yml",
+    )
+}
+
+
+def _index(monkeypatch, repos):
+    monkeypatch.setattr(
+        site, "_repo_tree", lambda o, r: ("main", tuple(sorted(repos[r])))
+    )
+    return yaml.safe_load(site._materials_index("Cohort-f2026", list(repos)))[
+        "sections"
+    ]
+
+
+def test_index_reads_a_repo_per_section_cohort(monkeypatch):
+    got = {
+        s["name"]: [e["name"] for e in s["entries"]]
+        for s in _index(monkeypatch, DEMO_REPOS)
+    }
+    # The repo names the section, its ordinal folders are the entries - and the root
+    # README.md, which no session ordinal covers, is finally listed somewhere.
+    assert got == {
+        "lectures": ["01_introduction/", "README.md"],
+        "readings": ["01_introduction/"],
+    }
+
+
+def test_index_reads_a_single_materials_repo_cohort(monkeypatch):
+    sections = _index(monkeypatch, MATHS_REPOS)
+    got = {s["name"]: [e["name"] for e in s["entries"]] for s in sections}
+    # Each top-level directory is its own section here, and `datasets/` needs no ordinal
+    # anywhere to appear. The root SYLLABUS.md takes the repo's name.
+    assert got == {
+        "datasets": ["housing.csv"],
+        "labs": ["01_lab/"],
+        "lectures": ["01_lecture/"],
+        "materials": ["SYLLABUS.md"],
+    }
+    # Plumbing is not material.
+    assert ".DS_Store" not in str(sections) and ".github" not in str(sections)
+
+
+def test_index_folds_a_directory_to_one_counted_link(monkeypatch):
+    lectures = next(
+        s for s in _index(monkeypatch, MATHS_REPOS) if s["name"] == "lectures"
+    )
+    entry = lectures["entries"][0]
+    # Never the directory's contents: one of these holds a couple of thousand files.
+    assert entry["name"] == "01_lecture/" and entry["files"] == 2
+    assert entry["url"].endswith("/tree/main/lectures/01_lecture")
+    assert lectures["files"] == 2
+
+
+def test_index_links_a_file_as_a_blob_and_counts_no_files(monkeypatch):
+    datasets = next(
+        s for s in _index(monkeypatch, MATHS_REPOS) if s["name"] == "datasets"
+    )
+    entry = datasets["entries"][0]
+    assert entry["url"].endswith("/blob/main/datasets/housing.csv")
+    assert "files" not in entry  # a file is not a folder with a count
+
+
+def test_index_is_empty_yaml_when_nothing_is_released(monkeypatch):
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
+    assert yaml.safe_load(site._materials_index("Cohort-f2026", ["materials"])) == {
+        "sections": []
+    }
+    # And with no repos at all, without touching the tree.
+    assert yaml.safe_load(site._materials_index("Cohort-f2026", [])) == {"sections": []}
+
+
+def test_index_puts_directories_before_files(monkeypatch):
+    # Both in ONE section, which needs the ordinal shape: a non-ordinal directory would
+    # become a section of its own rather than an entry beside the root file.
+    repos = {"m": ("01_zzz/a.txt", "aaa.md")}
+    entries = [e["name"] for e in _index(monkeypatch, repos)[0]["entries"]]
+    # A directory listing: the structure is what a reader scans first, unlike a session
+    # row, which leads with its deliverables.
+    assert entries == ["01_zzz/", "aaa.md"]
+
+
+def test_index_gives_a_non_ordinal_directory_its_own_section(monkeypatch):
+    # The rule that makes both cohort shapes work: an ordinal child means the REPO is the
+    # section, a non-ordinal one means the DIRECTORY is.
+    sections = _index(monkeypatch, {"m": ("handbook/rules.md", "aaa.md")})
+    assert {s["name"]: [e["name"] for e in s["entries"]] for s in sections} == {
+        "handbook": ["rules.md"],
+        "m": ["aaa.md"],
+    }
+
+
+def test_theme_pages_split_readings_out_only_where_there_is_an_index():
+    cohort = site._theme_pages(cohort=True)
+    assert "layout: readings" in cohort["readings.md"]
+    assert "layout: materials" in cohort["materials.md"]
+    assert "All Materials" in cohort["materials.md"]
+    # A public course site has no cohort repos to index, so /materials/ stays the readings
+    # page it has always been rather than becoming an empty catch-all.
+    public = site._theme_pages(cohort=False)
+    assert "readings.md" not in public
+    assert "layout: readings" in public["materials.md"]
+    assert "permalink: /materials/" in public["materials.md"]
+    # The public site hosts what it lists, so it claims no student gate.
+    assert site.COHORT_ACCESS_NOTE not in public["labs.md"]
+    assert site.COHORT_ACCESS_NOTE in cohort["labs.md"]
+    assert site.COHORT_READINGS_NOTE in cohort["readings.md"]
+
+
+def test_nav_lists_readings_before_all_materials():
+    nav = yaml.safe_load(site._nav_yaml(cohort=True))["items"]
+    assert [i["name"] for i in nav] == [
+        "Home",
+        "Schedule",
+        "Lectures",
+        "Labs",
+        "Readings",
+        "Assignments",
+        "All Materials",
+    ]
+    assert all(i["url"] and i["icon_class"] for i in nav)
+
+
+def test_no_nav_tab_can_point_at_a_page_this_site_does_not_get():
+    # The tab bar and the pages come from one table, and BOTH syncs generate the nav - so
+    # the public site cannot ship a Readings tab pointing at a page only cohort sites get.
+    for cohort in (True, False):
+        tabs = {
+            i["url"] for i in yaml.safe_load(site._nav_yaml(cohort=cohort))["items"]
+        }
+        generated = {
+            f"/{f.removesuffix('.md')}/" for f in site._theme_pages(cohort=cohort)
+        }
+        assert generated <= tabs  # every generated page has a tab
+        # ...and every remaining tab is one of the theme's own, never an orphan.
+        assert tabs - generated <= {"/", "/schedule/", "/assignments/"}
+    public = {i["url"] for i in yaml.safe_load(site._nav_yaml(cohort=False))["items"]}
+    cohort_tabs = {
+        i["url"] for i in yaml.safe_load(site._nav_yaml(cohort=True))["items"]
+    }
+    assert "/readings/" not in public  # a cohort-only page, so a cohort-only tab
+    # `sync_public_site` empties the _assignments collection deliberately, so a tab there
+    # would lead to a blank page.
+    assert "/assignments/" not in public
+    assert "/assignments/" in cohort_tabs
+
+
+def test_nav_order_does_not_depend_on_a_string_tie_break():
+    # Assignments used to be pinned to integer position 5, which tied with the fourth
+    # generated page - so the tab order came down to comparing "/assignments/" against
+    # "/materials/". It now follows the page it belongs behind.
+    names = [i["name"] for i in yaml.safe_load(site._nav_yaml(cohort=True))["items"]]
+    assert names.index("Assignments") == names.index("Readings") + 1
+    assert names.index("All Materials") == names.index("Assignments") + 1

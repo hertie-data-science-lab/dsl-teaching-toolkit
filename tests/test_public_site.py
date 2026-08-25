@@ -104,7 +104,11 @@ def test_publishes_every_discovered_section_not_just_lectures(published):
     assert f"{SERVED}/session-2/faq/faq.md" in files
     lab1 = files["_lectures/lab-01.md"]
     assert 'name: "lab - lab.ipynb"' in lab1
-    assert 'name: "lab - data/rows.csv"' in lab1
+    # A nested file is still SERVED (asserted above) but not listed: a rendered deck's
+    # assets have to stay reachable at their own paths, and linking each of them is what
+    # put 1,641 links on a live site. Jekyll serves no directory index, so - unlike the
+    # cohort site - there is no folder link to offer here either.
+    assert 'name: "lab - data/rows.csv"' not in lab1
     assert 'name: "faq - faq.md"' in files["_lectures/session-02.md"]
 
 
@@ -132,7 +136,7 @@ def test_session_with_no_content_gets_no_page(published):
 def test_reading_list_mode_publishes_citations_as_text_only(published):
     files = published(readings_mode="reading-list")
     s1 = files["_lectures/session-01.md"]
-    assert "### Reading list" in s1 and "Smith 2020" in s1
+    assert "reading_list: |" in s1 and "Smith 2020" in s1
     assert "- paper.pdf" in s1  # named, not hosted
     assert not [p for p in files if "/readings/" in p]  # no reading bytes served
 

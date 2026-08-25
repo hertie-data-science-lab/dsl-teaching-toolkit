@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
-from dsl_course import collect, deploy, scheduler, seed
+from dsl_course import collect, deploy, scheduler, seed, utils
 from dsl_course.schedule import (
     AssignmentEntry,
     Deploy,
@@ -1199,3 +1199,149 @@ def test_preflight_passes_dry_run_through(monkeypatch):
         monkeypatch, [SourceFault("releases.a", "gone", WHEN, "f")], dry_run=True
     )
     assert seen["kw"]["dry_run"] is True
+
+
+def _seed_source(path: Path, readme: str) -> None:
+    """A course materials repo: a root README + SYLLABUS, and one session folder."""
+    (path / "README.md").write_text(readme)
+    (path / "SYLLABUS.md").write_text("# Real syllabus\n")
+    d = path / "lectures" / "01_intro"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "slides.pdf").write_text("x")
+
+
+def _run_release(monkeypatch, seed_source, deploys) -> tuple[int, set[str]]:
+    """Run a real `deploy_many` and hand back (errors, what-landed-in-the-dest).
+
+    The dest is snapshotted when `git add` runs, not after the call returns: `deploy_many`
+    works in a TemporaryDirectory that is already gone by then."""
+    landed: set[str] = set()
+
+    def fake_gh(*args):
+        if args[:2] == ("repo", "clone"):
+            spec, dest = args[2], args[3]
+            path = Path(dest)
+            path.mkdir(parents=True, exist_ok=True)
+            if spec.startswith("Course-Org/"):
+                seed_source(path)
+            return (0, "")
+        return (0, "")
+
+    def fake_git(*args):
+        if "add" in args:
+            wd = Path(args[1])
+            landed.clear()
+            landed.update(
+                q.relative_to(wd).as_posix() for q in wd.rglob("*") if q.is_file()
+            )
+        return _git_with_staged_changes(*args)
+
+    monkeypatch.setattr(deploy, "gh", fake_gh)
+    monkeypatch.setattr(deploy, "git", fake_git)
+    monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    errors, _changed = deploy.deploy_many(
+        "Course-Org", "Cohort-Org", deploys, sync=False
+    )
+    return errors, landed
+
+
+UNEDITED = (
+    "<!-- FACULTY & INSTRUCTORS: replace the content below -->\n\n"
+    "> **Replace this placeholder.** This file becomes the students' README.\n\n"
+    f"## For faculty & instructors ({utils.FACULTY_ONLY_HEADING})\n\n"
+)
+
+
+def test_a_whole_repo_release_withholds_an_unedited_readme(monkeypatch):
+    # The incident: a whole-repo release carried the scaffold's faculty-facing README to
+    # students as their course overview. Everything else must still ship, and the run must
+    # go red so somebody fixes it - a silent skip reads as a broken release.
+    errors, landed = _run_release(
+        monkeypatch,
+        lambda p: _seed_source(p, UNEDITED),
+        [Deploy("cm", "/", "materials", None)],
+    )
+    assert "README.md" not in landed
+    assert {"SYLLABUS.md", "lectures/01_intro/slides.pdf"} <= landed
+    assert errors == 1
+
+
+def test_a_whole_repo_release_ships_a_real_readme(monkeypatch):
+    real = "# Foundations of ML\n\nWelcome - slides go up Tuesdays.\n"
+    errors, landed = _run_release(
+        monkeypatch,
+        lambda p: _seed_source(p, real),
+        [Deploy("cm", "/", "materials", None)],
+    )
+    assert "README.md" in landed and errors == 0
+
+
+def test_naming_an_unedited_readme_directly_withholds_it(monkeypatch):
+    # The other way it ships: named outright as the source path.
+    errors, landed = _run_release(
+        monkeypatch,
+        lambda p: _seed_source(p, UNEDITED),
+        [Deploy("cm", "README.md", "materials", None)],
+    )
+    assert landed == set() and errors == 1
+
+
+def test_a_section_release_never_guards_that_sections_own_readme(monkeypatch):
+    # Only the repo ROOT holds the stub. A section copy's own README is faculty writing
+    # about that section - here carrying the stub's exact TEXT, so only the path can tell
+    # them apart - and withholding it would be the guard overreaching.
+    def seed(path: Path) -> None:
+        (path / "lectures").mkdir(parents=True, exist_ok=True)
+        (path / "lectures" / "README.md").write_text(UNEDITED)
+
+    errors, landed = _run_release(
+        monkeypatch, seed, [Deploy("cm", "lectures", "materials", None)]
+    )
+    # Mirrored dest, so it lands at `lectures/README.md` - shipped, and not counted.
+    assert landed == {"lectures/README.md"} and errors == 0
+
+
+def test_withholding_the_stub_never_deletes_the_cohorts_own_readme(monkeypatch):
+    # The sequel to the incident: the placeholder leaked, faculty fixed it by editing the
+    # README in the COHORT repo (the fastest fix students see), and the course-org source
+    # is still the stub. Withholding by deleting after the copy would stage that fix as a
+    # deletion on the next whole-repo release - while the log said everything else shipped.
+    good = "# Foundations of ML\n\nWritten by faculty, in the cohort repo.\n"
+    landed: dict[str, str] = {}
+
+    def fake_gh(*args):
+        if args[:2] == ("repo", "clone"):
+            spec, dest = args[2], args[3]
+            path = Path(dest)
+            path.mkdir(parents=True, exist_ok=True)
+            if spec.startswith("Course-Org/"):
+                _seed_source(path, UNEDITED)
+            else:
+                (path / "README.md").write_text(good)  # the cohort's existing good one
+            return (0, "")
+        return (0, "")
+
+    def fake_git(*args):
+        if "add" in args:
+            wd = Path(args[1])
+            landed.clear()
+            landed.update(
+                {
+                    q.relative_to(wd).as_posix(): q.read_text()
+                    for q in wd.rglob("*")
+                    if q.is_file()
+                }
+            )
+        return _git_with_staged_changes(*args)
+
+    monkeypatch.setattr(deploy, "gh", fake_gh)
+    monkeypatch.setattr(deploy, "git", fake_git)
+    monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    errors, _changed = deploy.deploy_many(
+        "Course-Org", "Cohort-Org", [Deploy("cm", "/", "materials", None)], sync=False
+    )
+    assert errors == 1  # still reported
+    assert landed["README.md"] == good  # untouched, not replaced and not removed
+    assert "SYLLABUS.md" in landed  # everything else still shipped

@@ -52,6 +52,14 @@ The same button releases **code**, because code is just another path. Keep a gro
 - Copies are additive, so each release extends what students already have 
 - release the package base early (e.g. `mlpkg/core`) so partial releases still import. The [example schedule](../example-course/cohort-org/schedule.yml) shows the scheduled version of the same pattern (weeks 1, 3 and 5 each unlock an `mlpkg` subpackage).
 
+## The README is withheld until you write it
+
+Releasing the repo root (`/`), or naming `README.md` outright, copies the materials repo's
+`README.md` to students as their course overview. While it is still the scaffold's
+placeholder - addressed to faculty, with a "delete this section before releasing" block and
+a link to `MAINTAINING.md` - the release **skips it and goes red**. Everything else in the
+release still ships. Rewrite it for students and release again.
+
 ## Live updates to the deployed `<course>.github.io` site
 - Any released materials will automatically show up in the deployed site (i.e. their release triggers a redeploy).
   - Releases trigger **Sync site** for you, as does a push to `classroom-config/schedule.yml` or `people.yml`

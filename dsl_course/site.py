@@ -35,7 +35,7 @@ import shutil
 import sys
 import tempfile
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from functools import cache
@@ -71,7 +71,10 @@ from .utils import (
 # Public course site: served folder for the hosted section files, and the text-file
 # extensions treated as the (publishable) reading list rather than copyrighted material.
 PUBLIC_MATERIALS_DIR = "public-materials"
-READING_LIST_EXTS = {".md", ".markdown", ".txt", ".bib"}
+# Bare, not dotted: every test goes through `_ext`, so one spelling serves both sites. Two
+# spellings of one convention is how they come to disagree - and they had, on a name like
+# `.bib`, where `Path.suffix` reports nothing and `_ext` reports the extension.
+READING_LIST_EXTS = frozenset({"md", "markdown", "txt", "bib"})
 # The one section with copyright semantics of its own (--readings-mode); every OTHER
 # section a repo happens to have is published as files, whatever it's called.
 READINGS_SECTION = "readings"
@@ -120,6 +123,20 @@ def _liquid_raw(text: str) -> str:
     return f"{{% raw %}}\n{text}\n{{% endraw %}}"
 
 
+def _block(key: str, text: str) -> str:
+    """A multi-line front-matter value as a YAML literal block - faculty-written text (a
+    reading list) inlined verbatim, rather than folded onto one line by `_q`.
+
+    The indentation indicator (`|2`) is deliberate: without it YAML takes the block's
+    indentation from its first non-empty line, so a list that happens to start indented
+    would make every following line look like the end of the block and break the whole
+    file. Tabs are expanded for the same reason. Front matter is data, not a Liquid
+    template, so unlike the body route (`_liquid_raw`) a `{{` in the text needs no fence."""
+    lines = text.expandtabs(4).rstrip().splitlines()
+    body = "\n".join(f"  {ln}" if ln.strip() else "" for ln in lines)
+    return f"{key}: |2\n{body}\n"
+
+
 def _set_config(text: str, key: str, value: str) -> str:
     """Replace a top-level `key: ...` line in _config.yml, preserving the rest.
 
@@ -138,6 +155,178 @@ def _set_config(text: str, key: str, value: str) -> str:
     if n == 0:
         log(f"  (_config.yml has no `{key}:` key - not written; template drift?)")
     return new
+
+
+# The session pages. Their CONTENT is a theme layout (dsl-jekyll-theme's
+# `_layouts/lectures.html`, `labs.html`, `readings.html`, `materials.html`), so these are
+# the front matter that points at one plus the page's own intro line. Owned here, not left
+# to the site template, because a template edit only reaches orgs created after it - the
+# rendering used to live as inline Liquid in each site repo, and by the time it needed
+# changing there were seven live sites to hand-patch. Every later change to how sessions
+# render now ships from the theme alone.
+#
+# `_overwritten_edits` still reports a hand edit these replace, as it does for any other
+# generated surface. (It does NOT fire on the first sync that takes them over: the page a
+# site was generated with was authored by the token account, which reads as a machine.)
+#
+# The access sentences are the caller's, not the layout's: a COHORT site links its files
+# into the private materials repo, while the public open-courseware site hosts them for
+# anyone - so "visible to enrolled students" is true of one and false of the other.
+@dataclass(frozen=True)
+class _ThemePage:
+    """One generated page and its nav entry, declared together.
+
+    Together deliberately: the tab bar and the pages it points at were two structures
+    holding the same permalinks and titles, kept consistent only by both being written in
+    the same breath. The day someone generated the nav for the public site too, its
+    Readings tab would have pointed at a page that site never gets - a 404 nobody edited
+    into existence. One row per page makes that impossible."""
+
+    file: str
+    layout: str
+    title: str
+    permalink: str
+    icon: str
+    intro: str
+    # Which access sentence closes the intro: readings need their own, because the citation
+    # LIST is public even where the files behind it are not.
+    readings_note: bool = False
+    # Pages only a COHORT site has. A public course site has no cohort repos to index, so
+    # it keeps `/materials/` as the readings page it has always been.
+    cohort_only: bool = False
+
+
+_THEME_PAGES = (
+    _ThemePage(
+        "lectures.md",
+        "lectures",
+        "Lectures",
+        "/lectures/",
+        "fas fa-book-reader",
+        "Lecture slides by session (lab exercises are on the [Labs](/labs/) tab).",
+    ),
+    _ThemePage(
+        "labs.md",
+        "labs",
+        "Labs",
+        "/labs/",
+        "fas fa-flask",
+        "Lab exercises by session (lecture slides are on the [Lectures](/lectures/) tab).",
+    ),
+    _ThemePage(
+        "readings.md",
+        "readings",
+        "Readings",
+        "/readings/",
+        "fas fa-book",
+        "Readings by session.",
+        readings_note=True,
+        cohort_only=True,
+    ),
+    _ThemePage(
+        "materials.md",
+        "materials",
+        "All Materials",
+        "/materials/",
+        "fas fa-folder-open",
+        "Everything released to this cohort, whether or not it belongs to a session. "
+        "Folders open on GitHub.",
+        cohort_only=True,
+    ),
+)
+
+# The public site's `/materials/` - the readings page under its original name, which is
+# where that site has always kept them.
+_PUBLIC_MATERIALS_PAGE = _ThemePage(
+    "materials.md",
+    "readings",
+    "Materials",
+    "/materials/",
+    "fas fa-book",
+    "Readings by session.",
+    readings_note=True,
+)
+
+# Tabs the theme provides that are not generated pages (the template's own index.md and
+# the collections-driven Schedule/Assignments). `after` names the generated page each one
+# follows, so the order survives renaming a permalink or adding a page - positions used to
+# be hard-coded integers, and the 4th page tied with Assignments at 5, leaving the tab
+# order to a string comparison on the URL.
+_STATIC_NAV = (
+    ("Home", "/", "fa fa-home fa-lg", None),
+    ("Schedule", "/schedule/", "fas fa-calendar-alt", None),
+    ("Assignments", "/assignments/", "fas fa-user-graduate", "readings.md"),
+)
+
+
+def _site_pages(cohort: bool) -> tuple[_ThemePage, ...]:
+    """The pages this kind of site gets, in nav order."""
+    if cohort:
+        return _THEME_PAGES
+    return tuple(pg for pg in _THEME_PAGES if not pg.cohort_only) + (
+        _PUBLIC_MATERIALS_PAGE,
+    )
+
+
+def _theme_pages(cohort: bool) -> dict[str, str]:
+    """The `{path: content}` for the pages whose rendering lives in the theme."""
+    note = ""
+    if cohort:
+        note = COHORT_ACCESS_NOTE
+    return {
+        pg.file: (
+            f"---\nlayout: {pg.layout}\ntitle: {pg.title}\n"
+            f"permalink: {pg.permalink}\n---\n\n"
+            + pg.intro
+            + (f" {COHORT_READINGS_NOTE if pg.readings_note else note}" if note else "")
+            + "\n"
+        )
+        for pg in _site_pages(cohort)
+    }
+
+
+def _nav_yaml(cohort: bool) -> str:
+    """`_data/nav.yml` - the site's tab bar (the theme's `_includes/nav.html` reads it),
+    built from the same page table, so a tab can never point at a page this site lacks.
+
+    Home and Schedule lead; the generated pages follow in table order, with each static tab
+    slotted in after the page it belongs behind (`_STATIC_NAV`). Assignments follows
+    Readings on a cohort site and is dropped from a public one, whose `_assignments`
+    collection is deliberately emptied - a tab to a blank page is worse than no tab."""
+    pages = _site_pages(cohort)
+    rows = [
+        (name, url, icon)
+        for name, url, icon, after in _STATIC_NAV
+        if after is None and (cohort or url != "/assignments/")
+    ]
+    trailing = {
+        after: (name, url, icon)
+        for name, url, icon, after in _STATIC_NAV
+        if after is not None and (cohort or url != "/assignments/")
+    }
+    for pg in pages:
+        rows.append((pg.title, pg.permalink, pg.icon))
+        if pg.file in trailing:
+            rows.append(trailing[pg.file])
+    body = "\n\n".join(
+        f"- url: {url}\n  name: {name}\n  icon_class: {icon}"
+        for name, url, icon in rows
+    )
+    return (
+        "# Generated by `python3 -m dsl_course.site sync`. Rewritten on every sync - add a\n"
+        "# page of your own as a file in the repo and link it from `index.md` instead.\n"
+        "items:\n" + body + "\n"
+    )
+
+
+# A cohort site is public but its materials are not: every link points into the private
+# cohort repo, so only enrolled members can open one.
+COHORT_ACCESS_NOTE = "Released materials are visible to enrolled students."
+# Readings are the one case where the two halves differ: the citation list is published as
+# written, while the reading itself is only linked (this site must not host it).
+COHORT_READINGS_NOTE = (
+    "Citation lists are public; the files themselves are visible to enrolled students."
+)
 
 
 def _site_repo(org: str) -> str:
@@ -378,6 +567,27 @@ def _repo_tree(org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     return branch, repo_tree(org, repo, branch, "blob")
 
 
+def _source_prefix(subpath: str, folder: str) -> str:
+    """Where a discovered session folder sits in its repo - `subpath/folder`, or the bare
+    folder when the release landed at the repo root. Stated once: three callers need it,
+    and a fourth copy of the rule is how they come to disagree (same argument
+    `_deploy_dest` makes for the deploy side)."""
+    return f"{subpath}/{folder}" if subpath else folder
+
+
+def _source_section(repo: str, subpath: str) -> str:
+    """The section a DISCOVERED release source belongs to - its subpath, or the repo itself
+    when the folder sits at the root. The read-side twin of `_deploy_section`, which names
+    this rule in its own docstring; both must answer alike or a row's kind, its reading
+    list and its index heading disagree about the same folder."""
+    return subpath or repo
+
+
+def _gh_url(org: str, repo: str, branch: str, kind: str, path: str) -> str:
+    """A GitHub `blob`/`tree` URL for a path in a repo. One template, three callers."""
+    return f"https://github.com/{org}/{repo}/{kind}/{branch}/{quote(path)}"
+
+
 def _session_files(
     org: str, repo: str, subpath: str, folder: str
 ) -> list[tuple[str, str]]:
@@ -393,14 +603,256 @@ def _session_files(
     no API call per session or per subfolder; names are the path relative to the session
     folder, so nested files stay distinguishable, and the ordering is by path for a
     stable diff."""
-    prefix = f"{subpath}/{folder}" if subpath else folder
+    prefix = _source_prefix(subpath, folder)
     branch, paths = _repo_tree(org, repo)
-    base = f"https://github.com/{org}/{repo}/blob/{branch}"
     return [
-        (path[len(prefix) + 1 :], f"{base}/{quote(path)}")
+        (path[len(prefix) + 1 :], _gh_url(org, repo, branch, "blob", path))
         for path in paths
         if path.startswith(f"{prefix}/")
     ]
+
+
+# The link name for the escape hatch out of an allowlist: whatever the list does not
+# name is still one click away, rather than invisible.
+_BROWSE_ALL = "browse the folder"
+
+
+def _link_extensions(meta: dict) -> frozenset[str]:
+    """`site_link_extensions` from a course's `dsl-course.yml`, lowercased and dot-stripped.
+
+    The OPTIONAL allowlist narrowing what a session row links (see `_shape_links`); absent
+    or empty means the default folder-shaped listing. A bare string
+    (`site_link_extensions: pdf, html`) is accepted alongside a list - it is the shape
+    faculty reach for first, and refusing it would only produce a silently unfiltered site."""
+    raw = meta.get("site_link_extensions") or []
+    if isinstance(raw, str):
+        raw = raw.replace(",", " ").split()
+    return frozenset(str(x).strip().lstrip(".").lower() for x in raw if str(x).strip())
+
+
+def _ext(name: str) -> str:
+    """A file name's extension, lowercased and without the dot ('' when it has none). Not
+    `Path().suffix`, which would call the whole of `Makefile` an extension-less name but
+    read `figure-1` in `figure-1.tar.gz` inconsistently with the allowlist faculty write."""
+    return name.rsplit(".", 1)[-1].lower() if "." in name.rsplit("/", 1)[-1] else ""
+
+
+def _shape_links(
+    blobs: list[tuple[str, str]], tree_base: str, allow: frozenset[str]
+) -> list[tuple[str, str]]:
+    """The links a session row actually SHOWS, out of every file it released.
+
+    Release is recursive (see `_session_files`) because a release copies a session folder
+    wholesale, and it must stay that way. DISPLAY must not be: a rendered Quarto/Rmd deck is
+    one deliverable plus hundreds of assets (`libs/`, `pics/`, `<name>_files/`), and linking
+    each of them put 1,641 links across 27 rows on a live cohort site - burying the three
+    files a student actually opens. Nothing here changes what ships, only what is listed.
+
+    Two shapes, and neither leaves a released file unreachable from the page:
+
+    - DEFAULT (`allow` empty) - the folder as GitHub shows it. A file at the session
+      folder's root links to the file; each immediate subfolder gets ONE link to its tree,
+      named with its file count. Nothing to configure, and a course that keeps handouts in
+      `handouts/` reaches them in one more click rather than losing them.
+    - ALLOWLIST (`site_link_extensions`) - only files with those extensions, at any depth,
+      plus one "browse the folder" link, so a file the list does not name is still one
+      click away instead of invisible.
+
+    `blobs` is (path-relative-to-the-session-folder, url) as `_session_files` returns it;
+    `tree_base` is the session folder's own GitHub tree URL. Order follows `blobs` (path
+    sorted), files before folders, for a stable diff."""
+    if allow:
+        return [(n, u) for n, u in blobs if _ext(n) in allow] + [
+            (_BROWSE_ALL, tree_base)
+        ]
+    files = [(n, u) for n, u in blobs if "/" not in n]
+    counts: dict[str, int] = {}
+    for name, _ in blobs:
+        head, sep, _rest = name.partition("/")
+        if sep:
+            counts[head] = counts.get(head, 0) + 1
+    folders = [
+        (f"{d}/ ({n} file{'' if n == 1 else 's'})", f"{tree_base}/{quote(d)}")
+        for d, n in counts.items()
+    ]
+    return files + folders
+
+
+def _session_links(
+    org: str, repo: str, subpath: str, folder: str, allow: frozenset[str]
+) -> list[tuple[str, str]]:
+    """`_session_files` shaped for display (`_shape_links`), with the session folder's own
+    GitHub tree URL for the folder links. The branch comes from the memoised `_repo_tree`,
+    so naming the folder costs no extra API call."""
+    branch, _paths = _repo_tree(org, repo)
+    tree = _gh_url(org, repo, branch, "tree", _source_prefix(subpath, folder))
+    return _shape_links(_session_files(org, repo, subpath, folder), tree, allow)
+
+
+def _row_links(
+    org: str, repo: str, subpath: str, folder: str, allow: frozenset[str]
+) -> list[tuple[str, str]]:
+    """One released section folder's display links - `_session_links`, minus the citation
+    files whose CONTENT the row already inlines (see `_released_reading_list`). Those files
+    ARE the reading list; listing them again as downloads beside it says the same thing
+    twice. The same rule the public site's `reading-list` mode already follows."""
+    links = _session_links(org, repo, subpath, folder, allow)
+    if _source_section(repo, subpath) != READINGS_SECTION:
+        return links
+    return [(n, u) for n, u in links if _ext(n) not in READING_LIST_EXTS]
+
+
+def _released_reading_list(cohort_org: str, sources: list[tuple[str, str, str]]) -> str:
+    """The reading list a session row shows: the TEXT of every citation file released into
+    its `readings` section, inlined verbatim.
+
+    Faculty write the list as prose and that file IS the list - the same
+    `READING_LIST_EXTS` convention `_reading_list_md` already applies on the public site,
+    so one rule covers both. Any OTHER file (a PDF) is left to the links beside it: this
+    site repo is PUBLIC, so it never hosts the reading itself.
+
+    Reads the released COHORT copy, so a reading list appears on the same gate as every
+    other material. `get_file_content` raises on anything but a 404 - a rate-limited read
+    must not republish the row with the reading list silently emptied."""
+    parts = []
+    for repo, subpath, folder in sources:
+        if _source_section(repo, subpath) != READINGS_SECTION:
+            continue
+        prefix = _source_prefix(subpath, folder)
+        for name, _url in _session_files(cohort_org, repo, subpath, folder):
+            if _ext(name) not in READING_LIST_EXTS:
+                continue
+            text = (
+                get_file_content(cohort_org, repo, f"{prefix}/{name}") or ""
+            ).strip()
+            if text:
+                parts.append(text)
+    return "\n\n".join(parts)
+
+
+def _index_entry(repo: str, path: str) -> tuple[str, str, bool, str]:
+    """(section, entry name, is-a-directory, path to the entry) for one released blob, for
+    the All Materials index.
+
+    The ordinal decides only the LEVEL a section is read at, never whether a file shows up:
+
+    - a repo whose top-level directories are session folders (`01_intro/...`) IS one
+      section, and those folders are its entries - the shape a cohort gets from
+      `cohort_dest_repo: lectures`;
+    - a repo holding `lectures/`, `labs/`, `datasets/` gives one section EACH, their own
+      children as entries - the shape from a single `materials` repo;
+    - a file at a repo's root takes the repo's name as its section, which is how a released
+      `SYLLABUS.md` reaches the site at all. Every other page is keyed on a session
+      ordinal, so until this index existed a root file was released and then invisible.
+
+    Both live cohort shapes therefore land where a reader expects, and nothing needs an
+    ordinal to be listed. Same reading as `_deploy_section` - head-of-path, else the repo -
+    one level down."""
+    head, sep, rest = path.partition("/")
+    if not sep:
+        return repo, head, False, head
+    if session_number(head) is not None:
+        return repo, head, True, head
+    nxt, deeper, _rest = rest.partition("/")
+    return head, nxt, bool(deeper), f"{head}/{nxt}"
+
+
+@dataclass
+class _IndexEntry:
+    """One row of a section in the All Materials index - a file, or a folded directory
+    carrying the number of files inside it."""
+
+    name: str
+    is_dir: bool
+    url: str
+    files: int = 0
+
+    @property
+    def label(self) -> str:
+        """How the row reads: a directory keeps its trailing slash so it is obviously not
+        a file."""
+        return f"{self.name}/" if self.is_dir else self.name
+
+
+def _indexable_repos(
+    sched: schedule.Schedule, release_sources: list[tuple[str, str, str, int]]
+) -> set[str]:
+    """Which cohort repos the All Materials index is allowed to read.
+
+    A POSITIVE allowlist, deliberately. `discover_cohort_repos` works by exclusion - a repo
+    is content unless it carries an infra topic - and that topic is written once, on
+    creation, with its result ignored (`assign.py`), so a submission repo whose tag failed
+    is content forever. That was survivable while a repo only reached the site by holding
+    `NN_` session folders; this index reads whole trees, and the site repo it writes into is
+    PUBLIC, so the same slip would publish every path of a student's private work.
+
+    Two positive signals, both faculty declarations: a repo the release plan names as a
+    destination, and a repo discovery actually found a released session in (which covers a
+    manual release into a repo the plan never mentions). Non-ordinal material - a root
+    `SYLLABUS.md`, a flat `datasets/` - is still indexed, because the signal is the REPO,
+    not the folder shape inside it."""
+    planned = {d.cohort_dest_repo for r in sched.releases for d in r.deploy}
+    return planned | {repo for repo, _sub, _folder, _n in release_sources}
+
+
+def _materials_index(cohort_org: str, content_repos: list[str]) -> str:
+    """`_data/materials.yml` - every file released to this cohort, grouped into sections
+    and folded one level, for the All Materials tab.
+
+    The catch-all. Every other page is curated: a row exists because the schedule named a
+    session, and its links are the files of that session. This is the complete index, so
+    it answers the two questions the curated pages cannot - a student's "what do I have?"
+    and a teaching team's "did my file actually ship?" - including material no session
+    ordinal covers.
+
+    Folded, for the same reason the session rows are (`_shape_links`): a directory holds up
+    to a couple of thousand files, so an entry that is a directory is ONE counted link to
+    its tree, never its contents. Dotfiles are skipped as plumbing (`.gitkeep`, a stray
+    `.DS_Store`, `.github`), so they are not mistaken for material.
+
+    Directories lead, then files, both alphabetically: this is a directory listing, where
+    the structure is what a reader scans - unlike a session row, which leads with the
+    deliverables because there the files ARE the material."""
+    found: dict[str, dict[str, _IndexEntry]] = {}
+    for repo in sorted(content_repos):
+        branch, paths = _repo_tree(cohort_org, repo)
+        for path in paths:
+            # Cheaper than splitting the path: a leading dot, or a dot after any slash.
+            if path.startswith(".") or "/." in path:
+                continue  # plumbing, not material
+            section, name, is_dir, entry = _index_entry(repo, path)
+            rows = found.setdefault(section, {})
+            row = rows.get(f"{repo}/{entry}")
+            if row is None:
+                row = rows[f"{repo}/{entry}"] = _IndexEntry(
+                    name,
+                    is_dir,
+                    _gh_url(
+                        cohort_org, repo, branch, "tree" if is_dir else "blob", entry
+                    ),
+                )
+            row.files += 1
+    rows_out: list[str] = []
+    for section in sorted(found):
+        entries = sorted(
+            found[section].values(), key=lambda e: (not e.is_dir, e.name.lower())
+        )
+        rows_out.append(f'  - name: "{_q(section)}"')
+        rows_out.append(f"    files: {sum(e.files for e in entries)}")
+        rows_out.append("    entries:")
+        for e in entries:
+            rows_out.append(f'      - name: "{_q(e.label)}"')
+            rows_out.append(f"        url: {e.url}")
+            if e.is_dir:
+                rows_out.append(f"        files: {e.files}")
+    header = (
+        "# Generated by `python3 -m dsl_course.site sync` - every released file,\n"
+        "# grouped by section. Edit nothing here; it is rewritten on every sync.\n"
+    )
+    # Stated, not reached: `sections: []` is the empty index, the same shape
+    # `_links_block` uses for a row with nothing to link.
+    body = "sections:\n" + "\n".join(rows_out) if rows_out else "sections: []"
+    return header + body + "\n"
 
 
 # A week's lecture and its lab are two separate rows of the theme's schedule table, and
@@ -460,10 +912,10 @@ def _links_block(sections: list[tuple[str, list[tuple[str, str]]]]) -> str:
 def _lecture_entry(
     cohort_org: str,
     session: str,
-    when: date | datetime,
+    row: _PlannedRow,
     sources: list[tuple[str, str, str]],
     kind: str = "lecture",
-    planned_dests: Iterable[str] = (),
+    allow: frozenset[str] = frozenset(),
 ) -> str:
     """One row of a teaching week: the lecture (`kind='lecture'`) or the lab
     (`kind='lab'`), which the theme renders as separate schedule lines out of the same
@@ -471,30 +923,43 @@ def _lecture_entry(
 
     `sources` is (repo, subpath, folder) triples already confirmed (by
     seed.discover_release_sources) to hold this exact session - callers pass only the
-    sources known to match, so every call here is a real hit, not a probe. `when` is the
-    release datetime from schedule.yml (its real time is shown) or a synthesised date
-    fallback (rendered at 09:00) when the session isn't in the release plan.
+    sources known to match, so every call here is a real hit, not a probe.
+
+    `row` is what the PLAN says about this session (`_PlannedRow`): when the class happens,
+    where its deploys will land, and the name and blurb its entry declared. A row discovery
+    found but the plan never named gets a synthesised one, so there is no second shape to
+    handle here. Taking the row whole rather than six of its fields is what stops this
+    signature growing once per plan field.
+
+    `title` stays the ordinal (`Session 3`) - what the theme has always assumed it is.
+    `subtitle` and `description` are the plan's `title:` / `description:`: the session's
+    name, and a sentence about it. Both are omitted when empty rather than written blank,
+    so the theme can test for them.
 
     EMPTY `sources` is the not-yet-released row: the session is in the plan but its
     materials have not shipped, so the row carries no links, flags itself `unreleased:
-    true` for the theme, and names the `planned_dests` (`repo/path`) the copy is going to
-    land in. The whole term is on the schedule from the day it is written, exactly as an
+    true` for the theme, and names the destinations the copy is going to land in. The whole term is on the schedule from the day it is written, exactly as an
     assignment's row appears from the day its template repo exists rather than the day it
     hands out.
 
-    Only `tldr`, the links and the body differ between the two - the front matter is one
-    template, so a field added to the row (the way the event rows grew `tbc:`) cannot land
-    on one kind of row and miss the other."""
+    Only the links, the reading list and the body differ between the two - the front matter
+    is one template, so a field added to the row (the way the event rows grew `tbc:`)
+    cannot land on one kind of row and miss the other."""
     title = f"{_ROW_NOUN[kind]} {session}"
+    subtitle, description = row.subtitle, row.description
+    reading_list = ""
     if sources:
         flags = ""
-        tldr = f"Released materials for {title.lower()} (enrolled students only)."
         links = _links_block(
             [
-                (subpath or repo, _session_files(cohort_org, repo, subpath, folder))
+                (
+                    _source_section(repo, subpath),
+                    _row_links(cohort_org, repo, subpath, folder, allow),
+                )
                 for repo, subpath, folder in sources
             ]
         )
+        reading_list = _released_reading_list(cohort_org, sources)
         body = (
             f"Materials for {title.lower()}. Open the links above (you must be an "
             f"enrolled member of `{cohort_org}`)."
@@ -505,22 +970,33 @@ def _lecture_entry(
         # below carries the meaning on its own. Without it a placeholder is
         # indistinguishable from a released folder that happens to hold no files.
         flags = "unreleased: true\n"
-        tldr = f"Not released yet - {title.lower()} materials appear here on release."
         links = _links_block([])
-        where = ", ".join(f"`{d}`" for d in planned_dests)
+        where = ", ".join(f"`{d}`" for d in row.dests)
         body = (
             f"Materials for {title.lower()} are not released yet"
-            + (f" - they appear in {where}" if where else "")
-            + f" once the teaching team releases them to `{cohort_org}`."
+            + (f" - they will appear in {where} when released" if where else "")
+            + "."
         )
+        # `subtitle` and `description` are deliberately KEPT here. They describe what the
+        # session is about, which is known the day the plan is written; the body next to
+        # them describes whether its files have shipped. So the whole term reads as a
+        # syllabus from day one, rather than as a list of empty rows that fills in weekly.
+    # The plan ships readings for this row but no readings section has landed, so the
+    # Readings tab says so rather than leaving the session off the page entirely. Decided
+    # here, beside the reading list it is about, rather than by the caller.
+    released = {_source_section(repo, subpath) for repo, subpath, _folder in sources}
+    if row.readings_planned and READINGS_SECTION not in released:
+        flags += "readings_pending: true\n"
     return (
         f"---\n"
         f"type: {kind}\n"
-        f"date: {_iso_when(when)}\n"
+        f"date: {_iso_when(row.when)}\n"
         f'title: "{title}"\n'
-        f'tldr: "{tldr}"\n'
-        f"{flags}"
-        f"{links}\n"
+        + (f'subtitle: "{_q(subtitle)}"\n' if subtitle else "")
+        + (f'description: "{_q(description)}"\n' if description else "")
+        + flags
+        + (_block("reading_list", reading_list) if reading_list else "")
+        + f"{links}\n"
         f"---\n"
         f"{body}\n"
     )
@@ -631,17 +1107,36 @@ def _deploy_dest(deploy: schedule.Deploy) -> str:
 def _deploy_section(deploy: schedule.Deploy) -> str:
     """The section a deploy lands in - the top-level directory of its destination path,
     or the destination repo itself when the path is a bare session folder (a release into
-    a repo that IS one section). The same `subpath or repo` shape discovery reports for
+    a repo that IS one section). The read-side twin is `_source_section`, which reports for
     an already-released folder, so both sides classify a row the same way."""
     head, sep, _ = _deploy_dest(deploy).partition("/")
     return head if sep else deploy.cohort_dest_repo
 
 
-def _planned_sessions(
-    sched: schedule.Schedule,
-) -> dict[tuple[str, str], tuple[datetime, list[str]]]:
-    """Every session row the PLAN declares - (ordinal, 'lecture'|'lab') -> (when that
-    session happens, the cohort-side destinations its deploys will land in).
+@dataclass
+class _PlannedRow:
+    """What the release PLAN says about one session row, before anything has shipped.
+
+    `when` is the earliest event_datetime touching the row; `dests` the cohort-side
+    `repo/path`s its deploys will land in (ordered, deduped); `subtitle` and `description`
+    the display text its entry declared; `readings_planned` whether any of its deploys
+    targets the readings section - which is how a row can say a reading list is still to
+    come rather than leaving the session off the Materials tab entirely."""
+
+    when: date | datetime
+    dests: dict[str, None] = field(default_factory=dict)
+    subtitle: str = ""
+    description: str = ""
+    readings_planned: bool = False
+    # When the entry that supplied `subtitle`/`description` happens. Kept on the row so
+    # one row's state lives in one object: `when` is the min over every entry touching the
+    # row, which is not the same thing as "which entry named it".
+    named_at: datetime | None = None
+
+
+def _planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], _PlannedRow]:
+    """Every session row the PLAN declares - (ordinal, 'lecture'|'lab') -> what the plan
+    says about it (see `_PlannedRow`).
 
     Keyed by the ordinal and section of each deploy's destination folder, so the site can
     both date a released row from the plan that released it AND raise a row for a session
@@ -652,7 +1147,7 @@ def _planned_sessions(
     when several releases touch the same row, and the destinations are collected in plan
     order (deduped - two deploys of one entry can name the same one) so a placeholder row
     can name where its materials are going to appear."""
-    out: dict[tuple[str, str], tuple[datetime, dict[str, None]]] = {}
+    out: dict[tuple[str, str], _PlannedRow] = {}
     for release in sched.releases:
         if release.when is None:
             continue  # event_datetime: tbc - undated, can't place a session
@@ -661,13 +1156,25 @@ def _planned_sessions(
             n = session_number(dest.rsplit("/", 1)[-1])
             if n is None:
                 continue
-            key = (str(n), _row_kind(_deploy_section(d)))
+            section = _deploy_section(d)
+            key = (str(n), _row_kind(section))
+            row = out.setdefault(key, _PlannedRow(when=release.when))
+            row.when = min(row.when, release.when)
             # dict-as-ordered-set, not a list: dedupe where the destinations are
             # collected, so the consumer is a plain join and the returned value means
             # what the docstring says it does.
-            when, dests = out.get(key, (release.when, {}))
-            dests[f"{d.cohort_dest_repo}/{dest}"] = None
-            out[key] = (min(when, release.when), dests)
+            row.dests[f"{d.cohort_dest_repo}/{dest}"] = None
+            row.readings_planned = row.readings_planned or section == READINGS_SECTION
+            # A row is NAMED by the same entry it is DATED by: the earliest one touching
+            # it. Title and description are adopted as a pair - they describe one session,
+            # and taking the name from one entry and the blurb from another would read as
+            # a mismatch nobody wrote.
+            if (release.title or release.description) and (
+                row.named_at is None or release.when < row.named_at
+            ):
+                row.named_at = release.when
+                row.subtitle = release.title
+                row.description = release.description
     return out
 
 
@@ -921,6 +1428,13 @@ def _sync_site_repo(
 
     A pushed sync that discarded someone's manual edit also files an issue naming it - a
     courtesy that never changes this function's exit code."""
+    # `--all-cohorts` loops this in one process, and the index reads EVERY release
+    # destination's tree, not just the session-bearing ones - so the memo would pin a few
+    # hundred KB per repo for the whole run. Cleared on ENTRY rather than on the way out:
+    # most cohorts in a daily cron are already up to date and return early, so an exit-path
+    # clear ran on the rare path and never on the common one. Keys include the org, so this
+    # is purely about memory, never staleness.
+    _repo_tree.cache_clear()
     site = _site_repo(org)
     just_scaffolded = False
     if not repo_exists(org, site):
@@ -1020,7 +1534,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # lecture's row (and never shows up twice, on the schedule and the labs page).
         sources_by_row: dict[tuple[str, str], list[tuple[str, str, str]]] = {}
         for repo, subpath, folder, n in release_sources:
-            key = (str(n), _row_kind(subpath or repo))
+            key = (str(n), _row_kind(_source_section(repo, subpath)))
             sources_by_row.setdefault(key, []).append((repo, subpath, folder))
         assignments = seed.discover_assignments(course_org)
         # A persistent course org holds per-year templates (assignment-*-fYYYY); a cohort
@@ -1057,15 +1571,21 @@ def sync_site(course_org: str, cohort_org: str) -> int:
             f"{len(assignments)} assignment(s)"
         )
 
+        # What a session row LINKS, out of everything it released - the default
+        # folder-shaped listing unless this course declared an extension allowlist.
+        allow = _link_extensions(meta)
+
         def session_row(s: str, kind: str) -> str:
             """One row, from the plan where it has one and a synthesised weekly date where
-            it does not. Unpacked once: reaching into `planned` twice needed a `(None, [])`
-            sentinel whose first half existed only to be indexable."""
-            when, dests = planned.get(
-                (s, kind), (start + timedelta(days=int(s) * 7), ())
+            it does not. A row discovery found but the plan never named (the manual button,
+            an off-plan extra) gets a stand-in row: the weekly fallback date and no declared
+            name. It still appears, which is the point - and resolving the absence HERE is
+            what keeps the renderer to one shape rather than a field-by-field fallback."""
+            row = planned.get((s, kind)) or _PlannedRow(
+                when=start + timedelta(days=int(s) * 7)
             )
             return _lecture_entry(
-                cohort_org, s, when, sources_by_row.get((s, kind), []), kind, dests
+                cohort_org, s, row, sources_by_row.get((s, kind), []), kind, allow
             )
 
         config = {}
@@ -1120,7 +1640,18 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                     cohort_org,
                     _yaml_file(cohort_org, "classroom-config", "people.yml"),
                     edit_at=f"{cohort_org}/classroom-config/people.yml",
-                )
+                ),
+                "_data/nav.yml": _nav_yaml(cohort=True),
+                # The catch-all index behind the All Materials tab: every released file,
+                # including what no session ordinal covers - across the repos faculty
+                # actually release into, never everything discovery failed to exclude.
+                "_data/materials.yml": _materials_index(
+                    cohort_org,
+                    sorted(
+                        set(content_repos) & _indexable_repos(sched, release_sources)
+                    ),
+                ),
+                **_theme_pages(cohort=True),
             },
             # Assignment handout/due dates come from schedule.yml when set (keyed on the
             # assignment slug), else a synthesised fortnightly cadence.
@@ -1148,18 +1679,34 @@ def sync_site(course_org: str, cohort_org: str) -> int:
 
 
 def _public_links(local_dir: Path, url_prefix: str) -> list[tuple[str, str]]:
-    """(display-name, site-relative URL) for every file under a copied session folder.
+    """(display-name, site-relative URL) for the files of a copied session folder that the
+    page LISTS - not every file it serves.
 
     URLs are relative to the public site root (`/PUBLIC_MATERIALS_DIR/...`), so they
     resolve for the public - never blob/raw URLs into the private source repo. Names are
     the path relative to the session folder (so two nested `notes.pdf` stay
-    distinguishable, as on the cohort site) and URL-encoded so spaces etc. survive."""
-    out = []
-    for p in sorted(local_dir.rglob("*")):
-        if p.is_file():
-            rel = p.relative_to(local_dir).as_posix()
-            out.append((rel, f"{url_prefix}/{quote(rel)}"))
-    return out
+    distinguishable, as on the cohort site) and URL-encoded so spaces etc. survive.
+
+    Every file stays COPIED and served whatever this returns - a rendered deck's `libs/`
+    and `<name>_files/` must remain reachable at their original relative paths or the
+    `.html` loads with no styles and no figures. Only the LISTING is filtered.
+
+    Nested files are folded away ONLY when there is something at the root to fold them
+    into. That is what the fold means - "these are the assets of that deliverable" - and
+    with no root file they are not assets, they are the material. Listing them anyway is
+    also the only way to keep them reachable: Jekyll serves no directory index, so this
+    host has no folder link to offer instead, and a session whose files all sit in
+    subfolders would otherwise be copied, served, and linked from nowhere - or, since a
+    section with no links is skipped entirely, get no page at all.
+
+    `site_link_extensions` deliberately does NOT apply here, for the same reason: a file
+    the allowlist excluded would be served and unreachable. The cohort site takes the extra
+    narrowing because it CAN offer a folder link; this one keeps every file reachable."""
+    files = sorted(q for q in local_dir.rglob("*") if q.is_file())
+    rels = [q.relative_to(local_dir).as_posix() for q in files]
+    if any("/" not in rel for rel in rels):
+        rels = [rel for rel in rels if "/" not in rel]
+    return [(rel, f"{url_prefix}/{quote(rel)}") for rel in rels]
 
 
 def _reading_list_md(readings_session_dir: Path) -> str:
@@ -1172,7 +1719,7 @@ def _reading_list_md(readings_session_dir: Path) -> str:
     for p in sorted(readings_session_dir.rglob("*")):
         if not p.is_file():
             continue
-        if p.suffix.lower() in READING_LIST_EXTS:
+        if _ext(p.name) in READING_LIST_EXTS:
             text = p.read_text(encoding="utf-8", errors="replace").strip()
             if text:
                 parts.append(text)
@@ -1190,26 +1737,30 @@ def _public_lecture_entry(
 ) -> str:
     """A public session entry: hosted links for every published section (whatever this
     repo's sections are - `lectures`, `faq`, ... - plus `readings` in actual-readings
-    mode), plus the reading list as inline text when in reading-list mode. Public-facing
+    mode), plus the reading list in `reading_list:` when in reading-list mode. Public-facing
     body - no 'enrolled students only' gate. The week's `labs` section is a `lab` row of
     its own (`kind`), exactly as on the cohort site.
+
+    The reading list goes in the front matter, not the body, so that BOTH sites feed the
+    theme's Materials layout from one field rather than each carrying its own mechanism -
+    and so the text needs no `{% raw %}` fence (front matter is data, not a template).
+
+    A public course site has no schedule.yml to read, so it declares no `subtitle:` or
+    `description:` of its own; the theme simply shows the ordinal.
 
     `section_links` is `(section, [(name, url), ...])` in publication order; each link is
     named `<section-singular> - <file>`, as on the cohort site."""
     links_block = _links_block(section_links)
     title = f"{_ROW_NOUN[kind]} {session}"
-    body = f"Materials for {title.lower()}."
-    if reading_list_md:
-        body += "\n\n### Reading list\n\n" + _liquid_raw(reading_list_md)
     return (
         f"---\n"
         f"type: {kind}\n"
         f"date: {_iso_when(when)}\n"
         f'title: "{title}"\n'
-        f'tldr: "Materials for {title.lower()}."\n'
-        f"{links_block}\n"
+        + (_block("reading_list", reading_list_md) if reading_list_md else "")
+        + f"{links_block}\n"
         f"---\n"
-        f"{body}\n"
+        f"Materials for {title.lower()}.\n"
     )
 
 
@@ -1352,6 +1903,9 @@ def sync_public_site(
                     edit_at=f"the `people:` block of {course_org}/.github/dsl-course.yml",
                     include_tas=False,
                 ),
+                # No cohort repos to index, so `/materials/` stays the readings page.
+                "_data/nav.yml": _nav_yaml(cohort=False),
+                **_theme_pages(cohort=False),
                 # Persist the settings THIS publish used, in the site repo itself, so the
                 # daily cron can repeat it with no inputs (see resync_public_site).
                 PUBLISH_CONFIG: (
