@@ -14,6 +14,10 @@ releases:
         course_source_path: syllabus.md     # a root file
   lecture-1:
     event_datetime: 2026-09-01T10:00
+    title: Perceptrons and gradient descent   # the session's name, beside "Session 1"
+    description: >                            # a sentence about it, on the Lectures tab
+      What a linear model can and cannot separate, and how gradient descent finds its
+      weights.
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: lectures/01_week-1
@@ -24,11 +28,21 @@ releases:
         course_source_path: mlpkg/core
   lab-1:
     event_datetime: 2026-09-03T14:00
+    title: Your first classifier
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: labs/01_week-1
+      # Solutions AFTER the lab: a second copy on its own clock, landing inside the same
+      # session folder. Students work the empty scripts in the session and the worked
+      # answers appear that evening. Staged outside labs/01_week-1 in the course org - a
+      # solutions folder INSIDE it would ship with the copy above.
+      - course_source_repo: course-materials-f2026
+        course_source_path: solutions/labs/01_week-1
+        cohort_dest_path: labs/01_week-1/solutions
+        deploy_datetime: 2026-09-03T18:00
   lecture-2:
     event_datetime: 2026-09-08T10:00
+    title: Backpropagation
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: lectures/02_week-2

@@ -194,7 +194,9 @@ def scaffold_materials(org: str, tag: str) -> int:
         "Any top-level directory containing at least one ordinal-prefixed subdirectory "
         "(`01_`, `02_`, `03_`, ...) is a releasable section - no config to declare it:\n\n"
         "- `lectures/01_session-1/` - one folder per session's lecture files\n"
-        "- `readings/01_session-1/` - one folder per session's readings\n"
+        "- `readings/01_session-1/` - one folder per session's readings. A text file here "
+        "(`reading.md`, `.txt`, `.bib`) IS the reading list shown on the cohort site; "
+        "other files in it are linked, not published\n"
         "- `labs/01_session-1/` - one folder per session's lab (delete the `labs/` folder "
         "if your course has none)\n"
         "- `*syllabus*`, `README.md` (root) - released via the syllabus / README toggles\n\n"
@@ -225,7 +227,16 @@ def scaffold_materials(org: str, tag: str) -> int:
     user_files = {
         "README.md": readme.encode(),
         "lectures/01_session-1/.gitkeep": b"",
-        "readings/01_session-1/.gitkeep": b"",
+        # A stub, not a .gitkeep: a text file here IS the published reading list (its
+        # contents are inlined on the site's Materials tab), and an empty folder gave no
+        # sign of that - the tab then reads blank with nothing to explain why.
+        "readings/01_session-1/reading.md": (
+            "# Session 1 readings\n\n"
+            "- Author, *Title*, ch. 1.\n"
+            "- Author (2026), \"Paper title\", doi:...\n\n"
+            "This file is the reading list students see. Put reading PDFs in this folder "
+            "too - they are linked, never published.\n"
+        ).encode(),
         "labs/01_session-1/.gitkeep": b"",
         "SYLLABUS.md": f"# {tag} syllabus\n\nReplace with the real syllabus.\n".encode(),
     }

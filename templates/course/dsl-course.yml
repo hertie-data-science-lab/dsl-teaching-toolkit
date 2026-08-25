@@ -3,6 +3,10 @@ org_name: {org_name}
 course_name: {course_name}
 course_code: {course_code}
 # course_description: One or two sentences, on ONE line - the blurb on every cohort site.
+# site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: link ONLY these file types on the
+#   # site. Default (unset): each session's root files, plus one link per subfolder - so a
+#   # rendered deck lists the deck, not its hundreds of assets. Either way everything you
+#   # release still ships, and the folder itself is always one click away.
 
 # `course_name`, `course_code` and `course_description` are what reach the cohort websites
 # (`org_name` does not - it names the org). Editing them here re-syncs every cohort site.

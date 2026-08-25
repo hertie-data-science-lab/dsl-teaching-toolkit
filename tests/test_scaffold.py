@@ -78,7 +78,9 @@ def test_fresh_materials_repo_gets_the_full_skeleton(fake):
         "MAINTAINING.md",
         "SYLLABUS.md",
         "lectures/01_session-1/.gitkeep",
-        "readings/01_session-1/.gitkeep",
+        # Readings get a stub rather than a .gitkeep: a text file in here IS the reading
+        # list published on the cohort site, and an empty folder gave no sign of that.
+        "readings/01_session-1/reading.md",
         "labs/01_session-1/.gitkeep",
     }
     assert fake.skips == []
