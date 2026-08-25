@@ -36,10 +36,9 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
    ```
    lectures/01_session-1/   any files - slides, demo code, notebooks …
-   readings/01_session-1/   a text file (reading.md/.txt/.bib) IS the reading list
-                            published on the cohort site; other files are linked.
-                            Use `## Required Readings` / `## Optional Readings`
-                            sub-headings to mirror the Hertie syllabus format
+   readings/01_session-1/   just drop the readings in - every hosted file here is listed
+                            and linked for enrolled students to access automatically.
+                            Additionally, an optinal READINGS.md (or .txt/.bib) acts as an overlay, to add what a directly hosted file cannot express (a URL, pointers, page & chapter numbers to focus on, or metadata in clean citation format); it is published publicly on the deployed site (whereas the hosted files themselves are privately hosted and accessible to enrolled students only)
    labs/01_session-1/       any files 
    SYLLABUS.md              optional - or any name you like (SYLLABUS.pdf, ...):
                             a root file releases by being named as the path

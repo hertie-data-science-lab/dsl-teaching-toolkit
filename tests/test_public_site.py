@@ -30,7 +30,7 @@ def _seed_source(root: Path) -> None:
         "labs/01_first-lab/data/rows.csv": "a,b",  # nested - must still be published
         "labs/02_second-lab/lab.ipynb": "notebook",
         "faq/02_second-lab/faq.md": "Q: why? A: because.",
-        "readings/01_first-lab/list.md": "- Smith 2020, ch.1",
+        "readings/01_first-lab/READINGS.md": "- Smith 2020, ch.1",
         "readings/01_first-lab/paper.pdf": "%PDF-1.4 copyrighted",
         "README.md": "# materials",  # not a section
     }

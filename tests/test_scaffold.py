@@ -20,6 +20,7 @@ class FakeRepo:
     def __init__(self, existing: dict[tuple[str, str], str] | None = None):
         self.files: dict[tuple[str, str], str] = dict(existing or {})
         self.writes: list[tuple[str, str]] = []
+        self.deletes: list[tuple[str, str]] = []
         self.skips: list[str] = []
 
     def get_file_content(self, org, repo, path):
@@ -39,23 +40,17 @@ class FakeRepo:
                 self.skips.append(f"{repo}/{path}")
                 continue
             self.put_file(org, repo, path, content, message)
+        for path in delete:
+            self.files.pop((repo, path), None)
+            self.deletes.append((repo, path))
         return True
 
-    def refresh_stubs(self, org, repo, files, message, create=False):
-        """One commit for whatever is absent-and-wanted, or still carries the stub mark."""
-        failures = 0
-        for path, content in files.items():
-            current = self.files.get((repo, path))
-            if current is None:
-                if create and not self.put_file(org, repo, path, content, message):
-                    failures += 1
-                continue
-            if utils.is_untouched_stub(current):
-                if not self.put_file(org, repo, path, content, message):
-                    failures += 1
-            else:
-                self.skips.append(f"{repo}/{path}")
-        return failures
+    def refresh_stubs(self, *a, **k):
+        """The REAL rule, over this fake's files. It used to be reimplemented here, which
+        meant the stub lifecycle the scaffold actually runs was never the one under test -
+        the copy could drift from it silently. Everything it reaches (get_file_content,
+        put_files, log_skip) is already faked, so delegating tests the real thing."""
+        return utils.refresh_stubs(*a, **k)
 
     def written(self, repo):
         return {path for r, path in self.writes if r == repo}
@@ -99,9 +94,10 @@ def test_fresh_materials_repo_gets_the_full_skeleton(fake):
         # up on the next Refresh.
         "SYLLABUS.md.sample",
         "lectures/01_session-1/.gitkeep",
-        # Readings get a stub rather than a .gitkeep: a text file in here IS the reading
-        # list published on the cohort site, and an empty folder gave no sign of that.
-        "readings/01_session-1/reading.md",
+        # Readings get a stub rather than a .gitkeep: the folder's files are listed
+        # automatically, but an empty folder gave no sign of that, nor that this file is
+        # where an online reading goes.
+        "readings/01_session-1/READINGS.md",
         "labs/01_session-1/.gitkeep",
     }
     assert fake.skips == []
@@ -342,14 +338,14 @@ def test_a_stub_faculty_have_written_over_is_never_touched_again(fake):
     # They take ownership by removing the mark, which writing their own does.
     mine = "# Machine Learning - syllabus\n\nWritten by faculty.\n"
     fake.files[("course-materials-f2026", "SYLLABUS.md")] = mine
-    fake.files[("course-materials-f2026", "readings/01_session-1/reading.md")] = (
+    fake.files[("course-materials-f2026", "readings/01_session-1/READINGS.md")] = (
         "- Mine\n"
     )
 
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     assert fake.files[("course-materials-f2026", "SYLLABUS.md")] == mine
     assert (
-        fake.files[("course-materials-f2026", "readings/01_session-1/reading.md")]
+        fake.files[("course-materials-f2026", "readings/01_session-1/READINGS.md")]
         == "- Mine\n"
     )
     assert "course-materials-f2026/SYLLABUS.md" in fake.skips
@@ -359,7 +355,7 @@ def test_every_seeded_stub_carries_the_mark_that_makes_it_refreshable(fake):
     # If a stub ships without the mark it is frozen forever, which is the bug this fixes -
     # so the mark is asserted on what the scaffold actually writes.
     assert scaffold.scaffold_materials("Org", "f2026") == 0
-    for path in ("SYLLABUS.md", "readings/01_session-1/reading.md"):
+    for path in ("SYLLABUS.md", "readings/01_session-1/READINGS.md"):
         assert utils.STUB_MARK in fake.files[("course-materials-f2026", path)], path
 
 
@@ -376,6 +372,7 @@ def test_refresh_improves_an_existing_stub_but_never_creates_one(monkeypatch):
     f = FakeRepo()
     monkeypatch.setattr(utils, "get_file_content", f.get_file_content)
     monkeypatch.setattr(utils, "put_file", f.put_file)
+    monkeypatch.setattr(utils, "put_files", f.put_files)
     monkeypatch.setattr(utils, "log_skip", lambda msg: f.skips.append(msg))
     monkeypatch.setattr(seed, "refresh_stubs", f.refresh_stubs)
     # A materials repo with the stub we used to ship, and a code repo with no stub at all.
@@ -393,7 +390,10 @@ def test_refresh_improves_an_existing_stub_but_never_creates_one(monkeypatch):
     # Nothing was created anywhere - not the code repo's syllabus, not the materials repo's
     # missing readings stub.
     assert ("lecture-code-f2026", "SYLLABUS.md") not in f.files
-    assert ("course-materials-f2026", "readings/01_session-1/reading.md") not in f.files
+    assert (
+        "course-materials-f2026",
+        "readings/01_session-1/READINGS.md",
+    ) not in f.files
 
 
 def test_the_scaffold_and_refresh_converge_the_same_stub_list():
@@ -401,5 +401,37 @@ def test_the_scaffold_and_refresh_converge_the_same_stub_list():
     # edit somewhere else.
     assert sorted(scaffold.refreshable_stubs("f2026")) == [
         "SYLLABUS.md",
-        "readings/01_session-1/reading.md",
+        "readings/01_session-1/READINGS.md",
     ]
+
+
+def test_the_renamed_readings_stub_is_retired_not_orphaned(fake):
+    # Stubs are keyed by PATH, so renaming one leaves the old file behind forever: never
+    # refreshed (it is no longer in the set) and never removed. That matters here because
+    # the orphan is no longer the overlay, so the next release ships it to students as a
+    # "reading" whose contents are scaffold instructions addressed to faculty.
+    old = "readings/01_session-1/reading.md"
+    fake.files[("course-materials-f2026", old)] = scaffold._READINGS_STUB.decode()
+
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    assert ("course-materials-f2026", old) not in fake.files
+    assert ("course-materials-f2026", old) in fake.deletes
+    assert "readings/01_session-1/READINGS.md" in fake.written("course-materials-f2026")
+
+
+def test_a_readings_file_faculty_wrote_is_never_retired(fake):
+    # The rename must not delete their work. Once the mark is gone the file is theirs, so
+    # it stays exactly where it is - even though the toolkit no longer treats that name as
+    # the overlay. Losing a reading list to a rename would be far worse than an extra file.
+    mine = "## Required Readings\n\n- Blitzstein & Hwang, ch. 1-2.\n"
+    fake.files[("course-materials-f2026", "readings/01_session-1/reading.md")] = mine
+
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    assert (
+        fake.files[("course-materials-f2026", "readings/01_session-1/reading.md")]
+        == mine
+    )
+    assert (
+        "course-materials-f2026",
+        "readings/01_session-1/reading.md",
+    ) not in fake.deletes

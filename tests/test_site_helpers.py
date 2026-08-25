@@ -130,7 +130,7 @@ def test_set_config_replaces_only_the_named_key():
 def test_reading_list_md_inlines_text_lists_binaries_by_name(tmp_path):
     wk = tmp_path / "session-1"
     wk.mkdir()
-    (wk / "reading.md").write_text("# Session 1\n- Smith 2020, ch.1")
+    (wk / "READINGS.md").write_text("# Session 1\n- Smith 2020, ch.1")
     (wk / "paper.pdf").write_bytes(b"%PDF-1.4 copyrighted bytes")
     md = site._reading_list_md(wk)
     assert "Smith 2020" in md  # citation text is published
@@ -492,7 +492,7 @@ def _readings_sources():
 def test_released_reading_list_inlines_text_and_ignores_the_pdf(monkeypatch):
     files = {
         ("materials", "readings", "01_week-1"): [
-            ("reading.md", "u"),
+            ("READINGS.md", "u"),
             ("blitzstein_ch1.pdf", "u"),
         ],
         ("materials", "lectures", "01_x"): [("slides.pdf", "u")],
@@ -504,7 +504,7 @@ def test_released_reading_list_inlines_text_and_ignores_the_pdf(monkeypatch):
         site,
         "get_file_content",
         lambda org, repo, path: (
-            "- Blitzstein, ch. 1-2." if path.endswith("reading.md") else ""
+            "- Blitzstein, ch. 1-2." if path.endswith("READINGS.md") else ""
         ),
     )
     out = site._released_reading_list("Cohort-f2026", _readings_sources())
@@ -517,7 +517,7 @@ def test_released_reading_list_propagates_a_read_failure(monkeypatch):
     # A rate-limited read must not republish the row with the reading list silently
     # emptied - same rule as every other fail-loud read in this module.
     monkeypatch.setattr(
-        site, "_session_files", lambda o, r, s, f: [("reading.md", "u")]
+        site, "_session_files", lambda o, r, s, f: [("READINGS.md", "u")]
     )
 
     def boom(*a, **k):
@@ -534,19 +534,41 @@ def test_row_links_drops_the_citation_file_it_already_inlined(monkeypatch):
         site,
         "_session_files",
         lambda o, r, s, f: [
-            ("reading.md", "https://x/md"),
+            ("READINGS.md", "https://x/md"),
             ("ch1.pdf", "https://x/pdf"),
         ],
     )
     names = [
         n for n, _ in site._row_links("C", "materials", "readings", "01_a", frozenset())
     ]
-    assert names == ["ch1.pdf"]  # reading.md IS the list, not a download beside it
-    # Any other section keeps its text files - only `readings` is inlined.
+    assert names == ["ch1.pdf"]  # READINGS.md IS the list, not a download beside it
+    # Any other section keeps its text files - only `readings` inlines the overlay.
     names = [
         n for n, _ in site._row_links("C", "materials", "lectures", "01_a", frozenset())
     ]
-    assert "reading.md" in names
+    assert "READINGS.md" in names
+
+
+def test_row_links_keeps_an_uploaded_text_file_that_is_not_the_overlay(monkeypatch):
+    # The bug the name-based rule fixes: subtracting by EXTENSION took an uploaded
+    # `notes.md` or `refs.bib` - a reading in its own right - out of the downloads too, so a
+    # student could not get it. Only the overlay is ever subtracted.
+    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", ()))
+    monkeypatch.setattr(
+        site,
+        "_session_files",
+        lambda o, r, s, f: [
+            ("READINGS.md", "https://x/overlay"),
+            ("notes.md", "https://x/notes"),
+            ("refs.bib", "https://x/refs"),
+            ("ch1.pdf", "https://x/pdf"),
+        ],
+    )
+    names = [
+        n for n, _ in site._row_links("C", "materials", "readings", "01_a", frozenset())
+    ]
+    assert "READINGS.md" not in names  # its content is already inlined on the row
+    assert sorted(names) == ["ch1.pdf", "notes.md", "refs.bib"]
 
 
 # ------------------------------------------------------- the All Materials catch-all index

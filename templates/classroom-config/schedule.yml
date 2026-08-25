@@ -25,13 +25,19 @@
 #     title:                        # OPTIONAL: the session's name, beside its ordinal
 #     description:                  # OPTIONAL: a sentence about it, on the Lectures tab
 #     tbc: false                    # OPTIONAL: site marks it "(TBC)" next to the event_datetime (default: false)
-#     deploy:                       
-#       - course_source_repo:       # REQUIRED 
+#     deploy:
+#       - course_source_repo:       # REQUIRED
 #         course_source_path:       # REQUIRED - folder or file to copy
 #         cohort_dest_repo:         # default: materials
 #         cohort_dest_path:         # default: same as course_source_path
 #         deploy_datetime:          # default: the event_datetime
-#       - course_source_repo:       # a SECOND copy on its own clock - e.g. lab solutions
+#       - course_source_repo:       # this session's READINGS - one line per session, and
+#         course_source_path: readings/01_session-1  # they ship on the same clock as anything
+#                                   # else. Every file in that folder is listed and linked
+#                                   # for enrolled students; the optional READINGS.md beside
+#                                   # them is published publicly as the citation list.
+#                                   # Omit this and the session's readings never ship.
+#       - course_source_repo:       # a THIRD copy on its own clock - e.g. lab solutions
 #         course_source_path:       # staged OUTSIDE the folder released above, else the
 #         cohort_dest_path:         # first copy ships them too
 #         deploy_datetime:          # after the lab, so students work the empty scripts first
