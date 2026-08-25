@@ -231,12 +231,12 @@ def scaffold_materials(org: str, tag: str) -> int:
         # contents are inlined on the site's Materials tab), and an empty folder gave no
         # sign of that - the tab then reads blank with nothing to explain why.
         "readings/01_session-1/reading.md": (
-            "# Session 1 readings\n\n"
-            "- Author, *Title*, ch. 1.\n"
-            "- Author (2026), \"Paper title\", doi:...\n\n"
-            "This file is the reading list students see. Put reading PDFs in this folder "
-            "too - they are linked, never published.\n"
-        ).encode(),
+            b"# Session 1 readings\n\n"
+            b"- Author, *Title*, ch. 1.\n"
+            b'- Author (2026), "Paper title", doi:...\n\n'
+            b"This file is the reading list students see. Put reading PDFs in this folder "
+            b"too - they are linked, never published.\n"
+        ),
         "labs/01_session-1/.gitkeep": b"",
         "SYLLABUS.md": f"# {tag} syllabus\n\nReplace with the real syllabus.\n".encode(),
     }

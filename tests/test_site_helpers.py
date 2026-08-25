@@ -365,7 +365,8 @@ def test_shape_links_points_a_folded_folder_at_its_tree():
 
 def test_shape_links_allowlist_matches_at_any_depth_and_offers_the_folder():
     names = [
-        n for n, _ in site._shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf", "css"}))
+        n
+        for n, _ in site._shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf", "css"}))
     ]
     # Nothing is hidden without a way back: the browse link is the escape hatch.
     assert names == [
@@ -374,9 +375,12 @@ def test_shape_links_allowlist_matches_at_any_depth_and_offers_the_folder():
         "simons-touch.css",
         site._BROWSE_ALL,
     ]
-    assert dict(site._shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf"})))[
-        site._BROWSE_ALL
-    ] == TREE
+    assert (
+        dict(site._shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf"})))[
+            site._BROWSE_ALL
+        ]
+        == TREE
+    )
 
 
 def test_shape_links_leaves_a_flat_folder_untouched():
@@ -395,9 +399,9 @@ def test_ext_reads_the_extension_not_a_dotted_directory():
 
 
 def test_link_extensions_accepts_a_list_or_a_bare_string():
-    assert site._link_extensions({"site_link_extensions": [".PDF", "html"]}) == frozenset(
-        {"pdf", "html"}
-    )
+    assert site._link_extensions(
+        {"site_link_extensions": [".PDF", "html"]}
+    ) == frozenset({"pdf", "html"})
     # The shape faculty reach for first; refusing it would only mean a silently
     # unfiltered site.
     assert site._link_extensions({"site_link_extensions": "pdf, html"}) == frozenset(
@@ -419,7 +423,10 @@ def test_block_survives_an_indented_first_line():
 def test_block_keeps_liquid_verbatim_and_expands_tabs():
     # Front matter is data, not a template, so no `{% raw %}` fence is needed here.
     text = "a\tb\n{{ site.x }} {% if y %}"
-    assert yaml.safe_load(site._block("k", text))["k"] == "a   b\n{{ site.x }} {% if y %}\n"
+    assert (
+        yaml.safe_load(site._block("k", text))["k"]
+        == "a   b\n{{ site.x }} {% if y %}\n"
+    )
 
 
 def _readings_sources():
@@ -440,9 +447,9 @@ def test_released_reading_list_inlines_text_and_ignores_the_pdf(monkeypatch):
     monkeypatch.setattr(
         site,
         "get_file_content",
-        lambda org, repo, path: "- Blitzstein, ch. 1-2."
-        if path.endswith("reading.md")
-        else "",
+        lambda org, repo, path: (
+            "- Blitzstein, ch. 1-2." if path.endswith("reading.md") else ""
+        ),
     )
     out = site._released_reading_list("Cohort-f2026", _readings_sources())
     # The citation text is the list; the PDF is left to the links beside it (this site
@@ -470,7 +477,10 @@ def test_row_links_drops_the_citation_file_it_already_inlined(monkeypatch):
     monkeypatch.setattr(
         site,
         "_session_files",
-        lambda o, r, s, f: [("reading.md", "https://x/md"), ("ch1.pdf", "https://x/pdf")],
+        lambda o, r, s, f: [
+            ("reading.md", "https://x/md"),
+            ("ch1.pdf", "https://x/pdf"),
+        ],
     )
     names = [
         n for n, _ in site._row_links("C", "materials", "readings", "01_a", frozenset())

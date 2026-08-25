@@ -541,9 +541,7 @@ def _row_links(
     return [(n, u) for n, u in links if _ext(n) not in _READING_LIST_EXT_SET]
 
 
-def _released_reading_list(
-    cohort_org: str, sources: list[tuple[str, str, str]]
-) -> str:
+def _released_reading_list(cohort_org: str, sources: list[tuple[str, str, str]]) -> str:
     """The reading list a session row shows: the TEXT of every citation file released into
     its `readings` section, inlined verbatim.
 
@@ -563,7 +561,9 @@ def _released_reading_list(
         for name, _url in _session_files(cohort_org, repo, subpath, folder):
             if _ext(name) not in _READING_LIST_EXT_SET:
                 continue
-            text = (get_file_content(cohort_org, repo, f"{prefix}/{name}") or "").strip()
+            text = (
+                get_file_content(cohort_org, repo, f"{prefix}/{name}") or ""
+            ).strip()
             if text:
                 parts.append(text)
     return "\n\n".join(parts)
