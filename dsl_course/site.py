@@ -66,6 +66,7 @@ from .utils import (
     repo_is_archived,
     repo_tree,
     session_number,
+    term_tag,
 )
 
 # Public course site: served folder for the hosted section files, and the text-file
@@ -86,8 +87,7 @@ _GIT_ENV = GIT_ENV
 
 def _cohort_tag(cohort_org: str) -> str | None:
     """The fYYYY / sYYYY semester tag in a cohort org name (e.g. 'f2026'), or None."""
-    m = re.search(r"[fs]\d{4}", cohort_org.lower())
-    return m.group(0) if m else None
+    return term_tag(cohort_org)
 
 
 def _semester_start(cohort_org: str) -> date:
@@ -697,8 +697,11 @@ def _row_links(
 _HEADING_SHIFT = 2
 
 
-def _demote_headings(text: str) -> str:
-    """Push every ATX heading in faculty-written markdown down `_HEADING_SHIFT` levels.
+def _demote_headings(text: str, shift: int = _HEADING_SHIFT) -> str:
+    """Push every ATX heading in faculty-written markdown down `shift` levels.
+
+    `shift` is the caller's, because the heading it has to nest under differs: the site puts
+    a session at `<h2>`, the syllabus generator at `<h3>`.
 
     Only outside fenced code blocks: a `# comment` on the first line of a shell example is
     not a heading, and deepening it would rewrite the example. A heading also needs
@@ -713,7 +716,7 @@ def _demote_headings(text: str) -> str:
             hashes = len(stripped) - len(stripped.lstrip("#"))
             rest = stripped[hashes:]
             if rest[:1] in (" ", "\t", ""):
-                line = "#" * min(hashes + _HEADING_SHIFT, 6) + rest
+                line = "#" * min(hashes + shift, 6) + rest
         out.append(line)
     return "\n".join(out)
 
@@ -811,7 +814,43 @@ def _indexable_repos(
     return planned | {repo for repo, _sub, _folder, _n in release_sources}
 
 
-def _materials_index(cohort_org: str, content_repos: list[str]) -> str:
+def _released_syllabus(cohort_org: str, content_repos: list[str]) -> str | None:
+    """The URL of the syllabus released to this cohort, or None when there isn't one - the
+    home page then shows no line at all rather than an empty one.
+
+    Found by name, under whatever name and format the course uses (`SYLLABUS.md`,
+    `SYLLABUS.pdf`, `syllabus-2026.docx`). Faculty name it; we only have to find it - and a
+    release can come from the manual button with a typed path, so there is no declaration to
+    read instead.
+
+    Two rules that matter more than they look:
+
+    - ROOT files only. One live cohort has `lectures/01_introduction/pics/
+      ids-syllabus-2024.png`, and pinning a screenshot on the landing page as the syllabus
+      would be worse than pinning nothing.
+    - An exact `syllabus.*` stem wins over a longer name. Plain sorting put
+      `SYLLABUS-draft.pdf` ahead of `SYLLABUS.pdf` ('-' sorts before '.'), so a cohort that
+      shipped a draft alongside the real thing got the draft on its front page.
+
+    Reads the trees the caller already discovered, so this costs no API call. Order is
+    deterministic without re-sorting: `content_repos` arrives sorted and `_repo_tree` returns
+    sorted paths."""
+    fallback = None
+    for repo in content_repos:
+        branch, paths = _repo_tree(cohort_org, repo)
+        for path in paths:
+            if "/" in path or "syllab" not in path.lower():
+                continue
+            url = _gh_url(cohort_org, repo, branch, "blob", path)
+            if path.rsplit(".", 1)[0].lower() == "syllabus":
+                return url
+            fallback = fallback or url
+    return fallback
+
+
+def _materials_index(
+    cohort_org: str, content_repos: list[str], syllabus: str | None = None
+) -> str:
     """`_data/materials.yml` - every file released to this cohort, grouped into sections
     and folded one level, for the All Materials tab.
 
@@ -828,11 +867,29 @@ def _materials_index(cohort_org: str, content_repos: list[str]) -> str:
 
     Directories lead, then files, both alphabetically: this is a directory listing, where
     the structure is what a reader scans - unlike a session row, which leads with the
-    deliverables because there the files ARE the material."""
+    deliverables because there the files ARE the material.
+
+    Root files come out separately as `documents:` rather than as sections of their own,
+    because a course-level document is not a section: a README released into three content
+    repos was appearing three times, once under each repo's heading."""
     found: dict[str, dict[str, _IndexEntry]] = {}
+    # Course-level documents - the syllabus, the README - keyed by NAME, not by the repo
+    # they happen to sit in. They used to take the repo as their section, so a README
+    # released into three content repos showed up three times, once under each. Deduping by
+    # name is not lossy: a root document reaches a cohort by being released FROM one file in
+    # the course materials repo, so the copies are the same document by construction.
+    docs: dict[str, _IndexEntry] = {}
     for repo in sorted(content_repos):
         branch, paths = _repo_tree(cohort_org, repo)
         for path in paths:
+            if "/" not in path:
+                docs.setdefault(
+                    path,
+                    _IndexEntry(
+                        path, False, _gh_url(cohort_org, repo, branch, "blob", path), 1
+                    ),
+                )
+                continue
             section, name, is_dir, entry = _index_entry(repo, path)
             rows = found.setdefault(section, {})
             row = rows.get(f"{repo}/{entry}")
@@ -858,13 +915,20 @@ def _materials_index(cohort_org: str, content_repos: list[str]) -> str:
             rows_out.append(f"        url: {e.url}")
             if e.is_dir:
                 rows_out.append(f"        files: {e.files}")
+    doc_rows = [
+        line
+        for e in sorted(docs.values(), key=lambda e: e.name.lower())
+        for line in (f'  - name: "{_q(e.name)}"', f"    url: {e.url}")
+    ]
     header = (
         "# Generated by `python3 -m dsl_course.site sync` - every released file,\n"
         "# grouped by section. Edit nothing here; it is rewritten on every sync.\n"
-    )
+    ) + (f"syllabus: {syllabus}\n" if syllabus else "")
     # Stated, not reached: `sections: []` is the empty index, the same shape
     # `_links_block` uses for a row with nothing to link.
-    body = "sections:\n" + "\n".join(rows_out) if rows_out else "sections: []"
+    # Documents first, then the sections - the order the page renders them in.
+    body = "documents:\n" + "\n".join(doc_rows) + "\n" if doc_rows else ""
+    body += "sections:\n" + "\n".join(rows_out) if rows_out else "sections: []"
     return header + body + "\n"
 
 
@@ -1624,6 +1688,11 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # What a session row LINKS, out of everything it released - the default
         # folder-shaped listing unless this course declared an extension allowlist.
         allow = _link_extensions(meta)
+        # The repos this cohort actually releases into - the only ones the index and
+        # the syllabus lookup may read (see `_indexable_repos`).
+        indexable = sorted(
+            set(content_repos) & _indexable_repos(sched, release_sources)
+        )
 
         def session_row(s: str, kind: str) -> str:
             """One row, from the plan where it has one and a synthesised weekly date where
@@ -1703,9 +1772,10 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 # actually release into, never everything discovery failed to exclude.
                 "_data/materials.yml": _materials_index(
                     cohort_org,
-                    sorted(
-                        set(content_repos) & _indexable_repos(sched, release_sources)
-                    ),
+                    indexable,
+                    # Absent when the cohort has no syllabus, so the home page shows no
+                    # line rather than an empty one.
+                    syllabus=_released_syllabus(cohort_org, indexable),
                 ),
                 **_theme_pages(cohort=True),
             },

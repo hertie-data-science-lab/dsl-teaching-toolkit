@@ -28,7 +28,7 @@ example-course/
       lectures/01_week-1../05_week-5/  # 5 sessions (slides.md + a code demo each)
       readings/01_week-1../05_week-5/  # 5 sessions of placeholder readings
       labs/01_week-1../05_week-5/      # 5 sessions of labs (lab.py + lab.ipynb each)
-      syllabus.md
+      SYLLABUS.md
     lecture-code-f2026/mlpkg/       # a growing package, disclosed module-by-module
     assignment-1-f2026/             # individual (.py)      main/ + solution/
     assignment-2-f2026/             # individual (notebook) main/ + solution/

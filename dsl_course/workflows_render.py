@@ -809,6 +809,48 @@ on:
 {_CRON_NOTICE}"""
 
 
+def render_generate_syllabus(source_repos: list[str], cohort_orgs: list[str]) -> str:
+    """Build the syllabus's session-by-session section from a cohort's schedule.yml.
+
+    A button rather than a CLI habit, because the people who write syllabi are the people
+    who use the Actions tab. It writes a companion file for them to paste from and never
+    touches SYLLABUS.md itself - see dsl_course/syllabus.py for why."""
+    return f"""name: Generate syllabus
+
+# Writes the "Course sessions and readings" section of a syllabus - one block per session,
+# with its title, its learning objectives and its reading list - from the cohort's
+# classroom-config/schedule.yml and this repo's readings/ folders.
+#
+# It lands in SYLLABUS.sessions.md beside your syllabus, and is NEVER released to students.
+# Paste what you want into SYLLABUS.md; a re-run overwrites the companion file, never your
+# syllabus. Dropdowns are refreshed by the 'Refresh actions' workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+{_choice_input("course_source_repo", "Repo holding your syllabus and readings", source_repos)}
+{_choice_input("cohort_org", "Cohort whose schedule.yml supplies the sessions", cohort_orgs)}
+      write:
+        description: "Commit the block to SYLLABUS.sessions.md (off = just print it)"
+        type: boolean
+        default: true
+
+{_PERMISSIONS_JOBS}{_CHECK_TEAM}
+  syllabus:
+{_run_preamble()}      - name: Generate
+        env:
+          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
+          COURSE: ${{{{ github.repository_owner }}}}
+          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
+          WRITE: ${{{{ inputs.write }}}}
+        run: |
+          args=(--course-org "$COURSE" --cohort-org "$COHORT_ORG" --course-source-repo "$SOURCE_REPO")
+          [ "$WRITE" = "true" ] && args+=(--write)
+          python3 -m dsl_course.syllabus "${{args[@]}}"
+"""
+
+
 def render_new_materials() -> str:
     """Scaffold a correctly-structured course-materials-<tag> repo, then refresh."""
     return f"""name: New materials repo

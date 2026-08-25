@@ -569,13 +569,45 @@ MATHS_REPOS = {  # one materials repo, sections inside it
 }
 
 
-def _index(monkeypatch, repos):
+def _parse(monkeypatch, repos):
     monkeypatch.setattr(
         site, "_repo_tree", lambda o, r: ("main", tuple(sorted(repos[r])))
     )
-    return yaml.safe_load(site._materials_index("Cohort-f2026", list(repos)))[
-        "sections"
-    ]
+    return yaml.safe_load(site._materials_index("Cohort-f2026", list(repos)))
+
+
+def _index(monkeypatch, repos):
+    return _parse(monkeypatch, repos)["sections"]
+
+
+def _docs(monkeypatch, repos):
+    return [d["name"] for d in _parse(monkeypatch, repos).get("documents", [])]
+
+
+def test_root_documents_are_one_group_not_a_section_per_repo(monkeypatch):
+    # The syllabus and the README are course-level documents, not sections. Keying them by
+    # the repo they sit in listed each of them once per content repo - three READMEs on the
+    # live demo site, one under each of lectures, labs and readings.
+    repos = {
+        "labs": ("01_lab/lab.ipynb", "README.md", "SYLLABUS.md"),
+        "lectures": ("01_intro/deck.html", "README.md", "SYLLABUS.md"),
+    }
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", repos[r]))
+    got = yaml.safe_load(site._materials_index("C", sorted(repos)))
+    assert [d["name"] for d in got["documents"]] == ["README.md", "SYLLABUS.md"]
+    # ...and they are gone from the sections, which now hold only session folders.
+    assert [s["name"] for s in got["sections"]] == ["labs", "lectures"]
+    for section in got["sections"]:
+        assert [e["name"] for e in section["entries"]] == [
+            f"01_{'lab' if section['name'] == 'labs' else 'intro'}/"
+        ]
+
+
+def test_a_cohort_with_only_root_documents_is_not_reported_as_empty(monkeypatch):
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ("SYLLABUS.md",)))
+    got = yaml.safe_load(site._materials_index("C", ["materials"]))
+    assert [d["name"] for d in got["documents"]] == ["SYLLABUS.md"]
+    assert got["sections"] == []
 
 
 def test_index_reads_a_repo_per_section_cohort(monkeypatch):
@@ -583,12 +615,10 @@ def test_index_reads_a_repo_per_section_cohort(monkeypatch):
         s["name"]: [e["name"] for e in s["entries"]]
         for s in _index(monkeypatch, DEMO_REPOS)
     }
-    # The repo names the section, its ordinal folders are the entries - and the root
-    # README.md, which no session ordinal covers, is finally listed somewhere.
-    assert got == {
-        "lectures": ["01_introduction/", "README.md"],
-        "readings": ["01_introduction/"],
-    }
+    # The repo names the section and its ordinal folders are the entries. The root
+    # README.md is a course document, listed once rather than under a repo's heading.
+    assert got == {"lectures": ["01_introduction/"], "readings": ["01_introduction/"]}
+    assert _docs(monkeypatch, DEMO_REPOS) == ["README.md"]
 
 
 def test_index_reads_a_single_materials_repo_cohort(monkeypatch):
@@ -607,8 +637,9 @@ def test_index_reads_a_single_materials_repo_cohort(monkeypatch):
         "datasets": ["housing.csv"],
         "labs": ["01_lab/"],
         "lectures": ["01_lecture/"],
-        "materials": [".DS_Store", "SYLLABUS.md"],
     }
+    # The root files are course documents now, not a section named after the repo.
+    assert _docs(monkeypatch, MATHS_REPOS) == [".DS_Store", "SYLLABUS.md"]
 
 
 def test_index_folds_a_directory_to_one_counted_link(monkeypatch):
@@ -643,21 +674,23 @@ def test_index_is_empty_yaml_when_nothing_is_released(monkeypatch):
 def test_index_puts_directories_before_files(monkeypatch):
     # Both in ONE section, which needs the ordinal shape: a non-ordinal directory would
     # become a section of its own rather than an entry beside the root file.
-    repos = {"m": ("01_zzz/a.txt", "aaa.md")}
+    repos = {"m": ("01_zzz/a.txt", "01_zzz/aaa.md")}
     entries = [e["name"] for e in _index(monkeypatch, repos)[0]["entries"]]
     # A directory listing: the structure is what a reader scans first, unlike a session
     # row, which leads with its deliverables.
-    assert entries == ["01_zzz/", "aaa.md"]
+    assert entries == ["01_zzz/"]
 
 
 def test_index_gives_a_non_ordinal_directory_its_own_section(monkeypatch):
     # The rule that makes both cohort shapes work: an ordinal child means the REPO is the
     # section, a non-ordinal one means the DIRECTORY is.
-    sections = _index(monkeypatch, {"m": ("handbook/rules.md", "aaa.md")})
+    repos = {"m": ("handbook/rules.md", "aaa.md")}
+    sections = _index(monkeypatch, repos)
     assert {s["name"]: [e["name"] for e in s["entries"]] for s in sections} == {
-        "handbook": ["rules.md"],
-        "m": ["aaa.md"],
+        "handbook": ["rules.md"]
     }
+    # ...and the root file is a course document, not a section named after the repo.
+    assert _docs(monkeypatch, repos) == ["aaa.md"]
 
 
 def test_theme_pages_split_readings_out_only_where_there_is_an_index():
@@ -773,4 +806,68 @@ def test_a_planned_destination_links_only_where_something_exists(monkeypatch):
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     assert site._dest_link("C", "materials/lectures/03", live) == (
         "[`materials/lectures/03`](https://github.com/C/materials)"
+    )
+
+
+# ----------------------------------------------------- finding a released syllabus
+def test_the_syllabus_is_found_under_any_name_and_format(monkeypatch):
+    # Faculty name it; we only have to find it. ITDS really does use the PDF.
+    for name in ("SYLLABUS.md", "SYLLABUS.pdf", "syllabus-2026.docx", "Syllabus.MD"):
+        monkeypatch.setattr(site, "_repo_tree", lambda o, r, n=name: ("main", (n,)))
+        assert site._released_syllabus("C", ["materials"]) == (
+            f"https://github.com/C/materials/blob/main/{name}"
+        )
+
+
+def test_a_syllabus_image_inside_a_session_folder_is_not_the_syllabus(monkeypatch):
+    # A live cohort has `lectures/01_introduction/pics/ids-syllabus-2024.png`. Root files
+    # only, or the home page links a screenshot.
+    monkeypatch.setattr(
+        site,
+        "_repo_tree",
+        lambda o, r: (
+            "main",
+            ("lectures/01_x/pics/ids-syllabus-2024.png", "lectures/01_x/deck.html"),
+        ),
+    )
+    assert site._released_syllabus("C", ["materials"]) is None
+
+
+def test_no_syllabus_means_no_key_at_all(monkeypatch):
+    # The home page shows no line rather than an empty one, so the key must be absent -
+    # not present and blank.
+    monkeypatch.setattr(
+        site, "_repo_tree", lambda o, r: ("main", ("lectures/01/a.md",))
+    )
+    assert "syllabus" not in yaml.safe_load(site._materials_index("C", ["materials"]))
+    with_one = yaml.safe_load(site._materials_index("C", ["materials"], syllabus="u"))
+    assert with_one["syllabus"] == "u"
+
+
+def test_an_exact_syllabus_stem_beats_a_longer_name(monkeypatch):
+    # Plain sorting put `SYLLABUS-draft.pdf` ahead of `SYLLABUS.pdf` ('-' sorts before
+    # '.'), so a cohort shipping a draft alongside the real thing pinned the draft on its
+    # front page.
+    monkeypatch.setattr(
+        site,
+        "_repo_tree",
+        lambda o, r: ("main", ("SYLLABUS-draft.pdf", "SYLLABUS.pdf")),
+    )
+    assert site._released_syllabus("C", ["m"]).endswith("/SYLLABUS.pdf")
+
+
+def test_a_longer_name_is_still_used_when_it_is_all_there_is(monkeypatch):
+    monkeypatch.setattr(
+        site, "_repo_tree", lambda o, r: ("main", ("syllabus-2026.docx",))
+    )
+    assert site._released_syllabus("C", ["m"]).endswith("/syllabus-2026.docx")
+
+
+def test_the_syllabus_choice_is_stable_when_a_cohort_has_two(monkeypatch):
+    # A link that moves between syncs is worse than either choice. Determinism comes from
+    # the caller's sorted repo list and _repo_tree's sorted paths, not from re-sorting.
+    trees = {"zzz": ("SYLLABUS.md",), "aaa": ("SYLLABUS.md",)}
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", trees[r]))
+    assert site._released_syllabus("C", ["aaa", "zzz"]).endswith(
+        "/aaa/blob/main/SYLLABUS.md"
     )

@@ -183,7 +183,8 @@ course-materials-f2026/
   lectures/01_intro/     any files - slides, notebooks, code
   readings/01_intro/
   labs/01_setup/         add your own sections freely
-  SYLLABUS.md            optional - any root file matching *syllabus*
+  SYLLABUS.md            optional - or any name (SYLLABUS.pdf, ...); released by
+                         naming it as a `course_source_path`
 ```
 
 ### Assignment template

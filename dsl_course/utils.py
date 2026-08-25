@@ -889,6 +889,82 @@ def seed_if_absent(
     return put_file(org, repo, path, content, message)
 
 
+# The mark that says a seeded stub is STILL the scaffold's - present in every stub we write,
+# and the one thing that makes it safe to improve. A stub is refreshed while it carries the
+# mark and never touched again once faculty remove it, which they do by writing their own
+# (each stub tells them so). Without this a stub was create-only forever: the courses
+# already running kept the first version we ever shipped, and every later improvement
+# reached new repos only.
+#
+# The legacy strings are the stubs we shipped before the mark existed, so the repos that
+# have those pick the new versions up too. Nothing is ever added here that a faculty member
+# might plausibly have typed themselves.
+STUB_MARK = "dsl-stub:"
+# Every wording we have ever seeded, so a repo carrying an older one is still recognised.
+# Nothing goes in here that a faculty member might plausibly have typed themselves.
+STUB_MARKS = (
+    STUB_MARK,
+    "Replace with the real syllabus.",
+    "This file is the reading list students see.",
+    "This file IS the reading list students see on the site's Readings tab",
+)
+
+
+def term_tag(name: str) -> str | None:
+    """The fYYYY / sYYYY term tag in an org or repo name (`course-materials-F2026` ->
+    'f2026'), or None. Case-insensitive and lowercased, so the same name cannot yield a tag
+    on one code path and nothing on another - which two of the three copies of this regex
+    did before they were folded into it."""
+    m = re.search(r"[fs]\d{4}", name.lower())
+    return m.group(0) if m else None
+
+
+def is_untouched_stub(text: str) -> bool:
+    """Whether `text` is still a stub this toolkit seeded, rather than faculty writing."""
+    return any(m in text for m in STUB_MARKS)
+
+
+# Generated faculty-side files, named where every module that has to know about them can
+# see it: `scaffold` writes them, `deploy` refuses to release them, `syllabus` builds one.
+# Named rather than re-spelled per module, so the exclusion cannot lapse when one is renamed.
+SYLLABUS_SAMPLE_FILE = "SYLLABUS.md.sample"
+SYLLABUS_SESSIONS_FILE = "SYLLABUS.sessions.md"
+
+
+def refresh_stubs(
+    org: str, repo: str, files: dict[str, bytes], message: str, create: bool = False
+) -> int:
+    """Bring a SET of seeded stubs up to date in ONE commit, and return the failure count.
+
+    The middle ground between `seed_if_absent` (frozen at whatever we first shipped) and
+    `put_file` (clobbers real work): a stub is written while it is absent or still carries a
+    stub mark, and left exactly as faculty left it once they have written over it.
+
+    One commit, not one per file, for the same reason `seed_files_if_absent` batches - a set
+    of stubs is one act of seeding, and writing them one at a time opens a repo faculty then
+    author by hand with a column of identical commit lines.
+
+    `create=False` (the default) refreshes existing stubs but creates none, which is what
+    makes this safe to run over EVERY content repo in a nightly convergence: the code and
+    dataset repos are in that list too, and seeding a syllabus into `lecture-code-f2026`
+    would be nonsense. Creating is the scaffold's job - only it knows what kind of repo it
+    just made - so the scaffold passes `create=True`."""
+    write: dict[str, bytes] = {}
+    for path, body in files.items():
+        current = get_file_content(org, repo, path)
+        if current is None:
+            if create:
+                write[path] = body
+            continue
+        if is_untouched_stub(current):
+            write[path] = body
+        else:
+            log_skip(f"{repo}/{path}")
+    if not write:
+        return 0
+    return 0 if put_files(org, repo, write, message) else len(write)
+
+
 def seed_files_if_absent(
     org: str, repo: str, files: dict[str, bytes], message: str
 ) -> bool:
