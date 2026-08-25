@@ -69,6 +69,7 @@ from .workflows_render import (
     render_bootstrap_cohort,
     render_central_release,
     render_distribute_grades,
+    render_generate_syllabus,
     render_grade_assignment,
     render_new_assignment,
     render_new_materials,
@@ -213,6 +214,9 @@ def seed_github_workflows(course_org: str) -> int:
             cohorts, assignments
         ),
         ".github/workflows/new-materials.yml": render_new_materials(),
+        ".github/workflows/generate-syllabus.yml": render_generate_syllabus(
+            source_repos, cohorts
+        ),
         ".github/workflows/new-assignment.yml": render_new_assignment(),
         ".github/workflows/sync-site.yml": render_sync_site(cohorts),
         ".github/workflows/publish-site.yml": render_publish_site(source_repos),

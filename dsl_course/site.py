@@ -697,8 +697,11 @@ def _row_links(
 _HEADING_SHIFT = 2
 
 
-def _demote_headings(text: str) -> str:
-    """Push every ATX heading in faculty-written markdown down `_HEADING_SHIFT` levels.
+def _demote_headings(text: str, shift: int = _HEADING_SHIFT) -> str:
+    """Push every ATX heading in faculty-written markdown down `shift` levels.
+
+    `shift` is the caller's, because the heading it has to nest under differs: the site puts
+    a session at `<h2>`, the syllabus generator at `<h3>`.
 
     Only outside fenced code blocks: a `# comment` on the first line of a shell example is
     not a heading, and deepening it would rewrite the example. A heading also needs
@@ -713,7 +716,7 @@ def _demote_headings(text: str) -> str:
             hashes = len(stripped) - len(stripped.lstrip("#"))
             rest = stripped[hashes:]
             if rest[:1] in (" ", "\t", ""):
-                line = "#" * min(hashes + _HEADING_SHIFT, 6) + rest
+                line = "#" * min(hashes + shift, 6) + rest
         out.append(line)
     return "\n".join(out)
 

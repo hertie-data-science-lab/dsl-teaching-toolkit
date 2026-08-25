@@ -56,12 +56,14 @@ NEVER_COPIED = frozenset({".git"})
 # Additionally skipped when the WHOLE repo is released (`course_source_path: /`), and only
 # at the repo root. These are the faculty side of a materials repo by contract: `.github`
 # holds the Release buttons and their bot-token wiring, MAINTAINING.md is the maintainer
-# guide, and SYLLABUS.md.sample is the filled example faculty copy their own syllabus from
-# - all three are written by scaffold.py describing themselves as never released, so they
-# are named here to keep that promise and this mechanism one fact rather than two that
-# drift. Naming either path explicitly still releases it - this is what "give me
+# guide, SYLLABUS.md.sample is the filled example faculty copy their own syllabus from, and
+# SYLLABUS.sessions.md is the block the Generate syllabus button builds for them to paste -
+# all four describe themselves as never released, so they are named here to keep that
+# promise and this mechanism one fact rather than two that drift. Naming either path explicitly still releases it - this is what "give me
 # everything" means, not a ban.
-ROOT_RELEASE_EXCLUDED = frozenset({".github", "MAINTAINING.md", "SYLLABUS.md.sample"})
+ROOT_RELEASE_EXCLUDED = frozenset(
+    {".github", "MAINTAINING.md", "SYLLABUS.md.sample", "SYLLABUS.sessions.md"}
+)
 
 # A README the scaffold wrote and nobody rewrote. It is addressed to faculty - "replace
 # this placeholder", a section headed "delete this section before releasing", a link to
