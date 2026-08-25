@@ -199,9 +199,10 @@ _READINGS_STUB = (
     b"- https://example.org/an-online-reading\n\n"
     b"## Optional Readings\n\n"
     b"- Author, *Title*, ch. 2.\n\n"
-    b"What you write here is PUBLIC (it is a citation list); the files beside it\n"
-    b"are not - they stay behind the enrolled-student gate. The session's learning\n"
-    b"objectives come from `description:` in schedule.yml.\n"
+    b"What you write here is PUBLIC (it is a citation list). The files beside it\n"
+    b"stay behind the enrolled-student gate, unless the course runs a public\n"
+    b"open-courseware site in `actual-readings` mode, which serves them too. The\n"
+    b"session's learning objectives come from `description:` in schedule.yml.\n"
 )
 
 _GRADING_YML = """\
@@ -267,6 +268,14 @@ def _notebook(title_lines: list[str], code: str) -> str:
         "nbformat_minor": 5,
     }
     return json.dumps(nb, indent=1) + "\n"
+
+
+# Where the readings stub used to live, before it was renamed to `READINGS.md` and the
+# prose-vs-file rule stopped keying on extension. Declared so `refresh_stubs` can retire the
+# old copy in repos scaffolded earlier: keyed by path, a rename otherwise leaves it behind
+# forever, and as a non-overlay file it would then ship to students as a "reading" whose
+# contents are scaffold instructions addressed to faculty.
+RETIRED_STUBS = ("readings/01_session-1/reading.md",)
 
 
 def refreshable_stubs(tag: str) -> dict[str, bytes]:
@@ -371,7 +380,8 @@ def scaffold_materials(org: str, tag: str) -> int:
         "- `readings/01_session-1/` - one folder per session's readings. Drop the readings "
         "in and every file is listed and linked for enrolled students automatically. "
         "`READINGS.md` (or `.txt`/`.bib`) is OPTIONAL, for what a file cannot say - a link "
-        "to read online, or a citation; it is published publicly, the files never are\n"
+        "to read online, or a citation; it is published publicly, while the files stay\n"
+        "behind the enrolled-student gate (unless a public site runs `actual-readings`)\n"
         "- `labs/01_session-1/` - one folder per session's lab (delete the `labs/` folder "
         "if your course has none)\n"
         "- root files - your syllabus under any name (`SYLLABUS.md`, `SYLLABUS.pdf`, ...) "
@@ -417,7 +427,12 @@ def scaffold_materials(org: str, tag: str) -> int:
     # scaffolded. Written before the create-only set below so a re-run's log reads in the
     # order the rules apply.
     failures += refresh_stubs(
-        org, repo, refreshable_stubs(tag), "init: scaffold stubs", create=True
+        org,
+        repo,
+        refreshable_stubs(tag),
+        "init: scaffold stubs",
+        create=True,
+        retire=RETIRED_STUBS,
     )
 
     user_files = {

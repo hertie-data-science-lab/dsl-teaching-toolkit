@@ -32,7 +32,7 @@
 #         cohort_dest_path:         # default: same as course_source_path
 #         deploy_datetime:          # default: the event_datetime
 #       - course_source_repo:       # this session's READINGS - one line per session, and
-#         course_source_path: readings/01_week-1   # they ship on the same clock as anything
+#         course_source_path: readings/01_session-1  # they ship on the same clock as anything
 #                                   # else. Every file in that folder is listed and linked
 #                                   # for enrolled students; the optional READINGS.md beside
 #                                   # them is published publicly as the citation list.

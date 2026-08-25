@@ -945,7 +945,12 @@ READING_OVERLAY_NAMES = frozenset(
 
 
 def refresh_stubs(
-    org: str, repo: str, files: dict[str, bytes], message: str, create: bool = False
+    org: str,
+    repo: str,
+    files: dict[str, bytes],
+    message: str,
+    create: bool = False,
+    retire: tuple[str, ...] = (),
 ) -> int:
     """Bring a SET of seeded stubs up to date in ONE commit, and return the failure count.
 
@@ -961,7 +966,14 @@ def refresh_stubs(
     makes this safe to run over EVERY content repo in a nightly convergence: the code and
     dataset repos are in that list too, and seeding a syllabus into `lecture-code-f2026`
     would be nonsense. Creating is the scaffold's job - only it knows what kind of repo it
-    just made - so the scaffold passes `create=True`."""
+    just made - so the scaffold passes `create=True`.
+
+    `retire` is the path a stub used to live at, for when one is RENAMED. Keyed by path, a
+    rename otherwise orphans the old file: it is no longer in `files`, so it is never
+    refreshed and never removed, and it lingers in the repo forever - which, for a stub that
+    reads as faculty-facing instructions, means it ships to students as a released "reading"
+    the next time that folder goes out. Retired only while it is still an untouched stub;
+    once faculty have written over it, it is theirs and is left exactly where it is."""
     write: dict[str, bytes] = {}
     for path, body in files.items():
         current = get_file_content(org, repo, path)
@@ -973,9 +985,19 @@ def refresh_stubs(
             write[path] = body
         else:
             log_skip(f"{repo}/{path}")
-    if not write:
+    drop = []
+    for path in retire:
+        current = get_file_content(org, repo, path)
+        if current is None:
+            continue
+        if is_untouched_stub(current):
+            drop.append(path)
+        else:
+            log_skip(f"{repo}/{path} (renamed, but yours - left in place)")
+    if not write and not drop:
         return 0
-    return 0 if put_files(org, repo, write, message) else len(write)
+    ok = put_files(org, repo, write, message, delete=tuple(drop))
+    return 0 if ok else len(write) + len(drop)
 
 
 def seed_files_if_absent(

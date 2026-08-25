@@ -633,7 +633,7 @@ def _is_reading_overlay(name: str) -> bool:
     """Is this path a session's optional prose reading list (`READINGS.md`, `.txt`, `.bib`)?
 
     The ONE test that decides prose-vs-file for a readings folder, by NAME rather than by
-    extension - see `READING_OVERLAY_STEM` for why that distinction is the whole point.
+    extension - see `READING_OVERLAY_NAMES` in utils for why that distinction is the whole point.
     Takes a path or a bare name; only the last segment is read, so it works on the repo-tree
     paths, the release-relative names and the local filenames its callers each hold."""
     return name.rsplit("/", 1)[-1].lower() in READING_OVERLAY_NAMES

@@ -333,6 +333,7 @@ def _refresh_stubs(course_org: str, repo: str) -> int:
         repo,
         scaffold.refreshable_stubs(tag),
         "docs: refresh the scaffold stubs",
+        retire=scaffold.RETIRED_STUBS,
     )
 
 

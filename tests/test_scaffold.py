@@ -20,6 +20,7 @@ class FakeRepo:
     def __init__(self, existing: dict[tuple[str, str], str] | None = None):
         self.files: dict[tuple[str, str], str] = dict(existing or {})
         self.writes: list[tuple[str, str]] = []
+        self.deletes: list[tuple[str, str]] = []
         self.skips: list[str] = []
 
     def get_file_content(self, org, repo, path):
@@ -39,23 +40,17 @@ class FakeRepo:
                 self.skips.append(f"{repo}/{path}")
                 continue
             self.put_file(org, repo, path, content, message)
+        for path in delete:
+            self.files.pop((repo, path), None)
+            self.deletes.append((repo, path))
         return True
 
-    def refresh_stubs(self, org, repo, files, message, create=False):
-        """One commit for whatever is absent-and-wanted, or still carries the stub mark."""
-        failures = 0
-        for path, content in files.items():
-            current = self.files.get((repo, path))
-            if current is None:
-                if create and not self.put_file(org, repo, path, content, message):
-                    failures += 1
-                continue
-            if utils.is_untouched_stub(current):
-                if not self.put_file(org, repo, path, content, message):
-                    failures += 1
-            else:
-                self.skips.append(f"{repo}/{path}")
-        return failures
+    def refresh_stubs(self, *a, **k):
+        """The REAL rule, over this fake's files. It used to be reimplemented here, which
+        meant the stub lifecycle the scaffold actually runs was never the one under test -
+        the copy could drift from it silently. Everything it reaches (get_file_content,
+        put_files, log_skip) is already faked, so delegating tests the real thing."""
+        return utils.refresh_stubs(*a, **k)
 
     def written(self, repo):
         return {path for r, path in self.writes if r == repo}
@@ -377,6 +372,7 @@ def test_refresh_improves_an_existing_stub_but_never_creates_one(monkeypatch):
     f = FakeRepo()
     monkeypatch.setattr(utils, "get_file_content", f.get_file_content)
     monkeypatch.setattr(utils, "put_file", f.put_file)
+    monkeypatch.setattr(utils, "put_files", f.put_files)
     monkeypatch.setattr(utils, "log_skip", lambda msg: f.skips.append(msg))
     monkeypatch.setattr(seed, "refresh_stubs", f.refresh_stubs)
     # A materials repo with the stub we used to ship, and a code repo with no stub at all.
@@ -407,3 +403,35 @@ def test_the_scaffold_and_refresh_converge_the_same_stub_list():
         "SYLLABUS.md",
         "readings/01_session-1/READINGS.md",
     ]
+
+
+def test_the_renamed_readings_stub_is_retired_not_orphaned(fake):
+    # Stubs are keyed by PATH, so renaming one leaves the old file behind forever: never
+    # refreshed (it is no longer in the set) and never removed. That matters here because
+    # the orphan is no longer the overlay, so the next release ships it to students as a
+    # "reading" whose contents are scaffold instructions addressed to faculty.
+    old = "readings/01_session-1/reading.md"
+    fake.files[("course-materials-f2026", old)] = scaffold._READINGS_STUB.decode()
+
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    assert ("course-materials-f2026", old) not in fake.files
+    assert ("course-materials-f2026", old) in fake.deletes
+    assert "readings/01_session-1/READINGS.md" in fake.written("course-materials-f2026")
+
+
+def test_a_readings_file_faculty_wrote_is_never_retired(fake):
+    # The rename must not delete their work. Once the mark is gone the file is theirs, so
+    # it stays exactly where it is - even though the toolkit no longer treats that name as
+    # the overlay. Losing a reading list to a rename would be far worse than an extra file.
+    mine = "## Required Readings\n\n- Blitzstein & Hwang, ch. 1-2.\n"
+    fake.files[("course-materials-f2026", "readings/01_session-1/reading.md")] = mine
+
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    assert (
+        fake.files[("course-materials-f2026", "readings/01_session-1/reading.md")]
+        == mine
+    )
+    assert (
+        "course-materials-f2026",
+        "readings/01_session-1/reading.md",
+    ) not in fake.deletes
