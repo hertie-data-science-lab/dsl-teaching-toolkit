@@ -156,6 +156,37 @@ def _set_config(text: str, key: str, value: str) -> str:
     return new
 
 
+# The Materials and Labs pages. Their CONTENT is a theme layout (dsl-jekyll-theme's
+# `_layouts/materials.html` / `labs.html`), so these are the front matter that points at
+# it plus the page's own intro line. Owned here, not left to the site template, because a
+# template edit only reaches orgs created after it - the rendering used to live as inline
+# Liquid in each site repo, and by the time it needed changing there were seven live sites
+# to hand-patch. Every later change to how sessions render now ships from the theme alone.
+#
+# `_overwritten_edits` still reports a hand edit these replace, as it does for any other
+# generated surface.
+THEME_PAGES = {
+    "materials.md": (
+        "---\n"
+        "layout: materials\n"
+        "title: Materials\n"
+        "permalink: /materials/\n"
+        "---\n\n"
+        "Readings by session. Citation lists are public; the files themselves are "
+        "visible to enrolled students.\n"
+    ),
+    "labs.md": (
+        "---\n"
+        "layout: labs\n"
+        "title: Labs\n"
+        "permalink: /labs/\n"
+        "---\n\n"
+        "Lab exercises by session (lecture slides are on the [Lectures](/lectures/) tab). "
+        "Released materials are visible to enrolled students.\n"
+    ),
+}
+
+
 def _site_repo(org: str) -> str:
     """The GitHub Pages org site repo for an org - pushing it redeploys the site."""
     return f"{org.lower()}.github.io"
@@ -1322,7 +1353,8 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                     cohort_org,
                     _yaml_file(cohort_org, "classroom-config", "people.yml"),
                     edit_at=f"{cohort_org}/classroom-config/people.yml",
-                )
+                ),
+                **THEME_PAGES,
             },
             # Assignment handout/due dates come from schedule.yml when set (keyed on the
             # assignment slug), else a synthesised fortnightly cadence.
@@ -1580,6 +1612,7 @@ def sync_public_site(
                     edit_at=f"the `people:` block of {course_org}/.github/dsl-course.yml",
                     include_tas=False,
                 ),
+                **THEME_PAGES,
                 # Persist the settings THIS publish used, in the site repo itself, so the
                 # daily cron can repeat it with no inputs (see resync_public_site).
                 PUBLISH_CONFIG: (
