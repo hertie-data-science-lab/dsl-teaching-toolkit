@@ -50,6 +50,124 @@ WEBSITE_TEMPLATE = "course-website-template"
 
 _GIT_ENV = GIT_ENV
 
+_SYLLABUS_STUB = """\
+# {course} syllabus
+
+<!-- FACULTY & INSTRUCTORS: this is the students' syllabus, and it is yours to write - the
+     headings below are the standard Hertie shape, so delete what your course does not use.
+     Release it by naming this file as the release path (see MAINTAINING.md); the name and
+     its capitalisation must match exactly, and any format works - rename this to
+     SYLLABUS.pdf and release that instead if you author in Word.
+     A filled example sits beside this file in SYLLABUS.md.sample. -->
+
+## 1. General information
+
+| | |
+| --- | --- |
+| Instructor | |
+| E-mail | |
+| Office hours | |
+| Term | {tag} |
+| Sessions | |
+| Language of instruction | English |
+
+## 2. Course contents and learning objectives
+
+### Course contents
+
+### Main learning objectives
+
+### Target group
+
+### Prerequisites
+
+## 3. Grading and assignments
+
+| Component | Weight | Due |
+| --- | --- | --- |
+| | | |
+
+## 4. General readings
+
+## 5. Course sessions and readings
+
+<!-- The course website publishes this session by session, built from
+     `classroom-config/schedule.yml` (each session's title and learning objectives) and
+     each session's `readings/NN_.../` folder (its reading list). If you also list the
+     sessions here - Hertie syllabi normally do - keep the two in step, or students will
+     read one and see the other. -->
+"""
+
+_SYLLABUS_SAMPLE = """\
+# Foundations of Machine Learning (Demo) - E1234 - syllabus
+
+<!-- A FILLED example, kept current by the toolkit - copy from it, do not edit it (your
+     edits are overwritten). Your own syllabus is SYLLABUS.md beside this file. This file
+     is never released to students. -->
+
+## 1. General information
+
+| | |
+| --- | --- |
+| Instructor | Prof. Jane Doe |
+| E-mail | doe@hertie-school.org |
+| Office hours | Tuesdays 14:00-15:00, or by appointment |
+| Term | Fall 2026 (7 September - 18 December) |
+| Sessions | Tuesdays 10:00-12:00; lab Thursdays 14:00-16:00 |
+| Language of instruction | English |
+
+## 2. Course contents and learning objectives
+
+### Course contents
+
+An applied introduction to machine learning for public policy. We build up from linear
+models to neural networks, and spend as much time on what a model cannot tell you as on
+what it can.
+
+### Main learning objectives
+
+By the end of the course students can:
+
+- state what a supervised learning problem is, and recognise when a question is not one;
+- fit, tune and honestly evaluate a model, distinguishing training from test error;
+- read a published ML result critically, including its choice of baseline.
+
+### Target group
+
+MPP and MDS students in their second year. No prior ML required.
+
+### Prerequisites
+
+Statistics 1 or equivalent; comfort writing a function and reading a data frame in Python
+or R.
+
+## 3. Grading and assignments
+
+| Component | Weight | Due |
+| --- | --- | --- |
+| Problem set 1 | 20% | 13 October |
+| Problem set 2 | 20% | 27 October |
+| Group project | 40% | 15 November |
+| Participation | 20% | continuous |
+
+Late work loses one grade step per 24 hours. Extensions are granted before the deadline,
+not after it.
+
+## 4. General readings
+
+No required textbook. Both of these are free and used throughout:
+
+- James, Witten, Hastie & Tibshirani, *An Introduction to Statistical Learning*.
+  <https://www.statlearning.com/>
+- Goodfellow, Bengio & Courville, *Deep Learning*. <https://www.deeplearningbook.org/>
+
+## 5. Course sessions and readings
+
+Session titles, learning objectives and readings are published on the course website, and
+are generated from `classroom-config/schedule.yml` and each session's `readings/` folder -
+so they stay in step with what is actually released.
+"""
+
 _GRADING_YML = """\
 # How the Grade assignment button autogrades this assignment (after the grading_deadline in schedule.yml).
 # Delete this file (or set autograde: false) for a purely manually-graded one.
@@ -222,6 +340,17 @@ def scaffold_materials(org: str, tag: str) -> int:
         "file is hosted and downloadable - you carry the copyright responsibility).\n"
     )
     failures = 0
+    # The filled syllabus example: SYSTEM-owned like MAINTAINING.md, so it is refreshed
+    # rather than frozen - a repo scaffolded before this existed gets it on the next
+    # Refresh, which is the half of this that helps the courses already running.
+    if not put_file(
+        org,
+        repo,
+        "SYLLABUS.md.sample",
+        _SYLLABUS_SAMPLE.encode(),
+        "docs: syllabus example",
+    ):
+        failures += 1
     # MAINTAINING.md is SYSTEM-owned generated docs, built from the actions table above (like
     # classroom-config's README contract): it must refresh on a re-run when the toolkit
     # changes it, so it's written unconditionally with put_file - never frozen create-only. A
@@ -257,7 +386,7 @@ def scaffold_materials(org: str, tag: str) -> int:
             b"never published.\n"
         ),
         "labs/01_session-1/.gitkeep": b"",
-        "SYLLABUS.md": f"# {tag} syllabus\n\nReplace with the real syllabus.\n".encode(),
+        "SYLLABUS.md": _SYLLABUS_STUB.format(course=tag, tag=tag).encode(),
     }
     # One commit for the skeleton: all five carried the same subject anyway, so writing
     # them one at a time opened a repo faculty then author by hand with five identical

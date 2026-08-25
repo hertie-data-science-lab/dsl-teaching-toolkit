@@ -77,6 +77,10 @@ def test_fresh_materials_repo_gets_the_full_skeleton(fake):
         "README.md",
         "MAINTAINING.md",
         "SYLLABUS.md",
+        # The filled example beside the stub, on the repo's `<file>.sample` convention.
+        # SYSTEM-owned like MAINTAINING.md, so a repo scaffolded before it existed picks it
+        # up on the next Refresh.
+        "SYLLABUS.md.sample",
         "lectures/01_session-1/.gitkeep",
         # Readings get a stub rather than a .gitkeep: a text file in here IS the reading
         # list published on the cohort site, and an empty folder gave no sign of that.
@@ -259,3 +263,46 @@ def test_the_seeded_readme_would_be_withheld_from_a_release(fake):
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     seeded = fake.files[("course-materials-f2026", "README.md")]
     assert deploy._is_unedited_readme("README.md", seeded)
+
+
+def test_the_syllabus_stub_is_faculty_owned_and_the_sample_is_refreshed(fake):
+    # The stub is the faculty's own document, so a re-run must not revert it; the filled
+    # example beside it is ours, so a re-run MUST refresh it - that is how a course
+    # scaffolded before it existed gets one.
+    written = "# Real syllabus\n\nBy faculty.\n"
+    fake.files[("course-materials-f2026", "SYLLABUS.md")] = written
+    fake.files[("course-materials-f2026", "SYLLABUS.md.sample")] = "# stale example\n"
+
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    assert fake.files[("course-materials-f2026", "SYLLABUS.md")] == written
+    assert "SYLLABUS.md" not in fake.written("course-materials-f2026")
+    assert "SYLLABUS.md.sample" in fake.written("course-materials-f2026")
+    assert (
+        fake.files[("course-materials-f2026", "SYLLABUS.md.sample")]
+        != "# stale example\n"
+    )
+
+
+def test_the_syllabus_stub_carries_the_standard_sections(fake):
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    stub = fake.files[("course-materials-f2026", "SYLLABUS.md")]
+    for heading in (
+        "## 1. General information",
+        "## 2. Course contents and learning objectives",
+        "### Prerequisites",
+        "## 3. Grading and assignments",
+        "## 4. General readings",
+        "## 5. Course sessions and readings",
+    ):
+        assert heading in stub
+    # It must say that the name, and its capitalisation, is what releases it - the trap the
+    # sample schedule used to set - and that a PDF releases just as readily, which is what
+    # ITDS actually uses.
+    assert "capitalisation" in stub and "SYLLABUS.pdf" in stub
+
+
+def test_the_syllabus_sample_is_never_released_to_students():
+    # A whole-repo release must not ship our example syllabus into a cohort.
+    from dsl_course import deploy
+
+    assert "SYLLABUS.md.sample" in deploy.ROOT_RELEASE_EXCLUDED
