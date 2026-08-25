@@ -662,6 +662,29 @@ def test_index_links_a_file_as_a_blob_and_counts_no_files(monkeypatch):
     assert "files" not in entry  # a file is not a folder with a count
 
 
+def test_index_nests_a_directory_instead_of_only_folding_it(monkeypatch):
+    # The All Materials tab shows the whole shape of what shipped, not just a count -
+    # unlike a session row's links (`_shape_links`), a folded subfolder's contents ARE
+    # reachable in the page itself, at any depth.
+    lectures = next(
+        s for s in _index(monkeypatch, MATHS_REPOS) if s["name"] == "lectures"
+    )
+    top = lectures["entries"][0]
+    assert top["name"] == "01_lecture/"
+    nested = {e["name"]: e for e in top["entries"]}
+    assert set(nested) == {"deck.html", "media/"}
+    assert "entries" not in nested["deck.html"] and "files" not in nested["deck.html"]
+    assert nested["deck.html"]["url"].endswith(
+        "/blob/main/lectures/01_lecture/deck.html"
+    )
+    media = nested["media/"]
+    assert media["files"] == 1
+    assert [e["name"] for e in media["entries"]] == ["img.png"]
+    assert media["entries"][0]["url"].endswith(
+        "/blob/main/lectures/01_lecture/media/img.png"
+    )
+
+
 def test_index_is_empty_yaml_when_nothing_is_released(monkeypatch):
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     assert yaml.safe_load(site._materials_index("Cohort-f2026", ["materials"])) == {

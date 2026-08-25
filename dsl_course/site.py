@@ -749,48 +749,108 @@ def _released_reading_list(cohort_org: str, sources: list[tuple[str, str, str]])
     return "\n\n".join(parts)
 
 
-def _index_entry(repo: str, path: str) -> tuple[str, str, bool, str]:
-    """(section, entry name, is-a-directory, path to the entry) for one released blob, for
-    the All Materials index.
+def _section_boundary(repo: str, path: str) -> tuple[str, str]:
+    """(section, the prefix of `path` that names it) for one released blob already known
+    to hold a "/" - a root file is handled separately by the caller.
 
     The ordinal decides only the LEVEL a section is read at, never whether a file shows up:
 
     - a repo whose top-level directories are session folders (`01_intro/...`) IS one
-      section, and those folders are its entries - the shape a cohort gets from
-      `cohort_dest_repo: lectures`;
-    - a repo holding `lectures/`, `labs/`, `datasets/` gives one section EACH, their own
-      children as entries - the shape from a single `materials` repo;
-    - a file at a repo's root takes the repo's name as its section, which is how a released
-      `SYLLABUS.md` reaches the site at all. Every other page is keyed on a session
-      ordinal, so until this index existed a root file was released and then invisible.
+      section, the repo's own name - the shape a cohort gets from
+      `cohort_dest_repo: lectures`. Nothing is stripped, so a session folder is itself the
+      first node the tree gets.
+    - a repo holding `lectures/`, `labs/`, `datasets/` gives one section EACH, named after
+      the top directory - the shape from a single `materials` repo. That directory name IS
+      the prefix, stripped so its own children become the section's nodes.
 
-    Both live cohort shapes therefore land where a reader expects, and nothing needs an
-    ordinal to be listed. Same reading as `_deploy_section` - head-of-path, else the repo -
-    one level down."""
-    head, sep, rest = path.partition("/")
-    if not sep:
-        return repo, head, False, head
+    Both live cohort shapes therefore land where a reader expects. Same reading as
+    `_deploy_section` - head-of-path, else the repo - one level down."""
+    head, _sep, _rest = path.partition("/")
     if session_number(head) is not None:
-        return repo, head, True, head
-    nxt, deeper, _rest = rest.partition("/")
-    return head, nxt, bool(deeper), f"{head}/{nxt}"
+        return repo, ""
+    return head, f"{head}/"
 
 
 @dataclass
 class _IndexEntry:
-    """One row of a section in the All Materials index - a file, or a folded directory
-    carrying the number of files inside it."""
+    """One node of the All Materials index - a file, or a directory nesting its own
+    children to whatever depth the release actually has. `files` is 1 for a file and the
+    total under a directory, so a level's total is always `sum(e.files for e in level)`
+    regardless of what it mixes."""
 
     name: str
     is_dir: bool
     url: str
     files: int = 0
+    entries: dict[str, _IndexEntry] = field(default_factory=dict)
 
     @property
     def label(self) -> str:
         """How the row reads: a directory keeps its trailing slash so it is obviously not
         a file."""
         return f"{self.name}/" if self.is_dir else self.name
+
+    @property
+    def children(self) -> list[_IndexEntry]:
+        """This node's own entries, sorted for display."""
+        return _sorted_entries(self.entries)
+
+
+def _sorted_entries(entries: dict[str, _IndexEntry]) -> list[_IndexEntry]:
+    """One level of the All Materials tree, directories before files, both alphabetically:
+    this is a directory listing, where the structure is what a reader scans - the ordering
+    every level uses, from a section's own top down to its deepest file."""
+    return sorted(entries.values(), key=lambda e: (not e.is_dir, e.name.lower()))
+
+
+def _insert_released_path(
+    root: dict[str, _IndexEntry],
+    cohort_org: str,
+    repo: str,
+    branch: str,
+    full_path: str,
+    prefix: str,
+) -> None:
+    """Add one released blob into the nested tree rooted at `root`, creating every
+    ancestor directory it needs and counting the file into each one's `files`.
+
+    `full_path` is the blob's path in `repo`; `prefix` is the part `_section_boundary`
+    already spent naming the section, so what remains is split and walked exactly as deep
+    as the release actually is - a file three folders down nests three folders down, unlike
+    a session row's links (`_shape_links`), which fold a subfolder into a count because
+    this is the one page a reader opens to see the whole shape instead."""
+    parts = full_path[len(prefix) :].split("/")
+    node = root
+    entry_path = prefix.rstrip("/")
+    for i, part in enumerate(parts):
+        is_dir = i < len(parts) - 1
+        entry_path = f"{entry_path}/{part}" if entry_path else part
+        entry = node.get(part)
+        if entry is None:
+            entry = node[part] = _IndexEntry(
+                part,
+                is_dir,
+                _gh_url(
+                    cohort_org, repo, branch, "tree" if is_dir else "blob", entry_path
+                ),
+            )
+        entry.files += 1
+        node = entry.entries
+
+
+def _emit_entries(entries: list[_IndexEntry], indent: str) -> list[str]:
+    """YAML lines for one level of the All Materials tree, `indent` growing with every
+    level it recurses into - a file three folders down reads no differently than one at
+    the top, just deeper in the page."""
+    lines: list[str] = []
+    for e in entries:
+        lines.append(f'{indent}- name: "{_q(e.label)}"')
+        lines.append(f"{indent}  url: {e.url}")
+        if e.is_dir:
+            lines.append(f"{indent}  files: {e.files}")
+            lines.append(f"{indent}  entries:")
+            lines.extend(_emit_entries(e.children, indent + "    "))
+    return lines
 
 
 def _indexable_repos(
@@ -851,8 +911,8 @@ def _released_syllabus(cohort_org: str, content_repos: list[str]) -> str | None:
 def _materials_index(
     cohort_org: str, content_repos: list[str], syllabus: str | None = None
 ) -> str:
-    """`_data/materials.yml` - every file released to this cohort, grouped into sections
-    and folded one level, for the All Materials tab.
+    """`_data/materials.yml` - every file released to this cohort, nested exactly as its
+    repo has it, for the All Materials tab.
 
     The catch-all. Every other page is curated: a row exists because the schedule named a
     session, and its links are the files of that session. This is the complete index, so
@@ -860,14 +920,16 @@ def _materials_index(
     and a teaching team's "did my file actually ship?" - including material no session
     ordinal covers.
 
-    Folded, for the same reason the session rows are (`_shape_links`): a directory holds up
-    to a couple of thousand files, so an entry that is a directory is ONE counted link to
-    its tree, never its contents. Nothing is filtered by name (see `_shape_links`): a
-    dotfile can be course material, and most real clutter is not dotted anyway.
+    Nested, not folded: contrast the session rows (`_shape_links`), which count a
+    subfolder rather than open it because a deck's rendered assets would otherwise bury the
+    three files a student opens. This index is the one page meant to show the whole shape
+    of what shipped, so a directory carries its own children all the way down instead.
+    Nothing is filtered by name (see `_shape_links`): a dotfile can be course material, and
+    most real clutter is not dotted anyway.
 
-    Directories lead, then files, both alphabetically: this is a directory listing, where
-    the structure is what a reader scans - unlike a session row, which leads with the
-    deliverables because there the files ARE the material.
+    Directories lead, then files, both alphabetically, at every level: this is a directory
+    listing, where the structure is what a reader scans - unlike a session row, which leads
+    with the deliverables because there the files ARE the material.
 
     Root files come out separately as `documents:` rather than as sections of their own,
     because a course-level document is not a section: a README released into three content
@@ -890,39 +952,25 @@ def _materials_index(
                     ),
                 )
                 continue
-            section, name, is_dir, entry = _index_entry(repo, path)
-            rows = found.setdefault(section, {})
-            row = rows.get(f"{repo}/{entry}")
-            if row is None:
-                row = rows[f"{repo}/{entry}"] = _IndexEntry(
-                    name,
-                    is_dir,
-                    _gh_url(
-                        cohort_org, repo, branch, "tree" if is_dir else "blob", entry
-                    ),
-                )
-            row.files += 1
+            section, prefix = _section_boundary(repo, path)
+            _insert_released_path(
+                found.setdefault(section, {}), cohort_org, repo, branch, path, prefix
+            )
     rows_out: list[str] = []
     for section in sorted(found):
-        entries = sorted(
-            found[section].values(), key=lambda e: (not e.is_dir, e.name.lower())
-        )
+        entries = _sorted_entries(found[section])
         rows_out.append(f'  - name: "{_q(section)}"')
         rows_out.append(f"    files: {sum(e.files for e in entries)}")
         rows_out.append("    entries:")
-        for e in entries:
-            rows_out.append(f'      - name: "{_q(e.label)}"')
-            rows_out.append(f"        url: {e.url}")
-            if e.is_dir:
-                rows_out.append(f"        files: {e.files}")
+        rows_out.extend(_emit_entries(entries, "      "))
     doc_rows = [
         line
         for e in sorted(docs.values(), key=lambda e: e.name.lower())
         for line in (f'  - name: "{_q(e.name)}"', f"    url: {e.url}")
     ]
     header = (
-        "# Generated by `python3 -m dsl_course.site sync` - every released file,\n"
-        "# grouped by section. Edit nothing here; it is rewritten on every sync.\n"
+        "# Generated by `python3 -m dsl_course.site sync` - every released file, nested\n"
+        "# as its repo has it. Edit nothing here; it is rewritten on every sync.\n"
     ) + (f"syllabus: {syllabus}\n" if syllabus else "")
     # Stated, not reached: `sections: []` is the empty index, the same shape
     # `_links_block` uses for a row with nothing to link.
