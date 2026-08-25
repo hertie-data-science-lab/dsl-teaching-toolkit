@@ -845,7 +845,6 @@ on:
           SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
           WRITE: ${{{{ inputs.write }}}}
         run: |
-          gh auth setup-git
           args=(--course-org "$COURSE" --cohort-org "$COHORT_ORG" --course-source-repo "$SOURCE_REPO")
           [ "$WRITE" = "true" ] && args+=(--write)
           python3 -m dsl_course.syllabus "${{args[@]}}"

@@ -811,11 +811,30 @@ def test_no_syllabus_means_no_key_at_all(monkeypatch):
     assert with_one["syllabus"] == "u"
 
 
+def test_an_exact_syllabus_stem_beats_a_longer_name(monkeypatch):
+    # Plain sorting put `SYLLABUS-draft.pdf` ahead of `SYLLABUS.pdf` ('-' sorts before
+    # '.'), so a cohort shipping a draft alongside the real thing pinned the draft on its
+    # front page.
+    monkeypatch.setattr(
+        site,
+        "_repo_tree",
+        lambda o, r: ("main", ("SYLLABUS-draft.pdf", "SYLLABUS.pdf")),
+    )
+    assert site._released_syllabus("C", ["m"]).endswith("/SYLLABUS.pdf")
+
+
+def test_a_longer_name_is_still_used_when_it_is_all_there_is(monkeypatch):
+    monkeypatch.setattr(
+        site, "_repo_tree", lambda o, r: ("main", ("syllabus-2026.docx",))
+    )
+    assert site._released_syllabus("C", ["m"]).endswith("/syllabus-2026.docx")
+
+
 def test_the_syllabus_choice_is_stable_when_a_cohort_has_two(monkeypatch):
-    # A link that moves between syncs is worse than either choice: repos then names, sorted.
-    trees = {"zzz": ("SYLLABUS.md",), "aaa": ("syllabus-old.pdf", "SYLLABUS.md")}
+    # A link that moves between syncs is worse than either choice. Determinism comes from
+    # the caller's sorted repo list and _repo_tree's sorted paths, not from re-sorting.
+    trees = {"zzz": ("SYLLABUS.md",), "aaa": ("SYLLABUS.md",)}
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", trees[r]))
-    for order in (["aaa", "zzz"], ["zzz", "aaa"]):
-        assert site._released_syllabus("C", order).endswith(
-            "/aaa/blob/main/SYLLABUS.md"
-        )
+    assert site._released_syllabus("C", ["aaa", "zzz"]).endswith(
+        "/aaa/blob/main/SYLLABUS.md"
+    )

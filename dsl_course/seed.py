@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import argparse
 import os
-import re
 import sys
 from datetime import datetime, timezone
 
@@ -59,8 +58,9 @@ from .utils import (
     log_step,
     put_file,
     put_files,
+    refresh_stubs,
     repo_is_archived,
-    seed_or_refresh_stub,
+    term_tag,
 )
 from .welcome import (
     refresh_classroom_samples,
@@ -322,20 +322,18 @@ def _refresh_stubs(course_org: str, repo: str) -> int:
     # shape as `scheduler`'s import of `deploy`.
     from . import scaffold
 
-    # `course-materials-f2026` -> `f2026`, which is all the stubs interpolate.
-    m = re.search(r"[fs]\d{4}", repo)
-    failures = 0
-    for path, body in scaffold.refreshable_stubs(m.group(0) if m else "").items():
-        if not seed_or_refresh_stub(
-            course_org,
-            repo,
-            path,
-            body,
-            "docs: refresh the scaffold stub",
-            create=False,
-        ):
-            failures += 1
-    return failures
+    # `course-materials-f2026` -> `f2026`, which is all the stubs interpolate. A repo with
+    # no term tag is not one the materials scaffold made, and rewriting its stub would head
+    # the file `#  syllabus` - so it is left alone rather than refreshed into nonsense.
+    tag = term_tag(repo)
+    if tag is None:
+        return 0
+    return refresh_stubs(
+        course_org,
+        repo,
+        scaffold.refreshable_stubs(tag),
+        "docs: refresh the scaffold stubs",
+    )
 
 
 def refresh(course_org: str) -> int:

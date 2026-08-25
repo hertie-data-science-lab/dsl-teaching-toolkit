@@ -41,13 +41,21 @@ class FakeRepo:
             self.put_file(org, repo, path, content, message)
         return True
 
-    def seed_or_refresh_stub(self, org, repo, path, content, message):
-        """Write while the file is absent or still carries the stub mark; else leave it."""
-        current = self.files.get((repo, path))
-        if current is not None and not utils.is_untouched_stub(current):
-            self.skips.append(f"{repo}/{path}")
-            return True
-        return self.put_file(org, repo, path, content, message)
+    def refresh_stubs(self, org, repo, files, message, create=False):
+        """One commit for whatever is absent-and-wanted, or still carries the stub mark."""
+        failures = 0
+        for path, content in files.items():
+            current = self.files.get((repo, path))
+            if current is None:
+                if create and not self.put_file(org, repo, path, content, message):
+                    failures += 1
+                continue
+            if utils.is_untouched_stub(current):
+                if not self.put_file(org, repo, path, content, message):
+                    failures += 1
+            else:
+                self.skips.append(f"{repo}/{path}")
+        return failures
 
     def written(self, repo):
         return {path for r, path in self.writes if r == repo}
@@ -63,7 +71,7 @@ def fake(monkeypatch):
     monkeypatch.setattr(utils, "get_file_content", f.get_file_content)
     monkeypatch.setattr(utils, "put_file", f.put_file)
     monkeypatch.setattr(utils, "put_files", f.put_files)
-    monkeypatch.setattr(scaffold, "seed_or_refresh_stub", f.seed_or_refresh_stub)
+    monkeypatch.setattr(scaffold, "refresh_stubs", f.refresh_stubs)
     monkeypatch.setattr(scaffold, "put_file", f.put_file)
     monkeypatch.setattr(utils, "log_skip", lambda msg: f.skips.append(msg))
     monkeypatch.setattr(scaffold, "log_skip", lambda msg: f.skips.append(msg))
@@ -271,7 +279,7 @@ def test_the_seeded_readme_would_be_withheld_from_a_release(fake):
 
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     seeded = fake.files[("course-materials-f2026", "README.md")]
-    assert deploy._is_unedited_readme("README.md", seeded)
+    assert deploy._is_withheld_stub("README.md", seeded)
 
 
 def test_the_syllabus_stub_is_faculty_owned_and_the_sample_is_refreshed(fake):
@@ -369,6 +377,7 @@ def test_refresh_improves_an_existing_stub_but_never_creates_one(monkeypatch):
     monkeypatch.setattr(utils, "get_file_content", f.get_file_content)
     monkeypatch.setattr(utils, "put_file", f.put_file)
     monkeypatch.setattr(utils, "log_skip", lambda msg: f.skips.append(msg))
+    monkeypatch.setattr(seed, "refresh_stubs", f.refresh_stubs)
     # A materials repo with the stub we used to ship, and a code repo with no stub at all.
     f.files[("course-materials-f2026", "SYLLABUS.md")] = (
         "# f2026 syllabus\n\nReplace with the real syllabus.\n"

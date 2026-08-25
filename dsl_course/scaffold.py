@@ -39,10 +39,10 @@ from .utils import (
     log_skip,
     log_step,
     put_file,
+    refresh_stubs,
     repo_exists,
     seed_files_if_absent,
     seed_if_absent,
-    seed_or_refresh_stub,
     set_repo_topics,
 )
 
@@ -410,11 +410,9 @@ def scaffold_materials(org: str, tag: str) -> int:
     # improvement then reaches the courses already running, not just the next repo
     # scaffolded. Written before the create-only set below so a re-run's log reads in the
     # order the rules apply.
-    for path, body in refreshable_stubs(tag).items():
-        if not seed_or_refresh_stub(
-            org, repo, path, body, "init: refresh scaffold stub"
-        ):
-            failures += 1
+    failures += refresh_stubs(
+        org, repo, refreshable_stubs(tag), "init: scaffold stubs", create=True
+    )
 
     user_files = {
         "README.md": readme.encode(),
