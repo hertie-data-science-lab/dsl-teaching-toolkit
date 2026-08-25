@@ -16,6 +16,14 @@ name: Validate schedule
 # out from the public central repo. A second implementation - a JSON schema, a hand-rolled
 # checker - could drift, and its failure mode is the worst one available: passing a file
 # the scheduler will silently drop entries from.
+#
+# The red X and the issue above are the DROPPED-ENTRY channel and nothing else. The run
+# also checks whether the plan's sources exist in the course org, but that answer changes
+# week to week (a lecture nobody has written yet is normal in August), so it is reported as
+# ::warning:: annotations on a green run and never touches the exit code. Escalating one of
+# those to a failure is the hourly scheduler's job, which files its own, separately-titled
+# digest issue - routing it through here would name the fault "entries the scheduler cannot
+# read" and close it on the next clean parse, staged or not.
 
 on:
   push:
@@ -55,12 +63,41 @@ jobs:
           python-version: "3.12"
       - run: pip install -r central/requirements.txt
 
+      # The course org this cohort belongs to, read from its own dsl-course.yml (the same
+      # single source of truth dispatch-sync.yml reads - no org name baked in at bootstrap
+      # time). Only the source check needs it, and that check is advisory, so a failure to
+      # resolve it leaves this empty and the check is skipped rather than breaking the run.
+      - name: Resolve the course org
+        id: course
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          COHORT_ORG: ${{ github.repository_owner }}
+        run: |
+          course_org=$(gh api "repos/$COHORT_ORG/.github/contents/dsl-course.yml" \
+            --jq '.content | @base64d' | grep '^course:' | cut -d: -f2- | xargs) || true
+          echo "org=$course_org" >> "$GITHUB_OUTPUT"
+
       - name: Validate schedule.yml
         id: validate
         working-directory: central
+        env:
+          # Reading the COURSE org's (private) material repos is beyond the ambient token,
+          # which is scoped to this repo. Absent, --check-sources is simply not passed.
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          COURSE_ORG: ${{ steps.course.outputs.org }}
         run: |
           set +e
-          python3 -m dsl_course.schedule --file ../cohort/schedule.yml --validate > report.txt 2>&1
+          check=""
+          if [ -n "$COURSE_ORG" ]; then
+            check="--check-sources $COURSE_ORG --annotate"
+          else
+            echo "::notice::could not resolve this cohort's course org - the source check did not run"
+          fi
+          # stdout is the report; the ::warning:: annotations go to stderr, so they reach
+          # the job log (where Actions renders them against schedule.yml in the commit's
+          # own diff) without landing in the summary as raw workflow-command text.
+          python3 -m dsl_course.schedule --file ../cohort/schedule.yml --validate $check > report.txt
           echo "rc=$?" >> "$GITHUB_OUTPUT"
           {
             echo "## schedule.yml"

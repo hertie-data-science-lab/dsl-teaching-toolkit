@@ -18,8 +18,8 @@
 #       photo: "/_images/pp/jane.jpg" # optional. Either (1) a site-relative path to an image committed under `_images/pp/` in this cohort's site repo.
 #                                     # OR (2)an absolute URL on a host that allows hotlinking.
 #       url: "https://.../profile/jane"  # optional, display only
-#       start: "2026-09-01"           # optional - no start = active immediately
-#       end: "2027-01-31"             # optional - no end = indefinite
+#       start: "{year}-09-01"           # optional - no start = active immediately
+#       end: "{year_next}-01-31"             # optional - no end = indefinite
 #   teaching_assistants:
 #     - github_handle: "anOther"
 #       name: "..."

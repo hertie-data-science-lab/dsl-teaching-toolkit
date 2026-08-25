@@ -64,7 +64,7 @@ Sample identifiers throughout: course org `hertie-dsl-demo-course-e1234`, cohort
 Workflow YAML. Faculty read the **button names, input descriptions and header comments**;
 the rest is machinery. Edit the prose, leave the shell logic.
 
-- `course-org-buttons/` (17) - `dsl_course/workflows_render.py`
+- `course-org-buttons/` (18) - `dsl_course/workflows_render.py`
 - `cohort-classroom-config/` (3) - `templates/classroom-config/`
 - `cohort-welcome/` (2) - `templates/welcome/`; **edit `welcome-bot-messages.md` instead** for the student replies
 
