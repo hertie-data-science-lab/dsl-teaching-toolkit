@@ -964,7 +964,7 @@ def test_a_row_omits_the_declared_fields_it_was_not_given(monkeypatch):
     assert "subtitle:" not in out and "description:" not in out
 
 
-def test_an_unreleased_row_keeps_its_title_but_drops_its_description():
+def test_an_unreleased_row_still_says_what_the_session_is_about():
     out = site._lecture_entry(
         "Cohort-f2026",
         "3",
@@ -974,10 +974,11 @@ def test_an_unreleased_row_keeps_its_title_but_drops_its_description():
         subtitle="Expectation",
         description="Linearity of expectation.",
     )
+    # What the session covers is known the day the plan is written, so it is published
+    # then - the term reads as a syllabus from day one. Only the FILES wait for release,
+    # which is what the body says.
     assert 'subtitle: "Expectation"' in out
-    # The row's own prose already says it is unreleased; a blurb beside it would print a
-    # second sentence saying the same thing on the Lectures tab.
-    assert "description:" not in out
+    assert 'description: "Linearity of expectation."' in out
     assert "will appear in `materials/lectures/03_week-3` when released." in out
 
 

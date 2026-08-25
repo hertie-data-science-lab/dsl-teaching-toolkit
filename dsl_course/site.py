@@ -156,47 +156,62 @@ def _set_config(text: str, key: str, value: str) -> str:
     return new
 
 
-# The Materials and Labs pages. Their CONTENT is a theme layout (dsl-jekyll-theme's
-# `_layouts/materials.html` / `labs.html`), so these are the front matter that points at
-# it plus the page's own intro line. Owned here, not left to the site template, because a
-# template edit only reaches orgs created after it - the rendering used to live as inline
-# Liquid in each site repo, and by the time it needed changing there were seven live sites
-# to hand-patch. Every later change to how sessions render now ships from the theme alone.
+# The session pages. Their CONTENT is a theme layout (dsl-jekyll-theme's
+# `_layouts/lectures.html` / `materials.html` / `labs.html`), so these are the front matter
+# that points at it plus the page's own intro line. Owned here, not left to the site
+# template, because a template edit only reaches orgs created after it - the rendering used
+# to live as inline Liquid in each site repo, and by the time it needed changing there were
+# seven live sites to hand-patch. Every later change to how sessions render now ships from
+# the theme alone.
 #
 # `_overwritten_edits` still reports a hand edit these replace, as it does for any other
 # generated surface. (It does NOT fire on the first sync that takes them over: the page a
 # site was generated with was authored by the token account, which reads as a machine.)
 #
-# The access sentence is the caller's, not the layout's: a COHORT site links its files into
-# the private materials repo, while the public open-courseware site hosts them for anyone -
-# so "visible to enrolled students" is true of one and false of the other.
-def _theme_pages(access_note: str) -> dict[str, str]:
-    """The `{path: content}` for the two pages whose rendering lives in the theme."""
-    tail = f" {access_note}" if access_note else ""
+# The access sentences are the caller's, not the layout's: a COHORT site links its files
+# into the private materials repo, while the public open-courseware site hosts them for
+# anyone - so "visible to enrolled students" is true of one and false of the other.
+def _theme_pages(access_note: str, readings_note: str) -> dict[str, str]:
+    """The `{path: content}` for the pages whose rendering lives in the theme.
+
+    `access_note` closes the Lectures and Labs intros, `readings_note` the Materials one -
+    readings need their own sentence, because the citation LIST is public even where the
+    files behind it are not."""
+
+    def page(layout: str, title: str, intro: str, note: str) -> str:
+        return (
+            f"---\nlayout: {layout}\ntitle: {title}\npermalink: /{layout}/\n---\n\n"
+            + intro
+            + (f" {note}" if note else "")
+            + "\n"
+        )
+
     return {
-        "materials.md": (
-            "---\n"
-            "layout: materials\n"
-            "title: Materials\n"
-            "permalink: /materials/\n"
-            "---\n\n"
-            f"Readings by session.{tail}\n"
+        "lectures.md": page(
+            "lectures",
+            "Lectures",
+            "Lecture slides by session (lab exercises are on the [Labs](/labs/) tab).",
+            access_note,
         ),
-        "labs.md": (
-            "---\n"
-            "layout: labs\n"
-            "title: Labs\n"
-            "permalink: /labs/\n"
-            "---\n\n"
+        "labs.md": page(
+            "labs",
+            "Labs",
             "Lab exercises by session (lecture slides are on the "
-            f"[Lectures](/lectures/) tab).{tail}\n"
+            "[Lectures](/lectures/) tab).",
+            access_note,
+        ),
+        "materials.md": page(
+            "materials", "Materials", "Readings by session.", readings_note
         ),
     }
 
 
 # A cohort site is public but its materials are not: every link points into the private
 # cohort repo, so only enrolled members can open one.
-COHORT_ACCESS_NOTE = (
+COHORT_ACCESS_NOTE = "Released materials are visible to enrolled students."
+# Readings are the one case where the two halves differ: the citation list is published as
+# written, while the reading itself is only linked (this site must not host it).
+COHORT_READINGS_NOTE = (
     "Citation lists are public; the files themselves are visible to enrolled students."
 )
 
@@ -702,9 +717,10 @@ def _lecture_entry(
             + (f" - they will appear in {where} when released" if where else "")
             + "."
         )
-        # The row's own prose already says it is unreleased; a description repeating that
-        # would print the same sentence twice on the Lectures tab.
-        description = ""
+        # `subtitle` and `description` are deliberately KEPT here. They describe what the
+        # session is about, which is known the day the plan is written; the body next to
+        # them describes whether its files have shipped. So the whole term reads as a
+        # syllabus from day one, rather than as a list of empty rows that fills in weekly.
     # The plan ships readings for this row but they have not landed, so the Materials tab
     # says so rather than leaving the session off the page entirely.
     if readings_pending and not reading_list:
@@ -1368,7 +1384,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                     _yaml_file(cohort_org, "classroom-config", "people.yml"),
                     edit_at=f"{cohort_org}/classroom-config/people.yml",
                 ),
-                **_theme_pages(COHORT_ACCESS_NOTE),
+                **_theme_pages(COHORT_ACCESS_NOTE, COHORT_READINGS_NOTE),
             },
             # Assignment handout/due dates come from schedule.yml when set (keyed on the
             # assignment slug), else a synthesised fortnightly cadence.
@@ -1626,7 +1642,7 @@ def sync_public_site(
                     edit_at=f"the `people:` block of {course_org}/.github/dsl-course.yml",
                     include_tas=False,
                 ),
-                **_theme_pages(""),
+                **_theme_pages("", ""),
                 # Persist the settings THIS publish used, in the site repo itself, so the
                 # daily cron can repeat it with no inputs (see resync_public_site).
                 PUBLISH_CONFIG: (
