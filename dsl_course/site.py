@@ -637,15 +637,6 @@ def _ext(name: str) -> str:
     return name.rsplit(".", 1)[-1].lower() if "." in name.rsplit("/", 1)[-1] else ""
 
 
-def _is_plumbing(path: str) -> bool:
-    """Whether a released path is plumbing rather than material - any dot-prefixed segment
-    (`.gitkeep`, a stray `.DS_Store`, `.github/`). Cheaper than splitting the path: a
-    leading dot, or a dot straight after a slash. One rule for both the session rows and
-    the All Materials index, which otherwise disagreed - the index skipped these and a
-    session row offered `.gitkeep` to students as a download."""
-    return path.startswith(".") or "/." in path
-
-
 def _shape_links(
     blobs: list[tuple[str, str]], tree_base: str, allow: frozenset[str]
 ) -> list[tuple[str, str]]:
@@ -667,15 +658,16 @@ def _shape_links(
       plus one "browse the folder" link, so a file the list does not name is still one
       click away instead of invisible.
 
-    Dotfiles are skipped as plumbing, the same rule the All Materials index applies: a
-    `.gitkeep` holding an otherwise-empty session folder open is not a download, and it was
-    being offered to students as one. Two answers to "is this material?" is how the two
-    pages come to disagree about the same folder.
+    Nothing is filtered by NAME, dotfiles included. The exclusion list that would be needed
+    cannot be written honestly: `__pycache__/`, `.ipynb_checkpoints/` and `node_modules/`
+    are all clutter and none of them starts with a dot, while `.Rprofile`, `.env.example`
+    and a `.devcontainer/` are real course material a rule about dots would hide. So the
+    page says what was released, and the remedy for clutter sits where the clutter does -
+    in what the release copies.
 
     `blobs` is (path-relative-to-the-session-folder, url) as `_session_files` returns it;
     `tree_base` is the session folder's own GitHub tree URL. Order follows `blobs` (path
     sorted), files before folders, for a stable diff."""
-    blobs = [(n, u) for n, u in blobs if not _is_plumbing(n)]
     if allow:
         return [(n, u) for n, u in blobs if _ext(n) in allow] + [
             (_BROWSE_ALL, tree_base)
@@ -822,8 +814,8 @@ def _materials_index(cohort_org: str, content_repos: list[str]) -> str:
 
     Folded, for the same reason the session rows are (`_shape_links`): a directory holds up
     to a couple of thousand files, so an entry that is a directory is ONE counted link to
-    its tree, never its contents. Dotfiles are skipped as plumbing (`.gitkeep`, a stray
-    `.DS_Store`, `.github`), so they are not mistaken for material.
+    its tree, never its contents. Nothing is filtered by name (see `_shape_links`): a
+    dotfile can be course material, and most real clutter is not dotted anyway.
 
     Directories lead, then files, both alphabetically: this is a directory listing, where
     the structure is what a reader scans - unlike a session row, which leads with the
@@ -832,8 +824,6 @@ def _materials_index(cohort_org: str, content_repos: list[str]) -> str:
     for repo in sorted(content_repos):
         branch, paths = _repo_tree(cohort_org, repo)
         for path in paths:
-            if _is_plumbing(path):
-                continue  # a dotfile is not material - same rule as `_shape_links`
             section, name, is_dir, entry = _index_entry(repo, path)
             rows = found.setdefault(section, {})
             row = rows.get(f"{repo}/{entry}")
