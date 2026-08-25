@@ -158,20 +158,16 @@ def _set_config(text: str, key: str, value: str) -> str:
 
 
 # The session pages. Their CONTENT is a theme layout (dsl-jekyll-theme's
-# `_layouts/lectures.html`, `labs.html`, `readings.html`, `materials.html`), so these are
-# the front matter that points at one plus the page's own intro line. Owned here, not left
-# to the site template, because a template edit only reaches orgs created after it - the
-# rendering used to live as inline Liquid in each site repo, and by the time it needed
-# changing there were seven live sites to hand-patch. Every later change to how sessions
-# render now ships from the theme alone.
+# `_layouts/lectures.html`, `labs.html`, `readings.html`, `materials.html`,
+# `assignments.html`), so these are the front matter that points at one plus the page's own
+# intro line. Owned here, not left to the site template, because a template edit only
+# reaches orgs created after it - the rendering used to live as inline Liquid in each site
+# repo, and by the time it needed changing there were seven live sites to hand-patch. Every
+# later change to how sessions render now ships from the theme alone.
 #
 # `_overwritten_edits` still reports a hand edit these replace, as it does for any other
 # generated surface. (It does NOT fire on the first sync that takes them over: the page a
 # site was generated with was authored by the token account, which reads as a machine.)
-#
-# The access sentences are the caller's, not the layout's: a COHORT site links its files
-# into the private materials repo, while the public open-courseware site hosts them for
-# anyone - so "visible to enrolled students" is true of one and false of the other.
 @dataclass(frozen=True)
 class _ThemePage:
     """One generated page and its nav entry, declared together.
@@ -180,17 +176,20 @@ class _ThemePage:
     holding the same permalinks and titles, kept consistent only by both being written in
     the same breath. The day someone generated the nav for the public site too, its
     Readings tab would have pointed at a page that site never gets - a 404 nobody edited
-    into existence. One row per page makes that impossible."""
+    into existence. One row per page makes that impossible.
+
+    Each page carries its OWN access sentence, because they genuinely differ: readings are
+    a public citation list over gated files, everything else is gated outright. `gated_note`
+    is what a COHORT site says; `open_note` what the public open-courseware site says
+    instead, where the same files are published on purpose."""
 
     file: str
     layout: str
     title: str
     permalink: str
     icon: str
-    intro: str
-    # Which access sentence closes the intro: readings need their own, because the citation
-    # LIST is public even where the files behind it are not.
-    readings_note: bool = False
+    gated_note: str
+    open_note: str = ""
     # Pages only a COHORT site has. A public course site has no cohort repos to index, so
     # it keeps `/materials/` as the readings page it has always been.
     cohort_only: bool = False
@@ -203,7 +202,8 @@ _THEME_PAGES = (
         "Lectures",
         "/lectures/",
         "fas fa-book-reader",
-        "Lecture slides by session (lab exercises are on the [Labs](/labs/) tab).",
+        "Lecture slides are accessible to enrolled students.",
+        "Lecture slides by session.",
     ),
     _ThemePage(
         "labs.md",
@@ -211,7 +211,8 @@ _THEME_PAGES = (
         "Labs",
         "/labs/",
         "fas fa-flask",
-        "Lab exercises by session (lecture slides are on the [Lectures](/lectures/) tab).",
+        "Lab materials are only accessible to enrolled students.",
+        "Lab materials by session.",
     ),
     _ThemePage(
         "readings.md",
@@ -219,9 +220,21 @@ _THEME_PAGES = (
         "Readings",
         "/readings/",
         "fas fa-book",
+        "Citation lists are public; the files themselves are accessible to enrolled "
+        "students.",
         "Readings by session.",
-        readings_note=True,
         cohort_only=True,
+    ),
+    _ThemePage(
+        "assignments.md",
+        "assignments",
+        "Assignments",
+        "/assignments/",
+        "fas fa-user-graduate",
+        # The layout says "No assignments released yet." when the collection is empty, so
+        # this line is only ever shown beside an actual list.
+        "Assignments are only accessible to enrolled students.",
+        "Assignments by hand-out date.",
     ),
     _ThemePage(
         "materials.md",
@@ -229,8 +242,10 @@ _THEME_PAGES = (
         "All Materials",
         "/materials/",
         "fas fa-folder-open",
-        "Everything released to this cohort, whether or not it belongs to a session. "
-        "Folders open on GitHub.",
+        # Deliberately not "everything released": a cohort org also holds each student's
+        # private submission repo, which this must never list. See `_indexable_repos`.
+        "Every course material released to this cohort, session or not. Course materials "
+        "are only accessible to enrolled students.",
         cohort_only=True,
     ),
 )
@@ -243,24 +258,21 @@ _PUBLIC_MATERIALS_PAGE = _ThemePage(
     "Materials",
     "/materials/",
     "fas fa-book",
+    "",
     "Readings by session.",
-    readings_note=True,
 )
 
-# Tabs the theme provides that are not generated pages (the template's own index.md and
-# the collections-driven Schedule/Assignments). `after` names the generated page each one
-# follows, so the order survives renaming a permalink or adding a page - positions used to
-# be hard-coded integers, and the 4th page tied with Assignments at 5, leaving the tab
-# order to a string comparison on the URL.
+# Tabs the theme provides rather than generating: the template's own index.md and the
+# Schedule, which is driven by the collections. Everything else is a row above.
 _STATIC_NAV = (
-    ("Home", "/", "fa fa-home fa-lg", None),
-    ("Schedule", "/schedule/", "fas fa-calendar-alt", None),
-    ("Assignments", "/assignments/", "fas fa-user-graduate", "readings.md"),
+    ("Home", "/", "fa fa-home fa-lg"),
+    ("Schedule", "/schedule/", "fas fa-calendar-alt"),
 )
 
 
 def _site_pages(cohort: bool) -> tuple[_ThemePage, ...]:
-    """The pages this kind of site gets, in nav order."""
+    """The pages this kind of site gets, in nav order. A public course site drops the two
+    cohort-only pages and keeps `/materials/` as its readings page."""
     if cohort:
         return _THEME_PAGES
     return tuple(pg for pg in _THEME_PAGES if not pg.cohort_only) + (
@@ -270,15 +282,11 @@ def _site_pages(cohort: bool) -> tuple[_ThemePage, ...]:
 
 def _theme_pages(cohort: bool) -> dict[str, str]:
     """The `{path: content}` for the pages whose rendering lives in the theme."""
-    note = ""
-    if cohort:
-        note = COHORT_ACCESS_NOTE
     return {
         pg.file: (
             f"---\nlayout: {pg.layout}\ntitle: {pg.title}\n"
             f"permalink: {pg.permalink}\n---\n\n"
-            + pg.intro
-            + (f" {COHORT_READINGS_NOTE if pg.readings_note else note}" if note else "")
+            + ((pg.gated_note if cohort else pg.open_note) or pg.open_note)
             + "\n"
         )
         for pg in _site_pages(cohort)
@@ -287,27 +295,10 @@ def _theme_pages(cohort: bool) -> dict[str, str]:
 
 def _nav_yaml(cohort: bool) -> str:
     """`_data/nav.yml` - the site's tab bar (the theme's `_includes/nav.html` reads it),
-    built from the same page table, so a tab can never point at a page this site lacks.
-
-    Home and Schedule lead; the generated pages follow in table order, with each static tab
-    slotted in after the page it belongs behind (`_STATIC_NAV`). Assignments follows
-    Readings on a cohort site and is dropped from a public one, whose `_assignments`
-    collection is deliberately emptied - a tab to a blank page is worse than no tab."""
-    pages = _site_pages(cohort)
-    rows = [
-        (name, url, icon)
-        for name, url, icon, after in _STATIC_NAV
-        if after is None and (cohort or url != "/assignments/")
+    built from the same page table, so a tab can never point at a page this site lacks."""
+    rows = list(_STATIC_NAV) + [
+        (pg.title, pg.permalink, pg.icon) for pg in _site_pages(cohort)
     ]
-    trailing = {
-        after: (name, url, icon)
-        for name, url, icon, after in _STATIC_NAV
-        if after is not None and (cohort or url != "/assignments/")
-    }
-    for pg in pages:
-        rows.append((pg.title, pg.permalink, pg.icon))
-        if pg.file in trailing:
-            rows.append(trailing[pg.file])
     body = "\n\n".join(
         f"- url: {url}\n  name: {name}\n  icon_class: {icon}"
         for name, url, icon in rows
@@ -317,16 +308,6 @@ def _nav_yaml(cohort: bool) -> str:
         "# page of your own as a file in the repo and link it from `index.md` instead.\n"
         "items:\n" + body + "\n"
     )
-
-
-# A cohort site is public but its materials are not: every link points into the private
-# cohort repo, so only enrolled members can open one.
-COHORT_ACCESS_NOTE = "Released materials are visible to enrolled students."
-# Readings are the one case where the two halves differ: the citation list is published as
-# written, while the reading itself is only linked (this site must not host it).
-COHORT_READINGS_NOTE = (
-    "Citation lists are public; the files themselves are visible to enrolled students."
-)
 
 
 def _site_repo(org: str) -> str:
@@ -709,6 +690,34 @@ def _row_links(
     return [(n, u) for n, u in links if _ext(n) not in READING_LIST_EXTS]
 
 
+# How far the inlined reading list's own headings are pushed down, so they nest under the
+# session heading the page puts above them. A reading file written in the Hertie syllabus
+# shape opens with `# Session 1 readings` and sub-heads `## Required Readings`; at their
+# written levels those outrank the page's own `<h2>Session 1`, which is exactly backwards.
+_HEADING_SHIFT = 2
+
+
+def _demote_headings(text: str) -> str:
+    """Push every ATX heading in faculty-written markdown down `_HEADING_SHIFT` levels.
+
+    Only outside fenced code blocks: a `# comment` on the first line of a shell example is
+    not a heading, and deepening it would rewrite the example. A heading also needs
+    whitespace after its hashes, so `#hashtag` stays prose. Levels clamp at 6, which is as
+    deep as HTML goes."""
+    out, fenced = [], False
+    for line in text.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith(("```", "~~~")):
+            fenced = not fenced
+        elif not fenced and stripped.startswith("#"):
+            hashes = len(stripped) - len(stripped.lstrip("#"))
+            rest = stripped[hashes:]
+            if rest[:1] in (" ", "\t", ""):
+                line = "#" * min(hashes + _HEADING_SHIFT, 6) + rest
+        out.append(line)
+    return "\n".join(out)
+
+
 def _released_reading_list(cohort_org: str, sources: list[tuple[str, str, str]]) -> str:
     """The reading list a session row shows: the TEXT of every citation file released into
     its `readings` section, inlined verbatim.
@@ -733,7 +742,7 @@ def _released_reading_list(cohort_org: str, sources: list[tuple[str, str, str]])
                 get_file_content(cohort_org, repo, f"{prefix}/{name}") or ""
             ).strip()
             if text:
-                parts.append(text)
+                parts.append(_demote_headings(text))
     return "\n\n".join(parts)
 
 
@@ -913,6 +922,42 @@ def _links_block(sections: list[tuple[str, list[tuple[str, str]]]]) -> str:
     return ("links:\n" + "\n".join(rows)) if rows else "links: []"
 
 
+def _dest_link(cohort_org: str, dest: str, live_repos: frozenset[str]) -> str:
+    """A planned destination (`repo/path`) as markdown - a LINK when there is something to
+    link to, plain code when there is not.
+
+    The path itself does not exist yet, by definition: that is what "not released" means, so
+    linking it would hand a student a 404. What can exist is the destination repo, and once
+    it does, its tree is already in hand - so the link points at the deepest ancestor of the
+    path that is really there. `live_repos` is the cohort's existing repos, already
+    discovered by the caller, so knowing this costs no extra API call."""
+    repo, _, path = dest.partition("/")
+    if repo not in live_repos:
+        return f"`{dest}`"
+    branch, blobs = _repo_tree(cohort_org, repo)
+    here = ""
+    for part in path.split("/"):
+        candidate = f"{here}/{part}" if here else part
+        if not any(b == candidate or b.startswith(f"{candidate}/") for b in blobs):
+            break
+        here = candidate
+    return f"[`{dest}`]({_gh_url(cohort_org, repo, branch, 'tree', here) if here else f'https://github.com/{cohort_org}/{repo}'})"
+
+
+def _describe(text: str) -> str:
+    """A row's `description:` front matter - the session's learning objectives.
+
+    A block scalar once it has a newline in it. The Hertie syllabus format writes these as
+    a paragraph (sometimes two), and `_q` folds every newline away, so a one-line scalar
+    silently ran two paragraphs together. Empty stays absent rather than blank, so the
+    theme can test for it."""
+    if not text.strip():
+        return ""
+    if "\n" in text.strip():
+        return _block("description", text)
+    return f'description: "{_q(text)}"\n'
+
+
 def _lecture_entry(
     cohort_org: str,
     session: str,
@@ -920,6 +965,7 @@ def _lecture_entry(
     sources: list[tuple[str, str, str]],
     kind: str = "lecture",
     allow: frozenset[str] = frozenset(),
+    live_repos: frozenset[str] = frozenset(),
 ) -> str:
     """One row of a teaching week: the lecture (`kind='lecture'`) or the lab
     (`kind='lab'`), which the theme renders as separate schedule lines out of the same
@@ -964,10 +1010,10 @@ def _lecture_entry(
             ]
         )
         reading_list = _released_reading_list(cohort_org, sources)
-        body = (
-            f"Materials for {title.lower()}. Open the links above (you must be an "
-            f"enrolled member of `{cohort_org}`)."
-        )
+        # No body. It used to read "Materials for session 1. Open the links above (you must
+        # be an enrolled member of ...)" on every released row of every course - the links
+        # are right there, and each page already states who can open them.
+        body = ""
     else:
         # A flag as well as the prose: the theme can badge or grey an unreleased row off
         # this (as it already does for `tbc:`/`dateless:`), and until it does the sentence
@@ -975,7 +1021,7 @@ def _lecture_entry(
         # indistinguishable from a released folder that happens to hold no files.
         flags = "unreleased: true\n"
         links = _links_block([])
-        where = ", ".join(f"`{d}`" for d in row.dests)
+        where = ", ".join(_dest_link(cohort_org, d, live_repos) for d in row.dests)
         body = (
             f"Materials for {title.lower()} are not released yet"
             + (f" - they will appear in {where} when released" if where else "")
@@ -997,7 +1043,7 @@ def _lecture_entry(
         f"date: {_iso_when(row.when)}\n"
         f'title: "{title}"\n'
         + (f'subtitle: "{_q(subtitle)}"\n' if subtitle else "")
-        + (f'description: "{_q(description)}"\n' if description else "")
+        + _describe(description)
         + flags
         + (_block("reading_list", reading_list) if reading_list else "")
         + f"{links}\n"
@@ -1589,7 +1635,13 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 when=start + timedelta(days=int(s) * 7)
             )
             return _lecture_entry(
-                cohort_org, s, row, sources_by_row.get((s, kind), []), kind, allow
+                cohort_org,
+                s,
+                row,
+                sources_by_row.get((s, kind), []),
+                kind,
+                allow,
+                live_repos=frozenset(content_repos),
             )
 
         config = {}

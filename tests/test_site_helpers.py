@@ -671,24 +671,21 @@ def test_theme_pages_split_readings_out_only_where_there_is_an_index():
     assert "readings.md" not in public
     assert "layout: readings" in public["materials.md"]
     assert "permalink: /materials/" in public["materials.md"]
-    # The public site hosts what it lists, so it claims no student gate.
-    assert site.COHORT_ACCESS_NOTE not in public["labs.md"]
-    assert site.COHORT_ACCESS_NOTE in cohort["labs.md"]
-    assert site.COHORT_READINGS_NOTE in cohort["readings.md"]
 
 
-def test_nav_lists_readings_before_all_materials():
-    nav = yaml.safe_load(site._nav_yaml(cohort=True))["items"]
-    assert [i["name"] for i in nav] == [
-        "Home",
-        "Schedule",
-        "Lectures",
-        "Labs",
-        "Readings",
-        "Assignments",
-        "All Materials",
-    ]
-    assert all(i["url"] and i["icon_class"] for i in nav)
+def test_every_page_states_its_own_access_rule():
+    cohort = site._theme_pages(cohort=True)
+    # Each page's gate is its own sentence, because they genuinely differ: readings are a
+    # public citation list over gated files, the rest are gated outright.
+    assert "accessible to enrolled students." in cohort["lectures.md"]
+    assert "only accessible to enrolled students." in cohort["labs.md"]
+    assert "Citation lists are public" in cohort["readings.md"]
+    assert "Course materials are only accessible" in cohort["materials.md"]
+    assert "Assignments are only accessible" in cohort["assignments.md"]
+    # The public open-courseware site publishes the same files on purpose, so it claims no
+    # gate anywhere.
+    for page in site._theme_pages(cohort=False).values():
+        assert "enrolled" not in page
 
 
 def test_no_nav_tab_can_point_at_a_page_this_site_does_not_get():
@@ -702,17 +699,10 @@ def test_no_nav_tab_can_point_at_a_page_this_site_does_not_get():
             f"/{f.removesuffix('.md')}/" for f in site._theme_pages(cohort=cohort)
         }
         assert generated <= tabs  # every generated page has a tab
-        # ...and every remaining tab is one of the theme's own, never an orphan.
-        assert tabs - generated <= {"/", "/schedule/", "/assignments/"}
+        # ...and every remaining tab is one the theme provides rather than generates.
+        assert tabs - generated == {"/", "/schedule/"}
     public = {i["url"] for i in yaml.safe_load(site._nav_yaml(cohort=False))["items"]}
-    cohort_tabs = {
-        i["url"] for i in yaml.safe_load(site._nav_yaml(cohort=True))["items"]
-    }
     assert "/readings/" not in public  # a cohort-only page, so a cohort-only tab
-    # `sync_public_site` empties the _assignments collection deliberately, so a tab there
-    # would lead to a blank page.
-    assert "/assignments/" not in public
-    assert "/assignments/" in cohort_tabs
 
 
 def test_nav_order_does_not_depend_on_a_string_tie_break():
@@ -720,5 +710,67 @@ def test_nav_order_does_not_depend_on_a_string_tie_break():
     # generated page - so the tab order came down to comparing "/assignments/" against
     # "/materials/". It now follows the page it belongs behind.
     names = [i["name"] for i in yaml.safe_load(site._nav_yaml(cohort=True))["items"]]
+    # Assignments is a generated page now, so its position comes from the page table like
+    # every other - no integer slots, nothing to tie.
     assert names.index("Assignments") == names.index("Readings") + 1
     assert names.index("All Materials") == names.index("Assignments") + 1
+
+
+# ------------------------------------------------- the Hertie syllabus shape, rendered
+def test_demote_headings_nests_a_reading_list_under_the_session_heading():
+    # A reading file written in the Hertie syllabus shape: `# Session N readings`, then
+    # `## Required Readings` / `## Optional Readings`. At their written levels those
+    # outrank the page's own <h2>Session N, which is backwards.
+    src = "# Session 1 readings\n\n## Required Readings\n\n- Gill (2015)\n\n## Optional Readings\n"
+    out = site._demote_headings(src)
+    assert "### Session 1 readings" in out
+    assert "#### Required Readings" in out and "#### Optional Readings" in out
+
+
+def test_demote_headings_leaves_code_and_prose_alone():
+    # A `#` comment inside a fence is not a heading, and deepening it would rewrite the
+    # example the faculty member wrote.
+    src = "# Real heading\n\n```bash\n# install first\ncd x\n```\n\n#hashtag not a heading\n"
+    out = site._demote_headings(src)
+    assert "### Real heading" in out
+    assert "\n# install first\n" in out
+    assert "#hashtag not a heading" in out
+
+
+def test_demote_headings_clamps_at_six():
+    assert site._demote_headings("##### deep").startswith("###### deep")
+    assert site._demote_headings("###### deepest").startswith("###### deepest")
+
+
+def test_describe_keeps_the_paragraphs_of_a_multi_line_objective():
+    # Hertie learning objectives run to a paragraph, sometimes two. `_q` folds newlines, so
+    # a one-line scalar silently ran them together.
+    one = site._describe("Sample spaces and Bayes' rule.")
+    assert one == 'description: "Sample spaces and Bayes\' rule."\n'
+    many = site._describe("First paragraph.\n\nSecond paragraph.")
+    assert (
+        yaml.safe_load(many)["description"] == "First paragraph.\n\nSecond paragraph.\n"
+    )
+    assert site._describe("") == "" and site._describe("   ") == ""
+
+
+def test_a_planned_destination_links_only_where_something_exists(monkeypatch):
+    # The path itself cannot exist - that is what "not released" means - so linking it
+    # would hand a student a 404. The deepest ancestor that IS there gets the link.
+    monkeypatch.setattr(
+        site, "_repo_tree", lambda o, r: ("main", ("lectures/01_intro/slides.pdf",))
+    )
+    live = frozenset({"materials"})
+    # The repo exists and holds `lectures/`, but not `lectures/03_week-3` yet.
+    got = site._dest_link("C", "materials/lectures/03_week-3", live)
+    assert (
+        got
+        == "[`materials/lectures/03_week-3`](https://github.com/C/materials/tree/main/lectures)"
+    )
+    # A repo that does not exist yet has nothing to link at all.
+    assert site._dest_link("C", "labs/01_lab", live) == "`labs/01_lab`"
+    # A repo that exists but is empty links the repo itself.
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
+    assert site._dest_link("C", "materials/lectures/03", live) == (
+        "[`materials/lectures/03`](https://github.com/C/materials)"
+    )

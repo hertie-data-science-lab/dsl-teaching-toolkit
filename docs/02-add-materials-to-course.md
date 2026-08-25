@@ -37,7 +37,9 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
    ```
    lectures/01_session-1/   any files - slides, demo code, notebooks …
    readings/01_session-1/   a text file (reading.md/.txt/.bib) IS the reading list
-                            published on the cohort site; other files are linked
+                            published on the cohort site; other files are linked.
+                            Use `## Required Readings` / `## Optional Readings`
+                            sub-headings to mirror the Hertie syllabus format
    labs/01_session-1/       any files 
    SYLLABUS.md              optional (any root file matching *syllabus*)
    ```
