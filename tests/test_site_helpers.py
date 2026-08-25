@@ -774,3 +774,48 @@ def test_a_planned_destination_links_only_where_something_exists(monkeypatch):
     assert site._dest_link("C", "materials/lectures/03", live) == (
         "[`materials/lectures/03`](https://github.com/C/materials)"
     )
+
+
+# ----------------------------------------------------- finding a released syllabus
+def test_the_syllabus_is_found_under_any_name_and_format(monkeypatch):
+    # Faculty name it; we only have to find it. ITDS really does use the PDF.
+    for name in ("SYLLABUS.md", "SYLLABUS.pdf", "syllabus-2026.docx", "Syllabus.MD"):
+        monkeypatch.setattr(site, "_repo_tree", lambda o, r, n=name: ("main", (n,)))
+        assert site._released_syllabus("C", ["materials"]) == (
+            f"https://github.com/C/materials/blob/main/{name}"
+        )
+
+
+def test_a_syllabus_image_inside_a_session_folder_is_not_the_syllabus(monkeypatch):
+    # A live cohort has `lectures/01_introduction/pics/ids-syllabus-2024.png`. Root files
+    # only, or the home page links a screenshot.
+    monkeypatch.setattr(
+        site,
+        "_repo_tree",
+        lambda o, r: (
+            "main",
+            ("lectures/01_x/pics/ids-syllabus-2024.png", "lectures/01_x/deck.html"),
+        ),
+    )
+    assert site._released_syllabus("C", ["materials"]) is None
+
+
+def test_no_syllabus_means_no_key_at_all(monkeypatch):
+    # The home page shows no line rather than an empty one, so the key must be absent -
+    # not present and blank.
+    monkeypatch.setattr(
+        site, "_repo_tree", lambda o, r: ("main", ("lectures/01/a.md",))
+    )
+    assert "syllabus" not in yaml.safe_load(site._materials_index("C", ["materials"]))
+    with_one = yaml.safe_load(site._materials_index("C", ["materials"], syllabus="u"))
+    assert with_one["syllabus"] == "u"
+
+
+def test_the_syllabus_choice_is_stable_when_a_cohort_has_two(monkeypatch):
+    # A link that moves between syncs is worse than either choice: repos then names, sorted.
+    trees = {"zzz": ("SYLLABUS.md",), "aaa": ("syllabus-old.pdf", "SYLLABUS.md")}
+    monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", trees[r]))
+    for order in (["aaa", "zzz"], ["zzz", "aaa"]):
+        assert site._released_syllabus("C", order).endswith(
+            "/aaa/blob/main/SYLLABUS.md"
+        )
