@@ -57,8 +57,9 @@ The same button releases **code**, because code is just another path. Keep a gro
 Releasing the repo root (`/`), or naming `README.md` outright, copies the materials repo's
 `README.md` to students as their course overview. While it is still the scaffold's
 placeholder - addressed to faculty, with a "delete this section before releasing" block and
-a link to `MAINTAINING.md` - the release **skips it and goes red**. Everything else in the
-release still ships. Rewrite it for students and release again.
+a link to `MAINTAINING.md` - the release **skips it and says so**. Everything else in the
+release still ships and the run stays green; the withheld file appears as a warning on the
+run summary. Rewrite it for students and release again.
 
 ## Live updates to the deployed `<course>.github.io` site
 - Any released materials will automatically show up in the deployed site (i.e. their release triggers a redeploy).

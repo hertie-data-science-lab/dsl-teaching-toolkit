@@ -75,16 +75,28 @@ UNEDITED_README_MARKERS = ("**Replace this placeholder.**", FACULTY_ONLY_HEADING
 
 
 def _warn_unedited_readme(source_org: str, repo: str) -> None:
-    """Say what was withheld and how to fix it. Loud and counted (the run goes red): a
-    silent skip would read as "the README just didn't ship", which is the same symptom as
-    a broken release."""
-    log_err(
-        f"NOT released: {source_org}/{repo}/README.md is still the scaffold placeholder "
-        "(it is addressed to faculty and links MAINTAINING.md). Everything else in this "
-        "release shipped. Rewrite it as the students' overview - delete the "
-        '"For faculty & instructors" section and the "Replace this placeholder" note - '
+    """Say what was withheld and how to fix it - visibly, but WITHOUT failing the release.
+
+    Withholding an unedited placeholder is this guard working, not a fault: the release did
+    exactly what it should. Counting it as an error reddened a run whose every other copy
+    shipped, and - because the hourly scheduler drives the same `deploy_many` - would have
+    reddened the Scheduled release cron every hour, forever, for any course that never
+    rewrote its README. A permanently red cron is how real failures stop being noticed.
+
+    So it takes the channel this codebase already uses for "true, worth seeing, not a
+    failure" (see `templates/classroom-config/validate-schedule.yml`): a `::warning::`
+    annotation on a green run. It surfaces on the run summary without touching the exit
+    code, and outside Actions it is just a line of text."""
+    fix = (
+        f"{source_org}/{repo}/README.md was NOT released - it is still the scaffold "
+        "placeholder, addressed to faculty and linking MAINTAINING.md. Everything else in "
+        "this release shipped. Rewrite it as the students' overview (delete the "
+        '"For faculty & instructors" section and the "Replace this placeholder" note), '
         "then release again."
     )
+    log(f"  (withheld) {fix}")
+    # Straight to stderr as a workflow command, so the run summary carries it too.
+    print(f"::warning::{fix}", file=sys.stderr)
 
 
 def _is_unedited_readme(path: str, text: str) -> bool:
@@ -248,7 +260,6 @@ def deploy_many(
                     ):
                         withheld = frozenset({"README.md"})
                         _warn_unedited_readme(source_org, d.course_source_repo)
-                        errors += 1
                 shutil.copytree(
                     srcp,
                     destp,
@@ -258,8 +269,9 @@ def deploy_many(
             elif _is_unedited_readme(
                 d.course_source_path, srcp.read_text(encoding="utf-8", errors="replace")
             ):
+                # Named outright rather than swept up by a whole-repo release: nothing else
+                # was asked for, so this copy is simply a no-op.
                 _warn_unedited_readme(source_org, d.course_source_repo)
-                errors += 1
                 continue
             else:
                 destp.parent.mkdir(parents=True, exist_ok=True)
