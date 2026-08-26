@@ -13,7 +13,7 @@ the result - so a student never sees a score in their own repo.
   cohort/<slug>-<team>    (group)              |
                 v
   classroom-config/autograde/<slug>/<key>.json   (per-test detail, private archive)
-  classroom-config/grades/<slug>.csv             (auto / team_grade columns filled)
+  classroom-config/grades/<slug>.csv             (autograde_score / team_score filled)
 
 Student code is run in a subprocess with the GitHub token stripped from the environment.
 
@@ -50,7 +50,7 @@ record, never bare directory existence, so a stray early write into the director
 longer be mistaken for a completed grade. Machine-written grade cells are write-once too (see
 `grades.merge_auto`), so a marker's hand-edit is never clobbered. To re-grade deliberately,
 delete `autograde/<slug>/` (the next tick regrades) or press the Grade assignment button -
-and clear the `auto`/`team_grade` cells you want recomputed.
+and clear the `autograde_score`/`team_score` cells you want recomputed.
 
 grading.yml (on the template's solution branch):
     type: individual        # or group
@@ -1101,10 +1101,10 @@ def collect(
             score = str(result["score"])
             if is_group:
                 updates += [
-                    (m, {"team": target_key, "team_grade": score}) for m in members
+                    (m, {"team": target_key, "team_score": score}) for m in members
                 ]
             else:
-                updates.append((target_key, {"auto": score}))
+                updates.append((target_key, {"autograde_score": score}))
 
         if dry_run:
             return 0

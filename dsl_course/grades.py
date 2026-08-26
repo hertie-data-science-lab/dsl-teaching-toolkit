@@ -3,8 +3,8 @@
 Every grade, individual or group, is delivered into a PRIVATE per-student repo
 `grades-<handle>` (student = read). Team project repos may be public (showcase /
 open-courseware), so grades NEVER touch them: a group result is split into the shared
-team grade (duplicated into each member's gradebook) and that member's private
-adjustment + final mark, all delivered individually.
+team score (duplicated into each member's gradebook) and that member's private
+adjustment + final grade, all delivered individually.
 
 Three idempotent stages, each a faculty & instructors button:
 
@@ -66,32 +66,52 @@ GRADEBOOK_PREFIX = "grades-"  # per-student repo: grades-<handle>
 RENDER_BRANCH = "grades-update"
 COHORT_CSV_NAME = "cohort-gradebook.csv"  # generated wide faculty-only glance view
 
-# One assignment CSV row. Individual rows use `auto` (machine score) + `manual` (faculty & instructors'
-# hand-marked part); group rows carry the shared `team_grade`, that member's private
-# `adjustment`, and the shared `team_comments`. `final` is authoritative (stored explicitly so
-# faculty & instructors own any rounding/combination). `auto`/`manual` are faculty-internal working columns -
-# they never appear in the student's gradebook. Values stay strings - a grade may be a letter,
-# a percentage, or "+4" - we never coerce.
+# One assignment CSV row. Individual rows use `autograde_score` (machine) + `manual_score`
+# (faculty & instructors' hand-marked part); group rows carry the shared `team_score`, that
+# member's private `individual_adjustment`, and the shared `team_comments`. `final_grade` is
+# authoritative (stored explicitly so faculty & instructors own any rounding/combination).
+# `autograde_score`/`manual_score` are faculty-internal working columns - they never appear in
+# the student's gradebook. Values stay strings - a grade may be a letter, a percentage, or
+# "+4" - we never coerce.
+#
+# Every name says its scope and its role outright: a marker opening the CSV in Excel reads the
+# header, not this file, and the old `auto`/`manual`/`final` said neither which part of the
+# mark they held nor who owned them.
 GRADE_FIELDS = (
     "github_handle",
     "team",
-    "auto",
-    "manual",
-    "team_grade",
-    "adjustment",
-    "final",
-    "comments",
+    "autograde_score",
+    "manual_score",
+    "team_score",
+    "individual_adjustment",
+    "final_grade",
+    "individual_comments",
     "team_comments",
 )
 
 # The columns the autograder writes. They are WRITE-ONCE (see merge_auto): once one holds a
 # value - a machine score, or a marker's correction of one - no later run may replace it.
-MACHINE_FIELDS = ("auto", "team", "team_grade")
+MACHINE_FIELDS = ("autograde_score", "team", "team_score")
 
+# The legend for `grades.yml`. This README is the ONLY place a student is told what the
+# keys in that file mean - there is no other documentation on their side - so every key
+# gradebook_entry can emit is defined here, and the two must be kept in step.
 _STARTER_README = (
     "# Your gradebook\n\n"
     "This private repository is yours alone. Grades and feedback for each piece of "
-    "assessment appear in `grades.yml` as the course progresses.\n"
+    "assessment appear in `grades.yml` as the course progresses.\n\n"
+    "## What each field means\n\n"
+    "| Field | Meaning |\n"
+    "| --- | --- |\n"
+    "| `final_grade` | Your mark for that assignment. This is the authoritative one. |\n"
+    "| `individual_comments` | Your marker's feedback on your own work. |\n"
+    "| `team` | Group assignments only: the team you submitted with. |\n"
+    "| `team_score` | Group assignments only: the mark the whole team received. |\n"
+    "| `individual_adjustment` | Group assignments only: your own adjustment to the team "
+    "score, up or down. Nobody else on your team sees yours. |\n"
+    "| `team_comments` | Group assignments only: feedback shared with the whole team. |\n\n"
+    "A field you do not see simply does not apply - an individual assignment carries no "
+    "team fields.\n"
 )
 
 
@@ -99,12 +119,12 @@ _STARTER_README = (
 class GradeRow:
     github_handle: str = ""
     team: str = ""
-    auto: str = ""
-    manual: str = ""
-    team_grade: str = ""
-    adjustment: str = ""
-    final: str = ""
-    comments: str = ""
+    autograde_score: str = ""
+    manual_score: str = ""
+    team_score: str = ""
+    individual_adjustment: str = ""
+    final_grade: str = ""
+    individual_comments: str = ""
     team_comments: str = ""
 
 
@@ -121,22 +141,26 @@ def parse_grades(text: str) -> list[GradeRow]:
 
 def gradebook_entry(row: GradeRow) -> dict:
     """One assignment's entry for a student. Group fields appear only for group rows; the
-    faculty-internal auto/manual columns are never surfaced (the student sees the authoritative
-    final, not the machine/manual split); empty fields are dropped so an individual assignment
-    reads as just final + comments."""
+    faculty-internal `autograde_score`/`manual_score` columns are never surfaced (the student
+    sees the authoritative `final_grade`, not the machine/manual split); empty fields are
+    dropped so an individual assignment reads as just final_grade + individual_comments.
+
+    The keys carry the CSV's own names, so the file a student opens and the file their marker
+    fills in use one vocabulary - and `_STARTER_README` beside it defines each one, since this
+    file is the whole of what a student is given."""
     entry: dict[str, str] = {}
     if row.team:
         entry["team"] = row.team
-        if row.team_grade:
-            entry["team_grade"] = row.team_grade
-        if row.adjustment:
-            entry["adjustment"] = row.adjustment
+        if row.team_score:
+            entry["team_score"] = row.team_score
+        if row.individual_adjustment:
+            entry["individual_adjustment"] = row.individual_adjustment
         if row.team_comments:
             entry["team_comments"] = row.team_comments
-    if row.final:
-        entry["final"] = row.final
-    if row.comments:
-        entry["comments"] = row.comments
+    if row.final_grade:
+        entry["final_grade"] = row.final_grade
+    if row.individual_comments:
+        entry["individual_comments"] = row.individual_comments
     return entry
 
 
@@ -177,8 +201,9 @@ def render_cohort_csv(per: dict[str, list[GradeRow]]) -> str:
     """Pivot every assignment's raw grade rows into one wide CSV - one row per student,
     one column-group per assignment (sorted) - a faculty-only glance view. Generated,
     never hand-edited; the per-assignment CSVs in GRADES_DIR remain the source of
-    truth. Unlike gradebook_entry (student-facing, redacted), this keeps auto/manual/
-    team_grade/adjustment too - it never leaves classroom-config."""
+    truth. Unlike gradebook_entry (student-facing, redacted), this keeps
+    autograde_score/manual_score/team_score/individual_adjustment too - it never leaves
+    classroom-config."""
     fields = tuple(f for f in GRADE_FIELDS if f != "github_handle")
     assignments = sorted(per)
     by_assignment: dict[str, dict[str, GradeRow]] = {}
@@ -207,12 +232,13 @@ def merge_auto(text: str, updates: list[tuple[str, dict[str, str]]]) -> str:
 
     Each update is (github_handle, {field: value}); the handle's row is updated in place
     (preserving every other column a faculty & instructors member has already filled) or created and
-    appended if absent. Used by the collector to record `auto` (individual) or
-    `team`/`team_grade` (group) without disturbing manual marks, comments, or final.
+    appended if absent. Used by the collector to record `autograde_score` (individual) or
+    `team`/`team_score` (group) without disturbing hand-marked scores, comments, or the
+    final grade.
 
     WRITE-ONCE. A machine-written cell (MACHINE_FIELDS) that already holds a value is NEVER
     overwritten - this fills EMPTY cells only, on scheduled and manual runs alike. That is
-    what makes a hand-edited `auto`/`team_grade` safe: no re-run can silently replace a
+    what makes a hand-edited `autograde_score`/`team_score` safe: no re-run can silently replace a
     marker's correction with a recomputed score. To get a fresh machine score, clear those
     cells (or delete the CSV) first, then re-grade."""
     rows = parse_grades(text) if text.strip() else []

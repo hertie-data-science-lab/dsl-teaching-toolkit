@@ -164,12 +164,12 @@ Live example: [`example-course/cohort-org/grades/assignment-1.csv`](../example-c
 
 `classroom-config/grades/<slug>.csv` - one per assignment. The autograder creates it and
 fills the machine columns (write-once); for hand-marked work copy the header from the seeded
-`grades/assignment-1.csv.sample`. `final` +
-`comments` are what the student sees; full column-by-column reference:
+`grades/assignment-1.csv.sample`. `final_grade` +
+`individual_comments` are what the student sees; full column-by-column reference:
 [the grading runbook](10-grade-and-return-assignments.md#2-add-your-marks-on-top-of--instead-of-autograde).
 
 ```csv
-github_handle,team,auto,manual,team_grade,adjustment,final,comments,team_comments
+github_handle,team,autograde_score,manual_score,team_score,individual_adjustment,final_grade,individual_comments,team_comments
 anna-adams,,38/40,9/10,,,A-,Great work,
 ```
 

@@ -1,4 +1,4 @@
-github_handle,team,auto,manual,team_grade,adjustment,final,comments,team_comments
+github_handle,team,autograde_score,manual_score,team_score,individual_adjustment,final_grade,individual_comments,team_comments
 anna-adams,,70,18,,,88,"Clear, correct solution. Watch vectorised edge cases.",
 ben-baker,,60,14,,,74,"Right idea; the proof in Q3 is incomplete.",
 carla-cohen,,75,16,,,91,Excellent throughout.,

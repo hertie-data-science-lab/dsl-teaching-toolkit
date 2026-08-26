@@ -35,7 +35,7 @@ A push to this file triggers **Sync membership** automatically, reconciling the 
 
 One file per assignment,
 
-The autograder pre-fills `auto`/`team_grade` from hidden tests, creating the file if it doesn't exist; faculty & instructors fill the rest, then the following workflows:
+The autograder pre-fills `autograde_score`/`team_score` from hidden tests, creating the file if it doesn't exist; faculty & instructors fill the rest, then the following workflows:
 ```
 Sync gradebooks -> Render grades -> Distribute grades
 ```
@@ -46,7 +46,7 @@ For an all-manual assignment (`autograde: false`), copy the sample's header into
 
 > ### Changing grades:
 >
->`auto`/`team`/`team_grade` are **write-once**: once filled, no run overwrites them, so your corrections stand. 
+>`autograde_score`/`team`/`team_score` are **write-once**: once filled, no run overwrites them, so your corrections stand. 
 >
 >To recompute, clear those cells and delete `autograde/<slug>/`. 
 

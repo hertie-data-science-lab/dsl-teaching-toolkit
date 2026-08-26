@@ -1,4 +1,4 @@
-github_handle,team,auto,manual,team_grade,adjustment,final,comments,team_comments
+github_handle,team,autograde_score,manual_score,team_score,individual_adjustment,final_grade,individual_comments,team_comments
 anna-adams,team-alpha,,,85,+4,89,"Led the model architecture; carried the team's core work.","Strong project: excellent model design, but a thin evaluation section."
 ben-baker,team-alpha,,,85,0,85,"Solid, even contribution.","Strong project: excellent model design, but a thin evaluation section."
 amara-okonjo,team-alpha,,,85,+2,87,"Owned the evaluation harness and the error analysis.","Strong project: excellent model design, but a thin evaluation section."

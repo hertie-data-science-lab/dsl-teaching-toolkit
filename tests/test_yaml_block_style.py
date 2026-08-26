@@ -96,8 +96,10 @@ PY_FILES = sorted((ROOT / "dsl_course").glob("*.py"))
 def _gradebook() -> str:
     """One student's rendered gradebook - the `yaml.safe_dump` path (grades.render_yaml)."""
     rows = {
-        "assignment-1": [GradeRow(github_handle="janedoe", team="t1", final="15")],
-        "assignment-2": [GradeRow(github_handle="janedoe", final="10")],
+        "assignment-1": [
+            GradeRow(github_handle="janedoe", team="t1", final_grade="15")
+        ],
+        "assignment-2": [GradeRow(github_handle="janedoe", final_grade="10")],
     }
     return render_yaml(build_gradebooks(rows)["janedoe"])
 
