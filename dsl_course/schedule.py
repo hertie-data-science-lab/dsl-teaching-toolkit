@@ -11,7 +11,8 @@ lifecycle, `events` are display-only calendar rows.
         event_datetime: 2026-09-15T10:00   # deploy_datetime (default: the event itself).
         title: Linear regression           # optional, display-only: the session's name,
         description: Least squares by hand # and a sentence about what is in it.
-        deploy:                            # Labels are free identifiers.
+        show_on_site: true                 # optional (default true) - false deploys
+        deploy:                            # silently, off the site's schedule.
           - course_source_repo: course-materials-f2026   # course_source_repo + course_source_path
             course_source_path: lectures/02_intro        # are the only required keys;
             cohort_dest_repo: materials                  # cohort_dest_repo, cohort_dest_path
@@ -212,6 +213,14 @@ class Release:
     # `tbc: true` next to a REAL date = a provisional sketch: everything fires at that
     # date as normal, but the site marks it "(TBC)" to signal it may still move.
     tbc: bool = False
+    # `show_on_site: false` = a SILENT release: it deploys exactly as written, but tells
+    # the site's schedule nothing - no date, no title, no not-yet-released placeholder.
+    # For content that ships against a session without being an occasion of its own, a
+    # session's readings being the case it exists for: they land in the same site row as
+    # that session's lecture, and an entry dated a week earlier than the class would
+    # otherwise pull the row's date - and its name - back to the day the PDFs went up.
+    # Default true: an entry says what it is on the schedule unless faculty opt out.
+    show_on_site: bool = True
 
     @property
     def is_event_only(self) -> bool:
@@ -251,7 +260,7 @@ class AssignmentEntry:
     grading_datetime: datetime | None = None  # explicit pin; defaults to due_datetime
     # When to provision one repo per student (or per team - see `type`) from the
     # `<slug>-<tag>` template. The scheduler synthesises a release from this, so it fires
-    # exactly like a `releases` entry. None = hand out manually (the button
+    # exactly like a `releases` entry. None = hand out manually (the workflow
     # then records the release moment here).
     handout_datetime: datetime | None = None
     # 'group' | 'individual' | None. The COHORT-level declaration of how this assignment
@@ -333,7 +342,15 @@ KNOWN_TOP_LEVEL = frozenset(
     {"timezone", "releases", "semester_start", "semester_end", "assignments", "events"}
 )
 KNOWN_RELEASE = frozenset(
-    {"event_datetime", "deploy", "assignment", "title", "description", "tbc"}
+    {
+        "event_datetime",
+        "deploy",
+        "assignment",
+        "title",
+        "description",
+        "tbc",
+        "show_on_site",
+    }
 )
 KNOWN_DEPLOY = frozenset(
     {
@@ -517,6 +534,7 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Release
                 title=str(entry.get("title") or ""),
                 description=str(entry.get("description") or ""),
                 tbc=tbc,
+                show_on_site=entry.get("show_on_site") is not False,
             )
         )
     # Undated (TBC) entries sort to the end of the plan.
@@ -1024,7 +1042,7 @@ def _validate_report(sched: Schedule, source: str) -> str:
     return "\n".join(lines)
 
 
-_HANDOUT_COMMENT = "   # set automatically by the Release assignment button"
+_HANDOUT_COMMENT = "   # set automatically by the Release assignment workflow"
 _DUE_TODO = "# TODO: add `due_datetime:` - the date students see (required)"
 
 
@@ -1147,8 +1165,8 @@ def _insert_handout(text: str, slug: str, stamp: str) -> str | _Declined | None:
 def record_handout(cohort_org: str, slug: str, stamp: str | None = None) -> None:
     """Record a manual handout back into schedule.yml (`assignments.<slug>.handout_datetime`),
     so the schedule stays the one record of when every assignment went out - whether
-    the cron released it or a person clicked the button. Write-once: an existing
-    handout_datetime (scheduled, or recorded by an earlier click) is never modified. Best
+    the cron released it or a person ran the workflow. Write-once: an existing
+    handout_datetime (scheduled, or recorded by an earlier run) is never modified. Best
     effort - a failure here must never fail the release itself, but it is never silent
     either: a file this can't edit means the handout happened and is on record nowhere."""
     from .utils import log, put_file

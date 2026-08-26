@@ -3,10 +3,11 @@
 # - the SSOT for their GitHub access & permissions 
 # - supplies the deployed .github.io site's staff cards (name/title/photo/url). 
 # - see reference: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/05-manage-teaching-team.md
+# - see deployed reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/people.yml
+# - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/
 #
-# `photo` takes either (1) an absolute URL on a host that allows hotlinking (GitHub
-# avatars always do), or (2) a site-relative path to an image committed into this
-# cohort's site repo under `_images/pp/`. 
+# This is a FILLED EXAMPLE. The skeleton to edit is `people.yml` beside it; the two
+# `photo` forms are shown below.
 
 people:
   instructors:
@@ -23,10 +24,10 @@ people:
       url: "https://www.hertie-school.org/en/who-we-are/profile/person/fusar-bassini"
       start: "2026-08-01"
       end: "2027-01-31"
-    - github_handle: "demo-rmoreau-placeholder"
-      name: "Renée Moreau"
+    - github_handle: "demo-henrycgbaker-placeholder"
+      name: "Henry Baker"
       title: "Research Engineer & Data Scientist, Data Science Lab"
-      photo: "/_images/pp/renee-moreau.jpg"   # the other form: local file in the site repo
-      url: "https://www.hertie-school.org/en/who-we-are/profile/person/moreau"
+      photo: "/_images/pp/henrycgbaker.jpg"   # the other form: local file in the site repo
+      url: "https://www.hertie-school.org/en/who-we-are/profile/person/baker"
       start: "2026-08-01"
       end: "2027-01-31"

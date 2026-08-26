@@ -117,7 +117,7 @@ def _cohort_tag(org: str) -> tuple[str, int]:
 def set_org_secret(org: str, secret_name: str, secret_value: str) -> bool:
     """Create or update an org secret, scoped to the infra repos that need it.
 
-    The token must reach the **public** `.github` (faculty & instructors buttons), `welcome`
+    The token must reach the **public** `.github` (faculty & instructors workflows), `welcome`
     (onboarding), and `classroom-config` (its dispatch-sync workflow cross-repo
     triggers Sync membership in `.github`). gh defaults org-secret visibility to
     `private`, which excludes public repos - so the seeded workflows there run with
@@ -171,7 +171,7 @@ def set_org_secret(org: str, secret_name: str, secret_value: str) -> bool:
     return mirror_failures == 0
 
 
-# Faculty role teams - created in EVERY org (course + cohort): instructors run the buttons
+# Faculty role teams - created in EVERY org (course + cohort): instructors run the workflows
 # and push content (write); course-admin manage the org (admin).
 FACULTY_TEAMS = [
     ("instructors", "Instructors and TAs", "closed"),
@@ -207,7 +207,7 @@ def create_cohort_teams(org: str) -> None:
         create_team(org, slug, desc, privacy=privacy)
 
 
-# The course-org teams that may run the seeded buttons, and their grant on `.github`:
+# The course-org teams that may run the seeded workflows, and their grant on `.github`:
 # `instructors` run releases day-to-day (write); `course-admin` manage the org (admin).
 # Access is per-course - only this course's teaching team goes in these teams. The central
 # hertie-data-science-lab faculty/admin teams are a SEPARATE concern (who may bootstrap an
@@ -217,10 +217,10 @@ BUTTON_TEAMS = COURSE_TEAM_ACCESS
 
 def grant_button_access(org: str) -> None:
     """Give the course-org teams write/admin on `.github`, so faculty & instructors in them can see +
-    run the seeded workflow_dispatch buttons. GitHub only shows the 'Run workflow' button
-    to write+ users, so without this only the org owner can run the buttons - the seeded
+    run the seeded workflow_dispatch workflows. GitHub only shows the 'Run workflow' button
+    to write+ users, so without this only the org owner can run the workflows - the seeded
     check-team gate (repo permission) then enforces it at run time too."""
-    log_step("Granting course-org teams button access (.github)")
+    log_step("Granting course-org teams workflow access (.github)")
     for team, perm in BUTTON_TEAMS.items():
         if grant_team_repo_access(org, team, ".github", perm):
             log_ok(f"  {team} -> {perm} on {org}/.github")
@@ -570,7 +570,7 @@ def setup_cohort_extras(org: str) -> int:
             )
         # SYSTEM-owned contract + dispatchers: refreshed on every run so fixes reach
         # running cohorts - and, since they live in welcome.py, on every nightly
-        # seed.refresh too, so a cohort no longer waits for someone to press this button.
+        # seed.refresh too, so a cohort no longer waits for someone to run this by hand.
         # A failed dispatcher write means membership/site sync never triggers, so count it.
         failures += refresh_classroom_system_files(org)
 
@@ -589,7 +589,7 @@ def seed_workflows(org: str) -> int:
     (central Release materials/assignment + Sync membership/Bootstrap-cohort/Refresh) is
     rendered by dsl_course.seed (single source of truth).
 
-    Returns the number of writes that failed - a button that never landed (e.g. the token
+    Returns the number of writes that failed - a workflow that never landed (e.g. the token
     lost `workflow` scope) is exactly what a green bootstrap must not hide."""
     return seed.seed_github_workflows(org)
 
@@ -686,7 +686,7 @@ def main() -> int:
         "--admins",
         default="",
         help="GitHub handle(s) of this course's admin(s), comma/space-separated. Added to "
-        "the course-admin team (admin on .github) so they can run the buttons - and, on "
+        "the course-admin team (admin on .github) so they can run the workflows - and, on "
         "a course-org bootstrap, declared in dsl-course.yml's SSOT so a later sync doesn't "
         "revert it. Each accepts an org invite once. Add instructors/TAs later via the "
         "org's Teams page.",
@@ -792,7 +792,7 @@ def _run(args: argparse.Namespace) -> int:
             #
             # Best effort: Pages provisioning can lag right behind repo creation, and a
             # hiccup here must not fail a bootstrap that has already configured the org -
-            # a bootstrap re-run or the "Sync site" button repairs it.
+            # a bootstrap re-run or the "Sync site" workflow repairs it.
             try:
                 if site.sync_site(args.course, args.org) != 0:
                     log_err(
@@ -810,11 +810,11 @@ def _run(args: argparse.Namespace) -> int:
                 f".github/{seed.COHORTS_PATH} to show it in the faculty & instructors dropdowns)"
             )
     else:
-        # Course: seed the org-level buttons (incl. the central Release actions) into .github.
+        # Course: seed the org-level workflows (incl. the central Release actions) into .github.
         failures += seed_workflows(args.org)
 
-    # 3c. Button access: grant this course's own instructors/course-admin teams write/admin
-    # on .github (without it only the org owner can run the buttons), then seed the named
+    # 3c. Workflow access: grant this course's own instructors/course-admin teams write/admin
+    # on .github (without it only the org owner can run the workflows), then seed the named
     # admin(s) into course-admin. Access is per-course - central DSL faculty/admin are a
     # separate concern (who may bootstrap), not auto-added here.
     grant_button_access(args.org)
@@ -901,9 +901,9 @@ DONE (automated):
 - Workflows in .github: Release materials, Release assignment, Sync membership,
   Bootstrap cohort, Refresh actions
 - DSL_BOT_TOKEN secret validated (or set)
-- Button access: instructors (write) + course-admin (admin) granted on .github; any
+- Workflow access: instructors (write) + course-admin (admin) granted on .github; any
   --admins handles added to course-admin (they accept the org invite once, then the
-  buttons appear in their Actions tab) and declared in dsl-course.yml's SSOT
+  workflows appear in their Actions tab) and declared in dsl-course.yml's SSOT
 
 NEXT STEPS (manual):
 ============================================================

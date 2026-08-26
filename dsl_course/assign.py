@@ -445,7 +445,7 @@ def provision_all(
     log_ok(f"Done - {json.dumps(results)}")
     # Record the handout moment back into the cohort's schedule.yml (write-once - a
     # handout the schedule already carries is never touched). The schedule is the primary
-    # route AND the one record of when each assignment went out; a manual button click
+    # route AND the one record of when each assignment went out; a manual workflow run
     # fills the field the dispatcher didn't. record_handout keys on the schedule KEY, not the
     # cohort-side name: when `cohort_dest_repo` is set the two differ, and passing the name
     # made it miss the real entry and append a bogus duplicate block (dropping its due date).

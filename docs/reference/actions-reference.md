@@ -1,10 +1,10 @@
 # Faculty & instructors actions reference
 
-Every button, one line each. They all live in the **course org's `.github` Actions tab**.
+Every workflow, one line each. They all live in the **course org's `.github` Actions tab**.
 **Release materials** and **Release assignment** *also* live inside each content repo.
 
 Step-by-step flows: [workflow runbooks](../README.md). File layouts and CSV columns:
-[`DEPLOYMENT-CHECKLIST.md`](../DEPLOYMENT-CHECKLIST.md). Who may run each button, and which team
+[`DEPLOYMENT-CHECKLIST.md`](../DEPLOYMENT-CHECKLIST.md). Who may run each workflow, and which team
 grants it: [`access-reference.md`](access-reference.md).
 
 ## Setup
@@ -12,9 +12,9 @@ grants it: [`access-reference.md`](access-reference.md).
 | Action | Effect |
 | --- | --- |
 | **Bootstrap cohort** | Configure a pre-created cohort org: `welcome` + `classroom-config`, permissions, site, `course_admins`, register + refresh. Safe to re-run on a live cohort - your `classroom-config` files are never overwritten. |
-| **New materials repo** | Scaffold a `course-materials-<tag>` repo (lectures/readings/labs session folders, `SYLLABUS.md`, the run-from-repo Release buttons). |
+| **New materials repo** | Scaffold a `course-materials-<tag>` repo (lectures/readings/labs session folders, `SYLLABUS.md`, the run-from-repo Release workflows). |
 | **New assignment** | Scaffold an `assignment-N-<tag>` template: brief + starter on `main`; stub solution, `grading.yml` and a hidden test on the `solution` branch. `format` picks py/notebook stubs; `type: group` makes handout + grading run per team. |
-| **Refresh actions** | Re-seed the run-from-repo buttons, propagate the repo secret, repopulate every dropdown, rebuild the profile READMEs. No inputs. Also runs itself daily, so every org converges on central `main` within 24h without anyone clicking. _(All DSL orgs at once: [Refresh Course Orgs Inventory](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml).)_ |
+| **Refresh actions** | Re-seed the run-from-repo workflows, propagate the repo secret, repopulate every dropdown, rebuild the profile READMEs. No inputs. Also runs itself daily, so every org converges on central `main` within 24h without anyone clicking. _(All DSL orgs at once: [Refresh Course Orgs Inventory](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml).)_ |
 | **Check cohort setup** | Read-only per-cohort checklist of what's configured and what's missing, with an edit link for each gap. |
 | **Sync membership** | Reconcile `students`/`auditors` teams (`students.csv`), project teams (`teams.csv`) and instructor/course-admin access (`people.yml`, `dsl-course.yml`). Automatic on push to those files, plus a daily cron - run it by hand only to apply a `start`/`end` date that rolled over without an edit. See [05](../05-manage-teaching-team.md), [`access-reference.md`](access-reference.md). |
 
@@ -34,7 +34,7 @@ Full flow: [Grade and return assignments](../10-grade-and-return-assignments.md)
 
 | Action | Effect |
 | --- | --- |
-| **Grade assignment** | Faculty-side autograder: pins each submission to the frozen deadline snapshot, runs the template's hidden tests, writes `auto`/`team_grade` into `classroom-config/grades/<slug>.csv`. Nothing is written to student repos. |
+| **Grade assignment** | Faculty-side autograder: pins each submission to the frozen deadline snapshot, runs the template's hidden tests, writes `autograde_score`/`team_score` into `classroom-config/grades/<slug>.csv`. Nothing is written to student repos. |
 | **Sync gradebooks** | Ensure every onboarded, enrolled student has a private `grades-<handle>` repo (student = read). Idempotent. |
 | **Render grades (preview)** | Pivot the grade CSVs into `gradebook/<handle>.yml` + a wide `cohort-gradebook.csv`, and open **one** PR in `classroom-config` - that diff is the preview. |
 | **Distribute grades** | After merging that PR: push each gradebook to the student's private repo and email them. **`dry_run` defaults to `true`**; `silent` pushes without emailing. |

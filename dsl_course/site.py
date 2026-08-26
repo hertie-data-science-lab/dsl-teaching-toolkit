@@ -942,7 +942,7 @@ def _released_syllabus(cohort_org: str, content_repos: list[str]) -> str | None:
 
     Found by name, under whatever name and format the course uses (`SYLLABUS.md`,
     `SYLLABUS.pdf`, `syllabus-2026.docx`). Faculty name it; we only have to find it - and a
-    release can come from the manual button with a typed path, so there is no declaration to
+    release can come from the manual workflow with a typed path, so there is no declaration to
     read instead.
 
     Two rules that matter more than they look:
@@ -1262,7 +1262,7 @@ def _assignment_entry(
     - `handed_out` holds this assignment's cohort-side name - a frozen cohort template repo
       exists (`discovery.discover_handed_out_assignments`), so students have their repos
       whatever route fired it. This is the same "what actually shipped" signal a session
-      row reads, and the only one that covers the manual button, whose documented mode
+      row reads, and the only one that covers the manual workflow, whose documented mode
       pins no `handout_datetime` at all until it fires.
     - `handout` has passed. A pin whose provisioning then failed still says the brief was
       meant to be out by now, and a schedule that says so is not a secret worth keeping.
@@ -1361,7 +1361,7 @@ def _assignment_dates(
     """(due, handout) for an assignment from schedule.yml (keyed on the slug, repo minus
     its -fYYYY/-sYYYY tag). An unscheduled assignment is due on `fallback` and has no
     handout; a scheduled one has a handout only when the plan pins (or the manual release
-    button recorded) one."""
+    workflow recorded) one."""
     found = schedule.entry_for_repo(sched, repo)
     entry = found[1] if found else None
     if entry is None:
@@ -1419,11 +1419,19 @@ def _planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], _Planne
     `deploy_datetime` clocks; the site announces the class, not the copy. Earliest wins
     when several releases touch the same row, and the destinations are collected in plan
     order (deduped - two deploys of one entry can name the same one) so a placeholder row
-    can name where its materials are going to appear."""
+    can name where its materials are going to appear. An entry marked `show_on_site:
+    false` is skipped outright - see the loop."""
     out: dict[tuple[str, str], _PlannedRow] = {}
     for release in sched.releases:
         if release.when is None:
             continue  # event_datetime: tbc - undated, can't place a session
+        if not release.show_on_site:
+            # A silent release (readings, an errata drop): it ships on its own clock but
+            # says nothing here, so it can neither raise a row of its own nor pull an
+            # existing one's date and name back to whenever the files went up. Anything it
+            # actually released is still discovered and linked from the row it lands in -
+            # withheld from the PLAN is not withheld from the site.
+            continue
         for d in release.deploy:
             dest = _deploy_dest(d)
             n = session_number(dest.rsplit("/", 1)[-1])
@@ -1816,7 +1824,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         if tag:
             assignments = [a for a in assignments if a.lower().endswith(tag)]
         # Which of them this cohort has actually been given - what gates their briefs. Read
-        # from the cohort org rather than inferred from the plan, since the manual button
+        # from the cohort org rather than inferred from the plan, since the manual workflow
         # hands out with no `handout_datetime` pinned at all.
         handed_out = discover_handed_out_assignments(cohort_org)
 
@@ -1835,7 +1843,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # below); a planned row discovery has NOT found yet becomes a not-yet-released row,
         # so the whole term is on the schedule the day it is written rather than filling in
         # release by release. Discovery still leads: a folder released outside the plan
-        # (the manual button, an off-plan extra) keeps its row whether or not it is here.
+        # (the manual workflow, an off-plan extra) keeps its row whether or not it is here.
         planned = _planned_sessions(sched)
         rows = sorted(
             set(sources_by_row) | set(planned), key=lambda k: (int(k[0]), k[1])
@@ -1859,7 +1867,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
 
         def session_row(s: str, kind: str) -> str:
             """One row, from the plan where it has one and a synthesised weekly date where
-            it does not. A row discovery found but the plan never named (the manual button,
+            it does not. A row discovery found but the plan never named (the manual workflow,
             an off-plan extra) gets a stand-in row: the weekly fallback date and no declared
             name. It still appears, which is the point - and resolving the absence HERE is
             what keeps the renderer to one shape rather than a field-by-field fallback."""
@@ -2095,7 +2103,7 @@ def sync_public_site(
                 log_err(f"could not clone {spec}")
                 return None
 
-            # Sections are whatever THIS repo has (the same discovery the release buttons
+            # Sections are whatever THIS repo has (the same discovery the release workflows
             # use), not a hardcoded lectures/readings pair - a course whose content lives
             # in `labs/` publishes labs. `readings` is the one section with special
             # semantics (--readings-mode, below); `include_lectures` gates all the others.
@@ -2214,7 +2222,7 @@ def resync_public_site(course_org: str) -> int:
     """Re-publish the public course site from the settings the last publish persisted.
 
     The daily cron path: a materials edit then reaches the public site without anyone
-    re-clicking the button. Opting in is still a deliberate manual publish, so a course org
+    re-running the workflow. Opting in is still a deliberate manual publish, so a course org
     with no public site - or a site with no `PUBLISH_CONFIG` (published before this existed,
     or deliberately unhooked by deleting the file) - is a one-line no-op, NOT a failure:
     the cron ships in every course org's `.github`, and most never publish."""

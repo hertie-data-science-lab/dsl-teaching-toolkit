@@ -35,7 +35,7 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
    - For a purely hand-marked assignment, set `autograde: false` in `grading.yml` (or delete the file).
    - For a partially machine-marked assignment set `autograde: true` in `grading.yml`:
       - put the hidden tests in `tests/` (path configurable via `grading.yml`'s `tests:` field) plain pytest files that `from starter import ...` and check the submission, run faculty-side only, never shipped to students. 
-     - Set `max_auto` to the points they're worth (`0` = informational only). 
+     - `autograde_score` in `grades/<slug>.csv` then records how many of them each submission passed - a count for you to mark against, not the mark itself.
      - Full grading flow: [Grade and return assignments](10-grade-and-return-assignments.md).
 
 3. **Run Refresh actions** so the assignment dropdowns update.
@@ -49,7 +49,7 @@ Repeat for each assignment (`number` = 2, 3, …).
 - For group projects, both handout and grading then run per team automatically (i.e one repo per team is created, and the grading run assesses at the team-level with individual carve outs for comments / grade adjustments):
 
 > The type is determined in the assignment's solution branch in the `grading.yml`'s field `type: individual | group`. 
->- This fiels is initially set (1) at the course-level when the assignment itself is created using the ` New assignment` workflow button (in the course org's `.github`'s Actions tab) 
+>- This fiels is initially set (1) at the course-level when the assignment itself is created using the ` New assignment` workflow (in the course org's `.github`'s Actions tab) 
 > - It can be also be set in (2) the cohort's `classroom-config/schedule.yml`, which is more accessible to TAs with only cohort org write access:
 >
 >```yaml

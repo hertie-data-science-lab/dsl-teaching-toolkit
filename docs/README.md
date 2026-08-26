@@ -60,7 +60,7 @@ autograde → marks → preview → distribute`"]
   C --> G
   D --> G
 ```
-> NB: all workflows can be automated at the start of the semester by filling out the cohort org's `schedule.yml` for that semester. This will then automatically handle the release of materials / assignments / grading runs etc, with manual GH action buttons in the course org's `.github` repo for ad hoc runs of specific workflows. 
+> NB: all workflows can be automated at the start of the semester by filling out the cohort org's `schedule.yml` for that semester. This will then automatically handle the release of materials / assignments / grading runs etc, with specific workflows manually run from the course org's `.github` repo for ad hoc use. 
 
 ## The workflows
 
@@ -80,7 +80,7 @@ Numbered in reading order - **course-level** (01-03) before **cohort-level** (04
 | 10 | [Grade and return assignments](10-grade-and-return-assignments.md) | cohort | per assignment, after the deadline |
 | 11 | [Configure the cohort website](11-configure-cohort-site.md) | course + cohort | whenever the site should say something different - and to know what not to hand-edit |
 
-For a one-page summary of **every button**, see [`actions-reference.md`](reference/actions-reference.md);
+For a one-page summary of **every workflow**, see [`actions-reference.md`](reference/actions-reference.md);
 for who may run them, [`access-reference.md`](reference/access-reference.md).
 
 ## Example org artefacts

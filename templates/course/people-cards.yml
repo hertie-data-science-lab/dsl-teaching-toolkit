@@ -10,7 +10,7 @@
   #                                               # file committed into the site repo
   #                                               # under _images/pp/, OR an absolute
   #                                               # URL on a host that allows
-  #                                               # hotlinking (many institutional
-  #                                               # sites 403 off-site requests and
-  #                                               # render as a broken image)
+  #                                               # hotlinking (e.g. a GitHub avatar
+  #                                               # link - many institutional sites
+  #                                               # 403 off-site requests instead)
   #     url:   "https://.../profile/jane-doe"     # bio / profile link

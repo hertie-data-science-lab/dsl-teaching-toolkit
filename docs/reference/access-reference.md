@@ -1,7 +1,7 @@
 # Access reference
 
 Who can do what, and which team grants it. The companion to
-[`actions-reference.md`](actions-reference.md) (every button, one line each).
+[`actions-reference.md`](actions-reference.md) (every workflow, one line each).
 
 To **change** anyone's access, don't use this page - follow
 [05 Manage the teaching team](../05-manage-teaching-team.md). Access is declared in config files and
@@ -14,7 +14,7 @@ They are not the same gate and do not overlap.
 | | Who | Granted by | May do |
 |---|---|---|---|
 | **Provisioning** | DSL-wide | `faculty` / `instructors` / `admin` team in **`hertie-data-science-lab`** | run **Bootstrap Course Org** in the central repo. **Nothing else** - it grants no access inside any course. |
-| **Running a course** | per course | that course org's `course-admin` or an `instructors-<tag>` team | every button in that course org's `.github` Actions tab |
+| **Running a course** | per course | that course org's `course-admin` or an `instructors-<tag>` team | every workflow in that course org's `.github` Actions tab |
 
 A DSL faculty member who has never been declared in a course's config cannot push to it or
 release anything there. Being a course admin, conversely, grants nothing centrally.
@@ -40,14 +40,14 @@ Both files' person entries accept optional `start` / `end` ISO dates - see
 flowchart LR
   dcy["`COURSE org · .github/dsl-course.yml
 people: course_admins`"] -->|Sync membership| ca["`course-admin team (course org)
-admin on .github → every button, all cohorts`"]
+admin on .github → every workflow, all cohorts`"]
   ca -->|mirrored down| cca["`course-admin team
 (every cohort org)`"]
   py["`COHORT org · classroom-config/people.yml
 instructors + teaching_assistants`"] -->|Sync membership| ci["`instructors team (cohort org)
 classroom-config + welcome`"]
   py -->|synced upward| itag["`instructors-<tag> team (course org)
-push on that tag's repos + .github → the buttons`"]
+push on that tag's repos + .github → the workflows`"]
   ui["GitHub Teams UI (hand-add)"] -.->|reverted on next sync| ca
   ui -.->|reverted on next sync| ci
   ui -.->|reverted on next sync| itag
@@ -57,7 +57,7 @@ escape hatch: invisible to config & Check cohort setup`"]
 
 ## What `course-admin` grants
 
-Membership of **that course org's own `course-admin` team** makes **every** button in that org's
+Membership of **that course org's own `course-admin` team** makes **every** workflow in that org's
 Actions tab visible and runnable, across all its cohorts, and gives admin on each cohort org too.
 It is scoped to **one course**.
 
@@ -72,7 +72,7 @@ has no actor to check.
 
 Push on:
 
-- the course org's **`.github`** - which is what makes the central buttons visible and runnable
+- the course org's **`.github`** - which is what makes the central workflows visible and runnable
   for them; and
 - every course-org repo whose **name ends `-<tag>`**: `course-materials-f2026`,
   `assignment-1-f2026`, `lecture-code-f2026`.
@@ -95,7 +95,7 @@ a *population* (who teaches at DSL); the other three name a *role in one course*
 | --- | --- | --- | --- |
 | `instructors` | **`hertie-data-science-lab`** | nothing - manual | write on the toolkit → run **Bootstrap Course Org**. No access inside any course. |
 | `instructors` | a **cohort** org | that cohort's `classroom-config/people.yml` | cohort-org membership for that year's instructors/TAs; reconciled |
-| `instructors-<tag>` | the **course** org | the same `people.yml` (tag = e.g. `f2026`) | push on `.github` + that tag's content repos, i.e. the buttons for that cohort; reconciled |
+| `instructors-<tag>` | the **course** org | the same `people.yml` (tag = e.g. `f2026`) | push on `.github` + that tag's content repos, i.e. the workflows for that cohort; reconciled |
 | `instructors` | the **course** org (generic) | nothing - manual | a rare, permanent escape hatch |
 
 The central one is the odd kind out: it is the only one that grants **provisioning** and the only
@@ -112,9 +112,9 @@ record who's on it elsewhere. Route FA (faculty assistant) and TA access through
   team or `instructors-<tag>` through the GitHub Teams UI survives only until the next Sync
   membership run, which removes anyone the config doesn't name. A hand-*removal* is likewise
   re-added. Edit the file.
-- **Students never get write**, so they never see the buttons.
+- **Students never get write**, so they never see the workflows.
 - **New members must accept a one-time org invite** - membership shows `pending` until they do.
-- **Nobody ever holds the bot token.** Every button runs server-side under `DSL_BOT_TOKEN`; the
+- **Nobody ever holds the bot token.** Every workflow runs server-side under `DSL_BOT_TOKEN`; the
   actor's own permissions are only ever used as the gate.
 - **This is rotation, not a security boundary.** `instructors-<tag>` has push on `.github`, and no
   branch protection is configured, so a member could edit `dsl-course.yml` to add themselves to

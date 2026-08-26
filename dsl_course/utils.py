@@ -755,7 +755,7 @@ def put_files(
     """Write `files` and remove `delete` in a SINGLE commit, via the git data API.
 
     put_file is one commit per file, which is right for a lone write but turns a set of
-    files that always change together - the generated workflow buttons - into a burst of
+    files that always change together - the generated workflows - into a burst of
     near-identical commits in a repo faculty read. This makes that one commit.
 
     Same no-op guarantee as put_file, for ONE read rather than one per path: a single
@@ -962,7 +962,7 @@ def is_untouched_stub(text: str) -> bool:
 SYLLABUS_SAMPLE_FILE = "SYLLABUS.md.sample"
 SYLLABUS_SESSIONS_FILE = "SYLLABUS.sessions.md"
 # How `scaffold_materials` names every materials repo (`course-materials-<tag>`) - the New
-# materials repo button takes only the tag, so this prefix is guaranteed by the toolkit
+# materials repo workflow takes only the tag, so this prefix is guaranteed by the toolkit
 # rather than a convention faculty could deviate from. Named here because `seed.refresh`
 # has to recognise a materials repo among the code and dataset repos that
 # `discover_content_repos` returns alongside it, and a rename reaching only one side would

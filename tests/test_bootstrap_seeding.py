@@ -348,7 +348,7 @@ def test_every_shipped_sample_parses_with_the_real_parser():
         welcome.example_cohort_file("grades/assignment-4-project.csv")
     )
     assert individual and not any(r.team for r in individual)
-    assert project and all(r.team and r.team_grade for r in project)
+    assert project and all(r.team and r.team_score for r in project)
 
 
 def test_scaffold_and_sample_carry_the_engines_current_column_sets():

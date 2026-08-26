@@ -1,6 +1,6 @@
 """dsl-course sync-membership -- consolidated roster + teams + faculty sync.
 
-One entrypoint replacing three separate buttons' worth of orchestration:
+One entrypoint replacing three separate workflows' worth of orchestration:
 
 - course_admins (from the course org's declared `people:` block) ALWAYS reconciles
   everywhere - the course org itself + every cohort registered under it

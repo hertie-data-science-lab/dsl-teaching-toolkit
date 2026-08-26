@@ -1,5 +1,3 @@
 type: individual
-format: notebook
 autograde: true
-max_auto: 8
 tests: tests

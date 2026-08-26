@@ -14,7 +14,7 @@ Two independent flows, split by role rather than by "stability":
   cohort's own `instructors` team, AND synced UP into a parallel, tag-scoped
   `instructors-<tag>` team on the COURSE org (push access on just that tag's
   content repos, PLUS the central `.github` repo so its members can also use the
-  central dispatch buttons), so a cohort's own people can push materials without a
+  central dispatch workflows), so a cohort's own people can push materials without a
   course-level declaration. No merge/union across cohorts - each cohort's tag gets
   its own team, so there's no "which cohort wins" ambiguity and no
   accumulate-forever list.
@@ -136,7 +136,7 @@ def _tag_repos(content_repos: list[str], assignments: list[str], tag: str) -> li
     """Repos matching `tag` from the course org's already-discovered content/
     assignment repos, plus the central `.github` repo - what `instructors-<tag>`
     needs push access to so its members can use both the run-from-repo and central
-    dispatch buttons (`.github` is cross-cohort infrastructure, not itself
+    dispatch workflows (`.github` is cross-cohort infrastructure, not itself
     tag-scoped)."""
     matching = [r for r in content_repos if _matches_tag(r, tag)] + [
         r for r in assignments if _matches_tag(r, tag)

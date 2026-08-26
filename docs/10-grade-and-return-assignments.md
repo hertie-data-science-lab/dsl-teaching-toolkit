@@ -15,7 +15,7 @@ private `grades-<handle>` repo, never in their assignment repo.
 > 2. **Review**: you see exactly what the class scored before anything goes out -
 >    `grades/<slug>.csv` per assignment, and after **Render grades** the read-only
 >    `cohort-gradebook.csv` (one row per student, the whole-class glance view). Add
->    `manual`/`adjustment`/`final`/`comments` at leisure; machine cells are write-once, so
+>    `manual_score`/`individual_adjustment`/`final_grade`/`individual_comments` at leisure; machine cells are write-once, so
 >    your corrections stand.
 > 3. **Distribute grades** is the only step that pushes anything to students (with its own
 >    `dry_run`, and email notify optional).
@@ -29,14 +29,14 @@ private `grades-<handle>` repo, never in their assignment repo.
 ## 1. Grade assignment (for autograde only)
 
 **This runs itself.** At each assignment's grading deadline the hourly cron autogrades it
-**once**, with no button press required. Use the button only for a deliberate re-grade.
+**once**, with no manual run required. Run the workflow only for a deliberate re-grade.
 
 Course `.github` → **Actions** → **Grade assignment**: `cohort_org`, `course_source_repo`, plus `group`
 (a force-override - an assignment declared `type: group` grades per team anyway)
 and `dry_run` (both default **off**). It runs the hidden tests and writes into
 `classroom-config`:
 
-- `grades/<slug>.csv` → the `auto` column (individual) or `team_grade` (group). **Write-once:**
+- `grades/<slug>.csv` → the `autograde_score` column (individual) or `team_score` (group). **Write-once:**
   a cell that already holds a value is never overwritten - re-running fills empty cells only,
   so your hand-edits stand. For fresh machine scores, blank those cells first.
 - `autograde/<slug>/<handle-or-team>.json` → the raw per-test result, for appeals. This folder
@@ -81,21 +81,21 @@ Edit `classroom-config/grades/<slug>.csv` (directly editing via web UI is fine; 
 |--------|-----------|----------------------|---------------|
 | `github_handle` | no - roster | - | which student the row is |
 | `team` | no - autograder | yes (group only) | their team, on group assignments |
-| `auto` | no - autograder | **no** | the machine score |
-| `manual` | yes | **no** | your hand-marked part - a working column |
-| `team_grade` | yes (group) | yes | the shared team mark |
-| `adjustment` | yes (group) | only their own | that member's individual adjustment |
-| `final` | **yes** | **yes** | **the mark. Nothing computes it for you** |
-| `comments` | yes | yes | feedback for that student |
+| `autograde_score` | no - autograder | **no** | the machine score |
+| `manual_score` | yes | **no** | your hand-marked part - a working column |
+| `team_score` | yes (group) | yes | the shared team mark |
+| `individual_adjustment` | yes (group) | only their own | that member's individual adjustment |
+| `final_grade` | **yes** | **yes** | **the mark. Nothing computes it for you** |
+| `individual_comments` | yes | yes | feedback for that student |
 | `team_comments` | yes (group) | yes | feedback shared with the whole team |
 
 - **For group projects**:
-  - `team_grade` (shared), each member's private `adjustment`, shared
-  `team_comments`, plus each member's own `final`.
+  - `team_score` (shared), each member's private `individual_adjustment`, shared
+  `team_comments`, plus each member's own `final_grade`.
   - No one sees another member's adjustment.
-- **For no-autograde**: A hand-marked assignment just needs `final` + `comments`.
-- `auto` and `manual` are faculty-internal and never shown to the student.
-- `final` is what the student sees, and you own it - nothing sums `auto` + `manual` for you.
+- **For no-autograde**: A hand-marked assignment just needs `final_grade` + `individual_comments`.
+- `autograde_score` and `manual_score` are faculty-internal and never shown to the student.
+- `final_grade` is what the student sees, and you own it - nothing sums `autograde_score` + `manual_score` for you.
 - Values stay as you type them - a letter, a percentage, `+4` - nothing is coerced or rounded.
 
 ## 3. Sync gradebooks
@@ -115,9 +115,9 @@ inputs - it never sends anything.
 - Opens **one** PR in `classroom-config` (branch `grades-update`, "Grades: review before
   distribution") holding a `gradebook/<handle>.yml` per student - what that student will
   receive in step 5.
-- **That diff is the preview.** Only `final`, `comments` and, for group work, `team`,
-  `team_grade`, that member's own `adjustment` and `team_comments` are copied into a student's
-  file. `auto` and `manual` never are.
+- **That diff is the preview.** Only `final_grade`, `individual_comments` and, for group work, `team`,
+  `team_score`, that member's own `individual_adjustment` and `team_comments` are copied into a student's
+  file. `autograde_score` and `manual_score` never are.
 - It also regenerates `cohort-gradebook.csv` at the repo root - a wide all-students view for
   you, which stays in `classroom-config` and is never distributed.
 - Review, then **merge**. Nothing reaches a student until you do.
@@ -147,8 +147,8 @@ Copies each merged gradebook to `grades-<handle>/grades.yml` and emails the stud
   > ℹ️ **Autograding fires once**, at each assignment's grading deadline, and never again -
   > the `_graded.json` / `_skipped.json` record inside `autograde/<slug>/` is the marker. To
   > re-grade: delete that folder (the next
-  > hourly tick regrades) or press **Grade assignment**. Either way, clear the `auto` /
-  > `team_grade` cells you want recomputed first - they are write-once and are otherwise left
+  > hourly tick regrades) or press **Grade assignment**. Either way, clear the `autograde_score` /
+  > `team_score` cells you want recomputed first - they are write-once and are otherwise left
   > exactly as you left them.
 
 ---

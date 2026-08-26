@@ -29,17 +29,15 @@ OTHER_SHA = "b" * 40
 def test_parse_grading_spec_defaults_and_overrides():
     assert collect.parse_grading_spec("") == {
         "type": "individual",
-        "format": "py",
         "autograde": True,
-        "max_auto": None,
         "tests": "tests",
     }
+    # A retired key (`format`, `max_auto`) in a template written before they went is
+    # ignored like any other extra, never carried into the spec.
     spec = collect.parse_grading_spec(
         "type: group\nformat: notebook\nautograde: false\nmax_auto: 20\ntests: solution/tests\n"
     )
-    assert spec["type"] == "group" and spec["format"] == "notebook"
-    assert spec["autograde"] is False
-    assert spec["max_auto"] == 20 and spec["tests"] == "solution/tests"
+    assert spec == {"type": "group", "autograde": False, "tests": "solution/tests"}
 
 
 def test_score_from_junit_counts_only_clean_passes():
@@ -254,7 +252,7 @@ def test_run_tests_renames_a_non_py_nbconvert_output(
     tests.mkdir()
     (tests / "test_x.py").write_text("from starter import solve\n")
 
-    result = collect._run_tests(work, "notebook", tests)
+    result = collect._run_tests(work, tests)
 
     assert (work / "starter.py").read_text().startswith("def solve")
     assert not (work / f"starter{suffix}").exists()  # renamed, not copied
@@ -277,21 +275,40 @@ def test_run_tests_leaves_a_correct_py_conversion_alone(monkeypatch, tmp_path):
     tests = tmp_path / "hidden"
     tests.mkdir()
 
-    assert collect._run_tests(work, "notebook", tests)["score"] == 1
+    assert collect._run_tests(work, tests)["score"] == 1
     assert (work / "starter.py").read_text().startswith("def solve")
     assert (work / "starter.txt").read_text() == "notes, not code"  # untouched
 
 
-def test_run_tests_py_format_never_converts_anything(monkeypatch, tmp_path):
-    _fake_nbconvert(monkeypatch, ".txt")
+def test_run_tests_converts_a_notebook_the_template_never_declared(
+    monkeypatch, tmp_path
+):
+    # Conversion follows what the submission HOLDS, not a `format:` the template declared:
+    # a student who worked in a notebook is graded, where the old py/notebook switch
+    # imported nothing and scored them zero.
+    _fake_nbconvert(monkeypatch, ".py")
     work = tmp_path / "sub"
     work.mkdir()
-    (work / "starter.ipynb").write_text("{}")  # present but irrelevant for format: py
+    (work / "starter.ipynb").write_text("{}")
     tests = tmp_path / "hidden"
     tests.mkdir()
 
-    assert collect._run_tests(work, "py", tests)["score"] == 1
-    assert not (work / "starter.py").exists() and not (work / "starter.txt").exists()
+    assert collect._run_tests(work, tests)["score"] == 1
+    assert (work / "starter.py").exists()
+
+
+def test_run_tests_converts_nothing_when_the_submission_holds_no_notebook(
+    monkeypatch, tmp_path
+):
+    _fake_nbconvert(monkeypatch, ".txt")  # would fire if the walk found an .ipynb
+    work = tmp_path / "sub"
+    work.mkdir()
+    (work / "starter.py").write_text("def solve():\n    return 1\n")
+    tests = tmp_path / "hidden"
+    tests.mkdir()
+
+    assert collect._run_tests(work, tests)["score"] == 1
+    assert not (work / "starter.txt").exists()
 
 
 def test_run_tests_abandons_the_submission_on_the_first_convert_timeout(
@@ -315,7 +332,7 @@ def test_run_tests_abandons_the_submission_on_the_first_convert_timeout(
     tests = tmp_path / "hidden"
     tests.mkdir()
 
-    assert collect._run_tests(work, "notebook", tests) is None
+    assert collect._run_tests(work, tests) is None
     assert len(calls) == 1  # bailed on the FIRST timeout, not once per notebook
     assert "abandoning this submission" in capsys.readouterr().err
 
@@ -329,9 +346,9 @@ def test_stray_conversion_ignores_a_same_stem_directory(tmp_path):
 
 
 _STUDENTS = [
-    Student("1", "a@x", "Anna", "anna-adams", "", ""),
-    Student("2", "b@x", "Ben", "ben-baker", "", ""),
-    Student("3", "c@x", "Not yet", "", "", ""),  # enrolled, not onboarded
+    Student("a@x", "Anna", "anna-adams", ""),
+    Student("b@x", "Ben", "ben-baker", ""),
+    Student("c@x", "Not yet", "", ""),  # enrolled, not onboarded
 ]
 _TEAMS = {"assignment-4-project": {"team-y": ["carla"], "team-x": ["anna-adams"]}}
 
@@ -696,7 +713,7 @@ def test_collect_with_every_target_failing_to_grade_records_nothing(
     monkeypatch.setattr(
         collect,
         "_grade_target",
-        lambda *a, **k: collect._zero_result(2, collect.GRADE_FAILED_NOTE),
+        lambda *a, **k: collect._zero_result(collect.GRADE_FAILED_NOTE),
     )
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
@@ -712,7 +729,7 @@ def test_collect_records_a_cohort_of_genuine_non_submissions(monkeypatch):
     monkeypatch.setattr(
         collect,
         "_grade_target",
-        lambda *a, **k: collect._zero_result(2, "no submission on/before 2026-11-15"),
+        lambda *a, **k: collect._zero_result("no submission on/before 2026-11-15"),
     )
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
@@ -803,7 +820,7 @@ def _sandbox(tmp_path, starter_body: str):
 def test_run_tests_honest_baseline(tmp_path):
     # Ground truth: the student's wrong code scores 0/2 with no tampering in play.
     work, tests = _sandbox(tmp_path, "def solve(x):\n    return 0\n")
-    assert collect._run_tests(work, "py", tests) == {
+    assert collect._run_tests(work, tests) == {
         "score": 0,
         "max": 2,
         "tests": [
@@ -820,7 +837,7 @@ def test_run_tests_ignores_a_committed_report_xml(tmp_path):
     (work / "report.xml").write_text(
         '<testsuite><testcase name="a"/><testcase name="b"/></testsuite>'
     )
-    result = collect._run_tests(work, "py", tests)
+    result = collect._run_tests(work, tests)
     assert result["score"] == 0 and result["max"] == 2  # honest, not the forged 2/2
 
 
@@ -831,7 +848,7 @@ def test_run_tests_ignores_a_committed_conftest(tmp_path):
     (work / "conftest.py").write_text(
         "def pytest_ignore_collect(collection_path, config):\n    return True\n"
     )
-    result = collect._run_tests(work, "py", tests)
+    result = collect._run_tests(work, tests)
     assert result["max"] == 2  # both hidden tests still collected
     assert result["score"] == 0
 
@@ -847,7 +864,7 @@ def test_run_tests_ignores_a_committed_sitecustomize(tmp_path):
         "m.solve = lambda x: x + 1\n"
         "sys.modules['starter'] = m\n"
     )
-    result = collect._run_tests(work, "py", tests)
+    result = collect._run_tests(work, tests)
     assert result["score"] == 0 and result["max"] == 2  # the tamper did not inflate it
 
 
@@ -869,7 +886,7 @@ def test_run_tests_student_module_cannot_shadow_a_stdlib_import(tmp_path):
         "from starter import solve\n"
         "def test_one():\n    assert operator.eq(solve(1), 2)\n"
     )
-    result = collect._run_tests(work, "py", tests)
+    result = collect._run_tests(work, tests)
     assert result["score"] == 0 and result["max"] == 1  # the real stdlib operator won
 
 
@@ -881,7 +898,7 @@ def test_run_tests_removes_the_git_credential_before_student_code_runs(tmp_path)
     (work / ".git" / "config").write_text(
         "[http]\n  extraheader = AUTHORIZATION: bearer x\n"
     )
-    collect._run_tests(work, "py", tests)
+    collect._run_tests(work, tests)
     assert not (work / ".git").exists()
 
 
@@ -1001,8 +1018,8 @@ def test_submission_targets_individual_excludes_auditors(monkeypatch):
     # Auditors deliberately have no submission repo; listing one makes it an unclonable
     # phantom target. submission_targets must apply the enrolled filter, like assign/grades.
     students = [
-        Student("1", "a@x", "Anna", "anna-adams", "", "", "", "enrolled"),
-        Student("2", "e@x", "Eve", "eve-e", "", "", "", "auditor"),
+        Student("a@x", "Anna", "anna-adams", "", "", "enrolled"),
+        Student("e@x", "Eve", "eve-e", "", "", "auditor"),
     ]
     monkeypatch.setattr(collect.roster, "load", lambda org: students)
     monkeypatch.setattr(collect.teams, "load", lambda org: {})
@@ -1091,7 +1108,7 @@ def test_run_tests_returns_none_on_a_wall_clock_timeout_without_hanging(
         "def test_spin():\n    while True:\n        pass\n"
     )
     t0 = time.monotonic()
-    assert collect._run_tests(work, "py", tests) is None
+    assert collect._run_tests(work, tests) is None
     assert time.monotonic() - t0 < 30  # killed near the 2s budget, nowhere near a hang
     assert "timed out" in capsys.readouterr().err
 

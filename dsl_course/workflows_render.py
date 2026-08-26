@@ -5,17 +5,17 @@ discovered dropdown contents (see discovery) and returns the workflow YAML. seed
 the results.
 
 The templates are deliberately f-strings rather than a programmatic YAML builder: the
-rendered files carry human-facing comments (faculty read them in the repo, next to the
-button) and a deliberate key order, both of which a yaml.dump round-trip would destroy.
+rendered files carry human-facing comments (faculty read them in the repo, next to where
+they run them) and a deliberate key order, both of which a yaml.dump round-trip would destroy.
 Shared boilerplate that repeats verbatim between renderers is extracted into the small
 constants/helpers below (the check-team gate, the checkout+python job preamble, the
 dropdown builders); the prose and ordering stay per-workflow.
 
-The Release materials button's inputs are deliberately the SAME five fields as a
+The Release materials workflow's inputs are deliberately the SAME five fields as a
 schedule.yml `deploy:` entry (course_source_repo, course_source_path, cohort_dest_repo,
 cohort_dest_path, plus the cohort org) - one vocabulary for the scheduled and the manual
-path, so what faculty learn on the button reads straight across into the schedule.
-Nothing about the button is discovered from the source repo any more: `course_source_path`
+path, so what faculty learn on the workflow reads straight across into the schedule.
+Nothing about the workflow is discovered from the source repo any more: `course_source_path`
 is free text (a folder, a file, or a comma-separated list), so it needs no per-section
 checkbox and no session dropdown, and both variants stay well under GitHub's 10-input
 workflow_dispatch cap.
@@ -36,6 +36,20 @@ _SETUP_PYTHON = (
     "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0"
 )
 
+# Every workflow in an org is re-rendered from this module by Refresh actions, nightly, so
+# a hand-edit to one survives at most a day. Stamped on at the write sites (seed.py) rather
+# than inside each renderer's own header, so a new renderer cannot ship without it.
+SYSTEM_OWNED_BANNER = (
+    "# SYSTEM-OWNED - do not edit, edits here are overwritten. This workflow is\n"
+    "# re-rendered from the central DSL teaching toolkit by 'Refresh actions' (nightly).\n"
+)
+
+
+def system_owned(rendered: str) -> str:
+    """Prefix a rendered workflow with the ownership banner."""
+    return SYSTEM_OWNED_BANNER + rendered
+
+
 # Workflow-level permissions for every rendered workflow. Each one authenticates with
 # secrets.DSL_BOT_TOKEN and never needs the ambient GITHUB_TOKEN - not even to check out,
 # because the central repo is public. So the ambient token is dropped to zero scopes.
@@ -51,12 +65,12 @@ jobs:
 # conflicts. The nightly refresh is therefore serialised AGAINST ITSELF, and nothing else
 # joins the group.
 #
-# Deliberately NOT shared with the buttons that end in a refresh (New materials, New
+# Deliberately NOT shared with the workflows that end in a refresh (New materials, New
 # assignment, Bootstrap cohort). Actions concurrency has no `queue:`: a group holds exactly
 # ONE pending run, so a third arrival CANCELS the second - `cancel-in-progress: false`
 # notwithstanding. Putting an operator's click in a group with a nightly cron therefore
 # means a click that silently does nothing, which is the worse failure: the operator is
-# told the run started and never learns it was dropped. A button racing the nightly refresh
+# told the run started and never learns it was dropped. A workflow racing the nightly refresh
 # can at worst take a put_file 409 - visible, red, and healed by the next converge.
 _SEED_REFRESH_CONCURRENCY = """concurrency:
   group: seed-refresh
@@ -109,7 +123,7 @@ _TIMEOUT_GRADING = 120
 # The head of any job that runs toolkit code: a runner, the central repo checked out at
 # CENTRAL_REF, Python, and the deps. Used bare by the UNGATED jobs (cron /
 # repository_dispatch / push paths have no actor to gate on), and behind the check-team
-# gate via _run_preamble by every button. Ends after `pip install`, so a renderer appends
+# gate via _run_preamble by every workflow. Ends after `pip install`, so a renderer appends
 # its own `      - name: ...` step directly. The timeout is the ONE thing that varies, so
 # it is a parameter rather than a second copy of the preamble.
 def _ungated_preamble(minutes: int = _TIMEOUT_DEFAULT) -> str:
@@ -131,7 +145,7 @@ def _run_preamble(minutes: int = _TIMEOUT_DEFAULT) -> str:
     return f"    needs: check-team\n{_ungated_preamble(minutes)}"
 
 
-# SMTP secrets, wired into the env of the buttons that send email (enrolment codes, grade
+# SMTP secrets, wired into the env of the workflows that send email (enrolment codes, grade
 # notifications). A plain string (not the f-string body) so the GitHub `${{ }}` is literal.
 _MAIL_ENV = """\
           GRAPH_TENANT_ID: ${{ secrets.GRAPH_TENANT_ID }}
@@ -194,7 +208,7 @@ _CRON_NOTICE = (
           # A filed issue emails only the repo's watchers, which in practice is nobody.
           # The mention makes a red cron land in the admins' inbox; course-admin, not
           # instructors, because broken infrastructure is not the teaching staff's problem.
-          body=$(printf 'The unattended run failed or was cancelled (a timeout counts): %s\\n\\nNothing retries it before the next scheduled run. This issue closes itself once a run succeeds.\\n\\ncc @%s/course-admin\\n' "$RUN_URL" "${REPO%%/*}")
+          body=$(printf 'The unattended run failed or was cancelled: %s\\n\\nNothing retries it before the next scheduled run. This issue closes itself once a run succeeds.\\n\\ncc @%s/course-admin\\n' "$RUN_URL" "${REPO%%/*}")
           # The step runs under `bash -e`, so an unguarded capture would abort the step on a
           # transient search failure - before the `gh issue create` that is the whole point.
           # No dedupe hit just means we file a fresh issue.
@@ -233,7 +247,7 @@ def _choice_input(
     name: str, description: str, options: list[str], default: str | None = None
 ) -> str:
     """A required dropdown input. Pre-selected on `default` if given, otherwise on the
-    latest term year (see _newest) - every org/repo dropdown in every button, so a faculty
+    latest term year (see _newest) - every org/repo dropdown in every workflow, so a faculty
     member never has to scroll past last year's cohort to reach this year's."""
     default = default or _newest(options)
     return (
@@ -255,7 +269,7 @@ def _choice_input(
 #
 # Only cohort_dest_path is optional, and it ships EMPTY rather than pre-filled - a
 # `default:` on a free-text box is submitted verbatim, so pre-filling one reads as a value
-# the faculty member chose. cohort_dest_repo is REQUIRED on the button (the schedule's
+# the faculty member chose. cohort_dest_repo is REQUIRED on the workflow (the schedule's
 # `deploy:` may still omit it and take deploy's `materials` fallback): naming the repo a
 # release lands in is the one decision worth forcing, since a typo'd or defaulted target
 # quietly creates a second materials repo the cohort never sees.
@@ -276,10 +290,10 @@ _COHORT_DEST_INPUTS = """\
 
 
 def _render_release(header: str, cohort_orgs: list[str], source_repo_input: str) -> str:
-    """The Release materials button, shared by both variants. Its five inputs ARE a
+    """The Release materials workflow, shared by both variants. Its five inputs ARE a
     schedule.yml `deploy:` entry (plus the cohort org): the same names, the same meaning -
     and the same executor, deploy.deploy_many, so a batch of paths clones each repo once
-    whether it arrives from the cron or from this button. Only the `course_source_repo`
+    whether it arrives from the cron or from this workflow. Only the `course_source_repo`
     widget differs between variants (a dropdown centrally, a pre-filled string inside a
     content repo), which is why it is passed in."""
     return f"""name: Release materials
@@ -336,8 +350,8 @@ def render_release(cohort_orgs: list[str], repo: str) -> str:
 
 def render_central_release(source_repos: list[str], cohort_orgs: list[str]) -> str:
     """Central copy that lives in .github: `course_source_repo` is a dropdown of the course
-    org's content repos (discovery.discover_content_repos), since this button lives
-    outside any one of them. Otherwise identical to the run-from-repo button."""
+    org's content repos (discovery.discover_content_repos), since this workflow lives
+    outside any one of them. Otherwise identical to the run-from-repo workflow."""
     source_repo_input = _choice_input(
         "course_source_repo", _COURSE_SOURCE_REPO_DESC, source_repos
     )
@@ -424,17 +438,17 @@ on:
 def render_grade_assignment(
     cohort_orgs: list[str], assignments: list[str] | None = None
 ) -> str:
-    """Faculty-side autograder button: run hidden tests after the deadline, record scores."""
+    """Faculty-side autograder workflow: run hidden tests after the deadline, record scores."""
     return f"""name: Grade assignment
 
 # Faculty-side autograder, by hand. The hourly cron already grades each assignment ONCE at
-# its grading deadline - this button is for a deliberate re-grade. Clones each submission as
+# its grading deadline - this workflow is for a deliberate re-grade. Clones each submission as
 # of the cohort schedule's grading deadline (`grading_datetime`, else `due_datetime` -
 # SSOT, no input here), runs the HIDDEN tests from the template's solution branch, archives
 # result.json, and fills the machine score into the private grades CSV (faculty & instructors
 # then add manual marks; Render + Distribute send them).
 #
-# WRITE-ONCE: an `auto`/`team`/`team_grade` cell that already holds a value is never
+# WRITE-ONCE: an `autograde_score`/`team`/`team_score` cell that already holds a value is never
 # overwritten, so re-running does NOT refresh scores - it only fills cells still empty. For a
 # fresh machine score, clear those cells first (and delete classroom-config/autograde/<slug>/
 # to let the cron regrade). Nothing is written to student repos. dry_run lists what would be
@@ -479,7 +493,7 @@ _FACULTY_ONLY = "(faculty only)"
 
 def render_sync_membership(cohort_orgs: list[str]) -> str:
     """Consolidated roster + project-teams + faculty sync (replaces the old separate
-    Sync enrolment / Sync teams buttons).
+    Sync enrolment / Sync teams workflows).
 
     Faculty always reconciles - split by role: course_admins (from THIS org's
     declared `people:` block) into the course org + every cohort's own course-admin
@@ -759,7 +773,7 @@ def render_status(cohort_orgs: list[str]) -> str:
     return f"""name: Check cohort setup
 
 # A per-cohort glance view of everything configured (and everything still missing),
-# with direct links to fix it. Read-only - this button changes nothing.
+# with direct links to fix it. Read-only - this workflow changes nothing.
 
 on:
   workflow_dispatch:
@@ -787,7 +801,7 @@ def render_refresh() -> str:
     return f"""name: Refresh actions
 
 # Every seeded workflow is frozen at the moment it was seeded, while the engine it calls is
-# always checked out from central main - so an org left alone drifts, until a stale button
+# always checked out from central main - so an org left alone drifts, until a stale workflow
 # calls engine code that has since moved. This re-seeds the org daily, so every org
 # converges on central within 24h with nobody pressing anything. The refresh is idempotent
 # and skips files whose content is unchanged, so a night with no central changes is silent.
@@ -812,7 +826,7 @@ on:
 def render_generate_syllabus(source_repos: list[str], cohort_orgs: list[str]) -> str:
     """Build the syllabus's session-by-session section from a cohort's schedule.yml.
 
-    A button rather than a CLI habit, because the people who write syllabi are the people
+    A workflow rather than a CLI habit, because the people who write syllabi are the people
     who use the Actions tab. It writes a companion file for them to paste from and never
     touches SYLLABUS.md itself - see dsl_course/syllabus.py for why."""
     return f"""name: Generate syllabus
@@ -881,7 +895,7 @@ def render_new_assignment() -> str:
     """Scaffold an assignment-N-<tag> template repo (main + solution branch), then refresh.
 
     format/type land in the solution branch's grading.yml (and shape the starter/hidden
-    tests), so the choice made on this button is the one the grader later obeys - the
+    tests), so the choice made on this workflow is the one the grader later obeys - the
     grading.yml vocabulary is picked here, not hand-edited in afterwards."""
     return f"""name: New assignment
 

@@ -191,7 +191,7 @@ def refresh_classroom_system_files(org: str) -> int:
     Called both at bootstrap and on the nightly refresh, so a fix to a dispatcher or to
     the schema contract reaches running cohorts. It used to run only inside "Bootstrap
     cohort", which meant a template fix landed on a live cohort only if someone thought to
-    press that button again - three live cohorts drifted a whole semester that way.
+    run that workflow again - three live cohorts drifted a whole semester that way.
     `put_files` compares blob shas, so a cohort already current is written nothing.
 
     A failed write here is not cosmetic: without dispatch-sync*.yml a cohort's membership

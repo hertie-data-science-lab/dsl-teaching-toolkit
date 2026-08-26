@@ -12,9 +12,9 @@ faculty & instructors true-up - edit students.csv, then re-run to reconcile the 
 With --prune, handles no longer wanted in a team are removed from it (off-boarding, and
 the second half of a role change: the handle joins its new role team and is pruned from
 the old one); off by default here so a standalone/manual run never silently revokes
-access. The seeded **Sync membership** button (dsl_course.sync_membership) always calls
+access. The seeded **Sync membership** workflow (dsl_course.sync_membership) always calls
 this with prune=True - config is meant to be the live truth there; this module's own
-off-by-default is only for ad-hoc/CLI use outside that button.
+off-by-default is only for ad-hoc/CLI use outside that workflow.
 
 Usage:
     python3 -m dsl_course.sync_roster --cohort-org hertie-dsl-demo-f2026

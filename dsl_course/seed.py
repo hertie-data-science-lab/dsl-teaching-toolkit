@@ -89,6 +89,7 @@ from .workflows_render import (
     render_sync_gradebooks,
     render_sync_membership,
     render_sync_site,
+    system_owned,
 )
 
 # What the rest of the package reaches for as `seed.<name>`: this module's own jobs, plus
@@ -119,9 +120,9 @@ WORKFLOWS = (
     ".github/workflows/release-assignment.yml",
 )
 
-# Retired in favour of the consolidated Release materials button (whose course_source_path
+# Retired in favour of the consolidated Release materials workflow (whose course_source_path
 # takes any folder or file, which is all Release code ever did) - removed from content repos
-# seeded before that change, so no repo keeps a button whose CLI no longer exists.
+# seeded before that change, so no repo keeps a workflow whose CLI no longer exists.
 RETIRED_WORKFLOWS = (".github/workflows/release-code.yml",)
 
 # The heartbeat file, in the course org's `.github` repo - the repo every seeded cron runs
@@ -136,7 +137,7 @@ def _write_heartbeat(course_org: str) -> int:
     and a refresh is deliberately silent when nothing changed (put_file compares blob shas
     and skips identical files). So a course org that is simply quiet for two months has
     every cron switched off at once - including Refresh actions, the one that would have
-    self-healed it. Nothing then recovers without a human clicking a button they have no
+    self-healed it. Nothing then recovers without a human running a workflow they have no
     reason to know about.
 
     The content is the DATE alone: a second run on the same day writes an identical blob,
@@ -207,13 +208,13 @@ def _push_workflows(
     cohort_orgs: list[str],
     assignments: list[str],
 ) -> int:
-    """Place the run-from-repo buttons in one content repo, as ONE commit.
+    """Place the run-from-repo workflows in one content repo, as ONE commit.
 
-    Both buttons are re-rendered from the same inputs and change together (a new cohort
+    Both workflows are re-rendered from the same inputs and change together (a new cohort
     org, a new assignment template, an edit to the template here), so writing them file by
     file put a pair of near-identical `ci: ... wrapper` commits into a repo faculty
     actually read, for what is one logical change. put_files makes it one commit - and
-    folds the retired-workflow removal into it, so retiring a button costs no commit of its
+    folds the retired-workflow removal into it, so retiring a workflow costs no commit of its
     own either.
 
     Returns 1 if that commit didn't land, so refresh can report a run that didn't
@@ -222,13 +223,15 @@ def _push_workflows(
         org,
         repo,
         {
-            WORKFLOWS[0]: render_release(cohort_orgs, repo).encode(),
-            WORKFLOWS[1]: render_provision(cohort_orgs, assignments).encode(),
+            WORKFLOWS[0]: system_owned(render_release(cohort_orgs, repo)).encode(),
+            WORKFLOWS[1]: system_owned(
+                render_provision(cohort_orgs, assignments)
+            ).encode(),
         },
-        "ci: refresh release buttons",
+        "ci: refresh release workflows",
         delete=RETIRED_WORKFLOWS,
     ):
-        log_err(f"release buttons not written to {org}/{repo}")
+        log_err(f"release workflows not written to {org}/{repo}")
         return 1
     log_ok(f"workflows -> {org}/{repo}")
     return 0
@@ -245,7 +248,7 @@ def seed_github_workflows(course_org: str) -> int:
     file-by-file writes turned each such edit into a wall of sixteen near-identical
     `ci: <file>.yml` commits in the repo whose history faculty actually browse.
 
-    Returns 1 if that commit didn't land - a button that didn't land is exactly the thing a
+    Returns 1 if that commit didn't land - a workflow that didn't land is exactly the thing a
     green run must not hide."""
     cohorts = discover_cohorts(course_org)
     source_repos = discover_content_repos(course_org)
@@ -281,10 +284,10 @@ def seed_github_workflows(course_org: str) -> int:
     if not put_files(
         course_org,
         ".github",
-        {path: content.encode() for path, content in files.items()},
+        {path: system_owned(content).encode() for path, content in files.items()},
         "ci: refresh org workflows",
-        # Retired buttons - remove any copies already seeded into orgs bootstrapped before
-        # the change, so faculty never see two buttons for one job. sync-enrolment/sync-teams
+        # Retired workflows - remove any copies already seeded into orgs bootstrapped before
+        # the change, so faculty never see two workflows for one job. sync-enrolment/sync-teams
         # were consolidated into sync-membership.yml; status.yml was renamed to
         # check-cohort-setup.yml (same workflow, a name that says what it checks).
         delete=(
@@ -303,8 +306,8 @@ def _propagate_repo_secret(course_org: str, repos: list[str]) -> int:
     """On GitHub Free, org secrets don't reach PRIVATE repos - so set DSL_BOT_TOKEN as a
     repo secret on each content repo (from the token this run already holds), letting
     their run-from-repo workflows authenticate. Returns the number of repos the secret
-    could NOT be set on: a repo left with an empty DSL_BOT_TOKEN runs its Release buttons
-    with no auth and fails weeks later when faculty press them, so a failure here must
+    could NOT be set on: a repo left with an empty DSL_BOT_TOKEN runs its Release workflows
+    with no auth and fails weeks later when faculty run them, so a failure here must
     count into refresh's exit code rather than pass silently.
 
     Only DSL_BOT_TOKEN is published. A maintainer running `seed refresh` by hand usually
@@ -312,7 +315,7 @@ def _propagate_repo_secret(course_org: str, repos: list[str]) -> int:
     leak their PAT into every content repo, so if only GH_TOKEN is set we refuse. The
     refusal counts every repo as unpropagated rather than passing green: until the nightly
     refresh self-heals an org, its content repos still run the pre-fix new-assignment.yml
-    (no DSL_BOT_TOKEN in env), so a green refusal is a live button path left with no auth.
+    (no DSL_BOT_TOKEN in env), so a green refusal is a live workflow path left with no auth.
     The value goes over stdin - `gh secret set` reads it from there whenever `--body` is
     omitted - never argv, so it is not visible in `ps`."""
     token = os.environ.get("DSL_BOT_TOKEN")
@@ -395,13 +398,13 @@ def refresh(course_org: str) -> int:
     auto-disabled (_write_heartbeat).
 
     Non-zero if any file could not be written: this runs nightly on a cron, so a run that
-    silently failed to converge an org would go unnoticed until someone clicked a button
+    silently failed to converge an org would go unnoticed until someone ran a workflow
     that was never seeded."""
     # Local import: `scaffold` imports this module, so a module-level one is a cycle.
     from . import scaffold
 
     # Converge the registry FIRST, so `cohorts` is the live list for everything below.
-    # Seventeen org-level workflow dropdowns, the run-from-repo buttons in every content
+    # Seventeen org-level workflow dropdowns, the run-from-repo workflows in every content
     # repo and the profile README's cohort list are all rendered from it further down;
     # pruning after them wrote the dead org into all of them one last time and self-healed
     # a night later, which is the same "converges eventually, if someone waits" the prune

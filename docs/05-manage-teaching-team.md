@@ -21,7 +21,7 @@ There is no need to edit GitHub team directly. This provides an auditable histor
 | Role | You want them to… | Declare them in | Level | They get |
 |--- |---|---|---|---|
 | Faculty, FAs | Administer the **whole course**, every cohort, indefinitely | course org `.github/dsl-course.yml` → `people:` `course_admins` | **course** - once, for all years | `course-admin` (admin) on the course org **and** every cohort org |
-| TAs, Guest Lecturers| Push materials/assignments for **one year** and run the release buttons | that cohort's `classroom-config/people.yml` → `instructors` / `teaching_assistants` | **cohort** - per year | cohort org `instructors` team + course org `instructors-<tag>`: push on `.github` and on every course-org repo named `*-<tag>` |
+| TAs, Guest Lecturers| Push materials/assignments for **one year** and run the release workflows | that cohort's `classroom-config/people.yml` → `instructors` / `teaching_assistants` | **cohort** - per year | cohort org `instructors` team + course org `instructors-<tag>`: push on `.github` and on every course-org repo named `*-<tag>` |
 
 **Prefer the cohort file** for anyone who isn't running the course across multiple years. It is per-year, self-retiring, and it also supplies the deployed site's staff cards with rich display and information.
 
@@ -54,12 +54,12 @@ There is no need to edit GitHub team directly. This provides an auditable histor
    ```
 
 2. **Commit to `main`.** 
-  - The push dispatches **Sync membership** automatically - no button to click. 
+  - The push dispatches **Sync membership** automatically - nothing to run by hand. 
   - It reconciles fully (adds *and* removes) to match the pushed file.
 
 3. **They accept the org invite.** 
   - Membership shows `pending` in the Teams UI until they do.
-  - Once accepted, the workflow buttons appear in their Actions tab afterwards. 
+  - Once accepted, the workflows appear in their Actions tab afterwards. 
 
 >Enrolling the student roster is a separate process to the above.
 
@@ -102,7 +102,7 @@ Worked example: [`example-course/cohort-org/people.yml`](../example-course/cohor
 ## What the access actually reaches
 
 `instructors-<tag>` gets:
-1. **push** on the course org's **`.github`** - which is what makes the workflow buttons (Release materials, Release assignment, Refresh actions, Check cohort setup…) visible and runnable for them
+1. **push** on the course org's **`.github`** - which is what makes the workflows (Release materials, Release assignment, Refresh actions, Check cohort setup…) visible and runnable for them
 2. every course-org repo whose **name ends their associated `-<tag>`** (`course-materials-f2026`, `assignment-1-f2026`, `lecture-code-f2026`).
 3. Cohort-side they also get write on `classroom-config` and `welcome`, so they can edit the roster, schedule and team lists.
 

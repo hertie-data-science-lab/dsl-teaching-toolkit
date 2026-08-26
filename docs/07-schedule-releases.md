@@ -37,12 +37,32 @@ Each entry is a label you choose (`lecture-1`, `lab-1`, `bonus-dataset`) - yours
 | `title` | no | - | the session's name, shown beside its ordinal ("Session 1 / Probability Theory") on the schedule, Lectures, Materials and Labs tabs |
 | `description` | no | - | what the session covers - the **learning objectives** of a Hertie syllabus. Shown under the session heading on the Lectures, Labs and Readings tabs; may run to several paragraphs (use a `>` or `\|` block) |
 | `tbc` | no | `false` | signals the date is provisional: it fires as normal just the deployed site marks it **(TBC)** |
+| `show_on_site` | no | `true` | `false` releases **silently**: the deploys ship exactly as written, but the entry adds nothing to the site's schedule - no row, no date, no name, no not-yet-released placeholder. For content that belongs to a session without being an occasion of its own; see [Silent releases](#silent-releases) |
 
 
 NB: **the calendar event is not the release.** 
   - A release entry's `event_datetime:` is when the session *happens* - that is what the cohort's `.github.io` site's deployed schedule shows, and it is the default fire time for the entry's deploys. 
   - However, a deploy can also carry its own separate `deploy_datetime:` to ship its files earlier (or later) than the class they belong to. 
   - If nothing needs to ship at all, the row belongs under `events:`, not here.
+
+### Silent releases
+
+Most weeks a session's readings ride the lecture's own entry, so they ship on its clock and there is nothing to decide. Give them their own entry - because they go out a week ahead, say - and by default that entry announces itself: readings land in the same site row as that session's lecture, and the row takes the **earliest** date and title of every entry touching it. So a readings entry dated the 15th silently moves "Session 4" from the 22nd to the 15th, and can rename it.
+
+`show_on_site: false` is the opt-out. The entry deploys exactly as written and tells the schedule nothing:
+
+```yaml
+  readings-4:
+    event_datetime: 2026-09-15T09:00
+    show_on_site: false
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: readings/04_week-4
+```
+
+The files still reach students on the 15th, and still appear on session 4's row once released - what is withheld is the entry's claim on the schedule, not its content. The same applies to any release that is not an occasion: an errata drop, a dataset added mid-term.
+
+A silenced entry is also left out of the **generated syllabus** (Generate syllabus reads the same plan), which is usually what you want for a readings drop that belongs to a session already listed there.
 
 NB: **a row appears as soon as you write it, not when it ships.** Every dated `releases:` entry gets its schedule row from the moment it lands on `main` - so writing the term up front publishes the whole term. Until its files ship the row carries no links and says so ("Materials for session 3 are not released yet - they will appear in `materials/lectures/03_week-3` when released."), then picks up the links on release. Exactly how an assignment's row appears the day its template repo exists rather than the day it hands out - and until it hands out, its page withholds the brief and the real title, saying "This assignment has not been handed out yet." instead. An entry with `event_datetime: tbc` has nowhere to sit on a dated table, so it waits for a real date.
 
@@ -58,7 +78,7 @@ Nested under `deploy:` we havee the following:
 
 NB: `cohort_dest_repo` is yours to choose - one shared `materials` repo, or one repo for lectures, another for labs etc; any non-existent repo and/or directory structure specified between `cohort_dest_repo` and `cohort_dest_path` is created on release if non-exist.
 
-NB: `course_source_path: /` (or `.`) releases the **whole repo**. Two root entries are left behind: `.github` (the faculty Release buttons) and `MAINTAINING.md` (your operating notes, which the scaffold marks as never released). Nested copies - a `labs/.github/` of your own - travel normally. The button uses the identical spelling, so this reads straight across from `docs/08`.
+NB: `course_source_path: /` (or `.`) releases the **whole repo**. Two root entries are left behind: `.github` (the faculty Release workflows) and `MAINTAINING.md` (your operating notes, which the scaffold marks as never released). Nested copies - a `labs/.github/` of your own - travel normally. The workflow uses the identical spelling, so this reads straight across from `docs/08`.
 
 At a minimum only `course_source_repo` + `course_source_path` are required, everything else defaults:
 
@@ -283,7 +303,7 @@ Kept rather than dropped - the entry still runs on its documented fallback, and 
 
 Full details of this are in [10-grade-and-return-assignments.md](10-grade-and-return-assignments.md); below is as it pertains to the `schedule.yml`.
 
-> **Autograded ≠ released to students.** The scores land only in the private `classroom-config` - faculty review them (and the whole-class `cohort-gradebook.csv`) and nothing reaches a student until the separate **Distribute grades** button: [three gates](10-grade-and-return-assignments.md).
+> **Autograded ≠ released to students.** The scores land only in the private `classroom-config` - faculty review them (and the whole-class `cohort-gradebook.csv`) and nothing reaches a student until the separate **Distribute grades** workflow: [three gates](10-grade-and-return-assignments.md).
 
 Each assignment's **grading deadline** is `grading_datetime` if you set it, else `due_datetime`. Shortly after it passes, the hourly run does two things, once each:
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 import csv
 import io
 
+import pytest
 import yaml
 
 from dsl_course import grades, roster
@@ -15,69 +16,114 @@ from dsl_course import grades, roster
 
 def test_parse_grades_tolerates_blank_and_missing_columns():
     text = (
-        "github_handle,team,team_grade,adjustment,final,comments\n"
+        "github_handle,team,team_score,individual_adjustment,final_grade,individual_comments\n"
         "anna-adams,,,,88,Strong work\n"
         "ben-baker, team-x , 85 , +4 , 89 , Good lead \n"
     )
     rows = grades.parse_grades(text)
     assert [r.github_handle for r in rows] == ["anna-adams", "ben-baker"]
     # values are stripped, never coerced
-    assert rows[1].team == "team-x" and rows[1].adjustment == "+4"
-    assert rows[0].team == "" and rows[0].final == "88"
+    assert rows[1].team == "team-x" and rows[1].individual_adjustment == "+4"
+    assert rows[0].team == "" and rows[0].final_grade == "88"
+
+
+def test_a_retired_header_is_refused_rather_than_half_read():
+    # The rename left `github_handle`, `team` and `team_comments` untouched, so an
+    # un-migrated CSV would parse PARTIALLY: the row keeps its handle while every renamed
+    # cell reads blank. Nothing downstream can tell that apart from a legitimately sparse
+    # row, so `render` would publish a gradebook with the marks missing and `merge_auto`
+    # would write the file back having discarded them - green, and destructive.
+    text = (
+        "github_handle,team,auto,manual,team_grade,adjustment,final,comments,team_comments\n"
+        "ada-l,team-1,87,9,78,+4,B+,Nice work.,Team was solid.\n"
+    )
+    with pytest.raises(grades.RetiredGradeHeader) as exc:
+        grades.parse_grades(text)
+    # The message has to say what to rename to, or it just blocks without helping.
+    assert "final -> final_grade" in str(exc.value)
+
+
+def test_merge_auto_refuses_a_retired_header_instead_of_wiping_it():
+    # The path that actually destroys data: the autograder re-runs, reads the old CSV as
+    # blank, and re-serialises it under the new header. Write-once gives no protection,
+    # because from the new code's side those cells were never filled.
+    text = (
+        "github_handle,team,auto,manual,team_grade,adjustment,final,comments,team_comments\n"
+        "ada-l,,87,9,,,B+,Nice work.,\n"
+    )
+    with pytest.raises(grades.RetiredGradeHeader):
+        grades.merge_auto(text, [("ada-l", {"autograde_score": "3"})])
+
+
+def test_a_current_header_missing_optional_columns_still_parses():
+    # The guard keys on the RETIRED names specifically - a sparse but current header, and
+    # an extra column of the marker's own, are both still fine.
+    text = "github_handle,final_grade,rubric_notes\nada-l,B+,see the rubric tab\n"
+    (row,) = grades.parse_grades(text)
+    assert row.final_grade == "B+" and row.github_handle == "ada-l"
 
 
 def test_individual_entry_drops_group_fields():
-    row = grades.GradeRow(github_handle="anna", final="88", comments="Nice")
-    assert grades.gradebook_entry(row) == {"final": "88", "comments": "Nice"}
+    row = grades.GradeRow(
+        github_handle="anna", final_grade="88", individual_comments="Nice"
+    )
+    assert grades.gradebook_entry(row) == {
+        "final_grade": "88",
+        "individual_comments": "Nice",
+    }
 
 
-def test_auto_and_manual_are_internal_not_in_gradebook():
+def test_autograde_and_manual_scores_are_internal_not_in_gradebook():
     # auto/manual are faculty working columns - the student sees only the published final
     row = grades.GradeRow(
-        github_handle="anna", auto="70", manual="18", final="88", comments="Nice"
+        github_handle="anna",
+        autograde_score="70",
+        manual_score="18",
+        final_grade="88",
+        individual_comments="Nice",
     )
     entry = grades.gradebook_entry(row)
-    assert entry == {"final": "88", "comments": "Nice"}
-    assert "auto" not in entry and "manual" not in entry
+    assert entry == {"final_grade": "88", "individual_comments": "Nice"}
+    assert "autograde_score" not in entry and "manual_score" not in entry
 
 
-def test_group_entry_keeps_team_grade_private_adjustment_and_shared_comment():
+def test_group_entry_keeps_team_score_private_adjustment_and_shared_comment():
     row = grades.GradeRow(
         github_handle="ben",
         team="team-x",
-        team_grade="85",
-        adjustment="+4",
-        final="89",
-        comments="Led the model work",
+        team_score="85",
+        individual_adjustment="+4",
+        final_grade="89",
+        individual_comments="Led the model work",
         team_comments="Strong project; thin evaluation",
     )
     assert grades.gradebook_entry(row) == {
         "team": "team-x",
-        "team_grade": "85",
-        "adjustment": "+4",
+        "team_score": "85",
+        "individual_adjustment": "+4",
         "team_comments": "Strong project; thin evaluation",
-        "final": "89",
-        "comments": "Led the model work",
+        "final_grade": "89",
+        "individual_comments": "Led the model work",
     }
 
 
 def test_build_gradebooks_pivots_per_student_across_assignments():
     per = {
-        "assignment-1": [grades.GradeRow(github_handle="anna", final="88")],
+        "assignment-1": [grades.GradeRow(github_handle="anna", final_grade="88")],
         "assignment-4": [
             grades.GradeRow(
                 github_handle="anna",
                 team="team-x",
-                team_grade="85",
-                adjustment="0",
-                final="85",
+                team_score="85",
+                individual_adjustment="0",
+                final_grade="85",
             ),
             grades.GradeRow(
                 github_handle="ben",
                 team="team-x",
-                team_grade="85",
-                adjustment="+4",
-                final="89",
+                team_score="85",
+                individual_adjustment="+4",
+                final_grade="89",
             ),
         ],
     }
@@ -85,14 +131,16 @@ def test_build_gradebooks_pivots_per_student_across_assignments():
     assert set(books) == {"anna", "ben"}
     assert set(books["anna"]["assignments"]) == {"assignment-1", "assignment-4"}
     # one team-mate never sees the other's private adjustment: it lives in their own book
-    assert books["ben"]["assignments"]["assignment-4"]["adjustment"] == "+4"
-    assert "adjustment" not in books["anna"]["assignments"]["assignment-1"]
+    assert books["ben"]["assignments"]["assignment-4"]["individual_adjustment"] == "+4"
+    assert "individual_adjustment" not in books["anna"]["assignments"]["assignment-1"]
 
 
 def test_build_gradebooks_skips_blank_handles():
     per = {
         "assignment-1": [
-            grades.GradeRow(github_handle="", final="50", comments="ghost row")
+            grades.GradeRow(
+                github_handle="", final_grade="50", individual_comments="ghost row"
+            )
         ]
     }
     assert grades.build_gradebooks(per) == {}
@@ -101,40 +149,47 @@ def test_build_gradebooks_skips_blank_handles():
 def test_render_yaml_roundtrips_and_is_student_scoped():
     per = {
         "assignment-1": [
-            grades.GradeRow(github_handle="anna", final="88", comments="Nice")
+            grades.GradeRow(
+                github_handle="anna", final_grade="88", individual_comments="Nice"
+            )
         ]
     }
     book = grades.build_gradebooks(per)["anna"]
     parsed = yaml.safe_load(grades.render_yaml(book))
     assert parsed["student"] == "anna"
-    assert parsed["assignments"]["assignment-1"]["final"] == "88"
+    assert parsed["assignments"]["assignment-1"]["final_grade"] == "88"
 
 
-def test_merge_auto_upserts_without_clobbering_manual():
+def test_merge_auto_upserts_without_clobbering_the_manual_score():
     existing = grades.dump_grades(
-        [grades.GradeRow(github_handle="anna", manual="18", comments="Nice")]
+        [
+            grades.GradeRow(
+                github_handle="anna", manual_score="18", individual_comments="Nice"
+            )
+        ]
     )
     out = grades.merge_auto(
-        existing, [("anna", {"auto": "70"}), ("ben", {"auto": "60"})]
+        existing,
+        [("anna", {"autograde_score": "70"}), ("ben", {"autograde_score": "60"})],
     )
     rows = {r.github_handle: r for r in grades.parse_grades(out)}
     # the collector's auto score lands without touching the faculty's manual mark/comment
-    assert rows["anna"].auto == "70" and rows["anna"].manual == "18"
-    assert rows["anna"].comments == "Nice"
-    assert rows["ben"].auto == "60"  # a not-yet-listed student is appended
+    assert rows["anna"].autograde_score == "70" and rows["anna"].manual_score == "18"
+    assert rows["anna"].individual_comments == "Nice"
+    assert rows["ben"].autograde_score == "60"  # a not-yet-listed student is appended
 
 
-def test_merge_auto_group_sets_team_grade_per_member():
+def test_merge_auto_group_sets_team_score_per_member():
     out = grades.merge_auto(
         "",
         [
-            ("anna", {"team": "team-x", "team_grade": "85"}),
-            ("ben", {"team": "team-x", "team_grade": "85"}),
+            ("anna", {"team": "team-x", "team_score": "85"}),
+            ("ben", {"team": "team-x", "team_score": "85"}),
         ],
     )
     rows = {r.github_handle: r for r in grades.parse_grades(out)}
-    assert rows["anna"].team == "team-x" and rows["anna"].team_grade == "85"
-    assert rows["ben"].team_grade == "85"
+    assert rows["anna"].team == "team-x" and rows["anna"].team_score == "85"
+    assert rows["ben"].team_score == "85"
 
 
 # -------------------------------------------------------- write-once machine columns
@@ -143,25 +198,31 @@ def test_merge_auto_group_sets_team_grade_per_member():
 # scheduled or manual. Only empty cells get filled.
 
 
-def test_merge_auto_never_overwrites_an_existing_auto_score():
+def test_merge_auto_never_overwrites_an_existing_autograde_score():
     existing = grades.dump_grades(
-        [grades.GradeRow(github_handle="anna", auto="9", comments="regraded by hand")]
+        [
+            grades.GradeRow(
+                github_handle="anna",
+                autograde_score="9",
+                individual_comments="regraded by hand",
+            )
+        ]
     )
-    out = grades.merge_auto(existing, [("anna", {"auto": "3"})])
+    out = grades.merge_auto(existing, [("anna", {"autograde_score": "3"})])
     rows = {r.github_handle: r for r in grades.parse_grades(out)}
-    assert rows["anna"].auto == "9"  # the hand-edit stands
-    assert rows["anna"].comments == "regraded by hand"
+    assert rows["anna"].autograde_score == "9"  # the hand-edit stands
+    assert rows["anna"].individual_comments == "regraded by hand"
 
 
 def test_merge_auto_never_overwrites_existing_team_columns():
     existing = grades.dump_grades(
-        [grades.GradeRow(github_handle="anna", team="team-x", team_grade="85")]
+        [grades.GradeRow(github_handle="anna", team="team-x", team_score="85")]
     )
     out = grades.merge_auto(
-        existing, [("anna", {"team": "team-y", "team_grade": "40"})]
+        existing, [("anna", {"team": "team-y", "team_score": "40"})]
     )
     row = grades.parse_grades(out)[0]
-    assert (row.team, row.team_grade) == ("team-x", "85")
+    assert (row.team, row.team_score) == ("team-x", "85")
 
 
 def test_merge_auto_fills_only_the_empty_cells_of_a_mixed_row():
@@ -171,51 +232,62 @@ def test_merge_auto_fills_only_the_empty_cells_of_a_mixed_row():
         ]  # team set, team_grade empty
     )
     out = grades.merge_auto(
-        existing, [("anna", {"team": "team-y", "team_grade": "85"})]
+        existing, [("anna", {"team": "team-y", "team_score": "85"})]
     )
     row = grades.parse_grades(out)[0]
     assert row.team == "team-x"  # preserved
-    assert row.team_grade == "85"  # filled
+    assert row.team_score == "85"  # filled
 
 
 def test_merge_auto_write_once_is_per_row_not_per_file():
     existing = grades.dump_grades(
         [
-            grades.GradeRow(github_handle="anna", auto="9"),
+            grades.GradeRow(github_handle="anna", autograde_score="9"),
             grades.GradeRow(github_handle="ben"),
         ]
     )
-    out = grades.merge_auto(existing, [("anna", {"auto": "3"}), ("ben", {"auto": "3"})])
+    out = grades.merge_auto(
+        existing,
+        [("anna", {"autograde_score": "3"}), ("ben", {"autograde_score": "3"})],
+    )
     rows = {r.github_handle: r for r in grades.parse_grades(out)}
-    assert rows["anna"].auto == "9" and rows["ben"].auto == "3"
+    assert rows["anna"].autograde_score == "9" and rows["ben"].autograde_score == "3"
 
 
 def test_merge_auto_logs_how_many_cells_were_preserved(capsys):
     existing = grades.dump_grades(
         [
             grades.GradeRow(
-                github_handle="anna", auto="9", team="team-x", team_grade="85"
+                github_handle="anna",
+                autograde_score="9",
+                team="team-x",
+                team_score="85",
             )
         ]
     )
-    grades.merge_auto(existing, [("anna", {"auto": "3"}), ("ben", {"auto": "3"})])
+    grades.merge_auto(
+        existing,
+        [("anna", {"autograde_score": "3"}), ("ben", {"autograde_score": "3"})],
+    )
     out = capsys.readouterr().out
     assert "anna: 1 existing cell(s)" in out  # per-row skip count
     assert "1 existing machine-written cell(s) preserved" in out
 
 
 def test_merge_auto_says_nothing_when_it_preserved_nothing(capsys):
-    grades.merge_auto("", [("anna", {"auto": "3"})])
+    grades.merge_auto("", [("anna", {"autograde_score": "3"})])
     assert "preserved" not in capsys.readouterr().out
 
 
 def test_render_cohort_csv_pivots_to_one_row_per_handle():
     per = {
-        "assignment-2": [grades.GradeRow(github_handle="anna", final="90")],
+        "assignment-2": [grades.GradeRow(github_handle="anna", final_grade="90")],
         "assignment-1": [
-            grades.GradeRow(github_handle="anna", final="88", comments="Nice"),
             grades.GradeRow(
-                github_handle="ben", team="team-x", team_grade="85", final="89"
+                github_handle="anna", final_grade="88", individual_comments="Nice"
+            ),
+            grades.GradeRow(
+                github_handle="ben", team="team-x", team_score="85", final_grade="89"
             ),
         ],
     }
@@ -224,30 +296,33 @@ def test_render_cohort_csv_pivots_to_one_row_per_handle():
     assert [r["github_handle"] for r in rows] == ["anna", "ben"]
     # assignment column groups are sorted, so assignment-1 comes before assignment-2
     header = csv_text.splitlines()[0].split(",")
-    assert header.index("assignment-1_final") < header.index("assignment-2_final")
+    assert header.index("assignment-1_final_grade") < header.index(
+        "assignment-2_final_grade"
+    )
     anna = rows[0]
     assert (
-        anna["assignment-1_final"] == "88" and anna["assignment-1_comments"] == "Nice"
+        anna["assignment-1_final_grade"] == "88"
+        and anna["assignment-1_individual_comments"] == "Nice"
     )
-    assert anna["assignment-2_final"] == "90"
+    assert anna["assignment-2_final_grade"] == "90"
     # anna has no row in assignment-1's team columns
     assert anna["assignment-1_team"] == ""
     ben = rows[1]
     assert (
-        ben["assignment-1_team"] == "team-x" and ben["assignment-1_team_grade"] == "85"
+        ben["assignment-1_team"] == "team-x" and ben["assignment-1_team_score"] == "85"
     )
     # ben has no assignment-2 row at all - blank, not missing
-    assert ben["assignment-2_final"] == ""
+    assert ben["assignment-2_final_grade"] == ""
 
 
 def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
     # Auditors are never assessed, so they get no private gradebook repo. Dry-run keeps
     # this pure - the roster is the only input, and nothing is provisioned.
     students = roster.parse(
-        "student_id,hertie_email,name,github_handle,github_id,section,enrol_code,role\n"
-        "1,ada@uni.edu,Ada,ada-l,42,A,dsl-abc,enrolled\n"
-        "2,eve@uni.edu,Eve,eve-e,43,B,dsl-xyz,auditor\n"
-        "3,bob@uni.edu,Bob,bob-b,44,B,dsl-def,\n"  # blank role -> enrolled
+        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+        "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor\n"
+        "bob@uni.edu,Bob,bob-b,44,dsl-def,\n"  # blank role -> enrolled
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     assert grades.sync("COHORT", dry_run=True) == 0
@@ -270,9 +345,9 @@ def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
     # The send count used to be discarded, so a student who never got the "your grades are
     # updated" mail left no trace in the log at all.
     students = roster.parse(
-        "student_id,hertie_email,name,github_handle,github_id,section,enrol_code,role\n"
-        "1,ada@uni.edu,Ada,ada-l,42,A,dsl-abc,enrolled\n"
-        "2,bob@uni.edu,Bob,bob-b,43,A,dsl-def,enrolled\n"
+        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+        "bob@uni.edu,Bob,bob-b,43,dsl-def,enrolled\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades.mailer, "send_bulk", lambda msgs, dry_run=False: 1)

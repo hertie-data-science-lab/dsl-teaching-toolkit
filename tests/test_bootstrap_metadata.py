@@ -99,7 +99,7 @@ def test_classroom_readme_documents_every_roster_column():
     # The README's roster table is what faculty read instead of the schema doc; a column
     # missing from it is a column nobody fills in.
     readme = welcome.template("classroom-config/README.md")
-    documented = set(re.findall(r"^\| (\w+) \|", readme, re.MULTILINE))
+    documented = set(re.findall(r"^\| `?(\w+)`? \|", readme, re.MULTILINE))
     assert set(roster.FIELDS) <= documented
 
 

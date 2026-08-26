@@ -1,3 +1,5 @@
+# SYSTEM-OWNED - do not edit, edits here are overwritten. This workflow is re-seeded
+# from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Onboard student
 
 # Seed this into a cohort's public `welcome` repo as
@@ -113,7 +115,7 @@ jobs:
               'needs-review');
 
             // Read the PRIVATE roster. Columns (dsl_course.roster.FIELDS):
-            // student_id,hertie_email,name,github_handle,github_id,section,enrol_code,role
+            // hertie_email,name,github_handle,github_id,enrol_code,role
             // Re-readable, because the write below retries on a 409 (another student's Join
             // issue landed a row first) and must re-apply this row's edit to the fresh file.
             const readRoster = async () => {

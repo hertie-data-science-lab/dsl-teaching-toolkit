@@ -1,3 +1,5 @@
+# SYSTEM-OWNED - do not edit, edits here are overwritten. This workflow is re-seeded
+# from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Form team
 
 # Seed this into a cohort's public `welcome` repo as

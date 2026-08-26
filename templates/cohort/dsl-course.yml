@@ -1,3 +1,5 @@
+# SYSTEM-OWNED - do not edit, edits here are overwritten.
+#
 # This cohort org points back to its persistent course org. Read by the
 # classroom-config dispatchers (dispatch-sync / dispatch-sync-site) to find where
 # to fire Sync membership / Sync site. Identity + schedule live elsewhere (the

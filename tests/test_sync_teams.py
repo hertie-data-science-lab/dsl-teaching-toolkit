@@ -98,7 +98,7 @@ def test_ensure_team_without_prune_only_adds(stub_team):
     assert stub_team["removed"] == []
 
 
-HEADER = "student_id,hertie_email,name,github_handle,github_id,section,enrol_code,role"
+HEADER = "hertie_email,name,github_handle,github_id,enrol_code,role"
 
 
 def _students(*rows: str) -> list[roster.Student]:
@@ -121,8 +121,8 @@ def test_vet_handles_canonicalises_accepts_and_rejects():
 
 def test_known_handles_are_the_onboarded_roster_handles():
     students = _students(
-        "1,ada@uni.edu,Ada,ada-l,42,A,,enrolled",
-        "2,eve@uni.edu,Eve,,,B,,enrolled",  # not onboarded - no handle to add
+        "ada@uni.edu,Ada,ada-l,42,,enrolled",
+        "eve@uni.edu,Eve,,,,enrolled",  # not onboarded - no handle to add
     )
     assert sync_teams.known_handles(students) == {"ada-l"}
     assert sync_teams.known_handles(None) == set()  # roster missing/unreadable
@@ -138,7 +138,7 @@ def test_sync_never_adds_a_handle_that_is_not_on_the_roster(stub_team, monkeypat
         lambda org: {"assignment-4-project": {"wizards": ["ben-baker", "m-stranger"]}},
     )
     monkeypatch.setattr(
-        roster, "load", lambda org: _students("1,ben@uni.edu,Ben,ben-baker,42,A,,")
+        roster, "load", lambda org: _students("ben@uni.edu,Ben,ben-baker,42,,")
     )
     errors = sync_teams.sync("org", prune=False)
     assert errors == 1  # the skipped stranger is surfaced, not silently dropped
@@ -171,7 +171,7 @@ def test_sync_matches_roster_handles_case_insensitively(stub_team, monkeypatch):
         lambda org: {"assignment-4-project": {"wizards": ["Ben-Baker"]}},
     )
     monkeypatch.setattr(
-        roster, "load", lambda org: _students("1,ben@uni.edu,Ben,ben-baker,42,A,,")
+        roster, "load", lambda org: _students("ben@uni.edu,Ben,ben-baker,42,,")
     )
     errors = sync_teams.sync("org", prune=False)
     assert errors == 0

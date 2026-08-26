@@ -9,7 +9,7 @@ code, so a new repo is always laid out the way the Release actions expect.
 Materials repos get `lectures/`, `readings/` and `labs/` `01_session-1/` skeletons (any
 top-level directory with an ordinal-prefixed subdirectory is a releasable section - add
 more, e.g. `datasets/`, freely; delete `labs/` if unused) and the run-from-repo Release
-buttons. Assignment repos get a starter on `main` (no tests - grading is faculty-side)
+workflows. Assignment repos get a starter on `main` (no tests - grading is faculty-side)
 and a `solution` branch carrying the model solution, `grading.yml`, and the HIDDEN
 tests, so generate never ships any of them to students.
 """
@@ -108,13 +108,13 @@ _SYLLABUS_STUB = """\
 """
 
 _SYLLABUS_SAMPLE = """\
-# Foundations of Machine Learning (Demo) - E1234 - syllabus
+# Deep Learning (Demo) - E1234 - syllabus
 
 *Optional - a worked example to copy from; delete it if you do not want it.*
 
-<!-- A FILLED example, kept current by the toolkit - copy from it, do not edit it (your
-     edits are overwritten). Your own syllabus is SYLLABUS.md beside this file. This file
-     is never released to students. -->
+<!-- SYSTEM-OWNED - do not edit, edits here are overwritten. A FILLED example, kept
+     current by the toolkit: copy from it. Your own syllabus is SYLLABUS.md beside this
+     file. This file is never released to students. -->
 
 ## 1. General information
 
@@ -131,7 +131,7 @@ _SYLLABUS_SAMPLE = """\
 
 ### Course contents
 
-An applied introduction to machine learning for public policy. We build up from linear
+An applied introduction to deep learning for public policy. We build up from linear
 models to neural networks, and spend as much time on what a model cannot tell you as on
 what it can.
 
@@ -145,12 +145,12 @@ By the end of the course students can:
 
 ### Target group
 
-MPP and MDS students in their second year. No prior ML required.
+MDS students in their second year. Prior ML experience required.
 
 ### Prerequisites
 
-Statistics 1 or equivalent; comfort writing a function and reading a data frame in Python
-or R.
+Machine Learning or equivalent; comfort writing a function and reading a data frame in
+Python or R.
 
 ## 3. Grading and assignments
 
@@ -174,9 +174,8 @@ No required textbook. Both of these are free and used throughout:
 
 ## 5. Course sessions and readings
 
-Session titles, learning objectives and readings are published on the course website, and
-are generated from `classroom-config/schedule.yml` and each session's `readings/` folder -
-so they stay in step with what is actually released.
+Published on the course website, generated from `classroom-config/schedule.yml` and each
+session's `readings/` folder.
 """
 
 # The seeded reading list, shaped like a Hertie syllabus's readings block so a course
@@ -208,17 +207,18 @@ _READINGS_STUB = (
 )
 
 _GRADING_YML = """\
-# How the Grade assignment button autogrades this assignment (after the grading_deadline in schedule.yml).
-# Delete this file (or set autograde: false) for a purely manually-graded one.
+# How the Grade assignment workflow autogrades this assignment (after the grading_deadline
+# set in schedule.yml). Delete this file (or set autograde: false) for a purely
+# manually-graded assignment.
 type: {kind}      # individual (one repo per student) or group (one repo per team)
-format: {fmt}      # py or notebook
 autograde: true       # false -> skip autograding (all-manual)
-max_auto: 0           # points the hidden tests are worth (0 = informational)
 tests: tests          # path (on THIS solution branch) holding the hidden tests
+                      # `autograde_score` in grades/<slug>.csv records how many of them
+                      # passed; you own the mark the student actually gets (`final_grade`)
 """
 
 _HIDDEN_TEST_PY = """\
-# HIDDEN tests - run faculty-side by the Grade assignment button, never shipped to students.
+# HIDDEN tests - run faculty-side by the Grade assignment workflow, never shipped to students.
 # They import the student's submission (the repo root) and check it.
 # Replace this placeholder with the real grading tests.
 from starter import solve
@@ -294,21 +294,23 @@ def refreshable_stubs(tag: str) -> dict[str, bytes]:
 
 
 def _actions_table(org: str) -> str:
-    # The course org's `.github` Actions tab hosts the buttons that operate this course.
+    # The course org's `.github` Actions tab hosts the workflows that operate this course.
     # Both README (faculty & instructors orientation, pre-release) and MAINTAINING link it.
     actions_url = f"https://github.com/{org}/.github/actions"
     return (
-        f"The course org's [`.github` Actions tab]({actions_url}) hosts the buttons that "
+        f"The course org's [`.github` Actions tab]({actions_url}) hosts the workflows that "
         "operate this course:\n\n"
         "| Action | What it does |\n"
         "| --- | --- |\n"
-        "| **Release materials** | Copy session folders - or any path, including a root file "
-        "like your syllabus - into a cohort's `materials` repo. |\n"
+        "| **Release materials** | Copy any path - session folders, root files - into a "
+        "cohort's `materials` repo by default, or a destination path you name. |\n"
         "| **Release assignment** | Freeze an assignment template, then generate one private "
-        "repo per student. |\n"
-        "| **New materials repo** | Scaffold another structured materials repo. |\n"
-        "| **New assignment** | Scaffold an assignment template (starter + hidden autograder). |\n"
-        "| **Refresh actions** | Re-seed the run-from-repo buttons and repopulate dropdowns "
+        "repo per student (or per team). |\n"
+        "| **New materials repo** | Scaffold a correctly structured materials repo; the "
+        "release workflows come bootstrapped with it. |\n"
+        "| **New assignment** | Scaffold an assignment template (starter + hidden "
+        "autograder); the release workflows come bootstrapped with it. |\n"
+        "| **Refresh actions** | Re-seed the run-from-repo workflows and repopulate dropdowns "
         "after you add sessions/sections. |\n"
         "| **Check cohort setup** | Read-only per-cohort checklist of what's configured. |\n\n"
         "(**Release materials** and **Release assignment** also appear in this repo's own "
@@ -320,47 +322,50 @@ def _maintaining(org: str, repo: str) -> str:
     """The generated maintainer guide - SYSTEM-owned docs, built from the actions table."""
     actions_table = _actions_table(org)
     return (
-        f"# Maintaining `{repo}` (faculty & instructors)\n\n"
+        "<!-- SYSTEM-OWNED - do not edit, edits here are overwritten. This file is "
+        "regenerated by every Refresh actions run. -->\n\n"
+        f"# Maintaining `{repo}`\n\n"
         "Reference for faculty & instructors on how to populate and operate this materials "
-        "**source** repo. This file is **not** released to students - Release materials only "
-        "copies session folders, the syllabus, and (when toggled) `README.md`. Keep "
-        "student-facing wording in `README.md` and operational notes here.\n\n"
+        "**source** repo. This file is **not** released to students. Keep student-facing "
+        "wording in `README.md` and operational notes here.\n\n"
         "## What to edit vs leave alone\n\n"
         "| You edit / add | Visible to students? | Notes |\n"
         "| --- | --- | --- |\n"
-        "| `lectures/`, `readings/` (and any section folders) session content | Yes, when you "
-        "Release that session | The released files are copied into the cohort `materials` repo. |\n"
+        "| `lectures/`, `labs/`, `readings/` (and any other section folders) | Yes, when you "
+        "release that session | The released files are copied into the cohort `materials` "
+        "repo, or another destination path you name. |\n"
         "| root files - `SYLLABUS.md`, `README.md`, or any name you use | Yes, when you name "
         "the file as the release path | A root file is released like any other path: type "
-        "`SYLLABUS.pdf` (or whatever yours is called) as the `course_source_path`. Write "
-        "`README.md` for students; it replaces the placeholder. |\n"
+        "`SYLLABUS.pdf` (or whatever the file is called) as the `course_source_path`. |\n"
         "| `MAINTAINING.md` (this file) | No | Your reference; never released. Leave it in the "
         "repo. |\n"
-        "| `.github/workflows/` (the Release buttons) | No | **Infrastructure - do not edit or "
-        "delete.** These run-from-repo buttons are what make releasing work; **Refresh actions** "
+        "| `.github/workflows/` (the Release workflows) | No | **Infrastructure - do not edit or "
+        "delete.** These run-from-repo workflows are what make releasing work; **Refresh actions** "
         "re-seeds them. |\n\n"
         "Rule of thumb: edit the content folders and the two root files; leave `MAINTAINING.md` "
         "and `.github/workflows/` alone.\n\n"
         "## Structure\n\n"
         "Any top-level directory containing at least one ordinal-prefixed subdirectory "
-        "(`01_`, `02_`, `03_`, ...) is a releasable section - no config to declare it:\n\n"
+        "(`01_`, `02_`, `03_`, ...) is a releasable section:\n\n"
         "- `lectures/01_session-1/` - one folder per session's lecture files\n"
-        "- `readings/01_session-1/` - one folder per session's readings. Drop the readings "
-        "in and every file is listed and linked for enrolled students automatically. "
-        "`READINGS.md` (or `.txt`/`.bib`) is OPTIONAL, for what a file cannot say - a link "
-        "to read online, or a citation; it is published publicly, while the files stay\n"
-        "behind the enrolled-student gate (unless a public site runs `actual-readings`)\n"
         "- `labs/01_session-1/` - one folder per session's lab (delete the `labs/` folder "
         "if your course has none)\n"
+        "- `readings/01_session-1/` - one folder per session's readings. Just drop the "
+        "readings in and every file is listed and linked for enrolled students "
+        "automatically. An additional `READINGS.md` (or `.txt`/`.bib`) is OPTIONAL prose - "
+        "a link to read online, or a citation; it is published publicly, while the files "
+        "stay behind the enrolled-student gate (unless a public site toggles on "
+        "`actual-readings`)\n"
         "- root files - your syllabus under any name (`SYLLABUS.md`, `SYLLABUS.pdf`, ...) "
-        "and `README.md`: released by naming the file as the release path, exactly as it is "
-        "spelled here (the runner is case sensitive)\n\n"
+        "and `README.md`: released by naming the file as the release path (the runner is "
+        "case sensitive)\n\n"
         "Add more sessions by creating `lectures/02_session-2/`, `readings/02_session-2/`, ... "
         "(only the ordinal prefix matters - name the rest whatever you like), or add a whole "
-        "new section (e.g. `datasets/01_intro/`) - then run **Refresh actions** so the session "
-        "dropdown and Release button's section toggles pick it up.\n\n"
+        "new section (e.g. `datasets/01_intro/`). If you release materials by hand, run "
+        "**Refresh actions** afterwards so the session dropdown and the Release workflow's "
+        "section toggles pick it up - unnecessary if you release via `schedule.yml`.\n\n"
         "## Available actions\n\n" + actions_table + "\n"
-        "## Public course website (optional)\n\n"
+        "## Public course website (optional) **[DEFERRED]**\n\n"
         "The **Publish course website** action can share this repo's materials on a public "
         "open-courseware site. Lecture files are always hosted; for readings you choose "
         "`reading-list` (text/citation files are shown as a list - keep copyrighted PDFs out "
@@ -399,7 +404,7 @@ def refresh_materials_system_files(org: str, repo: str) -> int:
     hands the nightly sweep the code and dataset repos too, and a materials-repo
     maintainer guide in `lecture-code-f2026` is the nonsense `seed._refresh_stubs`'
     `create=False` exists to avoid. Every materials repo is named `course-materials-<tag>`
-    by `scaffold_materials`, from a button that takes only the tag, so the prefix is a
+    by `scaffold_materials`, from a workflow that takes only the tag, so the prefix is a
     toolkit guarantee rather than a convention.
 
     Returns 1 if the commit didn't land, so callers go red rather than report a converged
@@ -440,7 +445,8 @@ def scaffold_materials(org: str, tag: str) -> int:
         # placeholder" note and FACULTY_ONLY_HEADING. A release refuses to ship a README
         # still holding BOTH, so edit this stub's wording freely but keep those two intact
         # (test_scaffold.py asserts the seeded file still trips the guard).
-        "<!-- FACULTY & INSTRUCTORS: replace the content below with a real, student-facing\n"
+        "<!-- INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.\n\n"
+        "     FACULTY & INSTRUCTORS: replace the content below with a real, student-facing\n"
         "     overview of your course materials. Release materials with the 'include README'\n"
         "     toggle copies THIS file into the cohort's materials repo, where enrolled\n"
         "     students read it - so write it for them, not as internal notes. How this source\n"
@@ -489,9 +495,9 @@ def scaffold_materials(org: str, tag: str) -> int:
     # `init: materials skeleton` lines.
     if not seed_files_if_absent(org, repo, user_files, "init: materials skeleton"):
         failures += 1
-    # Equip the run-from-repo Release buttons (same as Refresh does for content repos).
+    # Equip the run-from-repo Release workflows (same as Refresh does for content repos).
     # _push_workflows lands both in one commit, logs its own failure, and returns 1 - a
-    # materials repo with no Release buttons must not report success.
+    # materials repo with no Release workflows must not report success.
     cohorts = seed.discover_cohorts(org)
     failures += seed._push_workflows(org, repo, cohorts, seed.discover_assignments(org))
     if failures:
@@ -604,10 +610,11 @@ def scaffold_assignment(
             "Released to students after the deadline via Release assignment with "
             "**include_solution** ticked.\n"
         )
-        # grading.yml + hidden tests for the faculty-side Grade assignment button. The
-        # type/format chosen at scaffold time are recorded here - edit this file to
-        # change them later.
-        (wd / "grading.yml").write_text(_GRADING_YML.format(kind=kind, fmt=fmt))
+        # grading.yml + hidden tests for the faculty-side Grade assignment workflow. The
+        # type chosen at scaffold time is recorded here - edit this file to change it
+        # later. `fmt` is NOT: the grader converts whatever notebooks a submission holds,
+        # so it only picks which starter and hidden-test stub are written below.
+        (wd / "grading.yml").write_text(_GRADING_YML.format(kind=kind))
         tests = wd / "tests"
         tests.mkdir()
         (tests / "test_solution.py").write_text(
@@ -800,7 +807,7 @@ def main() -> int:
     ps = sub.add_parser("site")
     ps.add_argument("--org", required=True)
     args = parser.parse_args()
-    # scaffold_materials equips the new repo's Release buttons, which reads the cohort
+    # scaffold_materials equips the new repo's Release workflows, which reads the cohort
     # registry + assignment list; a read helper that couldn't reach the API raises, and in
     # an Actions log a one-line error beats a traceback.
     try:

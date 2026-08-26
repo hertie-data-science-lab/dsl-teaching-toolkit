@@ -26,7 +26,7 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
       - a `README.md` 
       - a `MAINTAINING.md`, 
       - a placeholder `SYLLABUS.md` 
-      >It also seeds the three Release buttons & later scheduled release functionality. 
+      >It also seeds the three Release workflows & later scheduled release functionality. 
    - You have push on it immediately.
 
 2. **Clone the repo locally**
@@ -61,7 +61,7 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 ## Next
 
 - [Add an assignment](03-add-assignment-to-course.md).
-- [Schedule releases](07-schedule-releases.md) - plan the term, and never click a release button.
+- [Schedule releases](07-schedule-releases.md) - plan the term, and never run a release workflow by hand.
 - [Release to a cohort](08-release-materials-to-cohort.md) - open sessions up to students by hand.
 
 ---

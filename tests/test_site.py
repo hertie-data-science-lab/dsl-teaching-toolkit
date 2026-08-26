@@ -1213,6 +1213,54 @@ def test_the_earliest_entry_naming_a_row_is_the_one_that_titles_it():
     assert site._planned_sessions(s)[("2", "lecture")].subtitle == "Random Variables"
 
 
+def test_a_silent_release_neither_dates_nor_names_the_row_it_lands_in():
+    # The case the flag exists for: readings released a week ahead of the class. They land
+    # in session 2's row (readings are lecture material), and without the flag the row
+    # would take the EARLIEST entry's date and title - moving "Session 2" to the 10th and
+    # renaming it after a reading list.
+    s = _sched(
+        [
+            Release(
+                "lecture-2",
+                datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "lectures/02_x", "materials", None)],
+                title="Random Variables",
+            ),
+            Release(
+                "readings-2",
+                datetime(2026, 9, 10, 9, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "readings/02_x", "materials", None)],
+                title="Week 2 reading list",
+                show_on_site=False,
+            ),
+        ]
+    )
+    row = site._planned_sessions(s)[("2", "lecture")]
+    assert row.when == datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN)
+    assert row.subtitle == "Random Variables"
+    # The silent entry contributed nothing at all - not even the pending-readings note,
+    # which would otherwise promise a reading list on a row that never mentioned one.
+    assert row.readings_planned is False
+    assert "materials/readings/02_x" not in row.dests
+
+
+def test_a_silent_release_raises_no_row_of_its_own():
+    # Nothing else touches session 3, so with the flag honoured the plan declares no row
+    # for it at all - the files still reach students, and discovery still links them into
+    # whatever row they land in once released.
+    s = _sched(
+        [
+            Release(
+                "errata-3",
+                datetime(2026, 9, 20, 9, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "lectures/03_x", "materials", None)],
+                show_on_site=False,
+            )
+        ]
+    )
+    assert site._planned_sessions(s) == {}
+
+
 def test_a_row_with_no_readings_in_the_plan_never_reports_them_pending():
     s = _sched(
         [
