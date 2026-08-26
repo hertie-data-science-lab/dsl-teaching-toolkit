@@ -62,6 +62,8 @@ Most weeks a session's readings ride the lecture's own entry, so they ship on it
 
 The files still reach students on the 15th, and still appear on session 4's row once released - what is withheld is the entry's claim on the schedule, not its content. The same applies to any release that is not an occasion: an errata drop, a dataset added mid-term.
 
+A silenced entry is also left out of the **generated syllabus** (Generate syllabus reads the same plan), which is usually what you want for a readings drop that belongs to a session already listed there.
+
 NB: **a row appears as soon as you write it, not when it ships.** Every dated `releases:` entry gets its schedule row from the moment it lands on `main` - so writing the term up front publishes the whole term. Until its files ship the row carries no links and says so ("Materials for session 3 are not released yet - they will appear in `materials/lectures/03_week-3` when released."), then picks up the links on release. Exactly how an assignment's row appears the day its template repo exists rather than the day it hands out - and until it hands out, its page withholds the brief and the real title, saying "This assignment has not been handed out yet." instead. An entry with `event_datetime: tbc` has nowhere to sit on a dated table, so it waits for a real date.
 
 Nested under `deploy:` we havee the following:

@@ -34,7 +34,7 @@ collaborator.
 Other inputs, all default **off**: 
 - `include_solution` (also push the template's `solution`
 branch into each student repo)
-- `type` (`autograde_score` **default** = follow `schedule.yml` / the template's `grading.yml`;
+- `type` (`auto` **default** = follow `schedule.yml` / the template's `grading.yml`;
 or force `individual` / `group` for this dispatch -
 see [Group or individual?](#group-or-individual))
 - `dry_run` (list the repos that *would* be created).
@@ -55,7 +55,7 @@ Two places to say it, depending on how you release:
       type: group          # or individual - the default if field empty
   ```
 
-- **Manual dispatch**: the **Release assignment** workflow asks for `type` - pick `individual` or `group`, or leave the default `autograde_score` (= whatever `schedule.yml` or the template's `grading.yml` declare; unwritten everywhere means individual).
+- **Manual dispatch**: the **Release assignment** workflow asks for `type` - pick `individual` or `group`, or leave the default `auto` (= whatever `schedule.yml` or the template's `grading.yml` declare; unwritten everywhere means individual).
 
 - `group` = one shared repo per team from `teams.csv` (repo `<slug>-<team>`, every member a collaborator), graded per team into the `team`/`team_score` columns. 
 - `individual` = one private repo per onboarded, enrolled student (`<slug>-<handle>`), graded into `autograde_score`.
