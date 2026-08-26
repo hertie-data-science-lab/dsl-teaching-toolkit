@@ -6,7 +6,7 @@ Edit the text; I'll port it back to the generator named under each.
 ---
 
 ## 1. Grades preview PR
-`dsl_course/grades.py:446-452` · opened in `classroom-config` by **Render grades**
+`dsl_course/grades.py:446-467` · opened in `classroom-config` by **Render grades**
 
 **Title:** `Grades: review before distribution`
 
@@ -19,7 +19,7 @@ Rendered {n} gradebook(s) from `grades/`.
 ---
 
 ## 2. Site-sync overwrite notice
-`dsl_course/site.py:795-819` · opened in the cohort's site repo when a sync replaces a
+`dsl_course/site.py:1585-1690` · opened in the cohort's site repo when a sync replaces a
 hand-edited generated file. Deduped by title; commented on if already open.
 
 **Title:** `Manual edits to generated site files are overwritten by the sync`
@@ -47,7 +47,7 @@ cc @{org}/instructors - a commit author's email is not linked to a GitHub accoun
 ---
 
 ## 3. Unattended cron failure
-`dsl_course/workflows_render.py:167-209` · appended to every cron-bearing workflow
+`dsl_course/workflows_render.py:170-200` · appended to every cron-bearing workflow
 (Sync membership, Sync site, Scheduled release, Refresh actions, Publish site). Filed in
 the repo the workflow runs in; closes itself on the next green run.
 
@@ -91,7 +91,7 @@ Field reference: https://github.com/{central}/blob/main/docs/07-schedule-release
 ---
 
 ## 5. Schedule validator report
-`dsl_course/schedule.py:808-827, 1043-1047` · written to the job summary and embedded in
+`dsl_course/schedule.py:1010-1025, 1288-1292` · written to the job summary and embedded in
 the issue above.
 
 ```
@@ -111,16 +111,16 @@ Short strings, but they show on GitHub org and team pages - students see the fir
 
 | Text | Source | Seen by |
 | --- | --- | --- |
-| `Released course materials (enrolled students only)` | `deploy.py:135` | student |
+| `Released course materials (enrolled students only)` | `deploy.py:201` | student |
 | `Private gradebook for @{handle}` | `grades.py:302` | student |
-| `{slug} - submission repo` | `assign.py:208` | student |
-| `Project team (auto-managed from teams.csv)` | `sync_teams.py:72` | student |
-| `{slug} - cohort assignment template` | `assign.py:99` | faculty |
-| `Course front door - open a Join issue to enrol` | `bootstrap_course.py:490` | student |
-| `PRIVATE cohort config - roster (students.csv). No PII leaves here.` | `bootstrap_course.py:524` | faculty |
-| `Course materials (lectures/readings by session)` | `scaffold.py:123` | faculty |
-| `Org profile and configuration` | `bootstrap_course.py:378` | both |
-| `Course website (auto-deployed on push)` | `scaffold.py:460` | both |
+| `{slug} - submission repo` | `assign.py:204` | student |
+| `Project team (auto-managed from teams.csv)` | `sync_teams.py:69` | student |
+| `{slug} - cohort assignment template` | `assign.py:100` | faculty |
+| `Course front door - open a Join issue to enrol` | `bootstrap_course.py:491` | student |
+| `PRIVATE cohort config - roster (students.csv). No PII leaves here.` | `bootstrap_course.py:525` | faculty |
+| `Course materials (lectures/readings by session)` | `scaffold.py:427` | faculty |
+| `Org profile and configuration` | `bootstrap_course.py:379` | both |
+| `Course website (auto-deployed on push)` | `scaffold.py:711` | both |
 
 ## 7. Commit messages in student-readable repos
 Low-visibility but permanent in history: `grades: update`, `init gradebook`,

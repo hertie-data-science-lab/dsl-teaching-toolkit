@@ -20,7 +20,7 @@
 
 | Action | What it does |
 | --- | --- |
-| **Release materials** | Copy session folders (+ optional syllabus/README) into a cohort's `materials` repo. |
+| **Release materials** | Copy session folders - or any path, including a root file like your syllabus - into a cohort's `materials` repo. |
 | **Release assignment** | Freeze an assignment template, then generate one private repo per student. |
 | **New materials repo** | Scaffold another structured materials repo. |
 | **New assignment** | Scaffold an assignment template (starter + hidden autograder). |

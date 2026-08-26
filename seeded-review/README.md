@@ -30,7 +30,7 @@ Sample identifiers throughout: course org `hertie-dsl-demo-course-e1234`, cohort
 | `website-generated-prose.md` | Every string on the course website, split by which repo owns it | `dsl_course/site.py` (+ 2 external repos) |
 | `welcome-repo/README.md` | The public landing page: "how to join" | `templates/welcome/README.md` |
 | `welcome-repo/issue-form-*.yml` | The two issue forms students fill in | `templates/welcome/ISSUE_TEMPLATE/` |
-| `emails/enrolment-code.txt` | Emailed enrolment code | `dsl_course/enrol_codes.py:84` |
+| `emails/enrolment-code.txt` | Emailed enrolment code | `dsl_course/enrol_codes.py:86` |
 | `emails/grades-updated.txt` | Grade-release notification | `dsl_course/grades.py:545` |
 | `gradebook-repo/README.md` | Landing page in their private `grades-<handle>` repo | `grades.py:91` |
 | `gradebook-repo/grades.yml` | The grades file they open (shape + field names) | `grades.gradebook_entry` |
@@ -38,7 +38,8 @@ Sample identifiers throughout: course org `hertie-dsl-demo-course-e1234`, cohort
 | `assignment-repo/starter.*` | The starter they complete | `dsl_course/scaffold.py` |
 | `assignment-repo/solution-README.md` | Model-solution page, post-deadline | `dsl_course/scaffold.py` |
 | `materials-repo/README.md` | Released to students with the README toggle | `dsl_course/scaffold.py` |
-| `materials-repo/SYLLABUS.md` | Syllabus stub | `dsl_course/scaffold.py:229` |
+| `materials-repo/SYLLABUS.md` | Syllabus stub, in the standard Hertie shape | `scaffold._SYLLABUS_STUB` |
+| `materials-repo/readings/01_session-1/READINGS.md` | The optional prose reading list seeded in each session's readings folder - public when released | `scaffold._READINGS_STUB` |
 | `org-landing-page/profile-README.md` | The cohort org's front page | `profile_readme.render_profile_readme` |
 
 ### 2-faculty-facing/
@@ -50,7 +51,8 @@ Sample identifiers throughout: course org `hertie-dsl-demo-course-e1234`, cohort
 | `classroom-config-samples/*.sample` | Filled worked examples shipped beside each scaffold | `example-course/cohort-org/` |
 | `course-config/dsl-course.yml` | Course identity + admin SSOT (comments are the docs) | `templates/course/*` via `bootstrap_course._course_metadata` |
 | `course-config/cohort-dsl-course.yml` | Cohort -> course pointer | `templates/cohort/dsl-course.yml` |
-| `materials-repo/MAINTAINING.md` | How to operate a materials repo | `dsl_course/scaffold.py` |
+| `materials-repo/MAINTAINING.md` | How to operate a materials repo | `scaffold._maintaining` |
+| `materials-repo/SYLLABUS.md.sample` | Filled syllabus example beside the stub - never released to students | `scaffold._SYLLABUS_SAMPLE` |
 | `assignment-repo/grading.*.yml` | Autograder config, 3 variants | `scaffold._GRADING_YML` |
 | `assignment-repo/hidden-test*.py` | Hidden-test stubs faculty replace | `scaffold._HIDDEN_TEST_{PY,NOTEBOOK}` |
 | `assignment-repo/solution.*` | Model-solution stubs | `dsl_course/scaffold.py` |
@@ -86,11 +88,13 @@ the rest is machinery. Edit the prose, leave the shell logic.
 
 | Class | Files | Behaviour |
 | --- | --- | --- |
-| **SYSTEM** | all workflows, `classroom-config/README.md`, both org READMEs, all `*.sample`, `MAINTAINING.md`, cohort `dsl-course.yml` | Rewritten on every nightly refresh. Your edits propagate to **every existing org** within 24h. |
-| **USER** | `classroom-config/{students,teams,schedule,people}`, `welcome/README.md`, materials `README`/`SYLLABUS`, assignment starters, course `dsl-course.yml` | Seeded create-only. Your edits reach **newly bootstrapped orgs only** - existing ones keep what they have. |
+| **SYSTEM** | all workflows, `classroom-config/README.md`, both org READMEs, all `*.sample` (incl. `SYLLABUS.md.sample`), `MAINTAINING.md`, cohort `dsl-course.yml` | Rewritten on every nightly refresh. Your edits propagate to **every existing org** within 24h. |
+| **STUB** | materials `SYLLABUS.md` and `readings/NN_.../READINGS.md` | Refreshed nightly *while still ours* - they carry a `dsl-stub:` marker. Your edits reach every org that has not written over the file yet; once faculty edit it (or delete the marker) it is theirs and never touched again. |
+| **USER** | `classroom-config/{students,teams,schedule,people}`, `welcome/README.md`, materials `README.md`, assignment starters, course `dsl-course.yml` | Seeded create-only. Your edits reach **newly bootstrapped orgs only** - existing ones keep what they have. |
 
 > Consequence: editing a USER-owned scaffold changes nothing for live cohorts. If you want
-> a change to reach them, it has to go in a SYSTEM-owned file (or be propagated by hand).
+> a change to reach them, it has to go in a SYSTEM- or STUB-owned file (or be propagated by
+> hand).
 
 ## Not included
 
