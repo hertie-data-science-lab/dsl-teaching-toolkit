@@ -163,6 +163,12 @@ def log_err(msg: str) -> None:
 
 
 def repo_exists(org: str, name: str) -> bool:
+    """Whether the repo is there. OPTIMISTIC: any read failure reads as absent, because
+    this answers a create-if-missing question where guessing wrong costs a retry.
+
+    Its neighbour `org_exists` is deliberately the opposite shape - it raises rather than
+    call an unreadable org deleted - because its callers act destructively on a False.
+    Reach for that one whenever absence is going to remove something."""
     code, _ = gh("api", f"repos/{org}/{name}")
     return code == 0
 

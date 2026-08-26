@@ -118,5 +118,15 @@ jobs:
           # report success while the merge may never happen, and an inventory that cannot
           # merge is a broken refresh. Watching keeps the verdict on the run - red if the
           # checks fail, red if the merge is refused. No `|| true` for the same reason.
-          gh pr checks "$BRANCH" --watch --fail-fast
+          # `--watch` exits non-zero when NO check has registered on the branch yet, which
+          # is the same race one step earlier: the push and the PR both land before the
+          # workflow they trigger appears. Retry until a check shows up, then watch it.
+          for _ in $(seq 12); do
+            gh pr checks "$BRANCH" --watch --fail-fast && break
+            echo "no checks registered yet - waiting"
+            sleep 10
+          done
+          # Re-asserted, not assumed: the loop above exits on the last retry whether or not
+          # a check ever appeared, and a merge is not something to attempt on a maybe.
+          gh pr checks "$BRANCH" --fail-fast
           gh pr merge "$BRANCH" --squash --delete-branch=false

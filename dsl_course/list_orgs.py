@@ -163,6 +163,17 @@ def _fetch_metadata(org: str) -> dict:
         return {}
 
 
+def _registered_cohorts(course_org: str) -> list[str]:
+    """What the course org's registry claims, for comparison against what GitHub shows.
+
+    Read through discovery so there is ONE parser for that file - the registry raises on a
+    malformed one, and this page would rather fail than render a course as running nothing
+    because its registry could not be read."""
+    from .discovery import discover_cohorts
+
+    return discover_cohorts(course_org)
+
+
 def render_tree(orgs: list[dict], cohorts: list[dict]) -> str:
     """The estate as it is actually shaped: each course org, with the cohort orgs that
     point at it nested underneath.
@@ -175,7 +186,14 @@ def render_tree(orgs: list[dict], cohorts: list[dict]) -> str:
     A cohort whose `course:` pointer names an org that is NOT a discovered course org is
     ORPHANED - the pointer is dangling, or its course org lost its `dsl-course-hub` topic.
     Those cannot nest anywhere, so they are listed at the end rather than dropped: an
-    orphan is a fault to fix, and silently omitting it is how it stays unfixed."""
+    orphan is a fault to fix, and silently omitting it is how it stays unfixed.
+
+    A cohort that exists but is NOT REGISTERED in its course's cohort-courses-pages.yml is
+    marked as such. It is a live org that every nightly sync is blind to - membership,
+    faculty, site, scheduler all fan out from that registry - so it fails by doing nothing
+    at all, which is the one failure mode nothing else here reports. Marked, never
+    auto-registered: absence from the registry can be deliberate (a cohort paused on
+    purpose), so the page says what it sees and leaves the decision to a person."""
     by_course: dict[str, list[dict]] = {}
     for c in cohorts:
         by_course.setdefault(c["course"], []).append(c)
@@ -184,10 +202,13 @@ def render_tree(orgs: list[dict], cohorts: list[dict]) -> str:
     for o in orgs:
         name = " - ".join(x for x in (o["course_name"], o["course_code"]) if x)
         lines.append(f"- **[{o['org']}]({o['url']})**" + (f" - {name}" if name else ""))
+        registered = set(_registered_cohorts(o["org"]))
         mine = by_course.pop(o["org"], [])
-        lines += [f"    - [{c['org']}]({c['url']})" for c in mine] or [
-            "    - _no cohorts yet_"
-        ]
+        lines += [
+            f"    - [{c['org']}]({c['url']})"
+            + ("" if c["org"] in registered else " - **not registered**")
+            for c in mine
+        ] or ["    - _no cohorts yet_"]
 
     # Whatever is left over points at no course org this run discovered.
     orphans = [c for rest in by_course.values() for c in rest]

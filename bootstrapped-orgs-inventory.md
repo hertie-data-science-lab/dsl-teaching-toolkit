@@ -4,7 +4,7 @@
 
 ## Orgs
 
-- **[hertie-dsl-demo-course-e1234](https://github.com/hertie-dsl-demo-course-e1234)** - Machine Learning Fundamentals (Demo) - E1234
+- **[hertie-dsl-demo-course-e1234](https://github.com/hertie-dsl-demo-course-e1234)** - Deep Learning (Demo) - E1234
     - [hertie-dsl-demo-f2025](https://github.com/hertie-dsl-demo-f2025)
     - [hertie-dsl-demo-f2026](https://github.com/hertie-dsl-demo-f2026)
 - **[hertie-intro-to-data-science-c11](https://github.com/hertie-intro-to-data-science-c11)** - Introduction to Data Science - C11
