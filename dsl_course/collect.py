@@ -54,9 +54,7 @@ and clear the `autograde_score`/`team_score` cells you want recomputed.
 
 grading.yml (on the template's solution branch):
     type: individual        # or group
-    format: py              # or notebook
     autograde: true         # false -> skip (all-manual)
-    max_auto: 10
     tests: tests            # path on the solution branch holding the hidden tests
 
 Usage:
@@ -169,9 +167,7 @@ _STUDENT_TEST_RIGGING = (
 
 _DEFAULT_SPEC = {
     "type": "individual",
-    "format": "py",
     "autograde": True,
-    "max_auto": None,
     "tests": "tests",
 }
 
@@ -272,9 +268,12 @@ def summary_lines(result: dict) -> list[str]:
     return lines
 
 
-def _zero_result(max_auto: int, note: str) -> dict:
-    """A zero score carrying an explanatory note (non-submission / grading failure)."""
-    return {"score": 0, "max": max_auto, "tests": [], "note": note}
+def _zero_result(note: str) -> dict:
+    """A zero score carrying an explanatory note (non-submission / grading failure).
+
+    `max` is 0 rather than the assignment's test count: no test was collected, let alone
+    run, so there is no denominator to report and the note is what a marker reads."""
+    return {"score": 0, "max": 0, "tests": [], "note": note}
 
 
 def snapshot_path(slug: str) -> str:
@@ -752,7 +751,7 @@ def _run_limited(argv: list[str], *, cwd: str, env: dict, timeout: int) -> bool:
         return False
 
 
-def _run_tests(workdir: Path, fmt: str, tests_src: Path) -> dict | None:
+def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
     """Run the hidden tests against the checked-out submission, token-free and sandboxed.
     Returns the result.json dict, or None if grading could not run (a wall-clock timeout, a
     process-group kill, or a run that wrote no report).
@@ -783,45 +782,48 @@ def _run_tests(workdir: Path, fmt: str, tests_src: Path) -> dict | None:
     # and student code runs next and can read the workspace - so drop `.git` first (fix 10).
     shutil.rmtree(workdir / ".git", ignore_errors=True)
     _strip_student_test_rigging(workdir)
-    if fmt == "notebook":
-        # Convert each notebook to an importable script first (Otter can slot in here). Walked
-        # with os.walk(followlinks=False), like the strip above, so a symlink cycle can't hang
-        # this discovery before the per-convert timeout could fire.
-        for nb in _walk_files(workdir):
-            if nb.suffix != ".ipynb":
-                continue
-            # A timed-out convert ABORTS this submission rather than continuing to the next
-            # notebook: tolerating one per notebook multiplies the budget (100 hanging .ipynb
-            # = 100 x RUN_TIMEOUT), blowing the 6h Actions cap so the job dies before the
-            # fire-once sentinel is written and the hourly tick regrades the same bomb for
-            # ever. A hanging conversion means this submission cannot be graded, so we bail
-            # here and the caller records the usual "grading failed to run" zero.
-            if not _run_limited(
-                [
-                    sys.executable,
-                    "-m",
-                    "jupyter",
-                    "nbconvert",
-                    "--to",
-                    "script",
-                    str(nb),
-                ],
-                cwd=str(workdir),
-                env=env,
-                timeout=RUN_TIMEOUT,
-            ):
-                log_err(
-                    f"  ! converting {nb.name} timed out after {RUN_TIMEOUT}s "
-                    f"(process group killed) - abandoning this submission"
-                )
-                return None
-            script = nb.with_suffix(".py")
-            if not script.exists() and (stray := _stray_conversion(nb)):
-                stray.rename(script)
-                log(
-                    f"    ({nb.name} declares no python file_extension - "
-                    f"{stray.name} -> {script.name})"
-                )
+    # Convert every notebook the submission holds to an importable script first (Otter can
+    # slot in here). Unconditional, and driven by what is actually in the checkout rather
+    # than by a `format:` the template declared: the two disagreed silently whenever a
+    # student worked in a notebook on a `py` assignment (or the reverse), and the grader
+    # then imported nothing. A submission with no .ipynb walks this loop and converts
+    # nothing. Walked with os.walk(followlinks=False), like the strip above, so a symlink
+    # cycle can't hang this discovery before the per-convert timeout could fire.
+    for nb in _walk_files(workdir):
+        if nb.suffix != ".ipynb":
+            continue
+        # A timed-out convert ABORTS this submission rather than continuing to the next
+        # notebook: tolerating one per notebook multiplies the budget (100 hanging .ipynb
+        # = 100 x RUN_TIMEOUT), blowing the 6h Actions cap so the job dies before the
+        # fire-once sentinel is written and the hourly tick regrades the same bomb for
+        # ever. A hanging conversion means this submission cannot be graded, so we bail
+        # here and the caller records the usual "grading failed to run" zero.
+        if not _run_limited(
+            [
+                sys.executable,
+                "-m",
+                "jupyter",
+                "nbconvert",
+                "--to",
+                "script",
+                str(nb),
+            ],
+            cwd=str(workdir),
+            env=env,
+            timeout=RUN_TIMEOUT,
+        ):
+            log_err(
+                f"  ! converting {nb.name} timed out after {RUN_TIMEOUT}s "
+                f"(process group killed) - abandoning this submission"
+            )
+            return None
+        script = nb.with_suffix(".py")
+        if not script.exists() and (stray := _stray_conversion(nb)):
+            stray.rename(script)
+            log(
+                f"    ({nb.name} declares no python file_extension - "
+                f"{stray.name} -> {script.name})"
+            )
     with tempfile.TemporaryDirectory() as run:
         tests_dir = Path(run) / "tests"
         shutil.copytree(tests_src, tests_dir)
@@ -884,7 +886,6 @@ def _grade_target(
     """Clone one submission, pin it to its snapshot (else the deadline), run the hidden
     tests. Always returns a result dict (a zero with a note for non-submissions /
     failures), or None if unclonable."""
-    max_auto = spec.get("max_auto") or 0
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "sub"
         if gh("repo", "clone", f"{cohort_org}/{repo}", str(wd), "--", "-q")[0] != 0:
@@ -896,15 +897,15 @@ def _grade_target(
                 log_err(
                     f"  ! {cohort_org}/{repo} does not exist - scoring 0 (no submission)"
                 )
-                return _zero_result(max_auto, "submission repo does not exist")
+                return _zero_result("submission repo does not exist")
             log_err(f"  ! could not clone {cohort_org}/{repo} (transient - will retry)")
             return None
         sha = _pin_commit(wd, deadline, snapshot)
         if sha is None:
-            return _zero_result(max_auto, f"no submission on/before {deadline}")
-        result = _run_tests(wd, spec["format"], tests_src)
+            return _zero_result(f"no submission on/before {deadline}")
+        result = _run_tests(wd, tests_src)
         if result is None:
-            return _zero_result(max_auto, GRADE_FAILED_NOTE)
+            return _zero_result(GRADE_FAILED_NOTE)
         result["commit"] = sha
         return result
 
@@ -1072,9 +1073,7 @@ def collect(
                     f"the deadline freeze; scoring 0 rather than pinning on student-"
                     f"controlled commit dates"
                 )
-                result = _zero_result(
-                    spec.get("max_auto") or 0, f"absent from {snapshot_path(slug)}"
-                )
+                result = _zero_result(f"absent from {snapshot_path(slug)}")
             else:
                 result = _grade_target(
                     cohort_org,

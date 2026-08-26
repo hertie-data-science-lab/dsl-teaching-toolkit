@@ -208,13 +208,14 @@ _READINGS_STUB = (
 )
 
 _GRADING_YML = """\
-# How the Grade assignment button autogrades this assignment (after the grading_deadline in schedule.yml).
-# Delete this file (or set autograde: false) for a purely manually-graded one.
+# How the Grade assignment workflow autogrades this assignment (after the grading_deadline
+# set in schedule.yml). Delete this file (or set autograde: false) for a purely
+# manually-graded assignment.
 type: {kind}      # individual (one repo per student) or group (one repo per team)
-format: {fmt}      # py or notebook
 autograde: true       # false -> skip autograding (all-manual)
-max_auto: 0           # points the hidden tests are worth (0 = informational)
 tests: tests          # path (on THIS solution branch) holding the hidden tests
+                      # `autograde_score` in grades/<slug>.csv records how many of them
+                      # passed; you own the mark the student actually gets (`final_grade`)
 """
 
 _HIDDEN_TEST_PY = """\
@@ -605,9 +606,10 @@ def scaffold_assignment(
             "**include_solution** ticked.\n"
         )
         # grading.yml + hidden tests for the faculty-side Grade assignment button. The
-        # type/format chosen at scaffold time are recorded here - edit this file to
-        # change them later.
-        (wd / "grading.yml").write_text(_GRADING_YML.format(kind=kind, fmt=fmt))
+        # type chosen at scaffold time is recorded here - edit this file to change it
+        # later. `fmt` is NOT: the grader converts whatever notebooks a submission holds,
+        # so it only picks which starter and hidden-test stub are written below.
+        (wd / "grading.yml").write_text(_GRADING_YML.format(kind=kind))
         tests = wd / "tests"
         tests.mkdir()
         (tests / "test_solution.py").write_text(

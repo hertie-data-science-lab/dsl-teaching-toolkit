@@ -35,7 +35,7 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
    - For a purely hand-marked assignment, set `autograde: false` in `grading.yml` (or delete the file).
    - For a partially machine-marked assignment set `autograde: true` in `grading.yml`:
       - put the hidden tests in `tests/` (path configurable via `grading.yml`'s `tests:` field) plain pytest files that `from starter import ...` and check the submission, run faculty-side only, never shipped to students. 
-     - Set `max_auto` to the points they're worth (`0` = informational only). 
+     - `autograde_score` in `grades/<slug>.csv` then records how many of them each submission passed - a count for you to mark against, not the mark itself.
      - Full grading flow: [Grade and return assignments](10-grade-and-return-assignments.md).
 
 3. **Run Refresh actions** so the assignment dropdowns update.

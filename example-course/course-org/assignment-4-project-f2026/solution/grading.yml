@@ -1,5 +1,2 @@
 type: group
-format: py
-autograde: true
-max_auto: 12
-tests: tests
+autograde: false
