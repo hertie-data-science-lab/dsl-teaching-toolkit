@@ -18,8 +18,7 @@ Rule of thumb: edit the content folders and the two root files; leave `MAINTAINI
 Any top-level directory containing at least one ordinal-prefixed subdirectory (`01_`, `02_`, `03_`, ...) is a releasable section - no config to declare it:
 
 - `lectures/01_session-1/` - one folder per session's lecture files
-- `readings/01_session-1/` - one folder per session's readings. Drop the readings in and every file is listed and linked for enrolled students automatically. `READINGS.md` (or `.txt`/`.bib`) is OPTIONAL, for what a file cannot say - a link to read online, or a citation; it is published publicly, while the files stay
-behind the enrolled-student gate (unless a public site runs `actual-readings`)
+- `readings/01_session-1/` - one folder per session's readings. Drop the readings in and every file is listed and linked for enrolled students automatically. `READINGS.md` (or `.txt`/`.bib`) is OPTIONAL, for what a file cannot say - a link to read online, or a citation; it is published publicly, while the files stay behind the enrolled-student gate (unless a public site runs `actual-readings`)
 - `labs/01_session-1/` - one folder per session's lab (delete the `labs/` folder if your course has none)
 - root files - your syllabus under any name (`SYLLABUS.md`, `SYLLABUS.pdf`, ...) and `README.md`: released by naming the file as the release path, exactly as it is spelled here (the runner is case sensitive)
 
