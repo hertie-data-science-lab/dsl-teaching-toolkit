@@ -24,7 +24,7 @@ One row per student. Leave `github_handle`, `github_id`& `enrol_code` blank - th
 | name | instructor | display name |
 | github_handle | onboarding | blank until they join via the welcome "Join" issue |
 | github_id | onboarding | numeric id captured on join - **immutable; never hand-edit** |
-| enrol_code | **Send enrolment codes** | random non-PII token, emailed to the student; they paste it into the "Join" issue. Leave blank - the button fills blanks only, never rewrites an issued code |
+| enrol_code | **Send enrolment codes** | random non-PII token, emailed to the student; they paste it into the "Join" issue. Leave blank - the workflow fills blanks only, never rewrites an issued code |
 | role | instructor | `enrolled` (blank means enrolled) or `auditor` - auditors are read-only: released materials only, no assignment repos, no gradebook, no project teams |
 
 Any OTHER column you add (a registrar id, a lecture section, notes) is yours: the engine never reads it, and never drops it when it writes back.
@@ -52,7 +52,7 @@ For an all-manual assignment (`autograde: false`), copy the sample's header into
 
 ### What reaches students, when:
 A generated, read-only `cohort-gradebook.csv` (one row per student, one column-group per assignment) appears alongside the per-student gradebooks on every **Render grades** - never hand-edit it, it's a glance view, not a source. **Nothing in `grades/`,`autograde/` or the gradebooks reaches a student until the separate Distribute grades
-button** - autograding and your review happen entirely in this private repo.
+workflow** - autograding and your review happen entirely in this private repo.
 
 ## teams.csv - group membership (optional, for group assignments)
 

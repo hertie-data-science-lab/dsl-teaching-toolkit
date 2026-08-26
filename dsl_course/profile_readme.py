@@ -4,9 +4,9 @@ Two documents per org, both auto-generated and both overwritten on every refresh
 
 - `profile/README.md` - the org landing page. A cohort org gets a student-facing page
   (how to enrol, where the materials are); a course org gets the faculty-facing index of
-  cohorts, repos, and every action button.
+  cohorts, repos, and every action workflow.
 - the `.github` repo's own `README.md` - the orientation a faculty member sees on
-  landing in that repo, next to the Actions tab where the buttons live.
+  landing in that repo, next to the Actions tab where the workflows live.
 
 Rendering is pure (render_profile_readme / render_dotgithub_readme take the repo list);
 update_profile_readme is the one function that touches the network.
@@ -38,7 +38,7 @@ def _repo_table(repos: list[dict]) -> str:
 def render_dotgithub_readme(org: str, course_name: str, is_cohort: bool) -> str:
     """The `.github` repo's OWN README - the orientation a faculty & instructors member sees on landing
     in this repo just after bootstrap. Distinct from profile/README.md (the org landing
-    page); this shows on the repo itself, next to the Actions tab where the buttons live."""
+    page); this shows on the repo itself, next to the Actions tab where the workflows live."""
     if is_cohort:
         return f"""# {course_name} - cohort control repo
 
@@ -53,7 +53,7 @@ the course.
 
 ## Run an action
 
-Open the **[Actions tab](https://github.com/{org}/.github/actions)**, pick a workflow, and click **Run workflow**. Buttons only show if you have write access - i.e. you're either (1) in this org's `course-admin` team (declared here, course-wide), or (2) in a cohort's `instructors-<tag>` team (declared in that cohort's own `classroom-config/people.yml` then back-propagated). The full, annotated list of actions is on the **[org home page](https://github.com/{org})**.
+Open the **[Actions tab](https://github.com/{org}/.github/actions)**, pick a workflow, and click **Run workflow**. Workflows only show if you have write access - i.e. you're either (1) in this org's `course-admin` team (declared here, course-wide), or (2) in a cohort's `instructors-<tag>` team (declared in that cohort's own `classroom-config/people.yml` then back-propagated). The full, annotated list of actions is on the **[org home page](https://github.com/{org})**.
 
 ## Typical flow
 
@@ -111,7 +111,7 @@ org; updates on every release.
 | --- | --- | --- |
 {table}
 
-_Teaching staff (instructors, TAs, faculty assistants): your action buttons aren't here - they live in the
+_Teaching staff (instructors, TAs, faculty assistants): your action workflows aren't here - they live in the
 parent **course org's** `.github` control panel, on its Actions tab._
 
 ---
@@ -165,7 +165,7 @@ _(automatically bootstrapped from the central
 | [**New materials repo**](https://github.com/{org}/.github/actions/workflows/new-materials.yml) | Scaffolds a correctly-structured `course-materials-<year>` repo (session folders + the Release workflows). Ready for material to be added. | Run by instructor |
 | [**New assignment**](https://github.com/{org}/.github/actions/workflows/new-assignment.yml) | Scaffolds an `assignment-N-<year>` template repo (starter on `main`; the `solution` branch carries the model solution, `grading.yml`, and the hidden tests). | Run by instructor |
 | [**Check cohort setup**](https://github.com/{org}/.github/actions/workflows/check-cohort-setup.yml) | a per-cohort checklist of everything configured (identity, people, schedule + release plan, roster, teams, grades) with direct edit links for anything missing. Read-only. | Run by instructor |
-| [**Publish course website**](https://github.com/{org}/.github/actions/workflows/publish-site.yml) | **[OPTIONAL]** **[DEFERRED]** Build/refresh a public openware site for the course `{org}.github.io`. This will share this course's lecture materials and (limitted) readings with the open internet. Opt-in (the first run scaffolds the site); afterwards a daily cron re-syncs it from the settings that run chose, so later materials edits appear without another click. Pick a materials repo and choose for readings: `reading-list` (citations only) or `actual-readings` (also host the files). Because the materials repos are private, the site **hosts** the shared files itself. This is separate from each cohort's student-facing site. | Run by instructor |
+| [**Publish course website**](https://github.com/{org}/.github/actions/workflows/publish-site.yml) | **[OPTIONAL]** **[DEFERRED]** Build/refresh a public openware site for the course `{org}.github.io`. This will share this course's lecture materials and (limited) readings with the open internet. Opt-in (the first run scaffolds the site); afterwards a daily cron re-syncs it from the settings that run chose, so later materials edits appear without another click. Pick a materials repo and choose for readings: `reading-list` (citations only) or `actual-readings` (also host the files). Because the materials repos are private, the site **hosts** the shared files itself. This is separate from each cohort's student-facing site. | Run by instructor |
 | [**Release materials**](https://github.com/{org}/.github/actions/workflows/release-materials.yml) | Manually release materials to student-facing cohort orgs *(NB: it is recommended to instead use the [scheduling function](https://github.com/{CENTRAL}/blob/{CENTRAL_REF}/docs/07-schedule-releases.md) for regular releases)*. Select path(s) for any folder or file, one or several at a time. | Run by instructor |
 | [**Release assignment**](https://github.com/{org}/.github/actions/workflows/release-assignment.yml) | Generate one private repo per student from a chosen `assignment-*` template repo. *(NB: it is recommended to instead use the [scheduling function](https://github.com/{CENTRAL}/blob/{CENTRAL_REF}/docs/07-schedule-releases.md) for regular releases)* | Run by instructor |
 | [**Grade assignment**](https://github.com/{org}/.github/actions/workflows/grade-assignment.yml) | Faculty-side autograder: after the deadline, run the HIDDEN tests (from the template's `solution` branch) against each submission and record the machine score into `classroom-config/grades/<assignment>.csv`. Nothing is written to student repos; faculty & instructors then add manual marks. Optional per assignment (skipped if `grading.yml` sets `autograde: false`). | Run by instructor |
@@ -173,7 +173,7 @@ _(automatically bootstrapped from the central
 | [**Render grades (preview)**](https://github.com/{org}/.github/actions/workflows/render-grades.yml) | Build per-student `gradebook/<handle>.yml` from `classroom-config/grades/<assignment>.csv` and open ONE pull request. **That PR is the preview** - review every student's grades in the diff before sending. | Run by instructor |
 | [**Distribute grades**](https://github.com/{org}/.github/actions/workflows/distribute-grades.yml) | After merging the preview PR, copy each student's gradebook into their private repo and (unless silenced) email each student a notification to their university inbox (needs the `GRAPH_*` or `SMTP_*` secrets). | Run by instructor |
 
-NB: alternatively each materials repo *also* carries its own **Release** buttons (run from inside the
+NB: alternatively each materials repo *also* carries its own **Release** workflows (run from inside the
 repo; there `course_source_repo` is pre-filled with that repo instead of being a dropdown).
 
 ---
@@ -184,7 +184,7 @@ repo; there `course_source_repo` is pre-filled with that repo instead of being a
 | --- | --- | --- |
 | [**Sync membership**](https://github.com/{org}/.github/actions/workflows/sync-membership.yml) | Reconciles org + `students`-team access (from `students.csv`), project teams (from `teams.csv`), `course_admins` (from this org's declared `people:` block, mirrored into every cohort's own `course-admin` team), and each cohort's own `instructors`/`teaching_assistants` (from its `classroom-config/people.yml`, reconciled into that cohort's `instructors` team AND a course-org `instructors-<tag>` team).<br><br> Triggers on (1) push (editing any of those files takes effect immediately, including removals so that the file is the live truth) and (2) on a daily cron (catches a faculty entry's `start`/`end` rotation with no edit that day);`workflow_dispatch` is a manual escape hatch. | Auto-handled |
 | [**Refresh actions**](https://github.com/{org}/.github/actions/workflows/refresh-actions.yml) | Repopulates the cohort/session/assignment dropdowns, re-equips content repos, and rebuilds this index. Runs itself nightly, so this org stays in step with the central toolkit on its own. | Auto-handled |
-| [**Scheduled release**](https://github.com/{org}/.github/actions/workflows/scheduled-release.yml) | Hourly cron that auto-releases whatever each cohort's `classroom-config/schedule.yml` `releases:` plan says is now due (honouring each release's `when` time to the hour). Manual runs default to a dry-run preview ("what opens when"). Manual buttons above still work for early/ad-hoc release. | Auto-handled |
+| [**Scheduled release**](https://github.com/{org}/.github/actions/workflows/scheduled-release.yml) | Hourly cron that auto-releases whatever each cohort's `classroom-config/schedule.yml` `releases:` plan says is now due (honouring each release's `when` time to the hour). Manual runs default to a dry-run preview ("what opens when"). The manual workflows above still work for early/ad-hoc release. | Auto-handled |
 | _[**Sync site**](https://github.com/{org}/.github/actions/workflows/sync-site.yml)_ | _Regenerate a cohort's website from the org structure (releases do this automatically; standard workflow has no need for manual sync)._ | Auto-handled |
 
 
@@ -217,11 +217,11 @@ The course-level actions assume this layout - use **New materials repo** / **New
 - `readings/01_.../` - one folder per session's readings;
 - root files (`SYLLABUS.md`, `README.md`) release like any other path - name the file as the`course_source_path`.
 
-Add more sections freely (e.g. `labs/01_.../`). Alternatively, you could have `sessions/01_.../` with lectures & readings combined - or however you prefer to setup. The only constraint is the orginal prefixed subdirectories.
+Add more sections freely (e.g. `labs/01_.../`). Alternatively, you could have `sessions/01_.../` with lectures & readings combined - or however you prefer to setup. The only constraint is the ordinal-prefixed subdirectories.
 
 **Assignment repo** (`assignment-N-<year>`, an `is_template` repo) - the source for Release assignment:
 - **`main` branch** - the starter code only (no tests, no autograder). This is exactly what students receive (native template-generate copies `main` only).
-- **`solution` branch** - the model solution (`solution/`), plus **`grading.yml`** and the **hidden tests** that the Grade assignment button runs faculty-side. **All of this MUST live on this branch, never on `main`** - that is what guarantees it is never copied into student repos on generate. Only the `solution/` folder reaches students, and only when you run Release assignment with **include_solution** ticked (a separate, later commit); the hidden tests and `grading.yml` never do.
+- **`solution` branch** - the model solution (`solution/`), plus **`grading.yml`** and the **hidden tests** that the Grade assignment workflow runs faculty-side. **All of this MUST live on this branch, never on `main`** - that is what guarantees it is never copied into student repos on generate. Only the `solution/` folder reaches students, and only when you run Release assignment with **include_solution** ticked (a separate, later commit); the hidden tests and `grading.yml` never do.
 
 ## Further details on how the actions behave
 
@@ -229,7 +229,7 @@ Add more sections freely (e.g. `labs/01_.../`). Alternatively, you could have `s
 that repo) or from the course org's central `.github` control panel (`course_source_repo` is
 a dropdown). **Both** take the same five fields, which are exactly a `schedule.yml` `deploy:`
 entry: `cohort_org`, `course_source_repo`, `course_source_path`, `cohort_dest_repo`,
-`cohort_dest_path` - so the manual button and the scheduled release plan share one
+`cohort_dest_path` - so the manual workflow and the scheduled release plan share one
 vocabulary. `course_source_path` is any folder or file (`lectures/03_regression`,
 `mlpkg/simulation`, `SYLLABUS.md`); a folder is copied whole, **every file** in it.
 `course_source_path` and `cohort_dest_path` accept comma-separated lists paired in order, so

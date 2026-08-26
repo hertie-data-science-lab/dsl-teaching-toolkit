@@ -11,10 +11,10 @@ it clones each unique source repo and each unique dest repo ONCE per run and app
 copy against those working trees, so a scheduler run releasing 27 paths from one source
 clones it once, not 27 times. Both callers arrive here - the hourly scheduler
 (scheduler._run_releases, straight from each `deploy:` entry in schedule.yml) and the
-manual "Release materials" button (via `main` below, whose five inputs are deliberately the
+manual "Release materials" workflow (via `main` below, whose five inputs are deliberately the
 same five fields as a `deploy:` entry).
 
-The button's `course_source_path`/`cohort_dest_path` are comma-separated PARALLEL lists
+The workflow's `course_source_path`/`cohort_dest_path` are comma-separated PARALLEL lists
 paired by index (parse_path_pairs) - one Deploy per pair, one deploy_many call for the batch.
 
 Usage:
@@ -57,9 +57,9 @@ _GIT_ENV = GIT_ENV
 NEVER_COPIED = frozenset({".git"})
 
 # Additionally skipped when the WHOLE repo is released (`course_source_path: /`), and only
-# at the repo root: `.github` holds the Release buttons and their bot-token wiring,
+# at the repo root: `.github` holds the Release workflows and their bot-token wiring,
 # MAINTAINING.md is the maintainer guide, the syllabus sample is the filled example faculty
-# copy from, and the sessions block is what the Generate syllabus button builds for them to
+# copy from, and the sessions block is what the Generate syllabus workflow builds for them to
 # paste. Each is written by this toolkit describing itself as never released, so each is
 # named here - and named FROM `utils`, not re-spelled, so the exclusion cannot lapse the
 # next time one is renamed. Naming any of these paths explicitly still releases it: that is
@@ -352,11 +352,11 @@ def _items(spec: str) -> list[str]:
 def parse_path_pairs(
     source_paths: str, dest_paths: str = ""
 ) -> list[tuple[str, str | None]]:
-    """Pair the Release materials button's two comma-separated lists by index.
+    """Pair the Release materials workflow's two comma-separated lists by index.
 
     A blank `dest_paths` mirrors every source path (`None` dest, exactly what an omitted
     `cohort_dest_path:` means in schedule.yml). Otherwise the counts MUST match: unlike the
-    schedule (which drops what it can't pair, on an unattended cron), a button run has an
+    schedule (which drops what it can't pair, on an unattended cron), a workflow run has an
     operator watching it, so a mismatch is a loud ValueError naming both counts rather
     than a silently short release. Surrounding whitespace is stripped and empty items
     (a trailing comma) are ignored on both sides."""

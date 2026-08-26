@@ -11,9 +11,9 @@ on the group's repo (so post-sync membership edits propagate to access automatic
 
 With --prune, members no longer in the CSV are removed from their team (off-boarding) - never
 an org Owner or the acting login (see utils.reconcile_team_members); off by default here so a
-standalone/manual run never silently revokes access. Emptied teams are left in place. The seeded **Sync membership** button (dsl_course.sync_membership) always calls this
+standalone/manual run never silently revokes access. Emptied teams are left in place. The seeded **Sync membership** workflow (dsl_course.sync_membership) always calls this
 with prune=True - config is meant to be the live truth there; this module's own off-by-default
-is only for ad-hoc/CLI use outside that button.
+is only for ad-hoc/CLI use outside that workflow.
 
 Usage:
     python3 -m dsl_course.sync_teams --cohort-org hertie-dsl-demo-f2026

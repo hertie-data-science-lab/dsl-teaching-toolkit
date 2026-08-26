@@ -76,7 +76,7 @@ Nested under `deploy:` we havee the following:
 
 NB: `cohort_dest_repo` is yours to choose - one shared `materials` repo, or one repo for lectures, another for labs etc; any non-existent repo and/or directory structure specified between `cohort_dest_repo` and `cohort_dest_path` is created on release if non-exist.
 
-NB: `course_source_path: /` (or `.`) releases the **whole repo**. Two root entries are left behind: `.github` (the faculty Release buttons) and `MAINTAINING.md` (your operating notes, which the scaffold marks as never released). Nested copies - a `labs/.github/` of your own - travel normally. The button uses the identical spelling, so this reads straight across from `docs/08`.
+NB: `course_source_path: /` (or `.`) releases the **whole repo**. Two root entries are left behind: `.github` (the faculty Release workflows) and `MAINTAINING.md` (your operating notes, which the scaffold marks as never released). Nested copies - a `labs/.github/` of your own - travel normally. The workflow uses the identical spelling, so this reads straight across from `docs/08`.
 
 At a minimum only `course_source_repo` + `course_source_path` are required, everything else defaults:
 
@@ -301,7 +301,7 @@ Kept rather than dropped - the entry still runs on its documented fallback, and 
 
 Full details of this are in [10-grade-and-return-assignments.md](10-grade-and-return-assignments.md); below is as it pertains to the `schedule.yml`.
 
-> **Autograded ≠ released to students.** The scores land only in the private `classroom-config` - faculty review them (and the whole-class `cohort-gradebook.csv`) and nothing reaches a student until the separate **Distribute grades** button: [three gates](10-grade-and-return-assignments.md).
+> **Autograded ≠ released to students.** The scores land only in the private `classroom-config` - faculty review them (and the whole-class `cohort-gradebook.csv`) and nothing reaches a student until the separate **Distribute grades** workflow: [three gates](10-grade-and-return-assignments.md).
 
 Each assignment's **grading deadline** is `grading_datetime` if you set it, else `due_datetime`. Shortly after it passes, the hourly run does two things, once each:
 

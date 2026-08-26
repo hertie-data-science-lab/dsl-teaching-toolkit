@@ -29,7 +29,7 @@ private `grades-<handle>` repo, never in their assignment repo.
 ## 1. Grade assignment (for autograde only)
 
 **This runs itself.** At each assignment's grading deadline the hourly cron autogrades it
-**once**, with no button press required. Use the button only for a deliberate re-grade.
+**once**, with no manual run required. Run the workflow only for a deliberate re-grade.
 
 Course `.github` → **Actions** → **Grade assignment**: `cohort_org`, `course_source_repo`, plus `group`
 (a force-override - an assignment declared `type: group` grades per team anyway)

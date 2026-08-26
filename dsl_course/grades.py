@@ -6,7 +6,7 @@ open-courseware), so grades NEVER touch them: a group result is split into the s
 team score (duplicated into each member's gradebook) and that member's private
 adjustment + final grade, all delivered individually.
 
-Three idempotent stages, each a faculty & instructors button:
+Three idempotent stages, each a faculty & instructors workflow:
 
     sync       cohort/grades-<handle>            (private; student = read) per onboarded student
                      ^

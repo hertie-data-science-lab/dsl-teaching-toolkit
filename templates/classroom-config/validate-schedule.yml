@@ -3,7 +3,7 @@ name: Validate schedule
 # Seeded into a cohort's private classroom-config repo as
 # .github/workflows/validate-schedule.yml. Checks schedule.yml the moment it changes, in
 # the repo it lives in - faculty edit here, so the verdict belongs here rather than behind
-# a button in the course org.
+# a workflow in the course org.
 #
 # It CANNOT block the commit: workflows run after the push has landed, and branch
 # protection needs a paid plan on a private repo. So it does the two things it can:

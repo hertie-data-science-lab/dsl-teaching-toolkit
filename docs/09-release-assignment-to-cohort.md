@@ -17,13 +17,13 @@ A `handout_datetime:` datetime under `assignments.<slug>` in the cohort's `sched
 
 This is the recommended method for releasing assignments, as it involves a one-time setup cost and also creates an entry in the deployed `<course>.github.io` site, so students can clearly understand the course plan in advance.
 
-> NB: a manual release stays compatible with the schedule: on success the button **records the release moment into `schedule.yml`** (`assignments.<slug>.handout_datetime`, write-once - a scheduled value is never touched), so the schedule remains the one record of when every assignment went out - and late onboarders get their repo on the next hourly tick.
+> NB: a manual release stays compatible with the schedule: on success the workflow **records the release moment into `schedule.yml`** (`assignments.<slug>.handout_datetime`, write-once - a scheduled value is never touched), so the schedule remains the one record of when every assignment went out - and late onboarders get their repo on the next hourly tick.
 
 ## Release assignment via manual dispatch
 
 The `release assignment` workflow can be found in the course org's: 
   1. `.github` → **Actions** tab → **Release assignment** - e.g. [this demo repo](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/release-assignment.yml) 
-  2. within any boostrapped assignment repo (i.e. any repo created using the `new assignment repo` workflow) → **Actions** tab → **Release assignment** - e.g. [this demo repo](https://github.com/hertie-dsl-demo-course-e1234/course-materials-f2026/actions)
+  2. within any bootstrapped assignment repo (i.e. any repo created using the `new assignment repo` workflow) → **Actions** tab → **Release assignment** - e.g. [this demo repo](https://github.com/hertie-dsl-demo-course-e1234/course-materials-f2026/actions)
 
 
 Pick the `course_source_repo` - the same field a scheduled handout names in `schedule.yml`.
@@ -39,7 +39,7 @@ or force `individual` / `group` for this dispatch -
 see [Group or individual?](#group-or-individual))
 - `dry_run` (list the repos that *would* be created).
 
-Auditors (`role=auditor`) are skipped. The assignment brief appears on the cohort site automatically - at hand-out, not before. Until you release it the row is on the schedule, titled from its slug ("Assignment 1"), and its page says "This assignment has not been handed out yet." - no brief, and not the real title either. That holds however you hand out: this button and a scheduled `handout_datetime` both open it.
+Auditors (`role=auditor`) are skipped. The assignment brief appears on the cohort site automatically - at hand-out, not before. Until you release it the row is on the schedule, titled from its slug ("Assignment 1"), and its page says "This assignment has not been handed out yet." - no brief, and not the real title either. That holds however you hand out: this workflow and a scheduled `handout_datetime` both open it.
 
 ## Group or individual?
 
@@ -55,12 +55,12 @@ Two places to say it, depending on how you release:
       type: group          # or individual - the default if field empty
   ```
 
-- **Manual dispatch**: the **Release assignment** button asks for `type` - pick `individual` or `group`, or leave the default `autograde_score` (= whatever `schedule.yml` or the template's `grading.yml` declare; unwritten everywhere means individual).
+- **Manual dispatch**: the **Release assignment** workflow asks for `type` - pick `individual` or `group`, or leave the default `autograde_score` (= whatever `schedule.yml` or the template's `grading.yml` declare; unwritten everywhere means individual).
 
 - `group` = one shared repo per team from `teams.csv` (repo `<slug>-<team>`, every member a collaborator), graded per team into the `team`/`team_score` columns. 
 - `individual` = one private repo per onboarded, enrolled student (`<slug>-<handle>`), graded into `autograde_score`.
 
-> NB: The template's `grading.yml` also carries a `type:` - the **New assignment** button's `type` input writes it at scaffold time, so most assignments are already declared there.
+> NB: The template's `grading.yml` also carries a `type:` - the **New assignment** workflow's `type` input writes it at scaffold time, so most assignments are already declared there.
 
 ## Group assignments: creating the teams
 

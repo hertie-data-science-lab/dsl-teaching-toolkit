@@ -1,6 +1,6 @@
 """dsl-course scheduler -- datetime-driven auto-release.
 
-The same idempotent release functions as the manual buttons, fired automatically from the
+The same idempotent release functions as the manual workflows, fired automatically from the
 cohort's own `classroom-config/schedule.yml` `releases:` plan (see
 `dsl_course.schedule`). Each labelled release carries a `when` datetime and a mix of
 actions - `deploy` (copy a source path from a COURSE-org repo into a COHORT-org repo),
@@ -221,7 +221,7 @@ def _autograde_passed_deadlines(
     classroom-config is the marker. Absent means never machine-graded, so grade now; present
     means graded already, so never again - which is what stops an hourly re-run from recomputing
     scores a marker has since hand-edited. A deliberate re-grade = delete `autograde/<slug>/`
-    (or use the Grade assignment button).
+    (or use the Grade assignment workflow).
 
     A missing template repo, a template with no `solution` branch, and `autograde: false`
     are all skips, not failures: plenty of assignments are hand-marked. Group vs individual

@@ -9,8 +9,8 @@ Accompanies the e2e [worked example](../example-course/).
 | | Step | Org Level | Where | Input | Output |
 |---|------|-------|-------|-------|--------|
 | `[required]` | 1. Create the course org | course | GitHub [web UI](https://github.com/account/organizations/new) | name `<course-name>-<CODE>` (no year); invite **`hertie-dsl-bot`** as **Owner** (must accept) | an empty org the bot can bootstrap |
-| `[required]` | 2. Bootstrap | course | [central repo → Actions → **Bootstrap Course Org**](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/bootstrap-org.yml) | `org`, `org_name`, `course_code`; optional `admin` (your handle) | the `.github` control panel with every button, the `course-admin` team, [`dsl-course.yml`](#dsl-courseyml), `DSL_BOT_TOKEN` set for you |
-| `[required]` | 3. Materials | course | course `.github` → **New materials repo**, then `git push` | `tag` (e.g. `f2026`); then your content ([layout](#materials-repo)) | `course-materials-<tag>` with run-from-repo Release buttons |
+| `[required]` | 2. Bootstrap | course | [central repo → Actions → **Bootstrap Course Org**](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/bootstrap-org.yml) | `org`, `org_name`, `course_code`; optional `admin` (your handle) | the `.github` control panel with every workflow, the `course-admin` team, [`dsl-course.yml`](#dsl-courseyml), `DSL_BOT_TOKEN` set for you |
+| `[required]` | 3. Materials | course | course `.github` → **New materials repo**, then `git push` | `tag` (e.g. `f2026`); then your content ([layout](#materials-repo)) | `course-materials-<tag>` with run-from-repo Release workflows |
 | `[required]` | 4. Assignment(s) | course | course `.github` → **New assignment**, then `git push` | `number` + `tag` + `format` (py/notebook) + `type` (individual/group); brief + starter on `main`, optional autograding on `solution` ([layout](#assignment-template)) | one `assignment-N-<tag>` template each |
 | *(optional)* | 5. Course admins | course | edit [`dsl-course.yml`](#dsl-courseyml), commit to `main` ([05](05-manage-teaching-team.md)) | GitHub handles, optional `start`/`end` | admin on the course org + every cohort, reconciled |
 | `[required]` | 6. Refresh | course | course `.github` → **Refresh actions** | none | dropdowns populated, secrets on content repos |
@@ -26,10 +26,10 @@ Accompanies the e2e [worked example](../example-course/).
 | `[do this first]` | 3. The term plan | cohort | edit [`classroom-config/schedule.yml`](#scheduleyml) | releases, due dates, exams | the hourly cron runs the whole term; site dates; grading deadlines |
 | `[required]` | 4. Roster | cohort | edit [`classroom-config/students.csv`](#studentscsv) | registrar rows | the enrolment + provisioning source of truth |
 | *(optional)* | 5. Teaching team | cohort | edit [`classroom-config/people.yml`](#peopleyml) ([05](05-manage-teaching-team.md)) | handles (+ card fields), optional `start`/`end` | push access for this cohort's instructors/TAs + site cards; time-boxed if dated |
-| `[required]` | 6. Enrol | course button, per cohort | course `.github` → **Send enrolment codes** (untick `dry_run`) | `cohort_org` | codes written to the roster + emailed; students join via the `welcome` **Join course** issue |
-| *(optional)* | 7. Ad-hoc release | course button, per cohort | **Release materials** / **Release assignment** | see [08](08-release-materials-to-cohort.md)/[09](09-release-assignment-to-cohort.md) | anything out earlier/differently than the schedule says |
-| *(optional)* | 8. Return marks | course buttons + [`grades/<slug>.csv`](#gradesslugcsv) | the [grading runbook](10-grade-and-return-assignments.md) | your marks | private per-student gradebooks |
-| *(optional)* | 9. Check cohort setup | course button, per cohort | course `.github` → **Check cohort setup** | `cohort_org` | what's configured, what's missing, an edit link per gap |
+| `[required]` | 6. Enrol | course workflow, per cohort | course `.github` → **Send enrolment codes** (untick `dry_run`) | `cohort_org` | codes written to the roster + emailed; students join via the `welcome` **Join course** issue |
+| *(optional)* | 7. Ad-hoc release | course workflow, per cohort | **Release materials** / **Release assignment** | see [08](08-release-materials-to-cohort.md)/[09](09-release-assignment-to-cohort.md) | anything out earlier/differently than the schedule says |
+| *(optional)* | 8. Return marks | course workflows + [`grades/<slug>.csv`](#gradesslugcsv) | the [grading runbook](10-grade-and-return-assignments.md) | your marks | private per-student gradebooks |
+| *(optional)* | 9. Check cohort setup | course workflow, per cohort | course `.github` → **Check cohort setup** | `cohort_org` | what's configured, what's missing, an edit link per gap |
 
 ## Inputs by file
 
@@ -194,7 +194,7 @@ course-materials-f2026/
 Live example: [`example-course/course-org/assignment-1-f2026`](../example-course/course-org/assignment-1-f2026).
 
 `assignment-N-<tag>` - a template repo with two branches. Student repos are generated from
-`main` only. The **New assignment** button's `format` (py/notebook) and `type`
+`main` only. The **New assignment** workflow's `format` (py/notebook) and `type`
 (individual/group) shape the stubs and are recorded in `grading.yml` - handout and grading
 obey `type: group` automatically.
 
@@ -307,7 +307,7 @@ assignments:
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `due_datetime` | **yes** | - (entry dropped without it) | what students see; bare date = 23:59:59 |
-| `handout_datetime` | no* | - | when repos are provisioned, automatic. *Required for the schedule to release it. If you hand out via the **Release assignment** button instead, the button records the release moment here for you |
+| `handout_datetime` | no* | - | when repos are provisioned, automatic. *Required for the schedule to release it. If you hand out via the **Release assignment** workflow instead, the workflow records the release moment here for you |
 | `grading_datetime` | no | `due_datetime` | snapshot freezes + autograder fires (once) |
 | `type` | no | individual | `group` / `individual` - how handout + grading fan out. Can also be set in the template's `grading.yml` |
 | `max_team_size` | no | 5 | group assignments: Join-team cap |

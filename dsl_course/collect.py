@@ -49,7 +49,7 @@ cost of a template clone, every hour for ever. `has_autograde_results` tests for
 record, never bare directory existence, so a stray early write into the directory can no
 longer be mistaken for a completed grade. Machine-written grade cells are write-once too (see
 `grades.merge_auto`), so a marker's hand-edit is never clobbered. To re-grade deliberately,
-delete `autograde/<slug>/` (the next tick regrades) or press the Grade assignment button -
+delete `autograde/<slug>/` (the next tick regrades) or run the Grade assignment workflow -
 and clear the `autograde_score`/`team_score` cells you want recomputed.
 
 grading.yml (on the template's solution branch):
@@ -198,7 +198,7 @@ def resolve_is_group(
 ) -> bool:
     """The SINGLE precedence for group-vs-individual, shared by every resolver.
 
-    An explicit force (the Grade-assignment button's checkbox / `--group`) wins; else the
+    An explicit force (the Grade-assignment workflow's checkbox / `--group`) wins; else the
     COHORT's declaration - `assignments.<slug>.type` in classroom-config/schedule.yml, passed
     as `schedule_type`; else the template's design-time grading.yml `type:`, passed as
     `template_group` (True/False, or None when not consulted); else individual. Pure: each
@@ -440,8 +440,8 @@ def has_autograde_results(cohort_org: str, slug: str) -> bool:
 
     The scheduler grades an assignment only while neither record is present, so a machine score
     is written once and never silently refreshed under a marker's hand-edits. A deliberate
-    re-grade means deleting `autograde/<slug>/` (the next tick then regrades) or pressing the
-    Grade assignment button."""
+    re-grade means deleting `autograde/<slug>/` (the next tick then regrades) or running the
+    Grade assignment workflow."""
     for record in (GRADED_RECORD, SKIP_RECORD):
         code, _ = gh(
             "api",

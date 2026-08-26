@@ -2,7 +2,7 @@
 
 Central registry of the workflows that deliver courses at the Hertie Data Science Lab. 
 
-A course lives once in a persistent **course** org and is delivered each year into a per-year **cohort** org; everything faculty-facing is a **GitHub Actions button**, and can be scheduled in advance at the start of the semester.
+A course lives once in a persistent **course** org and is delivered each year into a per-year **cohort** org; everything faculty-facing is a **GitHub Actions workflow**, and can be scheduled in advance at the start of the semester.
 
 ## Start here
 
@@ -52,7 +52,7 @@ template repos
 
 profile (auto)
 
-+ faculty & instructors buttons
++ faculty & instructors workflows
 
 + cohort registry`"]
   end
@@ -108,22 +108,10 @@ Each cohort further gets an auto-deployed `<cohort>.github.io` site whose materi
 | Chronological index of the e2e workflow | [the workflows](docs/README.md#the-workflows) |
 | An example course setup | [`example course`](example-course/README.md) |
 | Template artefacts | [`templates`](templates/classroom-config/README.md) |
-| All available `.github` Actions tab buttons (course org) | [`actions reference`](docs/reference/actions-reference.md) |
-| Who may run those buttons, and which team grants it | [`access reference`](docs/reference/access-reference.md) |
+| All available `.github` Actions tab workflows (course org) | [`actions reference`](docs/reference/actions-reference.md) |
+| Who may run those workflows, and which team grants it | [`access reference`](docs/reference/access-reference.md) |
 | **Deployment checklist** | [`DEPLOYMENT-CHECKLIST.md`](docs/DEPLOYMENT-CHECKLIST.md) |
 
-
-## Glossary
-
-| Term | Meaning |
-|------|---------|
-| **Course org** | the persistent org for a course (e.g. `hertie-dsl-demo-course-e1234`): materials repos, assignment templates, the control panel. Lives across all years. |
-| **Cohort org** | one org per semester delivery (e.g. `hertie-dsl-demo-f2026`): roster, released materials, per-student repos, grades, the cohort website. Fresh each year. |
-| **Tag** | the `fYYYY`/`sYYYY` suffix naming a delivery (`f2026` = Fall 2026, s2027 = Summer 2027). Scopes the year's content repos and teams. |
-| **Control panel** | the course org's `.github` repo - its **Actions** tab holds every workflow button, for the course org and all its cohorts. Cohort orgs have no buttons of their own. |
-| **`course-admin` team** | the course's standing owners, declared once in the course org's `.github/dsl-course.yml` (`course_admins`), mirrored into every cohort. |
-| **SSOT** | single source of truth. The course org is the SSOT for all content; each cohort's `classroom-config` is the SSOT for that specific cohort's student roster, teams, schedule and grades. |
-| **The bot** | `hertie-dsl-bot`, the machine account behind every action. Must be an **Owner** of every org - the one irreducible manual step. See [admin-setup](docs-admin-arch/admin-setup.md#the-bot-account). |
 
 ---
 

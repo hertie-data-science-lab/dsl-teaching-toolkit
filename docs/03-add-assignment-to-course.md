@@ -49,7 +49,7 @@ Repeat for each assignment (`number` = 2, 3, …).
 - For group projects, both handout and grading then run per team automatically (i.e one repo per team is created, and the grading run assesses at the team-level with individual carve outs for comments / grade adjustments):
 
 > The type is determined in the assignment's solution branch in the `grading.yml`'s field `type: individual | group`. 
->- This fiels is initially set (1) at the course-level when the assignment itself is created using the ` New assignment` workflow button (in the course org's `.github`'s Actions tab) 
+>- This fiels is initially set (1) at the course-level when the assignment itself is created using the ` New assignment` workflow (in the course org's `.github`'s Actions tab) 
 > - It can be also be set in (2) the cohort's `classroom-config/schedule.yml`, which is more accessible to TAs with only cohort org write access:
 >
 >```yaml

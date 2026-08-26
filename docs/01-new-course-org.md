@@ -2,7 +2,7 @@
 
 Create the persistent org for a course: 
 - Its control panel (`.github`, holding every action
-button), 
+workflow), 
 - Its teams,
 - Later teaching materials and assignment templates are added here
 
@@ -12,7 +12,7 @@ This is setup once per course - it serves every future cohort. Per-semester setu
 
 - You are in the `faculty`, `instructors` or `admin` team of
   [`hertie-data-science-lab`](https://github.com/orgs/hertie-data-science-lab/teams) - this gates
-  the *Bootstrap Course Org* button.
+  running the *Bootstrap Course Org* workflow.
 
 ## Steps
 
@@ -38,11 +38,11 @@ This is setup once per course - it serves every future cohort. Per-semester setu
    | `org_name` | display name | e.g. `DSL Demo Course` |
    | `course_code` | short code | e.g. `E1234` |
    | `set_secret` | `true` (default) | propagates `DSL_BOT_TOKEN` - **don't set the secret by hand** |
-   | `admin` | *your handle* | adds you to `course-admin` so you can run the course buttons |
+   | `admin` | *your handle* | adds you to `course-admin` so you can run the course workflows |
 
    > This action is safe to re-run in case of need. 
    
-   This seeds the `.github` repo with every workflow button you'll need ([actions reference](reference/actions-reference.md)), the `course-admin` team, and  `.github/dsl-course.yml` (the course's identity card).
+   This seeds the `.github` repo with every workflow you'll need ([actions reference](reference/actions-reference.md)), the `course-admin` team, and  `.github/dsl-course.yml` (the course's identity card).
 
 4. **Add any other admins.** 
    - Edit `people.course_admins` in `.github/dsl-course.yml` and commit to `main` 

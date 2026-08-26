@@ -260,7 +260,7 @@ class AssignmentEntry:
     grading_datetime: datetime | None = None  # explicit pin; defaults to due_datetime
     # When to provision one repo per student (or per team - see `type`) from the
     # `<slug>-<tag>` template. The scheduler synthesises a release from this, so it fires
-    # exactly like a `releases` entry. None = hand out manually (the button
+    # exactly like a `releases` entry. None = hand out manually (the workflow
     # then records the release moment here).
     handout_datetime: datetime | None = None
     # 'group' | 'individual' | None. The COHORT-level declaration of how this assignment
@@ -1042,7 +1042,7 @@ def _validate_report(sched: Schedule, source: str) -> str:
     return "\n".join(lines)
 
 
-_HANDOUT_COMMENT = "   # set automatically by the Release assignment button"
+_HANDOUT_COMMENT = "   # set automatically by the Release assignment workflow"
 _DUE_TODO = "# TODO: add `due_datetime:` - the date students see (required)"
 
 
@@ -1165,8 +1165,8 @@ def _insert_handout(text: str, slug: str, stamp: str) -> str | _Declined | None:
 def record_handout(cohort_org: str, slug: str, stamp: str | None = None) -> None:
     """Record a manual handout back into schedule.yml (`assignments.<slug>.handout_datetime`),
     so the schedule stays the one record of when every assignment went out - whether
-    the cron released it or a person clicked the button. Write-once: an existing
-    handout_datetime (scheduled, or recorded by an earlier click) is never modified. Best
+    the cron released it or a person ran the workflow. Write-once: an existing
+    handout_datetime (scheduled, or recorded by an earlier run) is never modified. Best
     effort - a failure here must never fail the release itself, but it is never silent
     either: a file this can't edit means the handout happened and is on record nowhere."""
     from .utils import log, put_file

@@ -72,7 +72,7 @@
 #   assignment-1:
 #     course_source_repo:           # REQUIRED 
 #     cohort_dest_repo:             # OPTIONAL (default: the slug (here would be assignment-1))
-#     handout_datetime:             # Omit  if you hand out via the manual "Release assignment" button (which auto-records it here for you)
+#     handout_datetime:             # Omit  if you hand out via the manual "Release assignment" workflow (which auto-records it here for you)
 #     due_datetime:                 # a bare date -> end of that day (23:59:59)
 #     grading_datetime:             # OPTIONAL: snapshot freezes + autograder fires (default: due_datetime). Not shown to students
 #     type: group                   # OPTIONAL: group | individual (also settable in the template's grading.yml; default: individual)

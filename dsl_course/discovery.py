@@ -268,12 +268,12 @@ def discover_handed_out_assignments(cohort_org: str) -> frozenset[str]:
     name (`schedule.cohort_name` - the slug unless `cohort_dest_repo` renames it) and
     topics it `assignment-template`, before it provisions a single student repo
     (`ensure_cohort_template`). So that repo existing IS the cohort-side record that the
-    hand-out happened, whatever route fired it - the scheduled pin, the manual button, or a
+    hand-out happened, whatever route fired it - the scheduled pin, the manual workflow, or a
     `releases:` entry's `assignment:`.
 
     The site gates an assignment's brief on this (see `site._assignment_entry`), which is
     why it reads what SHIPPED rather than what the plan intended: a hand-out with no
-    `handout_datetime` pinned - the manual button's documented mode - is invisible to the
+    `handout_datetime` pinned - the manual workflow's documented mode - is invisible to the
     plan, and gating on the plan alone published those briefs on sight.
 
     This is a second listing of an org `sync_site` already listed, and it must stay one:
@@ -287,7 +287,7 @@ def discover_handed_out_assignments(cohort_org: str) -> frozenset[str]:
 
 
 def discover_content_repos(course_org: str) -> list[str]:
-    """Repos that should HOST the release buttons: the materials repo(s), not the infra
+    """Repos that should HOST the release workflows: the materials repo(s), not the infra
     repos (_is_infra_repo - notably NOT the public `<org>.github.io` site repo, which
     would otherwise be handed the org-admin token as a repo secret) and not the
     assignment-* template repos (those are generate sources - equipping them would copy
