@@ -135,21 +135,30 @@ def register_cohort(course_org: str, cohort_org: str) -> bool:
     if cohort_org in cohorts:
         log_ok(f"{cohort_org} already in {course_org}/.github/{COHORTS_PATH}")
         return True
-    cohorts.add(cohort_org)
-    body = yaml.safe_dump({"cohorts": sorted(cohorts)}, sort_keys=False)
-    if not put_file(
+    return _write_cohorts(
         course_org,
-        ".github",
-        COHORTS_PATH,
-        body.encode(),
+        cohorts | {cohort_org},
         f"registry: add cohort {cohort_org}",
-    ):
-        log_err(
+        failure=(
             f"failed to register {cohort_org} under {course_org}: the registry write "
             f"to {COHORTS_PATH} failed"
-        )
+        ),
+        success=f"registered {cohort_org} under {course_org}",
+    )
+
+
+def _write_cohorts(
+    course_org: str, cohorts: set[str], commit: str, *, failure: str, success: str
+) -> bool:
+    """Serialise the registry and write it back, reporting either way. The one place the
+    file's SHAPE is decided, so the two callers that edit it cannot disagree about it -
+    and the one place a write failure is turned into a False, so neither can claim an edit
+    that did not land."""
+    body = yaml.safe_dump({"cohorts": sorted(cohorts)}, sort_keys=False)
+    if not put_file(course_org, ".github", COHORTS_PATH, body.encode(), commit):
+        log_err(failure)
         return False
-    log_ok(f"registered {cohort_org} under {course_org}")
+    log_ok(success)
     return True
 
 
@@ -174,22 +183,16 @@ def unregister_cohort(course_org: str, cohort_org: str) -> bool:
     cohorts = set(_read_cohorts(course_org))
     if cohort_org not in cohorts:
         return True
-    cohorts.discard(cohort_org)
-    body = yaml.safe_dump({"cohorts": sorted(cohorts)}, sort_keys=False)
-    if not put_file(
+    return _write_cohorts(
         course_org,
-        ".github",
-        COHORTS_PATH,
-        body.encode(),
+        cohorts - {cohort_org},
         f"registry: drop deleted cohort {cohort_org}",
-    ):
-        log_err(
+        failure=(
             f"failed to unregister the deleted org {cohort_org} from {course_org}: the "
             f"registry write to {COHORTS_PATH} failed - every sync will keep trying it"
-        )
-        return False
-    log_ok(f"unregistered {cohort_org} from {course_org} (the org no longer exists)")
-    return True
+        ),
+        success=f"unregistered {cohort_org} from {course_org} (the org no longer exists)",
+    )
 
 
 def discover_cohort_repos(cohort_orgs: list[str]) -> list[str]:

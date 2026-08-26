@@ -43,11 +43,6 @@ PAGE = """\
 
 ## Regenerate on demand
 
-> _Discovery is GitHub itself: `bootstrap_course.py` tags each org's `.github` repo:_
-> - _`{course_topic}` = course org_
-> - _`{cohort_topic}` = cohort org_
-> - _a cohort's course org is its `dsl-course.yml` `course:` pointer._
-
 To regenerate:
 
 ```bash
@@ -208,11 +203,7 @@ def render_tree(orgs: list[dict], cohorts: list[dict]) -> str:
 
 def render_page(orgs: list[dict], cohorts: list[dict]) -> str:
     """The complete inventory page - PAGE with the org tree filled in."""
-    return PAGE.format(
-        tree=render_tree(orgs, cohorts),
-        course_topic=COURSE_HUB_TOPIC,
-        cohort_topic=COHORT_TOPIC,
-    )
+    return PAGE.format(tree=render_tree(orgs, cohorts))
 
 
 def update_file(path: str, page: str) -> bool:

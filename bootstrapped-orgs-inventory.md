@@ -17,11 +17,6 @@
 
 ## Regenerate on demand
 
-> _Discovery is GitHub itself: `bootstrap_course.py` tags each org's `.github` repo:_
-> - _`dsl-course-hub` = course org_
-> - _`dsl-cohort` = cohort org_
-> - _a cohort's course org is its `dsl-course.yml` `course:` pointer._
-
 To regenerate:
 
 ```bash
