@@ -27,7 +27,9 @@ from . import seed
 from .utils import (
     FACULTY_ONLY_HEADING,
     GIT_ENV,
+    MATERIALS_REPO_PREFIX,
     READING_OVERLAY_FILE,
+    SYLLABUS_SAMPLE_FILE,
     create_repo,
     generate_from_template,
     gh,
@@ -39,7 +41,7 @@ from .utils import (
     log_ok,
     log_skip,
     log_step,
-    put_file,
+    put_files,
     refresh_stubs,
     repo_exists,
     seed_files_if_absent,
@@ -291,18 +293,11 @@ def refreshable_stubs(tag: str) -> dict[str, bytes]:
     }
 
 
-def scaffold_materials(org: str, tag: str) -> int:
-    repo = f"course-materials-{tag}"
-    log_step(f"Scaffolding {org}/{repo}")
-    if not create_repo(
-        org,
-        repo,
-        private=True,
-        description="Course materials (lectures/readings by session)",
-    ):
-        return 1
-    grant_course_team_access(org, repo)
-    grant_tagged_team_access(org, repo, tag)
+def _actions_table(org: str) -> str:
+    """The buttons table, shared by a materials repo's README and its MAINTAINING.md.
+
+    Lifted out of `scaffold_materials` so `materials_system_files` can build the
+    maintainer guide without the scaffold's surrounding repo-creation work."""
     actions_url = f"https://github.com/{org}/.github/actions"
     # The course org's `.github` Actions tab hosts the buttons that operate this course.
     # Both README (faculty & instructors orientation, pre-release) and MAINTAINING link it.
@@ -323,34 +318,12 @@ def scaffold_materials(org: str, tag: str) -> int:
         "(**Release materials** and **Release assignment** also appear in this repo's own "
         "Actions tab.)\n"
     )
-    # README.md is student-facing: Release materials with the README toggle copies THIS
-    # file into the cohort's materials repo, where enrolled students read it. So it ships
-    # as a replace-me placeholder written for students - the how-this-repo-works reference
-    # for faculty & instructors lives in MAINTAINING.md (a root file that is never released:
-    # release only copies section folders, the syllabus, and README.md).
-    readme = (
-        # Two lines below carry deploy.py's UNEDITED_README_MARKERS - the "Replace this
-        # placeholder" note and FACULTY_ONLY_HEADING. A release refuses to ship a README
-        # still holding BOTH, so edit this stub's wording freely but keep those two intact
-        # (test_scaffold.py asserts the seeded file still trips the guard).
-        "<!-- FACULTY & INSTRUCTORS: replace the content below with a real, student-facing\n"
-        "     overview of your course materials. Release materials with the 'include README'\n"
-        "     toggle copies THIS file into the cohort's materials repo, where enrolled\n"
-        "     students read it - so write it for them, not as internal notes. How this source\n"
-        "     repo is structured, and how to operate it, is in MAINTAINING.md (for faculty &\n"
-        "     instructors only - never released to students). -->\n\n"
-        "# Course materials\n\n"
-        "> **Replace this placeholder.** This file becomes the students' README for the\n"
-        "> released materials. Add a short overview of the course, how the materials are\n"
-        "> organised, and anything students should read first.\n\n"
-        "---\n\n"
-        f"## For faculty & instructors ({FACULTY_ONLY_HEADING})\n\n"
-        "- **How to populate & operate this repo:** see [`MAINTAINING.md`](MAINTAINING.md) - "
-        "it explains what to edit, what gets released to students, and what to leave alone. "
-        "`MAINTAINING.md` is **not** deployed to the cohort org; leave it here as a persistent "
-        "reference.\n"
-        "- **Available actions:** " + actions_table
-    )
+    return actions_table
+
+
+def _maintaining(org: str, repo: str) -> str:
+    """The generated maintainer guide for a materials repo."""
+    actions_table = _actions_table(org)
     maintaining = (
         f"# Maintaining `{repo}` (faculty & instructors)\n\n"
         "Reference for faculty & instructors on how to populate and operate this materials "
@@ -399,24 +372,78 @@ def scaffold_materials(org: str, tag: str) -> int:
         "of the list by leaving them as non-text files) or `actual-readings` (every reading "
         "file is hosted and downloadable - you carry the copyright responsibility).\n"
     )
-    failures = 0
-    # The filled syllabus example: SYSTEM-owned like MAINTAINING.md, so it is refreshed
-    # rather than frozen - a repo scaffolded before this existed gets it on the next
-    # Refresh, which is the half of this that helps the courses already running.
-    if not put_file(
+    return maintaining
+
+
+def materials_system_files(org: str, repo: str) -> dict[str, bytes]:
+    """The SYSTEM-owned files in a materials repo: this toolkit describing itself, so
+    they are REFRESHED rather than frozen - faculty edits here are overwritten, which
+    each file says in its own text.
+
+    Named here, where they are written, and read by `seed._refresh_system_files`, so a
+    repo scaffolded before one of them improved converges on the next nightly Refresh
+    instead of keeping whatever the toolkit first shipped. One list rather than two that
+    drift - the same contract as `refreshable_stubs`, for the other half of the
+    ownership split."""
+    return {
+        SYLLABUS_SAMPLE_FILE: _SYLLABUS_SAMPLE.encode(),
+        "MAINTAINING.md": _maintaining(org, repo).encode(),
+    }
+
+
+def scaffold_materials(org: str, tag: str) -> int:
+    repo = f"{MATERIALS_REPO_PREFIX}{tag}"
+    log_step(f"Scaffolding {org}/{repo}")
+    if not create_repo(
         org,
         repo,
-        "SYLLABUS.md.sample",
-        _SYLLABUS_SAMPLE.encode(),
-        "docs: syllabus example",
+        private=True,
+        description="Course materials (lectures/readings by session)",
     ):
-        failures += 1
-    # MAINTAINING.md is SYSTEM-owned generated docs, built from the actions table above (like
-    # classroom-config's README contract): it must refresh on a re-run when the toolkit
-    # changes it, so it's written unconditionally with put_file - never frozen create-only. A
-    # failed write reds the scaffold rather than shipping a stale/absent maintainer guide.
-    if not put_file(
-        org, repo, "MAINTAINING.md", maintaining.encode(), "docs: maintaining guide"
+        return 1
+    grant_course_team_access(org, repo)
+    grant_tagged_team_access(org, repo, tag)
+    actions_table = _actions_table(org)
+    # README.md is student-facing: Release materials with the README toggle copies THIS
+    # file into the cohort's materials repo, where enrolled students read it. So it ships
+    # as a replace-me placeholder written for students - the how-this-repo-works reference
+    # for faculty & instructors lives in MAINTAINING.md (a root file that is never released:
+    # release only copies section folders, the syllabus, and README.md).
+    readme = (
+        # Two lines below carry deploy.py's UNEDITED_README_MARKERS - the "Replace this
+        # placeholder" note and FACULTY_ONLY_HEADING. A release refuses to ship a README
+        # still holding BOTH, so edit this stub's wording freely but keep those two intact
+        # (test_scaffold.py asserts the seeded file still trips the guard).
+        "<!-- FACULTY & INSTRUCTORS: replace the content below with a real, student-facing\n"
+        "     overview of your course materials. Release materials with the 'include README'\n"
+        "     toggle copies THIS file into the cohort's materials repo, where enrolled\n"
+        "     students read it - so write it for them, not as internal notes. How this source\n"
+        "     repo is structured, and how to operate it, is in MAINTAINING.md (for faculty &\n"
+        "     instructors only - never released to students). -->\n\n"
+        "# Course materials\n\n"
+        "> **Replace this placeholder.** This file becomes the students' README for the\n"
+        "> released materials. Add a short overview of the course, how the materials are\n"
+        "> organised, and anything students should read first.\n\n"
+        "---\n\n"
+        f"## For faculty & instructors ({FACULTY_ONLY_HEADING})\n\n"
+        "- **How to populate & operate this repo:** see [`MAINTAINING.md`](MAINTAINING.md) - "
+        "it explains what to edit, what gets released to students, and what to leave alone. "
+        "`MAINTAINING.md` is **not** deployed to the cohort org; leave it here as a persistent "
+        "reference.\n"
+        "- **Available actions:** " + actions_table
+    )
+    failures = 0
+    # The SYSTEM-owned pair (maintainer guide + filled syllabus example): written
+    # unconditionally, never frozen create-only, so a re-run picks up whatever the toolkit
+    # has since changed. One commit, because they always change together (put_files is
+    # diff-aware, so an unchanged pair writes nothing). The same dict is what the nightly
+    # refresh pushes into materials repos scaffolded before either file existed. A failed
+    # write reds the scaffold rather than shipping a stale/absent maintainer guide.
+    if not put_files(
+        org,
+        repo,
+        materials_system_files(org, repo),
+        "docs: maintainer guide + syllabus example",
     ):
         failures += 1
     # USER-owned skeletons: create-only, so a re-run against a repo faculty have since
