@@ -46,6 +46,7 @@ import yaml
 
 from . import schedule, seed
 from .assign import assignment_slug
+from .discovery import discover_handed_out_assignments
 from .utils import (
     GIT_ENV,
     READING_OVERLAY_NAMES,
@@ -1231,6 +1232,7 @@ def _assignment_entry(
     when: date | datetime,
     handout: datetime | None = None,
     sched: schedule.Schedule | None = None,
+    handed_out: frozenset[str] = frozenset(),
     now: datetime | None = None,
 ) -> str:
     """An assignment's page, plus the two schedule rows it drives: the entry's own
@@ -1247,15 +1249,23 @@ def _assignment_entry(
     get. Deriving it from the course repo alone named the wrong repo - and titled the page
     wrong - whenever an entry set `cohort_dest_repo`.
 
-    A handout still in the FUTURE withholds the brief, the way an unshipped session
+    An assignment NOT YET HANDED OUT withholds its brief, the way an unshipped session
     withholds its materials (`_lecture_entry`): the row appears from the day the template
     repo exists, but its body says so and flags `unreleased: true` rather than inlining the
     README. The template repo exists from the moment faculty write the assignment - weeks
     before it hands out - so publishing its README on sight put the whole brief on the
-    cohort site (a PUBLIC one) while the scheduler was still correctly holding the student
-    repos back. Not quite the same gate, though: a session row follows what actually
-    shipped, this one follows the plan, so a handout whose provisioning failed still flips
-    its brief public on schedule.
+    cohort site, which is PUBLIC, while the scheduler was still correctly holding the
+    student repos back.
+
+    Handed out means EITHER of two things, and it takes both being false to withhold:
+
+    - `handed_out` holds this assignment's cohort-side name - a frozen cohort template repo
+      exists (`discovery.discover_handed_out_assignments`), so students have their repos
+      whatever route fired it. This is the same "what actually shipped" signal a session
+      row reads, and the only one that covers the manual button, whose documented mode
+      pins no `handout_datetime` at all until it fires.
+    - `handout` has passed. A pin whose provisioning then failed still says the brief was
+      meant to be out by now, and a schedule that says so is not a secret worth keeping.
 
     Withheld is the ROW'S CONTENT, not the row: the dates stay, since a deadline is the
     plan and belongs on the schedule the day it is written. The TITLE is withheld with the
@@ -1264,17 +1274,17 @@ def _assignment_entry(
     same rule `_lecture_entry` follows: an unreleased row names itself from the PLAN
     (schedule.yml), never from the artefact it is withholding.
 
-    `now` is the moment to judge pending against (default: actual now, in the handout's own
+    `now` is the moment to judge the pin against (default: actual now, in the handout's own
     cohort timezone - `_coerce_datetime` hands out nothing naive)."""
     found = schedule.entry_for_repo(sched, repo) if sched is not None else None
     slug = schedule.cohort_name(*found) if found else assignment_slug(repo)
     # An unscheduled assignment's synthesised fallback date is due end-of-day.
     due = _iso_when(when, "23:59:00")
     released = _iso_when(handout) if handout is not None else due
-    # No handout on record means nothing says this assignment is embargoed: it is either
-    # handed out manually (the button records the moment here, so a real one gets a date)
-    # or the cohort keeps no assignments block at all. Either way, released.
-    pending = handout is not None and handout > (now or datetime.now(handout.tzinfo))
+    pinned_out = handout is not None and handout <= (
+        now or datetime.now(handout.tzinfo)
+    )
+    pending = slug not in handed_out and not pinned_out
     # Named once: both bodies point at the same repo, and the two sentences drifted apart
     # the moment either was edited on its own.
     student_repo = f"`{slug}-<your-handle>` repo in `{course_org}`'s cohort org"
@@ -1805,6 +1815,10 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         tag = _cohort_tag(cohort_org)
         if tag:
             assignments = [a for a in assignments if a.lower().endswith(tag)]
+        # Which of them this cohort has actually been given - what gates their briefs. Read
+        # from the cohort org rather than inferred from the plan, since the manual button
+        # hands out with no `handout_datetime` pinned at all.
+        handed_out = discover_handed_out_assignments(cohort_org)
 
         # Course identity comes from the course org metadata, semester from the cohort tag.
         meta = _yaml_file(course_org, ".github", "dsl-course.yml")
@@ -1942,6 +1956,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                             sched, a, start + timedelta(days=(i + 1) * 14)
                         ),
                         sched=sched,
+                        handed_out=handed_out,
                     )
                     for i, a in enumerate(assignments)
                 },

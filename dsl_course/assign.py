@@ -39,6 +39,7 @@ from pathlib import Path
 import yaml
 
 from . import roster, sync_teams, teams
+from .discovery import ASSIGNMENT_TEMPLATE_TOPIC
 from .utils import (
     GIT_ENV,
     add_collaborator,
@@ -128,7 +129,10 @@ def ensure_cohort_template(
             f"generate FROM it, so this must succeed: {out[:160]}"
         )
         return None
-    set_repo_topics(cohort_org, slug, [slug, "assignment-template"])
+    # The topic is not decoration: discovery.discover_handed_out_assignments reads it back
+    # as the record that this assignment went out, and the site withholds the brief until
+    # it does.
+    set_repo_topics(cohort_org, slug, [slug, ASSIGNMENT_TEMPLATE_TOPIC])
     return slug
 
 

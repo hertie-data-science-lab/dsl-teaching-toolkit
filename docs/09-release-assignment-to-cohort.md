@@ -39,7 +39,7 @@ or force `individual` / `group` for this dispatch -
 see [Group or individual?](#group-or-individual))
 - `dry_run` (list the repos that *would* be created).
 
-Auditors (`role=auditor`) are skipped. The assignment brief appears on the cohort site automatically - at hand-out, not before: until then the row is there but says "This assignment has not been handed out yet."
+Auditors (`role=auditor`) are skipped. The assignment brief appears on the cohort site automatically - at hand-out, not before. Until you release it the row is on the schedule but carries no brief and no title, just "This assignment has not been handed out yet." That holds however you hand out: the button and a scheduled `handout_datetime` both open it.
 
 ## Group or individual?
 

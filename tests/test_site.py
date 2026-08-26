@@ -285,7 +285,7 @@ def test_assignment_entry_falls_back_to_the_due_date_without_a_handout(monkeypat
     assert out.count("date: 2026-11-10T23:59:00") == 2  # both rows on the due date
 
 
-def test_a_future_handout_withholds_the_brief(monkeypatch):
+def test_an_unhanded_out_assignment_withholds_the_brief(monkeypatch):
     # The template repo exists from the day faculty write the assignment; publishing its
     # README on sight put the whole brief on the PUBLIC cohort site weeks before hand-out,
     # while the scheduler was still correctly holding the student repos back.
@@ -326,15 +326,76 @@ def test_a_passed_handout_inlines_the_brief(monkeypatch):
     assert "unreleased: true" not in out
 
 
-def test_an_assignment_with_no_handout_on_record_is_released(monkeypatch):
-    # Nothing says it is embargoed: it is handed out manually (the button records the
-    # moment, so a real one gets a date) or the cohort keeps no assignments block at all.
+def test_a_manual_handout_releases_the_brief_with_no_date_pinned(monkeypatch):
+    # The manual button's documented mode pins no handout_datetime at all, so the plan
+    # cannot say this went out - the frozen cohort template repo it creates is what says
+    # so. Gating on the plan alone published these briefs from the day the template
+    # existed, which is the whole bug.
+    monkeypatch.setattr(
+        site, "get_file_content", lambda *a, **k: "# Assignment 2\nThe brief."
+    )
+    out = site._assignment_entry(
+        "Course",
+        "assignment-2-f2026",
+        date(2026, 11, 10),
+        handed_out=frozenset({"assignment-2"}),
+    )
+    assert "The brief." in out
+    assert "unreleased: true" not in out
+
+
+def test_an_assignment_with_no_handout_on_record_is_withheld(monkeypatch):
+    # Neither signal fires: no cohort template repo, no pin. Withholding is the safe
+    # direction - the brief appears the moment either says it went out.
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# Assignment 2\nThe brief."
     )
     out = site._assignment_entry("Course", "assignment-2-f2026", date(2026, 11, 10))
+    assert "The brief." not in out
+    assert "unreleased: true" in out
+
+
+def test_an_early_manual_release_beats_a_pin_still_in_the_future(monkeypatch):
+    # Faculty pinned a later date, then released early. The repos exist, so the brief is
+    # already with the students; the site must not go on claiming it is embargoed.
+    monkeypatch.setattr(
+        site, "get_file_content", lambda *a, **k: "# Assignment 1\nThe brief."
+    )
+    out = site._assignment_entry(
+        "Course",
+        "assignment-1-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        datetime(2026, 10, 20, 14, 0, tzinfo=BERLIN),
+        handed_out=frozenset({"assignment-1"}),
+        now=datetime(2026, 10, 10, tzinfo=BERLIN),
+    )
     assert "The brief." in out
     assert "unreleased: true" not in out
+
+
+def test_handed_out_keys_on_the_cohort_dest_repo_not_the_slug(monkeypatch):
+    # assign.py freezes the cohort template under `cohort_dest_repo` when an entry renames
+    # it, so the gate must look the assignment up under the same name it was created with.
+    monkeypatch.setattr(
+        site, "get_file_content", lambda *a, **k: "# Assignment 1\nThe brief."
+    )
+    sched = Schedule(
+        assignments={
+            "assignment-1": AssignmentEntry(
+                course_source_repo="assignment-1-f2026",
+                due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+                cohort_dest_repo="homework-1",
+            )
+        }
+    )
+    args = ("Course", "assignment-1-f2026", date(2026, 10, 13))
+    assert "The brief." in site._assignment_entry(
+        *args, sched=sched, handed_out=frozenset({"homework-1"})
+    )
+    # the slug is NOT the name it was frozen under, so it must not open the gate
+    assert "The brief." not in site._assignment_entry(
+        *args, sched=sched, handed_out=frozenset({"assignment-1"})
+    )
 
 
 def test_assignment_dates_read_the_schedule():
@@ -360,7 +421,13 @@ def test_assignment_dates_read_the_schedule():
 
 
 def _plan(
-    monkeypatch, tmp_path, sched: Schedule, sources=(), assignments=(), files=None
+    monkeypatch,
+    tmp_path,
+    sched: Schedule,
+    sources=(),
+    assignments=(),
+    files=None,
+    handed_out=(),
 ):
     """Run sync_site against a faked org and return the _SitePlan it built. `files` fakes
     the per-source file listing (default: every source is empty)."""
@@ -376,6 +443,9 @@ def _plan(
     )
     monkeypatch.setattr(
         site.seed, "discover_assignments", lambda org: list(assignments)
+    )
+    monkeypatch.setattr(
+        site, "discover_handed_out_assignments", lambda org: frozenset(handed_out)
     )
     monkeypatch.setattr(site, "_yaml_file", lambda *a: {})
     monkeypatch.setattr(site.schedule, "load", lambda org: sched)
@@ -447,6 +517,9 @@ def test_course_description_flows_from_course_metadata_into_config(
     monkeypatch.setattr(site.seed, "discover_cohort_repos", lambda orgs: [])
     monkeypatch.setattr(site.seed, "discover_release_sources", lambda org, repos: [])
     monkeypatch.setattr(site.seed, "discover_assignments", lambda org: [])
+    monkeypatch.setattr(
+        site, "discover_handed_out_assignments", lambda org: frozenset()
+    )
     monkeypatch.setattr(site.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(site, "_people_yaml", lambda *a, **k: "people: []\n")
 
@@ -499,6 +572,9 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
     monkeypatch.setattr(site.seed, "discover_cohort_repos", lambda orgs: [])
     monkeypatch.setattr(site.seed, "discover_release_sources", lambda org, repos: [])
     monkeypatch.setattr(site.seed, "discover_assignments", lambda org: [])
+    monkeypatch.setattr(
+        site, "discover_handed_out_assignments", lambda org: frozenset()
+    )
     monkeypatch.setattr(site, "_yaml_file", lambda *a: {"course_name": "Deep Learning"})
     monkeypatch.setattr(site, "_people_yaml", lambda *a, **k: "people: []\n")
     # the REAL schedule.load, fed the malformed file
@@ -750,6 +826,30 @@ def test_assignment_entry_names_the_cohort_dest_repo_not_the_course_repo(monkeyp
     assert 'title: "Homework 1"' in out
 
 
+def test_the_site_build_gates_a_brief_on_what_the_cohort_actually_holds(
+    monkeypatch, tmp_path
+):
+    # End-to-end through sync_site, not just the renderer: the gate is worthless if the
+    # build forgets to pass what the cohort org holds. (`_plan` blanks every file read, so
+    # the flag - not the brief text - is what this can pin.)
+    sched = Schedule(
+        assignments={
+            "assignment-1": AssignmentEntry(
+                course_source_repo="assignment-1-f2026",
+                due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+            )
+        }
+    )
+    args = dict(sched=sched, assignments=["assignment-1-f2026"])
+    withheld = _plan(monkeypatch, tmp_path, **args).collections["_assignments"]
+    assert "unreleased: true" in withheld["01-assignment-1-f2026.md"]
+
+    out = _plan(monkeypatch, tmp_path, **args, handed_out=["assignment-1"]).collections[
+        "_assignments"
+    ]
+    assert "unreleased: true" not in out["01-assignment-1-f2026.md"]
+
+
 # ---------------------------------------------- fail-loud reads (fixes 5 and 6)
 
 
@@ -936,7 +1036,14 @@ def test_front_matter_survives_a_backslash_in_a_title(monkeypatch):
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# \\sigma review\nBody"
     )
-    out = site._assignment_entry("Course", "assignment-1-f2026", date(2026, 11, 10))
+    out = site._assignment_entry(
+        "Course",
+        "assignment-1-f2026",
+        date(2026, 11, 10),
+        handed_out=frozenset(
+            {"assignment-1"}
+        ),  # the README title is only read once out
+    )
     front = yaml.safe_load(out.split("---")[1])  # must parse, no ScannerError
     assert "sigma" in front["title"]
 
@@ -953,7 +1060,12 @@ def test_assignment_readme_body_is_fenced_as_liquid_raw(monkeypatch):
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# A1\nUse {{ x }} in your code"
     )
-    out = site._assignment_entry("Course", "assignment-1-f2026", date(2026, 11, 10))
+    out = site._assignment_entry(
+        "Course",
+        "assignment-1-f2026",
+        date(2026, 11, 10),
+        handed_out=frozenset({"assignment-1"}),  # the README is only inlined once out
+    )
     assert "{% raw %}" in out and "{% endraw %}" in out
 
 

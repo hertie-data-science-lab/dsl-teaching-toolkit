@@ -37,10 +37,14 @@ COHORTS_PATH = (
 )
 
 INFRA_REPOS = {"welcome", "classroom-config", ".github"}
+# The topic assign.py stamps on the frozen cohort-side template it creates before
+# provisioning a single student repo (ensure_cohort_template). Named here, and imported by
+# the one writer and the one reader, so the string cannot drift between them.
+ASSIGNMENT_TEMPLATE_TOPIC = "assignment-template"
 # Topics marking a repo as machinery rather than faculty-authored content: per-student
 # submission repos and the frozen cohort-side assignment templates (assign.py), and the
 # private per-student gradebooks (grades.py).
-INFRA_TOPICS = {"submission", "assignment-template", "gradebook"}
+INFRA_TOPICS = {"submission", ASSIGNMENT_TEMPLATE_TOPIC, "gradebook"}
 
 
 def _is_infra_repo(repo: dict) -> bool:
@@ -212,6 +216,27 @@ def discover_assignments(course_org: str) -> list[str]:
         r["name"]
         for r in list_org_repos(course_org)
         if r["name"].startswith("assignment-") and r.get("isTemplate")
+    )
+
+
+def discover_handed_out_assignments(cohort_org: str) -> frozenset[str]:
+    """The cohort-side name of every assignment this cohort has ACTUALLY been given.
+
+    assign.py's stage 1 freezes a cohort-level template repo named exactly the cohort-side
+    name (`schedule.cohort_name` - the slug unless `cohort_dest_repo` renames it) and
+    topics it `assignment-template`, before it provisions a single student repo
+    (`ensure_cohort_template`). So that repo existing IS the cohort-side record that the
+    hand-out happened, whatever route fired it - the scheduled pin, the manual button, or a
+    `releases:` entry's `assignment:`.
+
+    The site gates an assignment's brief on this (see `site._assignment_entry`), which is
+    why it reads what SHIPPED rather than what the plan intended: a hand-out with no
+    `handout_datetime` pinned - the manual button's documented mode - is invisible to the
+    plan, and gating on the plan alone published those briefs on sight."""
+    return frozenset(
+        r["name"]
+        for r in list_org_repos(cohort_org)
+        if ASSIGNMENT_TEMPLATE_TOPIC in (r.get("topics") or [])
     )
 
 
