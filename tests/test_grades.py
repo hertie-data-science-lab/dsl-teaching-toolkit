@@ -199,9 +199,9 @@ def test_merge_auto_group_gives_every_member_the_teams_autograde_score():
 def test_a_hand_set_team_score_is_not_a_machine_column():
     # The flaw this replaced: the group autograder wrote its count into `team_score`, so a
     # machine number and the marker's shared mark shared one write-once cell and whichever
-    # landed first won. `team_score` is now faculty-owned outright - a later autograde run
-    # neither reads it nor competes for it, and re-grading always refreshes the count on a
-    # row whose mark is already set.
+    # landed first won. `team_score` is now faculty-owned outright: a later autograde run
+    # neither reads it nor competes for it, so a row whose mark is already set still gets
+    # its count recorded. (The count itself stays write-once - see the test below.)
     assert "team_score" not in grades.MACHINE_FIELDS
     existing = grades.dump_grades(
         [grades.GradeRow(github_handle="anna", team="team-x", team_score="85")]

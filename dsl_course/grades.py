@@ -270,8 +270,10 @@ def merge_auto(text: str, updates: list[tuple[str, dict[str, str]]]) -> str:
     """Upsert machine-graded fields into a grades CSV, returning new CSV text.
 
     Each update is (github_handle, {field: value}); the handle's row is updated in place
-    (preserving every other column a faculty & instructors member has already filled) or created and
-    appended if absent. Used by the collector to record `autograde_score` (plus `team` on a
+    (leaving every column the update does not name exactly as it was) or created and
+    appended if absent. Only MACHINE_FIELDS are write-once - a key outside that set is
+    written unconditionally, so callers must not pass a faculty-owned column such as
+    `team_score` or `manual_score` here. Used by the collector to record `autograde_score` (plus `team` on a
     group assignment) without disturbing hand-marked scores, comments, or the final grade.
 
     WRITE-ONCE. A machine-written cell (MACHINE_FIELDS) that already holds a value is NEVER
