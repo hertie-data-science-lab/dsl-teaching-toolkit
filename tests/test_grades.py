@@ -244,10 +244,10 @@ def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
     # Auditors are never assessed, so they get no private gradebook repo. Dry-run keeps
     # this pure - the roster is the only input, and nothing is provisioned.
     students = roster.parse(
-        "student_id,hertie_email,name,github_handle,github_id,section,enrol_code,role\n"
-        "1,ada@uni.edu,Ada,ada-l,42,A,dsl-abc,enrolled\n"
-        "2,eve@uni.edu,Eve,eve-e,43,B,dsl-xyz,auditor\n"
-        "3,bob@uni.edu,Bob,bob-b,44,B,dsl-def,\n"  # blank role -> enrolled
+        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+        "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor\n"
+        "bob@uni.edu,Bob,bob-b,44,dsl-def,\n"  # blank role -> enrolled
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     assert grades.sync("COHORT", dry_run=True) == 0
@@ -270,9 +270,9 @@ def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
     # The send count used to be discarded, so a student who never got the "your grades are
     # updated" mail left no trace in the log at all.
     students = roster.parse(
-        "student_id,hertie_email,name,github_handle,github_id,section,enrol_code,role\n"
-        "1,ada@uni.edu,Ada,ada-l,42,A,dsl-abc,enrolled\n"
-        "2,bob@uni.edu,Bob,bob-b,43,A,dsl-def,enrolled\n"
+        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+        "bob@uni.edu,Bob,bob-b,43,dsl-def,enrolled\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades.mailer, "send_bulk", lambda msgs, dry_run=False: 1)

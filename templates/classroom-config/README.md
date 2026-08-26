@@ -20,14 +20,14 @@ One row per student. Leave `github_handle`, `github_id`& `enrol_code` blank - th
 
 | column | filled by | notes |
 |--------|-----------|-------|
-| student_id | instructor | institutional id |
 | hertie_email | instructor | **match key** - enrolment reconciles on this |
 | name | instructor | display name |
 | github_handle | onboarding | blank until they join via the welcome "Join" issue |
 | github_id | onboarding | numeric id captured on join - **immutable; never hand-edit** |
-| section | instructor | optional grouping (e.g. A/B) |
 | enrol_code | **Send enrolment codes** | random non-PII token, emailed to the student; they paste it into the "Join" issue. Leave blank - the button fills blanks only, never rewrites an issued code |
 | role | instructor | `enrolled` (blank means enrolled) or `auditor` - auditors are read-only: released materials only, no assignment repos, no gradebook, no project teams |
+
+Any OTHER column you add (a registrar id, a lecture section, notes) is yours: the engine never reads it, and never drops it when it writes back.
 
 A push to this file triggers **Sync membership** automatically, reconciling the `students` and `auditors` teams to match (a deleted row revokes access on that same push).
 

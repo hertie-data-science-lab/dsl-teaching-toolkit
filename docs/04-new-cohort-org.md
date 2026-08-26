@@ -64,7 +64,7 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
       - Full guide, including removing people   and how quickly changes land: [05 Manage the teaching team](05-manage-teaching-team.md).
 
 6. **Load the student roster.** 
-  - Fill `classroom-config/students.csv` (seeded header-only) with registrar data (`student_id, hertie_email, name, section`
+  - Fill `classroom-config/students.csv` (seeded header-only) with registrar data (`hertie_email, name`)
   - Leave `github_handle, github_id` blank - onboarding fills them). 
   - Add `role: auditor` for anyone who should get the released materials but no assignments and no grades. 
   - The seeded `students.csv.sample` in each newly boostrapped shows a filled row of each kind, and that repo's `README.md` documents every column.

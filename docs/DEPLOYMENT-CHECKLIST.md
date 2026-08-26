@@ -84,17 +84,19 @@ header-only, with a filled `students.csv.sample` next to it). Leave the onboardi
 columns blank (`github_handle`, `github_id`, `enrol_code`). Deleting a row off-boards that student on the next push.
 
 ```csv
-student_id,hertie_email,name,github_handle,github_id,section,enrol_code,role
-245001,j.doe@students.hertie-school.org,Jane Doe,,,A,,
-245002,e.evans@students.hertie-school.org,Eve Evans,,,A,,auditor
+hertie_email,name,github_handle,github_id,enrol_code,role
+j.doe@students.hertie-school.org,Jane Doe,,,,
+e.evans@students.hertie-school.org,Eve Evans,,,,auditor
 ```
 
 | Column | Filled by | Notes |
 |--------|-----------|-------|
-| `student_id`, `hertie_email`, `name`, `section` | you | `hertie_email` receives the enrolment code + grade notices |
+| `hertie_email`, `name` | you | `hertie_email` is the match key, and receives the enrolment code + grade notices |
 | `github_handle`, `github_id` | **onboarding** | blank until the student joins; the immutable `github_id` survives handle renames |
 | `enrol_code` | **Send enrolment codes** | the token the student pastes into the Join course issue |
 | `role` | you | blank/`enrolled` = full participant; `auditor` = reads released materials, gets no assignments/grades, refused from teams |
+
+Add any other column you want (a registrar id, a lecture section, notes) - the engine ignores it and preserves it.
 
 ### `people.yml`
 

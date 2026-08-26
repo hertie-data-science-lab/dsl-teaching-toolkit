@@ -3,12 +3,17 @@
 The single durable roster artifact is a PRIVATE per-cohort `students.csv`, kept in
 the cohort org's `classroom-config` repo. Columns:
 
-    student_id,hertie_email,name,github_handle,github_id,section,enrol_code,role
+    hertie_email,name,github_handle,github_id,enrol_code,role
 
-It is simultaneously the manual roster we maintain now, and the exact shape a future
-Moodle adapter will emit. `github_handle` / `github_id` are blank until the student
-onboards (the `welcome` Join issue fills them); a row with a blank handle is
-enrolled-but-not-yet-onboarded and is skipped by provisioning.
+These are the columns the engine READS; a roster may carry any others faculty want
+(a registrar id, a lecture section, a notes column) and they are carried through
+untouched - every write path here addresses cells by column NAME, never by position
+(`enrol_codes.fill_enrol_codes_in_csv` and the welcome repo's Join handler both), so an
+extra column is neither read nor lost.
+
+`github_handle` / `github_id` are blank until the student onboards (the `welcome` Join
+issue fills them); a row with a blank handle is enrolled-but-not-yet-onboarded and is
+skipped by provisioning.
 
 `role` splits the cohort into `enrolled` (the default - full participants) and `auditor`
 (read-only: released materials, but no assignment repos and no gradebook). A roster
@@ -29,12 +34,10 @@ ROSTER_PATH = "students.csv"
 ROLE_ENROLLED = "enrolled"
 ROLE_AUDITOR = "auditor"
 FIELDS = (
-    "student_id",
     "hertie_email",
     "name",
     "github_handle",
     "github_id",
-    "section",
     "enrol_code",
     "role",
 )
@@ -42,12 +45,10 @@ FIELDS = (
 
 @dataclass
 class Student:
-    student_id: str
     hertie_email: str
     name: str
     github_handle: str
     github_id: str
-    section: str
     enrol_code: str = (
         ""  # random non-PII token the bot generates + emails; pasted to enrol
     )

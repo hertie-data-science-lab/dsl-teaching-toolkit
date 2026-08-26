@@ -329,9 +329,9 @@ def test_stray_conversion_ignores_a_same_stem_directory(tmp_path):
 
 
 _STUDENTS = [
-    Student("1", "a@x", "Anna", "anna-adams", "", ""),
-    Student("2", "b@x", "Ben", "ben-baker", "", ""),
-    Student("3", "c@x", "Not yet", "", "", ""),  # enrolled, not onboarded
+    Student("a@x", "Anna", "anna-adams", ""),
+    Student("b@x", "Ben", "ben-baker", ""),
+    Student("c@x", "Not yet", "", ""),  # enrolled, not onboarded
 ]
 _TEAMS = {"assignment-4-project": {"team-y": ["carla"], "team-x": ["anna-adams"]}}
 
@@ -1001,8 +1001,8 @@ def test_submission_targets_individual_excludes_auditors(monkeypatch):
     # Auditors deliberately have no submission repo; listing one makes it an unclonable
     # phantom target. submission_targets must apply the enrolled filter, like assign/grades.
     students = [
-        Student("1", "a@x", "Anna", "anna-adams", "", "", "", "enrolled"),
-        Student("2", "e@x", "Eve", "eve-e", "", "", "", "auditor"),
+        Student("a@x", "Anna", "anna-adams", "", "", "enrolled"),
+        Student("e@x", "Eve", "eve-e", "", "", "auditor"),
     ]
     monkeypatch.setattr(collect.roster, "load", lambda org: students)
     monkeypatch.setattr(collect.teams, "load", lambda org: {})

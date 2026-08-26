@@ -11,7 +11,7 @@ from dsl_course import enrol_codes, mailer, roster
 
 
 def _student(email="a@x.edu", name="Ada", code="", handle=""):
-    return roster.Student("1", email, name, handle, "", "A", code)
+    return roster.Student(email, name, handle, "", code)
 
 
 def test_assign_codes_fills_blanks_only_and_is_unique():
@@ -102,9 +102,11 @@ def test_a_failed_graph_token_is_not_reported_as_nothing_to_send(monkeypatch):
 
 
 def test_fill_enrol_codes_preserves_unknown_columns_and_raw_role():
-    # The old round-trip through roster.dump re-serialised only roster.FIELDS, dropping a
-    # faculty-added `notes` column and normalising `role`. A surgical cell edit must leave
-    # every other column and each cell's raw text exactly as written.
+    # The old round-trip through roster.dump re-serialised only roster.FIELDS, dropping
+    # every column the engine does not read - a faculty-added `notes`, and the retired
+    # `student_id`/`section` a deployed cohort's roster still carries - and normalising
+    # `role`. A surgical cell edit must leave every other column and each cell's raw text
+    # exactly as written.
     import csv
     import io
 
@@ -118,6 +120,8 @@ def test_fill_enrol_codes_preserves_unknown_columns_and_raw_role():
     assert rows[0]["enrol_code"] == "dsl-new"  # the blank cell is filled
     assert rows[0]["role"] == "audit"  # raw text, NOT normalised to enrolled/auditor
     assert rows[0]["notes"] == "keen"  # the unknown column survives
+    assert rows[0]["student_id"] == "1"  # so do the columns the engine no longer reads
+    assert rows[0]["section"] == "A"
     assert rows[1]["enrol_code"] == "dsl-keep"  # an existing code is never overwritten
     assert "notes" in out.splitlines()[0]  # header keeps the extra column
 

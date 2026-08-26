@@ -12,7 +12,7 @@ import yaml
 from dsl_course import assign
 from dsl_course.schedule import Schedule
 
-HEADER = "student_id,hertie_email,name,github_handle,github_id,section,enrol_code,role"
+HEADER = "hertie_email,name,github_handle,github_id,enrol_code,role"
 
 
 def _roster_file(tmp_path, *rows: str):
@@ -36,9 +36,9 @@ def test_assignment_slug_drops_the_cohort_suffix():
 def test_provisioning_skips_auditors(tmp_path, capsys):
     path = _roster_file(
         tmp_path,
-        "1,ada@uni.edu,Ada,ada-l,42,A,dsl-abc,enrolled",
-        "2,eve@uni.edu,Eve,eve-e,43,B,dsl-xyz,auditor",
-        "3,bob@uni.edu,Bob,bob-b,44,B,dsl-def,",  # blank role -> enrolled
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
+        "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor",
+        "bob@uni.edu,Bob,bob-b,44,dsl-def,",  # blank role -> enrolled
     )
     rc = assign.provision_all(
         "COURSE",
@@ -79,9 +79,9 @@ def test_provisioning_still_works_for_a_roster_without_a_role_column(tmp_path, c
 def test_not_yet_onboarded_rows_are_still_skipped_separately(tmp_path, capsys):
     path = _roster_file(
         tmp_path,
-        "1,ada@uni.edu,Ada,ada-l,42,A,dsl-abc,enrolled",
-        "2,bob@uni.edu,Bob,,,B,dsl-def,enrolled",  # no handle yet
-        "3,eve@uni.edu,Eve,eve-e,43,B,dsl-xyz,auditor",
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
+        "bob@uni.edu,Bob,,,dsl-def,enrolled",  # no handle yet
+        "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor",
     )
     assign.provision_all(
         "COURSE",
@@ -112,9 +112,9 @@ def test_group_none_infers_per_team_from_the_templates_grading_yml(
     )
     path = _roster_file(
         tmp_path,
-        "1,ada@uni.edu,Ada,ada-l,42,A,dsl-abc,enrolled",
-        "2,bob@uni.edu,Bob,bob-b,43,A,dsl-def,enrolled",
-        "3,cid@uni.edu,Cid,cid-c,44,B,dsl-ghi,enrolled",
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
+        "bob@uni.edu,Bob,bob-b,43,dsl-def,enrolled",
+        "cid@uni.edu,Cid,cid-c,44,dsl-ghi,enrolled",
     )
     rc = assign.provision_all(
         "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path, dry_run=True
@@ -137,7 +137,7 @@ def test_group_false_forces_individual_even_for_a_group_template(
             AssertionError("must not be read")
         ),
     )
-    path = _roster_file(tmp_path, "1,ada@uni.edu,Ada,ada-l,42,A,dsl-abc,enrolled")
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
     rc = assign.provision_all(
         "COURSE",
         "assignment-4-project-f2026",
@@ -224,8 +224,8 @@ def test_group_provisioning_filters_teams_csv_through_the_roster_allowlist(
     )
     path = _roster_file(
         tmp_path,
-        "1,ada@uni.edu,Ada,ada-l,42,A,dsl-abc,enrolled",
-        "2,eve@uni.edu,Eve,eve-e,43,A,dsl-xyz,auditor",  # an auditor, not a team member
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
+        "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor",  # an auditor, not a team member
     )
     rc = assign.provision_all(
         "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path, dry_run=True
@@ -361,7 +361,7 @@ def test_provision_all_records_handout_under_schedule_key_and_survives_site_fail
         raise exc
 
     monkeypatch.setattr(site, "sync_site", boom_site)
-    path = _roster_file(tmp_path, "1,ada@uni.edu,Ada,ada-l,42,A,dsl-abc,enrolled")
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
     rc = assign.provision_all(
         "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path, group=False
     )
