@@ -232,7 +232,11 @@ def discover_handed_out_assignments(cohort_org: str) -> frozenset[str]:
     The site gates an assignment's brief on this (see `site._assignment_entry`), which is
     why it reads what SHIPPED rather than what the plan intended: a hand-out with no
     `handout_datetime` pinned - the manual button's documented mode - is invisible to the
-    plan, and gating on the plan alone published those briefs on sight."""
+    plan, and gating on the plan alone published those briefs on sight.
+
+    This is a second listing of an org `sync_site` already listed, and it must stay one:
+    memoising `list_org_repos` would serve assign.py a listing taken BEFORE it created the
+    template repo it then syncs the site for, withholding the brief it just handed out."""
     return frozenset(
         r["name"]
         for r in list_org_repos(cohort_org)

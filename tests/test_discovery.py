@@ -33,6 +33,16 @@ def test_is_infra_repo_excludes_by_name_and_by_topic():
     assert not discovery._is_infra_repo({"name": "notes"})  # topics absent -> content
 
 
+def test_handed_out_assignments_are_the_topic_stamped_cohort_templates(monkeypatch):
+    # The site withholds an assignment's brief until this says the cohort has it, so it
+    # must name the frozen cohort template (assign.py stage 1) and nothing else - not the
+    # per-student submission repos beside it, not the gradebooks.
+    monkeypatch.setattr(discovery, "list_org_repos", lambda org: INFRA_AND_CONTENT)
+    assert discovery.discover_handed_out_assignments("Cohort-f2026") == frozenset(
+        {"assignment-1-f2026-template"}
+    )
+
+
 def test_both_discover_functions_apply_the_same_infra_exclusions(monkeypatch):
     # One shared predicate: the public <org>.github.io site repo must never be treated
     # as a content repo (those HOST the faculty workflows and get DSL_BOT_TOKEN set as a

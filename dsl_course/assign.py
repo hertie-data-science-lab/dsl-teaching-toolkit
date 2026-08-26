@@ -131,8 +131,15 @@ def ensure_cohort_template(
         return None
     # The topic is not decoration: discovery.discover_handed_out_assignments reads it back
     # as the record that this assignment went out, and the site withholds the brief until
-    # it does.
-    set_repo_topics(cohort_org, slug, [slug, ASSIGNMENT_TEMPLATE_TOPIC])
+    # it does. So a failure here is said out loud with its consequence attached rather than
+    # dropped - the hand-out itself succeeded, and failing it now would be worse.
+    if not set_repo_topics(cohort_org, slug, [slug, ASSIGNMENT_TEMPLATE_TOPIC]):
+        log_err(
+            f"  ! {cohort_org}/{slug} carries no `{ASSIGNMENT_TEMPLATE_TOPIC}` topic. That "
+            f"topic is what the cohort site reads as the record that {slug} was handed "
+            f"out, so its brief stays withheld there until the topic is set by hand (or "
+            f"its `handout_datetime` passes)."
+        )
     return slug
 
 
