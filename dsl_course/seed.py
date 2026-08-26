@@ -20,7 +20,9 @@ it, and are imported from there (see `__all__` for the few names still reached f
 
 CLI:
   refresh --course-org X   re-render the content actions into every course repo with
-                           fresh cohort/course-source-repo/assignment dropdowns, rebuild
+                           fresh cohort/course-source-repo/assignment dropdowns, converge
+                           each materials repo's SYSTEM-owned files (maintainer guide,
+                           syllabus example) and its seeded stubs, rebuild
                            the org profile README, and re-push each registered cohort's
                            welcome workflows + classroom-config SYSTEM-owned files (the
                            schema README, the dispatchers, the schedule validator) and
@@ -339,8 +341,9 @@ def _refresh_stubs(course_org: str, repo: str) -> int:
 
 def refresh(course_org: str) -> int:
     """Refresh both layers: the run-from-repo content actions in every content repo,
-    AND the central org-level workflows in .github; repopulate dropdowns; rebuild the
-    org profile README; re-push every registered cohort's welcome workflows, its
+    AND the central org-level workflows in .github; converge each materials repo's
+    SYSTEM-owned files (maintainer guide, syllabus example) and its seeded stubs;
+    repopulate dropdowns; rebuild the org profile README; re-push every registered cohort's welcome workflows, its
     classroom-config SYSTEM-owned files (README contract, dispatch-sync*.yml,
     validate-schedule.yml) and its `*.sample` worked examples (skipping cohorts whose
     repos are archived) - never its own config, which stays create-if-missing; (Free-plan
@@ -351,6 +354,9 @@ def refresh(course_org: str) -> int:
     Non-zero if any file could not be written: this runs nightly on a cron, so a run that
     silently failed to converge an org would go unnoticed until someone clicked a button
     that was never seeded."""
+    # Local import: `scaffold` imports this module, so a module-level one is a cycle.
+    from . import scaffold
+
     cohorts = discover_cohorts(course_org)
     targets = discover_content_repos(course_org)
     assignments = discover_assignments(
@@ -363,6 +369,9 @@ def refresh(course_org: str) -> int:
     for repo in sorted(targets):
         failures += _push_workflows(course_org, repo, cohorts, assignments)
         failures += _refresh_stubs(course_org, repo)
+        # A no-op on the code and dataset repos this sweep also returns; the gate is
+        # inside, so no caller can forget it.
+        failures += scaffold.refresh_materials_system_files(course_org, repo)
     failures += _propagate_repo_secret(course_org, targets)
     failures += seed_github_workflows(course_org)
     failures += _write_heartbeat(course_org)

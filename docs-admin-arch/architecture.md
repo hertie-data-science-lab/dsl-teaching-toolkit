@@ -450,6 +450,9 @@ cron 05:27, ungated`"| sr["seed refresh (per course org)"]
   sr --> w["`.github buttons
 + run-from-repo buttons`"]
   sr --> sec["repo secrets on content repos"]
+  sr --> sys["`each materials repo:
+maintainer guide + syllabus example
++ seeded stubs`"]
   sr --> pr["profile READMEs + dropdowns"]
   sr --> coh["`each registered cohort:
 welcome workflows + classroom-config

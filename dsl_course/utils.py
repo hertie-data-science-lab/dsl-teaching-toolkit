@@ -929,6 +929,13 @@ def is_untouched_stub(text: str) -> bool:
 # Named rather than re-spelled per module, so the exclusion cannot lapse when one is renamed.
 SYLLABUS_SAMPLE_FILE = "SYLLABUS.md.sample"
 SYLLABUS_SESSIONS_FILE = "SYLLABUS.sessions.md"
+# How `scaffold_materials` names every materials repo (`course-materials-<tag>`) - the New
+# materials repo button takes only the tag, so this prefix is guaranteed by the toolkit
+# rather than a convention faculty could deviate from. Named here because `seed.refresh`
+# has to recognise a materials repo among the code and dataset repos that
+# `discover_content_repos` returns alongside it, and a rename reaching only one side would
+# silently stop the convergence it gates.
+MATERIALS_REPO_PREFIX = "course-materials-"
 # A session's OPTIONAL prose reading list, the one file in a `readings/NN_.../` folder that
 # is inlined as text rather than listed as a download. Named here for the same reason as the
 # two above: `scaffold` seeds it and `site`/`syllabus` match on it, so a rename that reached
