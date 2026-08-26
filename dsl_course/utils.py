@@ -163,8 +163,40 @@ def log_err(msg: str) -> None:
 
 
 def repo_exists(org: str, name: str) -> bool:
+    """Whether the repo is there. OPTIMISTIC: any read failure reads as absent, because
+    this answers a create-if-missing question where guessing wrong costs a retry.
+
+    Its neighbour `org_exists` is deliberately the opposite shape - it raises rather than
+    call an unreadable org deleted - because its callers act destructively on a False.
+    Reach for that one whenever absence is going to remove something."""
     code, _ = gh("api", f"repos/{org}/{name}")
     return code == 0
+
+
+def org_exists(org: str) -> bool:
+    """Whether `org` is still a live GitHub org.
+
+    The liveness half of discovery, and the ONLY evidence an org is gone that anything
+    here may act on. The topic search behind the inventory is eventually consistent, and
+    generously so: a deleted org kept coming back from `gh search repos topic:dsl-cohort`
+    for ten days after the org itself was gone. The search says what is INDEXED; this says
+    what is THERE.
+
+    Fails CLOSED, which is the whole point - only an unambiguous 404 is absence. A 403, a
+    5xx, a rate limit or a timeout all mean "could not tell", and both callers act
+    destructively on a False (a row dropped from a generated page, a cohort unregistered
+    from every nightly sync). Reading "could not tell" as "deleted" would do that on any
+    transient failure, so it raises instead. `repo_exists` above is deliberately the
+    opposite shape: it answers a cheap should-I-create question where a wrong guess costs
+    a retry, not a deletion."""
+    code, out = gh("api", f"orgs/{org}", "--jq", ".login")
+    if code == 0:
+        return True
+    if is_missing_resource(out):
+        return False
+    raise RuntimeError(
+        f"could not determine whether the org `{org}` still exists: {out[:200]}"
+    )
 
 
 def repo_is_private(org: str, name: str) -> bool:

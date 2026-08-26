@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import list_orgs
+from dsl_course import list_orgs, utils
 
 
 def test_main_reports_a_failed_search_and_exits_nonzero(monkeypatch, capsys):
@@ -38,12 +38,70 @@ def test_main_writes_the_inventory_when_discovery_succeeds(
         ],
     )
     monkeypatch.setattr(list_orgs, "discover_cohort_orgs", list)
+    monkeypatch.setattr(list_orgs, "_registered_cohorts", lambda org: [])
     page = tmp_path / "inventory.md"
     monkeypatch.setattr("sys.argv", ["list_orgs", "--update-file", str(page)])
 
     assert list_orgs.main() == 0
     assert "My-Course" in page.read_text()
     assert "1 course orgs" in capsys.readouterr().out
+
+
+def test_the_tree_nests_each_cohort_under_its_own_course_org(monkeypatch):
+    monkeypatch.setattr(
+        list_orgs, "_registered_cohorts", lambda org: ["C1-f2025", "C1-f2026"]
+    )
+    orgs = [
+        {"org": "C1", "course_name": "Deep Learning", "course_code": "E1", "url": "u1"},
+        {"org": "C2", "course_name": "Stats", "course_code": "", "url": "u2"},
+    ]
+    cohorts = [
+        {"org": "C1-f2025", "course": "C1", "url": "u3"},
+        {"org": "C1-f2026", "course": "C1", "url": "u4"},
+    ]
+    out = list_orgs.render_tree(orgs, cohorts)
+    assert out == (
+        "- **[C1](u1)** - Deep Learning - E1\n"
+        "    - [C1-f2025](u3)\n"
+        "    - [C1-f2026](u4)\n"
+        # a course org running nothing says so, rather than being an absence
+        "- **[C2](u2)** - Stats\n"
+        "    - _no cohorts yet_"
+    )
+
+
+def test_a_live_but_unregistered_cohort_is_marked_on_the_tree(monkeypatch):
+    # It exists and is tagged, but its course's registry does not list it - so every
+    # nightly sync fans out past it and does NOTHING, the one failure mode that reports
+    # itself nowhere else. Marked, never auto-registered: absence can be deliberate.
+    monkeypatch.setattr(list_orgs, "_registered_cohorts", lambda org: ["C1-f2025"])
+    out = list_orgs.render_tree(
+        [{"org": "C1", "course_name": "DL", "course_code": "", "url": "u1"}],
+        [
+            {"org": "C1-f2025", "course": "C1", "url": "u2"},
+            {"org": "C1-f2026", "course": "C1", "url": "u3"},
+        ],
+    )
+    assert "    - [C1-f2025](u2)\n" in out + "\n"  # registered: no marker
+    assert "    - [C1-f2026](u3) - **not registered**" in out
+
+
+def test_a_cohort_pointing_at_no_discovered_course_org_is_listed_as_orphaned(
+    monkeypatch,
+):
+    monkeypatch.setattr(list_orgs, "_registered_cohorts", lambda org: [])
+    # Its `course:` pointer is dangling, or that org lost its dsl-course-hub topic. It
+    # nests nowhere, and dropping it silently is how a broken pointer stays broken.
+    out = list_orgs.render_tree(
+        [{"org": "C1", "course_name": "", "course_code": "", "url": "u1"}],
+        [
+            {"org": "lost-f2025", "course": "deleted-course", "url": "u2"},
+            {"org": "bare-f2025", "course": "", "url": "u3"},
+        ],
+    )
+    assert "Orphaned cohort orgs" in out
+    assert "[lost-f2025](u2) -> `deleted-course`" in out
+    assert "[bare-f2025](u3) -> `no course: pointer`" in out
 
 
 def test_metadata_is_empty_only_for_an_org_that_carries_none(monkeypatch):
@@ -86,7 +144,35 @@ def test_a_partial_search_page_is_read_normally(monkeypatch):
             {"name": "course-materials", "owner": {"login": "Org-B"}},  # not a .github
         ],
     )
+    monkeypatch.setattr(list_orgs, "org_exists", lambda org: True)
     assert list_orgs._tagged_orgs(list_orgs.COURSE_HUB_TOPIC) == ["Org-A"]
+
+
+def test_a_deleted_org_the_search_index_still_returns_is_dropped(monkeypatch):
+    # The topic search lags org deletion - a deleted org kept coming back from it for ten
+    # days - so a hit is not evidence the org is there.
+    monkeypatch.setattr(
+        list_orgs,
+        "gh_json",
+        lambda *a: [
+            {"name": ".github", "owner": {"login": "Live-Org"}},
+            {"name": ".github", "owner": {"login": "Deleted-Org"}},
+        ],
+    )
+    monkeypatch.setattr(list_orgs, "org_exists", lambda org: org == "Live-Org")
+    assert list_orgs._tagged_orgs(list_orgs.COHORT_TOPIC) == ["Live-Org"]
+
+
+def test_only_a_404_counts_as_a_deleted_org(monkeypatch):
+    # Fails closed: "could not tell" must never read as "deleted", or one rate-limited
+    # call drops a live org from a page that is written out whole.
+    monkeypatch.setattr(utils, "gh", lambda *a, **k: (0, "Some-Org"))
+    assert utils.org_exists("Some-Org") is True
+    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    assert utils.org_exists("Some-Org") is False
+    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: HTTP 403 rate limit"))
+    with pytest.raises(RuntimeError, match="whether the org `Some-Org` still exists"):
+        utils.org_exists("Some-Org")
 
 
 def test_metadata_parses_the_yaml_body(monkeypatch):

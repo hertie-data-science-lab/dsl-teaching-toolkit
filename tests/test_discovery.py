@@ -10,6 +10,7 @@ session-folder rule makes the API side disagree with the local-checkout side. No
 from __future__ import annotations
 
 import pytest
+import yaml
 
 from dsl_course import discovery, seed, utils
 
@@ -31,6 +32,33 @@ def test_is_infra_repo_excludes_by_name_and_by_topic():
     assert all(discovery._is_infra_repo(r) for r in infra)
     assert not any(discovery._is_infra_repo(r) for r in content)
     assert not discovery._is_infra_repo({"name": "notes"})  # topics absent -> content
+
+
+def test_unregister_cohort_rewrites_the_registry_without_it(monkeypatch):
+    monkeypatch.setattr(
+        discovery,
+        "get_file_content",
+        lambda *a: "cohorts:\n- Cohort-f2025\n- Cohort-f2026\n",
+    )
+    written: list = []
+    monkeypatch.setattr(discovery, "put_file", lambda *a: written.append(a) or True)
+
+    assert discovery.unregister_cohort("Course-Org", "Cohort-f2025") is True
+    (_org, _repo, _path, body, message) = written[0]
+    assert yaml.safe_load(body.decode()) == {"cohorts": ["Cohort-f2026"]}
+    assert "Cohort-f2025" in message
+
+
+def test_unregister_cohort_writes_nothing_for_one_already_absent(monkeypatch):
+    # Idempotent: the nightly refresh probes every cohort every night, and a no-op must
+    # not put a commit into the course org's .github repo each time.
+    monkeypatch.setattr(
+        discovery, "get_file_content", lambda *a: "cohorts:\n- Cohort-f2026\n"
+    )
+    monkeypatch.setattr(
+        discovery, "put_file", lambda *a: pytest.fail("wrote for an absent cohort")
+    )
+    assert discovery.unregister_cohort("Course-Org", "Cohort-f2025") is True
 
 
 def test_handed_out_assignments_are_the_topic_stamped_cohort_templates(monkeypatch):

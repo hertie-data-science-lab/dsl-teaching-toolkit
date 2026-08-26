@@ -109,9 +109,24 @@ jobs:
               --body "Automated refresh by \`refresh-inventory\`. Course orgs discovered via topic \`dsl-course-hub\`, cohort orgs via \`dsl-cohort\`." \
               --base main --head "$BRANCH"
           fi
-          # Merge outright, not --auto. Auto-merge is a queue for PRs that must WAIT on
-          # something, and main requires neither an approving review nor a status check -
-          # so GitHub rejects enabling it, which is exactly how this silently stopped
-          # landing. No `|| true` either: an inventory that can't merge is a broken
-          # refresh, and the run must go red rather than report success and drift.
+          # main requires the `pytest` check, so the merge has to WAIT for it - merging
+          # outright raced CI and failed with `Required status check "pytest" is expected`,
+          # which is how this silently stopped landing (the run went red, the PR stayed
+          # open, and the inventory drifted for weeks).
+          #
+          # Waited on here rather than handed to `--auto`: auto-merge would let this run
+          # report success while the merge may never happen, and an inventory that cannot
+          # merge is a broken refresh. Watching keeps the verdict on the run - red if the
+          # checks fail, red if the merge is refused. No `|| true` for the same reason.
+          # `--watch` exits non-zero when NO check has registered on the branch yet, which
+          # is the same race one step earlier: the push and the PR both land before the
+          # workflow they trigger appears. Retry until a check shows up, then watch it.
+          for _ in $(seq 12); do
+            gh pr checks "$BRANCH" --watch --fail-fast && break
+            echo "no checks registered yet - waiting"
+            sleep 10
+          done
+          # Re-asserted, not assumed: the loop above exits on the last retry whether or not
+          # a check ever appeared, and a merge is not something to attempt on a maybe.
+          gh pr checks "$BRANCH" --fail-fast
           gh pr merge "$BRANCH" --squash --delete-branch=false
