@@ -426,12 +426,12 @@ session under POSIX rlimits (address space, CPU, nproc, file size) and a wall-cl
 SIGKILLs the whole **process group**, so a fork or memory bomb scores a recorded zero instead of
 OOM-killing the job and blocking the cohort's grading forever. Known, accepted residual: there is
 **no network isolation**, and graded code running in-process can forge its own report - which is
-why `auto` scores are faculty-reviewed before distribution and never shown to students directly.
+why `autograde_score` is faculty-reviewed before distribution and never shown to students directly.
 
 **Grades** are three idempotent stages: `sync` creates a private `grades-<handle>` per onboarded
 enrolled student; `render` pivots the CSVs into a preview PR on branch `grades-update`; and
-`distribute` pushes each student's `grades.yml` and emails them. Machine-written cells (`auto`,
-`team`, `team_grade`) are **write-once**, and `render` refuses to force-push its branch if a
+`distribute` pushes each student's `grades.yml` and emails them. Machine-written cells
+(`autograde_score`, `team`, `team_score`) are **write-once**, and `render` refuses to force-push its branch if a
 non-bot commit sits on it - a reviewer's correction is never clobbered.
 
 ## Convergence - the daily self-refresh
@@ -678,7 +678,7 @@ Self-contained - workflows and their Python implementation both live in this rep
     cohort repo additively, cloning every repo once per run. Shared by the button and the scheduler.
   - `assign` - freeze a cohort assignment template, then fan out per-student (or per-team) repos.
   - `collect` - the faculty-side autograder: deadline snapshots, pinned checkout, contained test
-    run, fire-once sentinels, `auto` scores into the grade CSV.
+    run, fire-once sentinels, `autograde_score` into the grade CSV.
   - `grades` - gradebook repos (`sync`), the preview PR (`render`), fan-out + email (`distribute`).
   - `enrol_codes` / `mailer` - generate + email enrolment codes; Graph or SMTP transport.
   - `scaffold` - create structured materials / assignment repos + the website (cohort or course).

@@ -8,6 +8,7 @@ from __future__ import annotations
 import csv
 import io
 
+import pytest
 import yaml
 
 from dsl_course import grades, roster
@@ -24,6 +25,42 @@ def test_parse_grades_tolerates_blank_and_missing_columns():
     # values are stripped, never coerced
     assert rows[1].team == "team-x" and rows[1].individual_adjustment == "+4"
     assert rows[0].team == "" and rows[0].final_grade == "88"
+
+
+def test_a_retired_header_is_refused_rather_than_half_read():
+    # The rename left `github_handle`, `team` and `team_comments` untouched, so an
+    # un-migrated CSV would parse PARTIALLY: the row keeps its handle while every renamed
+    # cell reads blank. Nothing downstream can tell that apart from a legitimately sparse
+    # row, so `render` would publish a gradebook with the marks missing and `merge_auto`
+    # would write the file back having discarded them - green, and destructive.
+    text = (
+        "github_handle,team,auto,manual,team_grade,adjustment,final,comments,team_comments\n"
+        "ada-l,team-1,87,9,78,+4,B+,Nice work.,Team was solid.\n"
+    )
+    with pytest.raises(grades.RetiredGradeHeader) as exc:
+        grades.parse_grades(text)
+    # The message has to say what to rename to, or it just blocks without helping.
+    assert "final -> final_grade" in str(exc.value)
+
+
+def test_merge_auto_refuses_a_retired_header_instead_of_wiping_it():
+    # The path that actually destroys data: the autograder re-runs, reads the old CSV as
+    # blank, and re-serialises it under the new header. Write-once gives no protection,
+    # because from the new code's side those cells were never filled.
+    text = (
+        "github_handle,team,auto,manual,team_grade,adjustment,final,comments,team_comments\n"
+        "ada-l,,87,9,,,B+,Nice work.,\n"
+    )
+    with pytest.raises(grades.RetiredGradeHeader):
+        grades.merge_auto(text, [("ada-l", {"autograde_score": "3"})])
+
+
+def test_a_current_header_missing_optional_columns_still_parses():
+    # The guard keys on the RETIRED names specifically - a sparse but current header, and
+    # an extra column of the marker's own, are both still fine.
+    text = "github_handle,final_grade,rubric_notes\nada-l,B+,see the rubric tab\n"
+    (row,) = grades.parse_grades(text)
+    assert row.final_grade == "B+" and row.github_handle == "ada-l"
 
 
 def test_individual_entry_drops_group_fields():

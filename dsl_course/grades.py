@@ -131,12 +131,43 @@ class GradeRow:
 # --------------------------------------------------------------------------- pure core
 
 
+# The pre-rename column names. A CSV still carrying them must never be parsed, because the
+# rename left `github_handle`, `team` and `team_comments` untouched: an old row would parse
+# PARTIALLY, keeping its handle while every renamed cell read blank. Nothing downstream can
+# tell that apart from a legitimately sparse row, so `render` would publish a gradebook with
+# the marks missing and `merge_auto` would write the file back having discarded them - a
+# green run that destroys a marker's work. Refusing to read the file is the only safe answer.
+_RETIRED_GRADE_FIELDS = {
+    "auto": "autograde_score",
+    "manual": "manual_score",
+    "team_grade": "team_score",
+    "adjustment": "individual_adjustment",
+    "final": "final_grade",
+    "comments": "individual_comments",
+}
+
+
+class RetiredGradeHeader(Exception):
+    """A grades CSV written against the pre-rename column names."""
+
+
 def parse_grades(text: str) -> list[GradeRow]:
-    """Parse one `grades/<assignment>.csv` into rows (blank/extra columns tolerated)."""
-    rows = []
-    for row in csv.DictReader(io.StringIO(text)):
-        rows.append(GradeRow(**{f: (row.get(f) or "").strip() for f in GRADE_FIELDS}))
-    return rows
+    """Parse one `grades/<assignment>.csv` into rows (blank/extra columns tolerated).
+
+    Raises RetiredGradeHeader if the header uses the pre-rename names - see
+    `_RETIRED_GRADE_FIELDS` for why that cannot be tolerated the way an unknown column is."""
+    reader = csv.DictReader(io.StringIO(text))
+    stale = [f for f in (reader.fieldnames or []) if f.strip() in _RETIRED_GRADE_FIELDS]
+    if stale:
+        renames = ", ".join(f"{f} -> {_RETIRED_GRADE_FIELDS[f.strip()]}" for f in stale)
+        raise RetiredGradeHeader(
+            f"grades CSV uses retired column name(s): {renames}. Rename the header row and "
+            f"re-run; reading it as-is would drop every mark in those columns."
+        )
+    return [
+        GradeRow(**{f: (row.get(f) or "").strip() for f in GRADE_FIELDS})
+        for row in reader
+    ]
 
 
 def gradebook_entry(row: GradeRow) -> dict:
@@ -305,12 +336,29 @@ def load_grade_sources(cohort_org: str) -> dict[str, list[GradeRow]]:
         )
         return {}
     per: dict[str, list[GradeRow]] = {}
+    stale = []
     for name in sorted(out.splitlines()):
         if not name.endswith(".csv"):
             continue
         content = get_file_content(cohort_org, CONFIG_REPO, f"{GRADES_DIR}/{name}")
-        if content is not None:
+        if content is None:
+            continue
+        try:
             per[name[:-4]] = parse_grades(content)
+        except RetiredGradeHeader as exc:
+            # Name the file and carry on reading the others, so one un-migrated CSV
+            # reports itself by name rather than aborting on the first one it meets.
+            log_err(f"{GRADES_DIR}/{name}: {exc}")
+            stale.append(name)
+    if stale:
+        # Returning a partial set would render gradebooks for the cohort MINUS these
+        # assignments, which reads as "those students have no marks" rather than as an
+        # error. Nothing is rendered until every CSV can be read.
+        log_err(
+            f"{len(stale)} grade CSV(s) still use retired column names - rename their "
+            f"header rows before rendering: {', '.join(stale)}"
+        )
+        return {}
     return per
 
 
