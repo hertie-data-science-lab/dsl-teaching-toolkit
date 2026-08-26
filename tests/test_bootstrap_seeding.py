@@ -576,10 +576,12 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "refresh_welcome_workflows", welcome_failures)
     monkeypatch.setattr(seed, "refresh_classroom_samples", sample_failures)
     monkeypatch.setattr(seed, "refresh_classroom_system_files", system_failures)
-    # The per-cohort loop probes the cohort ORG once (`orgs/<cohort>`): a 404 marker = the
-    # org is deleted (prune + skip). A live org then checks repo_is_archived (archived = skip
-    # frozen). (0, "") from the org probe + repo_is_archived False = present and live, proceed.
+    # The per-cohort loop probes the cohort ORG once: gone = unregister + skip. A live org
+    # then checks repo_is_archived (archived = skip frozen). org_exists True +
+    # repo_is_archived False = present and live, proceed.
     monkeypatch.setattr(seed, "gh", lambda *a, **k: (0, ""))
+    monkeypatch.setattr(seed, "org_exists", lambda org: True)
+    monkeypatch.setattr(seed, "unregister_cohort", lambda course, cohort: True)
     monkeypatch.setattr(seed, "repo_is_archived", lambda org, repo: False)
 
 
@@ -636,8 +638,9 @@ def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
 
 def test_refresh_prunes_a_deleted_cohort_org(monkeypatch, capsys):
     # A cohort org DELETED after it was registered 404s on every write - which reds the
-    # nightly cron forever (distinct from an archived cohort, which still exists). Skip a
-    # genuinely-gone cohort with a prune hint; the live cohort beside it still converges.
+    # nightly cron forever (distinct from an archived cohort, which still exists). It is
+    # skipped AND dropped from the registry: logging "prune it by hand" left the dead org
+    # registered, so every nightly sync in every tool went on trying it.
     refreshed: list[str] = []
     _stub_refresh(
         monkeypatch,
@@ -645,25 +648,28 @@ def test_refresh_prunes_a_deleted_cohort_org(monkeypatch, capsys):
         sample_failures=lambda org: refreshed.append(org) or 0,
         system_failures=lambda org: refreshed.append(org) or 0,
     )
-
-    def fake_gh(*a, **k):
-        # the per-cohort ORG probe (orgs/<cohort>): Cohort-f2026's org was deleted -> 404
-        if "Cohort-f2026" in a[1]:
-            return (1, "gh: Not Found (HTTP 404)")
-        return (0, "")
-
-    monkeypatch.setattr(seed, "gh", fake_gh)
+    monkeypatch.setattr(seed, "org_exists", lambda org: org != "Cohort-f2026")
+    pruned: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        seed,
+        "unregister_cohort",
+        lambda course, cohort: pruned.append((course, cohort)),
+    )
 
     assert seed.refresh("Course-Org") == 0
     assert refreshed == ["Cohort-s2027"] * 3  # deleted cohort skipped whole
+    assert pruned == [
+        ("Course-Org", "Cohort-f2026")
+    ]  # and unregistered, not just noted
     out = capsys.readouterr()
-    assert "[skip] Cohort-f2026" in out.out and "prune" in out.out
+    assert "[skip] Cohort-f2026" in out.out
     assert "refresh incomplete" not in out.err
 
 
 def test_refresh_does_not_prune_on_a_transient_read_failure(monkeypatch):
     # A non-404 read error is NOT proof the cohort is gone - it must still be refreshed
-    # (and fail loud there), never silently skipped on a rate-limit or 502.
+    # (and fail loud there), never silently skipped on a rate-limit or 502, and above all
+    # never UNREGISTERED, which would remove it from every nightly sync silently.
     refreshed: list[str] = []
     _stub_refresh(
         monkeypatch,
@@ -671,10 +677,19 @@ def test_refresh_does_not_prune_on_a_transient_read_failure(monkeypatch):
         sample_failures=lambda org: refreshed.append(org) or 0,
         system_failures=lambda org: refreshed.append(org) or 0,
     )
-    monkeypatch.setattr(seed, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
+
+    def cannot_tell(org: str) -> bool:
+        raise RuntimeError("gh: HTTP 502")
+
+    monkeypatch.setattr(seed, "org_exists", cannot_tell)
+    pruned: list = []
+    monkeypatch.setattr(
+        seed, "unregister_cohort", lambda course, cohort: pruned.append(cohort)
+    )
 
     assert seed.refresh("Course-Org") == 0
     assert refreshed == ["Cohort-f2026"] * 3 + ["Cohort-s2027"] * 3
+    assert pruned == []
 
 
 # ------------------------------------------------- the 60-day auto-disable heartbeat

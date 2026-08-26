@@ -48,16 +48,17 @@ from .discovery import (
     discover_release_sources,
     discover_sessions,
     register_cohort,
+    unregister_cohort,
 )
 from .profile_readme import update_profile_readme
 from .roster import CONFIG_REPO
 from .utils import (
     gh,
-    is_missing_resource,
     log,
     log_err,
     log_ok,
     log_step,
+    org_exists,
     put_file,
     put_files,
     refresh_stubs,
@@ -386,17 +387,30 @@ def refresh(course_org: str) -> int:
     for cohort in cohorts:
         # A cohort ORG DELETED after it was registered 404s on every write, which would red
         # the nightly cron forever. Detect a genuinely-gone org by probing the ORG itself: a
-        # 404 there means the org is gone -> skip with a prune hint. Probing one of its repos
-        # instead wrongly skipped a live org that had only lost its classroom-config repo (and
-        # skipped its welcome refresh too) - a live cohort missing its config repo is a real
-        # problem that must fail loud in refresh_classroom_samples below, not be pruned.
-        # A transient read failure is NOT a 404, so a live cohort is never skipped by mistake.
-        code, out = gh("api", f"orgs/{cohort}")
-        if code != 0 and is_missing_resource(out):
-            log(
-                f"  [skip] {cohort} (org not found - deleted cohort org? prune it "
-                f"from {course_org}/.github/{COHORTS_PATH})"
-            )
+        # 404 there means the org is gone. Probing one of its repos instead wrongly skipped
+        # a live org that had only lost its classroom-config repo (and skipped its welcome
+        # refresh too) - a live cohort missing its config repo is a real problem that must
+        # fail loud in refresh_classroom_samples below, not be pruned. `org_exists` RAISES
+        # on anything that is not a clean 404, so a rate-limited probe can never be read as
+        # a deletion.
+        #
+        # The registry is then converged rather than merely annotated: this used to log
+        # "prune it by hand", which nobody does, so a deleted org stayed registered and
+        # every nightly sync in every tool kept trying it. Removal here is safe precisely
+        # because the org is proven gone - see `unregister_cohort` for why the ADD side
+        # stays manual.
+        try:
+            gone = not org_exists(cohort)
+        except RuntimeError as exc:
+            # "Could not tell" is not "gone". org_exists raises rather than guessing, and
+            # here the safe reading of that is LIVE: the cohort goes on to be refreshed and
+            # fails loudly on its own if something is really wrong, rather than being
+            # skipped - or worse, unregistered - on a rate limit or a 502.
+            log(f"  [warn] could not probe {cohort}, treating it as live: {exc}")
+            gone = False
+        if gone:
+            log(f"  [skip] {cohort} (org no longer exists)")
+            unregister_cohort(course_org, cohort)
             continue
         # A finished semester's cohort is archived, and an archived repo is read-only:
         # every write 403s, and the samples are new files so put_file's sha no-op can't
