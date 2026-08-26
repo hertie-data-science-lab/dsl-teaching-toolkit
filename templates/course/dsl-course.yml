@@ -1,3 +1,5 @@
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
 org: {org}
 org_name: {org_name}
 course_name: {course_name}
@@ -10,7 +12,8 @@ course_code: {course_code}
 #   # (The public open-courseware site always lists root files - it hosts what it lists.)
 
 # `course_name`, `course_code` and `course_description` are what reach the cohort websites
-# (`org_name` does not - it names the org). Editing them here re-syncs every cohort site.
+# (`org_name` does not - it names the org). Editing them here re-syncs every cohort site
+# already bootstrapped from this course org.
 #
 # This is the persistent COURSE org - it spans many cohorts (years). Cohorts are
 # registered separately in .github/cohort-courses-pages.yml.

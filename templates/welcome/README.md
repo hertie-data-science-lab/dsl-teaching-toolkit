@@ -1,3 +1,5 @@
+<!-- INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten. This is the public page students land on to join the course. -->
+
 # Welcome to the course
 
 **Start here.** To join, open a

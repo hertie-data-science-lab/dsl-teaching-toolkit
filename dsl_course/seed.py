@@ -89,6 +89,7 @@ from .workflows_render import (
     render_sync_gradebooks,
     render_sync_membership,
     render_sync_site,
+    system_owned,
 )
 
 # What the rest of the package reaches for as `seed.<name>`: this module's own jobs, plus
@@ -222,8 +223,10 @@ def _push_workflows(
         org,
         repo,
         {
-            WORKFLOWS[0]: render_release(cohort_orgs, repo).encode(),
-            WORKFLOWS[1]: render_provision(cohort_orgs, assignments).encode(),
+            WORKFLOWS[0]: system_owned(render_release(cohort_orgs, repo)).encode(),
+            WORKFLOWS[1]: system_owned(
+                render_provision(cohort_orgs, assignments)
+            ).encode(),
         },
         "ci: refresh release workflows",
         delete=RETIRED_WORKFLOWS,
@@ -281,7 +284,7 @@ def seed_github_workflows(course_org: str) -> int:
     if not put_files(
         course_org,
         ".github",
-        {path: content.encode() for path, content in files.items()},
+        {path: system_owned(content).encode() for path, content in files.items()},
         "ci: refresh org workflows",
         # Retired workflows - remove any copies already seeded into orgs bootstrapped before
         # the change, so faculty never see two workflows for one job. sync-enrolment/sync-teams

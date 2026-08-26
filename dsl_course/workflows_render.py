@@ -36,6 +36,20 @@ _SETUP_PYTHON = (
     "actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0"
 )
 
+# Every workflow in an org is re-rendered from this module by Refresh actions, nightly, so
+# a hand-edit to one survives at most a day. Stamped on at the write sites (seed.py) rather
+# than inside each renderer's own header, so a new renderer cannot ship without it.
+SYSTEM_OWNED_BANNER = (
+    "# SYSTEM-OWNED - do not edit, edits here are overwritten. This workflow is\n"
+    "# re-rendered from the central DSL teaching toolkit by 'Refresh actions' (nightly).\n"
+)
+
+
+def system_owned(rendered: str) -> str:
+    """Prefix a rendered workflow with the ownership banner."""
+    return SYSTEM_OWNED_BANNER + rendered
+
+
 # Workflow-level permissions for every rendered workflow. Each one authenticates with
 # secrets.DSL_BOT_TOKEN and never needs the ambient GITHUB_TOKEN - not even to check out,
 # because the central repo is public. So the ambient token is dropped to zero scopes.
@@ -194,7 +208,7 @@ _CRON_NOTICE = (
           # A filed issue emails only the repo's watchers, which in practice is nobody.
           # The mention makes a red cron land in the admins' inbox; course-admin, not
           # instructors, because broken infrastructure is not the teaching staff's problem.
-          body=$(printf 'The unattended run failed or was cancelled (a timeout counts): %s\\n\\nNothing retries it before the next scheduled run. This issue closes itself once a run succeeds.\\n\\ncc @%s/course-admin\\n' "$RUN_URL" "${REPO%%/*}")
+          body=$(printf 'The unattended run failed or was cancelled: %s\\n\\nNothing retries it before the next scheduled run. This issue closes itself once a run succeeds.\\n\\ncc @%s/course-admin\\n' "$RUN_URL" "${REPO%%/*}")
           # The step runs under `bash -e`, so an unguarded capture would abort the step on a
           # transient search failure - before the `gh issue create` that is the whole point.
           # No dedupe hit just means we file a fresh issue.
