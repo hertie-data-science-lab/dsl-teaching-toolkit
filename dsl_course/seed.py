@@ -68,6 +68,7 @@ from .utils import (
 from .welcome import (
     refresh_classroom_samples,
     refresh_classroom_system_files,
+    refresh_cohort_pointer,
     refresh_welcome_workflows,
 )
 from .workflows_render import (
@@ -451,6 +452,9 @@ def refresh(course_org: str) -> int:
         # nightly cron would overwrite a live roster every night.
         failures += refresh_classroom_system_files(cohort)
         failures += refresh_classroom_samples(cohort)
+        # The pointer its dispatchers read to find this course org. Also SYSTEM-owned and
+        # also only ever written by Bootstrap cohort until now - same bug class.
+        failures += refresh_cohort_pointer(cohort, course_org)
         # The cohort's OWN landing pages - the student-facing profile/README.md and the
         # orientation in its .github repo. Both are SYSTEM-owned and documented as
         # "rewritten on every nightly refresh", but only the COURSE org's pair was ever
