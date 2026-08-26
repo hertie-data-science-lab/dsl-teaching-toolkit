@@ -1,4 +1,4 @@
-# This cohort's schedule + auto-release plan. Edit here. 
+# This cohort's schedule + auto-release plan. Instructors edit directly. 
 #
 # Times are Europe/Berlin unless you set `timezone:`; the Scheduled release cron runs hourly, so times are honoured to the hour.
 #
@@ -11,6 +11,7 @@
 # whatever is on main at each tick, so the change simply takes effect within the hour.
 # Only already-fired ONE-SHOT actions don't rewind: a release already shipped stays
 # shipped, and a snapshot/autograde that already ran needs its marker deleted to redo.
+# Rewrite git history and force push to remove a release.
 #
 # What follows is a SKELETON: uncomment and fill what you want. For a full worked term -
 # a real release plan, a group project, exams - see `schedule.yml.sample`.
@@ -42,6 +43,28 @@
 #         cohort_dest_path:         # first copy ships them too
 #         deploy_datetime:          # after the lab, so students work the empty scripts first
 #
+#   lab-1: 
+#     event_datetime:               
+#     title:
+#     description:
+#     deploy:
+#       - course_source_repo:
+#         course_source_path:
+#         cohort_dest_repo:
+#         cohort_dest_path:
+#         deploy_datetime: 
+# 
+#   readings-1:    # TODO: NEED TO ADD FUNCTIONALITY VIA A SEPARATE PR THAT ALLOWS TOGGLING ON/OFF OF SITE-DISPLAY -> READINGS ARE JUST SILENTLY RELEASED, DON'T NEED AN EVENT ROW IN THE SITE'S DEPLOYED SCHEDULE. WE NEED TO ADD THIS THEN THEN UPDATE THESE SAMPLE & STUB DOCS WITH THE TOGGLE (DEFAULT IS IT DISPLAYS, OPT OUT)
+#     event_datetime:               
+#     title:
+#     description:
+#     deploy:
+#       - course_source_repo:
+#         course_source_path:
+#         cohort_dest_repo:
+#         cohort_dest_path:
+#         deploy_datetime:       
+#
 # assignments:                      
 #   assignment-1:
 #     course_source_repo:           # REQUIRED 
@@ -53,8 +76,16 @@
 #     max_team_size:                # OPTIONAL, group only: the welcome "Join team" flow  refuses a member beyond this (default: 5)
 
 # events:                           # DISPLAY-ONLY calendar rows - nothing deploys
-#   final-exam:
-#     type:                         # OPTIONAL: exam | special_event (default:  special_event). `exam` colours the row as an exam
-#     title:                        # OPTIONAL row label (default: prettified label)
+#   midterm-exam:
+#     type: exam                    # OPTIONAL: exam | special_event (default:  special_event). `exam` colours the row as an exam
+#     title: Midterm exam           # OPTIONAL row label (default: prettified label)
 #     event_datetime:               # bare date -> whole day;
 #                                   # `event_datetime: tbc` -> an undated TBC row
+#   final-exam:
+#     type: exam                                            
+#     event_datetime: 
+#
+#   clinic-drop-in:
+#     type: special_event
+#     title: "Clinic drop-in"
+#     event_datetime: 

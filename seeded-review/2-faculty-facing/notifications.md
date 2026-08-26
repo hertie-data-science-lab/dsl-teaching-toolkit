@@ -54,7 +54,7 @@ the repo the workflow runs in; closes itself on the next green run.
 **Title:** `{workflow name} is failing`
 
 ```
-The unattended run failed or was cancelled (a timeout counts): {RUN_URL}
+The unattended run failed or was cancelled: {RUN_URL}
 
 Nothing retries it before the next scheduled run. This issue closes itself once a run succeeds.
 

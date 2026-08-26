@@ -54,3 +54,6 @@ course_code: GRAD-DEMO
   #                                               # sites 403 off-site requests and
   #                                               # render as a broken image)
   #     url:   "https://.../profile/jane-doe"     # bio / profile link
+
+
+# TODO - HOW IS THIS DIFFERENT FROM seeded-review/2-faculty-facing/course-config/dsl-course.with-admins.yml ? I MADE THE EDITS I WANT THERE

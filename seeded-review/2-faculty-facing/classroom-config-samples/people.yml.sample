@@ -23,10 +23,13 @@ people:
       url: "https://www.hertie-school.org/en/who-we-are/profile/person/fusar-bassini"
       start: "2026-08-01"
       end: "2027-01-31"
-    - github_handle: "demo-rmoreau-placeholder"
-      name: "Renée Moreau"
+    - github_handle: "demo-henrycgbaker-placeholder"
+      name: "Henry Baker"
       title: "Research Engineer & Data Scientist, Data Science Lab"
       photo: "/_images/pp/renee-moreau.jpg"   # the other form: local file in the site repo
-      url: "https://www.hertie-school.org/en/who-we-are/profile/person/moreau"
+      url: "https://www.hertie-school.org/en/who-we-are/profile/person/henry-baker"
       start: "2026-08-01"
       end: "2027-01-31"
+
+# TODO PULL IN EDITS I JUST MADE TO THE NON-SAMPLE VERSION - DO THIS FIRST
+#TODO rplace the old renee dummy with henrycgbaker dummy, both here and in the actually deployed demo (https://github.com/settings/profile)

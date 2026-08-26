@@ -1,4 +1,4 @@
-# Foundations of Machine Learning (Demo) - E1234 - syllabus
+# Deep Learning (Demo) - E1234 - syllabus
 
 *Optional - a worked example to copy from; delete it if you do not want it.*
 
@@ -21,7 +21,7 @@
 
 ### Course contents
 
-An applied introduction to machine learning for public policy. We build up from linear
+An applied introduction to Deep Learning for public policy. We build up from linear
 models to neural networks, and spend as much time on what a model cannot tell you as on
 what it can.
 
@@ -35,11 +35,11 @@ By the end of the course students can:
 
 ### Target group
 
-MPP and MDS students in their second year. No prior ML required.
+MDS students in their second year. Prior ML experience required.
 
 ### Prerequisites
 
-Statistics 1 or equivalent; comfort writing a function and reading a data frame in Python
+ML or equivalent; comfort writing a function and reading a data frame in Python
 or R.
 
 ## 3. Grading and assignments
@@ -64,6 +64,4 @@ No required textbook. Both of these are free and used throughout:
 
 ## 5. Course sessions and readings
 
-Session titles, learning objectives and readings are published on the course website, and
-are generated from `classroom-config/schedule.yml` and each session's `readings/` folder -
-so they stay in step with what is actually released.
+...

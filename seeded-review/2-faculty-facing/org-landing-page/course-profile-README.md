@@ -1,13 +1,13 @@
 # Deep Learning (Demo) Course
 
->_This page is auto-generated; edits will be overwritten on the next refresh._
+>_This page is auto-generated; do not edit - manual edits will be overwritten on the next refresh._
 
 This is the dedicated **Deep Learning (Demo)** **course org** - persistent across years. It acts as:
 1. A **private staging area** for pre-release version-controlled materials & assignments,
 2. A **historical record** of past years' materials,
-3. A **central control panel** for  instructors to run workflows from via the seeded [`.github` Actions tab](https://github.com/hertie-dsl-demo-course-e1234/.github/actions).
+3. A **central control panel** for instructors to run workflows from, via the seeded [`.github` Actions tab](https://github.com/hertie-dsl-demo-course-e1234/.github/actions).
 
-The substantive repos of this org are private; each year's student-facing interface live in separate **cohort orgs** that receive releases from here.
+The substantive repos of this org are private (not accessible to enrolled students); each year's student-facing interface live in separate **cohort orgs** that receive releases from here.
 
 > **Faculty & instructors - start here:** New to the platform?
 > Follow the step-by-step
@@ -30,7 +30,7 @@ List of all repositories associated with the course org. _Auto-discovered from t
 | [assignment-1-f2026](https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026) | private | Assignment 1 template |
 | [course-materials-f2026](https://github.com/hertie-dsl-demo-course-e1234/course-materials-f2026) | private | Course materials (lectures/readings by session) |
 
-Edit & stage new course-related content in these, then release it to the relevant cohort org using the GitHub Actions below.
+Edit & stage new course-related content in these, then release it to the relevant cohort org.
 
 ## Available actions for faculty, instructors & admin
 
@@ -43,10 +43,10 @@ _(automatically bootstrapped from the central
 | Action | What it does | Managed |
 | --- | --- | --- |
 | [**Bootstrap cohort**](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/bootstrap-cohort.yml) | Configures a freshly-created cohort org (sets up scaffold repos, registers it with the course org, seeds workflow functionality). | Run by instructor |
-| [**Send enrolment codes**](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/send-codes.yml) | Generates enrolment codes for each student and email each their code (to their university inbox). Students paste the code into the welcome Join issue. This keeps personal data out of the public repo. `dry_run` previews codes + emails. | Run by instructor |
+| [**Send enrolment codes**](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/send-codes.yml) | Generates enrolment codes for each student and emails each their code (to their university inbox). Students paste the code into the welcome Join issue. This keeps personal data out of the public repo. `dry_run` previews codes + emails. | Run by instructor |
 | [**New materials repo**](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/new-materials.yml) | Scaffolds a correctly-structured `course-materials-<year>` repo (session folders + the Release workflows). Ready for material to be added. | Run by instructor |
 | [**New assignment**](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/new-assignment.yml) | Scaffolds an `assignment-N-<year>` template repo (starter on `main`; the `solution` branch carries the model solution, `grading.yml`, and the hidden tests). | Run by instructor |
-| [**Check cohort setup**](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/check-cohort-setup.yml) | a per-cohort checklist of everything configured (identity, people, schedule + release plan, roster, teams, grades) with direct edit links for anything missing. Read-only. | Run by instructor |
+| [**Check cohort setup**](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/check-cohort-setup.yml) | A per-cohort checklist of everything configured (identity, people, schedule + release plan, roster, teams, grades) with direct edit links for anything missing. Read-only. | Run by instructor |
 | [**Publish course website**](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/publish-site.yml) | **[OPTIONAL]** **[DEFERRED]** Build/refresh a public openware site for the course `hertie-dsl-demo-course-e1234.github.io`. This will share this course's lecture materials and (limitted) readings with the open internet. Opt-in (the first run scaffolds the site); afterwards a daily cron re-syncs it from the settings that run chose, so later materials edits appear without another click. Pick a materials repo and choose for readings: `reading-list` (citations only) or `actual-readings` (also host the files). Because the materials repos are private, the site **hosts** the shared files itself. This is separate from each cohort's student-facing site. | Run by instructor |
 | [**Release materials**](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/release-materials.yml) | Manually release materials to student-facing cohort orgs *(NB: it is recommended to instead use the [scheduling function](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/07-schedule-releases.md) for regular releases)*. Select path(s) for any folder or file, one or several at a time. | Run by instructor |
 | [**Release assignment**](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/release-assignment.yml) | Generate one private repo per student from a chosen `assignment-*` template repo. *(NB: it is recommended to instead use the [scheduling function](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/07-schedule-releases.md) for regular releases)* | Run by instructor |
@@ -55,12 +55,13 @@ _(automatically bootstrapped from the central
 | [**Render grades (preview)**](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/render-grades.yml) | Build per-student `gradebook/<handle>.yml` from `classroom-config/grades/<assignment>.csv` and open ONE pull request. **That PR is the preview** - review every student's grades in the diff before sending. | Run by instructor |
 | [**Distribute grades**](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/distribute-grades.yml) | After merging the preview PR, copy each student's gradebook into their private repo and (unless silenced) email each student a notification to their university inbox (needs the `GRAPH_*` or `SMTP_*` secrets). | Run by instructor |
 
-NB: alternatively each materials repo *also* carries its own **Release** buttons (run from inside the
-repo; there `course_source_repo` is pre-filled with that repo instead of being a dropdown).
+NB: alternatively each materials repo *also* carries its own **Release** buttons (run from inside the repo).
 
 ---
 
-### Automatically handled within the pipeline as standard; runnable by explicit ad hoc manual dispatch - can mostly be ignored by you (course instructors):
+### Automatically handled within the pipeline as standard 
+
+The following are runnable by explicit ad hoc manual dispatch; can mostly be ignored by course instructors:
 
 | Action | What it does | Managed |
 | --- | --- | --- |
@@ -94,16 +95,19 @@ The course-level actions assume this layout - use **New materials repo** / **New
 
 ### Materials repo
 
-(`course-materials-<year>`) - the source for Release materials. Any path in it can be released. The convention below is compatible with the downstream pipeline transformations; specifically it requires ordinal-prefixed (`01_`, `02_`, `03_`, ...) sub-directories - this is the only constraint. The following are automatically seeded for you, but you can edit as you wish:
+(`course-materials-<year>`) - the source for Release materials. Any path in it can be released. The convention below is compatible with the downstream pipeline transformations which requires ordinal-prefixed (`01_`, `02_`, `03_`, ...) sub-directories (this is the only constraint). The following are automatically seeded for you, but you can edit as you wish:
 - `lectures/01_.../` - one folder per session's lecture files;
 - `readings/01_.../` - one folder per session's readings;
-- root files (`SYLLABUS.md`, `README.md`) release like any other path - name the file as the`course_source_path`.
+- root files (`SYLLABUS.md`, `README.md`).
 
-Add more sections freely (e.g. `labs/01_.../`). Alternatively, you could have `sessions/01_.../` with lectures & readings combined - or however you prefer to setup. The only constraint is the orginal prefixed subdirectories.
+Add more sections freely (e.g. `labs/01_.../`, `datasets/01_.../`. 
 
-**Assignment repo** (`assignment-N-<year>`, an `is_template` repo) - the source for Release assignment:
+>Alternatively, you could have `sessions/01_.../` with lectures & readings combined - or however you prefer to setup. The only constraint is the orginal prefixed subdirectories.
+
+### Assignment repo** 
+`assignment-N-<year>` - the source for Release assignment:
 - **`main` branch** - the starter code only (no tests, no autograder). This is exactly what students receive (native template-generate copies `main` only).
-- **`solution` branch** - the model solution (`solution/`), plus **`grading.yml`** and the **hidden tests** that the Grade assignment button runs faculty-side. **All of this MUST live on this branch, never on `main`** - that is what guarantees it is never copied into student repos on generate. Only the `solution/` folder reaches students, and only when you run Release assignment with **include_solution** ticked (a separate, later commit); the hidden tests and `grading.yml` never do.
+- **`solution` branch** - the model solution (`solution/`), plus **`grading.yml`** and the **hidden tests** that the Grade assignment workflow runs faculty-side. **All of this MUST live on this branch, never on `main`** - that is what guarantees it is never copied into student repos on generate. Only the `solution/` folder reaches students, and only when you run Release assignment with **include_solution** ticked (a separate, later commit); the hidden tests and `grading.yml` never do.
 
 ## Further details on how the actions behave
 

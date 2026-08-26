@@ -5,7 +5,7 @@ course_code: GRAD-DEMO
 # course_description: One or two sentences, on ONE line - the blurb on every cohort site.
 
 # `course_name`, `course_code` and `course_description` are what reach the cohort websites
-# (`org_name` does not - it names the org). Editing them here re-syncs every cohort site.
+# Editing them here re-syncs every associated/boostrapped cohort site.
 #
 # This is the persistent COURSE org - it spans many cohorts (years). Cohorts are
 # registered separately in .github/cohort-courses-pages.yml.
@@ -16,10 +16,9 @@ course_code: GRAD-DEMO
 #
 #   course_admins        GRANTS ACCESS. The single source of truth for course-wide
 #                        admin rights - the `course-admin` team here, mirrored into
-#                        every cohort org. "Sync membership" reconciles that team
-#                        FROM this list: a handle added any other way (Teams UI, a
-#                        gh call) is reverted on the next sync unless it's declared
-#                        here, and removing a handle here revokes their access.
+#                        every cohort org. A handle added any other way is reverted 
+#                        on the next sync unless it's declared here; removing a
+#                        handle here revokes their access.
 #
 #   instructors          DISPLAY ONLY - website cards (name/photo/title/link) for
 #                        the OPTIONAL public open-courseware course website (the
@@ -45,7 +44,7 @@ people:
   #                                               # file committed into the site repo
   #                                               # under _images/pp/, OR an absolute
   #                                               # URL on a host that allows
-  #                                               # hotlinking (many institutional
-  #                                               # sites 403 off-site requests and
-  #                                               # render as a broken image)
+  #                                               # hotlinking (e.g. GH avatar links)
   #     url:   "https://.../profile/jane-doe"     # bio / profile link
+
+# TODO: IF THIS IS NOT SOMETHING INSTRUCTORS ARE EXPECTED TO HAND EDIT (I.E. IT IS HANDLED BY WORKFLOW ADD THIS AS A LINE COMMENT AT THE TOP - SAME FOR ALL FILES INSTRUCTORS ARE/AREN'T EXPECTED TO TOUCH)

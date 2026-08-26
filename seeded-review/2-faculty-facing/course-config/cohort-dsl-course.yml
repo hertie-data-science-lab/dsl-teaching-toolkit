@@ -4,3 +4,6 @@
 # course org's dsl-course.yml and this cohort's classroom-config/schedule.yml).
 course: {course}
 org: {org}
+
+
+# TODO: IF THIS IS NOT SOMETHING INSTRUCTORS ARE EXPECTED TO HAND EDIT (I.E. IT IS HANDLED BY WORKFLOW ADD THIS AS A LINE COMMENT AT THE TOP - SAME FOR ALL FILES INSTRUCTORS ARE/AREN'T EXPECTED TO TOUCH)
