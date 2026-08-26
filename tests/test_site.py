@@ -270,6 +270,7 @@ def test_assignment_entry_dates_the_released_row_from_the_handout(monkeypatch):
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        now=datetime(2026, 9, 23, tzinfo=BERLIN),
     )
     # the entry's own row is the "released!" row; the due row lives in due_event
     assert "date: 2026-09-22T09:00:00" in out.split("due_event:")[0]
@@ -282,6 +283,55 @@ def test_assignment_entry_falls_back_to_the_due_date_without_a_handout(monkeypat
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
     out = site._assignment_entry("Course", "assignment-2-f2026", date(2026, 11, 10))
     assert out.count("date: 2026-11-10T23:59:00") == 2  # both rows on the due date
+
+
+def test_a_future_handout_withholds_the_brief(monkeypatch):
+    # The template repo exists from the day faculty write the assignment; publishing its
+    # README on sight put the whole brief on the cohort site weeks before hand-out, while
+    # the scheduler was still correctly holding the student repos back.
+    monkeypatch.setattr(
+        site, "get_file_content", lambda *a, **k: "# Assignment 1\nSecret brief."
+    )
+    out = site._assignment_entry(
+        "Course",
+        "assignment-1-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        now=datetime(2026, 9, 21, tzinfo=BERLIN),
+    )
+    assert "Secret brief" not in out
+    assert "unreleased: true" in out
+    assert "has not been handed out yet" in out
+    # Withheld is the BODY, not the row: title and both dates are the plan, not a secret.
+    assert 'title: "Assignment 1"' in out
+    assert "date: 2026-09-22T09:00:00" in out.split("due_event:")[0]
+    assert "    date: 2026-10-13T23:59:59" in out
+
+
+def test_a_passed_handout_inlines_the_brief(monkeypatch):
+    monkeypatch.setattr(
+        site, "get_file_content", lambda *a, **k: "# Assignment 1\nThe brief."
+    )
+    out = site._assignment_entry(
+        "Course",
+        "assignment-1-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        now=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),  # the moment itself is released
+    )
+    assert "The brief." in out
+    assert "unreleased: true" not in out
+
+
+def test_an_assignment_with_no_handout_on_record_is_released(monkeypatch):
+    # Nothing says it is embargoed: it is handed out manually (the button records the
+    # moment, so a real one gets a date) or the cohort keeps no assignments block at all.
+    monkeypatch.setattr(
+        site, "get_file_content", lambda *a, **k: "# Assignment 2\nThe brief."
+    )
+    out = site._assignment_entry("Course", "assignment-2-f2026", date(2026, 11, 10))
+    assert "The brief." in out
+    assert "unreleased: true" not in out
 
 
 def test_assignment_dates_read_the_schedule():

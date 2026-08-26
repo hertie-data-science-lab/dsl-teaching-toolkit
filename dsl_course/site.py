@@ -1231,6 +1231,7 @@ def _assignment_entry(
     when: date | datetime,
     handout: datetime | None = None,
     sched: schedule.Schedule | None = None,
+    now: datetime | None = None,
 ) -> str:
     """An assignment's page, plus the two schedule rows it drives: the entry's own
     `date:` is the "released!" row and its `due_event:` sub-block the due row.
@@ -1244,7 +1245,19 @@ def _assignment_entry(
     do (`cohort_dest_repo` or the schedule slug when the schedule keys this repo, else the
     course repo minus its -fYYYY/-sYYYY tag), so the page names the repo students actually
     get. Deriving it from the course repo alone named the wrong repo - and titled the page
-    wrong - whenever an entry set `cohort_dest_repo`."""
+    wrong - whenever an entry set `cohort_dest_repo`.
+
+    A handout still in the FUTURE withholds the brief, exactly as an unshipped session
+    withholds its materials (`_lecture_entry`): the row appears from the day the template
+    repo exists, but its body says so and flags `unreleased: true` rather than inlining the
+    README. The template repo exists from the moment faculty write the assignment - weeks
+    before it hands out - so publishing its README on sight put the whole brief on the
+    cohort site while the scheduler was still correctly holding the student repos back.
+
+    Withheld is the BODY, not the row: the title, the handout date and the deadline are
+    the plan, known the day it is written and no more secret than a session's name.
+    `now` is the moment to judge that against (default: actual now, in the handout's own
+    cohort timezone - `_coerce_datetime` hands out nothing naive)."""
     found = schedule.entry_for_repo(sched, repo) if sched is not None else None
     slug = schedule.cohort_name(*found) if found else assignment_slug(repo)
     readme = get_file_content(course_org, repo, "README.md") or ""
@@ -1254,25 +1267,42 @@ def _assignment_entry(
             title = line[2:].strip()
             break
     title = _q(title)
-    body = "\n".join(
-        ln for ln in readme.splitlines() if not ln.startswith("# ")
-    ).strip()
     # An unscheduled assignment's synthesised fallback date is due end-of-day.
     due = _iso_when(when, "23:59:00")
     released = _iso_when(handout) if handout is not None else due
+    # No handout on record means nothing says this assignment is embargoed: it is either
+    # handed out manually (the button records the moment here, so a real one gets a date)
+    # or the cohort keeps no assignments block at all. Either way, released.
+    pending = handout is not None and handout > (now or datetime.now(handout.tzinfo))
+    if pending:
+        flags = "unreleased: true\n"
+        body = (
+            f"This assignment has not been handed out yet. Its brief appears here, and "
+            f"your private `{slug}-<your-handle>` repo in `{course_org}`'s cohort org, "
+            f"when it does."
+        )
+    else:
+        flags = ""
+        brief = "\n".join(
+            ln for ln in readme.splitlines() if not ln.startswith("# ")
+        ).strip()
+        body = (
+            f"{_liquid_raw(brief or 'Assignment brief.')}\n\n"
+            f"_Your private `{slug}-<your-handle>` repo appears in `{course_org}`'s "
+            f"cohort org once the teaching team provisions it._"
+        )
     return (
         f"---\n"
         f"type: assignment\n"
         f"date: {released}\n"
         f'title: "{title}"\n'
+        f"{flags}"
         f"due_event:\n"
         f"    type: due\n"
         f"    date: {due}\n"
         f'    description: "{title}"\n'
         f"---\n"
-        f"{_liquid_raw(body or 'Assignment brief.')}\n\n"
-        f"_Your private `{slug}-<your-handle>` repo appears in `{course_org}`'s cohort "
-        f"org once the teaching team provisions it._\n"
+        f"{body}\n"
     )
 
 
