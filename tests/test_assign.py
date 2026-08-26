@@ -266,6 +266,40 @@ def test_ensure_cohort_template_repairs_a_half_created_template(monkeypatch):
     )
 
 
+def test_ensure_cohort_template_stamps_the_topic_the_site_gates_on(monkeypatch):
+    # discovery.discover_handed_out_assignments reads this topic back as the record that
+    # the assignment went out, and site._assignment_entry withholds the brief until it
+    # does - so dropping the stamp silently blanks every brief on every cohort site.
+    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
+    monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
+    stamped: list[tuple] = []
+    monkeypatch.setattr(assign, "set_repo_topics", lambda *a: stamped.append(a) or True)
+    assign.ensure_cohort_template(
+        "COURSE", "assignment-1-f2026", "COHORT", "homework-1"
+    )
+    # stamped on the COHORT-side repo, under the name the site looks it up by
+    assert stamped == [("COHORT", "homework-1", ["homework-1", "assignment-template"])]
+
+
+def test_ensure_cohort_template_says_what_a_failed_topic_stamp_costs(monkeypatch):
+    # The hand-out itself succeeded, so this must not fail the run - but a silent drop
+    # leaves the site withholding a brief the students already hold.
+    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
+    monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
+    monkeypatch.setattr(assign, "set_repo_topics", lambda *a: False)
+    errs: list[str] = []
+    monkeypatch.setattr(assign, "log_err", errs.append)
+    assert (
+        assign.ensure_cohort_template(
+            "COURSE", "assignment-1-f2026", "COHORT", "assignment-1"
+        )
+        == "assignment-1"
+    )
+    assert "assignment-template" in errs[0] and "withheld" in errs[0]
+
+
 def test_ensure_cohort_template_fails_loudly_when_is_template_patch_fails(monkeypatch):
     # The is_template PATCH result was discarded; now a failed PATCH returns None so the run
     # goes red rather than fanning out from a repo that isn't actually a template.
