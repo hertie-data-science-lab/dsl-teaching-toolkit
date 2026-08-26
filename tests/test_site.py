@@ -840,7 +840,7 @@ def test_the_site_build_gates_a_brief_on_what_the_cohort_actually_holds(
             )
         }
     )
-    args = dict(sched=sched, assignments=["assignment-1-f2026"])
+    args = {"sched": sched, "assignments": ["assignment-1-f2026"]}
     withheld = _plan(monkeypatch, tmp_path, **args).collections["_assignments"]
     assert "unreleased: true" in withheld["01-assignment-1-f2026.md"]
 
