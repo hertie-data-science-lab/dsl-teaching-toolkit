@@ -77,6 +77,14 @@ releases:
       - course_source_repo: course-materials-f2026
         course_source_path: lectures/04_week-4
         deploy_datetime: 2026-09-22T09:00
+  # Week 4's readings go out a week ahead, so they get their own entry rather than riding
+  # the lecture's clock like every other week above. `show_on_site: false` is what keeps
+  # that from showing: the files land in session 4's row as usual, but the entry adds no
+  # row of its own and does not drag session 4's date back to the 15th.
+  readings-4:
+    event_datetime: 2026-09-15T09:00
+    show_on_site: false
+    deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: readings/04_week-4
   lab-4:

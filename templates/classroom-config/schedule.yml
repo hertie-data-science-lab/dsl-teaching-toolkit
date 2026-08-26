@@ -25,6 +25,11 @@
 #     title:                        # OPTIONAL: the session's name, beside its ordinal
 #     description:                  # OPTIONAL: a sentence about it, on the Lectures tab
 #     tbc: false                    # OPTIONAL: site marks it "(TBC)" next to the event_datetime (default: false)
+#     show_on_site: true            # OPTIONAL: false = deploy silently - it ships exactly
+#                                   # as written but adds nothing to the site's schedule
+#                                   # (default: true). Use it for content that belongs to
+#                                   # a session without being an occasion of its own - see
+#                                   # the readings-only entry below.
 #     deploy:
 #       - course_source_repo:       # REQUIRED
 #         course_source_path:       # REQUIRED - folder or file to copy
@@ -41,6 +46,27 @@
 #         course_source_path:       # staged OUTSIDE the folder released above, else the
 #         cohort_dest_path:         # first copy ships them too
 #         deploy_datetime:          # after the lab, so students work the empty scripts first
+#
+#   lab-1:                          # the week's lab is its OWN schedule row, so it can sit
+#     event_datetime:               # on Wednesday while the lecture sits on Monday. A copy
+#     title:                        # into `labs/NN_...` is what makes it one - not the label.
+#     description:
+#     deploy:
+#       - course_source_repo:
+#         course_source_path: labs/01_session-1
+#         cohort_dest_repo:
+#         cohort_dest_path:
+#         deploy_datetime:
+#
+#   readings-1:                     # readings released on their own clock, silently: they
+#     event_datetime:               # belong to session 1 without being an occasion of its
+#     show_on_site: false           # own, so they add no row and - crucially - never pull
+#     deploy:                       # session 1's date or name back to the day they shipped.
+#       - course_source_repo:       # Drop `show_on_site` (or set it true) and they announce
+#         course_source_path: readings/01_session-1   # themselves like any other release.
+#         cohort_dest_repo:
+#         cohort_dest_path:
+#         deploy_datetime:
 #
 # assignments:                      
 #   assignment-1:

@@ -1419,11 +1419,19 @@ def _planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], _Planne
     `deploy_datetime` clocks; the site announces the class, not the copy. Earliest wins
     when several releases touch the same row, and the destinations are collected in plan
     order (deduped - two deploys of one entry can name the same one) so a placeholder row
-    can name where its materials are going to appear."""
+    can name where its materials are going to appear. An entry marked `show_on_site:
+    false` is skipped outright - see the loop."""
     out: dict[tuple[str, str], _PlannedRow] = {}
     for release in sched.releases:
         if release.when is None:
             continue  # event_datetime: tbc - undated, can't place a session
+        if not release.show_on_site:
+            # A silent release (readings, an errata drop): it ships on its own clock but
+            # says nothing here, so it can neither raise a row of its own nor pull an
+            # existing one's date and name back to whenever the files went up. Anything it
+            # actually released is still discovered and linked from the row it lands in -
+            # withheld from the PLAN is not withheld from the site.
+            continue
         for d in release.deploy:
             dest = _deploy_dest(d)
             n = session_number(dest.rsplit("/", 1)[-1])

@@ -462,6 +462,34 @@ def test_tbc_flag_keeps_a_provisional_date_firing():
     assert clinic.tbc and clinic.when is not None  # provisional: still fires
 
 
+def test_show_on_site_defaults_true_and_only_an_explicit_false_silences_an_entry():
+    # Default true, so a plan written before the key existed still announces every entry.
+    # Only a literal `false` opts out - a missing key, or anything truthy, shows the row,
+    # and the entry deploys either way.
+    meta = {
+        "releases": {
+            "lecture-1": {"event_datetime": "2026-09-01T10:00"},
+            "readings-1": {"event_datetime": "2026-08-25T09:00", "show_on_site": False},
+            "lab-1": {"event_datetime": "2026-09-03T14:00", "show_on_site": True},
+        },
+    }
+    by_label = {r.label: r for r in parse(meta).releases}
+    assert by_label["lecture-1"].show_on_site is True
+    assert by_label["readings-1"].show_on_site is False
+    assert by_label["lab-1"].show_on_site is True
+
+
+def test_show_on_site_is_a_known_release_key():
+    # An unrecognised key is FLAGGED rather than silently ignored, so a schedule that
+    # opts out of the site must not read as a typo faculty are told to fix.
+    meta = {
+        "releases": {
+            "readings-1": {"event_datetime": "2026-08-25T09:00", "show_on_site": False},
+        },
+    }
+    assert parse(meta).dropped == []
+
+
 def test_assignment_type_parses_and_rejects_unknown_values():
     meta = {
         "assignments": {
