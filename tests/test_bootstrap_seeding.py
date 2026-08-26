@@ -605,6 +605,19 @@ def test_refresh_reaches_every_registered_cohort(monkeypatch, per_cohort_job):
     assert refreshed == ["Cohort-f2026", "Cohort-s2027"]
 
 
+def test_refresh_rebuilds_every_cohorts_own_landing_pages(monkeypatch):
+    # Both org READMEs are SYSTEM-owned and documented as rewritten on every nightly
+    # refresh, but only the COURSE org's pair ever was: a cohort's were written once at
+    # Bootstrap and then frozen, so every wording fix since reached the course org and no
+    # cohort (a live cohort's .github README sat untouched for months).
+    rendered: list[str] = []
+    _stub_refresh(monkeypatch)
+    monkeypatch.setattr(seed, "update_profile_readme", lambda org: rendered.append(org))
+
+    assert seed.refresh("Course-Org") == 0
+    assert rendered == ["Course-Org", "Cohort-f2026", "Cohort-s2027"]
+
+
 def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
     # A finished semester's repos are archived, so every write 403s - and the config
     # samples are NEW files, which put_file's identical-sha no-op cannot absorb. The
@@ -628,9 +641,15 @@ def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
         seed, "repo_is_archived", lambda org, repo: org == "Cohort-f2026"
     )
 
+    rendered: list[str] = []
+    monkeypatch.setattr(seed, "update_profile_readme", lambda org: rendered.append(org))
+
     assert seed.refresh("Course-Org") == 0
     # every job, live cohort only
     assert refreshed == ["Cohort-s2027"] * 3
+    # The landing pages are written inside the same loop, so they have to honour the skip
+    # too - an archived repo is read-only and the write would 403 the whole cron.
+    assert rendered == ["Course-Org", "Cohort-s2027"]
     out = capsys.readouterr()
     assert "[skip] Cohort-f2026 (archived cohort - left frozen)" in out.out
     assert "refresh incomplete" not in out.err
