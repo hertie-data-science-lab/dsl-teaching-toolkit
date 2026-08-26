@@ -13,7 +13,7 @@ the result - so a student never sees a score in their own repo.
   cohort/<slug>-<team>    (group)              |
                 v
   classroom-config/autograde/<slug>/<key>.json   (per-test detail, private archive)
-  classroom-config/grades/<slug>.csv             (autograde_score / team_score filled)
+  classroom-config/grades/<slug>.csv             (autograde_score + team filled)
 
 Student code is run in a subprocess with the GitHub token stripped from the environment.
 
@@ -50,7 +50,7 @@ record, never bare directory existence, so a stray early write into the director
 longer be mistaken for a completed grade. Machine-written grade cells are write-once too (see
 `grades.merge_auto`), so a marker's hand-edit is never clobbered. To re-grade deliberately,
 delete `autograde/<slug>/` (the next tick regrades) or run the Grade assignment workflow -
-and clear the `autograde_score`/`team_score` cells you want recomputed.
+and clear the `autograde_score` cells you want recomputed.
 
 grading.yml (on the template's solution branch):
     type: individual        # or group
@@ -1099,8 +1099,15 @@ def collect(
             )
             score = str(result["score"])
             if is_group:
+                # The team's passing-test count goes in `autograde_score`, the same column
+                # an individual assignment uses - NOT in `team_score`. `team_score` is the
+                # marker's shared team mark, and writing a count there put a machine number
+                # and a human mark in one write-once cell: whichever landed first won, so a
+                # team marked before the grading deadline silently lost its autograde and a
+                # team marked after it found the cell already taken. Every member carries
+                # the team's count, which is what they were graded on.
                 updates += [
-                    (m, {"team": target_key, "team_score": score}) for m in members
+                    (m, {"team": target_key, "autograde_score": score}) for m in members
                 ]
             else:
                 updates.append((target_key, {"autograde_score": score}))

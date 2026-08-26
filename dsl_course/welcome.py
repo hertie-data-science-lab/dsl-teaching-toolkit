@@ -185,6 +185,33 @@ CLASSROOM_SYSTEM_FILES = (
 )
 
 
+def refresh_cohort_pointer(org: str, course_org: str) -> int:
+    """Re-push a cohort's `.github/dsl-course.yml` - the pointer its classroom-config
+    dispatchers read to find which course org to fire Sync membership / Sync site at.
+
+    SYSTEM-owned, but it used to be written ONLY by Bootstrap cohort's own wiring, so it
+    froze the day the cohort was created: every live cohort's copy still dated from the
+    org rename in August while the template had moved on. Same bug class as the cohort
+    landing pages (see seed.refresh) - a file documented as converged that in fact never
+    was. `put_files` compares blob shas, so a cohort already current is written nothing.
+
+    Returns 1 if the commit didn't land: without a resolvable pointer the dispatchers
+    cannot find the course org, and the cohort's syncs stop firing."""
+    if not put_files(
+        org,
+        ".github",
+        {
+            "dsl-course.yml": template("cohort/dsl-course.yml")
+            .format(course=course_org, org=org)
+            .encode()
+        },
+        "ci: refresh cohort -> course pointer",
+    ):
+        log_err(f"cohort -> course pointer not written to {org}/.github")
+        return 1
+    return 0
+
+
 def refresh_classroom_system_files(org: str) -> int:
     """Re-push a cohort's SYSTEM-owned classroom-config files (CLASSROOM_SYSTEM_FILES).
 

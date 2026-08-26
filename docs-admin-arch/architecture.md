@@ -431,7 +431,7 @@ why `autograde_score` is faculty-reviewed before distribution and never shown to
 **Grades** are three idempotent stages: `sync` creates a private `grades-<handle>` per onboarded
 enrolled student; `render` pivots the CSVs into a preview PR on branch `grades-update`; and
 `distribute` pushes each student's `grades.yml` and emails them. Machine-written cells
-(`autograde_score`, `team`, `team_score`) are **write-once**, and `render` refuses to force-push its branch if a
+(`autograde_score`, `team`) are **write-once**, and `render` refuses to force-push its branch if a
 non-bot commit sits on it - a reviewer's correction is never clobbered.
 
 ## Convergence - the daily self-refresh

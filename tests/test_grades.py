@@ -179,21 +179,41 @@ def test_merge_auto_upserts_without_clobbering_the_manual_score():
     assert rows["ben"].autograde_score == "60"  # a not-yet-listed student is appended
 
 
-def test_merge_auto_group_sets_team_score_per_member():
+def test_merge_auto_group_gives_every_member_the_teams_autograde_score():
+    # The team's passing-test count lands in `autograde_score` - the same column an
+    # individual assignment uses - on every member's row, since it is what they were all
+    # graded on. `team_score` is left alone: that is the marker's shared mark.
     out = grades.merge_auto(
         "",
         [
-            ("anna", {"team": "team-x", "team_score": "85"}),
-            ("ben", {"team": "team-x", "team_score": "85"}),
+            ("anna", {"team": "team-x", "autograde_score": "2"}),
+            ("ben", {"team": "team-x", "autograde_score": "2"}),
         ],
     )
     rows = {r.github_handle: r for r in grades.parse_grades(out)}
-    assert rows["anna"].team == "team-x" and rows["anna"].team_score == "85"
-    assert rows["ben"].team_score == "85"
+    assert rows["anna"].team == "team-x" and rows["anna"].autograde_score == "2"
+    assert rows["ben"].autograde_score == "2"
+    assert rows["anna"].team_score == "" and rows["ben"].team_score == ""
+
+
+def test_a_hand_set_team_score_is_not_a_machine_column():
+    # The flaw this replaced: the group autograder wrote its count into `team_score`, so a
+    # machine number and the marker's shared mark shared one write-once cell and whichever
+    # landed first won. `team_score` is now faculty-owned outright: a later autograde run
+    # neither reads it nor competes for it, so a row whose mark is already set still gets
+    # its count recorded. (The count itself stays write-once - see the test below.)
+    assert "team_score" not in grades.MACHINE_FIELDS
+    existing = grades.dump_grades(
+        [grades.GradeRow(github_handle="anna", team="team-x", team_score="85")]
+    )
+    out = grades.merge_auto(existing, [("anna", {"autograde_score": "2"})])
+    row = grades.parse_grades(out)[0]
+    assert row.team_score == "85"  # the marker's mark, untouched
+    assert row.autograde_score == "2"  # the count, recorded beside it
 
 
 # -------------------------------------------------------- write-once machine columns
-# `auto`, `team` and `team_grade` are filled by a machine but OWNED by whoever marks: a
+# `autograde_score` and `team` are filled by a machine but OWNED by whoever marks: a
 # non-empty cell is never overwritten, so a hand-corrected score survives every re-grade,
 # scheduled or manual. Only empty cells get filled.
 
@@ -214,29 +234,29 @@ def test_merge_auto_never_overwrites_an_existing_autograde_score():
     assert rows["anna"].individual_comments == "regraded by hand"
 
 
-def test_merge_auto_never_overwrites_existing_team_columns():
+def test_merge_auto_never_overwrites_an_existing_team():
     existing = grades.dump_grades(
-        [grades.GradeRow(github_handle="anna", team="team-x", team_score="85")]
+        [grades.GradeRow(github_handle="anna", team="team-x", autograde_score="2")]
     )
     out = grades.merge_auto(
-        existing, [("anna", {"team": "team-y", "team_score": "40"})]
+        existing, [("anna", {"team": "team-y", "autograde_score": "0"})]
     )
     row = grades.parse_grades(out)[0]
-    assert (row.team, row.team_score) == ("team-x", "85")
+    assert (row.team, row.autograde_score) == ("team-x", "2")
 
 
 def test_merge_auto_fills_only_the_empty_cells_of_a_mixed_row():
     existing = grades.dump_grades(
         [
             grades.GradeRow(github_handle="anna", team="team-x")
-        ]  # team set, team_grade empty
+        ]  # team set, autograde_score empty
     )
     out = grades.merge_auto(
-        existing, [("anna", {"team": "team-y", "team_score": "85"})]
+        existing, [("anna", {"team": "team-y", "autograde_score": "2"})]
     )
     row = grades.parse_grades(out)[0]
     assert row.team == "team-x"  # preserved
-    assert row.team_score == "85"  # filled
+    assert row.autograde_score == "2"  # filled
 
 
 def test_merge_auto_write_once_is_per_row_not_per_file():

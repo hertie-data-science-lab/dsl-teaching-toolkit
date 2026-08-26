@@ -559,6 +559,7 @@ def _stub_refresh(
     welcome_failures=lambda org: 0,
     sample_failures=lambda org: 0,
     system_failures=lambda org: 0,
+    pointer_failures=lambda org, course: 0,
     seed_failures=0,
     heartbeat_failures=0,
 ) -> None:
@@ -576,6 +577,7 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "refresh_welcome_workflows", welcome_failures)
     monkeypatch.setattr(seed, "refresh_classroom_samples", sample_failures)
     monkeypatch.setattr(seed, "refresh_classroom_system_files", system_failures)
+    monkeypatch.setattr(seed, "refresh_cohort_pointer", pointer_failures)
     # The per-cohort loop probes the cohort ORG once: gone = unregister + skip. A live org
     # then checks repo_is_archived (archived = skip frozen). org_exists True +
     # repo_is_archived False = present and live, proceed.
@@ -605,6 +607,37 @@ def test_refresh_reaches_every_registered_cohort(monkeypatch, per_cohort_job):
     assert refreshed == ["Cohort-f2026", "Cohort-s2027"]
 
 
+def test_refresh_repushes_every_cohorts_course_pointer(monkeypatch):
+    # `.github/dsl-course.yml` is what a cohort's classroom-config dispatchers read to
+    # find their course org. SYSTEM-owned, but written only by Bootstrap cohort's own
+    # wiring until now, so every live cohort's copy froze the day it was created - same
+    # bug class as the landing pages below.
+    pointed: list[tuple[str, str]] = []
+    _stub_refresh(
+        monkeypatch,
+        pointer_failures=lambda cohort, course: pointed.append((cohort, course)) or 0,
+    )
+
+    assert seed.refresh("Course-Org") == 0
+    assert pointed == [
+        ("Cohort-f2026", "Course-Org"),
+        ("Cohort-s2027", "Course-Org"),
+    ]
+
+
+def test_refresh_rebuilds_every_cohorts_own_landing_pages(monkeypatch):
+    # Both org READMEs are SYSTEM-owned and documented as rewritten on every nightly
+    # refresh, but only the COURSE org's pair ever was: a cohort's were written once at
+    # Bootstrap and then frozen, so every wording fix since reached the course org and no
+    # cohort (a live cohort's .github README sat untouched for months).
+    rendered: list[str] = []
+    _stub_refresh(monkeypatch)
+    monkeypatch.setattr(seed, "update_profile_readme", lambda org: rendered.append(org))
+
+    assert seed.refresh("Course-Org") == 0
+    assert rendered == ["Course-Org", "Cohort-f2026", "Cohort-s2027"]
+
+
 def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
     # A finished semester's repos are archived, so every write 403s - and the config
     # samples are NEW files, which put_file's identical-sha no-op cannot absorb. The
@@ -628,9 +661,21 @@ def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
         seed, "repo_is_archived", lambda org, repo: org == "Cohort-f2026"
     )
 
+    rendered: list[str] = []
+    pointed: list[str] = []
+    monkeypatch.setattr(seed, "update_profile_readme", lambda org: rendered.append(org))
+    monkeypatch.setattr(
+        seed, "refresh_cohort_pointer", lambda org, course: pointed.append(org) or 0
+    )
+
     assert seed.refresh("Course-Org") == 0
     # every job, live cohort only
     assert refreshed == ["Cohort-s2027"] * 3
+    # The pointer write sits in the same loop and must honour the skip too.
+    assert pointed == ["Cohort-s2027"]
+    # The landing pages are written inside the same loop, so they have to honour the skip
+    # too - an archived repo is read-only and the write would 403 the whole cron.
+    assert rendered == ["Course-Org", "Cohort-s2027"]
     out = capsys.readouterr()
     assert "[skip] Cohort-f2026 (archived cohort - left frozen)" in out.out
     assert "refresh incomplete" not in out.err

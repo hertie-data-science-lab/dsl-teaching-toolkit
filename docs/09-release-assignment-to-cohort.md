@@ -57,7 +57,7 @@ Two places to say it, depending on how you release:
 
 - **Manual dispatch**: the **Release assignment** workflow asks for `type` - pick `individual` or `group`, or leave the default `auto` (= whatever `schedule.yml` or the template's `grading.yml` declare; unwritten everywhere means individual).
 
-- `group` = one shared repo per team from `teams.csv` (repo `<slug>-<team>`, every member a collaborator), graded per team into the `team`/`team_score` columns. 
+- `group` = one shared repo per team from `teams.csv` (repo `<slug>-<team>`, every member a collaborator), graded per team into the `team`/`autograde_score` columns, with `team_score` left for the shared mark you set. 
 - `individual` = one private repo per onboarded, enrolled student (`<slug>-<handle>`), graded into `autograde_score`.
 
 > NB: The template's `grading.yml` also carries a `type:` - the **New assignment** workflow's `type` input writes it at scaffold time, so most assignments are already declared there.

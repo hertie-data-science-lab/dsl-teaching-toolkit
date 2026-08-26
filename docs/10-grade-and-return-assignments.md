@@ -36,7 +36,7 @@ Course `.github` → **Actions** → **Grade assignment**: `cohort_org`, `course
 and `dry_run` (both default **off**). It runs the hidden tests and writes into
 `classroom-config`:
 
-- `grades/<slug>.csv` → the `autograde_score` column (individual) or `team_score` (group). **Write-once:**
+- `grades/<slug>.csv` → the `autograde_score` column, on group assignments as well as individual ones (every member of a team carries the team's count, plus `team`). **Write-once:**
   a cell that already holds a value is never overwritten - re-running fills empty cells only,
   so your hand-edits stand. For fresh machine scores, blank those cells first.
 - `autograde/<slug>/<handle-or-team>.json` → the raw per-test result, for appeals. This folder
@@ -81,9 +81,9 @@ Edit `classroom-config/grades/<slug>.csv` (directly editing via web UI is fine; 
 |--------|-----------|----------------------|---------------|
 | `github_handle` | no - roster | - | which student the row is |
 | `team` | no - autograder | yes (group only) | their team, on group assignments |
-| `autograde_score` | no - autograder | **no** | the machine score |
+| `autograde_score` | no - autograder | **no** | how many hidden tests passed (a count, not a mark). On a group assignment every member carries the team's |
 | `manual_score` | yes | **no** | your hand-marked part - a working column |
-| `team_score` | yes (group) | yes | the shared team mark |
+| `team_score` | yes (group) | yes | the shared team mark - yours, never machine-written |
 | `individual_adjustment` | yes (group) | only their own | that member's individual adjustment |
 | `final_grade` | **yes** | **yes** | **the mark. Nothing computes it for you** |
 | `individual_comments` | yes | yes | feedback for that student |
@@ -147,8 +147,8 @@ Copies each merged gradebook to `grades-<handle>/grades.yml` and emails the stud
   > ℹ️ **Autograding fires once**, at each assignment's grading deadline, and never again -
   > the `_graded.json` / `_skipped.json` record inside `autograde/<slug>/` is the marker. To
   > re-grade: delete that folder (the next
-  > hourly tick regrades) or press **Grade assignment**. Either way, clear the `autograde_score` /
-  > `team_score` cells you want recomputed first - they are write-once and are otherwise left
+  > hourly tick regrades) or press **Grade assignment**. Either way, clear the `autograde_score`
+  > cells you want recomputed first - they are write-once and are otherwise left
   > exactly as you left them.
 
 ---
