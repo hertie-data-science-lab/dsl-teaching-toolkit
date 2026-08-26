@@ -287,11 +287,12 @@ def test_assignment_entry_falls_back_to_the_due_date_without_a_handout(monkeypat
 
 def test_a_future_handout_withholds_the_brief(monkeypatch):
     # The template repo exists from the day faculty write the assignment; publishing its
-    # README on sight put the whole brief on the cohort site weeks before hand-out, while
-    # the scheduler was still correctly holding the student repos back.
-    monkeypatch.setattr(
-        site, "get_file_content", lambda *a, **k: "# Assignment 1\nSecret brief."
-    )
+    # README on sight put the whole brief on the PUBLIC cohort site weeks before hand-out,
+    # while the scheduler was still correctly holding the student repos back.
+    def _no_reads(*a, **k):
+        raise AssertionError("the embargoed README must not be read at all")
+
+    monkeypatch.setattr(site, "get_file_content", _no_reads)
     out = site._assignment_entry(
         "Course",
         "assignment-1-f2026",
@@ -299,11 +300,13 @@ def test_a_future_handout_withholds_the_brief(monkeypatch):
         datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
         now=datetime(2026, 9, 21, tzinfo=BERLIN),
     )
-    assert "Secret brief" not in out
     assert "unreleased: true" in out
     assert "has not been handed out yet" in out
-    # Withheld is the BODY, not the row: title and both dates are the plan, not a secret.
+    # The title is withheld with the body - a README heading names the dataset or the trick
+    # - so a pending row is titled from its slug, the way an unreleased session row names
+    # itself from the plan.
     assert 'title: "Assignment 1"' in out
+    # Withheld is the row's CONTENT, not the row: both dates are the plan, not a secret.
     assert "date: 2026-09-22T09:00:00" in out.split("due_event:")[0]
     assert "    date: 2026-10-13T23:59:59" in out
 
