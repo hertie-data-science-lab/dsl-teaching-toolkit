@@ -66,8 +66,9 @@ GRADEBOOK_PREFIX = "grades-"  # per-student repo: grades-<handle>
 RENDER_BRANCH = "grades-update"
 COHORT_CSV_NAME = "cohort-gradebook.csv"  # generated wide faculty-only glance view
 
-# One assignment CSV row. Individual rows use `autograde_score` (machine) + `manual_score`
-# (faculty & instructors' hand-marked part); group rows carry the shared `team_score`, that
+# One assignment CSV row. `autograde_score` is the machine's passing-test count on both
+# individual and group assignments; `manual_score` is the faculty & instructors' hand-marked
+# part of an individual one. Group rows additionally carry the shared `team_score`, that
 # member's private `individual_adjustment`, and the shared `team_comments`. `final_grade` is
 # authoritative (stored explicitly so faculty & instructors own any rounding/combination).
 # `autograde_score`/`manual_score` are faculty-internal working columns - they never appear in
@@ -91,7 +92,14 @@ GRADE_FIELDS = (
 
 # The columns the autograder writes. They are WRITE-ONCE (see merge_auto): once one holds a
 # value - a machine score, or a marker's correction of one - no later run may replace it.
-MACHINE_FIELDS = ("autograde_score", "team", "team_score")
+#
+# `team_score` is deliberately NOT here. It is the marker's shared team mark, and while the
+# group autograder wrote its passing-test count into it the two shared one write-once cell:
+# whichever landed first won, so a team marked before the grading deadline silently lost its
+# autograde and a team marked after it found the cell already taken. The count now goes to
+# `autograde_score`, exactly as it does for an individual assignment, and `team_score` is
+# faculty-owned like `manual_score` beside it.
+MACHINE_FIELDS = ("autograde_score", "team")
 
 # The legend for `grades.yml`. This README is the ONLY place a student is told what the
 # keys in that file mean - there is no other documentation on their side - so every key
@@ -263,13 +271,12 @@ def merge_auto(text: str, updates: list[tuple[str, dict[str, str]]]) -> str:
 
     Each update is (github_handle, {field: value}); the handle's row is updated in place
     (preserving every other column a faculty & instructors member has already filled) or created and
-    appended if absent. Used by the collector to record `autograde_score` (individual) or
-    `team`/`team_score` (group) without disturbing hand-marked scores, comments, or the
-    final grade.
+    appended if absent. Used by the collector to record `autograde_score` (plus `team` on a
+    group assignment) without disturbing hand-marked scores, comments, or the final grade.
 
     WRITE-ONCE. A machine-written cell (MACHINE_FIELDS) that already holds a value is NEVER
     overwritten - this fills EMPTY cells only, on scheduled and manual runs alike. That is
-    what makes a hand-edited `autograde_score`/`team_score` safe: no re-run can silently replace a
+    what makes a hand-edited `autograde_score` safe: no re-run can silently replace a
     marker's correction with a recomputed score. To get a fresh machine score, clear those
     cells (or delete the CSV) first, then re-grade."""
     rows = parse_grades(text) if text.strip() else []

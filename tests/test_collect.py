@@ -18,7 +18,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from dsl_course import collect
+from dsl_course import collect, grades
 from dsl_course.roster import Student
 from dsl_course.schedule import Schedule
 
@@ -633,6 +633,15 @@ def test_collect_resolves_the_cohort_type_from_the_entry_not_the_cohort_name(
     # target's own key (the loop variable no longer shadows the schedule key)
     assert ("autograde/group-project/team-x.json") in [p for p, _t in written]
     assert "grades/group-project.csv" in [p for p, _t in written]
+    # The team's count goes to `autograde_score` on every member's row - NOT to
+    # `team_score`, which is the marker's shared mark and must reach them unclaimed.
+    (csv_text,) = [t for p, t in written if p == "grades/group-project.csv"]
+    rows = {r.github_handle: r for r in grades.parse_grades(csv_text)}
+    assert set(rows) == {"anna", "ben"}
+    for r in rows.values():
+        assert r.team == "team-x"
+        assert r.autograde_score != ""
+        assert r.team_score == ""
 
 
 def test_collect_records_a_skip_when_the_template_has_no_solution_branch(monkeypatch):

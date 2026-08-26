@@ -1,11 +1,11 @@
 github_handle,team,autograde_score,manual_score,team_score,individual_adjustment,final_grade,individual_comments,team_comments
-anna-adams,team-alpha,,,85,+4,89,"Led the model architecture; carried the team's core work.","Strong project: excellent model design, but a thin evaluation section."
-ben-baker,team-alpha,,,85,0,85,"Solid, even contribution.","Strong project: excellent model design, but a thin evaluation section."
-amara-okonjo,team-alpha,,,85,+2,87,"Owned the evaluation harness and the error analysis.","Strong project: excellent model design, but a thin evaluation section."
-jonas-bergstrom,team-alpha,,,85,-2,83,"Contributed late; the write-up was left to others.","Strong project: excellent model design, but a thin evaluation section."
-carla-cohen,team-beta,,,78,+2,80,"Strong data pipeline; good documentation.","Good pipeline and docs; the report lacked error analysis."
-dan-davies,team-beta,,,78,-3,75,"Limited commits; missed two team check-ins.","Good pipeline and docs; the report lacked error analysis."
-k-nowak-weiss,team-beta,,,78,+3,81,"Rescued the feature engineering; clear commit history.","Good pipeline and docs; the report lacked error analysis."
-miguel-santos,team-gamma,,,82,0,82,"Even contribution across modelling and writing.","Well-scoped project; strong baseline comparison, light on ablations."
-priya-raman,team-gamma,,,82,+3,85,"Drove the baseline comparison and the final report.","Well-scoped project; strong baseline comparison, light on ablations."
-tomas-havel,team-gamma,,,82,0,82,"Reliable throughout; good notebook hygiene.","Well-scoped project; strong baseline comparison, light on ablations."
+anna-adams,team-alpha,2,,85,+4,89,Led the model architecture; carried the team's core work.,"Strong project: excellent model design, but a thin evaluation section."
+ben-baker,team-alpha,2,,85,0,85,"Solid, even contribution.","Strong project: excellent model design, but a thin evaluation section."
+amara-okonjo,team-alpha,2,,85,+2,87,Owned the evaluation harness and the error analysis.,"Strong project: excellent model design, but a thin evaluation section."
+jonas-bergstrom,team-alpha,2,,85,-2,83,Contributed late; the write-up was left to others.,"Strong project: excellent model design, but a thin evaluation section."
+carla-cohen,team-beta,2,,78,+2,80,Strong data pipeline; good documentation.,Good pipeline and docs; the report lacked error analysis.
+dan-davies,team-beta,2,,78,-3,75,Limited commits; missed two team check-ins.,Good pipeline and docs; the report lacked error analysis.
+k-nowak-weiss,team-beta,2,,78,+3,81,Rescued the feature engineering; clear commit history.,Good pipeline and docs; the report lacked error analysis.
+miguel-santos,team-gamma,1,,82,0,82,Even contribution across modelling and writing.,"Well-scoped project; strong baseline comparison, light on ablations."
+priya-raman,team-gamma,1,,82,+3,85,Drove the baseline comparison and the final report.,"Well-scoped project; strong baseline comparison, light on ablations."
+tomas-havel,team-gamma,1,,82,0,82,Reliable throughout; good notebook hygiene.,"Well-scoped project; strong baseline comparison, light on ablations."

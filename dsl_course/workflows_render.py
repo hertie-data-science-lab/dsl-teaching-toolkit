@@ -448,7 +448,7 @@ def render_grade_assignment(
 # result.json, and fills the machine score into the private grades CSV (faculty & instructors
 # then add manual marks; Render + Distribute send them).
 #
-# WRITE-ONCE: an `autograde_score`/`team`/`team_score` cell that already holds a value is never
+# WRITE-ONCE: an `autograde_score`/`team` cell that already holds a value is never
 # overwritten, so re-running does NOT refresh scores - it only fills cells still empty. For a
 # fresh machine score, clear those cells first (and delete classroom-config/autograde/<slug>/
 # to let the cron regrade). Nothing is written to student repos. dry_run lists what would be
