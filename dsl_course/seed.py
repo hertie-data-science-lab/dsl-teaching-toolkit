@@ -52,7 +52,6 @@ from .discovery import (
 from .profile_readme import update_profile_readme
 from .roster import CONFIG_REPO
 from .utils import (
-    MATERIALS_REPO_PREFIX,
     gh,
     is_missing_resource,
     log,
@@ -304,43 +303,6 @@ def _propagate_repo_secret(course_org: str, repos: list[str]) -> int:
     return failures
 
 
-def _refresh_system_files(course_org: str, repo: str) -> int:
-    """Converge a MATERIALS repo's SYSTEM-owned files on central.
-
-    The other half of `_refresh_stubs`. Both files (`scaffold.materials_system_files`) are
-    this toolkit describing itself - the maintainer guide and the filled syllabus example -
-    so they are meant to be rewritten whenever the toolkit changes them. They were only
-    ever written by the scaffold, which made "SYSTEM-owned" true of new repos and nothing
-    else: a course scaffolded before the syllabus example existed was never going to get
-    one, and its maintainer guide stayed frozen at whatever shipped that day.
-
-    Unlike the stubs, this CREATES as well as updates - the whole point is to back-fill a
-    file that was added to the toolkit after the repo was made. Which is why it is gated on
-    the repo NAME: `discover_content_repos` hands us the code and dataset repos too, and a
-    materials-repo maintainer guide dropped into `lecture-code-f2026` is the nonsense
-    `_refresh_stubs`' `create=False` exists to avoid. `scaffold_materials` names every
-    materials repo `course-materials-<tag>`, and the New materials repo button only takes
-    the tag, so the prefix is what the toolkit itself guarantees - not a guess.
-
-    put_files is diff-aware, so an org already converged writes nothing: one tree read per
-    materials repo per night, no commit."""
-    if not repo.startswith(MATERIALS_REPO_PREFIX):
-        return 0
-    # Local import: `scaffold` imports this module, so a module-level one is a cycle - same
-    # shape as `_refresh_stubs` below.
-    from . import scaffold
-
-    if put_files(
-        course_org,
-        repo,
-        scaffold.materials_system_files(course_org, repo),
-        "docs: maintainer guide + syllabus example",
-    ):
-        return 0
-    log_err(f"system files not written to {course_org}/{repo}")
-    return 1
-
-
 def _refresh_stubs(course_org: str, repo: str) -> int:
     """Bring a content repo's seeded STUBS up to date, without creating any.
 
@@ -392,6 +354,9 @@ def refresh(course_org: str) -> int:
     Non-zero if any file could not be written: this runs nightly on a cron, so a run that
     silently failed to converge an org would go unnoticed until someone clicked a button
     that was never seeded."""
+    # Local import: `scaffold` imports this module, so a module-level one is a cycle.
+    from . import scaffold
+
     cohorts = discover_cohorts(course_org)
     targets = discover_content_repos(course_org)
     assignments = discover_assignments(
@@ -404,7 +369,9 @@ def refresh(course_org: str) -> int:
     for repo in sorted(targets):
         failures += _push_workflows(course_org, repo, cohorts, assignments)
         failures += _refresh_stubs(course_org, repo)
-        failures += _refresh_system_files(course_org, repo)
+        # A no-op on the code and dataset repos this sweep also returns; the gate is
+        # inside, so no caller can forget it.
+        failures += scaffold.refresh_materials_system_files(course_org, repo)
     failures += _propagate_repo_secret(course_org, targets)
     failures += seed_github_workflows(course_org)
     failures += _write_heartbeat(course_org)

@@ -294,14 +294,10 @@ def refreshable_stubs(tag: str) -> dict[str, bytes]:
 
 
 def _actions_table(org: str) -> str:
-    """The buttons table, shared by a materials repo's README and its MAINTAINING.md.
-
-    Lifted out of `scaffold_materials` so `materials_system_files` can build the
-    maintainer guide without the scaffold's surrounding repo-creation work."""
-    actions_url = f"https://github.com/{org}/.github/actions"
     # The course org's `.github` Actions tab hosts the buttons that operate this course.
     # Both README (faculty & instructors orientation, pre-release) and MAINTAINING link it.
-    actions_table = (
+    actions_url = f"https://github.com/{org}/.github/actions"
+    return (
         f"The course org's [`.github` Actions tab]({actions_url}) hosts the buttons that "
         "operate this course:\n\n"
         "| Action | What it does |\n"
@@ -318,13 +314,12 @@ def _actions_table(org: str) -> str:
         "(**Release materials** and **Release assignment** also appear in this repo's own "
         "Actions tab.)\n"
     )
-    return actions_table
 
 
 def _maintaining(org: str, repo: str) -> str:
-    """The generated maintainer guide for a materials repo."""
+    """The generated maintainer guide - SYSTEM-owned docs, built from the actions table."""
     actions_table = _actions_table(org)
-    maintaining = (
+    return (
         f"# Maintaining `{repo}` (faculty & instructors)\n\n"
         "Reference for faculty & instructors on how to populate and operate this materials "
         "**source** repo. This file is **not** released to students - Release materials only "
@@ -372,7 +367,6 @@ def _maintaining(org: str, repo: str) -> str:
         "of the list by leaving them as non-text files) or `actual-readings` (every reading "
         "file is hosted and downloadable - you carry the copyright responsibility).\n"
     )
-    return maintaining
 
 
 def materials_system_files(org: str, repo: str) -> dict[str, bytes]:
@@ -380,15 +374,47 @@ def materials_system_files(org: str, repo: str) -> dict[str, bytes]:
     they are REFRESHED rather than frozen - faculty edits here are overwritten, which
     each file says in its own text.
 
-    Named here, where they are written, and read by `seed._refresh_system_files`, so a
-    repo scaffolded before one of them improved converges on the next nightly Refresh
-    instead of keeping whatever the toolkit first shipped. One list rather than two that
-    drift - the same contract as `refreshable_stubs`, for the other half of the
-    ownership split."""
+    Named here, where they are written, and pushed by `refresh_materials_system_files`
+    from both the scaffold and the nightly refresh - one list rather than two that drift,
+    the same contract as `refreshable_stubs` for the other half of the ownership split."""
     return {
         SYLLABUS_SAMPLE_FILE: _SYLLABUS_SAMPLE.encode(),
         "MAINTAINING.md": _maintaining(org, repo).encode(),
     }
+
+
+def refresh_materials_system_files(org: str, repo: str) -> int:
+    """Re-push a materials repo's SYSTEM-owned files (materials_system_files).
+
+    Called both at scaffold time and on the nightly refresh, so an improvement to the
+    maintainer guide or the syllabus example reaches the courses already running. Before
+    this they were written only by the scaffold, which made "SYSTEM-owned" true of new
+    repos and nothing else: a course scaffolded before the example existed was never going
+    to get one. `put_files` compares blob shas, so a repo already current is written
+    nothing, and both files land in one commit because they always change together.
+
+    Unlike the stubs this CREATES as well as updates - back-filling a file added after the
+    repo was made is the point - so it is gated on the repo NAME, and the gate lives here
+    rather than at the call site because no caller may skip it: `discover_content_repos`
+    hands the nightly sweep the code and dataset repos too, and a materials-repo
+    maintainer guide in `lecture-code-f2026` is the nonsense `seed._refresh_stubs`'
+    `create=False` exists to avoid. Every materials repo is named `course-materials-<tag>`
+    by `scaffold_materials`, from a button that takes only the tag, so the prefix is a
+    toolkit guarantee rather than a convention.
+
+    Returns 1 if the commit didn't land, so callers go red rather than report a converged
+    repo - this runs unattended on a cron, where a silent skip is invisible for weeks."""
+    if not repo.startswith(MATERIALS_REPO_PREFIX):
+        return 0
+    if not put_files(
+        org,
+        repo,
+        materials_system_files(org, repo),
+        "docs: maintainer guide + syllabus example",
+    ):
+        log_err(f"system files not written to {org}/{repo}")
+        return 1
+    return 0
 
 
 def scaffold_materials(org: str, tag: str) -> int:
@@ -433,19 +459,7 @@ def scaffold_materials(org: str, tag: str) -> int:
         "- **Available actions:** " + actions_table
     )
     failures = 0
-    # The SYSTEM-owned pair (maintainer guide + filled syllabus example): written
-    # unconditionally, never frozen create-only, so a re-run picks up whatever the toolkit
-    # has since changed. One commit, because they always change together (put_files is
-    # diff-aware, so an unchanged pair writes nothing). The same dict is what the nightly
-    # refresh pushes into materials repos scaffolded before either file existed. A failed
-    # write reds the scaffold rather than shipping a stale/absent maintainer guide.
-    if not put_files(
-        org,
-        repo,
-        materials_system_files(org, repo),
-        "docs: maintainer guide + syllabus example",
-    ):
-        failures += 1
+    failures += refresh_materials_system_files(org, repo)
     # USER-owned skeletons: create-only, so a re-run against a repo faculty have since
     # authored must not revert their README/SYLLABUS to the stub or resurrect a deleted
     # starter directory. A failed seed (an absent file whose write failed) reds the scaffold.

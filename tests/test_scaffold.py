@@ -314,11 +314,15 @@ def test_the_syllabus_stub_carries_the_standard_sections(fake):
     assert "capitalisation" in stub and "SYLLABUS.pdf" in stub
 
 
-def test_the_syllabus_sample_is_never_released_to_students():
-    # A whole-repo release must not ship our example syllabus into a cohort.
+def test_no_system_file_is_ever_released_to_students():
+    # A whole-repo release must not ship our example syllabus - or any other file the
+    # toolkit wrote about itself - into a cohort. Asserted over the whole manifest because
+    # the nightly refresh back-fills these into repos that have been running for months:
+    # the exclusion is the precondition that makes creating them there safe.
     from dsl_course import deploy
 
-    assert "SYLLABUS.md.sample" in deploy.ROOT_RELEASE_EXCLUDED
+    for path in scaffold.materials_system_files("Org", "course-materials-f2026"):
+        assert path in deploy.ROOT_RELEASE_EXCLUDED, path
 
 
 def test_a_stub_is_refreshed_while_it_is_still_ours(fake):
@@ -397,44 +401,32 @@ def test_refresh_improves_an_existing_stub_but_never_creates_one(monkeypatch):
 
 
 def test_refresh_backfills_the_system_files_into_a_materials_repo(monkeypatch):
-    # The gap this closes: MAINTAINING.md and the syllabus sample are SYSTEM-owned - meant
-    # to be rewritten whenever the toolkit changes them - but were only ever written by the
-    # scaffold. That made "SYSTEM-owned" true of new repos and nothing else: a course
-    # scaffolded before the sample existed was never going to get one, and its maintainer
-    # guide stayed frozen at whatever shipped that day.
-    #
-    # Unlike the stubs, this CREATES: back-filling a file added after the repo was made is
-    # the whole point. Which is why it is gated on the repo NAME - discover_content_repos
-    # returns the code and dataset repos too.
-    from dsl_course import seed
-
+    # The gap this closes: both files are SYSTEM-owned - meant to be rewritten whenever the
+    # toolkit changes them - but were only ever written by the scaffold, which made that
+    # true of new repos and nothing else. This CREATES, because back-filling a file added
+    # after the repo was made is the point; hence the name gate, since the nightly sweep
+    # also hands us the code and dataset repos.
     f = FakeRepo()
-    monkeypatch.setattr(seed, "put_files", f.put_files)
-    # A materials repo holding NEITHER file (scaffolded before they existed), and a code
-    # repo the nightly refresh sweeps over alongside it.
-    assert seed._refresh_system_files("Org", "course-materials-f2026") == 0
-    assert seed._refresh_system_files("Org", "lecture-code-f2026") == 0
+    monkeypatch.setattr(scaffold, "put_files", f.put_files)
+
+    assert scaffold.refresh_materials_system_files("Org", "course-materials-f2026") == 0
+    assert scaffold.refresh_materials_system_files("Org", "lecture-code-f2026") == 0
 
     assert f.written("course-materials-f2026") == {
         "MAINTAINING.md",
         "SYLLABUS.md.sample",
     }
-    # The code repo is untouched: a materials-repo maintainer guide in `lecture-code-f2026`
-    # is the nonsense _refresh_stubs' create=False exists to avoid.
     assert f.written("lecture-code-f2026") == set()
 
 
 def test_refresh_rewrites_a_stale_system_file(monkeypatch):
-    # SYSTEM-owned means the toolkit's copy wins - that is what the file's own text tells
-    # faculty ("kept current by the toolkit - copy from it, do not edit it"). A guide left
-    # at last month's wording is the drift this closes.
-    from dsl_course import seed
-
+    # SYSTEM-owned means the toolkit's copy wins - what the file's own text tells faculty
+    # ("kept current by the toolkit - copy from it, do not edit it").
     f = FakeRepo()
-    monkeypatch.setattr(seed, "put_files", f.put_files)
+    monkeypatch.setattr(scaffold, "put_files", f.put_files)
     f.files[("course-materials-f2026", "MAINTAINING.md")] = "# stale guide\n"
 
-    assert seed._refresh_system_files("Org", "course-materials-f2026") == 0
+    assert scaffold.refresh_materials_system_files("Org", "course-materials-f2026") == 0
     assert (
         "Reference for faculty & instructors"
         in f.files[("course-materials-f2026", "MAINTAINING.md")]
@@ -444,29 +436,8 @@ def test_refresh_rewrites_a_stale_system_file(monkeypatch):
 def test_refresh_reds_when_a_system_file_cannot_be_written(monkeypatch):
     # This runs on a nightly cron, so a write that failed silently would leave an org
     # unconverged with a green run to say otherwise.
-    from dsl_course import seed
-
-    monkeypatch.setattr(seed, "put_files", lambda *a, **k: False)
-    assert seed._refresh_system_files("Org", "course-materials-f2026") == 1
-
-
-def test_the_scaffold_and_refresh_write_the_same_system_file_list():
-    # One list, for the same reason as the stubs: a SYSTEM-owned file added to the scaffold
-    # is converged everywhere without a second edit somewhere else.
-    assert sorted(scaffold.materials_system_files("Org", "course-materials-f2026")) == [
-        "MAINTAINING.md",
-        "SYLLABUS.md.sample",
-    ]
-
-
-def test_the_syllabus_sample_is_never_released_to_a_cohort():
-    # The sample now lands in repos that have been running for months, some with a public
-    # course site. It is our example syllabus, so shipping it as a course's own would be
-    # worse than shipping nothing - the exclusion is what makes back-filling it safe.
-    from dsl_course import deploy
-
-    for path in scaffold.materials_system_files("Org", "course-materials-f2026"):
-        assert path in deploy.ROOT_RELEASE_EXCLUDED, path
+    monkeypatch.setattr(scaffold, "put_files", lambda *a, **k: False)
+    assert scaffold.refresh_materials_system_files("Org", "course-materials-f2026") == 1
 
 
 def test_the_scaffold_and_refresh_converge_the_same_stub_list():
