@@ -33,6 +33,49 @@ def test_assignment_slug_drops_the_cohort_suffix():
     assert assign.assignment_slug("assignment-4-project") == "assignment-4-project"
 
 
+def test_an_unusable_solution_branch_does_not_block_provisioning(
+    tmp_path, monkeypatch, capsys
+):
+    # A scheduled handout re-runs every tick, so aborting on a bad solution branch meant NO
+    # student who onboarded after solution_datetime ever got a repo. The repos must be
+    # handed out regardless; an unusable solution only reddens the run.
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    monkeypatch.setattr(assign, "fetch_solution", lambda *a, **k: None)
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    provisioned = []
+    monkeypatch.setattr(
+        assign,
+        "provision_one",
+        lambda *a, **k: provisioned.append(a[3]) or "created",
+    )
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: None)
+    monkeypatch.setattr("dsl_course.schedule.entry_for_repo", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+    recorded = []
+    monkeypatch.setattr(
+        assign, "record_solution_released", lambda *a, **k: recorded.append(a)
+    )
+
+    rc = assign.provision_all(
+        "COURSE",
+        "assignment-1-f2026",
+        "COHORT",
+        roster_path=path,
+        solution=True,
+        group=False,
+    )
+    err = capsys.readouterr().err
+    assert provisioned == ["assignment-1-ada-l"], (
+        "the abort is back - nobody provisioned"
+    )
+    assert rc == 1, "an unusable solution must still redden the run"
+    assert "provisioning continues without it" in err
+    assert recorded == [], "a failed solution must not be recorded as released"
+
+
 def test_provisioning_skips_auditors(tmp_path, capsys):
     path = _roster_file(
         tmp_path,

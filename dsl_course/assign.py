@@ -52,11 +52,22 @@ from .utils import (
     log_ok,
     log_skip,
     log_step,
+    put_file,
     repo_exists,
     set_repo_topics,
 )
 
 SOLUTION_BRANCH = "solution"
+# Fire-once sentinel for the SCHEDULED solution push, in classroom-config. Needed because
+# `due_releases` is cumulative by design - a handout release re-fires every tick so a late
+# onboarder still gets their repo - and while re-probing a repo is cheap, push_solution
+# CLONES every student repo. Without this marker a passed `solution_datetime` means a clone
+# per student per hour for the rest of the term.
+#
+# A marker rather than a time window (`solution_datetime <= now < +1h`): a missed tick -
+# an outage, a queued runner, a rate limit - would silently mean the solution never ships
+# at all, and nothing would ever notice. Deleting the file re-releases it.
+SOLUTION_RECORD_DIR = "solutions"
 SOLUTION_DIR = "solution"
 _GIT_ENV = GIT_ENV
 
@@ -165,7 +176,16 @@ def fetch_solution(master_org: str, template: str, dest: Path) -> Path | None:
         )
         return None
     sol = dest / SOLUTION_DIR
-    return sol if sol.is_dir() else None
+    if not sol.is_dir():
+        # The branch exists but holds no `solution/` folder - the model answer was committed
+        # at the branch root, or the folder was renamed. Silent before, which made the
+        # caller's failure look like a missing branch.
+        log_err(
+            f"  ! {master_org}/{template}'s `{SOLUTION_BRANCH}` branch has no "
+            f"`{SOLUTION_DIR}/` folder - nothing to push"
+        )
+        return None
+    return sol
 
 
 def push_solution(cohort_org: str, repo: str, sol_dir: Path) -> bool:
@@ -314,6 +334,47 @@ def main() -> int:
         return 1
 
 
+def solution_record_path(slug: str) -> str:
+    """Where the fire-once record for `slug`'s solution release lives."""
+    return f"{SOLUTION_RECORD_DIR}/{slug}.json"
+
+
+def solution_released(cohort_org: str, slug: str) -> bool:
+    """Whether the model solution for `slug` has already been pushed to this cohort.
+
+    Read by the scheduler, so a passed `solution_datetime` fires exactly once. The manual
+    Release assignment path does NOT consult it - an operator ticking include_solution is
+    asking for it now, and push_solution is an idempotent overwrite anyway."""
+    from .roster import CONFIG_REPO
+
+    code, _ = gh(
+        "api",
+        f"repos/{cohort_org}/{CONFIG_REPO}/contents/{solution_record_path(slug)}",
+        "--jq",
+        ".sha",
+    )
+    return code == 0
+
+
+def record_solution_released(cohort_org: str, slug: str, repos: int) -> None:
+    """Write the fire-once record, so no later tick re-pushes the solution.
+
+    Written only after a run in which every solution push succeeded - a partial push must
+    re-run, or the students it missed would never receive the solution at all."""
+    from .roster import CONFIG_REPO
+
+    put_file(
+        cohort_org,
+        CONFIG_REPO,
+        solution_record_path(slug),
+        json.dumps(
+            {"assignment": slug, "repos": repos, "released": "by dsl-course"}, indent=2
+        ).encode()
+        + b"\n",
+        f"chore: record the model solution release for {slug}",
+    )
+
+
 def provision_all(
     master_org: str,
     template: str,
@@ -421,10 +482,20 @@ def provision_all(
     with tempfile.TemporaryDirectory() as soldir:
         # Solution still comes from the COURSE template's solution branch.
         sol_dir = None
+        solution_unavailable = False
         if solution:
             sol_dir = fetch_solution(master_org, template, Path(soldir) / "t")
             if sol_dir is None:
-                return 1
+                # NOT fatal. Stage 2 below is what gets students their repos at all, and a
+                # scheduled handout re-runs every tick - so returning here would mean a
+                # template whose solution branch is missing, renamed, or holding the model
+                # answer outside `solution/` stops provisioning for every student who
+                # onboards from that moment on, with the solution request as the only
+                # cause. Hand out the repos, report the failure, ship no solution.
+                log_err(
+                    "  ! no usable solution to push - provisioning continues without it"
+                )
+                solution_unavailable = True
 
         # Stage 2: fan out one repo per unit (student, or team) FROM the cohort template.
         results: dict[str, int] = {}
@@ -468,7 +539,12 @@ def provision_all(
             f"site refreshes on the next Sync site or scheduler tick: {exc}"
         )
         site_failed = True
-    return 1 if site_failed or any(k.startswith("failed") for k in results) else 0
+    failed = site_failed or any(k.startswith("failed") for k in results)
+    # Record the release only when every push in this run landed: a partial run has to
+    # re-push, or the students it missed would never receive the solution at all.
+    if solution and not solution_unavailable and not failed:
+        record_solution_released(cohort_org, slug, len(units))
+    return 1 if failed or solution_unavailable else 0
 
 
 if __name__ == "__main__":

@@ -624,7 +624,15 @@ def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -
     # "your grades have been updated" from another. Read live from the course org's
     # dsl-course.yml; a course that carries no name yet keeps the generic wording rather
     # than emailing a blank.
-    course_name = course_name_for_cohort(cohort_org)
+    # The grades are already pushed by the time this runs, so a transient read failure or a
+    # malformed dsl-course.yml must not turn a successful distribution into a traceback
+    # with zero notifications sent - load_yaml_config deliberately RAISES on both. The
+    # course name is a nicety; the email is not.
+    try:
+        course_name = course_name_for_cohort(cohort_org)
+    except Exception as exc:  # a name is never worth losing the notifications over
+        log_err(f"could not read the course name ({exc}) - mailing without it")
+        course_name = ""
     course_suffix = f" for {course_name}" if course_name else ""
     messages = []
     for handle in handles:

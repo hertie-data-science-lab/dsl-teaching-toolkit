@@ -1012,7 +1012,7 @@ def test_handout_releases_synthesised_from_the_assignments_block(monkeypatch):
             ),
         }
     )
-    (r,) = scheduler._handout_releases("Course-Org", sched, WHEN)
+    (r,) = scheduler._handout_releases("Course-Org", "Cohort-f2026", sched, WHEN)
     assert r.label == "assignment-1-handout"
     assert r.assignment == "a-f2026"
     assert r.when == datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN)
@@ -1043,8 +1043,13 @@ def test_the_solution_rides_on_the_handout_release_once_its_datetime_passes(
         }
     )
 
+    released = {"yet": False}
+    monkeypatch.setattr(
+        "dsl_course.assign.solution_released", lambda org, slug: released["yet"]
+    )
+
     def one(now):
-        (r,) = scheduler._handout_releases("Course-Org", sched, now)
+        (r,) = scheduler._handout_releases("Course-Org", "Cohort-f2026", sched, now)
         return r
 
     # between handout and solution time: exactly one release, carrying no solution
@@ -1060,6 +1065,12 @@ def test_the_solution_rides_on_the_handout_release_once_its_datetime_passes(
     after = one(datetime(2026, 10, 17, tzinfo=BERLIN))
     assert after.assignment_solution is True
     assert scheduler.describe(after) == ["assignment a-f2026 + model solution"]
+
+    # and ONCE only. due_releases is cumulative, so without the fire-once marker every
+    # later tick would re-push - and push_solution clones every student repo.
+    released["yet"] = True
+    assert one(datetime(2026, 10, 18, tzinfo=BERLIN)).assignment_solution is False
+    assert one(datetime(2027, 1, 5, tzinfo=BERLIN)).assignment_solution is False
 
 
 def test_a_solution_datetime_without_a_handout_never_synthesises_a_release(monkeypatch):
@@ -1077,7 +1088,7 @@ def test_a_solution_datetime_without_a_handout_never_synthesises_a_release(monke
             )
         }
     )
-    assert scheduler._handout_releases("Course-Org", sched, WHEN) == []
+    assert scheduler._handout_releases("Course-Org", "Cohort-f2026", sched, WHEN) == []
 
 
 def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):

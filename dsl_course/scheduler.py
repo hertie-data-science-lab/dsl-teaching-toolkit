@@ -307,8 +307,23 @@ def _run_releases(
     return errors
 
 
+def _solution_due(
+    cohort_org: str, slug: str, entry: schedule.AssignmentEntry, now: datetime
+) -> bool:
+    """Whether this tick should push the model solution for `slug`.
+
+    The datetime check is cheap and comes first, so the fire-once read is paid only by an
+    assignment whose solution moment has actually arrived - not by every assignment on
+    every tick."""
+    from .assign import solution_released
+
+    if entry.solution_datetime is None or entry.solution_datetime > now:
+        return False
+    return not solution_released(cohort_org, schedule.cohort_name(slug, entry))
+
+
 def _handout_releases(
-    course_org: str, sched: schedule.Schedule, now: datetime
+    course_org: str, cohort_org: str, sched: schedule.Schedule, now: datetime
 ) -> list[Release]:
     """Synthetic releases for `assignments.<slug>.handout_datetime` - the whole assignment
     lifecycle (handout_datetime/due_datetime/grading_datetime/max_team_size) is declared in
@@ -319,12 +334,15 @@ def _handout_releases(
     skipped - it may be pinned for its website date alone.
 
     The model solution rides on THIS release once `solution_datetime` has passed, rather
-    than being a second synthesised one. `due_releases` is cumulative, not edge-triggered,
-    so a separate solution release would fire again every tick for the rest of the term -
-    and provision_all's solution pass CLONES every student repo where the handout pass only
-    probes it, plus it syncs the site. That is a clone per student per hour, indefinitely.
-    One release, one provisioning pass, both jobs; between the two datetimes it simply
-    fires without the solution.
+    than being a second synthesised one - one release, one provisioning pass, both jobs;
+    between the two datetimes it simply fires without the solution.
+
+    It is ALSO gated on assign.solution_released, and that gate is what makes it safe.
+    `due_releases` is cumulative by design - the handout re-fires every tick so a student
+    who onboards late still gets their repo - and re-probing a repo is cheap, but
+    push_solution CLONES every student repo. Ungated, a passed `solution_datetime` would
+    mean a clone per student per hour for the rest of the term. Folding the two releases
+    into one removed a duplicate pass; only the marker removes the recurrence.
 
     It also makes "a scheduled solution needs a scheduled handout" structural - there is no
     release to carry the solution unless `handout_datetime` is set - so the scheduler no
@@ -343,10 +361,7 @@ def _handout_releases(
                 label=f"{slug}-handout",
                 when=entry.handout_datetime,
                 assignment=template,
-                assignment_solution=(
-                    entry.solution_datetime is not None
-                    and entry.solution_datetime <= now
-                ),
+                assignment_solution=_solution_due(cohort_org, slug, entry, now),
             )
         )
     return out
@@ -397,7 +412,7 @@ def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) 
     # Re-sorted, not just concatenated: the synthesised handouts carry their own datetimes
     # and would otherwise land after every scheduled release whatever their date.
     releases = sorted(
-        sched.releases + _handout_releases(course_org, sched, now),
+        sched.releases + _handout_releases(course_org, cohort_org, sched, now),
         key=release_order,
     )
     due = due_releases(releases, now)

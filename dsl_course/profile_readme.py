@@ -376,7 +376,11 @@ def update_profile_readme(
     # commit - kept separate from the workflow refresh's commit, because `docs:` vs `ci:` is
     # the one distinction in this history worth reading.
     put_files(org, ".github", files, "docs: refresh org READMEs (profile + .github)")
-    log_ok("profile + .github READMEs refreshed")
+    log_ok(
+        "profile + .github READMEs refreshed"
+        if "profile/README.md" in files
+        else ".github README refreshed (landing page left as the instructor has it)"
+    )
 
 
 def _cohort_profile_body(org: str, repos: list[dict], seeded: str) -> str | None:
