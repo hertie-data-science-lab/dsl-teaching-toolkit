@@ -24,11 +24,11 @@ each heading are ours:
 | --- | --- | --- |
 | Home | *(template's own page)* | *(same)* |
 | Schedule | *(no page - driven by the rows below)* | *(same)* |
-| Lectures | Lecture slides are accessible to enrolled students. | Lecture slides by session. |
+| Lectures | Lecture slides are only accessible to enrolled students. | Lecture slides by session. |
 | Labs | Lab materials are only accessible to enrolled students. | Lab materials by session. |
-| Readings | Citation lists are public; the files themselves are accessible to enrolled students. | *(cohort only)* |
+| Readings | Citation lists are public; the files themselves are accessible to enrolled students. | Readings by session. |
 | Assignments | Assignments are only accessible to enrolled students. | Assignments by hand-out date. |
-| All Materials | Every course material released to this cohort, session or not. Course materials are only accessible to enrolled students. | *(cohort only)* |
+| All Materials | Every course material released to this cohort, session or not. Course materials are only accessible to enrolled students. | All materials released |
 | Materials | *(cohort only)* | Readings by session. |
 
 The public site drops Readings and All Materials, and keeps `/materials/` as its readings

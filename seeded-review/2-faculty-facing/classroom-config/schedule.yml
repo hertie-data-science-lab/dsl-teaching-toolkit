@@ -9,9 +9,10 @@
 #
 # Changing a date later? Just commit the edit to this file on main; the hourly cron reads
 # whatever is on main at each tick, so the change simply takes effect within the hour.
-# Only already-fired ONE-SHOT actions don't rewind: a release already shipped stays
+#
+# NB already-fired actions don't rewind: a release already shipped stays
 # shipped, and a snapshot/autograde that already ran needs its marker deleted to redo.
-# Rewrite git history and force push to remove a release.
+# Rewrite git history and force push to remove these releases.
 #
 # What follows is a SKELETON: uncomment and fill what you want. For a full worked term -
 # a real release plan, a group project, exams - see `schedule.yml.sample`.
@@ -23,16 +24,16 @@
 # releases:                         
 #   lecture-1:                      
 #     event_datetime:               # what the site's schedule shows
-#     title:                        # OPTIONAL: the session's name, beside its ordinal
-#     description:                  # OPTIONAL: a sentence about it, on the Lectures tab
+#     title:                        # OPTIONAL: the session's name, displayed on the Lectures tab (default: prettified label of the key, here "Lecture 1")
+#     description:                  # OPTIONAL: a sentence about it, displayed on the Lectures tab
 #     tbc: false                    # OPTIONAL: site marks it "(TBC)" next to the event_datetime (default: false)
 #     deploy:
 #       - course_source_repo:       # REQUIRED
 #         course_source_path:       # REQUIRED - folder or file to copy
-#         cohort_dest_repo:         # default: materials
-#         cohort_dest_path:         # default: same as course_source_path
-#         deploy_datetime:          # default: the event_datetime
-#       - course_source_repo:       # this session's READINGS - one line per session, and
+#         cohort_dest_repo:         # OPTIONAL - default: materials
+#         cohort_dest_path:         # OPTIONAL - default: mirrors course_source_path
+#         deploy_datetime:          # OPTIONAL - default: the event_datetime
+#       - course_source_repo:       # this session's READINGS - one line per session, and TODO - I THINK MAIN MOVED THIS OUT NO?????
 #         course_source_path: readings/01_session-1  # they ship on the same clock as anything
 #                                   # else. Every file in that folder is listed and linked
 #                                   # for enrolled students; the optional READINGS.md beside
@@ -54,7 +55,7 @@
 #         cohort_dest_path:
 #         deploy_datetime: 
 # 
-#   readings-1:    # TODO: NEED TO ADD FUNCTIONALITY VIA A SEPARATE PR THAT ALLOWS TOGGLING ON/OFF OF SITE-DISPLAY -> READINGS ARE JUST SILENTLY RELEASED, DON'T NEED AN EVENT ROW IN THE SITE'S DEPLOYED SCHEDULE. WE NEED TO ADD THIS THEN THEN UPDATE THESE SAMPLE & STUB DOCS WITH THE TOGGLE (DEFAULT IS IT DISPLAYS, OPT OUT)
+#   readings-1:    # TODO: NEED TO ADD FUNCTIONALITY VIA A SEPARATE PR THAT ALLOWS TOGGLING ON/OFF OF SITE-DISPLAY -> READINGS ARE JUST SILENTLY RELEASED, DON'T NEED AN EVENT ROW IN THE SITE'S DEPLOYED SCHEDULE. WE NEED TO ADD THIS THEN THEN UPDATE THESE SAMPLE & STUB DOCS WITH THE TOGGLE (DEFAULT IS IT DISPLAYS, OPT OUT)... TO DO THIS IS ALREADY DONE???? NEED TO REBASE ON MAIN AND CHECK
 #     event_datetime:               
 #     title:
 #     description:

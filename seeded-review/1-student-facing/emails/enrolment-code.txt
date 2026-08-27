@@ -2,11 +2,14 @@ Subject: Your course enrolment code
 ----------------------------------------------------------------------
 Hello Alex Beispiel,
 
-To join the course on GitHub, open a 'Join' issue here:
+To join the {INSERT COURSE NAME HERE} course on GitHub, open a 'Join' issue here:
   https://github.com/hertie-dsl-demo-f2026/welcome/issues/new/choose
 
 and paste this enrolment code when asked:
 
     K7QP-2M9X
 
-Whichever GitHub account opens the issue is linked to you automatically - you don't need to type any personal details.
+Whichever GitHub account opens the issue is linked to your hertie email address automatically.
+
+
+TODO: INSERT THE COURSE NAME

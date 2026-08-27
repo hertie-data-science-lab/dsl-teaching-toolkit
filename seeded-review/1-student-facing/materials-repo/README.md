@@ -1,9 +1,7 @@
 <!-- FACULTY & INSTRUCTORS: replace the content below with a real, student-facing
-     overview of your course materials. Release materials with the 'include README'
-     toggle copies THIS file into the cohort's materials repo, where enrolled
-     students read it - so write it for them, not as internal notes. How this source
-     repo is structured, and how to operate it, is in MAINTAINING.md (for faculty &
-     instructors only - never released to students). -->
+     overview of your course materials. 
+     How this source repo is structured, and how to operate it, is in MAINTAINING.md
+     (intended for faculty & instructors only - never released to students). -->
 
 # Course materials
 
@@ -20,11 +18,11 @@
 
 | Action | What it does |
 | --- | --- |
-| **Release materials** | Copy session folders - or any path, including a root file like your syllabus - into a cohort's `materials` repo. |
-| **Release assignment** | Freeze an assignment template, then generate one private repo per student. |
-| **New materials repo** | Scaffold another structured materials repo. |
-| **New assignment** | Scaffold an assignment template (starter + hidden autograder). |
-| **Refresh actions** | Re-seed the run-from-repo buttons and repopulate dropdowns after you add sessions/sections. |
-| **Check cohort setup** | Read-only per-cohort checklist of what's configured. |
+| **Release materials** | Copy session folders - or any path, including a root file like your syllabus or a README - into a cohort org. |
+| **Release assignment** | Freeze an assignment template, then generate one private repo per student in the cohort org. |
+| **New materials repo** | Scaffold a structured materials repo - release functionality pre-seeded. |
+| **New assignment** | Scaffold an assignment template (starter + hidden autograder) - release functionality pre-seeded. |
+| **Refresh actions** | Re-seed the workflows and repopulate dropdowns after you add sessions/sections/repos. |
+| **Check cohort setup** | Read-only per-cohort checklist of what's configured - provides guidance for what needs doing. |
 
 (**Release materials** and **Release assignment** also appear in this repo's own Actions tab.)

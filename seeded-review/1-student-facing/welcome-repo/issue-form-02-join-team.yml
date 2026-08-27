@@ -12,7 +12,7 @@ body:
     attributes:
       label: Assignment
       description: The assignment slug for this group project (ask the teaching team if unsure).
-      placeholder: "e.g. assignment-4-project"
+      placeholder: "e.g. assignment-4-project-xyz"
     validations:
       required: true
   - type: input

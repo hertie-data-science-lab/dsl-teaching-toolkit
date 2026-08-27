@@ -68,7 +68,7 @@ Thanks @${handle} - enrolment is **not yet armed**: the `DSL_BOT_TOKEN` secret i
 ### A7 · Roster header missing a required column
 Label `needs-review`
 ```
-Thanks @${handle} - the roster's header is missing a required column (`github_handle`, `github_id`, `enrol_code`). A maintainer will action this.
+Thanks @${handle} - the roster's header is missing a required column (`github_handle`, `github_id`, `enrol_code`). 
 ```
 
 ### A8 · Roster row vanished mid-write
@@ -119,13 +119,13 @@ You're already in team **${existingTeam}** for `${assignment}` @${handle}. Conta
 *Trigger: member count has hit `max_team_size` (schedule.yml) or the default of 5.* Label `needs-review`
 > Names a private-repo path (`classroom-config/schedule.yml`) the student cannot open - flag if you want that removed.
 ```
-Team **${team}** for `${assignment}` is full (${cap} member${cap === 1 ? '' : 's'} - the cap the teaching team set via `max_team_size` in classroom-config/schedule.yml). Pick another team name.
+Team **${team}** for `${assignment}` is full (${cap} member${cap === 1 ? '' : 's'}. Pick another team name.
 ```
 
 ### B5 · Not on the roster yet
 *Trigger: student skipped Join course.* Label `needs-review`
 ```
-Thanks @${handle} - I can't find you on the roster yet. Please open a **Join** issue first to onboard, then come back to join a team.
+Thanks @${handle} - I can't find you on the course enrollment roster yet. Please open a **Join** issue first to onboard, then come back to join a team.
 ```
 
 ### B6 · Auditor refused

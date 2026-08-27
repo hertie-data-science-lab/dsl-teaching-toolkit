@@ -4,12 +4,11 @@
      Write over it and it is yours. This file is OPTIONAL - delete it and the
      files you put in this folder are still listed. -->
 
-Drop the readings themselves into this folder - PDFs, slides, notebooks,
+Drop the readings themselves into this folder - PDFs, slides, URLs as text files, notebooks -
 anything. Every file here is listed and linked for enrolled students
 automatically; you do not have to name them here as well.
 
-This file is for what a file cannot say: a link to read online, or a proper
-citation. Anything goes - a bare URL on its own line is fine.
+This file is for what a file cannot represent: explanations & directions, chapters & references, a link to read online, a proper citation format.
 
 ## Required Readings
 
@@ -21,6 +20,7 @@ citation. Anything goes - a bare URL on its own line is fine.
 - Author, *Title*, ch. 2.
 
 What you write here is PUBLIC (it is a citation list). The files beside it
-stay behind the enrolled-student gate, unless the course runs a public
-open-courseware site in `actual-readings` mode, which serves them too. The
-session's learning objectives come from `description:` in schedule.yml.
+stay behind the enrolled-student/auditor gate (unless the course runs a public
+open-courseware site in `actual-readings` mode, which serves them too). 
+
+TODO: check that autitors can also access all the files.

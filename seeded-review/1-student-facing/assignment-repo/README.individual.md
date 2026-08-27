@@ -1,3 +1,3 @@
 # Assignment 1
 
-Complete the TODOs in `starter.py` and push to `main` (that push is your submission).
+TODO: LET'S JUST LEAVE THIS AS A BLANK STUP SAYING SOMETHING LIKE "WRITE INSTRUCTIONS HERE"
