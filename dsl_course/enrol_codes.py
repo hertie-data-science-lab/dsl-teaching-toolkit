@@ -27,6 +27,7 @@ import secrets
 import sys
 
 from . import mailer, roster
+from .discovery import course_name_for_cohort
 from .utils import get_file_content, log_err, log_ok, log_step, put_file, strip_bom
 
 # No ambiguous characters (0/O, 1/l/I) so a student can read the code off an email.
@@ -81,17 +82,26 @@ def assign_codes(students: list[roster.Student], gen=make_code) -> int:
     return added
 
 
-def code_message(student: roster.Student, welcome_url: str) -> mailer.Message:
-    """The enrolment-code email for one student: (to, subject, body)."""
+def code_message(
+    student: roster.Student, welcome_url: str, course_name: str = ""
+) -> mailer.Message:
+    """The enrolment-code email for one student: (to, subject, body).
+
+    `course_name` names the course in the opening line - a student reading several of
+    these in one week needs to know which one this is. It is optional because the name is
+    read live from the course org's dsl-course.yml, which a half-configured course may
+    not carry yet; the wording then falls back to "the course" rather than emailing a
+    blank."""
+    course = f"the {course_name}" if course_name else "the"
     subject = "Your course enrolment code"
     body = (
         f"Hello {student.name or 'there'},\n\n"
-        f"To join the course on GitHub, open a 'Join' issue here:\n"
+        f"To join {course} course on GitHub, open a 'Join' issue here:\n"
         f"  {welcome_url}\n\n"
         f"and paste this enrolment code when asked:\n\n"
         f"    {student.enrol_code}\n\n"
-        f"Whichever GitHub account opens the issue is linked to you automatically - "
-        f"you don't need to type any personal details.\n"
+        f"Whichever GitHub account opens the issue is linked to your hertie email "
+        f"address automatically.\n"
     )
     return (student.hertie_email, subject, body)
 
@@ -144,7 +154,8 @@ def run(cohort_org: str, dry_run: bool = False) -> int:
     if not targets:
         log_ok("no not-yet-onboarded students with an email to mail.")
         return 0
-    messages = [code_message(s, welcome_url) for s in targets]
+    course_name = course_name_for_cohort(cohort_org)
+    messages = [code_message(s, welcome_url, course_name) for s in targets]
     sent = mailer.send_bulk(messages, dry_run=dry_run)
     return 0 if sent == len(messages) else 1
 

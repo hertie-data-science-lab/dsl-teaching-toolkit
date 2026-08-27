@@ -21,6 +21,4 @@ This file is for what a file cannot represent: explanations & directions, chapte
 
 What you write here is PUBLIC (it is a citation list). The files beside it
 stay behind the enrolled-student/auditor gate (unless the course runs a public
-open-courseware site in `actual-readings` mode, which serves them too). 
-
-TODO: check that autitors can also access all the files.
+open-courseware site in `actual-readings` mode, which serves them too).

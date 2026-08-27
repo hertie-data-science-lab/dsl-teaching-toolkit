@@ -53,7 +53,7 @@ Sample identifiers throughout: course org `hertie-dsl-demo-course-e1234`, cohort
 | `course-config/cohort-dsl-course.yml` | Cohort -> course pointer | `templates/cohort/dsl-course.yml` |
 | `materials-repo/MAINTAINING.md` | How to operate a materials repo | `scaffold._maintaining` |
 | `materials-repo/SYLLABUS.md.sample` | Filled syllabus example beside the stub - never released to students | `scaffold._SYLLABUS_SAMPLE` |
-| `assignment-repo/grading.*.yml` | Autograder config, 3 variants | `scaffold._GRADING_YML` |
+| `assignment-repo/grading.*.yml` | Autograder config - 2 variants, individual and group | `scaffold._GRADING_YML` |
 | `assignment-repo/hidden-test*.py` | Hidden-test stubs faculty replace | `scaffold._HIDDEN_TEST_{PY,NOTEBOOK}` |
 | `assignment-repo/solution.*` | Model-solution stubs | `dsl_course/scaffold.py` |
 | `org-landing-page/course-profile-README.md` | Course org front page - the full action index | `profile_readme.render_profile_readme` |

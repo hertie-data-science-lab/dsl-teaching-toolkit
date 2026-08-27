@@ -191,8 +191,8 @@ _READINGS_STUB = (
     b"     Write over it and it is yours. This file is OPTIONAL - delete it and the\n"
     b"     files you put in this folder are still listed. -->\n\n"
     b"Drop the readings themselves into this folder - PDFs, slides, notebooks,\n"
-    b"anything. Every file here is listed and linked for enrolled students\n"
-    b"automatically; you do not have to name them here as well.\n\n"
+    b"anything. Every file here is listed and linked for enrolled students and\n"
+    b"auditors automatically; you do not have to name them here as well.\n\n"
     b"This file is for what a file cannot say: a link to read online, or a proper\n"
     b"citation. Anything goes - a bare URL on its own line is fine.\n\n"
     b"## Required Readings\n\n"
@@ -201,9 +201,10 @@ _READINGS_STUB = (
     b"## Optional Readings\n\n"
     b"- Author, *Title*, ch. 2.\n\n"
     b"What you write here is PUBLIC (it is a citation list). The files beside it\n"
-    b"stay behind the enrolled-student gate, unless the course runs a public\n"
-    b"open-courseware site in `actual-readings` mode, which serves them too. The\n"
-    b"session's learning objectives come from `description:` in schedule.yml.\n"
+    b"stay behind the enrolled-student/auditor gate, unless the course runs a\n"
+    b"public open-courseware site in `actual-readings` mode, which serves them\n"
+    b"too. The session's learning objectives come from `description:` in\n"
+    b"schedule.yml.\n"
 )
 
 _GRADING_YML = """\
@@ -528,11 +529,7 @@ def scaffold_assignment(
     grant_course_team_access(org, repo)
     grant_tagged_team_access(org, repo, tag)
     starter_name = "starter.ipynb" if fmt == "notebook" else "starter.py"
-    submission = (
-        "any team member's push to `main` counts as the team's submission"
-        if kind == "group"
-        else "that push is your submission"
-    )
+    brief = "group assignment" if kind == "group" else "assignment"
     # main: starter only (what students receive on generate). No tests, no autograder -
     # grading runs faculty-side from the solution branch (see Grade assignment). Create-only:
     # a re-run against a repo whose starter faculty have since authored must not revert it.
@@ -543,8 +540,10 @@ def scaffold_assignment(
         org,
         repo,
         "README.md",
-        f"# Assignment {number}\n\nComplete the TODOs in `{starter_name}` and push to "
-        f"`main` ({submission}).\n".encode(),
+        # A STUB, deliberately: this is the page students read, and only faculty can
+        # write it. Seeding a plausible-looking brief invites shipping it unedited, so
+        # the placeholder is unmistakably one.
+        f"# Assignment {number}\n\n_Write the {brief} instructions here._\n".encode(),
         "init: assignment starter",
     ):
         seed_failures += 1

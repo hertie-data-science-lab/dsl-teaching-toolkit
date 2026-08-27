@@ -1,9 +1,0 @@
-# How the Grade assignment workflow autogrades this assignment (after the grading_deadline set in schedule.yml).
-# Delete this file (or set autograde: false) for a purely manually-graded assignment.
-type: group      # individual (one repo per student) or group (one repo per team)
-format: py      # py or notebook # TODO: CAN WE REMOVE THIS? IS THIS NEEDD FUNCTIONALITY? IF IT'S NEEDED LET'S DISCUSS WHAT THE EXPLANATORY COMMENT HERE & DOCS SHOULD HOLD
-autograde: true       # false -> skip autograding (all-manual)
-max_auto: 0           # points the hidden tests are worth (0 = informational) TODO: LET'S DISCUSS THIS THIS WHAT IS THIS ABOUT? -> I WILL ADD PROPER EXPLANATORY COMMENT
-tests: tests          # path (on THIS solution branch) holding the hidden tests
-
-# TODO: WHY ARE THERE 3 VERSIONS OF THIS FILE? SURELY WE JUST NEED ONE?

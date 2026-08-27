@@ -25,6 +25,7 @@ from .utils import (
     get_default_branch,
     get_file_content,
     gh,
+    load_yaml_config,
     log_err,
     log_ok,
     put_file,
@@ -117,6 +118,26 @@ def _read_cohorts(course_org: str) -> list[str]:
         log_err(msg)
         raise RuntimeError(msg)
     return [c for c in cohorts if c]
+
+
+
+def course_name_for_cohort(cohort_org: str) -> str:
+    """This cohort's course name, for student-facing prose ("your grades for X").
+
+    Follows the cohort's own `.github/dsl-course.yml` `course:` pointer to its course
+    org, then reads that org's identity file - the same two hops status.collect makes,
+    but starting from the cohort, which is all an emailer is given.
+
+    Returns "" when either file is missing or carries no name, so callers fall back to
+    generic wording. A student must never be emailed a blank or a literal placeholder
+    where the course name belongs.
+    """
+    pointer = load_yaml_config(cohort_org, ".github", "dsl-course.yml") or {}
+    course_org = str(pointer.get("course") or "")
+    if not course_org:
+        return ""
+    meta = load_yaml_config(course_org, ".github", "dsl-course.yml") or {}
+    return str(meta.get("course_name") or meta.get("org_name") or "")
 
 
 def discover_cohorts(course_org: str) -> list[str]:
