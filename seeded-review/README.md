@@ -50,6 +50,7 @@ Sample identifiers throughout: course org `hertie-dsl-demo-course-e1234`, cohort
 | `classroom-config/{students.csv,teams.csv,schedule.yml,people.yml}` | The four scaffolds faculty fill in | `templates/classroom-config/` |
 | `classroom-config-samples/*.sample` | Filled worked examples shipped beside each scaffold | `example-course/cohort-org/` |
 | `course-config/dsl-course.yml` | Course identity + admin SSOT (comments are the docs) | `templates/course/*` via `bootstrap_course._course_metadata` |
+| `course-config/dsl-course.with-admins.yml` | The SAME file after `bootstrap --admins` - `people.course_admins` written in rather than left commented | same generator |
 | `course-config/cohort-dsl-course.yml` | Cohort -> course pointer | `templates/cohort/dsl-course.yml` |
 | `materials-repo/MAINTAINING.md` | How to operate a materials repo | `scaffold._maintaining` |
 | `materials-repo/SYLLABUS.md.sample` | Filled syllabus example beside the stub - never released to students | `scaffold._SYLLABUS_SAMPLE` |
@@ -88,9 +89,9 @@ the rest is machinery. Edit the prose, leave the shell logic.
 
 | Class | Files | Behaviour |
 | --- | --- | --- |
-| **SYSTEM** | all workflows, `classroom-config/README.md`, both org READMEs, all `*.sample` (incl. `SYLLABUS.md.sample`), `MAINTAINING.md`, cohort `dsl-course.yml` | Rewritten on every nightly refresh. Your edits propagate to **every existing org** within 24h. |
+| **SYSTEM** | all workflows, `classroom-config/README.md`, the course org's landing page + both `.github` READMEs, all `*.sample` (incl. `SYLLABUS.md.sample`), `MAINTAINING.md`, cohort `dsl-course.yml` | Rewritten on every nightly refresh. Your edits propagate to **every existing org** within 24h. |
 | **STUB** | materials `SYLLABUS.md` and `readings/NN_.../READINGS.md` | Refreshed nightly *while still ours* - they carry a `dsl-stub:` marker. Your edits reach every org that has not written over the file yet; once faculty edit it (or delete the marker) it is theirs and never touched again. |
-| **USER** | `classroom-config/{students,teams,schedule,people}`, `welcome/README.md`, materials `README.md`, assignment starters, course `dsl-course.yml` | Seeded create-only. Your edits reach **newly bootstrapped orgs only** - existing ones keep what they have. |
+| **USER** | `classroom-config/{students,teams,schedule,people}`, `welcome/README.md`, materials `README.md`, assignment starters, course `dsl-course.yml`, the cohort org's landing page (bar its repo table) | Seeded create-only. Your edits reach **newly bootstrapped orgs only** - existing ones keep what they have. |
 
 > Consequence: editing a USER-owned scaffold changes nothing for live cohorts. If you want
 > a change to reach them, it has to go in a SYSTEM- or STUB-owned file (or be propagated by

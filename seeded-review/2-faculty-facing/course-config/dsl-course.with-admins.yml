@@ -1,11 +1,19 @@
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
 org: hertie-dsl-demo-course-e1234
 org_name: DSL Demo Course
 course_name: Deep Learning (Demo)
 course_code: GRAD-DEMO
 # course_description: One or two sentences, on ONE line - the blurb on every cohort site.
+# site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the COHORT sites, link ONLY
+#   # these file types. Default (unset): each session's root files, plus one link per
+#   # subfolder - so a rendered deck lists the deck, not its hundreds of assets. Either way
+#   # everything you release still ships, and the folder itself is always one click away.
+#   # (The public open-courseware site always lists root files - it hosts what it lists.)
 
-# `course_name`, `course_code` and `course_description` are what reach the cohort websites
-# Editing them here re-syncs every associated/boostrapped cohort site.
+# `course_name`, `course_code` and `course_description` are what reach the cohort
+# websites. Editing them here re-syncs every cohort site already bootstrapped from this
+# course org.
 #
 # This is the persistent COURSE org - it spans many cohorts (years). Cohorts are
 # registered separately in .github/cohort-courses-pages.yml.
@@ -16,7 +24,7 @@ course_code: GRAD-DEMO
 #
 #   course_admins        GRANTS ACCESS. The single source of truth for course-wide
 #                        admin rights - the `course-admin` team here, mirrored into
-#                        every cohort org. A handle added any other way is reverted 
+#                        every cohort org. A handle added any other way is reverted
 #                        on the next sync unless it's declared here; removing a
 #                        handle here revokes their access.
 #
@@ -44,7 +52,7 @@ people:
   #                                               # file committed into the site repo
   #                                               # under _images/pp/, OR an absolute
   #                                               # URL on a host that allows
-  #                                               # hotlinking (e.g. GH avatar links)
+  #                                               # hotlinking (e.g. a GitHub avatar
+  #                                               # link - many institutional sites
+  #                                               # 403 off-site requests instead)
   #     url:   "https://.../profile/jane-doe"     # bio / profile link
-
-# TODO: IF THIS IS NOT SOMETHING INSTRUCTORS ARE EXPECTED TO HAND EDIT (I.E. IT IS HANDLED BY WORKFLOW ADD THIS AS A LINE COMMENT AT THE TOP - SAME FOR ALL FILES INSTRUCTORS ARE/AREN'T EXPECTED TO TOUCH)
