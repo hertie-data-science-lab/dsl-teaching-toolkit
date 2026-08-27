@@ -87,13 +87,18 @@ def code_message(
 ) -> mailer.Message:
     """The enrolment-code email for one student: (to, subject, body).
 
-    `course_name` names the course in the opening line - a student reading several of
-    these in one week needs to know which one this is. It is optional because the name is
+    `course_name` names the course in the subject and the opening line - a student
+    reading several of these in one week needs to know which one this is, and the inbox
+    list is where they tell them apart. It is optional because the name is
     read live from the course org's dsl-course.yml, which a half-configured course may
     not carry yet; the wording then falls back to "the course" rather than emailing a
     blank."""
     course = f"the {course_name} course" if course_name else "the course"
-    subject = "Your course enrolment code"
+    subject = (
+        f"Your enrolment code for {course_name}"
+        if course_name
+        else "Your course enrolment code"
+    )
     body = (
         f"Hello {student.name or 'there'},\n\n"
         f"To join {course} on GitHub, open a 'Join' issue here:\n"

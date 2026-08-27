@@ -392,11 +392,16 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
 
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "Deep Learning")
     grades._email_updates("COHORT", ["ada-l"])
-    assert "Your grades for Deep Learning have been updated." in sent[-1][0][2]
+    _to, subject, body = sent[-1][0]
+    assert "Your grades for Deep Learning have been updated." in body
+    # and in the SUBJECT - the inbox list is where a student tells two courses apart
+    assert subject == "Your grades for Deep Learning have been updated"
 
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
     grades._email_updates("COHORT", ["ada-l"])
-    assert "Your grades have been updated." in sent[-1][0][2]
+    _to, subject, body = sent[-1][0]
+    assert "Your grades have been updated." in body
+    assert subject == "Your grades have been updated"
 
 
 # ------------------------------------------ render must not clobber a reviewer's edit (fix 16)

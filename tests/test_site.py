@@ -1269,6 +1269,70 @@ def test_a_silent_release_neither_dates_nor_names_the_row_it_lands_in():
     assert "materials/readings/02_x" not in row.dests
 
 
+def test_only_known_session_heads_raise_a_row_from_a_label():
+    # The label is documented as never shown to students, and rows come from the ordinal
+    # session folder a deploy lands in - the label is only a fallback for an entry that has
+    # not shipped yet. `anything-N` used to read as a lecture, so a `bonus-1` entry both
+    # invented a phantom Session 1 row AND folded into the real one, dragging its date and
+    # title back. `readings-N` must not raise a lecture row either.
+    assert site._row_from_label("lecture-1") == ("1", "lecture")
+    assert site._row_from_label("lecture_01") == ("1", "lecture")
+    assert site._row_from_label("lab-01") == ("1", "lab")
+    assert site._row_from_label("labs-2") == ("2", "lab")
+    for no_row in (
+        "bonus-1",
+        "quiz-2",
+        "topic-3",
+        "readings-01",
+        "course-intro",
+        "seed-syllabus",
+        "01_lab",
+    ):
+        assert site._row_from_label(no_row) is None, no_row
+
+
+def test_a_bonus_entry_cannot_drag_a_real_sessions_date_and_title():
+    # The concrete damage the whitelist prevents: `row.when = min(...)`, so an August
+    # bonus entry folding into lecture-1 would publish Session 1 as August, under the
+    # bonus entry's name.
+    s = _sched(
+        [
+            Release(
+                "lecture-1",
+                datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "lectures/01_x", "materials", None)],
+                title="Perceptrons",
+            ),
+            Release(
+                "bonus-1",
+                datetime(2026, 8, 20, 9, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "extras/bonus", "materials", None)],
+                title="Optional extra reading",
+            ),
+        ]
+    )
+    rows = site._planned_sessions(s)
+    row = rows[("1", "lecture")]
+    assert row.when == datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN)
+    assert row.subtitle == "Perceptrons"
+    # and the bonus entry raised no row of its own
+    assert len(rows) == 1
+
+
+def test_the_site_readme_does_not_promise_the_tab_pages_are_safe():
+    # It used to say "pages ... are never rewritten. Change them freely", while every sync
+    # overwrites the tab pages - so following it lost the edit AND opened an
+    # "edits overwritten" issue. Also: the public sync writes no materials index.
+    from dsl_course.site import _site_pages
+
+    cohort_readme = site._site_readme("org", cohort=True)
+    for pg in _site_pages(cohort=True):
+        assert f"`{pg.file}`" in cohort_readme, pg.file
+    assert "pages, `Gemfile`" not in cohort_readme
+    assert "`_data/materials.yml`" in cohort_readme
+    assert "`_data/materials.yml`" not in site._site_readme("org", cohort=False)
+
+
 def test_a_silent_release_raises_no_row_of_its_own():
     # Nothing else touches session 3, so with the flag honoured the plan declares no row
     # for it at all - the files still reach students, and discovery still links them into

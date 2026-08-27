@@ -1,4 +1,4 @@
-Subject: Your grades have been updated
+Subject: Your grades for Deep Learning (Demo) have been updated
 ----------------------------------------------------------------------
 Hello Alex Beispiel,
 

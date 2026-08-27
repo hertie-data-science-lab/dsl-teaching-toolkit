@@ -646,7 +646,15 @@ def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -
             f"gradebook:\n"
             f"  {url}\n"
         )
-        messages.append((student.hertie_email, "Your grades have been updated", body))
+        # The course goes in the SUBJECT as well as the body: the inbox list is where a
+        # student taking several of these actually tells them apart, and by the time they
+        # have opened it the body is redundant.
+        subject = (
+            f"Your grades for {course_name} have been updated"
+            if course_name
+            else "Your grades have been updated"
+        )
+        messages.append((student.hertie_email, subject, body))
     if not messages:
         return
     # The grades themselves are already pushed by this point, so a mail failure isn't

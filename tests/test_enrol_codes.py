@@ -51,10 +51,12 @@ def test_code_message_names_the_course_and_falls_back_when_unnamed():
     # never as a blank or a literal placeholder.
     s = _student(email="ada@uni.edu", name="Ada", code="dsl-xyz123")
     url = "https://github.com/org/welcome/issues"
-    _to, _subject, named = enrol_codes.code_message(s, url, "Deep Learning")
+    _to, subject, named = enrol_codes.code_message(s, url, "Deep Learning")
     assert "To join the Deep Learning course on GitHub" in named
-    _to, _subject, unnamed = enrol_codes.code_message(s, url)
+    assert subject == "Your enrolment code for Deep Learning"
+    _to, subject, unnamed = enrol_codes.code_message(s, url)
     assert "To join the course on GitHub" in unnamed
+    assert subject == "Your course enrolment code"
 
 
 def test_roster_dump_roundtrips_with_enrol_code():

@@ -1,4 +1,4 @@
-Subject: Your course enrolment code
+Subject: Your enrolment code for Deep Learning (Demo)
 ----------------------------------------------------------------------
 Hello Alex Beispiel,
 
