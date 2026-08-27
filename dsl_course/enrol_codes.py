@@ -159,7 +159,16 @@ def run(cohort_org: str, dry_run: bool = False) -> int:
     if not targets:
         log_ok("no not-yet-onboarded students with an email to mail.")
         return 0
-    course_name = course_name_for_cohort(cohort_org)
+    # The codes are already committed to students.csv by this point, and
+    # load_yaml_config RAISES on a malformed dsl-course.yml or a non-404 read failure -
+    # while main() catches only RuntimeError. Unguarded, a bad course file meant a
+    # traceback with the codes persisted and not one email sent. Same guard as
+    # grades._email_updates, for the same reason.
+    try:
+        course_name = course_name_for_cohort(cohort_org)
+    except Exception as exc:  # a name is never worth losing the codes email over
+        log_err(f"could not read the course name ({exc}) - mailing without it")
+        course_name = ""
     messages = [code_message(s, welcome_url, course_name) for s in targets]
     sent = mailer.send_bulk(messages, dry_run=dry_run)
     return 0 if sent == len(messages) else 1

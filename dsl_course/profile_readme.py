@@ -84,7 +84,11 @@ def _repo_table_block(repos: list[dict]) -> str:
 
 
 def splice_repo_table(existing: str, repos: list[dict]) -> str | None:
-    """Refresh only the marked repo table in `existing`, leaving every other byte alone.
+    """Refresh only the marked repo table in `existing`, leaving the rest of the page alone.
+
+    "The rest of the page" is everything outside the markers, with one caveat worth naming:
+    `get_file_content` returns `gh()`'s output, which is `.strip()`ed - so a page's leading
+    and trailing blank lines do not survive the round trip. The prose itself is untouched.
 
     None when the markers aren't both there in order - which is the signal to leave the
     page entirely alone rather than guess where the table belongs. An instructor who

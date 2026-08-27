@@ -243,11 +243,17 @@ def provision_one(
         log_ok(f"created {cohort_org}/{repo}")
         set_repo_topics(cohort_org, repo, [slug, "submission"])
 
+    solution_failed = False
     if sol_dir is not None:
         if push_solution(cohort_org, repo, sol_dir):
             log_ok("  + solution pushed")
         else:
+            # Reported in the RETURN value, not just the log: provision_all writes a
+            # fire-once marker off these statuses, so a push that only logged its failure
+            # meant the marker was written anyway - the student never received the
+            # solution, and the marker guaranteed no later tick would retry.
             log_err("  ! could not push solution")
+            solution_failed = True
 
     if team is not None:
         # Group: materialise the team from its members and grant it on the repo, so
@@ -261,6 +267,8 @@ def provision_one(
         if not team_ok:
             log_err(f"  ! team {team} is missing member(s) - they cannot see {repo}")
             return "failed-team-members"
+        if solution_failed:
+            return "failed-solution"
         return "skipped" if existed else "ok"
 
     # Ordering hazard (individual path): granting a repo collaborator BEFORE the student has
@@ -280,6 +288,8 @@ def provision_one(
         # A repo nobody can open is a failed handout - "failed" is what the exit code
         # keys on (see provision_all), so the run goes red rather than quietly ok.
         return "failed-no-collaborator"
+    if solution_failed:
+        return "failed-solution"
     return "skipped" if existed else "ok"
 
 
@@ -540,9 +550,22 @@ def provision_all(
         )
         site_failed = True
     failed = site_failed or any(k.startswith("failed") for k in results)
-    # Record the release only when every push in this run landed: a partial run has to
-    # re-push, or the students it missed would never receive the solution at all.
-    if solution and not solution_unavailable and not failed:
+    # Record the release only when every solution push in this run landed, and only when
+    # there was at least one repo to push into. Deliberately NOT gated on `failed`:
+    #   - a site-sync failure, or one dead student handle, says nothing about whether the
+    #     solution shipped - and both are PERSISTENT, so withholding the marker for them
+    #     would re-clone every student repo every hour for the rest of the term, which is
+    #     the exact cost this marker exists to prevent;
+    #   - `units == []` (nobody onboarded yet) means nothing was pushed at all, so
+    #     recording it would mean everyone who onboards later never gets the solution.
+    # `failed-solution` is what a failed push reports, so it is read here directly.
+    solution_pushed = (
+        solution
+        and not solution_unavailable
+        and bool(units)
+        and not results.get("failed-solution")
+    )
+    if solution_pushed:
         record_solution_released(cohort_org, slug, len(units))
     return 1 if failed or solution_unavailable else 0
 

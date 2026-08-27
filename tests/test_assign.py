@@ -76,6 +76,90 @@ def test_an_unusable_solution_branch_does_not_block_provisioning(
     assert recorded == [], "a failed solution must not be recorded as released"
 
 
+def _marker_run(tmp_path, monkeypatch, *, status="created", units=1, site_raises=False):
+    """provision_all with the network stubbed. Returns (rc, what was recorded)."""
+    rows = [f"s{i}@uni.edu,S{i},sh{i},{i},dsl-{i},enrolled" for i in range(units)]
+    path = _roster_file(tmp_path, *rows)
+    monkeypatch.setattr(assign, "fetch_solution", lambda *a, **k: tmp_path / "sol")
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: status)
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: None)
+    monkeypatch.setattr("dsl_course.schedule.entry_for_repo", lambda *a, **k: None)
+
+    def sync(*a, **k):
+        if site_raises:
+            raise RuntimeError("tree read failed")
+
+    monkeypatch.setattr("dsl_course.site.sync_site", sync)
+    recorded = []
+    monkeypatch.setattr(
+        assign, "record_solution_released", lambda *a, **k: recorded.append(a)
+    )
+    rc = assign.provision_all(
+        "COURSE",
+        "assignment-1-f2026",
+        "COHORT",
+        roster_path=path,
+        solution=True,
+        group=False,
+    )
+    return rc, recorded
+
+
+def test_the_marker_is_not_written_when_a_solution_push_failed(tmp_path, monkeypatch):
+    # The worst failure this feature can have: the marker is fire-once, so recording a
+    # release whose pushes failed means the student NEVER receives the solution and no
+    # later tick ever retries. provision_one must report the failure, not just log it.
+    rc, recorded = _marker_run(tmp_path, monkeypatch, status="failed-solution")
+    assert recorded == []
+    assert rc == 1
+
+
+def test_the_marker_IS_written_when_the_site_sync_fails(tmp_path, monkeypatch):
+    # A site-sync failure says nothing about whether the solution shipped - and it is
+    # PERSISTENT (a malformed people.yml raises every run), so withholding the marker for
+    # it would re-clone every student repo every hour for the rest of the term.
+    rc, recorded = _marker_run(tmp_path, monkeypatch, site_raises=True)
+    assert recorded == [("COHORT", "assignment-1", 1)]
+    assert rc == 1  # the run still goes red for the site
+
+
+def test_the_marker_IS_written_when_a_handle_is_dead(tmp_path, monkeypatch):
+    # Same reasoning: one unusable student handle is persistent and unrelated to the push.
+    _rc, recorded = _marker_run(tmp_path, monkeypatch, status="failed-no-collaborator")
+    assert recorded == [("COHORT", "assignment-1", 1)]
+
+
+def test_the_marker_is_not_written_when_there_is_nobody_to_push_to(
+    tmp_path, monkeypatch
+):
+    # Nobody onboarded yet -> no repos, so nothing was pushed. Recording it would mean
+    # every student who onboards afterwards never receives the solution.
+    _rc, recorded = _marker_run(tmp_path, monkeypatch, units=0)
+    assert recorded == []
+
+
+def test_a_failed_solution_push_reaches_the_returned_status(tmp_path, monkeypatch):
+    # The root of it: provision_one used to log the failure and return "ok" anyway, so
+    # provision_all could not tell. Both the group and individual paths must report it.
+    monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
+    monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
+    monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
+    individual = assign.provision_one(
+        "C", "t", "COHORT", "r", ["ada"], "assignment-1", sol_dir=tmp_path
+    )
+    group = assign.provision_one(
+        "C", "t", "COHORT", "r", ["ada"], "assignment-1", sol_dir=tmp_path, team="t-a"
+    )
+    assert individual == "failed-solution"
+    assert group == "failed-solution"
+
+
 def test_provisioning_skips_auditors(tmp_path, capsys):
     path = _roster_file(
         tmp_path,
