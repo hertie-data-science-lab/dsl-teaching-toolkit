@@ -539,6 +539,24 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Release
         _flag_unknown_keys(
             drops, entry, KNOWN_RELEASE, where, "that setting is ignored"
         )
+        # `deploy:` written with nothing under it. YAML reads that as None, which is
+        # indistinguishable from the key being ABSENT once it reaches _parse_deploy - and
+        # absent is legitimate (a display-only session row). Only here can the two be told
+        # apart, so the flag lives here. Silently coercing it to [] meant an instructor who
+        # wrote the key and then never filled it got a row that quietly ships nothing, with
+        # the truncated block looking for all the world like it should deploy.
+        #
+        # `None` only, NOT a falsy test: an explicit `deploy: []` is someone saying "no
+        # copies" in as many words, and is left alone.
+        if "deploy" in entry and entry["deploy"] is None:
+            _flag_bad_value(
+                drops,
+                where,
+                "deploy",
+                entry["deploy"],
+                "this entry ships NOTHING and is a display-only row - fill the deploy "
+                "in, or delete the key to say that is what you meant",
+            )
         assignment = entry.get("assignment")
         out.append(
             Release(

@@ -917,6 +917,26 @@ def test_an_absent_term_date_is_not_flagged(key):
     assert parse({key: date(2026, 9, 1)}).dropped == []
 
 
+def test_a_dangling_deploy_key_is_flagged_but_an_explicit_empty_list_is_not():
+    # `deploy:` with nothing under it parses to None, indistinguishable from the key being
+    # absent by the time _parse_deploy sees it - and absent is legitimate (a display-only
+    # session row). Both demo cohorts carried three of these on live sessions, each looking
+    # for all the world like it should ship something.
+    def drops(entry):
+        return parse({"releases": {"lecture-9": entry}}).dropped
+
+    when = {"event_datetime": "2026-09-29"}
+    assert drops(when) == []  # absent: a deliberate display-only row
+    assert drops({**when, "deploy": []}) == []  # explicit "no copies", left alone
+    flagged = drops({**when, "deploy": None})
+    assert len(flagged) == 1
+    assert "ships NOTHING" in flagged[0]
+    # the entry itself survives as the display-only row it in fact is
+    (r,) = parse({"releases": {"lecture-9": {**when, "deploy": None}}}).releases
+    assert r.deploy == []
+    assert r.is_event_only
+
+
 def test_a_clean_schedule_drops_nothing():
     assert parse({}).dropped == []
     assert (
