@@ -208,6 +208,10 @@ class Release:
     when: datetime | None
     deploy: list[Deploy] = field(default_factory=list)
     assignment: str | None = None
+    # True on a release synthesised from `assignments.<slug>.solution_datetime`: the same
+    # provisioning call, asked additionally to push the template's `solution/` into every
+    # repo it already made. Never set from the YAML - the scheduler owns it.
+    assignment_solution: bool = False
     title: str = ""  # display-only: the session's name, beside its ordinal on the site
     # display-only: a sentence about the session, shown under its heading on the Lectures
     # tab. `title` names the session, this says what is in it.
@@ -246,8 +250,9 @@ class Release:
 class AssignmentEntry:
     """One assignment's whole lifecycle, in one place: `handout_datetime` (when
     student/team repos are provisioned), `due_datetime` (what students see),
-    `grading_datetime` (when the snapshot freezes and the autograder fires), `type` and
-    `max_team_size` (group assignments)."""
+    `grading_datetime` (when the snapshot freezes and the autograder fires),
+    `solution_datetime` (when the model solution goes out), `type` and `max_team_size`
+    (group assignments)."""
 
     due_datetime: datetime
     # The COURSE-org repo this assignment hands out from - the template one repo per
@@ -274,6 +279,12 @@ class AssignmentEntry:
     # (templates/welcome/team-formation.yml reads it straight from schedule.yml; its
     # default when unset lives there). None = not set here.
     max_team_size: int | None = None
+    # When to push the template's `solution/` folder into every provisioned repo - the
+    # scheduled twin of Release assignment's `include_solution` tick. Deliberately NOT
+    # defaulted to the due date: a solution released the moment submissions close is a
+    # gift to anyone who pushes late, so faculty name the moment or it never fires.
+    # None = release the solution by hand, or not at all.
+    solution_datetime: datetime | None = None
 
 
 @dataclass
@@ -371,6 +382,7 @@ KNOWN_ASSIGNMENT = frozenset(
         "cohort_dest_repo",
         "grading_datetime",
         "handout_datetime",
+        "solution_datetime",
         "type",
         "max_team_size",
     }
@@ -632,6 +644,15 @@ def _parse_assignments(
                 where,
                 "the handout NEVER fires - no student or team repos are provisioned "
                 "from it, and nobody gets the assignment",
+            ),
+            solution_datetime=_flagged_datetime(
+                entry,
+                "solution_datetime",
+                tz,
+                drops,
+                where,
+                "the model solution NEVER ships automatically - it stays on the "
+                "template's solution branch until someone ticks include_solution by hand",
             ),
             # anything other than the two known values -> None, i.e. the grading.yml
             # fallback (flagged above, not silent)

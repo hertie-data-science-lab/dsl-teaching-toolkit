@@ -33,7 +33,8 @@ collaborator.
 
 Other inputs, all default **off**: 
 - `include_solution` (also push the template's `solution`
-branch into each student repo)
+branch into each student repo). Schedulable instead, as `solution_datetime:` on the
+assignment - see [07](07-schedule-releases.md#releasing-the-model-solution)
 - `type` (`auto` **default** = follow `schedule.yml` / the template's `grading.yml`;
 or force `individual` / `group` for this dispatch -
 see [Group or individual?](#group-or-individual))

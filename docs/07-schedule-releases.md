@@ -161,6 +161,7 @@ Keyed by a slug you choose. As with a `deploy:`, `course_source_repo` names wher
 | `handout_datetime` | no* | - | when repos are provisioned, automatically. |
 | `due_datetime` | **yes** | - | the deadline students see; a bare date closes at **23:59:59** |
 | `grading_datetime` | no | `due_datetime` | when the snapshot freezes and it is [autograded](#deadline-snapshots-and-autograding) |
+| `solution_datetime` | no | - | when the template's `solution/` is pushed into every provisioned repo. **No default** - omit it and the solution only ever goes out by hand. Needs `handout_datetime` |
 | `type` | no | `individual` | `individual` or `group`  |
 | `max_team_size` | no | `5` | group assignments only: the welcome repo's Join-team cap |
 | `course_source_repo` | **yes** | - | the course-org repo this hands out from - one repo per student (or team) is generated from it |
@@ -174,6 +175,7 @@ assignments:
     handout_datetime: 2026-09-22T09:00  
     due_datetime: 2026-10-13            # what students see
     grading_datetime: 2026-10-15        # snapshot freezes + autograded (default when undefined: mirrors due_datetime)
+    solution_datetime: 2026-10-16T09:00 # optional: pushes the model solution to every repo. No default - omitted = never
     type: group                         # default: individual 
     max_team_size: 3
 
@@ -291,7 +293,7 @@ An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it 
 | no valid `due_datetime` on an `assignments:` entry | no deadline, no submission snapshot, no autograding |
 | a `deploy` item missing `course_source_repo` or `course_source_path` | that one copy never ships |
 
-Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `handout_datetime` (**nothing is ever handed out**), `grading_datetime` (falls back to `due_datetime`), `deploy_datetime` (the copy ships at the `event_datetime`) or `max_team_size` (no cap); an unknown `type:` on an assignment (treated as individual) or an event (shown as a plain special event); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`).
+Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `handout_datetime` (**nothing is ever handed out**), `grading_datetime` (falls back to `due_datetime`), `solution_datetime` (**the model solution never ships automatically**), `deploy_datetime` (the copy ships at the `event_datetime`) or `max_team_size` (no cap); an unknown `type:` on an assignment (treated as individual) or an event (shown as a plain special event); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`).
 
 ## Timezones and bare dates
 
@@ -309,6 +311,12 @@ Each assignment's **grading deadline** is `grading_datetime` if you set it, else
 
 1. **Freezes** each submission repo's HEAD into `classroom-config/snapshots/<slug>.csv`, using the **server's** clock.
 2. **Autogrades** it (optional).
+
+### Releasing the model solution
+
+`solution_datetime` is separate from all of the above, and has no default - a solution released the moment submissions close rewards anyone who pushes late, so you name the moment or it never fires. At that datetime the hourly run pushes the template's `solution/` folder into every student/team repo, which is exactly what **Release assignment** with `include_solution` does by hand. Both are idempotent, so doing one after the other changes nothing.
+
+It needs `handout_datetime` set: the schedule can only push a solution into repos the schedule provisioned. If you hand out manually, release the solution manually too.
 
 ---
 

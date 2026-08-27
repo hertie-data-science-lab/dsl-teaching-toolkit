@@ -1,7 +1,7 @@
 # Worked example for the hertie-dsl-demo-f2026 cohort's whole term in one file. 
 #
 # - full schema: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/07-schedule-releases.md
-# - see deployed reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/schedule.yml
+# - see reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/schedule.yml
 # - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/schedule/
 
 timezone: Europe/Berlin
@@ -10,20 +10,11 @@ semester_end: 2026-12-18
 
 releases:
   course-intro:
-    event_datetime: 2026-08-31T09:00   # week 0 - the course opens before teaching starts
-    show_on_site: false                # ships the syllabus up front, but opening the course
-                                       # is not a session: no schedule row, and no date of
-                                       # its own to drag session 1 backwards. The site pins
-                                       # the syllabus separately.
+    event_datetime: 2026-08-31T09:00
+    show_on_site: false
     deploy:
       - course_source_repo: course-materials-f2026
-        course_source_path: SYLLABUS.md     # a root file - name it exactly as it
-                                            # is in the repo (the runner is case
-                                            # sensitive)
-  # Every session's readings get their own entry, released a week ahead of the session
-  # itself. `show_on_site: false` is what makes that safe: the files land in the session's
-  # row as usual, but the entry adds no row of its own and never drags the session's date
-  # back to the day the PDFs went up.
+        course_source_path: SYLLABUS.md
   readings-1:
     event_datetime: 2026-08-25T09:00
     show_on_site: false
@@ -32,8 +23,8 @@ releases:
         course_source_path: readings/01_week-1
   lecture-1:
     event_datetime: 2026-09-01T10:00
-    title: Perceptrons and gradient descent   # the session's name, beside "Session 1"
-    description: >                            # a sentence about it, on the Lectures tab
+    title: Perceptrons and gradient descent
+    description: >
       What a linear model can and cannot separate, and how gradient descent finds its
       weights.
     deploy:
@@ -48,10 +39,6 @@ releases:
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: labs/01_week-1
-      # Solutions AFTER the lab: a second copy on its own clock, landing inside the same
-      # session folder. Students work the empty scripts in the session and the worked
-      # answers appear that evening. Staged outside labs/01_week-1 in the course org - a
-      # solutions folder INSIDE it would ship with the copy above.
       - course_source_repo: course-materials-f2026
         course_source_path: solutions/labs/01_week-1
         cohort_dest_path: labs/01_week-1/solutions
@@ -132,33 +119,34 @@ releases:
 
 assignments:                    
   assignment-1:
-    course_source_repo: assignment-1-f2026  # REQUIRED - provision one repo per student/group from it
+    course_source_repo: assignment-1-f2026
     handout_datetime: 2026-09-15T14:00  
-    due_datetime: 2026-10-13            # what students see
-    grading_datetime: 2026-10-15        # optional grading pin - snapshot + autograde (if undefined, default = due_datetime)
+    due_datetime: 2026-10-13
+    grading_datetime: 2026-10-15
+    solution_datetime: 2026-10-16T09:00
   assignment-2:
     course_source_repo: assignment-2-f2026
-    cohort_dest_repo: homework-2      # optional: the cohort-side name. Default if undefined: the top-level slug (assignment-2).
+    cohort_dest_repo: homework-2
     handout_datetime: 2026-09-29T14:00
     due_datetime: 2026-10-27T23:59
   assignment-4-project:
     course_source_repo: assignment-4-project-f2026
     handout_datetime: 2026-10-13T14:00
-    type: group                   # per-team handout + grading (also set in the template's grading.yml; if declared here this overwrites it)
+    type: group
     due_datetime: 2026-11-15T23:59
-    max_team_size: 4              # the welcome "Join team" flow refuses a 5th member
+    max_team_size: 4
 
 events:
   mid-term:
-    type: exam                 # special types: exam -> dedicated colouring in the deployed schedule
+    type: exam
     title: MidTerm Exam
-    event_datetime: tbc         # fully provisional - no date shown             
+    event_datetime: tbc
   final-exam:
     type: exam
     title: Final Exam
     event_datetime: 2026-12-15T14:00   
-    tbc: true                    # partially provisional - the site shows "(TBC)" next to the date
-  project-clinic:                # no `type:` -> a special event row
+    tbc: true
+  project-clinic:
     title: Project clinic
     event_datetime: 2026-11-10T10:00
   guest-lecture:

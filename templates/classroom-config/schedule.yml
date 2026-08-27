@@ -3,7 +3,7 @@
 # This cohort's schedule + auto-release plan. Instructors edit it directly.
 #
 # - full schema: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/07-schedule-releases.md
-# - see deployed reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/schedule.yml
+# - see reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/schedule.yml
 # - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/schedule/
 #
 # Times are Europe/Berlin unless you set `timezone:`; the Scheduled release cron runs hourly, so times are honoured to the hour.
@@ -15,9 +15,10 @@
 #
 # Changing a date later? Just commit the edit to this file on main; the hourly cron reads
 # whatever is on main at each tick, so the change simply takes effect within the hour.
-# Only already-fired ONE-SHOT actions don't rewind: a release already shipped stays
+#
+# Already-fired ONE-SHOT actions don't rewind: a release already shipped stays
 # shipped, and a snapshot/autograde that already ran needs its marker deleted to redo.
-# Unshipping a release means rewriting the cohort repo's history and force-pushing.
+# Unshipping a release means rewriting the cohort repo's git history and force-pushing.
 #
 # What follows is a SKELETON: uncomment and fill what you want. For a full worked term -
 # a real release plan, a group project, exams - see `schedule.yml.sample`.
@@ -27,66 +28,64 @@
 # semester_end: 
 
 # releases:                         
-#   course-intro:                   # week 0: the course opens before teaching starts. It
+#   seed-syllabus:                  # week 0: the course opens before teaching starts. It
 #     event_datetime:               # ships the syllabus and anything else students need
-#     show_on_site: false           # up front - but it is not a session, so it claims no
-#     deploy:                       # schedule row (the site pins the syllabus separately).
+#     show_on_site: false           # deploy silently up front - it is not a session, so displays no schedule row.
+#     deploy:                       
 #       - course_source_repo:       
-#         course_source_path: SYLLABUS.md   # a root FILE, named exactly as in the repo
-#                                   # (the runner is case sensitive)
+#         course_source_path: SYLLABUS.md   # a root file
 #
 #   lecture-1:                      
 #     event_datetime:               # what the site's schedule shows
-#     title:                        # OPTIONAL: the session's name, beside its ordinal
-#                                   # (default: the label, prettified - here "Lecture 1")
-#     description:                  # OPTIONAL: a sentence about it, on the Lectures tab
+#     title:                        # OPTIONAL: the session's name (default: the label, prettified - here "Lecture 1")
+#     description:                  # OPTIONAL: a sentence about it, displays on the Lectures tab
 #     tbc: false                    # OPTIONAL: site marks it "(TBC)" next to the event_datetime (default: false)
-#     show_on_site: true            # OPTIONAL: false = deploy silently - it ships exactly
-#                                   # as written but adds nothing to the site's schedule
-#                                   # (default: true). Use it for content that belongs to
-#                                   # a session without being an occasion of its own - see
-#                                   # the course-intro and readings entries.
+#     show_on_site: true            # OPTIONAL: default: true. 
 #     deploy:
 #       - course_source_repo:       # REQUIRED
 #         course_source_path:       # REQUIRED - folder or file to copy
 #         cohort_dest_repo:         # OPTIONAL - default: materials
 #         cohort_dest_path:         # OPTIONAL - default: same as course_source_path
-#         deploy_datetime:          # OPTIONAL - default: the event_datetime
-#       - course_source_repo:       # a SECOND copy on its own clock - e.g. lab solutions
-#         course_source_path:       # staged OUTSIDE the folder released above, else the
-#         cohort_dest_path:         # first copy ships them too
-#         deploy_datetime:          # after the lab, so students work the empty scripts first
+#         deploy_datetime:          # OPTIONAL - default: the event_datetime. But can set on its own clock - e.g. for lectures might want to release slides BEFORE/AFTER the lecture itself 
+#       - course_source_repo:       # OPTIONAL - a SECOND file/directory released separately on its own clock 
+#         course_source_path:       
+#         cohort_dest_path:        
+#         deploy_datetime:          
 #
-#   lab-1:                          # the week's lab is its OWN schedule row, so it can sit
-#     event_datetime:               # on Wednesday while the lecture sits on Monday. A copy
-#     title:                        # into `labs/NN_...` is what makes it one - not the label.
+#   lab-1:                          
+#     event_datetime:               
+#     title:                        
 #     description:
 #     deploy:
 #       - course_source_repo:
 #         course_source_path: labs/01_session-1
 #         cohort_dest_repo:
 #         cohort_dest_path:
-#         deploy_datetime:
+#         deploy_datetime:         # if left blank, defaults to the event_datetime.
+#       - course_source_repo:      # NB stage solutions OUTSIDE the folder released above, else the first copy ships them too
+#         course_source_path: labs/01_session-1/solutions
+#         cohort_dest_repo:
+#         cohort_dest_path:
+#         deploy_datetime:          # could be set for AFTER the lab, so students work the empty notebooks/scripts first
 #
-#   readings-1:                     # each session's READINGS get their own entry, on their
-#     event_datetime:               # own clock - they usually go out ahead of the session.
-#     show_on_site: false           # They belong to session 1 without being an occasion of
-#     deploy:                       # its own, so `show_on_site: false` keeps them from
-#       - course_source_repo:       # adding a row and - crucially - from pulling session
-#         course_source_path: readings/01_session-1   # 1's date or name back to the day
-#         cohort_dest_repo:         # they shipped. The files still land in session 1's row
-#         cohort_dest_path:         # and are listed there for enrolled students; the
-#         deploy_datetime:          # optional READINGS.md beside them is published publicly
-#                                   # as the citation list. Omit the entry and the session's
-#                                   # readings never ship.
-#
+#   readings-1:                     # each session's readings can optionally get their own entry, on their own clock (recommended)- they usually go out ahead of the session. (Could also be released as part of the lecture block above).
+#     event_datetime:               
+#     show_on_site: false           # released without taking up a row in the deployed site's schedule
+#     deploy:                       
+#       - course_source_repo:       
+#         course_source_path: readings/01_session-1   # NB including an optional READINGS.md alongside the files themselves serves as a clean citation list (published publicly, whereas the files themeselves remain behind enrollment gating)
+#         cohort_dest_repo:         
+#         cohort_dest_path:         
+#         deploy_datetime:          
+#                                   
 # assignments:                      
 #   assignment-1:
 #     course_source_repo:           # REQUIRED 
-#     cohort_dest_repo:             # OPTIONAL (default: the slug (here would be assignment-1))
-#     handout_datetime:             # Omit  if you hand out via the manual "Release assignment" workflow (which auto-records it here for you)
+#     cohort_dest_repo:             # OPTIONAL (default: the slug, here would be assignment-1)
+#     handout_datetime:             # Omit if you hand out via the manual "Release assignment" workflow (which auto-records it here for you)
 #     due_datetime:                 # a bare date -> end of that day (23:59:59)
 #     grading_datetime:             # OPTIONAL: snapshot freezes + autograder fires (default: due_datetime). Not shown to students
+#     solution_datetime:            # OPTIONAL: pushes the template's `solution/` into every student/team repo. No default - omit it and the solution only ever goes out by hand ("Release assignment" with include_solution ticked). Needs handout_datetime set
 #     type: group                   # OPTIONAL: group | individual (also settable in the template's grading.yml; default: individual)
 #     max_team_size:                # OPTIONAL, group only: the welcome "Join team" flow  refuses a member beyond this (default: 5)
 

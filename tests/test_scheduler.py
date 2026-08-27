@@ -213,13 +213,20 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.assign.provision_all",
-        lambda master_org, template, cohort_org: (
-            calls.append((master_org, template, cohort_org)) or 0
+        lambda master_org, template, cohort_org, solution=False: (
+            calls.append((master_org, template, cohort_org, solution)) or 0
         ),
     )
     r = _r("s", WHEN, assignment="assignment-2-f2026")
     assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == 0
-    assert calls[0] == ("Course-Org", "assignment-2-f2026", "Cohort-Org")
+    assert calls[0] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", False)
+
+    # The solution release is the SAME call, asked to push the solution too - so a
+    # scheduled solution can never diverge from what include_solution does by hand.
+    r = _r("s", WHEN, assignment="assignment-2-f2026")
+    r.assignment_solution = True
+    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == 0
+    assert calls[1] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", True)
 
 
 def _git_with_staged_changes(*args):
@@ -1014,6 +1021,85 @@ def test_handout_releases_synthesised_from_the_assignments_block(monkeypatch):
     assert scheduler.due_releases([r], datetime(2026, 9, 22, 10, 0, tzinfo=BERLIN)) == [
         r
     ]
+
+
+def test_solution_releases_synthesised_from_the_assignments_block(monkeypatch):
+    # `solution_datetime:` becomes a SECOND release over the same template, flagged so
+    # _execute_nondeploy provisions with the solution pushed in. It requires a scheduled
+    # handout: without one the scheduler never made the repos there'd be anything to push
+    # the solution into, and a green run over nothing is worse than a skip line.
+    monkeypatch.setattr(
+        scheduler,
+        "_assignment_template",
+        lambda org, slug, entry: (
+            None if slug == "missing-repo" else entry.course_source_repo
+        ),
+    )
+    sched = Schedule(
+        assignments={
+            "assignment-1": AssignmentEntry(
+                course_source_repo="a-f2026",
+                due_datetime=datetime(2026, 10, 13, 23, 59, tzinfo=BERLIN),
+                handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+                solution_datetime=datetime(2026, 10, 16, 9, 0, tzinfo=BERLIN),
+            ),
+            # solution pinned but the handout is manual - skipped, with a line
+            "hand-released": AssignmentEntry(
+                course_source_repo="b-f2026",
+                due_datetime=datetime(2026, 11, 1, 23, 59, tzinfo=BERLIN),
+                solution_datetime=datetime(2026, 11, 3, 9, 0, tzinfo=BERLIN),
+            ),
+            # no template repo at all - skipped, not fatal to its neighbours
+            "missing-repo": AssignmentEntry(
+                course_source_repo="gone-f2026",
+                due_datetime=datetime(2026, 11, 1, 23, 59, tzinfo=BERLIN),
+                handout_datetime=datetime(2026, 10, 1, 9, 0, tzinfo=BERLIN),
+                solution_datetime=datetime(2026, 11, 4, 9, 0, tzinfo=BERLIN),
+            ),
+            # no solution_datetime - never synthesised
+            "manual": AssignmentEntry(
+                course_source_repo="a-f2026",
+                due_datetime=datetime(2026, 12, 1, 23, 59, tzinfo=BERLIN),
+                handout_datetime=datetime(2026, 11, 1, 9, 0, tzinfo=BERLIN),
+            ),
+        }
+    )
+    (r,) = scheduler._solution_releases("Course-Org", "Cohort-f2026", sched)
+    assert r.label == "assignment-1-solution"
+    assert r.assignment == "a-f2026"
+    assert r.assignment_solution is True
+    assert r.when == datetime(2026, 10, 16, 9, 0, tzinfo=BERLIN)
+    # due like any other release, and not a minute early
+    assert scheduler.due_releases([r], datetime(2026, 10, 16, 8, 0, tzinfo=BERLIN)) == []
+    assert scheduler.describe(r) == ["solution for assignment a-f2026"]
+
+
+def test_a_handout_and_its_solution_are_separate_releases(monkeypatch):
+    # One assignment, two synthesised releases on two clocks - so the solution cannot
+    # ride along with the handout, which would ship the answers with the questions.
+    monkeypatch.setattr(
+        scheduler, "_assignment_template", lambda org, slug, entry: "a-f2026"
+    )
+    sched = Schedule(
+        assignments={
+            "assignment-1": AssignmentEntry(
+                course_source_repo="a-f2026",
+                due_datetime=datetime(2026, 10, 13, 23, 59, tzinfo=BERLIN),
+                handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+                solution_datetime=datetime(2026, 10, 16, 9, 0, tzinfo=BERLIN),
+            )
+        }
+    )
+    (handout,) = scheduler._handout_releases("Course-Org", "Cohort-f2026", sched)
+    (solution,) = scheduler._solution_releases("Course-Org", "Cohort-f2026", sched)
+    assert handout.assignment_solution is False
+    assert solution.assignment_solution is True
+    # at handout time only the handout is due
+    both = [handout, solution]
+    assert scheduler.due_releases(both, datetime(2026, 9, 23, tzinfo=BERLIN)) == [
+        handout
+    ]
+    assert scheduler.due_releases(both, datetime(2026, 10, 17, tzinfo=BERLIN)) == both
 
 
 def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):

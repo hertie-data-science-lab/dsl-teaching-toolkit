@@ -436,6 +436,69 @@ def test_assignment_handout_parses():
     assert entries["assignment-2"].handout_datetime is None
 
 
+def test_assignment_solution_datetime_parses_and_has_no_default():
+    # The model solution has no fallback date on purpose: shipping it the moment
+    # submissions close rewards anyone who pushes late, so an omitted key must mean
+    # "never automatically", not "at the due date".
+    meta = {
+        "assignments": {
+            "assignment-1": {
+                "course_source_repo": "a-f2026",
+                "due_datetime": "2026-10-13",
+                "handout_datetime": "2026-09-22T09:00",
+                "solution_datetime": "2026-10-16T09:00",
+            },
+            "assignment-2": {
+                "course_source_repo": "a-f2026",
+                "due_datetime": "2026-11-10",
+            },
+        }
+    }
+    entries = parse(meta).assignments
+    assert (
+        entries["assignment-1"]
+        .solution_datetime.isoformat()
+        .startswith("2026-10-16T09:00")
+    )
+    assert entries["assignment-2"].solution_datetime is None
+
+
+def test_an_unparseable_solution_datetime_is_flagged_with_what_it_costs():
+    sched = parse(
+        {
+            "assignments": {
+                "assignment-1": {
+                    "course_source_repo": "a-f2026",
+                    "due_datetime": "2026-10-13",
+                    "handout_datetime": "2026-09-22T09:00",
+                    "solution_datetime": "the friday after",
+                }
+            }
+        }
+    )
+    # The entry survives - only the solution release is lost, and the drop says so.
+    assert sched.assignments["assignment-1"].solution_datetime is None
+    assert any("solution_datetime" in d for d in sched.dropped)
+    assert any("NEVER ships automatically" in d for d in sched.dropped)
+
+
+def test_solution_datetime_is_a_known_key():
+    # An unrecognised key is flagged and ignored, which for a date faculty typed would
+    # mean a silently unreleased solution.
+    sched = parse(
+        {
+            "assignments": {
+                "assignment-1": {
+                    "course_source_repo": "a-f2026",
+                    "due_datetime": "2026-10-13",
+                    "solution_datetime": "2026-10-16T09:00",
+                }
+            }
+        }
+    )
+    assert not any("unrecognised key" in d for d in sched.dropped)
+
+
 def test_tbc_event_datetime_keeps_an_undated_entry():
     meta = {
         "releases": {
