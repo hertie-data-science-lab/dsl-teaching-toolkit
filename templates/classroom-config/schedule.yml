@@ -81,11 +81,11 @@
 # assignments:                      
 #   assignment-1:
 #     course_source_repo:           # REQUIRED 
-#     cohort_dest_repo:             # OPTIONAL (default: the slug, here would be assignment-1)
-#     handout_datetime:             # Omit if you hand out via the manual "Release assignment" workflow (which auto-records it here for you)
-#     due_datetime:                 # a bare date -> end of that day (23:59:59)
-#     grading_datetime:             # OPTIONAL: snapshot freezes + autograder fires (default: due_datetime). Not shown to students
-#     solution_datetime:            # OPTIONAL: pushes the template's `solution/` into every student/team repo. No default - omit it and the solution only ever goes out by hand ("Release assignment" with include_solution ticked). Needs handout_datetime set
+#     cohort_dest_repo:             # OPTIONAL (default: the slug above, here would be assignment-1)
+#     handout_datetime:             # REQUIRED for a SCHEDULED handout. Omit if you hand out via the manual "Release assignment" workflow (which auto-records it here for you)
+#     due_datetime:                 # REQUIRED: a bare date without time -> end of that day (23:59:59)
+#     grading_datetime:             # OPTIONAL: snapshot freezes + autograder fires (default: due_datetime, so leaving it empty still autogrades - at the deadline). Not shown to students. To NOT autograde at all, set `autograde: false` in the template's grading.yml
+#     solution_datetime:            # OPTIONAL: pushes the `solution/` folder (from the template's `solution` branch) into every student/team repo. No default - if empty, the solution only ever goes out by hand ("Release assignment" with include_solution ticked). Needs handout_datetime set
 #     type: group                   # OPTIONAL: group | individual (also settable in the template's grading.yml; default: individual)
 #     max_team_size:                # OPTIONAL, group only: the welcome "Join team" flow  refuses a member beyond this (default: 5)
 
