@@ -1070,7 +1070,9 @@ def test_solution_releases_synthesised_from_the_assignments_block(monkeypatch):
     assert r.assignment_solution is True
     assert r.when == datetime(2026, 10, 16, 9, 0, tzinfo=BERLIN)
     # due like any other release, and not a minute early
-    assert scheduler.due_releases([r], datetime(2026, 10, 16, 8, 0, tzinfo=BERLIN)) == []
+    assert (
+        scheduler.due_releases([r], datetime(2026, 10, 16, 8, 0, tzinfo=BERLIN)) == []
+    )
     assert scheduler.describe(r) == ["solution for assignment a-f2026"]
 
 

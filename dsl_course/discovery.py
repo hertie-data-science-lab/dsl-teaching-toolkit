@@ -120,7 +120,6 @@ def _read_cohorts(course_org: str) -> list[str]:
     return [c for c in cohorts if c]
 
 
-
 def course_name_for_cohort(cohort_org: str) -> str:
     """This cohort's course name, for student-facing prose ("your grades for X").
 

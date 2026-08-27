@@ -79,7 +79,9 @@ def splice_repo_table(existing: str, repos: list[dict]) -> str | None:
     end = existing.find(TABLE_END)
     if start == -1 or end == -1 or end < start:
         return None
-    return existing[:start] + _repo_table_block(repos) + existing[end + len(TABLE_END) :]
+    return (
+        existing[:start] + _repo_table_block(repos) + existing[end + len(TABLE_END) :]
+    )
 
 
 def render_dotgithub_readme(org: str, course_name: str, is_cohort: bool) -> str:
