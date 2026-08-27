@@ -22,7 +22,12 @@ update_profile_readme is the one function that touches the network.
 from __future__ import annotations
 
 from .central import CENTRAL, CENTRAL_REF
-from .discovery import discover_cohorts, list_org_repos
+from .discovery import (
+    INFRA_TOPICS,
+    course_name_for_cohort,
+    discover_cohorts,
+    list_org_repos,
+)
 from .utils import get_file_content, load_yaml_config, log, log_ok, put_files
 
 # Per-org identity/people/schedule config, lives at the root of each org's `.github` repo.
@@ -30,8 +35,20 @@ COURSE_CONFIG = "dsl-course.yml"
 
 
 def _repo_table(repos: list[dict]) -> str:
-    """Clickable repo table, with `welcome` first (most logical landing repo)."""
-    visible = [r for r in repos if r["name"] != ".github"]
+    """Clickable repo table, with `welcome` first (most logical landing repo).
+
+    Machinery is dropped, not just `.github`: a cohort org holds one submission repo per
+    student per assignment and one gradebook each, and listing them named every
+    classmate's private repo - and so every enrolled handle and every team's membership -
+    on the page students land on. They could never OPEN them, but the roster is exactly
+    the thing this pipeline keeps out of public view. The site repo stays: it is public
+    anyway, and faculty need the "do not touch" row.
+    """
+    visible = [
+        r
+        for r in repos
+        if r["name"] != ".github" and not set(r.get("topics") or []) & INFRA_TOPICS
+    ]
     visible.sort(key=lambda r: (r["name"].lower() != "welcome", r["name"].lower()))
     rows = []
     for r in visible:
@@ -335,7 +352,16 @@ def update_profile_readme(
         # surface from mid-refresh - a non-mapping is likewise refused, not coerced to {}.
         cfg = load_yaml_config(org, ".github", COURSE_CONFIG) or {}
         org_name = org_name or cfg.get("org_name") or org
-        course_name = course_name or cfg.get("course_name") or org_name
+        # A COHORT org's dsl-course.yml is only a pointer - it carries no course_name of
+        # its own, so this used to fall all the way back to the org slug and title the
+        # students' landing page "hertie-dsl-demo-f2026". Follow the pointer to the course
+        # org that does hold the name; the slug stays as the last resort.
+        course_name = (
+            course_name
+            or cfg.get("course_name")
+            or (course_name_for_cohort(org) if cfg.get("course") else "")
+            or org_name
+        )
     repos = list_org_repos(org)
     is_cohort = any(r["name"] == "welcome" for r in repos)
     cohorts = None if is_cohort else discover_cohorts(org)

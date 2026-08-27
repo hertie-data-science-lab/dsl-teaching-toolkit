@@ -680,6 +680,88 @@ _REPOS = [
 ]
 
 
+def test_repo_table_drops_submission_and_gradebook_repos():
+    from dsl_course.profile_readme import _repo_table
+
+    # The students' landing page must not name every classmate's private repo: the topics
+    # are the same ones discovery._is_infra_repo filters on.
+    rows = _repo_table(
+        [
+            {
+                "name": "welcome",
+                "url": "u",
+                "visibility": "PUBLIC",
+                "description": "d",
+                "topics": [],
+            },
+            {
+                "name": "materials",
+                "url": "u",
+                "visibility": "PRIVATE",
+                "description": "d",
+                "topics": [],
+            },
+            {
+                "name": "assignment-1-ada",
+                "url": "u",
+                "visibility": "PRIVATE",
+                "description": "d",
+                "topics": ["submission"],
+            },
+            {
+                "name": "assignment-1",
+                "url": "u",
+                "visibility": "PRIVATE",
+                "description": "d",
+                "topics": ["assignment-template"],
+            },
+            {
+                "name": "grades-ada",
+                "url": "u",
+                "visibility": "PRIVATE",
+                "description": "d",
+                "topics": ["gradebook"],
+            },
+            # the site repo is public anyway, and faculty need its "do not touch" row
+            {
+                "name": "org.github.io",
+                "url": "u",
+                "visibility": "PUBLIC",
+                "description": "d",
+                "topics": [],
+            },
+        ]
+    )
+    assert "welcome" in rows and "materials" in rows and "org.github.io" in rows
+    assert "assignment-1-ada" not in rows
+    assert "grades-ada" not in rows
+    assert "| [assignment-1]" not in rows
+
+
+def test_cohort_page_title_follows_the_course_pointer(monkeypatch):
+    from dsl_course import profile_readme as P
+
+    # A cohort's dsl-course.yml is a pointer with no course_name, so this used to title
+    # the students' landing page with the org slug.
+    monkeypatch.setattr(
+        P, "load_yaml_config", lambda org, repo, path: {"course": "Course-Org"}
+    )
+    monkeypatch.setattr(P, "course_name_for_cohort", lambda org: "Deep Learning")
+    monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
+    monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(P, "log", lambda *a, **k: None)
+    monkeypatch.setattr(P, "log_ok", lambda *a, **k: None)
+    written = {}
+    monkeypatch.setattr(
+        P, "put_files", lambda org, repo, files, msg, **k: written.update(files) or True
+    )
+    P.update_profile_readme("Cohort-f2026")
+    page = written["profile/README.md"].decode()
+    assert "# Deep Learning" in page
+    assert "# Cohort-f2026" not in page
+
+
 def _cohort_readme(monkeypatch, existing):
     from dsl_course import profile_readme as P
 
