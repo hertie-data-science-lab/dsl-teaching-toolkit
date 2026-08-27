@@ -1402,6 +1402,25 @@ class _PlannedRow:
     named_at: datetime | None = None
 
 
+# A schedule label's own ordinal and row kind: `lecture-12` -> ('12', 'lecture'),
+# `lab-4` -> ('4', 'lab'). The deploy-keyed path below places a row from where its files
+# LAND, which cannot place an entry that stages nothing yet - so the label is the fallback,
+# and it is a reliable one because the label is what faculty write the ordinal into.
+_LABEL_ROW_RE = re.compile(r"^([a-z]+)[-_]0*(\d+)$", re.IGNORECASE)
+
+
+def _row_from_label(label: str) -> tuple[str, str] | None:
+    """The (ordinal, kind) row a schedule label names, or None if it names no session.
+
+    `course-intro` and any other unnumbered label return None: they are not a numbered
+    session, so they raise no row of their own."""
+    m = _LABEL_ROW_RE.match(label.strip())
+    if not m:
+        return None
+    head = m.group(1).lower()
+    return m.group(2), "lab" if head in ("lab", "labs") else "lecture"
+
+
 def _planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], _PlannedRow]:
     """Every session row the PLAN declares - (ordinal, 'lecture'|'lab') -> what the plan
     says about it (see `_PlannedRow`).
@@ -1409,7 +1428,10 @@ def _planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], _Planne
     Keyed by the ordinal and section of each deploy's destination folder, so the site can
     both date a released row from the plan that released it AND raise a row for a session
     whose materials have not shipped yet (`sync_site` unions these keys with what
-    discovery found). Keying on the row, not the week, is what lets Wednesday's lab carry
+    discovery found). An entry NO deploy can place - it stages nothing yet, or stages
+    nothing ordinal-prefixed - falls back to its own label (`_row_from_label`), because
+    docs/07 promises a row from the moment the entry is written, not from the moment it
+    ships. Keying on the row, not the week, is what lets Wednesday's lab carry
     its own time rather than inheriting Monday's lecture. Deploys may ship on their own
     `deploy_datetime` clocks; the site announces the class, not the copy. Earliest wins
     when several releases touch the same row, and the destinations are collected in plan
@@ -1417,6 +1439,35 @@ def _planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], _Planne
     can name where its materials are going to appear. An entry marked `show_on_site:
     false` is skipped outright - see the loop."""
     out: dict[tuple[str, str], _PlannedRow] = {}
+
+    def place(
+        key: tuple[str, str],
+        release: schedule.Release,
+        dest: str | None = None,
+        section: str | None = None,
+    ) -> None:
+        """Fold one entry into the row it touches. Shared by the deploy-keyed path and the
+        label fallback so a row means the same thing however it was placed."""
+        row = out.setdefault(key, _PlannedRow(when=release.when))
+        row.when = min(row.when, release.when)
+        if dest is not None:
+            # dict-as-ordered-set, not a list: dedupe where the destinations are
+            # collected, so the consumer is a plain join and the returned value means
+            # what the docstring says it does.
+            row.dests[dest] = None
+        if section is not None:
+            row.readings_planned = row.readings_planned or section == READINGS_SECTION
+        # A row is NAMED by the same entry it is DATED by: the earliest one touching
+        # it. Title and description are adopted as a pair - they describe one session,
+        # and taking the name from one entry and the blurb from another would read as
+        # a mismatch nobody wrote.
+        if (release.title or release.description) and (
+            row.named_at is None or release.when < row.named_at
+        ):
+            row.named_at = release.when
+            row.subtitle = release.title
+            row.description = release.description
+
     for release in sched.releases:
         if release.when is None:
             continue  # event_datetime: tbc - undated, can't place a session
@@ -1427,30 +1478,31 @@ def _planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], _Planne
             # actually released is still discovered and linked from the row it lands in -
             # withheld from the PLAN is not withheld from the site.
             continue
+        placed = False
         for d in release.deploy:
             dest = _deploy_dest(d)
             n = session_number(dest.rsplit("/", 1)[-1])
             if n is None:
                 continue
             section = _deploy_section(d)
-            key = (str(n), _row_kind(section))
-            row = out.setdefault(key, _PlannedRow(when=release.when))
-            row.when = min(row.when, release.when)
-            # dict-as-ordered-set, not a list: dedupe where the destinations are
-            # collected, so the consumer is a plain join and the returned value means
-            # what the docstring says it does.
-            row.dests[f"{d.cohort_dest_repo}/{dest}"] = None
-            row.readings_planned = row.readings_planned or section == READINGS_SECTION
-            # A row is NAMED by the same entry it is DATED by: the earliest one touching
-            # it. Title and description are adopted as a pair - they describe one session,
-            # and taking the name from one entry and the blurb from another would read as
-            # a mismatch nobody wrote.
-            if (release.title or release.description) and (
-                row.named_at is None or release.when < row.named_at
-            ):
-                row.named_at = release.when
-                row.subtitle = release.title
-                row.description = release.description
+            place(
+                (str(n), _row_kind(section)),
+                release,
+                dest=f"{d.cohort_dest_repo}/{dest}",
+                section=section,
+            )
+            placed = True
+        if placed or release.assignment is not None:
+            # An assignment entry gets its own out/due rows elsewhere; it is never a
+            # session row, so the label fallback must not claim one for it.
+            continue
+        # No deploy placed this entry: it stages nothing yet, or nothing it stages is an
+        # ordinal-prefixed session folder. docs/07 promises "a row appears as soon as you
+        # write it, not when it ships", so the entry's own label places it - dated, named,
+        # and flagged unreleased, with no destinations to name yet.
+        key = _row_from_label(release.label)
+        if key is not None:
+            place(key, release)
     return out
 
 
