@@ -423,26 +423,21 @@ def refresh_materials_system_files(org: str, repo: str) -> int:
     return 0
 
 
-def scaffold_materials(org: str, tag: str) -> int:
-    repo = f"{MATERIALS_REPO_PREFIX}{tag}"
-    log_step(f"Scaffolding {org}/{repo}")
-    if not create_repo(
-        org,
-        repo,
-        private=True,
-        description="Course materials (lectures/readings by session)",
-        converge_desc=True,  # read by faculty on the course org's landing page
-    ):
-        return 1
-    grant_course_team_access(org, repo)
-    grant_tagged_team_access(org, repo, tag)
+def materials_readme(org: str) -> str:
+    """The materials repo's student-facing README placeholder.
+
+    Module-level, not inline in scaffold_materials, so it can be rendered WITHOUT creating
+    a repo - which is what a propagation pass over the courses already running needs: the
+    file is create-only, so a wording fix reaches an existing repo only by writing it
+    deliberately, after checking the placeholder is still untouched (deploy's
+    UNEDITED_README_MARKERS).
+
+    Release materials with the README toggle copies this file into the cohort's materials
+    repo, where enrolled students read it - so it is written for them. How the source repo
+    is structured, and how to operate it, is MAINTAINING.md, which is never released.
+    """
     actions_table = _actions_table(org)
-    # README.md is student-facing: Release materials with the README toggle copies THIS
-    # file into the cohort's materials repo, where enrolled students read it. So it ships
-    # as a replace-me placeholder written for students - the how-this-repo-works reference
-    # for faculty & instructors lives in MAINTAINING.md (a root file that is never released:
-    # release only copies section folders, the syllabus, and README.md).
-    readme = (
+    return (
         # Two lines below carry deploy.py's UNEDITED_README_MARKERS - the "Replace this
         # placeholder" note and FACULTY_ONLY_HEADING. A release refuses to ship a README
         # still holding BOTH, so edit this stub's wording freely but keep those two intact
@@ -466,6 +461,22 @@ def scaffold_materials(org: str, tag: str) -> int:
         "reference.\n"
         "- **Available actions:** " + actions_table
     )
+
+
+def scaffold_materials(org: str, tag: str) -> int:
+    repo = f"{MATERIALS_REPO_PREFIX}{tag}"
+    log_step(f"Scaffolding {org}/{repo}")
+    if not create_repo(
+        org,
+        repo,
+        private=True,
+        description="Course materials (lectures/readings by session)",
+        converge_desc=True,  # read by faculty on the course org's landing page
+    ):
+        return 1
+    grant_course_team_access(org, repo)
+    grant_tagged_team_access(org, repo, tag)
+    readme = materials_readme(org)
     failures = 0
     failures += refresh_materials_system_files(org, repo)
     # USER-owned skeletons: create-only, so a re-run against a repo faculty have since
