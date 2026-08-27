@@ -20,3 +20,7 @@ nbconvert==7.17.1
 # bool cannot express. The nesting and walk-pruning layer is ours; only the per-pattern
 # translation is here.
 pathspec==0.12.1
+# Signs the JWT client assertion that authenticates the mailer to Entra ID with a certificate
+# instead of a client secret (dsl_course/mailer.py). 42 was the floor for the timezone-aware
+# not_valid_after_utc the expiry warning reads; pinned like everything else here.
+cryptography==50.0.1

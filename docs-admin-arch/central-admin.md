@@ -83,17 +83,37 @@ republishes it. Rotation is still a per-org Bootstrap run from central.
 Enrolment-code and grade emails go through `dsl_course.mailer` under a **tenant-level mail
 credential** - a one-time central setup, not per course. `dry_run` previews need nothing.
 
-- **Microsoft Graph (preferred)** - secrets `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`,
-  `GRAPH_CLIENT_SECRET`, `GRAPH_SENDER`. Needs an Entra app registration with the **Mail.Send**
-  application permission, admin-consented, scoped to one shared mailbox (Exchange application
-  access policy), plus that shared mailbox as the sender.
+- **Microsoft Graph (in use)** - secrets `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`,
+  `GRAPH_CLIENT_CERT`, `GRAPH_SENDER`. The Entra app *Send email via Datasciencelab @ Hertie
+  School* holds the **Mail.Send** application permission (admin-consented) and sends as the
+  shared mailbox `datasciencelab@hertie-school.org`.
 - **SMTP (fallback)** - `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` (+ optional `SMTP_PORT`,
-  `SMTP_FROM`). Most M365 tenants disable SMTP AUTH (error `5.7.139`), so Graph is usually the
-  only viable route.
+  `SMTP_FROM`). Most M365 tenants disable SMTP AUTH (error `5.7.139`), so Graph is the route
+  actually used.
 
-Set the secrets once; they must reach each course org's `.github` repo (where the send
-workflows run). **Status: not yet configured in any DSL org** - a request to Hertie IT for the
-Entra app registration is pending.
+The app authenticates **by certificate, not a client secret**. `GRAPH_CLIENT_CERT` is one
+multi-line secret holding the PEM certificate *and* its unencrypted private key (as
+`cat cert.cer key.pem` produces); the mailer derives the `x5t` thumbprint from the certificate
+itself, so the two halves cannot drift apart. Entra holds only the public half.
+
+**Certificate expiry: 2028-08-26.** Nothing warns you but the mailer, which logs a warning
+inside 30 days *on a run that actually sends* - a lapse otherwise surfaces as enrolment codes
+silently not arriving. To rotate: generate a new keypair, upload the new `.cer` to the app
+registration (it can hold several), update `GRAPH_CLIENT_CERT`, then remove the old certificate.
+
+Because a GitHub secret can be written but never read back, and Entra only ever gets the public
+half, **the private key needs a copy outside GitHub** - institutional password manager or a
+shared vault, never the repo. Without one, a lost laptop means a new keypair and an Entra ticket.
+
+Set the secrets once as **org** secrets on each course org (`--visibility all`); the send
+workflows run in that org's public `.github`, so no per-repo propagation is needed. Note that
+`dry_run` never touches the transport, so a green dry-run says nothing about the credential -
+only a real send tests it.
+
+**Status: live on `hertie-dsl-demo-course-e1234`, `hertie-intro-to-data-science-c11` and
+`hertie-maths-data-science-C23`.** Not on `hertie-nlp-e1282`, which has no cohorts yet - set the
+four secrets there (org, or on `.github` if you only hold repo admin) when its first cohort is
+bootstrapped.
 
 ## Deploying the toolkit
 

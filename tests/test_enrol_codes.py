@@ -1,11 +1,24 @@
 """enrol-codes + mailer pure cores: code assignment must fill only blanks and stay unique
 (a clash would let one student claim another's row), the message must carry the code, and
 the roster must round-trip with the new enrol_code column. SMTP send is wiring, not tested.
+
+The Graph certificate credential IS tested: the client assertion is the whole of our
+authentication, it is built by hand here rather than by a library, and it is unverifiable
+against the real tenant until IT uploads the public half - so a self-signed throwaway
+keypair stands in for the real one.
 """
 
 from __future__ import annotations
 
+import base64
+import json
+from datetime import UTC, datetime, timedelta
+
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.x509.oid import NameOID
 
 from dsl_course import enrol_codes, mailer, roster
 from tests.conftest import ROSTER_HEADER
@@ -123,25 +136,128 @@ def test_graph_config_from_env_needs_all_four(monkeypatch):
     for k in (
         "GRAPH_TENANT_ID",
         "GRAPH_CLIENT_ID",
-        "GRAPH_CLIENT_SECRET",
+        "GRAPH_CLIENT_CERT",
         "GRAPH_SENDER",
     ):
         monkeypatch.delenv(k, raising=False)
     assert mailer.graph_config_from_env() is None
     monkeypatch.setenv("GRAPH_TENANT_ID", "t")
     monkeypatch.setenv("GRAPH_CLIENT_ID", "c")
-    monkeypatch.setenv("GRAPH_CLIENT_SECRET", "s")
+    monkeypatch.setenv("GRAPH_CLIENT_CERT", "pem")
     assert mailer.graph_config_from_env() is None  # sender still missing
     monkeypatch.setenv("GRAPH_SENDER", "bot@x.edu")
     cfg = mailer.graph_config_from_env()
     assert cfg and cfg.sender == "bot@x.edu" and cfg.tenant_id == "t"
 
 
+# ------------------------------------------------- the certificate credential (no secret)
+
+
+def _self_signed_pem(days: int = 730, with_key: bool = True) -> str:
+    """A throwaway cert (+ key) in the one-secret PEM layout `mailer` expects.
+
+    Generated in-test rather than committed as a fixture: a committed private key - even a
+    disposable one - is the kind of thing that gets found by a scanner and mistaken for a
+    live credential. `with_key=False` gives the certificate alone, standing in for a
+    half-pasted secret."""
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "test-mailer")])
+    now = datetime.now(tz=UTC)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(name)
+        .issuer_name(name)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(days=1))
+        .not_valid_after(now + timedelta(days=days))
+        .sign(key, hashes.SHA256())
+    )
+    cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
+    if not with_key:
+        return cert_pem
+    return (
+        cert_pem
+        + key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        ).decode()
+    )
+
+
+def _decode_segment(segment: str) -> dict:
+    return json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))
+
+
+def test_client_assertion_is_signed_by_the_key_and_names_the_certificate():
+    pem = _self_signed_pem()
+    cfg = mailer.GraphConfig("tenant-1", "client-1", pem, "bot@x.edu")
+    header_seg, claims_seg, sig_seg = mailer._client_assertion(cfg).split(".")
+
+    header = _decode_segment(header_seg)
+    assert header["alg"] == "RS256" and header["typ"] == "JWT"
+    # Entra finds the uploaded public half by this thumbprint; if it doesn't match the
+    # certificate byte-for-byte the token request fails with an opaque error.
+    cert = x509.load_pem_x509_certificate(pem.encode())
+    assert header["x5t"] == mailer._b64url(cert.fingerprint(hashes.SHA1()))
+
+    claims = _decode_segment(claims_seg)
+    # aud must be the tenant's own token endpoint - a mismatch here is silently rejected.
+    assert claims["aud"] == (
+        "https://login.microsoftonline.com/tenant-1/oauth2/v2.0/token"
+    )
+    assert claims["iss"] == claims["sub"] == "client-1"
+    assert 0 < claims["exp"] - claims["nbf"] <= 600  # short-lived, single-use
+    assert claims["jti"]
+
+    # The signature must verify against the certificate's public key, over the exact
+    # `header.claims` bytes - this is the whole proof the client secret used to provide.
+    sig = base64.urlsafe_b64decode(sig_seg + "=" * (-len(sig_seg) % 4))
+    cert.public_key().verify(
+        sig,
+        f"{header_seg}.{claims_seg}".encode(),
+        padding.PKCS1v15(),
+        hashes.SHA256(),
+    )
+
+
+def test_assertions_are_unique_per_request():
+    # jti is a replay guard; a reused one would let a captured assertion be replayed.
+    cfg = mailer.GraphConfig("t", "c", _self_signed_pem(), "bot@x.edu")
+    first = _decode_segment(mailer._client_assertion(cfg).split(".")[1])
+    second = _decode_segment(mailer._client_assertion(cfg).split(".")[1])
+    assert first["jti"] != second["jti"]
+
+
+def test_an_expiring_certificate_is_flagged_loudly(capsys):
+    # A certificate lapses silently: enrolment codes and grade notices just stop. The warning
+    # is the only signal anyone gets, so it must fire BEFORE expiry, not on failure.
+    cfg = mailer.GraphConfig("t", "c", _self_signed_pem(days=5), "bot@x.edu")
+    mailer._client_assertion(cfg)
+    assert "expires in" in capsys.readouterr().err  # log_err -> stderr
+
+
+@pytest.mark.parametrize(
+    ("pem", "expected"),
+    [
+        ("not a pem at all", "no readable PEM certificate"),
+        # Certificate present, key missing - the classic half-pasted secret.
+        (_self_signed_pem(with_key=False), "no usable PEM"),
+    ],
+)
+def test_a_malformed_cert_secret_fails_with_one_actionable_line(pem, expected):
+    # This runs in an Actions log, where a cryptography traceback tells faculty nothing.
+    cfg = mailer.GraphConfig("t", "c", pem, "bot@x.edu")
+    with pytest.raises(RuntimeError, match=expected):
+        mailer._client_assertion(cfg)
+
+
 def test_a_failed_graph_token_is_not_reported_as_nothing_to_send(monkeypatch):
     # "0 sent" is the same number an empty batch produces, so a dead token used to look
     # like a quiet no-op. Nothing was sent AND nothing could be: that is a failure.
     monkeypatch.setattr(mailer, "_graph_token", lambda cfg: None)
-    cfg = mailer.GraphConfig("t", "c", "s", "bot@x.edu")
+    cfg = mailer.GraphConfig("t", "c", "pem", "bot@x.edu")
     with pytest.raises(RuntimeError, match="token request failed"):
         mailer._send_via_graph(cfg, [("a@x.edu", "Subj", "Body")])
 

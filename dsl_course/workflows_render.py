@@ -181,12 +181,15 @@ def _run_preamble(minutes: int = _TIMEOUT_DEFAULT) -> str:
     return f"    needs: check-team\n{_ungated_preamble(minutes)}"
 
 
-# SMTP secrets, wired into the env of the workflows that send email (enrolment codes, grade
+# Mail secrets, wired into the env of the workflows that send email (enrolment codes, grade
 # notifications). A plain string (not the f-string body) so the GitHub `${{ }}` is literal.
+# GRAPH_CLIENT_CERT is the app's certificate credential - certificate + private key in one
+# multi-line secret. There is no GRAPH_CLIENT_SECRET: the mailer authenticates by
+# certificate only.
 _MAIL_ENV = """\
           GRAPH_TENANT_ID: ${{ secrets.GRAPH_TENANT_ID }}
           GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
-          GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
+          GRAPH_CLIENT_CERT: ${{ secrets.GRAPH_CLIENT_CERT }}
           GRAPH_SENDER: ${{ secrets.GRAPH_SENDER }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}

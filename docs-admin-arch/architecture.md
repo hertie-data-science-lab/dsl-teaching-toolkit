@@ -697,7 +697,8 @@ Self-contained - workflows and their Python implementation both live in this rep
   - `collect` - the faculty-side autograder: deadline snapshots, pinned checkout, contained test
     run, fire-once sentinels, `autograde_score` into the grade CSV.
   - `grades` - gradebook repos (`sync`), the preview PR (`render`), fan-out + email (`distribute`).
-  - `enrol_codes` / `mailer` - generate + email enrolment codes; Graph or SMTP transport.
+  - `enrol_codes` / `mailer` - generate + email enrolment codes; Graph (certificate-signed
+    JWT assertion, no client secret) or SMTP transport.
   - `scaffold` - create structured materials / assignment repos + the website (cohort or course).
   - `site` - regenerate the cohort website (`sync_site`) and the public course website
     (`sync_public_site` / `resync_public_site`).
