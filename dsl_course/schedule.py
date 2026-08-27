@@ -622,12 +622,34 @@ def _parse_assignments(
                 "per team (expected 'group' or 'individual')",
             )
         dest = str(entry.get("cohort_dest_repo") or "").strip()
-        # A solution date with no handout date is a same-file, parse-time contradiction, so
-        # it belongs in `drops` where --validate reports it on the commit that introduced
-        # it. The scheduler cannot carry the solution without a handout release to put it
-        # on, and its only other symptom is a solution that silently never ships - noticed
-        # in November, from a date pinned in September.
-        if entry.get("solution_datetime") and not entry.get("handout_datetime"):
+        handout = _flagged_datetime(
+            entry,
+            "handout_datetime",
+            tz,
+            drops,
+            where,
+            "the handout NEVER fires - no student or team repos are provisioned "
+            "from it, and nobody gets the assignment",
+        )
+        solution = _flagged_datetime(
+            entry,
+            "solution_datetime",
+            tz,
+            drops,
+            where,
+            "the model solution NEVER ships automatically - it stays on the "
+            "template's solution branch until someone ticks include_solution by hand",
+        )
+        # The solution rides on the handout release, so these two dates are only meaningful
+        # relative to each other - and both ways of getting that wrong are silent, which is
+        # why they are checked here rather than left to the scheduler.
+        #
+        # REFUSED, not merely flagged, because the failure is not symmetrical: a date
+        # earlier than the handout would push the model solution into every student repo on
+        # the very first firing, shipping the answers WITH the questions, and no later run
+        # can take that back. Dropping to None is the documented "omit it" behaviour - the
+        # solution then waits for a human, which is the safe direction to fail.
+        if solution is not None and handout is None:
             _flag_bad_value(
                 drops,
                 where,
@@ -636,6 +658,18 @@ def _parse_assignments(
                 "the model solution NEVER ships automatically - the schedule can only push "
                 "it into repos it provisioned, which needs `handout_datetime` set too",
             )
+            solution = None
+        elif solution is not None and handout is not None and solution <= handout:
+            _flag_bad_value(
+                drops,
+                where,
+                "solution_datetime",
+                entry.get("solution_datetime"),
+                "it is not AFTER handout_datetime, which would ship the model solution "
+                "together with the assignment on the very first release - refused, so the "
+                "solution now waits for a human",
+            )
+            solution = None
         out[str(slug)] = AssignmentEntry(
             due_datetime=due,
             course_source_repo=source_repo,
@@ -650,24 +684,8 @@ def _parse_assignments(
                 "and the autograder fires then, not when this says",
                 end_of_day=True,
             ),
-            handout_datetime=_flagged_datetime(
-                entry,
-                "handout_datetime",
-                tz,
-                drops,
-                where,
-                "the handout NEVER fires - no student or team repos are provisioned "
-                "from it, and nobody gets the assignment",
-            ),
-            solution_datetime=_flagged_datetime(
-                entry,
-                "solution_datetime",
-                tz,
-                drops,
-                where,
-                "the model solution NEVER ships automatically - it stays on the "
-                "template's solution branch until someone ticks include_solution by hand",
-            ),
+            handout_datetime=handout,
+            solution_datetime=solution,
             # anything other than the two known values -> None, i.e. the grading.yml
             # fallback (flagged above, not silent)
             type=kind if kind in ("group", "individual") else None,

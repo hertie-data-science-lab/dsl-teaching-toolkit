@@ -161,7 +161,7 @@ Keyed by a slug you choose. As with a `deploy:`, `course_source_repo` names wher
 | `handout_datetime` | no* | - | when repos are provisioned, automatically. |
 | `due_datetime` | **yes** | - | the deadline students see; a bare date closes at **23:59:59** |
 | `grading_datetime` | no | `due_datetime` | when the snapshot freezes and it is [autograded](#deadline-snapshots-and-autograding) |
-| `solution_datetime` | no | - | when the template's `solution/` is pushed into every provisioned repo. **No default** - omit it and the solution only ever goes out by hand. Needs `handout_datetime` |
+| `solution_datetime` | no | - | when the template's `solution/` is pushed into every provisioned repo. **No default** - omit it and the solution only ever goes out by hand. Must be **after** `handout_datetime`, and needs it set |
 | `type` | no | `individual` | `individual` or `group`  |
 | `max_team_size` | no | `5` | group assignments only: the welcome repo's Join-team cap |
 | `course_source_repo` | **yes** | - | the course-org repo this hands out from - one repo per student (or team) is generated from it |
@@ -317,6 +317,8 @@ Each assignment's **grading deadline** is `grading_datetime` if you set it, else
 `solution_datetime` is separate from all of the above, and has no default - a solution released the moment submissions close rewards anyone who pushes late, so you name the moment or it never fires. At that datetime the hourly run pushes the template's `solution/` folder into every student/team repo, which is exactly what **Release assignment** with `include_solution` does by hand. Both are idempotent, so doing one after the other changes nothing.
 
 It needs `handout_datetime` set: the schedule can only push a solution into repos the schedule provisioned. If you hand out manually, release the solution manually too.
+
+Both ways of getting the two dates wrong are **refused at validate time**, not honoured: a `solution_datetime` with no `handout_datetime` (nothing to push into), and one at or before the handout - which would ship the answers with the questions on the first release, and no later run could take that back. In either case the solution simply waits for a human, and `--validate` names the entry.
 
 ---
 

@@ -482,8 +482,50 @@ def test_a_solution_datetime_without_a_handout_is_flagged_at_parse_time():
     )
     assert any("solution_datetime" in d for d in sched.dropped)
     assert any("needs `handout_datetime` set too" in d for d in sched.dropped)
+    assert sched.assignments["assignment-1"].solution_datetime is None
     # the entry itself survives - only the automatic solution release is lost
     assert sched.assignments["assignment-1"].due_datetime is not None
+
+
+def test_a_solution_datetime_not_after_the_handout_is_refused():
+    # The one unrecoverable mistake this feature can make: a date at or before the handout
+    # pushes the model solution into every student repo on the FIRST firing, shipping the
+    # answers with the questions. No later run can take that back, so it is refused rather
+    # than flagged-and-honoured.
+    for bad in ("2026-09-22T09:00", "2026-09-01T09:00"):
+        sched = parse(
+            {
+                "assignments": {
+                    "assignment-1": {
+                        "course_source_repo": "a-f2026",
+                        "due_datetime": "2026-10-13",
+                        "handout_datetime": "2026-09-22T09:00",
+                        "solution_datetime": bad,
+                    }
+                }
+            }
+        )
+        assert sched.assignments["assignment-1"].solution_datetime is None, bad
+        assert any("not AFTER handout_datetime" in d for d in sched.dropped), bad
+        # the assignment itself is untouched - only the automatic solution is withheld
+        assert sched.assignments["assignment-1"].handout_datetime is not None
+
+
+def test_a_solution_datetime_after_the_handout_is_kept():
+    sched = parse(
+        {
+            "assignments": {
+                "assignment-1": {
+                    "course_source_repo": "a-f2026",
+                    "due_datetime": "2026-10-13",
+                    "handout_datetime": "2026-09-22T09:00",
+                    "solution_datetime": "2026-09-22T09:01",
+                }
+            }
+        }
+    )
+    assert sched.assignments["assignment-1"].solution_datetime is not None
+    assert not sched.dropped
 
 
 def test_an_unparseable_solution_datetime_is_flagged_with_what_it_costs():
