@@ -1543,7 +1543,8 @@ def _planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], _Planne
     when several releases touch the same row, and the destinations are collected in plan
     order (deduped - two deploys of one entry can name the same one) so a placeholder row
     can name where its materials are going to appear. An entry marked `show_on_site:
-    false` is skipped outright - see the loop."""
+    false` raises, dates and names nothing, but still contributes its destinations to a row
+    another entry already raised - see the two loops."""
     out: dict[tuple[str, str], _PlannedRow] = {}
 
     def place(
@@ -1578,12 +1579,7 @@ def _planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], _Planne
         if release.when is None:
             continue  # event_datetime: tbc - undated, can't place a session
         if not release.show_on_site:
-            # A silent release (readings, an errata drop): it ships on its own clock but
-            # says nothing here, so it can neither raise a row of its own nor pull an
-            # existing one's date and name back to whenever the files went up. Anything it
-            # actually released is still discovered and linked from the row it lands in -
-            # withheld from the PLAN is not withheld from the site.
-            continue
+            continue  # second pass, below - a silent entry may not raise or date a row
         placed = False
         for d in release.deploy:
             dest = _deploy_dest(d)
@@ -1609,6 +1605,31 @@ def _planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], _Planne
         key = _row_from_label(release.label)
         if key is not None:
             place(key, release)
+
+    # SECOND pass for the silent entries. A silent release ships on its own clock but says
+    # nothing here, so it may neither raise a row of its own nor pull an existing one's date
+    # or name back to whenever the files went up. Its DESTINATIONS still count, though: they
+    # are what lets an unreleased row say "readings will appear in materials/readings/02_x"
+    # and carry `readings_pending`. Since readings moved out of the lecture entries into
+    # their own silent ones, dropping them here left both of those permanently unreachable.
+    #
+    # A second pass, not one: releases are sorted by datetime and readings usually ship
+    # AHEAD of their session, so a silent readings entry is reached before the lecture entry
+    # that raises its row. Folding in one pass would silently lose exactly the common case.
+    for release in sched.releases:
+        if release.show_on_site or release.when is None:
+            continue
+        for d in release.deploy:
+            dest = _deploy_dest(d)
+            n = session_number(dest.rsplit("/", 1)[-1])
+            if n is None:
+                continue
+            section = _deploy_section(d)
+            row = out.get((str(n), _row_kind(section)))
+            if row is None:
+                continue  # raising a row is precisely what silence forbids
+            row.dests[f"{d.cohort_dest_repo}/{dest}"] = None
+            row.readings_planned = row.readings_planned or section == READINGS_SECTION
     return out
 
 

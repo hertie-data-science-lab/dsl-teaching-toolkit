@@ -37,7 +37,7 @@ Each entry is a label you choose (`lecture-1`, `lab-1`, `bonus-dataset`) - yours
 | `title` | no | - | the session's name, shown beside its ordinal ("Session 1 / Probability Theory") on the schedule, Lectures, Materials and Labs tabs |
 | `description` | no | - | what the session covers - the **learning objectives** of a Hertie syllabus. Shown under the session heading on the Lectures, Labs and Readings tabs; may run to several paragraphs (use a `>` or `\|` block) |
 | `tbc` | no | `false` | signals the date is provisional: it fires as normal just the deployed site marks it **(TBC)** |
-| `show_on_site` | no | `true` | `false` releases **silently**: the deploys ship exactly as written, but the entry adds nothing to the site's schedule - no row, no date, no name, no not-yet-released placeholder. For content that belongs to a session without being an occasion of its own; see [Silent releases](#silent-releases) |
+| `show_on_site` | no | `true` | `false` releases **silently**: the deploys ship exactly as written, but the entry raises no row of its own and never sets an existing row's date or name (it still contributes where its files will land). For content that belongs to a session without being an occasion of its own; see [Silent releases](#silent-releases) |
 
 
 NB: **the calendar event is not the release.** 
@@ -61,6 +61,8 @@ Most weeks a session's readings ride the lecture's own entry, so they ship on it
 ```
 
 The files still reach students on the 15th, and still appear on session 4's row once released - what is withheld is the entry's claim on the schedule, not its content. The same applies to any release that is not an occasion: an errata drop, a dataset added mid-term.
+
+What is *not* withheld is where the files are going: session 4's row still names `materials/readings/04_week-4` among the paths its materials will appear at, and is flagged as having a reading list pending, so an unreleased session can say readings are coming. Only the date and the name are silenced.
 
 A silenced entry is also left out of the **generated syllabus** (Generate syllabus reads the same plan), which is usually what you want for a readings drop that belongs to a session already listed there.
 
