@@ -456,12 +456,14 @@ def refresh(course_org: str) -> int:
         # also only ever written by Bootstrap cohort until now - same bug class.
         failures += refresh_cohort_pointer(cohort, course_org)
         # The cohort's OWN landing pages - the student-facing profile/README.md and the
-        # orientation in its .github repo. Both are SYSTEM-owned and documented as
-        # "rewritten on every nightly refresh", but only the COURSE org's pair was ever
-        # refreshed (below the content-repo sweep above): a cohort's were written once at
-        # Bootstrap and then frozen for the life of the org, so every wording fix since
-        # reached the course org and no cohort. They render from the org's live repo list,
-        # so this also keeps a cohort's repo table honest as repos are added.
+        # orientation in its .github repo. Only the COURSE org's pair was ever refreshed
+        # (below the content-repo sweep above): a cohort's were written once at Bootstrap
+        # and then frozen for the life of the org, so every wording fix since reached the
+        # course org and no cohort. The .github README is SYSTEM-owned and rewritten
+        # outright; the student-facing landing page is INSTRUCTOR-owned, so only its
+        # marked repo table is refreshed (see profile_readme.splice_repo_table) - which is
+        # what keeps that table honest as repos are added, without flattening an
+        # instructor's wording around it.
         update_profile_readme(cohort)
     if failures:
         log_err(f"refresh incomplete: {failures} file(s) could not be written")
