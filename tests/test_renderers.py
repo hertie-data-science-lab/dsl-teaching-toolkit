@@ -649,6 +649,8 @@ def test_update_profile_readme_absent_config_falls_back_without_crashing(monkeyp
     from dsl_course import profile_readme as P
 
     monkeypatch.setattr("dsl_course.utils.get_file_content", lambda *a, **k: None)
+    # profile_readme imported the name, so the module binding is what the splice reads.
+    monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(
         P,
         "list_org_repos",
@@ -668,6 +670,69 @@ def test_update_profile_readme_absent_config_falls_back_without_crashing(monkeyp
     # rendered from the same org snapshot and always move together.
     assert len(commits) == 1
     assert set(commits[0]) == {"profile/README.md", "README.md"}
+
+
+# ------------------------------------- the cohort landing page is instructor-owned, bar
+# its repo table. These pin the three ways a refresh can meet an existing page.
+
+_REPOS = [
+    {"name": "welcome", "url": "u", "visibility": "PUBLIC", "description": "front door"}
+]
+
+
+def _cohort_readme(monkeypatch, existing):
+    from dsl_course import profile_readme as P
+
+    monkeypatch.setattr(P, "get_file_content", lambda *a, **k: existing)
+    monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
+    monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(P, "log", lambda *a, **k: None)
+    monkeypatch.setattr(P, "log_ok", lambda *a, **k: None)
+    written = {}
+    monkeypatch.setattr(
+        P, "put_files", lambda org, repo, files, msg, **k: written.update(files) or True
+    )
+    P.update_profile_readme("Cohort-f2026", "Org", "Deep Learning")
+    return written
+
+
+def test_cohort_page_is_seeded_whole_when_absent(monkeypatch):
+    from dsl_course import profile_readme as P
+
+    page = _cohort_readme(monkeypatch, None)["profile/README.md"].decode()
+    assert "INSTRUCTOR-OWNED" in page
+    assert P.TABLE_START in page and P.TABLE_END in page
+    assert "front door" in page
+
+
+def test_cohort_refresh_replaces_only_the_marked_table(monkeypatch):
+    from dsl_course import profile_readme as P
+
+    edited = (
+        "# Our course, our words\n\nSee you Tuesdays in room 4.\n\n"
+        f"{P.TABLE_START} -->\n| stale | rows |\n{P.TABLE_END}\n\nGood luck!\n"
+    )
+    page = _cohort_readme(monkeypatch, edited)["profile/README.md"].decode()
+    assert "Our course, our words" in page  # prose above survives
+    assert "See you Tuesdays in room 4." in page
+    assert "Good luck!" in page  # and prose below
+    assert "| stale | rows |" not in page  # the table alone is replaced
+    assert "front door" in page
+
+
+def test_cohort_refresh_adopts_an_untouched_pre_marker_page(monkeypatch):
+    from dsl_course import profile_readme as P
+
+    page = _cohort_readme(
+        monkeypatch, f"# Old\n\n| a | b |\n\n---\n{P.LEGACY_FOOTER}\n"
+    )["profile/README.md"].decode()
+    assert P.TABLE_START in page  # a machine page nobody edited gains the markers
+
+
+def test_cohort_refresh_leaves_a_hand_edited_page_without_markers_alone(monkeypatch):
+    written = _cohort_readme(monkeypatch, "# Entirely mine\n\nNo markers, no footer.\n")
+    # The .github README still refreshes; the landing page is not written at all.
+    assert set(written) == {"README.md"}
 
 
 # --------------------------------------------- operational hardening, swept over every

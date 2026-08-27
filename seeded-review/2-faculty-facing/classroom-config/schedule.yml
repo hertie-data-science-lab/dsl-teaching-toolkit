@@ -46,15 +46,15 @@
 #         course_source_path:       # REQUIRED - folder or file to copy
 #         cohort_dest_repo:         # OPTIONAL - default: materials
 #         cohort_dest_path:         # OPTIONAL - default: same as course_source_path
-#         deploy_datetime:          # OPTIONAL - default: the event_datetime
-#       - course_source_repo:       # OPTIONAL - a SECOND file released separately on its own clock - e.g. for labs might want to release lab solutions after the lab itself
+#         deploy_datetime:          # OPTIONAL - default: the event_datetime. But can set on its own clock - e.g. for lectures might want to release slides BEFORE/AFTER the lecture itself 
+#       - course_source_repo:       # OPTIONAL - a SECOND file/directory released separately on its own clock 
 #         course_source_path:       
 #         cohort_dest_path:        
 #         deploy_datetime:          
 #
-#   lab-1:                          # the week's lab is its OWN schedule row, so it can sit
-#     event_datetime:               # on Wednesday while the lecture sits on Monday. A copy
-#     title:                        # into `labs/NN_...` is what makes it one - not the label.
+#   lab-1:                          
+#     event_datetime:               
+#     title:                        
 #     description:
 #     deploy:
 #       - course_source_repo:
@@ -65,10 +65,10 @@
 #       - course_source_repo: labs/01_session-1/solutions 
 #         cohort_dest_repo:
 #         cohort_dest_path:
-#         deploy_datetime:          # could be set for after the lab, so students work the empty notebooks/scripts first
+#         deploy_datetime:          # could be set for AFTER the lab, so students work the empty notebooks/scripts first
 #
-#   readings-1:                     # each session's READINGS get their own entry, on their
-#     event_datetime:               # own clock - they usually go out ahead of the session.
+#   readings-1:                     # each session's readings can optional get their own entry, on their own clock - they usually go out ahead of the session. Could also be released as part of the lecture block above.
+#     event_datetime:               
 #     show_on_site: false           # They belong to session 1 without being an occasion of
 #     deploy:                       # its own, so `show_on_site: false` keeps them from
 #       - course_source_repo:       # adding a row and - crucially - from pulling session
