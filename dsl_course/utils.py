@@ -631,14 +631,90 @@ def grant_read_teams(cohort_org: str, repo: str) -> None:
             log(f"  ({team} team not found - create it first)")
 
 
+# Every repo description this toolkit has ever written, current and superseded. A live
+# description in this set - or an empty one - is OURS, so it may be converged to the
+# current wording; anything else a human typed, and is left alone. Same contract as
+# STUB_MARKS for seeded file CONTENT, and needed for the same reason: a description is
+# only ever set at repo creation, so a wording fix otherwise never reaches an existing
+# repo - while being the "What it's for" column on the students' landing page.
+SEEDED_DESCRIPTIONS = frozenset(
+    {
+        "Org profile and configuration",
+        "Course front door - open a Join issue to enrol",
+        "PRIVATE cohort config - roster (students.csv). No PII leaves here.",
+        "Course materials (lectures/readings by session)",
+        "Course website (auto-deployed on push)",
+        "Released lectures, labs, readings, and other materials",
+        # SUPERSEDED: said "enrolled students only", but grant_read_teams gives the
+        # `auditors` team read on every released repo too - so the page students land on
+        # carried a claim about access that was simply untrue.
+        "Released course materials (enrolled students only)",
+    }
+)
+
+# The descriptions rendered per repo rather than fixed, matched by shape. A templated
+# description always re-renders to the same string, so these only matter if we ever
+# reword one of the templates.
+_SEEDED_DESCRIPTION_PATTERNS = (
+    re.compile(r"^.+ - cohort assignment template$"),
+    re.compile(r"^.+ - submission repo$"),
+    re.compile(r"^Assignment .+ template$"),
+    re.compile(r"^Private gradebook for @.+$"),
+)
+
+
+def is_seeded_description(text: str) -> bool:
+    """Whether `text` is a description this toolkit wrote, rather than faculty writing."""
+    stripped = (text or "").strip()
+    if not stripped or stripped in SEEDED_DESCRIPTIONS:
+        return True
+    return any(p.match(stripped) for p in _SEEDED_DESCRIPTION_PATTERNS)
+
+
+def converge_description(org: str, repo: str, want: str) -> None:
+    """Bring an EXISTING repo's GitHub description to `want` - but only if it is still ours.
+
+    Never fatal: a description is documentation, and failing a seed over it would be
+    worse than leaving it stale. A read failure, or a description a human has written, is
+    a note and nothing more."""
+    code, out = gh("api", f"repos/{org}/{repo}", "--jq", ".description")
+    if code != 0:
+        return
+    live = "" if out.strip() in ("", "null") else out.strip()
+    if live == want:
+        return
+    if not is_seeded_description(live):
+        log(f"  ({repo}: kept the description faculty wrote)")
+        return
+    if (
+        gh(
+            "api",
+            "--method",
+            "PATCH",
+            f"repos/{org}/{repo}",
+            "--field",
+            f"description={want}",
+        )[0]
+        == 0
+    ):
+        log_ok(f"{repo} description -> current wording")
+
+
 def create_repo(
     org: str,
     name: str,
     private: bool = True,
     description: str = "",
     is_template: bool = False,
+    converge_desc: bool = False,
 ) -> bool:
-    """Create a repo. Idempotent - treats existing repo as success."""
+    """Create a repo. Idempotent - treats existing repo as success.
+
+    `converge_desc` additionally brings an ALREADY-EXISTING repo's description up to
+    `description` when the live one is still one of ours (see converge_description). Off
+    by default: it costs a read per call, and is only worth it for the handful of repos
+    whose description is read by a human - the ones on an org's landing page. The
+    per-student submission and gradebook repos are not among them."""
     args = [
         "api",
         "--method",
@@ -662,6 +738,8 @@ def create_repo(
     # that was never created. Key on GitHub's specific message text instead.
     if "name already exists" in out.lower():
         log_skip(f"repo {org}/{name}")
+        if converge_desc and description:
+            converge_description(org, name, description)
         return True
     log_err(f"failed to create repo {org}/{name}: {out[:200]}")
     return False

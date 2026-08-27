@@ -274,6 +274,68 @@ def test_released_repos_are_read_by_both_cohort_role_teams():
     assert deploy.grant_read_teams is utils.grant_read_teams
 
 
+def test_is_seeded_description_recognises_ours_and_spares_faculty_writing():
+    # The gate on converging a description: only text this toolkit wrote may be replaced.
+    assert utils.is_seeded_description("")  # never set
+    assert utils.is_seeded_description("   ")
+    # the superseded wording that wrongly said "enrolled students only"
+    assert utils.is_seeded_description(
+        "Released course materials (enrolled students only)"
+    )
+    assert utils.is_seeded_description(
+        "Released lectures, labs, readings, and other materials"
+    )
+    # templated ones, matched by shape
+    assert utils.is_seeded_description("assignment-1 - submission repo")
+    assert utils.is_seeded_description("Private gradebook for @ada-l")
+    # anything a human typed is off limits
+    assert not utils.is_seeded_description(
+        "Week 1-5 slides, do not share outside the cohort"
+    )
+    assert not utils.is_seeded_description("Released course materials")
+
+
+def test_converge_description_only_overwrites_our_own_wording(monkeypatch):
+    calls = []
+
+    def fake_gh(*args, **kwargs):
+        calls.append(args)
+        if args[0] == "api" and "--jq" in args:
+            return (0, fake_gh.live)
+        return (0, "")
+
+    monkeypatch.setattr(utils, "gh", fake_gh)
+    monkeypatch.setattr(utils, "log", lambda *a, **k: None)
+    monkeypatch.setattr(utils, "log_ok", lambda *a, **k: None)
+
+    def patched():
+        return [a for a in calls if "--method" in a and "PATCH" in a]
+
+    # ours, and stale -> patched to the current wording
+    fake_gh.live = "Released course materials (enrolled students only)"
+    calls.clear()
+    utils.converge_description(
+        "Org", "materials", "Released lectures, labs, readings, and other materials"
+    )
+    assert len(patched()) == 1
+
+    # faculty's own -> left alone
+    fake_gh.live = "Slides and notebooks, weeks 1-5"
+    calls.clear()
+    utils.converge_description(
+        "Org", "materials", "Released lectures, labs, readings, and other materials"
+    )
+    assert patched() == []
+
+    # already current -> no write at all
+    fake_gh.live = "Released lectures, labs, readings, and other materials"
+    calls.clear()
+    utils.converge_description(
+        "Org", "materials", "Released lectures, labs, readings, and other materials"
+    )
+    assert patched() == []
+
+
 # --- releasing the whole repo -------------------------------------------------------
 # `/` is the "release everything" spelling. The end-to-end proof that it flows through
 # clone -> copytree -> `git add` lives in test_scheduler.py; what is pinned here is the two

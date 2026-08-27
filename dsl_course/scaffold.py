@@ -431,6 +431,7 @@ def scaffold_materials(org: str, tag: str) -> int:
         repo,
         private=True,
         description="Course materials (lectures/readings by session)",
+        converge_desc=True,  # read by faculty on the course org's landing page
     ):
         return 1
     grant_course_team_access(org, repo)
@@ -726,6 +727,7 @@ def scaffold_site(org: str) -> int:
         name=site,
         private=False,
         description="Course website (auto-deployed on push)",
+        converge_desc=True,
     ):
         log_err(
             f"  ! could not generate the site from {WEBSITE_TEMPLATE_ORG}/{WEBSITE_TEMPLATE}"
