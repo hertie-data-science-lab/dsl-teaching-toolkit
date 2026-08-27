@@ -29,13 +29,10 @@ org; updates on every release.
 | Repo | Visibility | What it's for |
 | --- | --- | --- |
 | [welcome](https://github.com/hertie-dsl-demo-f2026/welcome) | public | Course front door - open a Join issue to enrol |
-| [classroom-config](https://github.com/hertie-dsl-demo-f2026/classroom-config) | private | cohort config - where instructors configure term-time delivery of the course |
-| [hertie-dsl-demo-f2026.github.io](https://github.com/hertie-dsl-demo-f2026/hertie-dsl-demo-f2026.github.io) | public | deploying the automatically-updated site - do not touch |
+| [classroom-config](https://github.com/hertie-dsl-demo-f2026/classroom-config) | private | PRIVATE cohort config - roster (students.csv). No PII leaves here. |
+| [hertie-dsl-demo-f2026.github.io](https://github.com/hertie-dsl-demo-f2026/hertie-dsl-demo-f2026.github.io) | public | Course website (auto-deployed on push) |
 | [materials](https://github.com/hertie-dsl-demo-f2026/materials) | private | Released lectures, labs, readings, and other materials |
 <!-- dsl:repo-table:end -->
-
-_Teaching staff (instructors, TAs, faculty assistants): your action workflows aren't here - they live in the
-parent **course org's** `.github` control panel, on its Actions tab._
 
 ---
 _Hertie Data Science Lab._
