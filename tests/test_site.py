@@ -1375,3 +1375,44 @@ def test_a_silent_deployless_entry_still_raises_nothing():
         ]
     )
     assert site._planned_sessions(s) == {}
+
+
+# ------------------------------------------------- ownership notices on generated files
+
+
+def test_a_generated_page_states_its_ownership_inside_its_front_matter():
+    page = site._stamp_front_matter('---\ntype: lecture\ntitle: "Session 1"\n---\n')
+    # Jekyll needs `---` on line 1, so the notice cannot go above it
+    assert page.startswith("---\n# SYSTEM-OWNED - do not edit.")
+    assert "type: lecture" in page and 'title: "Session 1"' in page
+    import yaml
+
+    assert yaml.safe_load(page.split("---")[1])["type"] == "lecture"
+
+
+def test_stamping_a_page_with_no_front_matter_leaves_it_untouched():
+    assert site._stamp_front_matter("just text\n") == "just text\n"
+
+
+def test_the_site_readme_names_what_the_sync_rewrites_and_what_it_does_not():
+    r = site._site_readme("hertie-x-f2026", cohort=True)
+    assert r.startswith("<!-- SYSTEM-OWNED - do not edit.")
+    assert "Do not edit this repository." in r
+    for owned in ("_lectures/", "_assignments/", "_events/", "_data/people.yml"):
+        assert owned in r
+    # the theme is explicitly NOT claimed, or faculty cannot restyle their own site
+    assert "Everything else is yours" in r
+
+
+def test_the_config_header_names_the_identity_keys_the_sync_overwrites():
+    cfg = site._stamp_config(
+        "# Edit the fields below for your course.\ncourse_name: x\n",
+        ["course_code", "course_name"],
+    )
+    assert "`course_code`, `course_name`" in cfg
+    assert "dsl-course.yml" in cfg
+    assert "course_name: x" in cfg
+
+
+def test_a_config_without_the_template_header_line_is_left_alone():
+    assert site._stamp_config("course_name: x\n", ["course_name"]) == "course_name: x\n"
