@@ -15,8 +15,9 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
    - In the course org → `.github` → **Actions tab** → [New assignment](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/new-assignment.yml). Inputs:
       - `number` = `1`, `2`, etc (the assigment number)
       - `tag` = `f/sYYYY`, 
-      - `format` (`py` starter script or `notebook`) - also picked up by the autograder, which
-        `nbconvert`s a notebook submission before running the hidden tests against it
+      - `format` (`py` starter script or `notebook`) - picks which starter stub you get.
+        Either way the autograder accepts both: it `nbconvert`s any `.ipynb` the
+        submission holds before running the hidden tests.
       - `type` (`individual` or `group` - one repo per student vs per team) 
    - this creates **`assignment-1-f2026`** with two branches of stubs for you to replace:
 

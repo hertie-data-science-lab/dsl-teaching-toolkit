@@ -194,9 +194,10 @@ course-materials-f2026/
 Live example: [`example-course/course-org/assignment-1-f2026`](../example-course/course-org/assignment-1-f2026).
 
 `assignment-N-<tag>` - a template repo with two branches. Student repos are generated from
-`main` only. The **New assignment** workflow's `format` (py/notebook) and `type`
-(individual/group) shape the stubs and are recorded in `grading.yml` - handout and grading
-obey `type: group` automatically.
+`main` only. The **New assignment** workflow's `format` (py/notebook) picks the starter
+stub; `type` (individual/group) is recorded in `grading.yml`, and handout and grading obey
+`type: group` automatically. The autograder takes either format - it converts any `.ipynb`
+the submission holds before running the hidden tests.
 
 ```
 main branch      README.md (the brief) + starter.*      -> what students get

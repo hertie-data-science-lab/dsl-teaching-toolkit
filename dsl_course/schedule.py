@@ -197,8 +197,10 @@ class Release:
     `when` holds the entry's `event_datetime`: what the cohort site's schedule shows AND
     the default fire time for its deploys. An individual deploy may carry its own
     `deploy_datetime` to ship earlier or later than the session it belongs to. An entry
-    with no actions at all is inert: it fires nothing and the site shows nothing - a row
-    with nothing to release belongs in `events:`."""
+    with no actions at all fires nothing, but it is not invisible: a numbered label still
+    raises its session row on the site, marked not-yet-released, so a term written up
+    front reads as a syllabus from day one. `events:` is for a row that is not a numbered
+    session at all."""
 
     label: str
     # None = the event_datetime is literally `tbc`: the site shows a TBC row and nothing
@@ -224,7 +226,8 @@ class Release:
 
     @property
     def is_event_only(self) -> bool:
-        """No actions - nothing to fire, and nothing for the site to show."""
+        """No actions - nothing for the SCHEDULER to fire. The site still shows the row
+        (see the class docstring); this is about firing, not visibility."""
         return not self.deploy and not self.assignment
 
     def due_deploys(self, now: datetime) -> list[Deploy]:

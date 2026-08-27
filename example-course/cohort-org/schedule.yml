@@ -11,12 +11,25 @@ semester_end: 2026-12-18
 releases:
   course-intro:
     event_datetime: 2026-08-31T09:00   # week 0 - the course opens before teaching starts
-    title: Course opens
+    show_on_site: false                # ships the syllabus up front, but opening the course
+                                       # is not a session: no schedule row, and no date of
+                                       # its own to drag session 1 backwards. The site pins
+                                       # the syllabus separately.
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: SYLLABUS.md     # a root file - name it exactly as it
                                             # is in the repo (the runner is case
                                             # sensitive)
+  # Every session's readings get their own entry, released a week ahead of the session
+  # itself. `show_on_site: false` is what makes that safe: the files land in the session's
+  # row as usual, but the entry adds no row of its own and never drags the session's date
+  # back to the day the PDFs went up.
+  readings-1:
+    event_datetime: 2026-08-25T09:00
+    show_on_site: false
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: readings/01_week-1
   lecture-1:
     event_datetime: 2026-09-01T10:00
     title: Perceptrons and gradient descent   # the session's name, beside "Session 1"
@@ -27,8 +40,6 @@ releases:
       - course_source_repo: course-materials-f2026
         course_source_path: lectures/01_week-1
         deploy_datetime: 2026-09-01T09:00
-      - course_source_repo: course-materials-f2026
-        course_source_path: readings/01_week-1
       - course_source_repo: lecture-code-f2026
         course_source_path: mlpkg/core
   lab-1:
@@ -45,6 +56,12 @@ releases:
         course_source_path: solutions/labs/01_week-1
         cohort_dest_path: labs/01_week-1/solutions
         deploy_datetime: 2026-09-03T18:00
+  readings-2:
+    event_datetime: 2026-09-01T09:00
+    show_on_site: false
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: readings/02_week-2
   lecture-2:
     event_datetime: 2026-09-08T10:00
     title: Backpropagation
@@ -52,21 +69,23 @@ releases:
       - course_source_repo: course-materials-f2026
         course_source_path: lectures/02_week-2
         deploy_datetime: 2026-09-08T09:00
-      - course_source_repo: course-materials-f2026
-        course_source_path: readings/02_week-2
   lab-2:
     event_datetime: 2026-09-10T14:00
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: labs/02_week-2
+  readings-3:
+    event_datetime: 2026-09-08T09:00
+    show_on_site: false
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: readings/03_week-3
   lecture-3:
     event_datetime: 2026-09-15T10:00
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: lectures/03_week-3
         deploy_datetime: 2026-09-15T09:00
-      - course_source_repo: course-materials-f2026
-        course_source_path: readings/03_week-3
       - course_source_repo: lecture-code-f2026
         course_source_path: mlpkg/simulation
   lab-3:
@@ -74,35 +93,35 @@ releases:
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: labs/03_week-3
-  lecture-4:
-    event_datetime: 2026-09-22T10:00
-    deploy:
-      - course_source_repo: course-materials-f2026
-        course_source_path: lectures/04_week-4
-        deploy_datetime: 2026-09-22T09:00
-  # Week 4's readings go out a week ahead, so they get their own entry rather than riding
-  # the lecture's clock like every other week above. `show_on_site: false` is what keeps
-  # that from showing: the files land in session 4's row as usual, but the entry adds no
-  # row of its own and does not drag session 4's date back to the 15th.
   readings-4:
     event_datetime: 2026-09-15T09:00
     show_on_site: false
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: readings/04_week-4
+  lecture-4:
+    event_datetime: 2026-09-22T10:00
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: lectures/04_week-4
+        deploy_datetime: 2026-09-22T09:00
   lab-4:
     event_datetime: 2026-09-24T14:00
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: labs/04_week-4
+  readings-5:
+    event_datetime: 2026-09-22T09:00
+    show_on_site: false
+    deploy:
+      - course_source_repo: course-materials-f2026
+        course_source_path: readings/05_week-5
   lecture-5:
     event_datetime: 2026-09-29T10:00
     deploy:
       - course_source_repo: course-materials-f2026
         course_source_path: lectures/05_week-5
         deploy_datetime: 2026-09-29T09:00
-      - course_source_repo: course-materials-f2026
-        course_source_path: readings/05_week-5
       - course_source_repo: lecture-code-f2026
         course_source_path: mlpkg/training
   lab-5:

@@ -27,6 +27,14 @@
 # semester_end: 
 
 # releases:                         
+#   course-intro:                   # week 0: the course opens before teaching starts. It
+#     event_datetime:               # ships the syllabus and anything else students need
+#     show_on_site: false           # up front - but it is not a session, so it claims no
+#     deploy:                       # schedule row (the site pins the syllabus separately).
+#       - course_source_repo:       
+#         course_source_path: SYLLABUS.md   # a root FILE, named exactly as in the repo
+#                                   # (the runner is case sensitive)
+#
 #   lecture-1:                      
 #     event_datetime:               # what the site's schedule shows
 #     title:                        # OPTIONAL: the session's name, beside its ordinal
@@ -36,20 +44,14 @@
 #                                   # as written but adds nothing to the site's schedule
 #                                   # (default: true). Use it for content that belongs to
 #                                   # a session without being an occasion of its own - see
-#                                   # the readings-only entry below.
+#                                   # the course-intro and readings entries.
 #     deploy:
 #       - course_source_repo:       # REQUIRED
 #         course_source_path:       # REQUIRED - folder or file to copy
 #         cohort_dest_repo:         # default: materials
 #         cohort_dest_path:         # default: same as course_source_path
 #         deploy_datetime:          # default: the event_datetime
-#       - course_source_repo:       # this session's READINGS - one line per session, and
-#         course_source_path: readings/01_session-1  # they ship on the same clock as anything
-#                                   # else. Every file in that folder is listed and linked
-#                                   # for enrolled students; the optional READINGS.md beside
-#                                   # them is published publicly as the citation list.
-#                                   # Omit this and the session's readings never ship.
-#       - course_source_repo:       # a THIRD copy on its own clock - e.g. lab solutions
+#       - course_source_repo:       # a SECOND copy on its own clock - e.g. lab solutions
 #         course_source_path:       # staged OUTSIDE the folder released above, else the
 #         cohort_dest_path:         # first copy ships them too
 #         deploy_datetime:          # after the lab, so students work the empty scripts first
@@ -65,15 +67,17 @@
 #         cohort_dest_path:
 #         deploy_datetime:
 #
-#   readings-1:                     # readings released on their own clock, silently: they
-#     event_datetime:               # belong to session 1 without being an occasion of its
-#     show_on_site: false           # own, so they add no row and - crucially - never pull
-#     deploy:                       # session 1's date or name back to the day they shipped.
-#       - course_source_repo:       # Drop `show_on_site` (or set it true) and they announce
-#         course_source_path: readings/01_session-1   # themselves like any other release.
-#         cohort_dest_repo:
-#         cohort_dest_path:
-#         deploy_datetime:
+#   readings-1:                     # each session's READINGS get their own entry, on their
+#     event_datetime:               # own clock - they usually go out ahead of the session.
+#     show_on_site: false           # They belong to session 1 without being an occasion of
+#     deploy:                       # its own, so `show_on_site: false` keeps them from
+#       - course_source_repo:       # adding a row and - crucially - from pulling session
+#         course_source_path: readings/01_session-1   # 1's date or name back to the day
+#         cohort_dest_repo:         # they shipped. The files still land in session 1's row
+#         cohort_dest_path:         # and are listed there for enrolled students; the
+#         deploy_datetime:          # optional READINGS.md beside them is published publicly
+#                                   # as the citation list. Omit the entry and the session's
+#                                   # readings never ship.
 #
 # assignments:                      
 #   assignment-1:

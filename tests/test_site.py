@@ -1297,3 +1297,81 @@ def test_a_row_with_no_readings_in_the_plan_never_reports_them_pending():
         ]
     )
     assert site._planned_sessions(s)[("1", "lecture")].readings_planned is False
+
+
+# --------------------------------------------------------------- rows from a bare label
+# docs/07: "a row appears as soon as you write it, not when it ships". An entry that stages
+# nothing yet has no deploy destination to key a row off, so its own label places it.
+
+
+def test_an_entry_with_no_deploy_still_raises_its_row_from_its_label():
+    s = _sched(
+        [
+            Release(
+                "lecture-12",
+                datetime(2026, 10, 20, 10, 0, tzinfo=BERLIN),
+                title="Tutorial presentations",
+                description="Students present their topic.",
+            )
+        ]
+    )
+    row = site._planned_sessions(s)[("12", "lecture")]
+    assert row.when == datetime(2026, 10, 20, 10, 0, tzinfo=BERLIN)
+    assert row.subtitle == "Tutorial presentations"
+    assert row.description == "Students present their topic."
+    # nothing staged, so nothing to name as a destination - the row says only that its
+    # materials are not released yet
+    assert row.dests == {}
+
+
+def test_a_deployless_lab_label_raises_a_lab_row_not_a_lecture_row():
+    s = _sched([Release("lab-04", datetime(2026, 10, 22, 14, 0, tzinfo=BERLIN))])
+    assert set(site._planned_sessions(s)) == {("4", "lab")}
+
+
+def test_a_deployless_entry_whose_label_names_no_session_raises_nothing():
+    # `course-intro` opens the course without being a numbered session
+    s = _sched([Release("course-intro", datetime(2026, 8, 31, 9, 0, tzinfo=BERLIN))])
+    assert site._planned_sessions(s) == {}
+
+
+def test_the_label_fallback_never_fires_when_a_deploy_already_placed_the_row():
+    # label says 12, the deploy lands in session 3 - the deploy wins and no phantom
+    # session-12 row appears beside it
+    s = _sched(
+        [
+            Release(
+                "lecture-12",
+                datetime(2026, 10, 20, 10, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "lectures/03_x", "materials", None)],
+            )
+        ]
+    )
+    assert set(site._planned_sessions(s)) == {("3", "lecture")}
+
+
+def test_an_assignment_entry_never_becomes_a_session_row_via_its_label():
+    # assignment out/due rows are built elsewhere; `assignment-1` must not claim session 1
+    s = _sched(
+        [
+            Release(
+                "assignment-1",
+                datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN),
+                assignment="assignment-1",
+            )
+        ]
+    )
+    assert site._planned_sessions(s) == {}
+
+
+def test_a_silent_deployless_entry_still_raises_nothing():
+    s = _sched(
+        [
+            Release(
+                "lecture-9",
+                datetime(2026, 9, 29, 10, 0, tzinfo=BERLIN),
+                show_on_site=False,
+            )
+        ]
+    )
+    assert site._planned_sessions(s) == {}

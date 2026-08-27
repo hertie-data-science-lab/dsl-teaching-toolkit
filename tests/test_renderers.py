@@ -577,7 +577,7 @@ def test_classroom_config_site_dispatcher_fires_on_schedule_or_people_change():
 
 
 def test_new_assignment_button_exposes_format_and_type():
-    # The grading.yml vocabulary (format: py/notebook, type: individual/group) is chosen
+    # The grading.yml vocabulary (type: individual/group) is chosen
     # on the button and recorded by the scaffold - not hand-edited in afterwards.
     rendered = workflows_render.render_new_assignment()
     inputs = workflow_inputs(rendered)
