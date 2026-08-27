@@ -1,3 +1,5 @@
+# SYSTEM-OWNED - do not edit. This form's field ids are a contract with .github/workflows/onboard.yml,
+# which parses them; both are re-pushed by every bootstrap and nightly refresh.
 name: Join course
 description: Enrol in this course with the code the teaching team emailed you
 title: "Join course"

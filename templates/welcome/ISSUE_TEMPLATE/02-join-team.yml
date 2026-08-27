@@ -1,3 +1,5 @@
+# SYSTEM-OWNED - do not edit. This form's field ids are a contract with .github/workflows/team-formation.yml,
+# which parses them; both are re-pushed by every bootstrap and nightly refresh.
 name: Join team
 description: Join or form a team for a group assignment
 title: "Join team"
