@@ -436,6 +436,117 @@ def test_assignment_handout_parses():
     assert entries["assignment-2"].handout_datetime is None
 
 
+def test_assignment_solution_datetime_parses_and_has_no_default():
+    # The model solution has no fallback date on purpose: shipping it the moment
+    # submissions close rewards anyone who pushes late, so an omitted key must mean
+    # "never automatically", not "at the due date".
+    meta = {
+        "assignments": {
+            "assignment-1": {
+                "course_source_repo": "a-f2026",
+                "due_datetime": "2026-10-13",
+                "handout_datetime": "2026-09-22T09:00",
+                "solution_datetime": "2026-10-16T09:00",
+            },
+            "assignment-2": {
+                "course_source_repo": "a-f2026",
+                "due_datetime": "2026-11-10",
+            },
+        }
+    }
+    entries = parse(meta).assignments
+    assert (
+        entries["assignment-1"]
+        .solution_datetime.isoformat()
+        .startswith("2026-10-16T09:00")
+    )
+    assert entries["assignment-2"].solution_datetime is None
+    # and a valid one raises no "unrecognised key" noise
+    assert not any("unrecognised key" in d for d in parse(meta).dropped)
+
+
+def test_a_solution_datetime_without_a_handout_is_flagged_at_parse_time():
+    # The scheduler cannot carry a solution without a handout release to put it on, and
+    # the only other symptom is a solution that silently never ships. So the contradiction
+    # is reported on the commit that introduces it, via --validate, not from a cron log.
+    sched = parse(
+        {
+            "assignments": {
+                "assignment-1": {
+                    "course_source_repo": "a-f2026",
+                    "due_datetime": "2026-10-13",
+                    "solution_datetime": "2026-10-16T09:00",
+                }
+            }
+        }
+    )
+    assert any("solution_datetime" in d for d in sched.dropped)
+    assert any("needs `handout_datetime` set too" in d for d in sched.dropped)
+    assert sched.assignments["assignment-1"].solution_datetime is None
+    # the entry itself survives - only the automatic solution release is lost
+    assert sched.assignments["assignment-1"].due_datetime is not None
+
+
+def test_a_solution_datetime_not_after_the_handout_is_refused():
+    # The one unrecoverable mistake this feature can make: a date at or before the handout
+    # pushes the model solution into every student repo on the FIRST firing, shipping the
+    # answers with the questions. No later run can take that back, so it is refused rather
+    # than flagged-and-honoured.
+    for bad in ("2026-09-22T09:00", "2026-09-01T09:00"):
+        sched = parse(
+            {
+                "assignments": {
+                    "assignment-1": {
+                        "course_source_repo": "a-f2026",
+                        "due_datetime": "2026-10-13",
+                        "handout_datetime": "2026-09-22T09:00",
+                        "solution_datetime": bad,
+                    }
+                }
+            }
+        )
+        assert sched.assignments["assignment-1"].solution_datetime is None, bad
+        assert any("not AFTER handout_datetime" in d for d in sched.dropped), bad
+        # the assignment itself is untouched - only the automatic solution is withheld
+        assert sched.assignments["assignment-1"].handout_datetime is not None
+
+
+def test_a_solution_datetime_after_the_handout_is_kept():
+    sched = parse(
+        {
+            "assignments": {
+                "assignment-1": {
+                    "course_source_repo": "a-f2026",
+                    "due_datetime": "2026-10-13",
+                    "handout_datetime": "2026-09-22T09:00",
+                    "solution_datetime": "2026-09-22T09:01",
+                }
+            }
+        }
+    )
+    assert sched.assignments["assignment-1"].solution_datetime is not None
+    assert not sched.dropped
+
+
+def test_an_unparseable_solution_datetime_is_flagged_with_what_it_costs():
+    sched = parse(
+        {
+            "assignments": {
+                "assignment-1": {
+                    "course_source_repo": "a-f2026",
+                    "due_datetime": "2026-10-13",
+                    "handout_datetime": "2026-09-22T09:00",
+                    "solution_datetime": "the friday after",
+                }
+            }
+        }
+    )
+    # The entry survives - only the solution release is lost, and the drop says so.
+    assert sched.assignments["assignment-1"].solution_datetime is None
+    assert any("solution_datetime" in d for d in sched.dropped)
+    assert any("NEVER ships automatically" in d for d in sched.dropped)
+
+
 def test_tbc_event_datetime_keeps_an_undated_entry():
     meta = {
         "releases": {

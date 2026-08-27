@@ -1238,7 +1238,7 @@ def test_the_earliest_entry_naming_a_row_is_the_one_that_titles_it():
     assert site._planned_sessions(s)[("2", "lecture")].subtitle == "Random Variables"
 
 
-def test_a_silent_release_neither_dates_nor_names_the_row_it_lands_in():
+def test_a_silent_release_neither_dates_nor_names_the_row_but_does_fill_its_dests():
     # The case the flag exists for: readings released a week ahead of the class. They land
     # in session 2's row (readings are lecture material), and without the flag the row
     # would take the EARLIEST entry's date and title - moving "Session 2" to the 10th and
@@ -1263,10 +1263,129 @@ def test_a_silent_release_neither_dates_nor_names_the_row_it_lands_in():
     row = site._planned_sessions(s)[("2", "lecture")]
     assert row.when == datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN)
     assert row.subtitle == "Random Variables"
-    # The silent entry contributed nothing at all - not even the pending-readings note,
-    # which would otherwise promise a reading list on a row that never mentioned one.
-    assert row.readings_planned is False
-    assert "materials/readings/02_x" not in row.dests
+    # What silence withholds is the DATE and the NAME, not the destinations: the row still
+    # learns readings are planned for it, so an unreleased session can say where they will
+    # appear. Note the silent entry is the EARLIER of the two, so it is reached first - the
+    # fold has to happen in a second pass or this is exactly the case that gets lost.
+    assert row.readings_planned is True
+    assert "materials/readings/02_x" in row.dests
+
+
+def test_only_known_session_heads_raise_a_row_from_a_label():
+    # The label is documented as never shown to students, and rows come from the ordinal
+    # session folder a deploy lands in - the label is only a fallback for an entry that has
+    # not shipped yet. `anything-N` used to read as a lecture, so a `bonus-1` entry both
+    # invented a phantom Session 1 row AND folded into the real one, dragging its date and
+    # title back. `readings-N` must not raise a lecture row either.
+    assert site._row_from_label("lecture-1") == ("1", "lecture")
+    assert site._row_from_label("lecture_01") == ("1", "lecture")
+    assert site._row_from_label("lab-01") == ("1", "lab")
+    assert site._row_from_label("labs-2") == ("2", "lab")
+    for no_row in (
+        "bonus-1",
+        "quiz-2",
+        "topic-3",
+        "readings-01",
+        "course-intro",
+        "seed-syllabus",
+        "01_lab",
+    ):
+        assert site._row_from_label(no_row) is None, no_row
+
+
+def test_a_bonus_entry_cannot_drag_a_real_sessions_date_and_title():
+    # The concrete damage the whitelist prevents: `row.when = min(...)`, so an August
+    # bonus entry folding into lecture-1 would publish Session 1 as August, under the
+    # bonus entry's name.
+    s = _sched(
+        [
+            Release(
+                "lecture-1",
+                datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "lectures/01_x", "materials", None)],
+                title="Perceptrons",
+            ),
+            Release(
+                "bonus-1",
+                datetime(2026, 8, 20, 9, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "extras/bonus", "materials", None)],
+                title="Optional extra reading",
+            ),
+        ]
+    )
+    rows = site._planned_sessions(s)
+    row = rows[("1", "lecture")]
+    assert row.when == datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN)
+    assert row.subtitle == "Perceptrons"
+    # and the bonus entry raised no row of its own
+    assert len(rows) == 1
+
+
+def test_the_site_readme_does_not_promise_the_tab_pages_are_safe():
+    # It used to say "pages ... are never rewritten. Change them freely", while every sync
+    # overwrites the tab pages - so following it lost the edit AND opened an
+    # "edits overwritten" issue. Also: the public sync writes no materials index.
+    from dsl_course.site import _site_pages
+
+    cohort_readme = site._site_readme("org", cohort=True)
+    for pg in _site_pages(cohort=True):
+        assert f"`{pg.file}`" in cohort_readme, pg.file
+    assert "pages, `Gemfile`" not in cohort_readme
+    assert "`_data/materials.yml`" in cohort_readme
+    assert "`_data/materials.yml`" not in site._site_readme("org", cohort=False)
+
+
+def test_a_silent_readings_entry_reached_before_its_lecture_still_folds_in():
+    # The ordering trap: releases are sorted by datetime and readings ship AHEAD of the
+    # session, so the silent entry is always reached BEFORE the entry that raises its row.
+    # A single-pass fold loses precisely the common case, which is why there are two.
+    s = _sched(
+        [
+            Release(
+                "readings-2",
+                datetime(2026, 9, 1, 9, 0, tzinfo=BERLIN),  # a week EARLIER
+                deploy=[Deploy("cm", "readings/02_x", "materials", None)],
+                show_on_site=False,
+            ),
+            Release(
+                "lecture-2",
+                datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "lectures/02_x", "materials", None)],
+            ),
+        ]
+    )
+    rows = site._planned_sessions(s)
+    assert list(rows) == [("2", "lecture")], "the silent entry raised a row of its own"
+    row = rows[("2", "lecture")]
+    assert row.when == datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN)  # not dragged back
+    assert row.readings_planned is True
+    assert "materials/readings/02_x" in row.dests
+
+
+def test_readings_pending_reaches_the_rendered_row():
+    # End to end: the flag and the "will appear in" sentence are what the whole fold is
+    # for, and both were unreachable for the layout the toolkit ships as its example.
+    s = _sched(
+        [
+            Release(
+                "readings-2",
+                datetime(2026, 9, 1, 9, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "readings/02_x", "materials", None)],
+                show_on_site=False,
+            ),
+            Release(
+                "lecture-2",
+                datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
+                deploy=[Deploy("cm", "lectures/02_x", "materials", None)],
+            ),
+        ]
+    )
+    row = site._planned_sessions(s)[("2", "lecture")]
+    # live_repos empty -> _dest_link renders plain code and makes no tree call
+    page = site._lecture_entry("COHORT", "2", row, sources=[], live_repos=frozenset())
+    assert "readings_pending: true" in page
+    assert "materials/readings/02_x" in page
+    assert "not released yet" in page
 
 
 def test_a_silent_release_raises_no_row_of_its_own():

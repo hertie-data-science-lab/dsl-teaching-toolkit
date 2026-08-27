@@ -41,6 +41,7 @@ from pathlib import Path
 import yaml
 
 from . import mailer, roster
+from .discovery import course_name_for_cohort
 from .utils import (
     GIT_ENV,
     add_collaborator,
@@ -619,6 +620,20 @@ def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -
     by_handle = {
         s.github_handle: s for s in roster.load(cohort_org) or [] if s.github_handle
     }
+    # Name the course in the body - a student taking several of these can't tell one
+    # "your grades have been updated" from another. Read live from the course org's
+    # dsl-course.yml; a course that carries no name yet keeps the generic wording rather
+    # than emailing a blank.
+    # The grades are already pushed by the time this runs, so a transient read failure or a
+    # malformed dsl-course.yml must not turn a successful distribution into a traceback
+    # with zero notifications sent - load_yaml_config deliberately RAISES on both. The
+    # course name is a nicety; the email is not.
+    try:
+        course_name = course_name_for_cohort(cohort_org)
+    except Exception as exc:  # a name is never worth losing the notifications over
+        log_err(f"could not read the course name ({exc}) - mailing without it")
+        course_name = ""
+    course_suffix = f" for {course_name}" if course_name else ""
     messages = []
     for handle in handles:
         student = by_handle.get(handle)
@@ -627,10 +642,19 @@ def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -
         url = f"https://github.com/{cohort_org}/{GRADEBOOK_PREFIX}{handle}"
         body = (
             f"Hello {student.name or 'there'},\n\n"
-            f"Your grades have been updated. View them in your private gradebook:\n"
+            f"Your grades{course_suffix} have been updated. View them in your private "
+            f"gradebook:\n"
             f"  {url}\n"
         )
-        messages.append((student.hertie_email, "Your grades have been updated", body))
+        # The course goes in the SUBJECT as well as the body: the inbox list is where a
+        # student taking several of these actually tells them apart, and by the time they
+        # have opened it the body is redundant.
+        subject = (
+            f"Your grades for {course_name} have been updated"
+            if course_name
+            else "Your grades have been updated"
+        )
+        messages.append((student.hertie_email, subject, body))
     if not messages:
         return
     # The grades themselves are already pushed by this point, so a mail failure isn't

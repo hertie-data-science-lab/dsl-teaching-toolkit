@@ -25,6 +25,7 @@ from .utils import (
     get_default_branch,
     get_file_content,
     gh,
+    load_yaml_config,
     log_err,
     log_ok,
     put_file,
@@ -60,6 +61,17 @@ def _is_infra_repo(repo: dict) -> bool:
     name = repo["name"]
     if name in INFRA_REPOS or name.endswith(".github.io"):
         return True
+    return has_infra_topic(repo)
+
+
+def has_infra_topic(repo: dict) -> bool:
+    """Whether `repo`'s TOPICS mark it machinery - a per-student submission repo, a frozen
+    cohort assignment template, or a private gradebook.
+
+    Split out of _is_infra_repo because the org landing page needs this half and not the
+    other: it must drop those per-student repos (naming them exposes the roster and every
+    team's membership on a page students land on) while KEEPING `welcome`,
+    `classroom-config` and the site repo, which _is_infra_repo also excludes."""
     return bool(set(repo.get("topics") or []) & INFRA_TOPICS)
 
 
@@ -117,6 +129,34 @@ def _read_cohorts(course_org: str) -> list[str]:
         log_err(msg)
         raise RuntimeError(msg)
     return [c for c in cohorts if c]
+
+
+def course_name_for_cohort(cohort_org: str) -> str:
+    """This cohort's course name, for student-facing prose ("your grades for X").
+
+    Follows the cohort's own `.github/dsl-course.yml` `course:` pointer to its course
+    org, then reads that org's identity file - the same two hops status.collect makes,
+    but starting from the cohort, which is all an emailer is given.
+
+    Returns "" when either file is missing or carries no name, so callers fall back to
+    generic wording. A student must never be emailed a blank or a literal placeholder
+    where the course name belongs.
+    """
+    pointer = load_yaml_config(cohort_org, ".github", "dsl-course.yml") or {}
+    return course_name_of(str(pointer.get("course") or ""))
+
+
+def course_name_of(course_org: str) -> str:
+    """A COURSE org's display name from its own identity file. "" when unnamed or absent.
+
+    The toolkit's single spelling of that fallback - `course_name`, else `org_name` - so a
+    cohort landing page, a status row and an email cannot disagree about what a course is
+    called. Takes "" and returns "" so a caller holding a cohort pointer that names no
+    course org needs no guard of its own."""
+    if not course_org:
+        return ""
+    meta = load_yaml_config(course_org, ".github", "dsl-course.yml") or {}
+    return str(meta.get("course_name") or meta.get("org_name") or "")
 
 
 def discover_cohorts(course_org: str) -> list[str]:

@@ -208,6 +208,10 @@ class Release:
     when: datetime | None
     deploy: list[Deploy] = field(default_factory=list)
     assignment: str | None = None
+    # True on a release synthesised from `assignments.<slug>.solution_datetime`: the same
+    # provisioning call, asked additionally to push the template's `solution/` into every
+    # repo it already made. Never set from the YAML - the scheduler owns it.
+    assignment_solution: bool = False
     title: str = ""  # display-only: the session's name, beside its ordinal on the site
     # display-only: a sentence about the session, shown under its heading on the Lectures
     # tab. `title` names the session, this says what is in it.
@@ -246,8 +250,9 @@ class Release:
 class AssignmentEntry:
     """One assignment's whole lifecycle, in one place: `handout_datetime` (when
     student/team repos are provisioned), `due_datetime` (what students see),
-    `grading_datetime` (when the snapshot freezes and the autograder fires), `type` and
-    `max_team_size` (group assignments)."""
+    `grading_datetime` (when the snapshot freezes and the autograder fires),
+    `solution_datetime` (when the model solution goes out), `type` and `max_team_size`
+    (group assignments)."""
 
     due_datetime: datetime
     # The COURSE-org repo this assignment hands out from - the template one repo per
@@ -274,6 +279,12 @@ class AssignmentEntry:
     # (templates/welcome/team-formation.yml reads it straight from schedule.yml; its
     # default when unset lives there). None = not set here.
     max_team_size: int | None = None
+    # When to push the template's `solution/` folder into every provisioned repo - the
+    # scheduled twin of Release assignment's `include_solution` tick. Deliberately NOT
+    # defaulted to the due date: a solution released the moment submissions close is a
+    # gift to anyone who pushes late, so faculty name the moment or it never fires.
+    # None = release the solution by hand, or not at all.
+    solution_datetime: datetime | None = None
 
 
 @dataclass
@@ -371,6 +382,7 @@ KNOWN_ASSIGNMENT = frozenset(
         "cohort_dest_repo",
         "grading_datetime",
         "handout_datetime",
+        "solution_datetime",
         "type",
         "max_team_size",
     }
@@ -610,6 +622,54 @@ def _parse_assignments(
                 "per team (expected 'group' or 'individual')",
             )
         dest = str(entry.get("cohort_dest_repo") or "").strip()
+        handout = _flagged_datetime(
+            entry,
+            "handout_datetime",
+            tz,
+            drops,
+            where,
+            "the handout NEVER fires - no student or team repos are provisioned "
+            "from it, and nobody gets the assignment",
+        )
+        solution = _flagged_datetime(
+            entry,
+            "solution_datetime",
+            tz,
+            drops,
+            where,
+            "the model solution NEVER ships automatically - it stays on the "
+            "template's solution branch until someone ticks include_solution by hand",
+        )
+        # The solution rides on the handout release, so these two dates are only meaningful
+        # relative to each other - and both ways of getting that wrong are silent, which is
+        # why they are checked here rather than left to the scheduler.
+        #
+        # REFUSED, not merely flagged, because the failure is not symmetrical: a date
+        # earlier than the handout would push the model solution into every student repo on
+        # the very first firing, shipping the answers WITH the questions, and no later run
+        # can take that back. Dropping to None is the documented "omit it" behaviour - the
+        # solution then waits for a human, which is the safe direction to fail.
+        if solution is not None and handout is None:
+            _flag_bad_value(
+                drops,
+                where,
+                "solution_datetime",
+                entry.get("solution_datetime"),
+                "the model solution NEVER ships automatically - the schedule can only push "
+                "it into repos it provisioned, which needs `handout_datetime` set too",
+            )
+            solution = None
+        elif solution is not None and handout is not None and solution <= handout:
+            _flag_bad_value(
+                drops,
+                where,
+                "solution_datetime",
+                entry.get("solution_datetime"),
+                "it is not AFTER handout_datetime, which would ship the model solution "
+                "together with the assignment on the very first release - refused, so the "
+                "solution now waits for a human",
+            )
+            solution = None
         out[str(slug)] = AssignmentEntry(
             due_datetime=due,
             course_source_repo=source_repo,
@@ -624,15 +684,8 @@ def _parse_assignments(
                 "and the autograder fires then, not when this says",
                 end_of_day=True,
             ),
-            handout_datetime=_flagged_datetime(
-                entry,
-                "handout_datetime",
-                tz,
-                drops,
-                where,
-                "the handout NEVER fires - no student or team repos are provisioned "
-                "from it, and nobody gets the assignment",
-            ),
+            handout_datetime=handout,
+            solution_datetime=solution,
             # anything other than the two known values -> None, i.e. the grading.yml
             # fallback (flagged above, not silent)
             type=kind if kind in ("group", "individual") else None,

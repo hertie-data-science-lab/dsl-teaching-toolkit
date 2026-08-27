@@ -1,12 +1,19 @@
 """Generate an org's landing pages from its live contents.
 
-Two documents per org, both auto-generated and both overwritten on every refresh:
+Two documents per org:
 
 - `profile/README.md` - the org landing page. A cohort org gets a student-facing page
   (how to enrol, where the materials are); a course org gets the faculty-facing index of
   cohorts, repos, and every action workflow.
+
+  The COURSE page is wholly generated - it is a live index of actions and cohorts, and
+  is read by faculty who can go and change the things it indexes. The COHORT page is
+  the front door students land on, so it is theirs to word: seeded once, then left
+  alone, EXCEPT the repo table between the `dsl:repo-table` markers, which keeps being
+  regenerated from the org's live repo list. See splice_repo_table.
 - the `.github` repo's own `README.md` - the orientation a faculty member sees on
-  landing in that repo, next to the Actions tab where the workflows live.
+  landing in that repo, next to the Actions tab where the workflows live. Wholly
+  generated, and stamped as such.
 
 Rendering is pure (render_profile_readme / render_dotgithub_readme take the repo list);
 update_profile_readme is the one function that touches the network.
@@ -15,16 +22,36 @@ update_profile_readme is the one function that touches the network.
 from __future__ import annotations
 
 from .central import CENTRAL, CENTRAL_REF
-from .discovery import discover_cohorts, list_org_repos
-from .utils import load_yaml_config, log_ok, put_files
+from .discovery import (
+    course_name_of,
+    discover_cohorts,
+    has_infra_topic,
+    list_org_repos,
+)
+from .utils import (
+    converge_descriptions,
+    get_file_content,
+    load_yaml_config,
+    log,
+    log_ok,
+    put_files,
+)
 
 # Per-org identity/people/schedule config, lives at the root of each org's `.github` repo.
 COURSE_CONFIG = "dsl-course.yml"
 
 
 def _repo_table(repos: list[dict]) -> str:
-    """Clickable repo table, with `welcome` first (most logical landing repo)."""
-    visible = [r for r in repos if r["name"] != ".github"]
+    """Clickable repo table, with `welcome` first (most logical landing repo).
+
+    Machinery is dropped, not just `.github`: a cohort org holds one submission repo per
+    student per assignment and one gradebook each, and listing them named every
+    classmate's private repo - and so every enrolled handle and every team's membership -
+    on the page students land on. They could never OPEN them, but the roster is exactly
+    the thing this pipeline keeps out of public view. The site repo stays: it is public
+    anyway, and faculty need the "do not touch" row.
+    """
+    visible = [r for r in repos if r["name"] != ".github" and not has_infra_topic(r)]
     visible.sort(key=lambda r: (r["name"].lower() != "welcome", r["name"].lower()))
     rows = []
     for r in visible:
@@ -33,6 +60,46 @@ def _repo_table(repos: list[dict]) -> str:
             f"| [{r['name']}]({r['url']}) | {r['visibility'].lower()} | {desc} |"
         )
     return "\n".join(rows) or "| _(no repos yet)_ | | |"
+
+
+# The one generated region of the otherwise instructor-owned COHORT landing page. Matched
+# on these bare sentinels, not on the whole comment, so the prose inside the opening
+# marker can be reworded later without orphaning every page already deployed.
+TABLE_START = "<!-- dsl:repo-table:start"
+TABLE_END = "<!-- dsl:repo-table:end -->"
+
+
+def _repo_table_block(repos: list[dict]) -> str:
+    """The repo table wrapped in its markers - regenerated whole on every refresh."""
+    return (
+        f"{TABLE_START} - AUTO-GENERATED from this org's live repo list.\n"
+        "     Edits between these markers are overwritten on the next refresh. The\n"
+        "     \"What it's for\" column is each repo's own GitHub description - to change\n"
+        "     what a row says, edit that. -->\n"
+        "| Repo | Visibility | What it's for |\n"
+        "| --- | --- | --- |\n"
+        f"{_repo_table(repos)}\n"
+        f"{TABLE_END}"
+    )
+
+
+def splice_repo_table(existing: str, repos: list[dict]) -> str | None:
+    """Refresh only the marked repo table in `existing`, leaving the rest of the page alone.
+
+    "The rest of the page" is everything outside the markers, with one caveat worth naming:
+    `get_file_content` returns `gh()`'s output, which is `.strip()`ed - so a page's leading
+    and trailing blank lines do not survive the round trip. The prose itself is untouched.
+
+    None when the markers aren't both there in order - which is the signal to leave the
+    page entirely alone rather than guess where the table belongs. An instructor who
+    deletes the markers has said, unambiguously, that they want the whole page."""
+    start = existing.find(TABLE_START)
+    end = existing.find(TABLE_END)
+    if start == -1 or end == -1 or end < start:
+        return None
+    return (
+        existing[:start] + _repo_table_block(repos) + existing[end + len(TABLE_END) :]
+    )
 
 
 def render_dotgithub_readme(org: str, course_name: str, is_cohort: bool) -> str:
@@ -44,7 +111,7 @@ def render_dotgithub_readme(org: str, course_name: str, is_cohort: bool) -> str:
 
 # {course_name} - cohort control repo
 
-This is the **`.github` repo** for the `{org}` cohort org. **Students and instructors rarely need to touch anything in this repo  directly.**
+This is the **`.github` repo** for the `{org}` cohort org. **Students and instructors rarely need to touch anything in this repo directly.**
 
 Built and kept in sync by the [DSL teaching toolkit](https://github.com/{CENTRAL}).
 """
@@ -85,13 +152,12 @@ def render_profile_readme(
     cohorts: list[str] | None = None,
 ) -> str:
     """Org overview. Cohort orgs get a student-facing page; course orgs a faculty & instructors one."""
-    table = _repo_table(repos)
-    cohort_lines = (
-        "\n".join(f"- [{c}](https://github.com/{c})" for c in (cohorts or []))
-        or "_(none registered yet - run Bootstrap cohort)_"
-    )
     if is_cohort:
-        return f"""# {course_name}
+        return f"""<!-- INSTRUCTOR-OWNED - this is the page students land on, so it is yours to word.
+     It is seeded ONCE and every edit you make survives the nightly refresh. The one
+     exception is the repo table below, between the dsl:repo-table markers. -->
+
+# {course_name}
 
 Welcome! This is the course organisation for **{course_name}**.
 
@@ -111,16 +177,16 @@ org; updates on every release.
 
 ## Where things are
 
-| Repo | Visibility | What it's for |
-| --- | --- | --- |
-{table}
-
-_Teaching staff (instructors, TAs, faculty assistants): your action workflows aren't here - they live in the
-parent **course org's** `.github` control panel, on its Actions tab._
+{_repo_table_block(repos)}
 
 ---
-_Hertie Data Science Lab. This page is auto-generated._
+_Hertie Data Science Lab._
 """
+    table = _repo_table(repos)
+    cohort_lines = (
+        "\n".join(f"- [{c}](https://github.com/{c})" for c in (cohorts or []))
+        or "_(none registered yet - run Bootstrap cohort)_"
+    )
     return f"""# {course_name} Course
 
 >_This page is auto-generated - do not edit; manual edits are overwritten on the next refresh._
@@ -284,21 +350,70 @@ def update_profile_readme(
         # surface from mid-refresh - a non-mapping is likewise refused, not coerced to {}.
         cfg = load_yaml_config(org, ".github", COURSE_CONFIG) or {}
         org_name = org_name or cfg.get("org_name") or org
-        course_name = course_name or cfg.get("course_name") or org_name
+        # A COHORT org's dsl-course.yml is only a pointer - it carries no course_name of
+        # its own, so this used to fall all the way back to the org slug and title the
+        # students' landing page "hertie-dsl-demo-f2026". Follow the pointer to the course
+        # org that does hold the name; the slug stays as the last resort.
+        # `cfg` is the cohort's own pointer, already read above - so resolve the second
+        # hop directly rather than calling course_name_for_cohort, which would re-fetch
+        # this same file. course_name_of("") returns "", so no guard is needed here.
+        course_name = (
+            course_name
+            or cfg.get("course_name")
+            or course_name_of(str(cfg.get("course") or ""))
+            or org_name
+        )
     repos = list_org_repos(org)
+    # The listing carries every repo's description, and the table below is rendered
+    # from it - so this is the one place that can fix a reworded description without
+    # paying a read for it, and the corrected text reaches the page in the same run.
+    converge_descriptions(org, repos)
     is_cohort = any(r["name"] == "welcome" for r in repos)
     cohorts = None if is_cohort else discover_cohorts(org)
     body = render_profile_readme(org, org_name, course_name, repos, is_cohort, cohorts)
+    if is_cohort:
+        body = _cohort_profile_body(org, repos, body)
+    files = {"README.md": render_dotgithub_readme(org, course_name, is_cohort).encode()}
+    if body is not None:
+        files["profile/README.md"] = body.encode()
     # Both are rendered from the same org snapshot and move together, so they belong in one
     # commit - kept separate from the workflow refresh's commit, because `docs:` vs `ci:` is
     # the one distinction in this history worth reading.
-    put_files(
-        org,
-        ".github",
-        {
-            "profile/README.md": body.encode(),
-            "README.md": render_dotgithub_readme(org, course_name, is_cohort).encode(),
-        },
-        "docs: refresh org READMEs (profile + .github)",
+    put_files(org, ".github", files, "docs: refresh org READMEs (profile + .github)")
+    log_ok(
+        "profile + .github READMEs refreshed"
+        if "profile/README.md" in files
+        else ".github README refreshed (landing page left as the instructor has it)"
     )
-    log_ok("profile + .github READMEs refreshed")
+
+
+def _cohort_profile_body(org: str, repos: list[dict], seeded: str) -> str | None:
+    """What to write to a COHORT org's profile/README.md - or None to write nothing.
+
+    The page is the students' front door and instructor-owned, so a refresh must not
+    flatten wording an instructor has since improved. Three cases:
+
+    - ABSENT -> seed the full page (markers included).
+    - present WITH markers -> refresh only the table between them; the prose is theirs.
+    - present WITHOUT markers -> leave it completely alone, and say so. An instructor who
+      has no markers either wrote the page before they existed or deleted them, and there
+      is no way to tell those apart from the bytes: the page is treated as wholly theirs
+      rather than destroyed to install machinery. To hand a page back to the generator,
+      delete it - the next refresh reseeds it, markers and all.
+
+    The orgs that predated the markers were migrated once, by hand, after confirming each
+    page was still byte-identical to what the generator produced. That is deliberately NOT
+    a rule in here: keying it on a leftover "auto-generated" footer would have flattened
+    any page whose prose an instructor had reworded while leaving the footer in place,
+    which nothing ever told them was load-bearing."""
+    existing = get_file_content(org, ".github", "profile/README.md")
+    if existing is None:
+        return seeded
+    spliced = splice_repo_table(existing, repos)
+    if spliced is not None:
+        return spliced
+    log(
+        f"  ({org}/.github/profile/README.md has no dsl:repo-table markers - left as it "
+        "is. Paste them back around the repo table to resume refreshing it.)"
+    )
+    return None

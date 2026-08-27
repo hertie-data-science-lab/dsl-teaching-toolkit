@@ -11,7 +11,9 @@ no "already released" state to track. Grading is the exception - see AUTOGRADE b
 
 Assignment handouts are declared with the rest of the assignment's lifecycle -
 `assignments.<slug>.handout_datetime` - and synthesised into releases here
-(_handout_releases), so they fire through the exact machinery a deploy does.
+(_handout_releases), so they fire through the exact machinery a deploy does. The model
+solution rides on that same release once `assignments.<slug>.solution_datetime` has
+passed - Release assignment's `include_solution` tick, on a clock.
 
 The same hourly run also drives each assignment's grading deadline (`grading_datetime`,
 else `due_datetime`), whether or not the cohort uses `releases` at all:
@@ -116,7 +118,8 @@ def describe(release: Release, now: datetime | None = None) -> list[str]:
         else ""
     )
     if release.assignment:
-        lines.append(f"assignment {release.assignment}{actions_suffix}")
+        solution = " + model solution" if release.assignment_solution else ""
+        lines.append(f"assignment {release.assignment}{solution}{actions_suffix}")
     return lines
 
 
@@ -124,7 +127,8 @@ def describe(release: Release, now: datetime | None = None) -> list[str]:
 
 
 def _execute_nondeploy(course_org: str, cohort_org: str, release: Release) -> int:
-    """Run one release's non-deploy action (an assignment handout). Deploys are batched
+    """Run one release's non-deploy action (an assignment handout, and once its
+    `solution_datetime` has passed, the model solution with it). Deploys are batched
     across the whole run (see `run`) so their source/dest repos clone once. Returns the
     error count."""
     errors = 0
@@ -134,7 +138,13 @@ def _execute_nondeploy(course_org: str, cohort_org: str, release: Release) -> in
         # provision_all's default (group=None) resolves group-vs-individual from the
         # cohort schedule / the template's grading.yml - so a scheduled group handout
         # provisions per TEAM, not one repo per student.
-        if provision_all(course_org, release.assignment, cohort_org) != 0:
+        failed = provision_all(
+            course_org,
+            release.assignment,
+            cohort_org,
+            solution=release.assignment_solution,
+        )
+        if failed != 0:
             errors += 1
     return errors
 
@@ -273,7 +283,10 @@ def _run_releases(
     did_assign = False
     for release in due:
         if release.assignment and release.when is not None and release.when <= now:
-            log_step(f"  [{release.label}] assignment handout")
+            log_step(
+                f"  [{release.label}] assignment handout"
+                + (" + solution" if release.assignment_solution else "")
+            )
             errors += _execute_nondeploy(course_org, cohort_org, release)
             did_assign = True
 
@@ -294,8 +307,23 @@ def _run_releases(
     return errors
 
 
+def _solution_due(
+    cohort_org: str, slug: str, entry: schedule.AssignmentEntry, now: datetime
+) -> bool:
+    """Whether this tick should push the model solution for `slug`.
+
+    The datetime check is cheap and comes first, so the fire-once read is paid only by an
+    assignment whose solution moment has actually arrived - not by every assignment on
+    every tick."""
+    from .assign import solution_released
+
+    if entry.solution_datetime is None or entry.solution_datetime > now:
+        return False
+    return not solution_released(cohort_org, schedule.cohort_name(slug, entry))
+
+
 def _handout_releases(
-    course_org: str, cohort_org: str, sched: schedule.Schedule
+    course_org: str, cohort_org: str, sched: schedule.Schedule, now: datetime
 ) -> list[Release]:
     """Synthetic releases for `assignments.<slug>.handout_datetime` - the whole assignment
     lifecycle (handout_datetime/due_datetime/grading_datetime/max_team_size) is declared in
@@ -303,7 +331,23 @@ def _handout_releases(
     `releases` entry would: due at its datetime, re-checked every tick
     (idempotent - a late onboarder gets their repo on the next one), per-team when the
     template's grading.yml says so. An assignment with no `<slug>-<tag>` template repo is
-    skipped - it may be pinned for its website date alone."""
+    skipped - it may be pinned for its website date alone.
+
+    The model solution rides on THIS release once `solution_datetime` has passed, rather
+    than being a second synthesised one - one release, one provisioning pass, both jobs;
+    between the two datetimes it simply fires without the solution.
+
+    It is ALSO gated on assign.solution_released, and that gate is what makes it safe.
+    `due_releases` is cumulative by design - the handout re-fires every tick so a student
+    who onboards late still gets their repo - and re-probing a repo is cheap, but
+    push_solution CLONES every student repo. Ungated, a passed `solution_datetime` would
+    mean a clone per student per hour for the rest of the term. Folding the two releases
+    into one removed a duplicate pass; only the marker removes the recurrence.
+
+    It also makes "a scheduled solution needs a scheduled handout" structural - there is no
+    release to carry the solution unless `handout_datetime` is set - so the scheduler no
+    longer has to notice and skip. `_parse_assignments` flags that combination instead, at
+    commit time, where faculty will actually see it."""
     out = []
     for slug, entry in sched.assignments.items():
         if entry.handout_datetime is None:
@@ -317,6 +361,7 @@ def _handout_releases(
                 label=f"{slug}-handout",
                 when=entry.handout_datetime,
                 assignment=template,
+                assignment_solution=_solution_due(cohort_org, slug, entry, now),
             )
         )
     return out
@@ -367,7 +412,7 @@ def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) 
     # Re-sorted, not just concatenated: the synthesised handouts carry their own datetimes
     # and would otherwise land after every scheduled release whatever their date.
     releases = sorted(
-        sched.releases + _handout_releases(course_org, cohort_org, sched),
+        sched.releases + _handout_releases(course_org, cohort_org, sched, now),
         key=release_order,
     )
     due = due_releases(releases, now)

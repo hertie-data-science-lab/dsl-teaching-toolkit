@@ -45,6 +45,20 @@ def test_code_message_contains_code_and_targets_university_email():
     assert "dsl-xyz123" in body and "welcome" in body
 
 
+def test_code_message_names_the_course_and_falls_back_when_unnamed():
+    # The code arrives in a student's inbox alongside other courses' mail, so the opening
+    # line names this one - but a course org with no name yet must read as plain English,
+    # never as a blank or a literal placeholder.
+    s = _student(email="ada@uni.edu", name="Ada", code="dsl-xyz123")
+    url = "https://github.com/org/welcome/issues"
+    _to, subject, named = enrol_codes.code_message(s, url, "Deep Learning")
+    assert "To join the Deep Learning course on GitHub" in named
+    assert subject == "Your enrolment code for Deep Learning"
+    _to, subject, unnamed = enrol_codes.code_message(s, url)
+    assert "To join the course on GitHub" in unnamed
+    assert subject == "Your course enrolment code"
+
+
 def test_roster_dump_roundtrips_with_enrol_code():
     students = [
         _student(email="ada@uni.edu", name="Ada", code="dsl-abc", handle="ada-l")

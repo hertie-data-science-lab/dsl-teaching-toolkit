@@ -274,6 +274,58 @@ def test_released_repos_are_read_by_both_cohort_role_teams():
     assert deploy.grant_read_teams is utils.grant_read_teams
 
 
+SUPERSEDED = "Released course materials (enrolled students only)"
+CURRENT = "Released lectures, labs, readings, and other materials"
+
+
+def _converge(monkeypatch, repos):
+    """The PATCH calls converge_descriptions makes over `repos`, and the mutated listing."""
+    calls = []
+
+    def fake_gh(*args, **kwargs):
+        calls.append(args)
+        return (0, "")
+
+    monkeypatch.setattr(utils, "gh", fake_gh)
+    monkeypatch.setattr(utils, "log", lambda *a, **k: None)
+    monkeypatch.setattr(utils, "log_ok", lambda *a, **k: None)
+    changed = utils.converge_descriptions("Org", repos)
+    return [a for a in calls if "--method" in a and "PATCH" in a], changed
+
+
+def test_a_superseded_description_is_updated_and_others_are_left_alone(monkeypatch):
+    # Only a wording WE have since replaced may be overwritten. Faculty's own text, and a
+    # repo already carrying the current wording, must produce no request at all.
+    repos = [
+        {"name": "materials", "description": SUPERSEDED},
+        {"name": "labs", "description": CURRENT},
+        {"name": "lectures", "description": "Slides and notebooks, weeks 1-5"},
+        {"name": "readings", "description": None},
+    ]
+    patched, changed = _converge(monkeypatch, repos)
+    assert changed == 1
+    assert len(patched) == 1
+    assert "repos/Org/materials" in patched[0]
+    # and the listing is corrected in place, so a table rendered next shows the new text
+    assert repos[0]["description"] == CURRENT
+    assert repos[2]["description"] == "Slides and notebooks, weeks 1-5"
+
+
+def test_every_superseded_description_names_a_replacement_we_still_write(monkeypatch):
+    # The forcing function: each mapping value must be a description the code actually
+    # writes today, or convergence would move repos onto a wording nothing else uses.
+    import re
+    from pathlib import Path
+
+    literals = set()
+    for mod in ("bootstrap_course", "deploy", "scaffold", "grades", "assign"):
+        src = (Path(utils.__file__).parent / f"{mod}.py").read_text()
+        literals |= set(re.findall(r'description=f?"([^"]+)"', src))
+    for old, new in utils.SUPERSEDED_DESCRIPTIONS.items():
+        assert new in literals, f"{new!r} is not written anywhere any more"
+        assert old not in literals, f"{old!r} is still written - it is not superseded"
+
+
 # --- releasing the whole repo -------------------------------------------------------
 # `/` is the "release everything" spelling. The end-to-end proof that it flows through
 # clone -> copytree -> `git add` lives in test_scheduler.py; what is pinned here is the two

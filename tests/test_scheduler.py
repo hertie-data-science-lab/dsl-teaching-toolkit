@@ -213,13 +213,20 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.assign.provision_all",
-        lambda master_org, template, cohort_org: (
-            calls.append((master_org, template, cohort_org)) or 0
+        lambda master_org, template, cohort_org, solution=False: (
+            calls.append((master_org, template, cohort_org, solution)) or 0
         ),
     )
     r = _r("s", WHEN, assignment="assignment-2-f2026")
     assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == 0
-    assert calls[0] == ("Course-Org", "assignment-2-f2026", "Cohort-Org")
+    assert calls[0] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", False)
+
+    # The solution release is the SAME call, asked to push the solution too - so a
+    # scheduled solution can never diverge from what include_solution does by hand.
+    r = _r("s", WHEN, assignment="assignment-2-f2026")
+    r.assignment_solution = True
+    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == 0
+    assert calls[1] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", True)
 
 
 def _git_with_staged_changes(*args):
@@ -1005,7 +1012,7 @@ def test_handout_releases_synthesised_from_the_assignments_block(monkeypatch):
             ),
         }
     )
-    (r,) = scheduler._handout_releases("Course-Org", "Cohort-f2026", sched)
+    (r,) = scheduler._handout_releases("Course-Org", "Cohort-f2026", sched, WHEN)
     assert r.label == "assignment-1-handout"
     assert r.assignment == "a-f2026"
     assert r.when == datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN)
@@ -1014,6 +1021,74 @@ def test_handout_releases_synthesised_from_the_assignments_block(monkeypatch):
     assert scheduler.due_releases([r], datetime(2026, 9, 22, 10, 0, tzinfo=BERLIN)) == [
         r
     ]
+
+
+def test_the_solution_rides_on_the_handout_release_once_its_datetime_passes(
+    monkeypatch,
+):
+    # ONE release does both jobs. A second synthesised release would re-fire every tick
+    # for the rest of the term, and provision_all's solution pass clones every student
+    # repo - so a separate release costs a clone per student per hour, indefinitely.
+    monkeypatch.setattr(
+        scheduler, "_assignment_template", lambda org, slug, entry: "a-f2026"
+    )
+    sched = Schedule(
+        assignments={
+            "assignment-1": AssignmentEntry(
+                course_source_repo="a-f2026",
+                due_datetime=datetime(2026, 10, 13, 23, 59, tzinfo=BERLIN),
+                handout_datetime=datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+                solution_datetime=datetime(2026, 10, 16, 9, 0, tzinfo=BERLIN),
+            )
+        }
+    )
+
+    released = {"yet": False}
+    monkeypatch.setattr(
+        "dsl_course.assign.solution_released", lambda org, slug: released["yet"]
+    )
+
+    def one(now):
+        (r,) = scheduler._handout_releases("Course-Org", "Cohort-f2026", sched, now)
+        return r
+
+    # between handout and solution time: exactly one release, carrying no solution
+    before = one(datetime(2026, 9, 23, tzinfo=BERLIN))
+    assert before.label == "assignment-1-handout"
+    assert before.assignment_solution is False
+    assert scheduler.describe(before) == ["assignment a-f2026"]
+
+    # not a minute early
+    assert one(datetime(2026, 10, 16, 8, 0, tzinfo=BERLIN)).assignment_solution is False
+
+    # once past it: still ONE release, now carrying the solution
+    after = one(datetime(2026, 10, 17, tzinfo=BERLIN))
+    assert after.assignment_solution is True
+    assert scheduler.describe(after) == ["assignment a-f2026 + model solution"]
+
+    # and ONCE only. due_releases is cumulative, so without the fire-once marker every
+    # later tick would re-push - and push_solution clones every student repo.
+    released["yet"] = True
+    assert one(datetime(2026, 10, 18, tzinfo=BERLIN)).assignment_solution is False
+    assert one(datetime(2027, 1, 5, tzinfo=BERLIN)).assignment_solution is False
+
+
+def test_a_solution_datetime_without_a_handout_never_synthesises_a_release(monkeypatch):
+    # There is no release to carry it, which is what makes the rule structural rather than
+    # a run-time skip. The parser flags the combination - see test_schedule.py.
+    monkeypatch.setattr(
+        scheduler, "_assignment_template", lambda org, slug, entry: "a-f2026"
+    )
+    sched = Schedule(
+        assignments={
+            "hand-released": AssignmentEntry(
+                course_source_repo="a-f2026",
+                due_datetime=datetime(2026, 11, 1, 23, 59, tzinfo=BERLIN),
+                solution_datetime=datetime(2026, 11, 3, 9, 0, tzinfo=BERLIN),
+            )
+        }
+    )
+    assert scheduler._handout_releases("Course-Org", "Cohort-f2026", sched, WHEN) == []
 
 
 def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):

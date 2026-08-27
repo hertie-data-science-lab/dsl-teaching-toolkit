@@ -191,8 +191,8 @@ _READINGS_STUB = (
     b"     Write over it and it is yours. This file is OPTIONAL - delete it and the\n"
     b"     files you put in this folder are still listed. -->\n\n"
     b"Drop the readings themselves into this folder - PDFs, slides, notebooks,\n"
-    b"anything. Every file here is listed and linked for enrolled students\n"
-    b"automatically; you do not have to name them here as well.\n\n"
+    b"anything. Every file here is listed and linked for enrolled students and\n"
+    b"auditors automatically; you do not have to name them here as well.\n\n"
     b"This file is for what a file cannot say: a link to read online, or a proper\n"
     b"citation. Anything goes - a bare URL on its own line is fine.\n\n"
     b"## Required Readings\n\n"
@@ -201,9 +201,10 @@ _READINGS_STUB = (
     b"## Optional Readings\n\n"
     b"- Author, *Title*, ch. 2.\n\n"
     b"What you write here is PUBLIC (it is a citation list). The files beside it\n"
-    b"stay behind the enrolled-student gate, unless the course runs a public\n"
-    b"open-courseware site in `actual-readings` mode, which serves them too. The\n"
-    b"session's learning objectives come from `description:` in schedule.yml.\n"
+    b"stay behind the enrolled-student/auditor gate, unless the course runs a\n"
+    b"public open-courseware site in `actual-readings` mode, which serves them\n"
+    b"too. The session's learning objectives come from `description:` in\n"
+    b"schedule.yml.\n"
 )
 
 _GRADING_YML = """\
@@ -422,25 +423,23 @@ def refresh_materials_system_files(org: str, repo: str) -> int:
     return 0
 
 
-def scaffold_materials(org: str, tag: str) -> int:
-    repo = f"{MATERIALS_REPO_PREFIX}{tag}"
-    log_step(f"Scaffolding {org}/{repo}")
-    if not create_repo(
-        org,
-        repo,
-        private=True,
-        description="Course materials (lectures/readings by session)",
-    ):
-        return 1
-    grant_course_team_access(org, repo)
-    grant_tagged_team_access(org, repo, tag)
+def materials_readme(org: str) -> str:
+    """The materials repo's student-facing README placeholder.
+
+    Module-level, not inline in scaffold_materials, so it can be rendered WITHOUT creating
+    a repo. The file is create-only, so a wording fix reaches a repo that already exists
+    only by writing it deliberately, after checking the placeholder is still untouched
+    (deploy.UNEDITED_README_MARKERS) - which is done by hand, per the create-only file
+    rules. TODO: it belongs on the nightly path instead, the way SYLLABUS.md already is
+    via refresh_stubs; that needs refresh_stubs to accept the README's own predicate,
+    since the README predates the `dsl-stub:` mark its gate keys on.
+
+    Release materials with the README toggle copies this file into the cohort's materials
+    repo, where enrolled students read it - so it is written for them. How the source repo
+    is structured, and how to operate it, is MAINTAINING.md, which is never released.
+    """
     actions_table = _actions_table(org)
-    # README.md is student-facing: Release materials with the README toggle copies THIS
-    # file into the cohort's materials repo, where enrolled students read it. So it ships
-    # as a replace-me placeholder written for students - the how-this-repo-works reference
-    # for faculty & instructors lives in MAINTAINING.md (a root file that is never released:
-    # release only copies section folders, the syllabus, and README.md).
-    readme = (
+    return (
         # Two lines below carry deploy.py's UNEDITED_README_MARKERS - the "Replace this
         # placeholder" note and FACULTY_ONLY_HEADING. A release refuses to ship a README
         # still holding BOTH, so edit this stub's wording freely but keep those two intact
@@ -464,6 +463,21 @@ def scaffold_materials(org: str, tag: str) -> int:
         "reference.\n"
         "- **Available actions:** " + actions_table
     )
+
+
+def scaffold_materials(org: str, tag: str) -> int:
+    repo = f"{MATERIALS_REPO_PREFIX}{tag}"
+    log_step(f"Scaffolding {org}/{repo}")
+    if not create_repo(
+        org,
+        repo,
+        private=True,
+        description="Course materials (lectures/readings by session)",
+    ):
+        return 1
+    grant_course_team_access(org, repo)
+    grant_tagged_team_access(org, repo, tag)
+    readme = materials_readme(org)
     failures = 0
     failures += refresh_materials_system_files(org, repo)
     # USER-owned skeletons: create-only, so a re-run against a repo faculty have since
@@ -528,11 +542,7 @@ def scaffold_assignment(
     grant_course_team_access(org, repo)
     grant_tagged_team_access(org, repo, tag)
     starter_name = "starter.ipynb" if fmt == "notebook" else "starter.py"
-    submission = (
-        "any team member's push to `main` counts as the team's submission"
-        if kind == "group"
-        else "that push is your submission"
-    )
+    brief = "group assignment" if kind == "group" else "assignment"
     # main: starter only (what students receive on generate). No tests, no autograder -
     # grading runs faculty-side from the solution branch (see Grade assignment). Create-only:
     # a re-run against a repo whose starter faculty have since authored must not revert it.
@@ -543,8 +553,10 @@ def scaffold_assignment(
         org,
         repo,
         "README.md",
-        f"# Assignment {number}\n\nComplete the TODOs in `{starter_name}` and push to "
-        f"`main` ({submission}).\n".encode(),
+        # A STUB, deliberately: this is the page students read, and only faculty can
+        # write it. Seeding a plausible-looking brief invites shipping it unedited, so
+        # the placeholder is unmistakably one.
+        f"# Assignment {number}\n\n_Write the {brief} instructions here._\n".encode(),
         "init: assignment starter",
     ):
         seed_failures += 1
@@ -609,8 +621,17 @@ def scaffold_assignment(
             )
         (sol / "README.md").write_text(
             f"# Assignment {number} - model solution\n\n"
-            "Released to students after the deadline via Release assignment with "
-            "**include_solution** ticked.\n"
+            "Goes out to students after the deadline, two ways:\n\n"
+            "- **On a clock** - set `solution_datetime:` on this assignment in the "
+            "cohort's `classroom-config/schedule.yml`, beside its `due_datetime`. The "
+            "hourly cron pushes this folder into every student/team repo at that "
+            "moment. Needs `handout_datetime:` set too - the schedule can only push a "
+            "solution into repos it provisioned. There is no default: leave it out and "
+            "the solution never ships automatically.\n"
+            "- **By hand** - run **Release assignment** with **include_solution** "
+            "ticked.\n\n"
+            "Both do the same thing, idempotently, so a scheduled release you then "
+            "re-run by hand changes nothing.\n"
         )
         # grading.yml + hidden tests for the faculty-side Grade assignment workflow. The
         # type chosen at scaffold time is recorded here - edit this file to change it

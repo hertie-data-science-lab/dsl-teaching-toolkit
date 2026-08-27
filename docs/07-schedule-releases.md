@@ -37,7 +37,7 @@ Each entry is a label you choose (`lecture-1`, `lab-1`, `bonus-dataset`) - yours
 | `title` | no | - | the session's name, shown beside its ordinal ("Session 1 / Probability Theory") on the schedule, Lectures, Materials and Labs tabs |
 | `description` | no | - | what the session covers - the **learning objectives** of a Hertie syllabus. Shown under the session heading on the Lectures, Labs and Readings tabs; may run to several paragraphs (use a `>` or `\|` block) |
 | `tbc` | no | `false` | signals the date is provisional: it fires as normal just the deployed site marks it **(TBC)** |
-| `show_on_site` | no | `true` | `false` releases **silently**: the deploys ship exactly as written, but the entry adds nothing to the site's schedule - no row, no date, no name, no not-yet-released placeholder. For content that belongs to a session without being an occasion of its own; see [Silent releases](#silent-releases) |
+| `show_on_site` | no | `true` | `false` releases **silently**: the deploys ship exactly as written, but the entry raises no row of its own and never sets an existing row's date or name (it still contributes where its files will land). For content that belongs to a session without being an occasion of its own; see [Silent releases](#silent-releases) |
 
 
 NB: **the calendar event is not the release.** 
@@ -61,6 +61,8 @@ Most weeks a session's readings ride the lecture's own entry, so they ship on it
 ```
 
 The files still reach students on the 15th, and still appear on session 4's row once released - what is withheld is the entry's claim on the schedule, not its content. The same applies to any release that is not an occasion: an errata drop, a dataset added mid-term.
+
+What is *not* withheld is where the files are going: session 4's row still names `materials/readings/04_week-4` among the paths its materials will appear at, and is flagged as having a reading list pending, so an unreleased session can say readings are coming. Only the date and the name are silenced.
 
 A silenced entry is also left out of the **generated syllabus** (Generate syllabus reads the same plan), which is usually what you want for a readings drop that belongs to a session already listed there.
 
@@ -161,6 +163,7 @@ Keyed by a slug you choose. As with a `deploy:`, `course_source_repo` names wher
 | `handout_datetime` | no* | - | when repos are provisioned, automatically. |
 | `due_datetime` | **yes** | - | the deadline students see; a bare date closes at **23:59:59** |
 | `grading_datetime` | no | `due_datetime` | when the snapshot freezes and it is [autograded](#deadline-snapshots-and-autograding) |
+| `solution_datetime` | no | - | when the template's `solution/` is pushed into every provisioned repo. **No default** - omit it and the solution only ever goes out by hand. Must be **after** `handout_datetime`, and needs it set |
 | `type` | no | `individual` | `individual` or `group`  |
 | `max_team_size` | no | `5` | group assignments only: the welcome repo's Join-team cap |
 | `course_source_repo` | **yes** | - | the course-org repo this hands out from - one repo per student (or team) is generated from it |
@@ -174,6 +177,7 @@ assignments:
     handout_datetime: 2026-09-22T09:00  
     due_datetime: 2026-10-13            # what students see
     grading_datetime: 2026-10-15        # snapshot freezes + autograded (default when undefined: mirrors due_datetime)
+    solution_datetime: 2026-10-16T09:00 # optional: pushes the model solution to every repo. No default - omitted = never
     type: group                         # default: individual 
     max_team_size: 3
 
@@ -293,6 +297,8 @@ An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it 
 
 Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `handout_datetime` (**nothing is ever handed out**), `grading_datetime` (falls back to `due_datetime`), `deploy_datetime` (the copy ships at the `event_datetime`) or `max_team_size` (no cap); an unknown `type:` on an assignment (treated as individual) or an event (shown as a plain special event); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`).
 
+`solution_datetime` is the exception that is **dropped, not kept**: malformed, missing its `handout_datetime`, or not after it, the value is discarded and the model solution waits for a human. Honouring a bad one could ship the answers with the questions, and nothing undoes that.
+
 ## Timezones and bare dates
 
 - Everything naive is read in the cohort's `timezone:` (default `Europe/Berlin`).
@@ -309,6 +315,14 @@ Each assignment's **grading deadline** is `grading_datetime` if you set it, else
 
 1. **Freezes** each submission repo's HEAD into `classroom-config/snapshots/<slug>.csv`, using the **server's** clock.
 2. **Autogrades** it (optional).
+
+### Releasing the model solution
+
+`solution_datetime` is separate from all of the above, and has no default - a solution released the moment submissions close rewards anyone who pushes late, so you name the moment or it never fires. At that datetime the hourly run pushes the template's `solution/` folder into every student/team repo, which is exactly what **Release assignment** with `include_solution` does by hand. Both are idempotent, so doing one after the other changes nothing.
+
+It needs `handout_datetime` set: the schedule can only push a solution into repos the schedule provisioned. If you hand out manually, release the solution manually too.
+
+Both ways of getting the two dates wrong are **refused at validate time**, not honoured: a `solution_datetime` with no `handout_datetime` (nothing to push into), and one at or before the handout - which would ship the answers with the questions on the first release, and no later run could take that back. In either case the solution simply waits for a human, and `--validate` names the entry.
 
 ---
 

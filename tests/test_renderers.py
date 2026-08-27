@@ -649,6 +649,8 @@ def test_update_profile_readme_absent_config_falls_back_without_crashing(monkeyp
     from dsl_course import profile_readme as P
 
     monkeypatch.setattr("dsl_course.utils.get_file_content", lambda *a, **k: None)
+    # profile_readme imported the name, so the module binding is what the splice reads.
+    monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(
         P,
         "list_org_repos",
@@ -668,6 +670,144 @@ def test_update_profile_readme_absent_config_falls_back_without_crashing(monkeyp
     # rendered from the same org snapshot and always move together.
     assert len(commits) == 1
     assert set(commits[0]) == {"profile/README.md", "README.md"}
+
+
+# ------------------------------------- the cohort landing page is instructor-owned, bar
+# its repo table. These pin the three ways a refresh can meet an existing page.
+
+_REPOS = [
+    {"name": "welcome", "url": "u", "visibility": "PUBLIC", "description": "front door"}
+]
+
+
+def test_repo_table_drops_submission_and_gradebook_repos():
+    from dsl_course.profile_readme import _repo_table
+
+    # The students' landing page must not name every classmate's private repo: the topics
+    # are the same ones discovery._is_infra_repo filters on.
+    rows = _repo_table(
+        [
+            {
+                "name": "welcome",
+                "url": "u",
+                "visibility": "PUBLIC",
+                "description": "d",
+                "topics": [],
+            },
+            {
+                "name": "materials",
+                "url": "u",
+                "visibility": "PRIVATE",
+                "description": "d",
+                "topics": [],
+            },
+            {
+                "name": "assignment-1-ada",
+                "url": "u",
+                "visibility": "PRIVATE",
+                "description": "d",
+                "topics": ["submission"],
+            },
+            {
+                "name": "assignment-1",
+                "url": "u",
+                "visibility": "PRIVATE",
+                "description": "d",
+                "topics": ["assignment-template"],
+            },
+            {
+                "name": "grades-ada",
+                "url": "u",
+                "visibility": "PRIVATE",
+                "description": "d",
+                "topics": ["gradebook"],
+            },
+            # the site repo is public anyway, and faculty need its "do not touch" row
+            {
+                "name": "org.github.io",
+                "url": "u",
+                "visibility": "PUBLIC",
+                "description": "d",
+                "topics": [],
+            },
+        ]
+    )
+    assert "welcome" in rows and "materials" in rows and "org.github.io" in rows
+    assert "assignment-1-ada" not in rows
+    assert "grades-ada" not in rows
+    assert "| [assignment-1]" not in rows
+
+
+def test_cohort_page_title_follows_the_course_pointer(monkeypatch):
+    from dsl_course import profile_readme as P
+
+    # A cohort's dsl-course.yml is a pointer with no course_name, so this used to title
+    # the students' landing page with the org slug.
+    monkeypatch.setattr(
+        P, "load_yaml_config", lambda org, repo, path: {"course": "Course-Org"}
+    )
+    monkeypatch.setattr(P, "course_name_of", lambda org: "Deep Learning")
+    monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
+    monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(P, "log", lambda *a, **k: None)
+    monkeypatch.setattr(P, "log_ok", lambda *a, **k: None)
+    written = {}
+    monkeypatch.setattr(
+        P, "put_files", lambda org, repo, files, msg, **k: written.update(files) or True
+    )
+    P.update_profile_readme("Cohort-f2026")
+    page = written["profile/README.md"].decode()
+    assert "# Deep Learning" in page
+    assert "# Cohort-f2026" not in page
+
+
+def _cohort_readme(monkeypatch, existing):
+    from dsl_course import profile_readme as P
+
+    monkeypatch.setattr(P, "get_file_content", lambda *a, **k: existing)
+    monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
+    monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(P, "log", lambda *a, **k: None)
+    monkeypatch.setattr(P, "log_ok", lambda *a, **k: None)
+    written = {}
+    monkeypatch.setattr(
+        P, "put_files", lambda org, repo, files, msg, **k: written.update(files) or True
+    )
+    P.update_profile_readme("Cohort-f2026", "Org", "Deep Learning")
+    return written
+
+
+def test_cohort_page_is_seeded_whole_when_absent(monkeypatch):
+    from dsl_course import profile_readme as P
+
+    page = _cohort_readme(monkeypatch, None)["profile/README.md"].decode()
+    assert "INSTRUCTOR-OWNED" in page
+    assert P.TABLE_START in page and P.TABLE_END in page
+    assert "front door" in page
+
+
+def test_cohort_refresh_replaces_only_the_marked_table(monkeypatch):
+    from dsl_course import profile_readme as P
+
+    edited = (
+        "# Our course, our words\n\nSee you Tuesdays in room 4.\n\n"
+        f"{P.TABLE_START} -->\n| stale | rows |\n{P.TABLE_END}\n\nGood luck!\n"
+    )
+    page = _cohort_readme(monkeypatch, edited)["profile/README.md"].decode()
+    assert "Our course, our words" in page  # prose above survives
+    assert "See you Tuesdays in room 4." in page
+    assert "Good luck!" in page  # and prose below
+    assert "| stale | rows |" not in page  # the table alone is replaced
+    assert "front door" in page
+
+
+def test_cohort_refresh_leaves_any_page_without_markers_alone(monkeypatch):
+    # No markers = wholly the instructor's, whether they deleted them or predate them.
+    # There is no way to tell those apart from the bytes, so neither is overwritten.
+    written = _cohort_readme(monkeypatch, "# Entirely mine\n\nNo markers here.\n")
+    # The .github README still refreshes; the landing page is not written at all.
+    assert set(written) == {"README.md"}
 
 
 # --------------------------------------------- operational hardening, swept over every

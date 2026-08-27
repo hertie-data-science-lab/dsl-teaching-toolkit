@@ -175,6 +175,9 @@ def _stamp_front_matter(text: str) -> str:
 # is machine-written and redeployed on every push. Written through `plan.files`, so it
 # converges on every sync exactly like `_data/people.yml`.
 def _site_readme(org: str, cohort: bool) -> str:
+    # Named from the same page table the sync writes them from, so the list cannot claim a
+    # page this site does not have - or omit one it rewrites.
+    tab_pages = ", ".join(f"`{pg.file}`" for pg in _site_pages(cohort))
     source = (
         "the cohort's `classroom-config/` files (`schedule.yml`, `people.yml`) and what "
         "the course org actually releases"
@@ -197,15 +200,18 @@ def _site_readme(org: str, cohort: bool) -> str:
         f"| `_events/` | exams, term dates, display-only rows |\n"
         f"| `_data/people.yml` | the staff cards |\n"
         f"| `_data/nav.yml` | the nav bar |\n"
-        f"| `_data/materials.yml` | the All Materials index |\n"
-        f"| `_config.yml` | the course identity keys only (name, code, semester, org) |\n\n"
-        f"Each collection is CLEARED and rewritten on every sync, so a file you add to one "
-        f"disappears on the next run.\n\n"
-        f"## Everything else is yours\n\n"
-        f"Layouts, styles, pages, `Gemfile` - the theme - are never rewritten. Change them "
-        f"freely.\n\n"
-        f"If you edit a generated file anyway, the sync opens an issue naming the commit it "
-        f"overwrote, so the change can be copied back out of it.\n"
+        + ("| `_data/materials.yml` | the All Materials index |\n" if cohort else "")
+        + f"| the tab pages - {tab_pages} | the wrappers the tabs point at |\n"
+        + "| `_config.yml` | the course identity keys only (name, code, semester, org) |\n\n"
+        "Each collection is CLEARED and rewritten on every sync, so a file you add to one "
+        "disappears on the next run. The tab pages are rewritten too - they are generated "
+        "wrappers, so put your own words in `index.md`, or in a page of your own linked "
+        "from there.\n\n"
+        "## Everything else is yours\n\n"
+        "Layouts, styles, `index.md`, any page you add yourself, `Gemfile` - the theme - "
+        "are never rewritten. Change them freely.\n\n"
+        "If you edit a generated file anyway, the sync opens an issue naming the commit it "
+        "overwrote, so the change can be copied back out of it.\n"
     )
 
 
@@ -1490,16 +1496,35 @@ class _PlannedRow:
 _LABEL_ROW_RE = re.compile(r"^([a-z]+)[-_]0*(\d+)$", re.IGNORECASE)
 
 
+# The label heads that NAME a session row, and which kind each raises. A label outside this
+# table raises no row: the site's rows come from the ordinal session folders a deploy lands
+# in (docs/07 - "the label is yours, and never shown to students"), and the label is only a
+# fallback for an entry that has not shipped yet. Anything-plus-a-number used to read as a
+# lecture, so `bonus-1`, `quiz-2` or `topic-3` invented a phantom "Session N - not released
+# yet" row AND folded into the real lecture-N row, where `row.when = min(...)` dragged that
+# session's published date - and its title - back to the bonus entry's date.
+# `readings` maps to None for the same reason: readings belong to a session without being
+# one, so an entry that forgets `show_on_site: false` must still not raise a lecture row.
+_LABEL_ROW_KINDS = {
+    "lecture": "lecture",
+    "lectures": "lecture",
+    "lab": "lab",
+    "labs": "lab",
+    "readings": None,
+    "reading": None,
+}
+
+
 def _row_from_label(label: str) -> tuple[str, str] | None:
     """The (ordinal, kind) row a schedule label names, or None if it names no session.
 
-    `course-intro` and any other unnumbered label return None: they are not a numbered
-    session, so they raise no row of their own."""
+    `course-intro` and any other label whose head is not a known session kind return None:
+    they are not a numbered session, so they raise no row of their own."""
     m = _LABEL_ROW_RE.match(label.strip())
     if not m:
         return None
-    head = m.group(1).lower()
-    return m.group(2), "lab" if head in ("lab", "labs") else "lecture"
+    kind = _LABEL_ROW_KINDS.get(m.group(1).lower())
+    return (m.group(2), kind) if kind else None
 
 
 def _planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], _PlannedRow]:
@@ -1518,7 +1543,8 @@ def _planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], _Planne
     when several releases touch the same row, and the destinations are collected in plan
     order (deduped - two deploys of one entry can name the same one) so a placeholder row
     can name where its materials are going to appear. An entry marked `show_on_site:
-    false` is skipped outright - see the loop."""
+    false` raises, dates and names nothing, but still contributes its destinations to a row
+    another entry already raised - see the two loops."""
     out: dict[tuple[str, str], _PlannedRow] = {}
 
     def place(
@@ -1553,12 +1579,7 @@ def _planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], _Planne
         if release.when is None:
             continue  # event_datetime: tbc - undated, can't place a session
         if not release.show_on_site:
-            # A silent release (readings, an errata drop): it ships on its own clock but
-            # says nothing here, so it can neither raise a row of its own nor pull an
-            # existing one's date and name back to whenever the files went up. Anything it
-            # actually released is still discovered and linked from the row it lands in -
-            # withheld from the PLAN is not withheld from the site.
-            continue
+            continue  # second pass, below - a silent entry may not raise or date a row
         placed = False
         for d in release.deploy:
             dest = _deploy_dest(d)
@@ -1584,6 +1605,31 @@ def _planned_sessions(sched: schedule.Schedule) -> dict[tuple[str, str], _Planne
         key = _row_from_label(release.label)
         if key is not None:
             place(key, release)
+
+    # SECOND pass for the silent entries. A silent release ships on its own clock but says
+    # nothing here, so it may neither raise a row of its own nor pull an existing one's date
+    # or name back to whenever the files went up. Its DESTINATIONS still count, though: they
+    # are what lets an unreleased row say "readings will appear in materials/readings/02_x"
+    # and carry `readings_pending`. Since readings moved out of the lecture entries into
+    # their own silent ones, dropping them here left both of those permanently unreachable.
+    #
+    # A second pass, not one: releases are sorted by datetime and readings usually ship
+    # AHEAD of their session, so a silent readings entry is reached before the lecture entry
+    # that raises its row. Folding in one pass would silently lose exactly the common case.
+    for release in sched.releases:
+        if release.show_on_site or release.when is None:
+            continue
+        for d in release.deploy:
+            dest = _deploy_dest(d)
+            n = session_number(dest.rsplit("/", 1)[-1])
+            if n is None:
+                continue
+            section = _deploy_section(d)
+            row = out.get((str(n), _row_kind(section)))
+            if row is None:
+                continue  # raising a row is precisely what silence forbids
+            row.dests[f"{d.cohort_dest_repo}/{dest}"] = None
+            row.readings_planned = row.readings_planned or section == READINGS_SECTION
     return out
 
 
