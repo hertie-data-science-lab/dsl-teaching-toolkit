@@ -199,10 +199,6 @@ def deploy_many(
                 repo,
                 private=True,
                 description="Released lectures, labs, readings, and other materials",
-                # This string is the "What it's for" column on the cohort's landing page,
-                # and the repo already exists on every run after the first - so converge
-                # it, or a wording fix never reaches a released cohort.
-                converge_desc=True,
             )
             grant_read_teams(cohort_org, repo)
             dd = root / "out" / repo

@@ -23,12 +23,19 @@ from __future__ import annotations
 
 from .central import CENTRAL, CENTRAL_REF
 from .discovery import (
-    INFRA_TOPICS,
-    course_name_for_cohort,
+    course_name_of,
     discover_cohorts,
+    has_infra_topic,
     list_org_repos,
 )
-from .utils import get_file_content, load_yaml_config, log, log_ok, put_files
+from .utils import (
+    converge_descriptions,
+    get_file_content,
+    load_yaml_config,
+    log,
+    log_ok,
+    put_files,
+)
 
 # Per-org identity/people/schedule config, lives at the root of each org's `.github` repo.
 COURSE_CONFIG = "dsl-course.yml"
@@ -44,11 +51,7 @@ def _repo_table(repos: list[dict]) -> str:
     the thing this pipeline keeps out of public view. The site repo stays: it is public
     anyway, and faculty need the "do not touch" row.
     """
-    visible = [
-        r
-        for r in repos
-        if r["name"] != ".github" and not set(r.get("topics") or []) & INFRA_TOPICS
-    ]
+    visible = [r for r in repos if r["name"] != ".github" and not has_infra_topic(r)]
     visible.sort(key=lambda r: (r["name"].lower() != "welcome", r["name"].lower()))
     rows = []
     for r in visible:
@@ -64,12 +67,6 @@ def _repo_table(repos: list[dict]) -> str:
 # marker can be reworded later without orphaning every page already deployed.
 TABLE_START = "<!-- dsl:repo-table:start"
 TABLE_END = "<!-- dsl:repo-table:end -->"
-
-# The footer every cohort page carried while the whole file was machine-written. Its
-# presence WITHOUT the markers is what identifies a page seeded before the split, and so
-# still untouched by an instructor - the one case where a full overwrite is safe. See
-# update_profile_readme.
-LEGACY_FOOTER = "_Hertie Data Science Lab. This page is auto-generated._"
 
 
 def _repo_table_block(repos: list[dict]) -> str:
@@ -151,11 +148,6 @@ def render_profile_readme(
     cohorts: list[str] | None = None,
 ) -> str:
     """Org overview. Cohort orgs get a student-facing page; course orgs a faculty & instructors one."""
-    table = _repo_table(repos)
-    cohort_lines = (
-        "\n".join(f"- [{c}](https://github.com/{c})" for c in (cohorts or []))
-        or "_(none registered yet - run Bootstrap cohort)_"
-    )
     if is_cohort:
         return f"""<!-- INSTRUCTOR-OWNED - this is the page students land on, so it is yours to word.
      It is seeded ONCE and every edit you make survives the nightly refresh. The one
@@ -189,6 +181,11 @@ parent **course org's** `.github` control panel, on its Actions tab._
 ---
 _Hertie Data Science Lab._
 """
+    table = _repo_table(repos)
+    cohort_lines = (
+        "\n".join(f"- [{c}](https://github.com/{c})" for c in (cohorts or []))
+        or "_(none registered yet - run Bootstrap cohort)_"
+    )
     return f"""# {course_name} Course
 
 >_This page is auto-generated - do not edit; manual edits are overwritten on the next refresh._
@@ -356,13 +353,20 @@ def update_profile_readme(
         # its own, so this used to fall all the way back to the org slug and title the
         # students' landing page "hertie-dsl-demo-f2026". Follow the pointer to the course
         # org that does hold the name; the slug stays as the last resort.
+        # `cfg` is the cohort's own pointer, already read above - so resolve the second
+        # hop directly rather than calling course_name_for_cohort, which would re-fetch
+        # this same file. course_name_of("") returns "", so no guard is needed here.
         course_name = (
             course_name
             or cfg.get("course_name")
-            or (course_name_for_cohort(org) if cfg.get("course") else "")
+            or course_name_of(str(cfg.get("course") or ""))
             or org_name
         )
     repos = list_org_repos(org)
+    # The listing carries every repo's description, and the table below is rendered
+    # from it - so this is the one place that can fix a reworded description without
+    # paying a read for it, and the corrected text reaches the page in the same run.
+    converge_descriptions(org, repos)
     is_cohort = any(r["name"] == "welcome" for r in repos)
     cohorts = None if is_cohort else discover_cohorts(org)
     body = render_profile_readme(org, org_name, course_name, repos, is_cohort, cohorts)
@@ -386,19 +390,23 @@ def _cohort_profile_body(org: str, repos: list[dict], seeded: str) -> str | None
 
     - ABSENT -> seed the full page (markers included).
     - present WITH markers -> refresh only the table between them; the prose is theirs.
-    - present WITHOUT markers -> two sub-cases. A page still carrying the pre-split
-      LEGACY_FOOTER was wholly machine-written and has not been touched, so replacing it
-      is safe and is how an existing org acquires the markers at all. Anything else has
-      been edited by hand: leave it completely alone and say so, rather than silently
-      destroying it to install machinery."""
+    - present WITHOUT markers -> leave it completely alone, and say so. An instructor who
+      has no markers either wrote the page before they existed or deleted them, and there
+      is no way to tell those apart from the bytes: the page is treated as wholly theirs
+      rather than destroyed to install machinery. To hand a page back to the generator,
+      delete it - the next refresh reseeds it, markers and all.
+
+    The orgs that predated the markers were migrated once, by hand, after confirming each
+    page was still byte-identical to what the generator produced. That is deliberately NOT
+    a rule in here: keying it on a leftover "auto-generated" footer would have flattened
+    any page whose prose an instructor had reworded while leaving the footer in place,
+    which nothing ever told them was load-bearing."""
     existing = get_file_content(org, ".github", "profile/README.md")
     if existing is None:
         return seeded
     spliced = splice_repo_table(existing, repos)
     if spliced is not None:
         return spliced
-    if LEGACY_FOOTER in existing:
-        return seeded
     log(
         f"  ({org}/.github/profile/README.md has no dsl:repo-table markers - left as it "
         "is. Paste them back around the repo table to resume refreshing it.)"

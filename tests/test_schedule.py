@@ -461,6 +461,29 @@ def test_assignment_solution_datetime_parses_and_has_no_default():
         .startswith("2026-10-16T09:00")
     )
     assert entries["assignment-2"].solution_datetime is None
+    # and a valid one raises no "unrecognised key" noise
+    assert not any("unrecognised key" in d for d in parse(meta).dropped)
+
+
+def test_a_solution_datetime_without_a_handout_is_flagged_at_parse_time():
+    # The scheduler cannot carry a solution without a handout release to put it on, and
+    # the only other symptom is a solution that silently never ships. So the contradiction
+    # is reported on the commit that introduces it, via --validate, not from a cron log.
+    sched = parse(
+        {
+            "assignments": {
+                "assignment-1": {
+                    "course_source_repo": "a-f2026",
+                    "due_datetime": "2026-10-13",
+                    "solution_datetime": "2026-10-16T09:00",
+                }
+            }
+        }
+    )
+    assert any("solution_datetime" in d for d in sched.dropped)
+    assert any("needs `handout_datetime` set too" in d for d in sched.dropped)
+    # the entry itself survives - only the automatic solution release is lost
+    assert sched.assignments["assignment-1"].due_datetime is not None
 
 
 def test_an_unparseable_solution_datetime_is_flagged_with_what_it_costs():
@@ -480,23 +503,6 @@ def test_an_unparseable_solution_datetime_is_flagged_with_what_it_costs():
     assert sched.assignments["assignment-1"].solution_datetime is None
     assert any("solution_datetime" in d for d in sched.dropped)
     assert any("NEVER ships automatically" in d for d in sched.dropped)
-
-
-def test_solution_datetime_is_a_known_key():
-    # An unrecognised key is flagged and ignored, which for a date faculty typed would
-    # mean a silently unreleased solution.
-    sched = parse(
-        {
-            "assignments": {
-                "assignment-1": {
-                    "course_source_repo": "a-f2026",
-                    "due_datetime": "2026-10-13",
-                    "solution_datetime": "2026-10-16T09:00",
-                }
-            }
-        }
-    )
-    assert not any("unrecognised key" in d for d in sched.dropped)
 
 
 def test_tbc_event_datetime_keeps_an_undated_entry():

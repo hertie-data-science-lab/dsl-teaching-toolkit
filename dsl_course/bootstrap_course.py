@@ -377,7 +377,6 @@ def create_profile_repo(
         ".github",
         private=False,
         description="Org profile and configuration",
-        converge_desc=True,
     ):
         return
 
@@ -490,7 +489,6 @@ def setup_cohort_extras(org: str) -> int:
         "welcome",
         private=False,
         description="Course front door - open a Join issue to enrol",
-        converge_desc=True,  # the first row students read on the landing page
     ):
         failures += 1
         log_err(
@@ -525,7 +523,6 @@ def setup_cohort_extras(org: str) -> int:
         "classroom-config",
         private=True,
         description="PRIVATE cohort config - roster (students.csv). No PII leaves here.",
-        converge_desc=True,
     ):
         failures += 1
         log_err(f"could not create the classroom-config repo in {org}")

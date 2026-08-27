@@ -631,73 +631,62 @@ def grant_read_teams(cohort_org: str, repo: str) -> None:
             log(f"  ({team} team not found - create it first)")
 
 
-# Every repo description this toolkit has ever written, current and superseded. A live
-# description in this set - or an empty one - is OURS, so it may be converged to the
-# current wording; anything else a human typed, and is left alone. Same contract as
-# STUB_MARKS for seeded file CONTENT, and needed for the same reason: a description is
-# only ever set at repo creation, so a wording fix otherwise never reaches an existing
-# repo - while being the "What it's for" column on the students' landing page.
-SEEDED_DESCRIPTIONS = frozenset(
-    {
-        "Org profile and configuration",
-        "Course front door - open a Join issue to enrol",
-        "PRIVATE cohort config - roster (students.csv). No PII leaves here.",
-        "Course materials (lectures/readings by session)",
-        "Course website (auto-deployed on push)",
-        "Released lectures, labs, readings, and other materials",
-        # SUPERSEDED: said "enrolled students only", but grant_read_teams gives the
-        # `auditors` team read on every released repo too - so the page students land on
-        # carried a claim about access that was simply untrue.
-        "Released course materials (enrolled students only)",
-    }
-)
-
-# The descriptions rendered per repo rather than fixed, matched by shape. A templated
-# description always re-renders to the same string, so these only matter if we ever
-# reword one of the templates.
-_SEEDED_DESCRIPTION_PATTERNS = (
-    re.compile(r"^.+ - cohort assignment template$"),
-    re.compile(r"^.+ - submission repo$"),
-    re.compile(r"^Assignment .+ template$"),
-    re.compile(r"^Private gradebook for @.+$"),
-)
+# Descriptions this toolkit wrote in a wording it has since REPLACED, mapped to the
+# current one. A repo carrying an old string is carrying OUR text, so it is ours to
+# update; anything else a human typed, and is left alone.
+#
+# There is deliberately no entry for a CURRENT wording - a repo already carrying it needs
+# no change - so this is exactly the rename log, and rewording a description means adding
+# a line here or convergence silently stops. That forcing function is why this is a
+# mapping rather than the set of "everything we ever wrote": the set had to be edited in
+# lockstep with a literal in another file, and forgetting would have frozen the old
+# wording on every existing org while classifying it as faculty's.
+SUPERSEDED_DESCRIPTIONS = {
+    # Claimed "enrolled students only", but grant_read_teams gives the `auditors` team read
+    # on every released repo too - so the repo table students land on carried a false claim
+    # about who can see the materials.
+    "Released course materials (enrolled students only)": (
+        "Released lectures, labs, readings, and other materials"
+    ),
+}
 
 
-def is_seeded_description(text: str) -> bool:
-    """Whether `text` is a description this toolkit wrote, rather than faculty writing."""
-    stripped = (text or "").strip()
-    if not stripped or stripped in SEEDED_DESCRIPTIONS:
-        return True
-    return any(p.match(stripped) for p in _SEEDED_DESCRIPTION_PATTERNS)
+def converge_descriptions(org: str, repos: list[dict]) -> int:
+    """Update every repo in `repos` whose description we have since reworded.
 
+    A GitHub description is only ever set at repo CREATION, so a wording fix otherwise
+    never reaches a repo that already exists - while being the "What it's for" column on
+    the org's landing page. This is the convergence path for it.
 
-def converge_description(org: str, repo: str, want: str) -> None:
-    """Bring an EXISTING repo's GitHub description to `want` - but only if it is still ours.
+    Costs no reads: `repos` is the listing the caller already holds (list_org_repos asks
+    for `description` in the same paginated call), so the only requests made are a PATCH
+    per genuinely-drifted repo. The dicts are updated in place as well, so a caller that
+    renders the listing straight afterwards shows the new wording in the same run rather
+    than one run late.
 
-    Never fatal: a description is documentation, and failing a seed over it would be
-    worse than leaving it stale. A read failure, or a description a human has written, is
-    a note and nothing more."""
-    code, out = gh("api", f"repos/{org}/{repo}", "--jq", ".description")
-    if code != 0:
-        return
-    live = "" if out.strip() in ("", "null") else out.strip()
-    if live == want:
-        return
-    if not is_seeded_description(live):
-        log(f"  ({repo}: kept the description faculty wrote)")
-        return
-    if (
-        gh(
+    Never fatal - a description is documentation, and a failed PATCH is worth a line, not
+    a failed refresh. Returns the number changed.
+    """
+    changed = 0
+    for repo in repos:
+        want = SUPERSEDED_DESCRIPTIONS.get((repo.get("description") or "").strip())
+        if not want:
+            continue
+        code, _ = gh(
             "api",
             "--method",
             "PATCH",
-            f"repos/{org}/{repo}",
+            f"repos/{org}/{repo['name']}",
             "--field",
             f"description={want}",
-        )[0]
-        == 0
-    ):
-        log_ok(f"{repo} description -> current wording")
+        )
+        if code == 0:
+            repo["description"] = want
+            log_ok(f"{repo['name']} description -> current wording")
+            changed += 1
+        else:
+            log(f"  ({repo['name']}: could not update the description)")
+    return changed
 
 
 def create_repo(
@@ -706,15 +695,12 @@ def create_repo(
     private: bool = True,
     description: str = "",
     is_template: bool = False,
-    converge_desc: bool = False,
 ) -> bool:
     """Create a repo. Idempotent - treats existing repo as success.
 
-    `converge_desc` additionally brings an ALREADY-EXISTING repo's description up to
-    `description` when the live one is still one of ours (see converge_description). Off
-    by default: it costs a read per call, and is only worth it for the handful of repos
-    whose description is read by a human - the ones on an org's landing page. The
-    per-student submission and gradebook repos are not among them."""
+    Sets `description` only on creation. Bringing an EXISTING repo's description up to a
+    reworded one is converge_descriptions' job, off the listing the refresh already
+    holds - not this function's, which would have to pay a read per call to find out."""
     args = [
         "api",
         "--method",
@@ -738,8 +724,6 @@ def create_repo(
     # that was never created. Key on GitHub's specific message text instead.
     if "name already exists" in out.lower():
         log_skip(f"repo {org}/{name}")
-        if converge_desc and description:
-            converge_description(org, name, description)
         return True
     log_err(f"failed to create repo {org}/{name}: {out[:200]}")
     return False

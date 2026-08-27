@@ -746,7 +746,7 @@ def test_cohort_page_title_follows_the_course_pointer(monkeypatch):
     monkeypatch.setattr(
         P, "load_yaml_config", lambda org, repo, path: {"course": "Course-Org"}
     )
-    monkeypatch.setattr(P, "course_name_for_cohort", lambda org: "Deep Learning")
+    monkeypatch.setattr(P, "course_name_of", lambda org: "Deep Learning")
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
@@ -802,17 +802,10 @@ def test_cohort_refresh_replaces_only_the_marked_table(monkeypatch):
     assert "front door" in page
 
 
-def test_cohort_refresh_adopts_an_untouched_pre_marker_page(monkeypatch):
-    from dsl_course import profile_readme as P
-
-    page = _cohort_readme(
-        monkeypatch, f"# Old\n\n| a | b |\n\n---\n{P.LEGACY_FOOTER}\n"
-    )["profile/README.md"].decode()
-    assert P.TABLE_START in page  # a machine page nobody edited gains the markers
-
-
-def test_cohort_refresh_leaves_a_hand_edited_page_without_markers_alone(monkeypatch):
-    written = _cohort_readme(monkeypatch, "# Entirely mine\n\nNo markers, no footer.\n")
+def test_cohort_refresh_leaves_any_page_without_markers_alone(monkeypatch):
+    # No markers = wholly the instructor's, whether they deleted them or predate them.
+    # There is no way to tell those apart from the bytes, so neither is overwritten.
+    written = _cohort_readme(monkeypatch, "# Entirely mine\n\nNo markers here.\n")
     # The .github README still refreshes; the landing page is not written at all.
     assert set(written) == {"README.md"}
 

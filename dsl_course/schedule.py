@@ -622,6 +622,20 @@ def _parse_assignments(
                 "per team (expected 'group' or 'individual')",
             )
         dest = str(entry.get("cohort_dest_repo") or "").strip()
+        # A solution date with no handout date is a same-file, parse-time contradiction, so
+        # it belongs in `drops` where --validate reports it on the commit that introduced
+        # it. The scheduler cannot carry the solution without a handout release to put it
+        # on, and its only other symptom is a solution that silently never ships - noticed
+        # in November, from a date pinned in September.
+        if entry.get("solution_datetime") and not entry.get("handout_datetime"):
+            _flag_bad_value(
+                drops,
+                where,
+                "solution_datetime",
+                entry.get("solution_datetime"),
+                "the model solution NEVER ships automatically - the schedule can only push "
+                "it into repos it provisioned, which needs `handout_datetime` set too",
+            )
         out[str(slug)] = AssignmentEntry(
             due_datetime=due,
             course_source_repo=source_repo,

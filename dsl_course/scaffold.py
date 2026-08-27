@@ -427,10 +427,12 @@ def materials_readme(org: str) -> str:
     """The materials repo's student-facing README placeholder.
 
     Module-level, not inline in scaffold_materials, so it can be rendered WITHOUT creating
-    a repo - which is what a propagation pass over the courses already running needs: the
-    file is create-only, so a wording fix reaches an existing repo only by writing it
-    deliberately, after checking the placeholder is still untouched (deploy's
-    UNEDITED_README_MARKERS).
+    a repo. The file is create-only, so a wording fix reaches a repo that already exists
+    only by writing it deliberately, after checking the placeholder is still untouched
+    (deploy.UNEDITED_README_MARKERS) - which is done by hand, per the create-only file
+    rules. TODO: it belongs on the nightly path instead, the way SYLLABUS.md already is
+    via refresh_stubs; that needs refresh_stubs to accept the README's own predicate,
+    since the README predates the `dsl-stub:` mark its gate keys on.
 
     Release materials with the README toggle copies this file into the cohort's materials
     repo, where enrolled students read it - so it is written for them. How the source repo
@@ -471,7 +473,6 @@ def scaffold_materials(org: str, tag: str) -> int:
         repo,
         private=True,
         description="Course materials (lectures/readings by session)",
-        converge_desc=True,  # read by faculty on the course org's landing page
     ):
         return 1
     grant_course_team_access(org, repo)
@@ -738,7 +739,6 @@ def scaffold_site(org: str) -> int:
         name=site,
         private=False,
         description="Course website (auto-deployed on push)",
-        converge_desc=True,
     ):
         log_err(
             f"  ! could not generate the site from {WEBSITE_TEMPLATE_ORG}/{WEBSITE_TEMPLATE}"

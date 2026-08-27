@@ -61,6 +61,17 @@ def _is_infra_repo(repo: dict) -> bool:
     name = repo["name"]
     if name in INFRA_REPOS or name.endswith(".github.io"):
         return True
+    return has_infra_topic(repo)
+
+
+def has_infra_topic(repo: dict) -> bool:
+    """Whether `repo`'s TOPICS mark it machinery - a per-student submission repo, a frozen
+    cohort assignment template, or a private gradebook.
+
+    Split out of _is_infra_repo because the org landing page needs this half and not the
+    other: it must drop those per-student repos (naming them exposes the roster and every
+    team's membership on a page students land on) while KEEPING `welcome`,
+    `classroom-config` and the site repo, which _is_infra_repo also excludes."""
     return bool(set(repo.get("topics") or []) & INFRA_TOPICS)
 
 
@@ -132,7 +143,16 @@ def course_name_for_cohort(cohort_org: str) -> str:
     where the course name belongs.
     """
     pointer = load_yaml_config(cohort_org, ".github", "dsl-course.yml") or {}
-    course_org = str(pointer.get("course") or "")
+    return course_name_of(str(pointer.get("course") or ""))
+
+
+def course_name_of(course_org: str) -> str:
+    """A COURSE org's display name from its own identity file. "" when unnamed or absent.
+
+    The toolkit's single spelling of that fallback - `course_name`, else `org_name` - so a
+    cohort landing page, a status row and an email cannot disagree about what a course is
+    called. Takes "" and returns "" so a caller holding a cohort pointer that names no
+    course org needs no guard of its own."""
     if not course_org:
         return ""
     meta = load_yaml_config(course_org, ".github", "dsl-course.yml") or {}

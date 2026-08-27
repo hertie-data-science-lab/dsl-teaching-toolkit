@@ -92,11 +92,11 @@ def code_message(
     read live from the course org's dsl-course.yml, which a half-configured course may
     not carry yet; the wording then falls back to "the course" rather than emailing a
     blank."""
-    course = f"the {course_name}" if course_name else "the"
+    course = f"the {course_name} course" if course_name else "the course"
     subject = "Your course enrolment code"
     body = (
         f"Hello {student.name or 'there'},\n\n"
-        f"To join {course} course on GitHub, open a 'Join' issue here:\n"
+        f"To join {course} on GitHub, open a 'Join' issue here:\n"
         f"  {welcome_url}\n\n"
         f"and paste this enrolment code when asked:\n\n"
         f"    {student.enrol_code}\n\n"
