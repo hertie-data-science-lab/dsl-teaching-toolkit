@@ -38,6 +38,7 @@
 #   lecture-1:                      
 #     event_datetime:               # what the site's schedule shows
 #     title:                        # OPTIONAL: the session's name, beside its ordinal
+#                                   # (default: the label, prettified - here "Lecture 1")
 #     description:                  # OPTIONAL: a sentence about it, on the Lectures tab
 #     tbc: false                    # OPTIONAL: site marks it "(TBC)" next to the event_datetime (default: false)
 #     show_on_site: true            # OPTIONAL: false = deploy silently - it ships exactly
@@ -48,9 +49,9 @@
 #     deploy:
 #       - course_source_repo:       # REQUIRED
 #         course_source_path:       # REQUIRED - folder or file to copy
-#         cohort_dest_repo:         # default: materials
-#         cohort_dest_path:         # default: same as course_source_path
-#         deploy_datetime:          # default: the event_datetime
+#         cohort_dest_repo:         # OPTIONAL - default: materials
+#         cohort_dest_path:         # OPTIONAL - default: same as course_source_path
+#         deploy_datetime:          # OPTIONAL - default: the event_datetime
 #       - course_source_repo:       # a SECOND copy on its own clock - e.g. lab solutions
 #         course_source_path:       # staged OUTSIDE the folder released above, else the
 #         cohort_dest_path:         # first copy ships them too

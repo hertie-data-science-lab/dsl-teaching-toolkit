@@ -1,5 +1,5 @@
 name: Join course
-description: Enrol in this course with the code the teaching team emailed you
+description: Enrol in this course with the code emailed to your hertie email address. 
 title: "Join course"
 labels: ["onboarding"]
 body:
