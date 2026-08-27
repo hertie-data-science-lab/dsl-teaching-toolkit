@@ -1,6 +1,0 @@
-Subject: Your grades for Deep Learning (Demo) have been updated
-----------------------------------------------------------------------
-Hello Alex Beispiel,
-
-Your grades for Deep Learning (Demo) have been updated. View them in your private gradebook:
-  https://github.com/hertie-dsl-demo-f2026/grades-alexbeispiel
