@@ -28,28 +28,27 @@
 # semester_end:                     # OPTIONAL - default: 15 weeks after the start
 
 # releases:                         
-#   seed-syllabus:                  # week 0: the course opens before teaching starts. It
+#   seed-syllabus:                  # week 0: the course opens before teaching starts. 
 #     event_datetime:               # REQUIRED - ships the syllabus and anything else students need up front
-#     show_on_site: false           # OPTIONAL - default: true. false = deploy silently: it is not a session, so it claims no schedule row
+#     show_on_site: false           # OPTIONAL - default: true. false = releases materials silently without adding an entry to the deployed site's Schedule tab
 #     deploy:
 #       - course_source_repo:       # REQUIRED
-#         course_source_path: SYLLABUS.md   # REQUIRED - a root file
+#         course_source_path: SYLLABUS.md   # REQUIRED - NB here just a relative path to a root file
 #
 #   lecture-1:                      
 #     event_datetime:               # REQUIRED - what the site's schedule shows (no valid date = the whole entry is dropped)
 #     title:                        # OPTIONAL - default: the label, prettified (here "Lecture 1")
-#     description:                  # OPTIONAL - a sentence about it, displays on the Lectures tab
-#     tbc: false                    # OPTIONAL - default: false. true = site marks it "(TBC)" next to the event_datetime
-#     show_on_site: true            # OPTIONAL - default: true
+#     description:                  # OPTIONAL - a sentence about it, displays on the deployed site's Lectures tab
+#     tbc: false                    # OPTIONAL - default: false. true = site marks it "(TBC)" next to the event_datetime on the deployed site
 #     deploy:                       # OPTIONAL - omit it for a display-only row (a session with nothing to ship yet)
 #       - course_source_repo:       # REQUIRED
 #         course_source_path:       # REQUIRED - folder or file to copy
 #         cohort_dest_repo:         # OPTIONAL - default: materials
-#         cohort_dest_path:         # OPTIONAL - default: same as course_source_path
+#         cohort_dest_path:         # OPTIONAL - default: mirrors course_source_path
 #         deploy_datetime:          # OPTIONAL - default: the event_datetime. But can set on its own clock - e.g. for lectures might want to release slides BEFORE/AFTER the lecture itself 
-#       - course_source_repo:       # a SECOND copy, on its own clock - the ITEM is optional, its
-#         course_source_path:       # course_source_repo/_path are still REQUIRED once you add it
-#         cohort_dest_path:         # OPTIONAL - default: same as course_source_path
+#       - course_source_repo:       # a SECOND file, on its own clock (here the second item itself is optional, but once specified the course_source_path is REQUIRED)
+#         course_source_path:       
+#         cohort_dest_path:         # OPTIONAL - default: mirrors course_source_path
 #         deploy_datetime:          # OPTIONAL - default: the event_datetime
 #
 #   lab-1:                          
@@ -60,7 +59,7 @@
 #       - course_source_repo:       # REQUIRED
 #         course_source_path: labs/01_session-1   # REQUIRED
 #         cohort_dest_repo:         # OPTIONAL - default: materials
-#         cohort_dest_path:         # OPTIONAL - default: same as course_source_path
+#         cohort_dest_path:         # OPTIONAL - default: mirrors course_source_path
 #         deploy_datetime:          # OPTIONAL - default: the event_datetime
 #       - course_source_repo:       # NB stage solutions OUTSIDE the folder released above, else the first copy ships them too
 #         course_source_path: labs/01_session-1/solutions
@@ -70,7 +69,7 @@
 #
 #   readings-1:                     # each session's readings can optionally get their own entry, on their own clock (recommended)- they usually go out ahead of the session. (Could also be released as part of the lecture block above).
 #     event_datetime:               # REQUIRED
-#     show_on_site: false           # OPTIONAL - default: true. false = released without taking up a row in the deployed site's schedule
+#     show_on_site: false           # OPTIONAL - default: true
 #     deploy:
 #       - course_source_repo:       # REQUIRED
 #         course_source_path: readings/01_session-1   # NB including an optional READINGS.md alongside the files themselves serves as a clean citation list (published publicly, whereas the files themeselves remain behind enrollment gating)
@@ -82,9 +81,9 @@
 #   assignment-1:
 #     course_source_repo:           # REQUIRED - the course-org repo it hands out from
 #     cohort_dest_repo:             # OPTIONAL - default: the slug above (here assignment-1)
-#     handout_datetime:             # OPTIONAL, but REQUIRED for a scheduled handout - omit it if you hand out via the manual "Release assignment" workflow (which auto-records it here for you)
+#     handout_datetime:             # technically OPTIONAL, but REQUIRED for a scheduled handout - omit it if you hand out via the manual "Release assignment" workflow (which auto-records it here for you)
 #     due_datetime:                 # REQUIRED - a bare date without time -> end of that day (23:59:59)
-#     grading_datetime:             # OPTIONAL - default: due_datetime, so leaving it empty still autogrades, at the deadline. Snapshot freezes + autograder fires. Not shown to students. To NOT autograde at all, set `autograde: false` in the template's grading.yml
+#     grading_datetime:             # OPTIONAL - default: due_datetime, so leaving it empty still autogrades at the deadline. Snapshot freezes + autograder fires. Not shown to students. To NOT autograde at all, set `autograde: false` in the template's grading.yml
 #     solution_datetime:            # OPTIONAL - NO default: if empty, the solution only ever goes out by hand ("Release assignment" with include_solution ticked). Pushes the `solution/` folder (from the template's `solution` branch) into every student/team repo. Must be AFTER handout_datetime, and needs it set
 #     type: group                   # OPTIONAL - default: individual (also settable in the template's grading.yml)
 #     max_team_size:                # OPTIONAL - default: 5. Group only: the welcome "Join team" flow refuses a member beyond this

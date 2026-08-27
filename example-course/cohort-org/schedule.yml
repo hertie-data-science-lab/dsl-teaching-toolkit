@@ -3,6 +3,8 @@
 # - full schema: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/07-schedule-releases.md
 # - see reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/schedule.yml
 # - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/schedule/
+#
+# this deliberately showcases a range of different fields for each entry, showing possible maximal vs minimal (i.e. relying on defaults) usage
 
 timezone: Europe/Berlin
 semester_start: 2026-09-07
@@ -139,15 +141,15 @@ assignments:
 events:
   mid-term:
     type: exam
-    title: MidTerm Exam
+    title: MidTerm Exam                   # NB if empty, default -> would display as this anyway
     event_datetime: tbc
   final-exam:
     type: exam
-    title: Final Exam
+    title: Final Exam                     # NB if empty, default -> would display as this anyway
     event_datetime: 2026-12-15T14:00   
     tbc: true
   project-clinic:
-    title: Project clinic
+    title: Project clinic (drop-in room xyz)
     event_datetime: 2026-11-10T10:00
   guest-lecture:
     title: Guest lecture (industry speaker)
