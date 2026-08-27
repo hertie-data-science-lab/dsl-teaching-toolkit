@@ -509,9 +509,11 @@ def scaffold_materials(org: str, tag: str) -> int:
 def scaffold_assignment(
     org: str, number: str, tag: str, fmt: str = "py", kind: str = "individual"
 ) -> int:
-    """fmt: 'py' (starter.py) or 'notebook' (starter.ipynb, nbconvert'd at grading time);
+    """fmt: 'py' (starter.py) or 'notebook' (starter.ipynb). It picks the starter stub and
+    nothing else - the grader never reads it, converting whatever `.ipynb` a submission
+    holds, so a student who works in a notebook on a `py` assignment still grades.
     kind: 'individual' (one repo per student) or 'group' (one repo per team, graded
-    per team from classroom-config/teams.csv). Both land verbatim in the solution
+    per team from classroom-config/teams.csv). This one DOES land verbatim in the solution
     branch's grading.yml, so the scaffold and the grader can never disagree."""
     repo = f"assignment-{number}-{tag}"
     log_step(f"Scaffolding {org}/{repo} ({kind}, {fmt}; template + solution branch)")
