@@ -68,7 +68,7 @@ A silenced entry is also left out of the **generated syllabus** (Generate syllab
 
 NB: **a row appears as soon as you write it, not when it ships.** Every dated `releases:` entry gets its schedule row from the moment it lands on `main` - so writing the term up front publishes the whole term. Until its files ship the row carries no links and says so (*"**Materials for session 3 are not yet released** - they will appear in `materials/lectures/03_week-3` when they are."*), then picks up the links on release. An `assignments:` entry works the same way: its hand-out and due rows appear the day you write them, and what waits for the hand-out is the assignment's *content* - the brief, and the title the template's README gives it. Until then the row carries only the plan-side name (`Assignment 1`) and says it is not handed out yet, because the template repo exists from the day faculty write the assignment, weeks early, and the cohort site is public. An entry with `event_datetime: tbc` has nowhere to sit on a dated table, so it waits for a real date.
 
-Nested under `deploy:` we havee the following:
+Nested under `deploy:` we have the following:
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
@@ -81,6 +81,8 @@ Nested under `deploy:` we havee the following:
 NB: `cohort_dest_repo` is yours to choose - one shared `materials` repo, or one repo for lectures, another for labs etc; any non-existent repo and/or directory structure specified between `cohort_dest_repo` and `cohort_dest_path` is created on release if non-exist.
 
 NB: `course_source_path: /` (or `.`) releases the **whole repo**. Two root entries are left behind: `.github` (the faculty Release workflows) and `MAINTAINING.md` (your operating notes, which the scaffold marks as never released). Nested copies - a `labs/.github/` of your own - travel normally. The workflow uses the identical spelling, so this reads straight across from `docs/08`.
+
+NB: a root `README.md` or `SYLLABUS.md` still carrying the scaffold's placeholder is **withheld** from the release, with a warning on the run summary and everything else shipped - see [08 -> The unwritten root stubs](08-release-materials-to-cohort.md#the-unwritten-root-stubs-are-withheld-until-you-write-them).
 
 At a minimum only `course_source_repo` + `course_source_path` are required, everything else defaults:
 
@@ -231,7 +233,7 @@ Full schema, field by field, see [here](DEPLOYMENT-CHECKLIST.md#scheduleyml).
 
 ## Changing dates mid-term
 
-Just commit the edit to `classroom-config/schedule.yml` on `main` - the **GitHub web UI is the recommended way** (or edit a local clone → commit → push). The hourly cron readswhatever is on `main` at each tick, so the change takes effect within the hour; there is nothing to re-arm or re-deploy. 
+Just commit the edit to `classroom-config/schedule.yml` on `main` - the **GitHub web UI is the recommended way** (or edit a local clone → commit → push). The hourly cron reads whatever is on `main` at each tick, so the change takes effect within the hour; there is nothing to re-arm or re-deploy. 
 
 The one caveat: already-fired **one-shot** actions don't rewind - a release already shipped stays shipped, and a snapshot/autograde that already ran re-runs only if you delete its marker (`snapshots/<slug>.csv` / the `_graded.json` or `_skipped.json` record in `autograde/<slug>/` - deleting the whole folder works too).
 

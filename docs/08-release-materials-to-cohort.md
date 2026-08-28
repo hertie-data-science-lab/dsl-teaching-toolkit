@@ -61,14 +61,19 @@ Do not edit the cohort's released copy directly - instructors have read on it fo
 reason. An edit there survives only until the next release of that path, then vanishes with
 no warning.
 
-## The README is withheld until you write it
+## The unwritten root stubs are withheld until you write them
 
-Releasing the repo root (`/`), or naming `README.md` outright, copies the materials repo's
-`README.md` to students as their course overview. While it is still the scaffold's
-placeholder - addressed to faculty, with a "delete this section before releasing" block and
-a link to `MAINTAINING.md` - the release **skips it and says so**. Everything else in the
+Two root files are withheld while they are still the scaffold's placeholder: `README.md` and
+`SYLLABUS.md`. Releasing the repo root (`/`), or naming either outright, would otherwise
+publish faculty instructions as the students' course overview, and an empty table as their
+syllabus - which the site then pins on the cohort home page.
+
+So while the file is untouched the release **skips it and says so**. Everything else in the
 release still ships and the run stays green; the withheld file appears as a warning on the
 run summary. Rewrite it for students and release again.
+
+Only the ROOT file is ever withheld - a `README.md` inside a session folder is your own
+writing about that session and always ships.
 
 ## Live updates to the deployed `<course>.github.io` site
 - Any released materials will automatically show up in the deployed site (i.e. their release triggers a redeploy).
