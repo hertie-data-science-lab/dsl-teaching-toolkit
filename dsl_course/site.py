@@ -1257,7 +1257,10 @@ def _lecture_entry(
     is one template, so a field added to the row (the way the event rows grew `tbc:`)
     cannot land on one kind of row and miss the other."""
     title = f"{_ROW_NOUN[kind]} {session}"
-    subtitle, description = row.subtitle, row.description
+    # `_row_name`, so an entry that declares `title: Lab 1` renders "Lab 1" and not
+    # "Lab 1 / Lab 1" - the same trim an assignment's README heading gets, because faculty
+    # repeat the identifier just as readily in the plan as in a README.
+    subtitle, description = _row_name(row.subtitle, title), row.description
     reading_list = ""
     if sources:
         flags = ""
@@ -1317,25 +1320,27 @@ def _lecture_entry(
     )
 
 
-# Separators faculty put between an assignment's identifier and its name. Two dash
-# characters are in live READMEs already (`Assignment 1 - ...` and `Assignment 1 — ...`),
-# which is exactly why this is a set and not a `-`.
+# Separators faculty put between a row's identifier and its name. Two dash characters are
+# in live sources already (`Assignment 1 - ...` and `Assignment 1 — ...`), which is exactly
+# why this is a set and not a `-`.
 _NAME_SEPARATORS = "-\u2013\u2014:|"
 
 
-def _assignment_name(heading: str, identifier: str) -> str:
-    """The assignment's NAME out of a template README's `# ` heading, given the identifier
-    the site already shows in bold beside it.
+def _row_name(declared: str, identifier: str) -> str:
+    """A row's NAME out of what faculty wrote, given the identifier the site already shows
+    in bold beside it - so the pair reads "Session 3 / Probability theory" and never
+    "Session 3 / Session 3".
 
-    Faculty conventionally open the heading with the identifier - `# Assignment 1 - linear
-    regression from scratch` - so printing the heading whole under "Assignment 1" reads
-    "Assignment 1 / Assignment 1 - linear regression from scratch". Drop that prefix and
-    whatever separates it.
+    Faculty conventionally repeat the identifier: a template README opens `# Assignment 1 -
+    linear regression from scratch`, and a `releases:` entry is as likely to say
+    `title: Lab 1` as to name the lab. Printed whole under the identifier that reads
+    "Assignment 1 / Assignment 1 - linear regression from scratch" and "Lab 1 / Lab 1", so
+    drop the prefix and whatever separates it.
 
-    A heading that does NOT open with the identifier (`# Group project - an end-to-end
-    modelling report`) is the name already and is returned as it stands. Casefolded, so a
-    heading that differs from the slug only in capitalisation still matches."""
-    name = heading.strip()
+    Text that does NOT open with the identifier (`Group project - an end-to-end modelling
+    report`) is the name already and is returned as it stands. Casefolded, so text that
+    differs from the identifier only in capitalisation still matches."""
+    name = declared.strip()
     if name.casefold().startswith(identifier.casefold()):
         rest = name[len(identifier) :].lstrip()
         # Only when a separator actually follows: `Assignment 10` must not be read as
@@ -1463,7 +1468,7 @@ def _assignment_entry(
         readme = get_file_content(course_org, repo, "README.md") or ""
         for line in readme.splitlines():
             if line.startswith("# ") and not subtitle:
-                subtitle = _assignment_name(line[2:], title)
+                subtitle = _row_name(line[2:], title)
                 break
         brief = "\n".join(
             ln for ln in readme.splitlines() if not ln.startswith("# ")

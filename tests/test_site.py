@@ -420,27 +420,31 @@ def test_the_plans_title_is_the_assignments_name_and_beats_the_readme(monkeypatc
     assert out.count('subtitle: "Fraud detection"') == 2  # entry + due row
 
 
-def test_a_readme_heading_that_repeats_the_identifier_is_trimmed(monkeypatch):
-    # Faculty conventionally open the heading with the identifier, so printing it whole
-    # under "Assignment 1" read "Assignment 1 / Assignment 1 - linear regression...".
-    # Both dash characters in live READMEs are handled.
+def test_a_declared_name_that_repeats_the_identifier_is_trimmed(monkeypatch):
+    # Faculty repeat the identifier in a README heading and in a `releases:` title alike,
+    # so printing either whole under its identifier read "Assignment 1 / Assignment 1 -
+    # linear regression..." and "Lab 1 / Lab 1". Both dash characters in live sources are
+    # handled.
     assert (
-        site._assignment_name("Assignment 1 - linear regression", "Assignment 1")
+        site._row_name("Assignment 1 - linear regression", "Assignment 1")
         == "linear regression"
     )
     assert (
-        site._assignment_name("Assignment 1 \u2014 Introduce Yourself", "Assignment 1")
+        site._row_name("Assignment 1 \u2014 Introduce Yourself", "Assignment 1")
         == "Introduce Yourself"
     )
     # a heading that is the name already survives whole
     assert (
-        site._assignment_name("Group project - a report", "Assignment 3 Project")
+        site._row_name("Group project - a report", "Assignment 3 Project")
         == "Group project - a report"
     )
     # and `Assignment 10` is not `Assignment 1` plus a name of "0"
-    assert site._assignment_name("Assignment 10 revisited", "Assignment 1") == (
+    assert site._row_name("Assignment 10 revisited", "Assignment 1") == (
         "Assignment 10 revisited"
     )
+    # a session's declared title gets the same trim
+    assert site._row_name("Lab 1", "Lab 1") == ""
+    assert site._row_name("Session 3 - Probability", "Session 3") == "Probability"
 
 
 def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
