@@ -6,7 +6,7 @@
 
 This is the entire per-cohort data hub - instructors manage everything from here: roster, teams, grades, schedule, and this cohort's own instructors/TAs. No PII (emails, ids, names) leaves this repo.
 
-Instructors/TAs edit these files; the workflows in the **course org's** Actions tab read them and implement the changes programmatically. This repo is the SSOT for all cohort config.
+Instructors/TAs edit these files; the toolkit's workflows read them and apply the changes automatically. This repo is the SSOT for all cohort config.
 
 
 **Live files vs samples.**
