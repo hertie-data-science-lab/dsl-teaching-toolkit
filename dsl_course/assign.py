@@ -63,7 +63,6 @@ from .repos import (
 # at all, and nothing would ever notice. Deleting the file re-releases it.
 SOLUTION_RECORD_DIR = "solutions"
 SOLUTION_DIR = "solution"
-_GIT_ENV = GIT_ENV
 
 
 def _wait_for_content(
@@ -184,11 +183,11 @@ def push_solution(cohort_org: str, repo: str, sol_dir: Path) -> bool:
         if gh("repo", "clone", f"{cohort_org}/{repo}", str(wd), "--", "-q")[0] != 0:
             return False
         shutil.copytree(sol_dir, wd / SOLUTION_DIR, dirs_exist_ok=True)
-        git("-C", str(wd), *_GIT_ENV, "add", "-A")
+        git("-C", str(wd), *GIT_ENV, "add", "-A")
         code, _ = git(
             "-C",
             str(wd),
-            *_GIT_ENV,
+            *GIT_ENV,
             "commit",
             "-q",
             "--no-verify",
@@ -197,7 +196,7 @@ def push_solution(cohort_org: str, repo: str, sol_dir: Path) -> bool:
         )
         if code != 0:
             return True  # already present, nothing new
-        return git("-C", str(wd), *_GIT_ENV, "push", "-q", "origin", "HEAD")[0] == 0
+        return git("-C", str(wd), *GIT_ENV, "push", "-q", "origin", "HEAD")[0] == 0
 
 
 def provision_one(

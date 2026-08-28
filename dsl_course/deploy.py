@@ -45,9 +45,6 @@ from .log import log, log_err, log_ok, log_step
 from .repos import create_repo
 from .schedule import Deploy
 
-_GIT_ENV = GIT_ENV
-
-
 # Never copied, at any depth: a `.git` landing in the dest overwrites its git metadata and
 # redirects the release's own push into the SOURCE repo.
 NEVER_COPIED = frozenset({".git"})
@@ -319,7 +316,7 @@ def deploy_many(
             # own `.gitignore` along, and without -f `git add` would then silently drop any
             # file the source force-added past it (lecture PDFs under a `*.pdf` rule are the
             # usual case) - reporting the release as shipped while those files never left.
-            git("-C", str(dd), *_GIT_ENV, "add", "-A", "-f")
+            git("-C", str(dd), *GIT_ENV, "add", "-A", "-f")
             # Distinguish "nothing staged" (genuinely nothing new to release - the
             # idempotent no-op) from a real commit failure (disk, lock, hook): git commit
             # exits non-zero for BOTH, so a failed commit would otherwise be reported as
@@ -330,7 +327,7 @@ def deploy_many(
             code, out = git(
                 "-C",
                 str(dd),
-                *_GIT_ENV,
+                *GIT_ENV,
                 "commit",
                 "-q",
                 "--no-verify",
@@ -341,7 +338,7 @@ def deploy_many(
                 log_err(f"  {repo}: commit failed - {out[:200]}")
                 errors += 1
                 continue
-            if git("-C", str(dd), *_GIT_ENV, "push", "-q", "origin", "HEAD")[0] != 0:
+            if git("-C", str(dd), *GIT_ENV, "push", "-q", "origin", "HEAD")[0] != 0:
                 log_err(f"  {repo}: push failed")
                 errors += 1
                 continue

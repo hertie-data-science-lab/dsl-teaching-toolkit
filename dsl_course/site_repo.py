@@ -31,7 +31,6 @@ from .repos import repo_exists, repo_is_archived
 # The settings of the last manual publish, committed into the site repo so the daily cron
 # can re-sync unattended. Leading `_`, so Jekyll ignores it rather than serving it.
 PUBLISH_CONFIG = "_publish-config.yml"
-_GIT_ENV = GIT_ENV
 
 # The shared Jekyll theme, and the ref every generated site pins it at.
 #
@@ -729,7 +728,7 @@ def _git_identity(key: str) -> str:
     """What GIT_ENV sets `user.name` / `user.email` to - read off GIT_ENV itself, so the
     machine-author test below cannot drift from the identity the sync commits under."""
     prefix = f"{key}="
-    return next(v[len(prefix) :] for v in _GIT_ENV if v.startswith(prefix))
+    return next(v[len(prefix) :] for v in GIT_ENV if v.startswith(prefix))
 
 
 def _is_machine_author(name: str, email: str) -> bool:
@@ -993,7 +992,7 @@ def sync_site_repo(
             git(
                 "-C",
                 str(wd),
-                *_GIT_ENV,
+                *GIT_ENV,
                 "rm",
                 "-r",
                 "-q",
@@ -1002,14 +1001,14 @@ def sync_site_repo(
                 rel,
             )
 
-        git("-C", str(wd), *_GIT_ENV, "add", "-A")
+        git("-C", str(wd), *GIT_ENV, "add", "-A")
         code, _ = git(
-            "-C", str(wd), *_GIT_ENV, "commit", "-q", "--no-verify", "-m", plan.commit
+            "-C", str(wd), *GIT_ENV, "commit", "-q", "--no-verify", "-m", plan.commit
         )
         if code != 0:
             log_ok(f"{plan.label} already up to date")
             return 0
-        if git("-C", str(wd), *_GIT_ENV, "push", "-q", "origin", "HEAD")[0] != 0:
+        if git("-C", str(wd), *GIT_ENV, "push", "-q", "origin", "HEAD")[0] != 0:
             log_err(f"{plan.label} push failed")
             return 1
         # Only now is anything actually overwritten on the remote: a run that committed
