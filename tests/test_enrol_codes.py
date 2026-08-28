@@ -266,6 +266,29 @@ def test_rows_are_relocated_by_email_not_by_their_original_index():
     }
 
 
+def test_two_rows_sharing_an_email_each_keep_their_own_code():
+    # A registrar export with the same address twice (a duplicate enrolment, a shared
+    # departmental inbox) mapped BOTH codes onto the first of the two rows, so the pair
+    # collapsed to one dict key and the second row was left with no code at all - silently,
+    # on a green run. A non-unique email re-locates nothing; those rows keep their index.
+    text = (
+        HEADER
+        + "ada@uni.edu,Ada,,,,enrolled\n"
+        + "dept@uni.edu,First,,,,enrolled\n"
+        + "dept@uni.edu,Second,,,,enrolled\n"
+    )
+    codes = [
+        (0, "ada@uni.edu", "dsl-aaa111"),
+        (1, "dept@uni.edu", "dsl-bbb222"),
+        (2, "dept@uni.edu", "dsl-ccc333"),
+    ]
+    assert enrol_codes.rows_for_codes(text, codes) == {
+        0: "dsl-aaa111",
+        1: "dsl-bbb222",
+        2: "dsl-ccc333",
+    }
+
+
 def test_a_row_with_no_email_keeps_its_original_index():
     text = HEADER + ",Anonymous,,,,enrolled\n"
     assert enrol_codes.rows_for_codes(text, [(0, "", "dsl-zzz")]) == {0: "dsl-zzz"}

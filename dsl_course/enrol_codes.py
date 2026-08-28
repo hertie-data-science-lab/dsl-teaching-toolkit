@@ -75,14 +75,23 @@ def rows_for_codes(text: str, codes: list[tuple[int, str, str]]) -> dict[int, st
     landed in between - a Join issue filling in a handle, a faculty member inserting a row.
     A row carrying no email at all cannot be re-located and keeps its original index; that
     is the one row for which a concurrent edit can still land the code on the wrong line,
-    and it is also a row nobody can be emailed at."""
-    by_email: dict[str, int] = {}
+    and it is also a row nobody can be emailed at.
+
+    An email that is NOT unique cannot re-locate anything either - a registrar export with
+    the same address on two rows (a duplicate enrolment, a shared departmental inbox) sent
+    both codes to the FIRST of them, so the two collapsed onto one key and one of the rows
+    was left with no code at all, silently. Those rows keep their original index too."""
+    seen: dict[str, int] = {}
     reader = csv.DictReader(io.StringIO(strip_bom(text)))
     for i, row in enumerate(reader):
         email = (row.get("hertie_email") or "").strip()
         if email:
-            by_email.setdefault(email, i)
-    return {by_email.get(email, index): code for index, email, code in codes}
+            # -1 marks "more than one row carries this" - not usable as a destination.
+            seen[email] = i if email not in seen else -1
+    return {
+        (at if (at := seen.get(email, -1)) >= 0 else index): code
+        for index, email, code in codes
+    }
 
 
 # Bounded: each attempt costs a read and a write, and a roster being edited faster than
