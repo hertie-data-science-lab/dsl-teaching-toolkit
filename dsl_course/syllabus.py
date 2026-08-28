@@ -30,12 +30,8 @@ from .course import SYLLABUS_SESSIONS_FILE, session_number
 from .gh_contents import get_file_content, put_file, repo_tree
 from .log import log, log_err, log_ok, log_step
 from .repos import default_branch
-from .site import (
-    READINGS_SECTION,
-    _demote_headings,
-    _planned_sessions,
-    _readings_block,
-)
+from .schedule_plan import READINGS_SECTION, planned_sessions
+from .site import _demote_headings, _readings_block
 
 # How far a reading list's own headings are pushed down here: the syllabus puts a session at
 # `###`, so its `# Session N readings` has to land below that.
@@ -76,11 +72,11 @@ def build(course_org: str, cohort_org: str, source_repo: str) -> tuple[str, int]
     was always zero and the CLI always reported "no dated sessions" - state the builder
     already had, thrown away and re-derived wrongly.
 
-    Sessions come from `site._planned_sessions`, the same function the website reads, so the
-    two cannot disagree about what session 3 is called. Re-deriving it here did: it took the
-    title from the earliest deploy touching a session whether or not that entry declared
-    one, so a readings-only or "Course opens" entry silently blanked a session the site
-    names."""
+    Sessions come from `schedule_plan.planned_sessions`, the same function the website
+    reads, so the two cannot disagree about what session 3 is called. Re-deriving it here
+    did: it took the title from the earliest deploy touching a session whether or not that
+    entry declared one, so a readings-only or "Course opens" entry silently blanked a
+    session the site names."""
     sched = schedule.load(cohort_org)
     branch = default_branch(course_org, source_repo)
     paths = repo_tree(course_org, source_repo, branch, "blob")
@@ -89,7 +85,7 @@ def build(course_org: str, cohort_org: str, source_repo: str) -> tuple[str, int]
     # the session once.
     rows = {
         int(ordinal): row
-        for (ordinal, kind), row in _planned_sessions(sched).items()
+        for (ordinal, kind), row in planned_sessions(sched).items()
         if kind == "lecture"
     }
 

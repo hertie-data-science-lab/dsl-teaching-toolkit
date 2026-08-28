@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
-from dsl_course import gh_contents, repos, site
+from dsl_course import gh_contents, repos, schedule_plan, site
 
 
 def test_semester_label():
@@ -178,7 +178,7 @@ def test_lecture_entry_labels_links_by_repo_or_subpath():
         entry = site._lecture_entry(
             "Cohort-f2026",
             "1",
-            site._PlannedRow(when=date(2026, 9, 7)),
+            schedule_plan.PlannedRow(when=date(2026, 9, 7)),
             [("labs", "", "01_intro"), ("materials", "lectures", "01_intro")],
         )
     assert "https://x/1" in entry and "https://x/2" in entry
@@ -211,10 +211,7 @@ def test_public_lecture_entry_renders_a_lab_row_as_its_own_type():
     assert 'name: "lab - lab.ipynb"' in e
 
 
-def test_row_kind_and_file_split_labs_from_lectures():
-    assert site._row_kind("labs") == "lab"
-    for section in ("lectures", "readings", "faq", ""):
-        assert site._row_kind(section) == "lecture"
+def test_row_file_splits_labs_from_lectures():
     assert site._row_file("2", "lab") == "lab-02.md"
     assert site._row_file("2", "lecture") == "session-02.md"
 
