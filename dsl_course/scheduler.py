@@ -42,9 +42,21 @@ import argparse
 import sys
 from datetime import datetime, timezone
 
-from . import schedule, source_digest
+from . import schedule, site, source_digest
+from .assign import provision_all, solution_released
+from .collect import (
+    collect,
+    has_autograde_results,
+    load_snapshots,
+    resolve_is_group,
+    snapshot_assignment,
+    snapshot_path,
+    template_is_group,
+)
+from .deploy import deploy_many
 from .schedule import Deploy, Release
-from .utils import log, log_err, log_ok, log_step
+from .seed import discover_cohorts
+from .utils import log, log_err, log_ok, log_step, repo_exists
 
 # --------------------------------------------------------------------------- pure core
 
@@ -133,8 +145,6 @@ def _execute_nondeploy(course_org: str, cohort_org: str, release: Release) -> in
     error count."""
     errors = 0
     if release.assignment:
-        from .assign import provision_all
-
         # provision_all's default (group=None) resolves group-vs-individual from the
         # cohort schedule / the template's grading.yml - so a scheduled group handout
         # provisions per TEAM, not one repo per student.
@@ -161,14 +171,6 @@ def _snapshot_passed_deadlines(
     """Freeze every passed-deadline assignment that has no snapshot yet. Write-once: an
     assignment already frozen is skipped silently, so this is a no-op on every tick after
     the first. Returns the error count."""
-    from .collect import (
-        load_snapshots,
-        resolve_is_group,
-        snapshot_assignment,
-        snapshot_path,
-        template_is_group,
-    )
-
     errors = 0
     for slug, deadline in due_snapshots(sched, now):
         entry = sched.assignments[slug]
@@ -211,8 +213,6 @@ def _assignment_template(
     exists. None otherwise, and loudly - the name is required and written by hand, so a
     name that resolves to nothing can only be a typo, and its one other symptom is an
     assignment that never hands out and never grades."""
-    from .utils import repo_exists
-
     if repo_exists(course_org, entry.course_source_repo):
         return entry.course_source_repo
     log_err(
@@ -241,8 +241,6 @@ def _autograde_passed_deadlines(
     A missing template repo, a template with no `solution` branch, and `autograde: false`
     are all skips, not failures: plenty of assignments are hand-marked. Group vs individual
     is not guessed here - `collect` resolves it from the cohort schedule / grading.yml."""
-    from .collect import collect, has_autograde_results, load_snapshots
-
     errors = 0
     for slug, deadline in due_snapshots(sched, now):
         # the fire-once marker is keyed on the cohort NAME - it must agree with what
@@ -284,8 +282,6 @@ def _run_releases(
     all_deploys = [d for release in due for d in release.due_deploys(now)]
     deploy_errors, changed = 0, False
     if all_deploys:
-        from .deploy import deploy_many
-
         deploy_errors, changed = deploy_many(
             course_org, cohort_org, all_deploys, sync=False
         )
@@ -304,8 +300,6 @@ def _run_releases(
 
     # One website sync at the end, only if something actually changed.
     if changed or did_assign:
-        from . import site
-
         # site.sync_site RAISES on a genuine tree/team read failure (post-PR2). This
         # cohort's site-sync failure must be logged and counted, not an unhandled traceback
         # that aborts the run - and, under --all-cohorts, every cohort scheduled after it.
@@ -327,8 +321,6 @@ def _solution_due(
     The datetime check is cheap and comes first, so the fire-once read is paid only by an
     assignment whose solution moment has actually arrived - not by every assignment on
     every tick."""
-    from .assign import solution_released
-
     if entry.solution_datetime is None or entry.solution_datetime > now:
         return False
     return not solution_released(cohort_org, schedule.cohort_name(slug, entry))
@@ -509,8 +501,6 @@ def main() -> int:
     now = _parse_now(args.now)
 
     if args.all_cohorts:
-        from .seed import discover_cohorts
-
         cohorts = discover_cohorts(args.course_org)
         if not cohorts:
             # A freshly bootstrapped course org has this cron installed before any

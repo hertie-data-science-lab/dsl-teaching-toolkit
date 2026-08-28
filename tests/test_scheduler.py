@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
-from dsl_course import collect, course, deploy, scheduler, seed
+from dsl_course import course, deploy, scheduler, seed
 from dsl_course.schedule import (
     AssignmentEntry,
     Deploy,
@@ -166,7 +166,7 @@ def test_run_batches_all_deploys_through_deploy_many(monkeypatch):
     # comma-separated paths through the same call (see test_release.py).
     calls = []
     monkeypatch.setattr(
-        "dsl_course.deploy.deploy_many",
+        "dsl_course.scheduler.deploy_many",
         lambda source_org, cohort_org, deploys, sync=True: (
             calls.append((source_org, cohort_org, list(deploys), sync)) or (0, True)
         ),
@@ -212,7 +212,7 @@ def test_run_batches_all_deploys_through_deploy_many(monkeypatch):
 def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        "dsl_course.assign.provision_all",
+        "dsl_course.scheduler.provision_all",
         lambda master_org, template, cohort_org, solution=False, touch_existing=True: (
             calls.append((master_org, template, cohort_org, solution, touch_existing))
             or 0
@@ -644,7 +644,7 @@ def _stub_autograde(monkeypatch, marked: bool = True):
     """Neutralise the autograde phase's I/O (it shares due_snapshots with the snapshot
     phase). `marked` = every slug already has its autograde/<slug>/ marker, so nothing
     fires."""
-    monkeypatch.setattr(collect, "has_autograde_results", lambda org, slug: marked)
+    monkeypatch.setattr(scheduler, "has_autograde_results", lambda org, slug: marked)
     monkeypatch.setattr(
         scheduler, "_assignment_template", lambda org, slug, entry: None
     )
@@ -654,10 +654,10 @@ def _stub_snapshots(monkeypatch, existing: set[str]):
     """Track snapshot_assignment calls; `existing` are the slugs already frozen."""
     taken: list[tuple[str, str, str, str | None]] = []
     monkeypatch.setattr(
-        collect, "load_snapshots", lambda org, slug: {} if slug in existing else None
+        scheduler, "load_snapshots", lambda org, slug: {} if slug in existing else None
     )
     monkeypatch.setattr(
-        collect,
+        scheduler,
         "snapshot_assignment",
         # `is_group` is REQUIRED (no default), so a scheduler that stopped passing it fails
         # these tests loudly instead of silently freezing every assignment as individual.
@@ -753,9 +753,9 @@ def test_run_dry_run_snapshots_nothing(monkeypatch):
 
 
 def test_run_reports_a_failed_snapshot(monkeypatch):
-    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
     monkeypatch.setattr(
-        collect,
+        scheduler,
         "snapshot_assignment",
         lambda org, slug, deadline, *, is_group, teams_key=None: False,
     )
@@ -782,7 +782,8 @@ def test_run_reports_a_failed_snapshot(monkeypatch):
 
 def test_assignment_template_is_the_named_course_source_repo(monkeypatch):
     monkeypatch.setattr(
-        "dsl_course.utils.repo_exists", lambda org, repo: repo == "wk3-regression-f2026"
+        "dsl_course.scheduler.repo_exists",
+        lambda org, repo: repo == "wk3-regression-f2026",
     )
     entry = AssignmentEntry(
         course_source_repo="wk3-regression-f2026",
@@ -799,7 +800,7 @@ def test_assignment_template_is_the_named_course_source_repo(monkeypatch):
 def test_a_course_source_repo_that_does_not_exist_says_so(monkeypatch, capsys):
     # The name is required and hand-written, so one that resolves to nothing can only be a
     # typo - and its only other symptom is an assignment that never hands out or grades.
-    monkeypatch.setattr("dsl_course.utils.repo_exists", lambda org, repo: False)
+    monkeypatch.setattr("dsl_course.scheduler.repo_exists", lambda org, repo: False)
     entry = AssignmentEntry(
         course_source_repo="typo-repo",
         due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
@@ -815,7 +816,7 @@ def _stub_collect(monkeypatch, marked: set[str], templates: set[str], rc: int = 
     `templates` = the template repos that exist in the course org."""
     graded: list[tuple[str, str, str, str, bool]] = []
     monkeypatch.setattr(
-        collect, "has_autograde_results", lambda org, slug: slug in marked
+        scheduler, "has_autograde_results", lambda org, slug: slug in marked
     )
     monkeypatch.setattr(
         scheduler,
@@ -823,7 +824,7 @@ def _stub_collect(monkeypatch, marked: set[str], templates: set[str], rc: int = 
         lambda org, slug, entry: t if (t := f"{slug}-f2026") in templates else None,
     )
     monkeypatch.setattr(
-        "dsl_course.collect.collect",
+        "dsl_course.scheduler.collect",
         lambda m, t, c, deadline=None, group=False: (
             graded.append((m, t, c, deadline, group)) or rc
         ),
@@ -833,9 +834,9 @@ def _stub_collect(monkeypatch, marked: set[str], templates: set[str], rc: int = 
 
 def _only_snapshots_taken(monkeypatch):
     """Snapshots always succeed and are never the subject of these tests."""
-    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: {})
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: {})
     monkeypatch.setattr(
-        collect,
+        scheduler,
         "snapshot_assignment",
         lambda org, slug, dl, *, is_group, teams_key=None: True,
     )
@@ -995,7 +996,7 @@ def test_main_all_cohorts_with_none_registered_is_a_noop(monkeypatch):
     # A freshly bootstrapped course org runs the hourly cron before any cohort is
     # registered - that gap must be a quiet no-op, not a red run (and a failure
     # email to the bot owner) every hour.
-    monkeypatch.setattr(seed, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(
         sys, "argv", ["scheduler", "--course-org", "Course-Org", "--all-cohorts"]
     )
@@ -1076,7 +1077,7 @@ def test_the_solution_rides_on_the_handout_release_once_its_datetime_passes(
 
     released = {"yet": False}
     monkeypatch.setattr(
-        "dsl_course.assign.solution_released", lambda org, slug: released["yet"]
+        "dsl_course.scheduler.solution_released", lambda org, slug: released["yet"]
     )
 
     def one(now):
@@ -1126,9 +1127,9 @@ def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):
     # due_releases documents event_datetime order, and the plan is sorted at parse time -
     # but the synthesised handouts are appended afterwards, so without a re-sort a
     # September handout is processed after a December release.
-    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: {})
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: {})
     monkeypatch.setattr(
-        collect,
+        scheduler,
         "snapshot_assignment",
         lambda org, slug, dl, *, is_group, teams_key=None: True,
     )
@@ -1228,7 +1229,7 @@ def test_run_releases_counts_a_raised_site_sync(monkeypatch):
     # must catch it, count it, and return non-zero - not let the traceback abort the tick
     # (and, under --all-cohorts, every cohort scheduled after it).
     monkeypatch.setattr(
-        "dsl_course.deploy.deploy_many",
+        "dsl_course.scheduler.deploy_many",
         lambda *a, **k: (0, True),  # something changed
     )
 
@@ -1244,7 +1245,9 @@ def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsy
     # The lesson PR #151/#146 applied to the nightly refresh: one cohort's raised failure
     # (unreachable API, a blown-up site sync) must not abort the remaining cohorts' work.
     # main() imports discover_cohorts from .seed at call time, so patch it at the source.
-    monkeypatch.setattr(seed, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"])
+    monkeypatch.setattr(
+        scheduler, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+    )
     seen: list[str] = []
 
     def fake_run(course, cohort, now, dry_run=False):
@@ -1509,16 +1512,16 @@ def test_autograde_waits_for_a_completed_snapshot(monkeypatch):
     # exists at all it records a permanent write-once ZERO for every student and marks the
     # assignment graded, on a green run. A missing snapshot means "not now", never "grade".
     graded = []
-    monkeypatch.setattr(collect, "has_autograde_results", lambda org, slug: False)
+    monkeypatch.setattr(scheduler, "has_autograde_results", lambda org, slug: False)
     monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
-    monkeypatch.setattr(collect, "collect", lambda *a, **k: graded.append(a) or 0)
-    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(scheduler, "collect", lambda *a, **k: graded.append(a) or 0)
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
     sched = _assignments(**{"assignment-1": _due(13)})
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
     assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
     assert graded == []
     monkeypatch.setattr(
-        collect, "load_snapshots", lambda org, slug: {"assignment-1-ada": "abc"}
+        scheduler, "load_snapshots", lambda org, slug: {"assignment-1-ada": "abc"}
     )
     assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
     assert len(graded) == 1

@@ -417,8 +417,7 @@ def _refresh_stubs(course_org: str, repo: str) -> int:
     already there.
 
     Two reads per stub per repo, so a handful of calls per org per night."""
-    # Local import: `scaffold` imports this module, so a module-level one is a cycle. Same
-    # shape as `scheduler`'s import of `deploy`.
+    # Local import: `scaffold` imports this module, so a module-level one is a cycle.
     from . import scaffold
 
     # `course-materials-f2026` -> `f2026`, which is all the stubs interpolate. A repo with

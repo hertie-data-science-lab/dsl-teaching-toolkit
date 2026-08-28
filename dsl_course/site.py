@@ -44,13 +44,14 @@ from urllib.parse import quote
 
 import yaml
 
-from . import schedule, seed, welcome
+from . import scaffold, schedule, seed, welcome
 from .course import (
     active_today,
     assignment_slug,
     discover_sections,
     find_session_dir,
     pages_repo,
+    resolve_is_group,
     session_number,
     term_tag,
 )
@@ -1551,8 +1552,6 @@ def _assignment_entry(
     # it in the one place students READ the answer is how the site comes to name a shape
     # the handout does not create. `template_group=None` leaves the design-time grading.yml
     # unconsulted - the site will not spend an API call per assignment on a repo name.
-    from .collect import resolve_is_group
-
     group = resolve_is_group(
         force=False,
         schedule_type=found[1].type if found else None,
@@ -2168,8 +2167,6 @@ def _sync_site_repo(
         if not scaffold_missing:
             log(f"  (no site repo {org}/{site} - skipping site sync)")
             return 0
-        from . import scaffold
-
         log_step(f"No public site yet - scaffolding {org}/{site}")
         if scaffold.scaffold_site(org) != 0:
             return 1
@@ -2824,10 +2821,8 @@ def main() -> int:
                 include_lectures=not args.no_include_lectures,
             )
         if args.all_cohorts:
-            from .seed import discover_cohorts
-
             rc = 0
-            for cohort in discover_cohorts(args.course_org):
+            for cohort in seed.discover_cohorts(args.course_org):
                 # One cohort's raised failure (an unreachable API, a people.yml that
                 # doesn't parse) must not skip every LATER cohort's site on the 06:00
                 # cron - log it, mark the batch failed, and carry on. The same per-cohort
