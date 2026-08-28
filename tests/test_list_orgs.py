@@ -34,6 +34,7 @@ def test_main_writes_the_inventory_when_discovery_succeeds(
                 "org_name": "My Course",
                 "course_name": "Deep Learning",
                 "course_code": "E1",
+                "central_ref": "release",
                 "url": "https://github.com/My-Course",
             }
         ],
@@ -53,8 +54,20 @@ def test_the_tree_nests_each_cohort_under_its_own_course_org(monkeypatch):
         list_orgs, "_registered_cohorts", lambda org: ["C1-f2025", "C1-f2026"]
     )
     orgs = [
-        {"org": "C1", "course_name": "Deep Learning", "course_code": "E1", "url": "u1"},
-        {"org": "C2", "course_name": "Stats", "course_code": "", "url": "u2"},
+        {
+            "org": "C1",
+            "course_name": "Deep Learning",
+            "course_code": "E1",
+            "central_ref": "staging",
+            "url": "u1",
+        },
+        {
+            "org": "C2",
+            "course_name": "Stats",
+            "course_code": "",
+            "central_ref": "release",
+            "url": "u2",
+        },
     ]
     cohorts = [
         {"org": "C1-f2025", "course": "C1", "url": "u3"},
@@ -62,11 +75,12 @@ def test_the_tree_nests_each_cohort_under_its_own_course_org(monkeypatch):
     ]
     out = list_orgs.render_tree(orgs, cohorts)
     assert out == (
-        "- **[C1](u1)** - Deep Learning - E1\n"
+        # the tier each course runs, so a promotion can be aimed without a second page
+        "- **[C1](u1)** - Deep Learning - E1 - toolkit `staging`\n"
         "    - [C1-f2025](u3)\n"
         "    - [C1-f2026](u4)\n"
         # a course org running nothing says so, rather than being an absence
-        "- **[C2](u2)** - Stats\n"
+        "- **[C2](u2)** - Stats - toolkit `release`\n"
         "    - _no cohorts yet_"
     )
 
@@ -77,7 +91,15 @@ def test_a_live_but_unregistered_cohort_is_marked_on_the_tree(monkeypatch):
     # itself nowhere else. Marked, never auto-registered: absence can be deliberate.
     monkeypatch.setattr(list_orgs, "_registered_cohorts", lambda org: ["C1-f2025"])
     out = list_orgs.render_tree(
-        [{"org": "C1", "course_name": "DL", "course_code": "", "url": "u1"}],
+        [
+            {
+                "org": "C1",
+                "course_name": "DL",
+                "course_code": "",
+                "central_ref": "release",
+                "url": "u1",
+            }
+        ],
         [
             {"org": "C1-f2025", "course": "C1", "url": "u2"},
             {"org": "C1-f2026", "course": "C1", "url": "u3"},
@@ -94,7 +116,15 @@ def test_a_cohort_pointing_at_no_discovered_course_org_is_listed_as_orphaned(
     # Its `course:` pointer is dangling, or that org lost its dsl-course-hub topic. It
     # nests nowhere, and dropping it silently is how a broken pointer stays broken.
     out = list_orgs.render_tree(
-        [{"org": "C1", "course_name": "", "course_code": "", "url": "u1"}],
+        [
+            {
+                "org": "C1",
+                "course_name": "",
+                "course_code": "",
+                "central_ref": "release",
+                "url": "u1",
+            }
+        ],
         [
             {"org": "lost-f2025", "course": "deleted-course", "url": "u2"},
             {"org": "bare-f2025", "course": "", "url": "u3"},
@@ -209,3 +239,20 @@ def test_a_failed_metadata_read_stops_the_inventory_being_rewritten(
     assert list_orgs.main() == 1
     assert page.read_text() == "# the previous, good inventory\n"
     assert "HTTP 502" in capsys.readouterr().err
+
+
+def test_each_course_org_reports_the_toolkit_tier_it_runs(monkeypatch):
+    # The inventory is where a maintainer checks what a promotion would move, so the tier
+    # has to come off the same metadata read the page already makes - and an org that
+    # declares nothing reports the default rather than a blank.
+    monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Soak", "Live"])
+    monkeypatch.setattr(
+        list_orgs,
+        "_fetch_metadata",
+        lambda org: {"central_ref": "staging"} if org == "Soak" else {},
+    )
+
+    assert [(o["org"], o["central_ref"]) for o in list_orgs.discover_course_orgs()] == [
+        ("Live", "release"),
+        ("Soak", "staging"),
+    ]
