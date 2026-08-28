@@ -112,6 +112,26 @@ So a TA on f2026 can `git push` labs into the course org level `course-materials
 >
 >A repo scaffolded by **New materials repo** / **New assignment** is granted as it is created - there is nothing to run afterwards. The nightly **Refresh actions** sweep then re-checks every repo against the same floor, so an older repo that predates a grant catches up on its own. The sweep only ever raises access; it never removes any.
 
+## The trust boundary: only staff in these teams
+
+On GitHub Free an org secret does not reach a **private** repo, so `DSL_BOT_TOKEN` is mirrored
+as a **repo secret onto every course-org content repo** - that is what lets the run-from-repo
+Release workflows authenticate at all. A repo secret is readable by anyone with write on the
+repo. So write on a content repo is, in effect, the bot token: whoever holds it can act as the
+bot across every org this toolkit runs.
+
+`instructors` and `instructors-<tag>` hold that write. **Put only teaching staff in them.** A
+guest who needs to read materials is not an instructor - give them read on the one repo, by hand.
+
+The same reasoning bounds the rest of the model: `instructors-<tag>` has push on `.github` and
+`main` is unprotected there, so a member can edit `dsl-course.yml` and promote themselves. This
+is rotation between trusted colleagues, not a security boundary - see
+[`access-reference.md`](reference/access-reference.md#rules-that-catch-people-out).
+
+> Role teams are `secret` teams, so a non-owner instructor cannot browse their membership in
+> GitHub's UI. Read the roster from `classroom-config/students.csv` instead - that file is the
+> record either way. *(Coming change: the teams are `closed` today.)*
+
 ## Next
 
 - [Enrol students](06-enrol-students-to-cohort.md) - the other half of populating a cohort.
