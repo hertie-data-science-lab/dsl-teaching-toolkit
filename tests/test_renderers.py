@@ -14,7 +14,6 @@ import yaml
 from conftest import workflow_inputs, workflow_jobs
 
 from dsl_course import (
-    discovery,
     profile_readme,
     seed,
     workflows_render,
@@ -490,30 +489,6 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
         ".github/workflows/sync-teams.yml",
         ".github/workflows/status.yml",
     ]
-
-
-def test_seed_exports_exactly_what_its_callers_reach_for():
-    # seed.__all__ IS the contract now: the names other modules use as `seed.<name>`
-    # (site, scaffold, bootstrap_course, sync_faculty, sync_membership). Pinned here, so
-    # trimming one that a caller still uses fails loudly instead of at runtime.
-    assert set(seed.__all__) == {
-        "seed_github_workflows",
-        "_push_workflows",
-        "COHORTS_PATH",
-        "discover_assignments",
-        "discover_cohort_repos",
-        "discover_cohorts",
-        "discover_content_repos",
-        "discover_release_sources",
-        "discover_sessions",
-        "register_cohort",
-        "update_profile_readme",
-    }
-    for name in seed.__all__:
-        assert getattr(seed, name, None) is not None, f"seed.{name} does not resolve"
-    # ...and they are the real thing, not a stale copy.
-    assert seed.discover_release_sources is discovery.discover_release_sources
-    assert seed.update_profile_readme is profile_readme.update_profile_readme
 
 
 def test_scaffold_buttons_route_inputs_through_env_not_the_shell():

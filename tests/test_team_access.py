@@ -45,8 +45,8 @@ def scaffold_grants(monkeypatch):
     monkeypatch.setattr(utils, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(scaffold, "seed_files_if_absent", lambda *a, **k: True)
     monkeypatch.setattr(scaffold, "seed_if_absent", lambda *a, **k: True)
-    monkeypatch.setattr(scaffold.seed, "discover_cohorts", lambda org: [])
-    monkeypatch.setattr(scaffold.seed, "discover_assignments", lambda org: [])
+    monkeypatch.setattr(scaffold, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(scaffold, "discover_assignments", lambda org: [])
     monkeypatch.setattr(scaffold.seed, "_push_workflows", lambda *a, **k: 0)
 
     def fake_gh(*args, **kwargs):

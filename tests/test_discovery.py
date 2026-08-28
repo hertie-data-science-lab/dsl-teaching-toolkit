@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from dsl_course import course, discovery, seed, utils
+from dsl_course import course, discovery, utils
 
 INFRA_AND_CONTENT = [
     {"name": ".github", "topics": []},
@@ -322,13 +322,6 @@ def test_register_cohort_is_idempotent_when_already_registered(monkeypatch):
         discovery, "put_file", lambda *a, **k: pytest.fail("should not write")
     )
     assert discovery.register_cohort("Course", "Course-f2026") is True
-
-
-def test_seed_facade_still_exposes_discovery(monkeypatch):
-    # site/scaffold/sync_* call these as seed.<name> - the split must be invisible.
-    monkeypatch.setattr(discovery, "list_org_repos", lambda org: INFRA_AND_CONTENT)
-    assert seed.discover_content_repos("Org") == ["course-materials-f2026", "labs"]
-    assert seed.COHORTS_PATH == discovery.COHORTS_PATH
 
 
 def test_org_tier_reads_the_dotgithub_topic_then_the_cohort_only_repos_then_gives_up():

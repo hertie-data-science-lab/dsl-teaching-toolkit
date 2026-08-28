@@ -4,7 +4,7 @@ Two sites, two audiences, one Jekyll template (course-website-template):
 
 - **cohort site** (`<cohort>.github.io`, `sync_site`) - student-facing. Its lecture links
   point at the cohort's PRIVATE content repos (wherever a release actually landed each
-  section - see `seed.discover_release_sources`), so they 404 for non-members (the gate is
+  section - see `discovery.discover_release_sources`), so they 404 for non-members (the gate is
   deliberate). Regenerates `_lectures/`, `_assignments/`, `_events/` from the release state.
   Releases call it; the Sync site action runs it on demand.
 
@@ -44,7 +44,7 @@ from urllib.parse import quote
 
 import yaml
 
-from . import scaffold, schedule, seed, welcome
+from . import scaffold, schedule, welcome
 from .course import (
     active_today,
     assignment_slug,
@@ -55,7 +55,16 @@ from .course import (
     session_number,
     term_tag,
 )
-from .discovery import discover_handed_out_assignments, list_org_repos
+from .discovery import (
+    COHORTS_PATH,
+    discover_assignments,
+    discover_cohort_repos,
+    discover_cohorts,
+    discover_handed_out_assignments,
+    discover_release_sources,
+    discover_sessions,
+    list_org_repos,
+)
 from .utils import (
     GIT_ENV,
     READING_OVERLAY_NAMES,
@@ -781,7 +790,7 @@ def _session_files(
     org: str, repo: str, subpath: str, folder: str
 ) -> list[tuple[str, str]]:
     """(name, blob-url) for every file at ANY depth under `folder` (already confirmed by
-    seed.discover_release_sources to match a session's ordinal prefix), at `subpath`
+    discovery.discover_release_sources to match a session's ordinal prefix), at `subpath`
     in a repo (or the repo root when `subpath` is empty - a release destination left
     at its default).
 
@@ -1348,7 +1357,7 @@ def _lecture_entry(
     `_lectures` collection.
 
     `sources` is (repo, subpath, folder) triples already confirmed (by
-    seed.discover_release_sources) to hold this exact session - callers pass only the
+    discovery.discover_release_sources) to hold this exact session - callers pass only the
     sources known to match, so every call here is a real hit, not a probe.
 
     `row` is what the PLAN says about this session (`_PlannedRow`): when the class happens,
@@ -2274,8 +2283,8 @@ def sync_site(course_org: str, cohort_org: str) -> int:
     the schedule (exams, special events, term dates)."""
 
     def build(_wd: Path) -> _SitePlan:
-        content_repos = seed.discover_cohort_repos([cohort_org])
-        release_sources = seed.discover_release_sources(cohort_org, content_repos)
+        content_repos = discover_cohort_repos([cohort_org])
+        release_sources = discover_release_sources(cohort_org, content_repos)
         # One row per (ordinal, kind): a week's lecture materials and its lab are separate
         # rows on the schedule, so a lab released into `labs/` never folds into the
         # lecture's row (and never shows up twice, on the schedule and the labs page).
@@ -2283,7 +2292,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         for repo, subpath, folder, n in release_sources:
             key = (str(n), _row_kind(_source_section(repo, subpath)))
             sources_by_row.setdefault(key, []).append((repo, subpath, folder))
-        assignments = seed.discover_assignments(course_org)
+        assignments = discover_assignments(course_org)
         # A persistent course org holds per-year templates (assignment-*-fYYYY); a cohort
         # site should list only its own year's, matched on the cohort's fYYYY/sYYYY tag.
         tag = term_tag(cohort_org)
@@ -2594,7 +2603,7 @@ def sync_public_site(
         return 1
 
     def build(site_wd: Path) -> _SitePlan | None:
-        sessions = seed.discover_sessions(course_org, source_repo)
+        sessions = discover_sessions(course_org, source_repo)
         log_step(
             f"Publishing {course_org}/{pages_repo(course_org)} from {source_repo}: "
             f"{len(sessions)} session(s), readings={readings_mode}, "
@@ -2822,7 +2831,7 @@ def main() -> int:
             )
         if args.all_cohorts:
             rc = 0
-            for cohort in seed.discover_cohorts(args.course_org):
+            for cohort in discover_cohorts(args.course_org):
                 # One cohort's raised failure (an unreachable API, a people.yml that
                 # doesn't parse) must not skip every LATER cohort's site on the 06:00
                 # cron - log it, mark the batch failed, and carry on. The same per-cohort
@@ -2847,12 +2856,12 @@ def main() -> int:
         # An EMPTY registry authorises nothing. It used to short-circuit the whole check,
         # so a course org that had never registered a cohort - or whose registry failed to
         # parse to anything - accepted any org name a dispatch cared to name.
-        registered = seed.discover_cohorts(args.course_org)
+        registered = discover_cohorts(args.course_org)
         if args.cohort_org.casefold() not in {c.casefold() for c in registered}:
             listed = ", ".join(sorted(registered)) or "nothing"
             log_err(
                 f"{args.cohort_org} is not registered under {args.course_org} "
-                f"({seed.COHORTS_PATH} lists {listed}) - refusing to sync its site."
+                f"({COHORTS_PATH} lists {listed}) - refusing to sync its site."
             )
             return 1
         return sync_site(args.course_org, args.cohort_org)

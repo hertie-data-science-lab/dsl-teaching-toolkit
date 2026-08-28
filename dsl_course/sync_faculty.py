@@ -35,8 +35,12 @@ import argparse
 import sys
 from datetime import date
 
-from . import seed
 from .course import CONFIG_REPO, active_today, term_tag
+from .discovery import (
+    discover_assignments,
+    discover_cohorts,
+    discover_content_repos,
+)
 from .utils import (
     create_team,
     grant_team_repo_access,
@@ -254,7 +258,7 @@ def sync(
     instructors/TAs (its own team + its course-org tag team). Pass an explicit
     single-item list to scope to just one cohort, e.g. a freshly bootstrapped one,
     without re-touching every other cohort."""
-    targets = seed.discover_cohorts(course_org) if cohorts is None else cohorts
+    targets = discover_cohorts(course_org) if cohorts is None else cohorts
     log_step(
         f"Materialising faculty access: course-admin across {1 + len(targets)} "
         f"org(s), instructors across {len(targets)} cohort(s)"
@@ -262,8 +266,8 @@ def sync(
     errors = sync_course_admins(course_org, targets, dry_run=dry_run)
     # Fetched once, not once per cohort - discover_content_repos/discover_assignments
     # depend only on course_org, not on which cohort is being processed.
-    content_repos = seed.discover_content_repos(course_org)
-    assignments = seed.discover_assignments(course_org)
+    content_repos = discover_content_repos(course_org)
+    assignments = discover_assignments(course_org)
     for cohort_org in targets:
         errors += sync_cohort_instructors(
             course_org, cohort_org, content_repos, assignments, dry_run=dry_run

@@ -579,13 +579,11 @@ def _plan(
         "_sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
-    monkeypatch.setattr(site.seed, "discover_cohort_repos", lambda orgs: [])
+    monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
     monkeypatch.setattr(
-        site.seed, "discover_release_sources", lambda org, repos: list(sources)
+        site, "discover_release_sources", lambda org, repos: list(sources)
     )
-    monkeypatch.setattr(
-        site.seed, "discover_assignments", lambda org: list(assignments)
-    )
+    monkeypatch.setattr(site, "discover_assignments", lambda org: list(assignments))
     monkeypatch.setattr(
         site, "discover_handed_out_assignments", lambda org: frozenset(handed_out)
     )
@@ -656,9 +654,9 @@ def test_course_description_flows_from_course_metadata_into_config(
         "_sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
-    monkeypatch.setattr(site.seed, "discover_cohort_repos", lambda orgs: [])
-    monkeypatch.setattr(site.seed, "discover_release_sources", lambda org, repos: [])
-    monkeypatch.setattr(site.seed, "discover_assignments", lambda org: [])
+    monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
+    monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
+    monkeypatch.setattr(site, "discover_assignments", lambda org: [])
     monkeypatch.setattr(
         site, "discover_handed_out_assignments", lambda org: frozenset()
     )
@@ -711,9 +709,9 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
         "_sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
-    monkeypatch.setattr(site.seed, "discover_cohort_repos", lambda orgs: [])
-    monkeypatch.setattr(site.seed, "discover_release_sources", lambda org, repos: [])
-    monkeypatch.setattr(site.seed, "discover_assignments", lambda org: [])
+    monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
+    monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
+    monkeypatch.setattr(site, "discover_assignments", lambda org: [])
     monkeypatch.setattr(
         site, "discover_handed_out_assignments", lambda org: frozenset()
     )
@@ -1178,10 +1176,8 @@ def test_main_reports_a_malformed_config_as_one_line_not_a_traceback(
     # people.yml is web-editable, so faculty author bad indents directly. yaml.YAMLError
     # is not a RuntimeError, so it used to walk straight through main()'s guard and out as
     # a traceback in the Actions log.
-    from dsl_course import seed
-
     err = _bad_indent_error()
-    monkeypatch.setattr(seed, "discover_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-f2026"])
     monkeypatch.setattr(site, "sync_site", lambda *a: (_ for _ in ()).throw(err))
     monkeypatch.setattr(
         "sys.argv",
@@ -1196,9 +1192,8 @@ def test_main_refuses_a_cohort_this_course_org_never_registered(monkeypatch, cap
     # written by whoever holds a cohort's DSL_BOT_TOKEN - a lower trust tier than the
     # course org. Naming SOMEONE ELSE'S cohort would rebuild that cohort's site from this
     # dispatch, so the registry gets the last word.
-    from dsl_course import seed
 
-    monkeypatch.setattr(seed, "discover_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-f2026"])
     synced: list = []
     monkeypatch.setattr(site, "sync_site", lambda *a: synced.append(a) or 0)
     monkeypatch.setattr(
@@ -1214,9 +1209,8 @@ def test_main_refuses_every_cohort_when_the_registry_is_empty(monkeypatch, capsy
     # The check used to short-circuit on an empty registry, so a course org that had
     # registered nothing accepted any org a dispatch named. An empty registry authorises
     # nothing.
-    from dsl_course import seed
 
-    monkeypatch.setattr(seed, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(site, "discover_cohorts", lambda org: [])
     synced: list = []
     monkeypatch.setattr(site, "sync_site", lambda *a: synced.append(a) or 0)
     monkeypatch.setattr(
@@ -1231,9 +1225,8 @@ def test_main_refuses_every_cohort_when_the_registry_is_empty(monkeypatch, capsy
 def test_main_matches_a_registered_cohort_case_insensitively(monkeypatch):
     # GitHub org names are case-insensitive; a case difference must not read as a
     # cross-cohort dispatch.
-    from dsl_course import seed
 
-    monkeypatch.setattr(seed, "discover_cohorts", lambda org: ["Cohort-F2026"])
+    monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-F2026"])
     synced: list = []
     monkeypatch.setattr(site, "sync_site", lambda *a: synced.append(a) or 0)
     monkeypatch.setattr(
@@ -1248,9 +1241,8 @@ def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsy
     # The lesson PR #151/#146 applied to the nightly refresh: the single try used to wrap
     # the whole loop, so one cohort's raise skipped every LATER cohort's site on the 06:00
     # cron. main() imports discover_cohorts from .seed at call time - patch it at source.
-    from dsl_course import seed
 
-    monkeypatch.setattr(seed, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"])
+    monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"])
     seen: list[str] = []
 
     def fake_sync(course, cohort):

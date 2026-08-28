@@ -74,8 +74,8 @@ def fake(monkeypatch):
     monkeypatch.setattr(scaffold, "grant_course_team_access", lambda *a, **k: None)
     monkeypatch.setattr(scaffold, "grant_tagged_team_access", lambda *a, **k: None)
     monkeypatch.setattr(scaffold, "set_repo_topics", lambda *a, **k: None)
-    monkeypatch.setattr(seed, "discover_cohorts", lambda org: [])
-    monkeypatch.setattr(seed, "discover_assignments", lambda org: [])
+    monkeypatch.setattr(scaffold, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(scaffold, "discover_assignments", lambda org: [])
     monkeypatch.setattr(seed, "_push_workflows", lambda *a, **k: 0)
     return f
 
