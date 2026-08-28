@@ -408,7 +408,8 @@ def provision_one(cohort_org: str, handle: str) -> str:
             cohort_org, repo, "README.md", _STARTER_README.encode(), "init gradebook"
         )
         if not set_repo_topics(cohort_org, repo, ["gradebook"]):
-            log_err(f"  ! {repo} is untagged - the nightly sweep converges it")
+            # Not named: this log is public. The nightly sweep converges the topic.
+            log_err("  ! a gradebook is untagged - the nightly sweep converges it")
 
     # Read, not write: `distribute` rewrites grades.yml from
     # `classroom-config/grades/<slug>.csv`, so a mark corrected here would be overwritten

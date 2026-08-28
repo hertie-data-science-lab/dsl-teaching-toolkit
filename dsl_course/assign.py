@@ -260,7 +260,9 @@ def provision_one(
         log_verbose(f"  [ok] created {cohort_org}/{repo}")
         if not set_repo_topics(cohort_org, repo, [slug, "submission"]):
             # Not named: this log is public. The nightly sweep converges the topic.
-            log_err("  ! a submission repo is untagged - the nightly sweep converges it")
+            log_err(
+                "  ! a submission repo is untagged - the nightly sweep converges it"
+            )
 
     solution_failed = False
     if sol_dir is not None:
