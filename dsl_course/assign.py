@@ -419,6 +419,14 @@ def record_solution_released(cohort_org: str, slug: str, repos: int) -> bool:
     )
 
 
+# provision_one statuses that mean the model solution did NOT reach that unit's repo, and
+# so must withhold the fire-once release marker. Every OTHER `failed-*` happens AFTER the
+# push (a dead handle, an unreachable team) and is persistent, so withholding the marker
+# for one would re-clone every submission repo every hour for the rest of the term - the
+# exact cost the marker exists to prevent.
+_SOLUTION_NOT_PUSHED = ("failed-solution", "failed-create")
+
+
 def provision_all(
     master_org: str,
     template: str,
@@ -608,12 +616,15 @@ def provision_all(
     #     the exact cost this marker exists to prevent;
     #   - `units == []` (nobody onboarded yet) means nothing was pushed at all, so
     #     recording it would mean everyone who onboards later never gets the solution.
-    # `failed-solution` is what a failed push reports, so it is read here directly.
+    # The statuses that mean this unit never received the solution are read here directly:
+    # `failed-solution` is a push that was attempted and failed, and `failed-create` is a
+    # repo that never existed to push INTO - provision_one returns it before the push, so
+    # the marker used to be written over it and no later tick ever retried.
     solution_pushed = (
         solution
         and not solution_unavailable
         and bool(units)
-        and not results.get("failed-solution")
+        and not any(results.get(s) for s in _SOLUTION_NOT_PUSHED)
     )
     if solution_pushed and not record_solution_released(cohort_org, slug, len(units)):
         log_err(

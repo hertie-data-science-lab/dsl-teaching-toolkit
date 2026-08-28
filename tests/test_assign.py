@@ -169,6 +169,17 @@ def test_the_marker_IS_written_when_the_site_sync_fails(tmp_path, monkeypatch):
     assert rc == 1  # the run still goes red for the site
 
 
+def test_the_marker_is_not_written_when_a_repo_could_not_be_created(
+    tmp_path, monkeypatch
+):
+    # `failed-create` is returned BEFORE the solution push is even attempted, so the unit
+    # never received it - but the marker is fire-once, so writing it here meant that
+    # student never got the solution and no later tick retried. Only the failures that
+    # happen after a successful push may be written over.
+    _rc, recorded = _marker_run(tmp_path, monkeypatch, status="failed-create")
+    assert recorded == []
+
+
 def test_the_marker_IS_written_when_a_handle_is_dead(tmp_path, monkeypatch):
     # Same reasoning: one unusable student handle is persistent and unrelated to the push.
     _rc, recorded = _marker_run(tmp_path, monkeypatch, status="failed-no-collaborator")
