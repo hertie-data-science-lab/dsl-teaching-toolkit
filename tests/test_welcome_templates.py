@@ -326,3 +326,18 @@ def test_blank_issues_are_disabled_so_every_issue_carries_a_routing_label(monkey
     )
     welcome.refresh_welcome_workflows("Org")
     assert ".github/ISSUE_TEMPLATE/config.yml" in seen
+
+
+def test_onboard_throttles_a_student_before_it_touches_the_roster():
+    # `welcome` is public and anyone can open an issue in it, and each one costs a private
+    # roster read plus an org invite and a team write on the bot token. A student who keeps
+    # opening new Join issues instead of reading the reply on the last one pays that on
+    # repeat. The count must therefore happen BEFORE the roster read and before the bot
+    # token is used at all.
+    code = code_of(script_of("onboard.yml", "onboard"))
+    throttle = code.index("listForRepo")
+    assert "creator: handle" in code and "labels: 'needs-review'" in code
+    assert "unresolved.length >= 3" in code
+    assert "unresolved Join issues - contact the teaching team" in code
+    assert throttle < code.index("await readRoster()")
+    assert throttle < code.index("process.env.HAS_BOT")
