@@ -30,6 +30,7 @@ from .course import (
     SYLLABUS_SAMPLE_FILE,
     pages_repo,
 )
+from .discovery import discover_assignments, discover_cohorts
 from .utils import (
     GIT_ENV,
     READING_OVERLAY_FILE,
@@ -518,8 +519,8 @@ def scaffold_materials(org: str, tag: str) -> int:
     # Equip the run-from-repo Release workflows (same as Refresh does for content repos).
     # _push_workflows lands both in one commit, logs its own failure, and returns 1 - a
     # materials repo with no Release workflows must not report success.
-    cohorts = seed.discover_cohorts(org)
-    failures += seed._push_workflows(org, repo, cohorts, seed.discover_assignments(org))
+    cohorts = discover_cohorts(org)
+    failures += seed._push_workflows(org, repo, cohorts, discover_assignments(org))
     if failures:
         return 1
     log_ok(f"materials repo ready: {org}/{repo}")

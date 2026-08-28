@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import seed, site, utils
+from dsl_course import site, utils
 
 COURSE = "Course-Org"
 SOURCE = "course-materials-f2026"
@@ -85,7 +85,7 @@ def _install_fakes(monkeypatch) -> dict[str, str]:
     # get_file_content in the UTILS namespace - stub it there too, or the real gh
     # runs (green on an authenticated dev box, red in tokenless CI).
     monkeypatch.setattr(utils, "get_file_content", lambda *a, **k: "")
-    monkeypatch.setattr(seed, "discover_sessions", lambda org, repo: ["1", "2", "3"])
+    monkeypatch.setattr(site, "discover_sessions", lambda org, repo: ["1", "2", "3"])
     return committed
 
 

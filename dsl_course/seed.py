@@ -11,8 +11,7 @@ refreshed on demand: `refresh` reads the course org's .github/cohort-courses-pag
 the content actions to every course repo. No cron, no app.
 
 This module is the placement + CLI layer; the three jobs it used to also do live next to
-it, and are imported from there (see `__all__` for the few names still reached for as
-`seed.<name>`):
+it, and every caller imports them from their owning module:
 
 - workflows_render - the workflow YAML templates and every render_* function;
 - discovery       - the cohort registry and all live org/repo/section/session discovery;
@@ -41,14 +40,9 @@ from datetime import datetime, timezone
 
 from .course import CONFIG_REPO, term_tag
 from .discovery import (
-    COHORTS_PATH,
     discover_assignments,
-    discover_cohort_repos,
     discover_cohorts,
     discover_content_repos,
-    discover_release_sources,
-    discover_sessions,
-    register_cohort,
     unregister_cohort,
 )
 from .profile_readme import update_profile_readme
@@ -92,28 +86,6 @@ from .workflows_render import (
     render_sync_site,
     system_owned,
 )
-
-# What the rest of the package reaches for as `seed.<name>`: this module's own jobs, plus
-# the handful of discovery/profile names its callers (site, scaffold, bootstrap_course,
-# sync_faculty, sync_membership) grew up importing from here. Everything else the split
-# moved out is imported from its owning module (workflows_render, discovery,
-# profile_readme, central) - so should new code be.
-__all__ = [  # noqa: RUF022 - grouped by owning module, sorting would lose the grouping
-    # placement + CLI (this module's own job)
-    "seed_github_workflows",
-    "_push_workflows",
-    # discovery.py
-    "COHORTS_PATH",
-    "discover_assignments",
-    "discover_cohort_repos",
-    "discover_cohorts",
-    "discover_content_repos",
-    "discover_release_sources",
-    "discover_sessions",
-    "register_cohort",
-    # profile_readme.py
-    "update_profile_readme",
-]
 
 # The run-from-repo workflows _push_workflows places in every content repo.
 WORKFLOWS = (

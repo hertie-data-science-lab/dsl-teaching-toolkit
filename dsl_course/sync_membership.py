@@ -28,7 +28,13 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import seed, sync_faculty, sync_roster, sync_teams
+from . import sync_faculty, sync_roster, sync_teams
+from .discovery import (
+    COHORTS_PATH,
+    discover_assignments,
+    discover_cohorts,
+    discover_content_repos,
+)
 from .utils import _acting_login, log_err, log_ok
 
 
@@ -40,14 +46,14 @@ def sync(
 ) -> int:
     # course_admins always reconciles everywhere, independent of which cohort (if
     # any) triggered this sync.
-    all_registered = seed.discover_cohorts(course_org)
+    all_registered = discover_cohorts(course_org)
     if not all_registered:
         # An empty registry can be legitimate for a brand-new course org, so this does not
         # fail the run - but it must be VISIBLE, not a silent green "Sync complete": only
         # the course org's own course-admin gets reconciled, no cohort at all.
         log_err(
             f"no cohorts are registered under {course_org} "
-            f"({seed.COHORTS_PATH} is empty or unset) - only course-admin on the course "
+            f"({COHORTS_PATH} is empty or unset) - only course-admin on the course "
             f"org itself will be reconciled. Expected for a brand-new course org; a "
             f"problem if this course has live cohorts."
         )
@@ -67,7 +73,7 @@ def sync(
         listed = ", ".join(sorted(all_registered)) or "nothing"
         log_err(
             f"{cohort_org} is not registered under {course_org} "
-            f"({seed.COHORTS_PATH} lists {listed}) - refusing to reconcile it. Register "
+            f"({COHORTS_PATH} lists {listed}) - refusing to reconcile it. Register "
             f"the cohort first if this is genuinely its course org."
         )
         return 1
@@ -80,8 +86,8 @@ def sync(
     targets = (
         list(all_registered) if all_cohorts else ([cohort_org] if cohort_org else [])
     )
-    content_repos = seed.discover_content_repos(course_org) if targets else []
-    assignments = seed.discover_assignments(course_org) if targets else []
+    content_repos = discover_content_repos(course_org) if targets else []
+    assignments = discover_assignments(course_org) if targets else []
     for org in targets:
         # Per-cohort isolation: the read helpers now raise on non-404, so one cohort's
         # transient failure must not abort the whole batch (the lesson seed.refresh

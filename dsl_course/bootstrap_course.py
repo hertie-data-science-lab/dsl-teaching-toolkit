@@ -26,6 +26,8 @@ import sys
 
 from . import scaffold, seed, site, sync_faculty
 from .course import COHORT_TOPIC, COURSE_HUB_TOPIC
+from .discovery import COHORTS_PATH, register_cohort
+from .profile_readme import update_profile_readme
 from .utils import (
     COHORT_WRITE_REPOS,
     COURSE_TEAM_ACCESS,
@@ -432,7 +434,7 @@ def create_profile_repo(
         # the SSOT faculty edit (people.course_admins / instructor cards), so it is
         # USER-owned: seeded once, never rewritten by a later repair run.
         # (The org-overview profile/README.md is generated at the end of bootstrap,
-        # once all repos exist, by seed.update_profile_readme - see main.)
+        # once all repos exist, by profile_readme.update_profile_readme - see main.)
         metadata = _course_metadata(org, org_name, course_name, course_code, admins)
         if not seed_if_absent(
             org,
@@ -859,7 +861,7 @@ def _run(args: argparse.Namespace) -> int:
             # register_cohort returns False on a failed registry write. A cohort that is
             # invisible to discover_cohorts is invisible to every nightly sync, so a claimed
             # -but-unregistered cohort must red the bootstrap rather than proceed silently.
-            if not seed.register_cohort(args.course, args.org):
+            if not register_cohort(args.course, args.org):
                 failures += 1
                 log_err(
                     f"could not register {args.org} in {args.course}'s cohort registry - "
@@ -894,7 +896,7 @@ def _run(args: argparse.Namespace) -> int:
         else:
             log(
                 f"  (no --course given - add {args.org} to its course org's "
-                f".github/{seed.COHORTS_PATH} to show it in the faculty & instructors dropdowns)"
+                f".github/{COHORTS_PATH} to show it in the faculty & instructors dropdowns)"
             )
     else:
         # Course: seed the org-level workflows (incl. the central Release actions) into .github.
@@ -964,7 +966,7 @@ def _run(args: argparse.Namespace) -> int:
     failures += secret_failures
 
     # 5. Generate the org-overview README now that all repos exist (clickable index).
-    failures += seed.update_profile_readme(args.org, org_name, course_name)
+    failures += update_profile_readme(args.org, org_name, course_name)
 
     if admin_logins and not args.cohort:
         admins_step = (

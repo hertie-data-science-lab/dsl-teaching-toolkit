@@ -504,8 +504,8 @@ def _stub_bootstrap(monkeypatch) -> None:
     monkeypatch.setattr(bc, "add_course_admins", lambda org, handles: 0)
     monkeypatch.setattr(bc, "validate_secret_presence", lambda org, secret: True)
     monkeypatch.setattr(bc, "put_file", lambda *a, **k: True)
-    monkeypatch.setattr(bc.seed, "register_cohort", lambda course, cohort: True)
-    monkeypatch.setattr(bc.seed, "update_profile_readme", lambda *a, **k: 0)
+    monkeypatch.setattr(bc, "register_cohort", lambda course, cohort: True)
+    monkeypatch.setattr(bc, "update_profile_readme", lambda *a, **k: 0)
     monkeypatch.setattr(bc.sync_faculty, "sync", lambda course, cohorts=None: 0)
 
 
@@ -570,7 +570,7 @@ def test_bootstrap_reports_an_unreachable_api_instead_of_a_traceback(
     def boom(org, org_name=None, course_name=None):
         raise RuntimeError("could not list repos in Course-Org: gh: HTTP 502")
 
-    monkeypatch.setattr(bc.seed, "update_profile_readme", boom)
+    monkeypatch.setattr(bc, "update_profile_readme", boom)
     monkeypatch.setattr("sys.argv", ["bootstrap_course", "--org", "Course-Org"])
 
     assert bc.main() == 1
@@ -1031,7 +1031,7 @@ def test_cohort_bootstrap_reds_when_registration_fails(monkeypatch, capsys):
     # register_cohort returns False on a failed registry write: a cohort invisible to
     # discover_cohorts is invisible to every nightly sync, so it must red the bootstrap.
     _stub_bootstrap(monkeypatch)
-    monkeypatch.setattr(bc.seed, "register_cohort", lambda course, cohort: False)
+    monkeypatch.setattr(bc, "register_cohort", lambda course, cohort: False)
     monkeypatch.setattr(bc.site, "sync_site", lambda c, o: 0)
     monkeypatch.setattr("sys.argv", _cohort_argv())
 
