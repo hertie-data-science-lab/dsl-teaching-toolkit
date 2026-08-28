@@ -904,8 +904,8 @@ def _head(org: str, repo: str, branch: str) -> tuple[str, str] | None:
 
     Empty is a state every repo passes through: create_repo does not auto-init, so the
     first seed after it lands into a repo with no commit, no tree and no ref. The Contents
-    API used to hide that (it creates the initial commit itself); the git data API has to
-    be told, which is what the None arm is for."""
+    API hides that - it creates the initial commit itself - and the git data API cannot be
+    told: see `_commit_tree`, which routes that one case back through Contents."""
     code, out = gh(
         "api",
         f"repos/{org}/{repo}/commits/{branch}",
@@ -918,6 +918,25 @@ def _head(org: str, repo: str, branch: str) -> tuple[str, str] | None:
     if is_missing_resource(out) or "HTTP 409" in out:
         return None
     raise RuntimeError(f"could not read {org}/{repo}@{branch}: {out[:200]}")
+
+
+def _seed_first_commit(
+    org: str, repo: str, tree: list[dict[str, Any]], message: str
+) -> bool:
+    """The first commit into a repo that has none, via the Contents API - the only one that
+    will create it (see `_commit_tree`).
+
+    One commit per file rather than one for the set, which is the cost of the API that
+    works here; it is paid once in a repo's life, on the seed that creates it. Deletions in
+    `tree` are skipped: there is nothing in an empty repo to remove."""
+    ok = True
+    for entry in tree:
+        content = entry.get("content")
+        if content is None:  # a `sha: None` delete - nothing there to delete
+            continue
+        if not put_file(org, repo, entry["path"], content.encode(), message):
+            ok = False
+    return ok
 
 
 def _commit_tree(
@@ -933,9 +952,19 @@ def _commit_tree(
     except RuntimeError as exc:
         log_err(str(exc))
         return False
-    payload: dict[str, Any] = {"tree": tree}
-    if parent:
-        payload["base_tree"] = parent[1]
+    if parent is None:
+        # A repo with NO commits at all refuses `POST /git/trees` outright - "Git Repository
+        # is empty" (409) - whether or not a base_tree is sent. Omitting base_tree is not
+        # enough: the git data API needs a commit to hang a tree off, and only the Contents
+        # API will create that first one. So the first write into a freshly-created repo
+        # goes file by file through Contents, and every later write takes the batched path.
+        #
+        # This is not hypothetical tidying: batching the classroom-config scaffolds into one
+        # commit moved them off Contents, and the first cohort org bootstrapped afterwards
+        # could not seed that repo at all - the roster, schedule and people.yml never
+        # landed, and every later step that reads them failed in turn.
+        return _seed_first_commit(org, repo, tree, message)
+    payload: dict[str, Any] = {"tree": tree, "base_tree": parent[1]}
     code, new_tree = gh(
         "api",
         "--method",
