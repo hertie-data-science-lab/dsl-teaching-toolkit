@@ -120,7 +120,7 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
     )
 
     # Access is granted by github_handle alone (sync_faculty's actual criterion) -
-    # site._people_from_meta requires a display `name` too (it's for website cards),
+    # site_repo._people_from_meta requires a display `name` too (it's for website cards),
     # so it undercounts here. Reuse the already-fetched course_raw. course-admin only
     # - a course-level `instructors`/`teaching_assistants` entry is a legitimate,
     # display-only website card (see the People section in
