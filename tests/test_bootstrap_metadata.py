@@ -75,13 +75,14 @@ def test_schedule_yml_seed_is_commented_and_covers_every_field():
         assert key in schedule
 
 
-def test_classroom_readme_points_to_course_org_for_people():
-    # There is no cohort dsl-course.yml any more - the README is the one place that
-    # still tells faculty where people/instructors are actually managed.
+def test_classroom_readme_documents_the_cohort_files_it_holds():
+    # Instructors configure a cohort HERE (people.yml, schedule.yml, the roster); the README
+    # must document those files and never send them back up to the course org.
     readme = welcome.template("classroom-config/README.md")
-    assert "course org" in readme
+    assert "people.yml" in readme
     assert "schedule.yml" in readme
     assert "schedule.csv" not in readme
+    assert "course org's" not in readme
 
 
 def test_starter_roster_seeds_the_full_column_set():
