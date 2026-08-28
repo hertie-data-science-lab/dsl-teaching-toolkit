@@ -130,15 +130,45 @@ def test_cohort_metadata_carries_course_pointer():
     assert course == "My-Course-E1"
 
 
-def test_cohort_github_repo_never_carries_the_course_hub_topic():
+def _bootstrapped_topics(monkeypatch, **kwargs) -> list[list[str]]:
+    """The topics `create_profile_repo` actually stamps on the org's `.github` repo."""
+    stamped: list[list[str]] = []
+    monkeypatch.setattr(bc, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(bc, "seed_if_absent", lambda *a, **k: True)
+    monkeypatch.setattr(
+        bc, "set_repo_topics", lambda org, repo, topics: stamped.append(topics) or True
+    )
+    bc.create_profile_repo("Org", "Org Name", "Course Name", **kwargs)
+    return stamped
+
+
+def test_a_cohort_github_repo_is_stamped_dsl_cohort_and_nothing_else(monkeypatch):
     # list_orgs.py enumerates COURSE orgs by the dsl-course-hub topic; a cohort org
-    # stamped with it shows up in the course-org inventory as a phantom course.
-    assert bc._profile_topics(is_cohort=True, course_code="E1234") == ["dsl-cohort"]
-    assert bc._profile_topics(is_cohort=False, course_code="E1234") == [
-        "dsl-course-hub",
-        "course-e1234",
+    # stamped with it shows up in the course-org inventory as a phantom course. Asserted
+    # through bootstrap itself: computing the right list and never stamping it - which is
+    # what the old test allowed - leaves every org untagged and the inventory empty.
+    assert _bootstrapped_topics(monkeypatch, course_code="E1234", is_cohort=True) == [
+        ["dsl-cohort"]
     ]
-    assert bc._profile_topics(is_cohort=False) == ["dsl-course-hub"]
+
+
+def test_a_course_github_repo_is_stamped_the_hub_topic_and_its_course_code(monkeypatch):
+    assert _bootstrapped_topics(monkeypatch, course_code="E1234") == [
+        ["dsl-course-hub", "course-e1234"]
+    ]
+    assert _bootstrapped_topics(monkeypatch) == [["dsl-course-hub"]]
+
+
+def test_a_repo_that_could_not_be_created_is_not_stamped(monkeypatch):
+    # create_profile_repo returns early, so nothing downstream must run against a repo
+    # that is not there.
+    monkeypatch.setattr(bc, "create_repo", lambda *a, **k: False)
+    stamped: list[list[str]] = []
+    monkeypatch.setattr(
+        bc, "set_repo_topics", lambda org, repo, topics: stamped.append(topics) or True
+    )
+    bc.create_profile_repo("Org", "Org Name", "Course Name")
+    assert stamped == []
 
 
 def test_inventory_skips_cohort_pointer_orgs(monkeypatch):

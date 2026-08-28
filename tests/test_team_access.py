@@ -9,6 +9,7 @@ roster/schedule or triage onboarding issues."""
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -24,9 +25,58 @@ def test_button_teams_is_single_sourced():
     assert bootstrap_course.BUTTON_TEAMS is utils.COURSE_TEAM_ACCESS
 
 
-def test_scaffolds_use_the_shared_grant_helper():
-    # the materials/assignment scaffolds grant the faculty teams via this helper
-    assert scaffold.grant_course_team_access is utils.grant_course_team_access
+@pytest.fixture
+def scaffold_grants(monkeypatch):
+    """Run a scaffold with everything but the ACCESS GRANTS stubbed out; returns the
+    `(team, repo, permission)` grants it actually issued."""
+    granted: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        utils,
+        "grant_team_repo_access",
+        lambda org, team, repo, perm, **k: granted.append((team, repo, perm)) or True,
+    )
+    monkeypatch.setattr(utils, "create_team", lambda *a, **k: True)
+    monkeypatch.setattr(scaffold, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(scaffold, "set_repo_topics", lambda *a, **k: None)
+    monkeypatch.setattr(scaffold, "refresh_stubs", lambda *a, **k: 0)
+    monkeypatch.setattr(scaffold, "put_files", lambda *a, **k: True)
+    monkeypatch.setattr(utils, "put_file", lambda *a, **k: True)
+    monkeypatch.setattr(utils, "put_files", lambda *a, **k: True)
+    monkeypatch.setattr(utils, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(scaffold, "seed_files_if_absent", lambda *a, **k: True)
+    monkeypatch.setattr(scaffold, "seed_if_absent", lambda *a, **k: True)
+    monkeypatch.setattr(scaffold.seed, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(scaffold.seed, "discover_assignments", lambda org: [])
+    monkeypatch.setattr(scaffold.seed, "_push_workflows", lambda *a, **k: 0)
+
+    def fake_gh(*args, **kwargs):
+        if args[:2] == ("repo", "clone"):
+            Path(args[3]).mkdir(parents=True, exist_ok=True)
+        return 0, ""
+
+    monkeypatch.setattr(scaffold, "gh", fake_gh)
+    monkeypatch.setattr(scaffold, "git", lambda *a, **k: (0, ""))
+    return granted
+
+
+def test_a_scaffolded_materials_repo_is_granted_to_the_faculty_teams(scaffold_grants):
+    # A non-owner instructor has to be able to push to a repo they just scaffolded. The
+    # grant is asserted by DRIVING the scaffold, not by comparing an import binding: the
+    # scaffold could grant the wrong repo, or skip the call, and the binding would match.
+    scaffold.scaffold_materials("Org", "f2026")
+    repo = "course-materials-f2026"
+    for team, perm in utils.COURSE_TEAM_ACCESS.items():
+        assert (team, repo, perm) in scaffold_grants
+    # ...and the cohort-declared instructors team for that tag, scoped to its own content.
+    assert ("instructors-f2026", repo, "push") in scaffold_grants
+
+
+def test_a_scaffolded_assignment_repo_is_granted_to_the_faculty_teams(scaffold_grants):
+    scaffold.scaffold_assignment("Org", "1", "f2026")
+    repo = "assignment-1-f2026"
+    for team, perm in utils.COURSE_TEAM_ACCESS.items():
+        assert (team, repo, perm) in scaffold_grants
+    assert ("instructors-f2026", repo, "push") in scaffold_grants
 
 
 def test_faculty_teams_are_only_instructors_and_admin():

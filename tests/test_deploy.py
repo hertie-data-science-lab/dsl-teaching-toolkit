@@ -267,11 +267,21 @@ def test_dry_run_still_flags_a_path_escaping_the_clone(monkeypatch, capsys):
     assert "course-materials-f2026/lectures/02 -> materials/lectures/02" in out
 
 
-def test_released_repos_are_read_by_both_cohort_role_teams():
-    # Auditors see exactly what enrolled students see once it's released - the read grant
-    # is one helper covering both teams, so no release site can grant only `students`.
-    assert utils.READ_TEAMS == ("students", "auditors")
-    assert deploy.grant_read_teams is utils.grant_read_teams
+def test_a_released_repo_is_actually_granted_to_both_cohort_role_teams(monkeypatch):
+    # Auditors see exactly what enrolled students see once it's released, so a release must
+    # grant BOTH role teams read on its destination repo. Asserted through a real release
+    # rather than by comparing an import binding: deploy could call the right helper for
+    # the wrong repo, or not call it at all, and the binding would still match.
+    granted: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        utils,
+        "grant_team_repo_access",
+        lambda org, team, repo, perm, **k: granted.append((team, repo, perm)) or True,
+    )
+    _stub_deploy_many(monkeypatch, _one_file, real_grants=True)
+    deploy.deploy_many("COURSE", "COHORT", [_deploy("sec")], sync=False)
+    assert ("students", "materials", "pull") in granted
+    assert ("auditors", "materials", "pull") in granted
 
 
 SUPERSEDED = "Released course materials (enrolled students only)"
@@ -495,7 +505,12 @@ def test_the_excluded_root_files_are_named_from_one_place():
 # ----------------------------- a bad symlink is one failed copy, not a dead cohort
 
 
-def _stub_deploy_many(monkeypatch, build_source):
+def _one_file(src):
+    (src / "sec").mkdir()
+    (src / "sec" / "notes.md").write_text("real\n")
+
+
+def _stub_deploy_many(monkeypatch, build_source, real_grants=False):
     """Drive deploy_many against local trees: `build_source(path)` fills each source clone,
     dest clones start empty, and nothing is committed.
 
@@ -534,8 +549,9 @@ def _stub_deploy_many(monkeypatch, build_source):
 
     monkeypatch.setattr(deploy, "gh", fake_gh)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
-    monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    if not real_grants:
+        monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+        monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "git", fake_git)
     return snapshots
 
