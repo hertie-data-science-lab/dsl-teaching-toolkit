@@ -27,13 +27,19 @@ def test_every_module_imports(name):
 
 
 def _function_local_imports(tree: ast.AST) -> list[str]:
-    """Every `import`/`from ... import` that sits inside a function body."""
+    """Every `import`/`from ... import` that sits inside a function body.
+
+    Absolute ones count too. The rule was written for the relative kind, where a
+    function-local import is nearly always a worked-around cycle - but `from pathlib
+    import Path` buried in one function is the same hidden dependency and the same
+    per-call lookup, and it sat there unflagged because the check only asked about
+    `child.level`."""
     found = []
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
         for child in ast.walk(node):
-            if isinstance(child, ast.ImportFrom) and child.level:
+            if isinstance(child, ast.ImportFrom):
                 found.append(
                     f"{node.name}: from {'.' * child.level}{child.module or ''}"
                 )
