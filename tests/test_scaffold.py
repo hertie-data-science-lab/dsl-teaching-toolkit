@@ -76,7 +76,7 @@ def fake(monkeypatch):
     monkeypatch.setattr(scaffold, "set_repo_topics", lambda *a, **k: None)
     monkeypatch.setattr(scaffold, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(scaffold, "discover_assignments", lambda org: [])
-    monkeypatch.setattr(seed, "_push_workflows", lambda *a, **k: 0)
+    monkeypatch.setattr(scaffold, "push_content_workflows", lambda *a, **k: 0)
     return f
 
 
@@ -147,8 +147,8 @@ def test_materials_repo_reports_non_zero_when_release_buttons_do_not_seed(
     fake, monkeypatch
 ):
     # A materials repo with no Release buttons (workflow writes failed) must not report a
-    # green "ready" - _push_workflows' failure count is the exit code.
-    monkeypatch.setattr(seed, "_push_workflows", lambda *a, **k: 2)
+    # green "ready" - push_content_workflows' failure count is the exit code.
+    monkeypatch.setattr(scaffold, "push_content_workflows", lambda *a, **k: 2)
     assert scaffold.scaffold_materials("Org", "f2026") == 1
 
 
@@ -371,7 +371,6 @@ def test_refresh_improves_an_existing_stub_but_never_creates_one(monkeypatch):
     # `create=False` is what makes that safe over EVERY content repo:
     # discover_content_repos returns the code and dataset repos too, and seeding a syllabus
     # into `lecture-code-f2026` would be nonsense.
-    from dsl_course import seed
 
     f = FakeRepo()
     monkeypatch.setattr(utils, "get_file_content", f.get_file_content)

@@ -16,6 +16,7 @@ from conftest import workflow_inputs, workflow_jobs
 from dsl_course import (
     profile_readme,
     seed,
+    workflows_place,
     workflows_render,
 )
 
@@ -431,9 +432,9 @@ def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
         commits.append((files, list(delete), message))
         return True
 
-    monkeypatch.setattr(seed, "put_files", fake_put_files)
+    monkeypatch.setattr(workflows_place, "put_files", fake_put_files)
     assert (
-        seed._push_workflows(
+        workflows_place.push_content_workflows(
             "Course", "course-materials-f2026", ["Cohort-f2026"], ["assignment-1-f2026"]
         )
         == 0
@@ -443,7 +444,7 @@ def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
     pushed = {path: content.decode() for path, content in files.items()}
     assert (
         set(pushed)
-        == set(seed.WORKFLOWS)
+        == set(workflows_place.WORKFLOWS)
         == {
             ".github/workflows/release-materials.yml",
             ".github/workflows/release-assignment.yml",
