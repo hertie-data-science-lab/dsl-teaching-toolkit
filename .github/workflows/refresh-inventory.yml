@@ -109,8 +109,10 @@ jobs:
               --body "Automated refresh by \`refresh-inventory\`. Course orgs discovered via topic \`dsl-course-hub\`, cohort orgs via \`dsl-cohort\`." \
               --base main --head "$BRANCH"
           fi
-          # main requires the `pytest` check, so the merge has to WAIT for it - merging
-          # outright raced CI and failed with `Required status check "pytest" is expected`,
+          # main requires the `pytest` and `jekyll-contract` checks (both set by hand on
+          # GitHub - see docs-admin-arch/central-admin.md), so the merge has to WAIT for
+          # them - merging outright raced CI and failed with `Required status check
+          # "pytest" is expected`,
           # which is how this silently stopped landing (the run went red, the PR stayed
           # open, and the inventory drifted for weeks).
           #

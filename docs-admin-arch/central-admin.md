@@ -195,7 +195,10 @@ code straight into every live org. Three settings, none of them in code:
 3. **Create the `release` environment** (Settings -> Environments) with the `admin` team as
    **required reviewers**. Promote's job runs in the environment named by its `to:` input,
    so a release promotion waits for an approval and a staging soak does not.
-`main` keeps what it has: PR only, `pytest` required.
+On `main`: PR only, with **both** `ci.yml` jobs required - `pytest` **and**
+`jekyll-contract`. Required checks are named by hand, and `jekyll-contract` is the only
+thing that catches a Liquid error in the site templates; unrequired, it is a check a PR
+merges straight past.
 
 ### Putting an org on a tier
 
