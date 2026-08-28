@@ -239,19 +239,31 @@ _CRON_NOTICE = (
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           title="$WORKFLOW is failing"
-          # A filed issue emails only the repo's watchers, which in practice is nobody.
-          # The mention makes a red cron land in the admins' inbox; course-admin, not
-          # instructors, because broken infrastructure is not the teaching staff's problem.
-          body=$(printf 'The unattended run failed or was cancelled: %s\\n\\nNothing retries it before the next scheduled run. This issue closes itself once a run succeeds.\\n\\ncc @%s/course-admin\\n' "$RUN_URL" "${REPO%%/*}")
+          note=$(printf 'The unattended run failed or was cancelled: %s\\n\\nNothing retries it before the next scheduled run. This issue closes itself once a run succeeds.\\n' "$RUN_URL")
+          # A filed issue emails only the repo's watchers, which in practice is nobody, so
+          # the FIRST report mentions the org's admins; course-admin, not instructors,
+          # because broken infrastructure is not the teaching staff's problem.
+          body=$(printf '%s\\ncc @%s/course-admin\\n' "$note" "${REPO%%/*}")
           # The step runs under `bash -e`, so an unguarded capture would abort the step on a
           # transient search failure - before the `gh issue create` that is the whole point.
           # No dedupe hit just means we file a fresh issue.
-          existing=$(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number --jq '.[0].number') || true
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --repo "$REPO" --body "$body"
-          else
+          existing=$(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number,updatedAt --jq '.[0] | select(.) | "\\(.number) \\(.updatedAt)"') || true
+          if [ -z "$existing" ]; then
             gh issue create --repo "$REPO" --title "$title" --body "$body"
+            exit 0
           fi
+          # Already open. The hourly scheduler fails EVERY hour while a fault stands, and
+          # a comment per run buried the thread and mentioned course-admin 24 times a day
+          # about one fault. So comment only once the thread has been quiet for six hours,
+          # and without the cc - whoever it reached the first time is already subscribed.
+          # An unparseable timestamp reads as epoch, i.e. "long overdue": the point of the
+          # issue is that somebody hears about the failure.
+          last=$(date -u -d "${existing#* }" +%s 2>/dev/null || echo 0)
+          if [ $(( $(date -u +%s) - last )) -lt 21600 ]; then
+            echo "already reported within the last 6h - see issue ${existing%% *}"
+            exit 0
+          fi
+          gh issue comment "${existing%% *}" --repo "$REPO" --body "$note"
 """
     + _CRON_CLOSE
 )
