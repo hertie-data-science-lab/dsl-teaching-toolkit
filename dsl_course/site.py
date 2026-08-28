@@ -44,7 +44,7 @@ from urllib.parse import quote
 
 import yaml
 
-from . import schedule, seed
+from . import schedule, seed, welcome
 from .assign import assignment_slug
 from .discovery import discover_handed_out_assignments, list_org_repos
 from .utils import (
@@ -97,6 +97,53 @@ READINGS_SECTION = "readings"
 # can re-sync unattended. Leading `_`, so Jekyll ignores it rather than serving it.
 PUBLISH_CONFIG = "_publish-config.yml"
 _GIT_ENV = GIT_ENV
+
+# The shared Jekyll theme, and the ref every generated site pins it at.
+#
+# Pinned, because sites used to track its `main`: a theme PR reached all six live sites
+# the moment it merged, and twice took two of them down before anyone had opened one.
+# What the theme still owns is the GENERIC chrome - header, footer, nav, brand colours,
+# the `default`/`page`/`post` layouts. The course-specific layouts, includes and
+# stylesheet ship from `templates/site/` in THIS repo (see `_site_templates`), where they
+# sit beside the renderers whose front matter they read.
+#
+# A commit, not a tag, because the theme carries no release tags yet; `remote_theme:`
+# takes either form, so this becomes `@v1.0.0` the day one is cut.
+THEME_REPO = "hertie-data-science-lab/dsl-jekyll-theme"
+THEME_REF = "9288394c5c6d78cf8e881bf4e22ab025a5da1888"
+
+# `_config.yml` keys the sync owns because the templates it ships DEPEND on them, as
+# opposed to the course-identity keys, which are content. Written whether or not the
+# site's own `_config.yml` already has them: a site generated before this existed has no
+# `remote_theme:` line to replace, and a site missing `dateformat` prints every date on
+# every page as a raw ISO timestamp.
+_THEME_CONFIG = {
+    "remote_theme": f"{THEME_REPO}@{THEME_REF}",
+    "dateformat": "%m/%d/%Y",
+}
+
+# The collections the shipped templates read (`site.lectures`, `site.assignments`,
+# `site.events`, `site.announcements`) and the layout an assignment page gets. Both are
+# multi-line blocks rather than scalars, so `_ensure_config_block` writes them; both are
+# a CONTRACT of templates/site/ rather than a preference, and a site missing either
+# builds green into empty pages - the worst way for this to be wrong.
+_COLLECTIONS_BLOCK = """collections:
+  events:
+    output: true
+  lectures:
+    output: true
+  assignments:
+    output: true
+  announcements:
+    output: false
+"""
+_DEFAULTS_BLOCK = """defaults:
+  - scope:
+      path: ""
+      type: "assignments"
+    values:
+      layout: "assignment"
+"""
 
 
 def _cohort_tag(cohort_org: str) -> str | None:
@@ -204,14 +251,21 @@ def _site_readme(org: str, cohort: bool) -> str:
         f"| `_data/nav.yml` | the nav bar |\n"
         + ("| `_data/materials.yml` | the All Materials index |\n" if cohort else "")
         + f"| the tab pages - {tab_pages} | the wrappers the tabs point at |\n"
-        + "| `_config.yml` | the course identity keys only (name, code, semester, org) |\n\n"
+        + "| `_layouts/`, `_includes/`, `_sass/_course.scss` | how every page renders |\n"
+        + "| `_config.yml` | the course identity keys, the pinned theme, and the "
+        "`collections:`/`defaults:` the layouts need |\n\n"
         "Each collection is CLEARED and rewritten on every sync, so a file you add to one "
         "disappears on the next run. The tab pages are rewritten too - they are generated "
         "wrappers, so put your own words in `index.md`, or in a page of your own linked "
         "from there.\n\n"
         "## Everything else is yours\n\n"
-        "Layouts, styles, `index.md`, any page you add yourself, `Gemfile` - the theme - "
-        "are never rewritten. Change them freely.\n\n"
+        "`index.md`, any page you add yourself, `_announcements/`, `_images/`, `Gemfile`, "
+        "further `_data/*.yml` - never rewritten. Change them freely.\n\n"
+        "The rendering is not yours to change here: `_layouts/`, `_includes/` and "
+        "`_sass/_course.scss` are shipped from `templates/site/` in the DSL teaching "
+        "toolkit, and the rest of the styling from the shared `dsl-jekyll-theme`. An edit "
+        "in this repo is overwritten on the next sync; open a PR against the toolkit "
+        "instead, and every course site gets it.\n\n"
         "If you edit a generated file anyway, the sync opens an issue naming the commit it "
         "overwrote, so the change can be copied back out of it.\n"
     )
@@ -238,7 +292,12 @@ def _stamp_config(text: str, keys: list[str]) -> str:
     )
 
 
-def _set_config(text: str, key: str, value: str) -> str:
+# Stamped above anything this sync ADDS to a `_config.yml` it did not write - so a reader
+# of the file can tell the lines that are theirs from the lines that get rewritten.
+_MANAGED_MARKER = "# managed by the DSL course sync - rewritten on every run"
+
+
+def _set_config(text: str, key: str, value: str, *, insert: bool = False) -> str:
     """Replace a top-level `key: ...` line in _config.yml, preserving the rest.
 
     The value is always written as a one-line double-quoted scalar (see `_q`). Any
@@ -246,16 +305,49 @@ def _set_config(text: str, key: str, value: str) -> str:
     a `>`/`|` block scalar doesn't strand its body as invalid YAML.
 
     A key the template's `_config.yml` doesn't have is a no-op - logged, so template drift
-    (a key the code sets that the site theme dropped) is visible rather than silent."""
+    (a key the code sets that the site theme dropped) is visible rather than silent. That
+    is right for the course-IDENTITY keys, which are content: a site that dropped
+    `course_code:` chose to. `insert=True` appends the key instead, for the handful the
+    shipped templates DEPEND on (`_THEME_CONFIG`): there a missing key is not a choice, it
+    is a site generated before the key existed, and leaving it out renders a broken page."""
     new, n = re.subn(
         rf"(?m)^({re.escape(key)}:[ \t]*).*(?:\n[ \t]+\S.*)*$",
         lambda m: f'{m.group(1)}"{_q(value)}"',
         text,
         count=1,
     )
-    if n == 0:
+    if n:
+        return new
+    if not insert:
         log(f"  (_config.yml has no `{key}:` key - not written; template drift?)")
-    return new
+        return new
+    added = f'{_MANAGED_MARKER}\n{key}: "{_q(value)}"\n'
+    return text.rstrip("\n") + "\n\n" + added
+
+
+def _ensure_config_block(text: str, key: str, block: str) -> str:
+    """Write a verbatim MULTI-LINE `_config.yml` block (`collections:`, `defaults:`),
+    replacing whatever the site had under that key and appending it when it had none.
+
+    Not `_set_config`, which folds a value onto one quoted line - right for a course name,
+    impossible for a nested mapping. These two are a contract of the templates this sync
+    ships rather than anything faculty choose, so the block goes in whole: a site whose
+    `collections:` lost `lectures` renders an empty Lectures page and builds green, which
+    is the failure nobody notices.
+
+    The block is matched with or without the marker line above it, so a second sync
+    replaces what the first wrote rather than stacking another copy."""
+    body = _MANAGED_MARKER + "\n" + block.rstrip("\n") + "\n"
+    new, n = re.subn(
+        rf"(?m)^(?:{re.escape(_MANAGED_MARKER)}\n)?{re.escape(key)}:[ \t]*.*$"
+        r"(?:\n[ \t]+.*)*\n?",
+        lambda _m: body,
+        text,
+        count=1,
+    )
+    if n:
+        return new
+    return text.rstrip("\n") + "\n\n" + body
 
 
 # The session pages. Their CONTENT is a theme layout (dsl-jekyll-theme's
@@ -409,6 +501,27 @@ def _nav_yaml(cohort: bool) -> str:
         "# page of your own as a file in the repo and link it from `index.md` instead.\n"
         "items:\n" + body + "\n"
     )
+
+
+@cache
+def _site_templates() -> dict[str, str]:
+    """`{repo-relative path: content}` for everything under `templates/site/` - the
+    course-specific Jekyll layouts, includes and stylesheet this repo owns.
+
+    Walked, not enumerated: a template added to the directory ships on the next sync with
+    no second edit here, which is the only way the two cannot disagree. The paths are the
+    site-repo paths verbatim (`_layouts/schedule.html`, `_sass/_course.scss`), so they drop
+    straight into `plan.files`.
+
+    Read from real files rather than Python literals for the same reason as
+    `welcome.template`: faculty (and the theme's maintainer) can read and PR the thing a
+    site will actually receive."""
+    root = welcome.TEMPLATES / "site"
+    return {
+        path.relative_to(root).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
 
 
 def _site_repo(org: str) -> str:
@@ -1833,13 +1946,20 @@ class _SitePlan:
     content}` (so an entry that is no longer generated - a de-released session, a template
     placeholder - disappears, and a collection the sync does not own is left alone);
     `files` every other tracked file to write, by repo-relative path (`_data/people.yml`,
-    the publish config, ...); `commit` the commit subject; `label`/`done` the wording of
-    this sync's log lines."""
+    the publish config, ...); `retire` paths to DELETE if the site still has them;
+    `commit` the commit subject; `label`/`done` the wording of this sync's log lines.
+
+    `retire` exists because `files` cannot express a removal: the apply step is `git add
+    -A` over a checkout, so a file the toolkit stops shipping simply stays in the repo
+    forever. It is the local-checkout twin of `put_files(delete=...)`, and a path already
+    absent is not an error - `git rm --ignore-unmatch` - so the same list is safe to
+    re-declare on every sync until every site has converged."""
 
     config: dict[str, str]
     collections: dict[str, dict[str, str]]
     commit: str
     files: dict[str, str] = field(default_factory=dict)
+    retire: tuple[str, ...] = ()
     label: str = "site"
     done: str = "synced + redeploying"
 
@@ -2083,14 +2203,22 @@ def _sync_site_repo(
         if plan is None:
             return 1
 
-        # Course identity into _config.yml (course_name / _semester / _code /
-        # _description, github_org) - only the keys the plan declares, nothing else.
+        # _config.yml, in two halves. The plan's own keys are course IDENTITY (course_name
+        # / _semester / _code / _description, github_org) and are replace-only. The theme
+        # keys and the two blocks are the CONTRACT of the templates written below - a site
+        # that lacks them renders those templates wrong - so they go in whether the file
+        # has them or not.
         cfg_path = wd / "_config.yml"
         if cfg_path.is_file():
             cfg = cfg_path.read_text()
             for key, value in plan.config.items():
                 cfg = _set_config(cfg, key, value)
-            cfg_path.write_text(_stamp_config(cfg, sorted(plan.config)))
+            for key, value in _THEME_CONFIG.items():
+                cfg = _set_config(cfg, key, value, insert=True)
+            cfg = _ensure_config_block(cfg, "collections", _COLLECTIONS_BLOCK)
+            cfg = _ensure_config_block(cfg, "defaults", _DEFAULTS_BLOCK)
+            owned = [*plan.config, *_THEME_CONFIG, "collections", "defaults"]
+            cfg_path.write_text(_stamp_config(cfg, sorted(owned)))
 
         # Regenerate the owned collections; leave everything else (layouts, pages) as the
         # template provides.
@@ -2106,6 +2234,21 @@ def _sync_site_repo(
         for rel, content in plan.files.items():
             (wd / rel).parent.mkdir(parents=True, exist_ok=True)
             (wd / rel).write_text(content)
+
+        # Removals. `git add -A` below stages everything the working tree holds, so a file
+        # the toolkit no longer ships would otherwise live on in the site repo untouched.
+        for rel in plan.retire:
+            git(
+                "-C",
+                str(wd),
+                *_GIT_ENV,
+                "rm",
+                "-r",
+                "-q",
+                "--ignore-unmatch",
+                "--",
+                rel,
+            )
 
         git("-C", str(wd), *_GIT_ENV, "add", "-A")
         code, _ = git(
@@ -2306,6 +2449,11 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                     syllabus=_released_syllabus(cohort_org, indexable),
                 ),
                 **_theme_pages(cohort=True),
+                # The course-specific layouts, includes and stylesheet - shipped
+                # from templates/site/, not from the shared theme, so a change to
+                # how a session renders is tested against the generator that
+                # writes its front matter before any site sees it.
+                **_site_templates(),
             },
             # Assignment handout/due dates come from schedule.yml when set (keyed on the
             # assignment slug), else a synthesised fortnightly cadence.
@@ -2584,6 +2732,11 @@ def sync_public_site(
                 # No cohort repos to index, so `/materials/` stays the readings page.
                 "_data/nav.yml": _nav_yaml(cohort=False),
                 **_theme_pages(cohort=False),
+                # The course-specific layouts, includes and stylesheet - shipped
+                # from templates/site/, not from the shared theme, so a change to
+                # how a session renders is tested against the generator that
+                # writes its front matter before any site sees it.
+                **_site_templates(),
                 # Persist the settings THIS publish used, in the site repo itself, so the
                 # daily cron can repeat it with no inputs (see resync_public_site).
                 PUBLISH_CONFIG: (
