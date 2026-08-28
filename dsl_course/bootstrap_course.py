@@ -372,11 +372,18 @@ def create_profile_repo(
     people.course_admins live from the start - see _course_admins_block.
     """
     log_step("Setting up .github profile repo")
+    # Opposite instructions to the same reader, so the description says which: a cohort
+    # org's `.github` is machine-owned scaffolding, a course org's is where faculty work -
+    # it holds dsl-course.yml and every workflow they run.
     if not create_repo(
         org,
         ".github",
         private=False,
-        description="Org profile and configuration",
+        description=(
+            "[do not touch]: Org profile and configuration"
+            if is_cohort
+            else "[control panel]: Org profile & configuration"
+        ),
     ):
         return
 

@@ -738,7 +738,9 @@ def scaffold_site(org: str) -> int:
         owner=org,
         name=site,
         private=False,
-        description="Course website (auto-deployed on push)",
+        # Generated and rewritten on every sync, which is what the reader needs to know
+        # from the org's landing page.
+        description="[do not touch]: Course website (auto-deployed)",
     ):
         log_err(
             f"  ! could not generate the site from {WEBSITE_TEMPLATE_ORG}/{WEBSITE_TEMPLATE}"

@@ -314,16 +314,57 @@ def test_a_superseded_description_is_updated_and_others_are_left_alone(monkeypat
 def test_every_superseded_description_names_a_replacement_we_still_write(monkeypatch):
     # The forcing function: each mapping value must be a description the code actually
     # writes today, or convergence would move repos onto a wording nothing else uses.
-    import re
+    #
+    # Every string constant in those modules, via `ast` rather than a `description="..."`
+    # regex: a tier-specific description is written by a conditional expression, which the
+    # regex could not see - so the two tier tables went unguarded, which is the half of
+    # this rule most likely to rot (one old wording, two new ones).
+    import ast
     from pathlib import Path
 
     literals = set()
     for mod in ("bootstrap_course", "deploy", "scaffold", "grades", "assign"):
-        src = (Path(utils.__file__).parent / f"{mod}.py").read_text()
-        literals |= set(re.findall(r'description=f?"([^"]+)"', src))
-    for old, new in utils.SUPERSEDED_DESCRIPTIONS.items():
-        assert new in literals, f"{new!r} is not written anywhere any more"
-        assert old not in literals, f"{old!r} is still written - it is not superseded"
+        tree = ast.parse((Path(utils.__file__).parent / f"{mod}.py").read_text())
+        literals |= {
+            n.value
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Constant)
+            if isinstance(n.value, str)
+        }
+    for table in (
+        utils.SUPERSEDED_DESCRIPTIONS,
+        utils.SUPERSEDED_COHORT_DESCRIPTIONS,
+        utils.SUPERSEDED_COURSE_DESCRIPTIONS,
+    ):
+        for old, new in table.items():
+            assert new in literals, f"{new!r} is not written anywhere any more"
+            assert old not in literals, (
+                f"{old!r} is still written - it is not superseded"
+            )
+
+
+def test_the_dotgithub_description_says_the_opposite_thing_per_tier():
+    # A cohort org's .github is scaffolding nobody should open; a course org's is where
+    # faculty work. Converging both onto one wording would tell half of them the wrong
+    # thing, which is why the tier picks the table.
+    repos = [{"name": ".github", "description": "Org profile and configuration"}]
+    calls = []
+    original = utils.gh
+
+    def fake(*args, **kwargs):
+        calls.append(args)
+        return 0, ""
+
+    utils.gh = fake
+    try:
+        cohort = [dict(r) for r in repos]
+        utils.converge_descriptions("Cohort-f2026", cohort, cohort=True)
+        course = [dict(r) for r in repos]
+        utils.converge_descriptions("Course", course, cohort=False)
+    finally:
+        utils.gh = original
+    assert cohort[0]["description"] == "[do not touch]: Org profile and configuration"
+    assert course[0]["description"] == "[control panel]: Org profile & configuration"
 
 
 # --- releasing the whole repo -------------------------------------------------------

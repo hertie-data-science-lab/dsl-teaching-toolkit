@@ -648,11 +648,34 @@ SUPERSEDED_DESCRIPTIONS = {
     "Released course materials (enrolled students only)": (
         "Released lectures, labs, readings, and other materials"
     ),
+    # The site repo is generated and rewritten on every sync (site.py stamps that inside the
+    # repo itself), so its description says so where faculty see it: on the org's landing
+    # page, beside the repos they SHOULD open. "on push" went with it - true but about the
+    # mechanism, and the reader wants to know whether to touch it.
+    "Course website (auto-deployed on push)": (
+        "[do not touch]: Course website (auto-deployed)"
+    ),
+}
+
+# Per TIER, because one old wording wants two different new ones. A cohort org's `.github`
+# is machine-owned scaffolding faculty never open; a COURSE org's is where they actually
+# work - it holds dsl-course.yml and every workflow they run. A flat old -> new mapping
+# cannot tell those apart, so the tier picks the table. Same forcing function as above: a
+# reworded literal must be added here or convergence silently stops.
+SUPERSEDED_COHORT_DESCRIPTIONS = {
+    "Org profile and configuration": "[do not touch]: Org profile and configuration",
+}
+SUPERSEDED_COURSE_DESCRIPTIONS = {
+    "Org profile and configuration": "[control panel]: Org profile & configuration",
 }
 
 
-def converge_descriptions(org: str, repos: list[dict]) -> int:
+def converge_descriptions(org: str, repos: list[dict], cohort: bool = False) -> int:
     """Update every repo in `repos` whose description we have since reworded.
+
+    `cohort` selects the tier-specific table on top of the shared one: the same old
+    `.github` wording becomes "[do not touch]" on a cohort org and "[control panel]" on a
+    course org, because they are opposite instructions to the same reader.
 
     A GitHub description is only ever set at repo CREATION, so a wording fix otherwise
     never reaches a repo that already exists - while being the "What it's for" column on
@@ -667,9 +690,12 @@ def converge_descriptions(org: str, repos: list[dict]) -> int:
     Never fatal - a description is documentation, and a failed PATCH is worth a line, not
     a failed refresh. Returns the number changed.
     """
+    superseded = SUPERSEDED_DESCRIPTIONS | (
+        SUPERSEDED_COHORT_DESCRIPTIONS if cohort else SUPERSEDED_COURSE_DESCRIPTIONS
+    )
     changed = 0
     for repo in repos:
-        want = SUPERSEDED_DESCRIPTIONS.get((repo.get("description") or "").strip())
+        want = superseded.get((repo.get("description") or "").strip())
         if not want:
             continue
         code, _ = gh(
