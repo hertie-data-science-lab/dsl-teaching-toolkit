@@ -56,7 +56,12 @@ def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:
     At any depth, unlike `deploy._copy_ignore`, which anchors its exclusions to the repo
     root: the release path excludes plumbing that only ever lives at the root, while the
     thing this exists to stop - a `solution/` beside the lab it answers - is precisely a
-    nested folder."""
+    nested folder.
+
+    It filters NAMES, so every copytree it guards passes `symlinks=True` (as deploy.py
+    does). Following links would copy a `notes.pdf -> ../solution/answers.pdf` in as the
+    answers themselves, under a name this filter has no reason to deny - publishing the
+    exact content the denylist exists to withhold, to a public site."""
     return {n for n in names if is_denied_publication(n)}
 
 
@@ -224,7 +229,11 @@ def sync_public_site(
                         continue
                     dest = site_session / section
                     shutil.copytree(
-                        sec_src, dest, dirs_exist_ok=True, ignore=_publication_ignore
+                        sec_src,
+                        dest,
+                        dirs_exist_ok=True,
+                        symlinks=True,
+                        ignore=_publication_ignore,
                     )
                     links = _public_links(dest, f"{url_base}/{section}")
                     if links:
@@ -241,6 +250,7 @@ def sync_public_site(
                             read_src,
                             dest,
                             dirs_exist_ok=True,
+                            symlinks=True,
                             ignore=_publication_ignore,
                         )
                         links = _public_links(dest, f"{url_base}/{READINGS_SECTION}")

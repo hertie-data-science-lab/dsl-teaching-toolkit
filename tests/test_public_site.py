@@ -43,6 +43,9 @@ def _seed_source(root: Path) -> None:
         p = root / rel
         p.parent.mkdir(parents=True, exist_ok=True)
         p.write_text(body)
+    # A link out of the published folder into what sits beside it. Following it would copy
+    # the target's CONTENT in, under a name the denylist has no reason to refuse.
+    (root / "labs/01_first-lab/handout.pdf").symlink_to("solution/answers.ipynb")
 
 
 def _install_fakes(monkeypatch) -> dict[str, str]:
@@ -258,3 +261,13 @@ def test_the_public_site_never_publishes_what_sits_beside_the_material(published
     ):
         assert leaked not in files
     assert "answers" not in files["_lectures/lab-01.md"]
+
+
+def test_a_symlink_cannot_smuggle_a_denied_file_onto_the_public_site(published):
+    # The denylist filters NAMES, so a link is only ever as safe as the copy that follows
+    # it: `handout.pdf -> solution/answers.ipynb` is a name nothing would refuse, and the
+    # copy used to resolve it and publish the answers themselves. Copied AS a link, it
+    # points at a folder that was never copied, and so carries nothing.
+    files = published(readings_mode="actual-readings")
+    assert f"{SERVED}/session-1/labs/lab.ipynb" in files
+    assert "the answers" not in files.get(f"{SERVED}/session-1/labs/handout.pdf", "")
