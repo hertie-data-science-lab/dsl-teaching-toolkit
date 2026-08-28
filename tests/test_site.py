@@ -317,7 +317,7 @@ def test_an_unhanded_out_assignment_is_a_placeholder(monkeypatch):
     assert "    date: 2026-10-13T23:59:59" in out
     # the plan-side name only, never the README's own title
     assert 'title: "Assignment 1"' in out
-    assert "Not handed out yet" in out
+    assert "**Assignment 1 is not yet released**" in out
 
 
 def test_a_passed_handout_inlines_the_brief(monkeypatch):
@@ -384,8 +384,10 @@ def test_a_released_assignment_links_the_cohort_repo_not_the_course_org(monkeypa
         date(2026, 10, 13),
         handed_out=frozenset({"assignment-1"}),
     )
-    assert "Cohort-f2026/repositories?q=assignment-1-" in out
-    assert 'repo_name: "assignment-1-<your-handle>"' in out
+    # both levels: the theme reaches the due row via `map: "due_event"`, which cannot
+    # see the parent entry's fields
+    assert out.count("Cohort-f2026/repositories?q=assignment-1-") == 2
+    assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
     assert "Course" not in out.split("---")[1]  # the course org names no student repo
 
 
@@ -428,6 +430,8 @@ def test_a_pending_assignment_links_no_repo(monkeypatch):
         now=datetime(2026, 9, 21, tzinfo=BERLIN),
     )
     assert "repo_url" not in out
+    # the SHAPE is still named - it is the plan's, and known before anything ships
+    assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
     assert "`assignment-1-<your-handle>` repo appears when it is" in out
 
 

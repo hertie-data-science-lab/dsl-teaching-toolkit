@@ -1407,6 +1407,21 @@ def _assignment_entry(
     # The plan-side name - all a pending assignment ever shows, and the fallback for a
     # released README that opens with no `# ` heading.
     title = slug.replace("-", " ").title()
+    # `repo_name` either way - the shape is the plan's, known before anything ships - and
+    # `repo_url` only once there is something at the other end of it. So the theme tests
+    # the flag for state and the URL only for "have I somewhere to link", rather than
+    # inferring one from the other.
+    repo_lines = [f'repo_name: "{_q(repo_name)}"']
+    if out:
+        repo_lines.insert(
+            0,
+            f'repo_url: "https://github.com/orgs/{cohort_org}/repositories?q={slug}-"',
+        )
+    # Written at BOTH levels: the due row is a sub-hash the theme reaches through
+    # `map: "due_event"`, so it cannot see its parent's fields - and the row that tells a
+    # student when to submit is the one that should say where.
+    repo_fm = "".join(f"{ln}\n" for ln in repo_lines)
+    repo_due = "".join(f"    {ln}\n" for ln in repo_lines)
     if out:
         readme = get_file_content(course_org, repo, "README.md") or ""
         for line in readme.splitlines():
@@ -1416,10 +1431,7 @@ def _assignment_entry(
         brief = "\n".join(
             ln for ln in readme.splitlines() if not ln.startswith("# ")
         ).strip()
-        flags = (
-            f'repo_url: "https://github.com/orgs/{cohort_org}/repositories?q={slug}-"\n'
-            f'repo_name: "{_q(repo_name)}"\n'
-        )
+        flags = ""
         # No trailing "your repo appears once the teaching team provisions it" line: the
         # repo exists by the time this renders, and the theme now links it twice off the
         # fields above. The body is the brief, and nothing else.
@@ -1431,13 +1443,13 @@ def _assignment_entry(
         # inferring the state from an empty body.
         # No `repo_url`: there is nothing at the other end of it yet.
         flags = "handout_pending: true\n"
-        # The same shape as an unreleased session's line (`_lecture_entry`) - bold lead
-        # inside italics - because they render on adjacent tabs and read as one status
-        # vocabulary or as two. Kept short: the assignment schedule row prints this body in
-        # a table cell, exactly as the lecture row prints its own.
+        # Word for word the shape of an unreleased session's line (`_lecture_entry`):
+        # "**<what> is not yet released** - <where it will be> when <it is>", bold lead
+        # inside italics. They render in the same table column and on adjacent tabs, so
+        # they read as one status vocabulary or as two.
         body = (
-            f"_**Not handed out yet** - your private `{repo_name}` repo "
-            f"appears when it is._"
+            f"_**{title} is not yet released** - your private "
+            f"`{repo_name}` repo appears when it is._"
         )
     title = _q(title)
     return (
@@ -1446,10 +1458,12 @@ def _assignment_entry(
         f"date: {released}\n"
         f'title: "{title}"\n'
         f"{flags}"
+        f"{repo_fm}"
         f"due_event:\n"
         f"    type: due\n"
         f"    date: {due}\n"
         f'    description: "{title}"\n'
+        f"{repo_due}"
         f"---\n"
         f"{body}\n"
     )
