@@ -760,8 +760,9 @@ def main() -> int:
         default=None,
         help="Which tier of the central toolkit this course org's seeded workflows run "
         "the engine from: main, staging, release (default), or a full commit SHA. Written "
-        "to .github/dsl-course.yml as `central_ref:`; cohorts inherit their course org's. "
-        "Only the demo course should sit anywhere but release.",
+        "to .github/dsl-course.yml as `central_ref:`. Course orgs only - a cohort inherits "
+        "its course org's, so the two flags together are refused. Only the demo course "
+        "should sit anywhere but release.",
     )
     parser.add_argument(
         "--propagate-secret",
@@ -780,6 +781,18 @@ def main() -> int:
         "Teams page, which Sync membership reconciles away.",
     )
     args = parser.parse_args()
+    # A cohort has no tier of its own: central_ref_for follows its `course:` pointer, and
+    # the nightly refresh re-renders every cohort at whatever the COURSE org declares. So
+    # this pair looks like it pins the cohort and in fact holds for one night at most -
+    # refused outright rather than silently undone hours later.
+    if args.central_ref and args.cohort:
+        log_err(
+            "--central-ref is a COURSE org's setting: a cohort inherits its course org's "
+            "tier, and tonight's refresh would re-render this one at that tier anyway. "
+            f"Set `central_ref:` in {args.course or 'the course org'}/.github/"
+            "dsl-course.yml instead."
+        )
+        return 1
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
