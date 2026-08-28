@@ -111,10 +111,20 @@ ref an org runs **is** that org's engine. Three tiers, three branches:
 cohorts inherit it. The [inventory page](../bootstrapped-orgs-inventory.md) shows it per
 course org, and **Check cohort setup** shows it per cohort.
 
-Neither tier branch exists until someone makes it. `central.CENTRAL_REF` is already
-`release`, so **`release` must exist before that value reaches any org** or every seeded
-workflow fails at checkout: `git push origin main:release`, and the same for `staging`.
-(A Promote run creates a missing tier branch too.)
+Neither tier branch exists until someone makes it, and `central.CENTRAL_REF` is already
+`release`. **Order, on first setup:**
+
+1. Merge to `main`.
+2. Run **Promote** with `to: staging`, then `to: release`. The first run of each creates
+   that branch from `main`.
+3. Verify one org: open a workflow in its `.github` repo and check the checkout step's
+   `ref:` is the tier you expect.
+
+A refresh will not render a ref that is not there. `seed.refresh` checks the central repo
+for it first, and if it is missing it logs the org and the ref, goes red, and **leaves the
+org's existing workflows alone** - stale workflows that run beat current workflows that
+cannot check anything out. So a forgotten tier branch costs a red cron, not an org whose
+whole Actions tab (Refresh included) fails at checkout forever.
 
 ### Promote
 
