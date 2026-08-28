@@ -214,3 +214,19 @@ def test_dry_run_touches_nothing(gh):
         == 0
     )
     assert fake.did("issue", "create") == fake.did("issue", "edit") == []
+
+
+def test_the_digest_lookup_asks_for_more_than_the_default_page(monkeypatch):
+    # `gh issue list` returns 30 by default and the exact-title match below is client-side,
+    # so a repo whose issue list buried ours past the 30th result looked as though no
+    # digest existed - and every hourly run opened a fresh one.
+    seen: list[tuple[str, ...]] = []
+
+    def fake_gh(*args, **kwargs):
+        seen.append(args)
+        return 0, "[]"
+
+    monkeypatch.setattr(sd, "gh", fake_gh)
+    assert sd._open_issue("Cohort-f2026") is None
+    (args,) = seen
+    assert "--limit" in args and args[args.index("--limit") + 1] == "100"

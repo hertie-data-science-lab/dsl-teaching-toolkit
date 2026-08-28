@@ -194,6 +194,12 @@ def _open_issue(cohort_org: str) -> tuple[int, str] | None:
         "open",
         "--search",
         f"{TITLE} in:title",
+        # `gh issue list` defaults to 30. The search is narrow, but the exact-title match
+        # below happens client-side - so a repo whose issue list happened to bury ours past
+        # the 30th result would look as though no digest existed, and every run would open
+        # a fresh one.
+        "--limit",
+        "100",
         "--json",
         "number,body,title",
     )
