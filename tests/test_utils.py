@@ -556,3 +556,15 @@ def test_reconcile_team_members_skips_the_prune_when_the_owners_are_unreadable(
     assert added == ["carol"]
     assert removed == []
     assert "pruning skipped" in capsys.readouterr().err
+
+
+def test_repo_missing_is_true_only_on_a_404(monkeypatch):
+    # `repo_exists` is optimistic (any failure = absent) because it answers a create-if-
+    # missing question. `repo_missing` answers "may I record something permanent on the
+    # strength of absence?" - so a 5xx or a rate limit is neither present nor absent.
+    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    assert utils.repo_missing("O", "r")
+    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "HTTP 502 bad gateway"))
+    assert not utils.repo_missing("O", "r")
+    monkeypatch.setattr(utils, "gh", lambda *a, **k: (0, "{}"))
+    assert not utils.repo_missing("O", "r")

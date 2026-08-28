@@ -1465,3 +1465,23 @@ def test_withholding_the_stub_is_visible_without_failing_the_run(monkeypatch, ca
     assert "::warning::" in captured.err
     assert "was NOT released" in captured.err
     assert "Write it for students, then release again." in captured.err
+
+
+def test_autograde_waits_for_a_completed_snapshot(monkeypatch):
+    # Without a snapshot, collect pins on committer dates - and when no submission repo
+    # exists at all it records a permanent write-once ZERO for every student and marks the
+    # assignment graded, on a green run. A missing snapshot means "not now", never "grade".
+    graded = []
+    monkeypatch.setattr(collect, "has_autograde_results", lambda org, slug: False)
+    monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
+    monkeypatch.setattr(collect, "collect", lambda *a, **k: graded.append(a) or 0)
+    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: None)
+    sched = _assignments(**{"assignment-1": _due(13)})
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
+    assert graded == []
+    monkeypatch.setattr(
+        collect, "load_snapshots", lambda org, slug: {"assignment-1-ada": "abc"}
+    )
+    assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
+    assert len(graded) == 1

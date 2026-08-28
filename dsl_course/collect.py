@@ -99,7 +99,7 @@ from .utils import (
     log_skip,
     log_step,
     put_file,
-    repo_exists,
+    repo_missing,
 )
 
 CONFIG_REPO = roster.CONFIG_REPO  # classroom-config
@@ -898,11 +898,14 @@ def _grade_target(
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "sub"
         if gh("repo", "clone", f"{cohort_org}/{repo}", str(wd), "--", "-q")[0] != 0:
-            if not repo_exists(cohort_org, repo):
-                # The repo genuinely does not exist (deleted, or never provisioned) - a
+            if repo_missing(cohort_org, repo):
+                # GitHub SAYS the repo does not exist (deleted, or never provisioned) - a
                 # recorded zero, NOT a transient failure. Returning None ('unreachable') would
                 # hold the fire-once marker and re-clone + re-grade every OTHER repo hourly,
-                # for ever, on an assignment that can never complete.
+                # for ever, on an assignment that can never complete. Only a 404 counts:
+                # `repo_exists` reads ANY failure as absent, and a clone hiccup followed by
+                # one 5xx on the probe would write a permanent zero for a student who
+                # submitted.
                 log_err(
                     f"  ! {target_ref(repo)} does not exist - scoring 0 (no submission)"
                 )
@@ -1029,7 +1032,21 @@ def collect(
         # Targets: one per team (group) or one per onboarded student (individual).
         targets = submission_targets(cohort_org, slug, is_group)
         if not targets:
-            return 1
+            # Nothing to grade at a passed deadline is a RESULT (the reason is logged
+            # above): a cohort with nobody onboarded, or a group assignment whose teams.csv
+            # has no teams. Left unrecorded, the cron came back every hour and went red
+            # every hour (live in the demo cohort for days). Record the skip; a deliberate
+            # re-grade is still a delete of autograde/<slug>/ away.
+            if dry_run:
+                return 0
+            if not mark_not_autograded(
+                cohort_org, slug, f"no submission targets as of {deadline}"
+            ):
+                log_err(
+                    f"{slug}: could not record the skip - the next run re-decides it"
+                )
+                return 1
+            return 0
 
         # Which commit each repo is graded at was frozen server-side just after the
         # deadline (see the module docstring). Without that file we can only trust the

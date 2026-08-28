@@ -68,8 +68,8 @@ def test_the_public_log_never_names_a_submission_repo(monkeypatch, capsys):
     assert ref.startswith("#") and len(ref) == 8
     assert "ada" not in ref
     # The clone-failure paths log the tag, not the repo.
-    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
-    monkeypatch.setattr(collect, "repo_exists", lambda *a, **k: False)
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "clone failed"))
+    monkeypatch.setattr(collect, "repo_missing", lambda *a: True)
     collect._grade_target("COHORT", "assignment-1-ada-l", {}, None, "2026-09-08")
     captured = capsys.readouterr()
     out = captured.out + captured.err
@@ -1223,3 +1223,14 @@ def test_collect_withholds_the_sentinel_when_an_archive_write_fails(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
     assert "grades/assignment-1.csv" in written  # scores still durably recorded
     assert "autograde/assignment-1/_graded.json" not in written  # marker withheld
+
+
+def test_a_zero_is_recorded_only_when_github_says_the_repo_is_gone(monkeypatch):
+    # `repo_exists` reads ANY failure as absent. A clone hiccup followed by one 5xx on the
+    # probe used to write a permanent, write-once zero for a student who had submitted.
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "clone failed"))
+    monkeypatch.setattr(collect, "repo_missing", lambda *a: False)  # a 5xx: cannot tell
+    assert collect._grade_target("K", "a1-ada", {}, None, "2026-09-08") is None
+    monkeypatch.setattr(collect, "repo_missing", lambda *a: True)  # GitHub says 404
+    result = collect._grade_target("K", "a1-ada", {}, None, "2026-09-08")
+    assert result["score"] == 0 and "does not exist" in result["note"]

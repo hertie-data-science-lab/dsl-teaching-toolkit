@@ -104,6 +104,25 @@ def is_valid_github_username(handle: str) -> bool:
     return bool(_GITHUB_USERNAME_RE.match(handle))
 
 
+def require_csv_header(
+    fieldnames: list[str] | None, required: tuple[str, ...], what: str
+) -> None:
+    """Refuse a CSV whose header lacks a column the caller cannot do without.
+
+    The failure this exists for: a German-locale Excel saves `;`-delimited CSV. DictReader
+    then sees ONE header column, every field reads "", nothing raises, and the caller
+    proceeds on an empty roster / empty marks - `enrol_codes` even wrote such a file back
+    mangled, exit 0. A header that cannot name the required columns is a hard error."""
+    have = {f.strip() for f in (fieldnames or [])}
+    missing = [f for f in required if f not in have]
+    if missing:
+        raise RuntimeError(
+            f"{what}: header lacks {', '.join(missing)} (got {list(fieldnames or [])}). "
+            f"A semicolon-delimited export looks like this - save the file as "
+            f"comma-separated UTF-8 CSV and try again."
+        )
+
+
 def strip_bom(text: str) -> str:
     """Drop a leading UTF-8 BOM. Excel exports CSVs with one, and left in place
     `csv.DictReader` reads it into the first header name so every lookup on that column
@@ -160,6 +179,14 @@ def log_skip(msg: str) -> None:
 
 def log_err(msg: str) -> None:
     print(f"  [err] {msg}", file=sys.stderr, flush=True)
+
+
+def repo_missing(org: str, name: str) -> bool:
+    """Whether GitHub positively says the repo is NOT there (a 404). The shape for a
+    caller about to record something permanent on the strength of absence: a 5xx or a
+    rate limit is neither present nor absent, and must read as "could not tell"."""
+    code, out = gh("api", f"repos/{org}/{name}")
+    return code != 0 and is_missing_resource(out)
 
 
 def repo_exists(org: str, name: str) -> bool:

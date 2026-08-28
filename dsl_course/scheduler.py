@@ -143,6 +143,8 @@ def _execute_nondeploy(course_org: str, cohort_org: str, release: Release) -> in
             release.assignment,
             cohort_org,
             solution=release.assignment_solution,
+            # Hourly: leave existing repos alone (the manual button still repairs access).
+            touch_existing=False,
         )
         if failed != 0:
             errors += 1
@@ -236,19 +238,26 @@ def _autograde_passed_deadlines(
     A missing template repo, a template with no `solution` branch, and `autograde: false`
     are all skips, not failures: plenty of assignments are hand-marked. Group vs individual
     is not guessed here - `collect` resolves it from the cohort schedule / grading.yml."""
-    from .collect import collect, has_autograde_results
+    from .collect import collect, has_autograde_results, load_snapshots
 
     errors = 0
     for slug, deadline in due_snapshots(sched, now):
         # the fire-once marker is keyed on the cohort NAME - it must agree with what
         # collect writes, or a passed deadline re-grades every tick
-        if has_autograde_results(
-            cohort_org, schedule.cohort_name(slug, sched.assignments[slug])
-        ):
+        name = schedule.cohort_name(slug, sched.assignments[slug])
+        if has_autograde_results(cohort_org, name):
             continue  # already machine-graded - re-grading is a deliberate act
         template = _assignment_template(course_org, slug, sched.assignments[slug])
         if template is None:
             log(f"  [skip] autograde {slug} - no template repo for it in {course_org}")
+            continue
+        # Never grade what was never frozen. Without a snapshot `collect` pins on committer
+        # dates (student-controlled), and when no submission repo exists at all it would
+        # record a permanent write-once ZERO for every student and mark the assignment
+        # graded - on a green run. A snapshot that failed this tick, or was skipped because
+        # nothing was handed out yet, simply means: not now. The next tick looks again.
+        if load_snapshots(cohort_org, name) is None:
+            log(f"  [wait] autograde {slug} - no completed snapshot yet, not grading")
             continue
         if dry_run:
             log(f"    DRY-RUN  autograde {slug} via {template} (deadline {deadline})")
