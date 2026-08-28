@@ -646,7 +646,16 @@ SUPERSEDED_DESCRIPTIONS = {
     # on every released repo too - so the repo table students land on carried a false claim
     # about who can see the materials.
     "Released course materials (enrolled students only)": (
-        "Released lectures, labs, readings, and other materials"
+        "Released lectures, labs, readings, & other materials"
+    ),
+    # The wording that replaced the one above, superseded in its turn. A chain, not a
+    # rewrite: an org still on the oldest string has to reach the newest in one pass, so
+    # every link keeps pointing at the CURRENT text rather than at its immediate successor.
+    "Released lectures, labs, readings, and other materials": (
+        "Released lectures, labs, readings, & other materials"
+    ),
+    "Course materials (lectures/readings by session)": (
+        "Course materials (lectures/labs/readings/datasets/other) by session"
     ),
     # The site repo is generated and rewritten on every sync (site.py stamps that inside the
     # repo itself), so its description says so where faculty see it: on the org's landing
@@ -671,6 +680,10 @@ SUPERSEDED_DESCRIPTIONS = {
 # reworded literal must be added here or convergence silently stops.
 SUPERSEDED_COHORT_DESCRIPTIONS = {
     "Org profile and configuration": "[do not touch]: Org profile and configuration",
+    "PRIVATE cohort config - roster (students.csv). No PII leaves here.": (
+        "[visible to instructors only]: Cohort config - roster, schedule, people, "
+        "grades. No PII leaves here."
+    ),
 }
 SUPERSEDED_COURSE_DESCRIPTIONS = {
     "Org profile and configuration": "[control panel]: Org profile & configuration",

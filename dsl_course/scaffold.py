@@ -472,7 +472,9 @@ def scaffold_materials(org: str, tag: str) -> int:
         org,
         repo,
         private=True,
-        description="Course materials (lectures/readings by session)",
+        description=(
+            "Course materials (lectures/labs/readings/datasets/other) by session"
+        ),
     ):
         return 1
     grant_course_team_access(org, repo)
