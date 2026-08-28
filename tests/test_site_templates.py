@@ -269,9 +269,9 @@ def cohort_plan(monkeypatch, tmp_path):
         "_sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
-    monkeypatch.setattr(site.seed, "discover_cohort_repos", lambda orgs: [])
-    monkeypatch.setattr(site.seed, "discover_release_sources", lambda org, repos: [])
-    monkeypatch.setattr(site.seed, "discover_assignments", lambda org: [])
+    monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
+    monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
+    monkeypatch.setattr(site, "discover_assignments", lambda org: [])
     monkeypatch.setattr(
         site, "discover_handed_out_assignments", lambda org: frozenset()
     )
