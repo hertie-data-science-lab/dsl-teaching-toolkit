@@ -27,13 +27,12 @@ from .course import (
     GRADEBOOK_PREFIX,
     session_dirs,
 )
+from .ghcli import gh
+from .log import log_err, log_ok
 from .utils import (
     get_default_branch,
     get_file_content,
-    gh,
     load_yaml_config,
-    log_err,
-    log_ok,
     put_file,
     repo_tree,
 )

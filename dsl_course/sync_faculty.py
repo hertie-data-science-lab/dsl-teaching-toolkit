@@ -41,15 +41,12 @@ from .discovery import (
     discover_cohorts,
     discover_content_repos,
 )
+from .log import log, log_err, log_ok, log_step
 from .utils import (
     create_team,
     grant_team_repo_access,
     is_valid_github_username,
     load_yaml_config,
-    log,
-    log_err,
-    log_ok,
-    log_step,
     reconcile_team_members,
 )
 

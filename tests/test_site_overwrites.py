@@ -206,7 +206,7 @@ def test_a_failed_push_overwrote_nothing_on_the_remote(monkeypatch):
 
 
 def test_the_machine_identity_is_read_off_git_env():
-    # A rename of the bot identity in utils.GIT_ENV must not silently turn every sync
+    # A rename of the bot identity in ghcli.GIT_ENV must not silently turn every sync
     # commit into a "human edit" here.
     assert site._git_identity("user.name") == "dsl-bot"
     assert site._git_identity("user.email") == "bot@dsl.local"

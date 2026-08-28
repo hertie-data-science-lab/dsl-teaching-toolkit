@@ -29,7 +29,7 @@ import urllib.request
 from dataclasses import dataclass
 from email.message import EmailMessage
 
-from .utils import log, log_err, log_ok
+from .log import log, log_err, log_ok
 
 # A single message: (recipient, subject, body).
 Message = tuple[str, str, str]

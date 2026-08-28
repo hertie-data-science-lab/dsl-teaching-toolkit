@@ -38,19 +38,14 @@ from .course import (
     SYLLABUS_SAMPLE_FILE,
     SYLLABUS_SESSIONS_FILE,
 )
+from .ghcli import GIT_ENV, gh, git
+from .log import log, log_err, log_ok, log_step
 from .schedule import Deploy
 from .utils import (
-    GIT_ENV,
     create_repo,
-    gh,
-    git,
     grant_faculty_read_access,
     grant_read_teams,
     is_untouched_stub,
-    log,
-    log_err,
-    log_ok,
-    log_step,
 )
 
 _GIT_ENV = GIT_ENV

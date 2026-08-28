@@ -572,7 +572,7 @@ def test_new_assignment_button_exposes_format_and_type():
 
 @pytest.mark.parametrize("name", sorted(ALL_RENDERED))
 def test_no_rendered_workflow_turns_on_dsl_verbose(name):
-    # DSL_VERBOSE un-suppresses the per-student log lines (utils.log_verbose) - who is
+    # DSL_VERBOSE un-suppresses the per-student log lines (log.log_verbose) - who is
     # enrolled, who is in which team, which `<slug>-<handle>` repo exists. Every one of
     # these workflows runs in the course org's PUBLIC `.github`, whose Actions log anyone
     # can read, so the variable is for a local CLI run only and no workflow may set it.

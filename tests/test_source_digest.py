@@ -30,7 +30,7 @@ def _f(where: str, offset: timedelta | None, field: str = "course_source_path"):
 
 
 class _Gh:
-    """A recording fake for utils.gh - every call captured, replies queued by subcommand."""
+    """A recording fake for ghcli.gh - every call captured, replies queued by subcommand."""
 
     def __init__(self, issues: list[dict] | None = None):
         self.issues = issues or []

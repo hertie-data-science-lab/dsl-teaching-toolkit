@@ -27,8 +27,8 @@ def _no_live_gh(monkeypatch):
     test that stubbed `site._session_files` but not `site._repo_tree` passed locally for a
     whole branch and failed only on the PR.
 
-    Guards the `gh` BINARY rather than `utils.gh`, so the retry ladder and return-pair
-    contract of `utils.gh` itself stay testable, and `git` against a tmp repo still runs. A
+    Guards the `gh` BINARY rather than `ghcli.gh`, so the retry ladder and return-pair
+    contract of `ghcli.gh` itself stay testable, and `git` against a tmp repo still runs. A
     test that legitimately fakes `gh` or `git` sets its own after this fixture and wins."""
     real_run = subprocess.run
 

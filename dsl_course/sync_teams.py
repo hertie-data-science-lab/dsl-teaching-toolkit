@@ -26,14 +26,8 @@ import argparse
 import sys
 
 from . import roster, teams
-from .utils import (
-    create_team,
-    log_err,
-    log_ok,
-    log_step,
-    log_verbose,
-    reconcile_team_members,
-)
+from .log import log_err, log_ok, log_step, log_verbose
+from .utils import create_team, reconcile_team_members
 
 
 def team_slug(assignment: str, team: str) -> str:

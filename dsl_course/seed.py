@@ -46,14 +46,11 @@ from .discovery import (
     discover_content_repos,
     unregister_cohort,
 )
+from .ghcli import gh
+from .log import log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
 from .utils import (
     get_file_content,
-    gh,
-    log,
-    log_err,
-    log_ok,
-    log_step,
     org_exists,
     put_file,
     put_files,

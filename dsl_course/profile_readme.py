@@ -32,15 +32,13 @@ from .discovery import (
     org_tier,
     student_repo_names,
 )
+from .log import log, log_err, log_ok
 from .utils import (
     converge_descriptions,
     converge_faculty_access,
     converge_topics,
     get_file_content,
     load_yaml_config,
-    log,
-    log_err,
-    log_ok,
     put_files,
 )
 

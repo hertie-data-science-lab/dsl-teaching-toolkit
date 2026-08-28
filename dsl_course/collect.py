@@ -87,20 +87,9 @@ import yaml
 
 from . import grades, roster, schedule, teams
 from .course import CONFIG_REPO, SOLUTION_BRANCH, assignment_slug, resolve_is_group
-from .utils import (
-    GIT_ENV,
-    get_file_content,
-    gh,
-    git,
-    is_missing_resource,
-    log,
-    log_err,
-    log_ok,
-    log_skip,
-    log_step,
-    put_file,
-    repo_missing,
-)
+from .ghcli import GIT_ENV, gh, git, is_missing_resource
+from .log import log, log_err, log_ok, log_skip, log_step
+from .utils import get_file_content, put_file, repo_missing
 
 AUTOGRADE_DIR = "autograde"  # classroom-config/autograde/<slug>/<key>.json
 GRADED_RECORD = "_graded.json"  # fire-once sentinel: a successful run's LAST write

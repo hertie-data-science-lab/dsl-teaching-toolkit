@@ -28,12 +28,9 @@ import sys
 
 from . import roster
 from .discovery import list_org_repos
+from .log import log_err, log_ok, log_step, log_verbose
 from .utils import (
     is_collaborator,
-    log_err,
-    log_ok,
-    log_step,
-    log_verbose,
     reconcile_team_members,
     remove_collaborator,
     set_org_membership,
