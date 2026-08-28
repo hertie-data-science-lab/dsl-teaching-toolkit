@@ -46,7 +46,7 @@ from .utils import (
     generate_from_template,
     gh,
     git,
-    grant_course_team_access,
+    grant_faculty_read_access,
     grant_team_repo_access,
     log,
     log_err,
@@ -258,10 +258,14 @@ def provision_one(
 
     # Before the group/individual split, because the group arm RETURNS inside itself: a
     # call after it reaches individual assignments only, and every team project repo would
-    # have gone on granting nobody but the team. Marking a submission means reading it, and
-    # this repo used to grant no faculty at all - so an instructor who was not an org OWNER
-    # could not open the work they had to mark.
-    grant_course_team_access(cohort_org, repo)
+    # have gone on granting nobody but the team. This repo used to grant no faculty at all,
+    # so an instructor who was not an org OWNER could not open the work they had to mark.
+    #
+    # READ, not write. Marking happens in `classroom-config/grades/<slug>.csv` (docs/10),
+    # and by the time anyone marks, the deadline snapshot has already frozen this repo's
+    # HEAD and the autograder has run off that snapshot - so a commit here would reach no
+    # gradebook and form no part of the record. Faculty need to SEE the work, not edit it.
+    grant_faculty_read_access(cohort_org, repo)
     if team is not None:
         # Group: materialise the team from its members and grant it on the repo, so
         # post-sync membership edits propagate to access (vs. one-off collaborator grants).

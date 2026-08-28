@@ -591,9 +591,19 @@ COURSE_TEAM_ACCESS = {"instructors": "push", "course-admin": "admin"}
 #     correction belongs in the course org's materials repo, then re-release
 #   - `distribute` rewrites a gradebook's grades.yml from
 #     `classroom-config/grades/<slug>.csv`, so a mark belongs in that CSV
-# Submission repos keep COURSE_TEAM_ACCESS above: marking is editing, and feedback commits
-# are the point. `course-admin` stays admin either way - it is the cohort's owner of last
-# resort, and read access cannot fix a broken repo.
+# A submission repo is read for the same reason: marking happens in
+# `classroom-config/grades/<slug>.csv`, and by then the deadline snapshot has frozen its
+# HEAD and the autograder has run off that snapshot, so a commit there would reach no
+# gradebook and form no part of the record.
+#
+# What keeps WRITE is where faculty actually author: `classroom-config` (the grading CSVs,
+# schedule.yml, people.yml, the roster), `welcome/README.md` (the students' front door,
+# seeded create-only so faculty may reword it), and `.github` - that one because GitHub
+# requires write on a repo to trigger a workflow_dispatch at all, which is what every
+# faculty button is.
+#
+# `course-admin` stays admin throughout - it is the cohort's owner of last resort, and read
+# access cannot fix a broken repo.
 FACULTY_READ_ACCESS = {"instructors": "pull", "course-admin": "admin"}
 
 # GitHub's repo permissions, weakest first. Used to compare a live grant against the floor

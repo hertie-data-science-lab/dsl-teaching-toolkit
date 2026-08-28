@@ -91,16 +91,18 @@ def test_every_cohort_repo_kind_grants_faculty_at_the_right_level():
     # they released, open the work they had to mark, or see the grades they returned. Every
     # live faculty member happens to be an owner, which is why nothing broke.
     #
-    # WRITE only where writing is the job. A released repo and a gradebook both have their
-    # source of truth elsewhere (the course org's materials; grades/<slug>.csv), and both
-    # are overwritten wholesale by the next release / distribute - so write there would
-    # invite an edit that silently vanishes.
+    # READ on all three. Each has its source of truth elsewhere - the course org's
+    # materials repo, and `grades/<slug>.csv` for both marks and submissions - and each is
+    # superseded wholesale by the next release / distribute / snapshot, so write would
+    # invite an edit that silently vanishes. Write stays where faculty author:
+    # classroom-config, welcome/README.md, and .github (which GitHub requires for
+    # workflow_dispatch).
     import inspect
 
     from dsl_course import assign, deploy, grades
 
     for mod, call, what in (
-        (assign, "grant_course_team_access", "marking is editing"),
+        (assign, "grant_faculty_read_access", "the snapshot already froze HEAD"),
         (deploy, "grant_faculty_read_access", "a re-release copies over it"),
         (grades, "grant_faculty_read_access", "distribute rewrites grades.yml"),
     ):
@@ -178,7 +180,7 @@ def test_the_group_assignment_path_also_grants_faculty():
     from dsl_course import assign
 
     src = inspect.getsource(assign)
-    grant = src.index("grant_course_team_access(cohort_org, repo)")
+    grant = src.index("grant_faculty_read_access(cohort_org, repo)")
     split = src.index("if team is not None:")
     assert grant < split, (
         "the faculty grant must precede the group/individual split, or group repos miss it"
