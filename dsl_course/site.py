@@ -45,15 +45,20 @@ from urllib.parse import quote
 import yaml
 
 from . import schedule, seed, welcome
-from .assign import assignment_slug
+from .course import (
+    active_today,
+    assignment_slug,
+    discover_sections,
+    find_session_dir,
+    pages_repo,
+    session_number,
+    term_tag,
+)
 from .discovery import discover_handed_out_assignments, list_org_repos
 from .utils import (
     GIT_ENV,
     READING_OVERLAY_NAMES,
     _acting_login,
-    active_today,
-    discover_sections,
-    find_session_dir,
     get_default_branch,
     get_file_content,
     gh,
@@ -69,8 +74,6 @@ from .utils import (
     repo_exists,
     repo_is_archived,
     repo_tree,
-    session_number,
-    term_tag,
 )
 
 # Public course site: served folder for the hosted section files.
@@ -146,14 +149,9 @@ _DEFAULTS_BLOCK = """defaults:
 """
 
 
-def _cohort_tag(cohort_org: str) -> str | None:
-    """The fYYYY / sYYYY semester tag in a cohort org name (e.g. 'f2026'), or None."""
-    return term_tag(cohort_org)
-
-
 def _semester_start(cohort_org: str) -> date:
     """Best-effort semester start from a fYYYY / sYYYY tag (for schedule ordering)."""
-    tag = _cohort_tag(cohort_org)
+    tag = term_tag(cohort_org)
     if tag:
         return date(int(tag[1:]), 9 if tag[0] == "f" else 2, 1)
     return date(2026, 1, 1)
@@ -165,7 +163,7 @@ def _slug(text: str) -> str:
 
 def _semester_label(cohort_org: str) -> str:
     """fYYYY -> 'Fall YYYY', sYYYY -> 'Spring YYYY' (for site.course_semester)."""
-    tag = _cohort_tag(cohort_org)
+    tag = term_tag(cohort_org)
     return f"{'Fall' if tag[0] == 'f' else 'Spring'} {tag[1:]}" if tag else ""
 
 
@@ -522,11 +520,6 @@ def _site_templates() -> dict[str, str]:
         for path in sorted(root.rglob("*"))
         if path.is_file()
     }
-
-
-def _site_repo(org: str) -> str:
-    """The GitHub Pages org site repo for an org - pushing it redeploys the site."""
-    return f"{org.lower()}.github.io"
 
 
 def _yaml_file(org: str, repo: str, path: str) -> dict:
@@ -2157,7 +2150,7 @@ def _sync_site_repo(
     # clear ran on the rare path and never on the common one. Keys include the org, so this
     # is purely about memory, never staleness.
     _repo_tree.cache_clear()
-    site = _site_repo(org)
+    site = pages_repo(org)
     just_scaffolded = False
     if not repo_exists(org, site):
         try:
@@ -2296,7 +2289,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         assignments = seed.discover_assignments(course_org)
         # A persistent course org holds per-year templates (assignment-*-fYYYY); a cohort
         # site should list only its own year's, matched on the cohort's fYYYY/sYYYY tag.
-        tag = _cohort_tag(cohort_org)
+        tag = term_tag(cohort_org)
         if tag:
             assignments = [a for a in assignments if a.lower().endswith(tag)]
         # Which of them this cohort has actually been given - what gates their briefs. Read
@@ -2350,7 +2343,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # Every key of sources_by_row is in rows by construction, so this is arithmetic
         # rather than a scan.
         log_step(
-            f"Syncing {cohort_org}/{_site_repo(cohort_org)}: {len(rows)} session row(s) "
+            f"Syncing {cohort_org}/{pages_repo(cohort_org)}: {len(rows)} session row(s) "
             f"({len(rows) - len(sources_by_row)} not released yet), "
             f"{len(cohort_assignments)} assignment(s)"
         )
@@ -2606,7 +2599,7 @@ def sync_public_site(
     def build(site_wd: Path) -> _SitePlan | None:
         sessions = seed.discover_sessions(course_org, source_repo)
         log_step(
-            f"Publishing {course_org}/{_site_repo(course_org)} from {source_repo}: "
+            f"Publishing {course_org}/{pages_repo(course_org)} from {source_repo}: "
             f"{len(sessions)} session(s), readings={readings_mode}, "
             f"file sections={'on' if include_lectures else 'off'}"
         )
@@ -2764,7 +2757,7 @@ def resync_public_site(course_org: str) -> int:
     with no public site - or a site with no `PUBLISH_CONFIG` (published before this existed,
     or deliberately unhooked by deleting the file) - is a one-line no-op, NOT a failure:
     the cron ships in every course org's `.github`, and most never publish."""
-    site = _site_repo(course_org)
+    site = pages_repo(course_org)
     hint = "run the Publish course website action (or pass --source-repo) to publish"
     if not repo_exists(course_org, site):
         log(f"no public course site ({course_org}/{site}) - nothing to re-sync; {hint}")

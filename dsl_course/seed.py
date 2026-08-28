@@ -39,6 +39,7 @@ import os
 import sys
 from datetime import datetime, timezone
 
+from .course import CONFIG_REPO, term_tag
 from .discovery import (
     COHORTS_PATH,
     discover_assignments,
@@ -51,7 +52,6 @@ from .discovery import (
     unregister_cohort,
 )
 from .profile_readme import update_profile_readme
-from .roster import CONFIG_REPO
 from .utils import (
     get_file_content,
     gh,
@@ -64,7 +64,6 @@ from .utils import (
     put_files,
     refresh_stubs,
     repo_is_archived,
-    term_tag,
 )
 from .welcome import (
     refresh_classroom_samples,

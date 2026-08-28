@@ -1257,11 +1257,11 @@ def test_an_absent_optional_value_is_never_flagged():
     )
 
 
-def test_schedule_and_utils_share_one_date_coercion():
+def test_schedule_and_course_share_one_date_coercion():
     # The two implementations must not drift: schedule re-exports the canonical one.
-    from dsl_course import utils
+    from dsl_course import course
 
-    assert schedule._coerce_date is utils.coerce_date
+    assert schedule._coerce_date is course.coerce_date
 
 
 # ------------------------------------------------ _insert_handout indentation robustness

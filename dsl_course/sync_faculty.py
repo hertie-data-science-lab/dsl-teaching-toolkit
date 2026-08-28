@@ -35,9 +35,9 @@ import argparse
 import sys
 from datetime import date
 
-from . import seed, site
+from . import seed
+from .course import CONFIG_REPO, active_today, term_tag
 from .utils import (
-    active_today,
     create_team,
     grant_team_repo_access,
     is_valid_github_username,
@@ -54,7 +54,6 @@ ROLE_TEAM = {
     "teaching_assistants": "instructors",
     "course_admins": "course-admin",
 }
-COHORT_CONFIG_REPO = "classroom-config"
 COHORT_PEOPLE_PATH = "people.yml"
 
 
@@ -168,7 +167,7 @@ def load_cohort_faculty(cohort_org: str) -> dict[str, list[dict]] | None:
 
     Returns None when people.yml is genuinely ABSENT (do not prune); a present-but-empty
     people block parses to {} and legitimately empties the team."""
-    meta = load_yaml_config(cohort_org, COHORT_CONFIG_REPO, COHORT_PEOPLE_PATH)
+    meta = load_yaml_config(cohort_org, CONFIG_REPO, COHORT_PEOPLE_PATH)
     if meta is None:
         return None
     return _cohort_roles_only(parse_faculty_from_meta(meta))
@@ -216,7 +215,7 @@ def sync_cohort_instructors(
         # ABSENT people.yml: reconciling an empty desired set with prune=True would strip
         # this cohort's instructors team (and its course-org tag team). Refuse to prune.
         log_err(
-            f"cohort people config {cohort_org}/{COHORT_CONFIG_REPO}/"
+            f"cohort people config {cohort_org}/{CONFIG_REPO}/"
             f"{COHORT_PEOPLE_PATH} is absent - refusing to reconcile instructors (an "
             f"absent config would prune every instructor); skipping"
         )
@@ -226,7 +225,7 @@ def sync_cohort_instructors(
         cohort_org, "instructors", desired, prune=True, dry_run=dry_run
     )
 
-    tag = site._cohort_tag(cohort_org)
+    tag = term_tag(cohort_org)
     if tag is None:
         return errors
     team = f"instructors-{tag}"

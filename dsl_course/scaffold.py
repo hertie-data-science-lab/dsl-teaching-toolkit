@@ -24,12 +24,15 @@ import time
 from pathlib import Path
 
 from . import seed
-from .utils import (
+from .course import (
     FACULTY_ONLY_HEADING,
-    GIT_ENV,
     MATERIALS_REPO_PREFIX,
-    READING_OVERLAY_FILE,
     SYLLABUS_SAMPLE_FILE,
+    pages_repo,
+)
+from .utils import (
+    GIT_ENV,
+    READING_OVERLAY_FILE,
     create_repo,
     generate_from_template,
     gh,
@@ -731,7 +734,7 @@ def scaffold_site(org: str) -> int:
     The repo is named `<org>.github.io` so it serves at the org root. It must be PUBLIC
     on the Free plan (Pages requires it); on GitHub Enterprise Cloud / Campus it can be
     made private with Pages access control. The site redeploys on every push."""
-    site = f"{org.lower()}.github.io"
+    site = pages_repo(org)
     log_step(f"Scaffolding website {org}/{site}")
     if repo_exists(org, site):
         log_skip(f"repo {org}/{site}")

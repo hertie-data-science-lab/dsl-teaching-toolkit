@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
-from dsl_course import collect, deploy, scheduler, seed, utils
+from dsl_course import collect, course, deploy, scheduler, seed
 from dsl_course.schedule import (
     AssignmentEntry,
     Deploy,
@@ -1387,7 +1387,7 @@ def _run_release(monkeypatch, seed_source, deploys) -> tuple[int, set[str]]:
 UNEDITED = (
     "<!-- FACULTY & INSTRUCTORS: replace the content below -->\n\n"
     "> **Replace this placeholder.** This file becomes the students' README.\n\n"
-    f"## For faculty & instructors ({utils.FACULTY_ONLY_HEADING})\n\n"
+    f"## For faculty & instructors ({course.FACULTY_ONLY_HEADING})\n\n"
 )
 
 

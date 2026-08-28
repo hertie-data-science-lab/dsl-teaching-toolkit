@@ -86,7 +86,7 @@ from pathlib import Path
 import yaml
 
 from . import grades, roster, schedule, teams
-from .assign import SOLUTION_BRANCH, assignment_slug
+from .course import CONFIG_REPO, SOLUTION_BRANCH, assignment_slug, resolve_is_group
 from .utils import (
     GIT_ENV,
     get_file_content,
@@ -102,7 +102,6 @@ from .utils import (
     repo_missing,
 )
 
-CONFIG_REPO = roster.CONFIG_REPO  # classroom-config
 AUTOGRADE_DIR = "autograde"  # classroom-config/autograde/<slug>/<key>.json
 GRADED_RECORD = "_graded.json"  # fire-once sentinel: a successful run's LAST write
 SKIP_RECORD = "_skipped.json"  # the same marker, for an assignment nothing grades
@@ -193,26 +192,6 @@ def template_is_group(master_org: str, template: str) -> bool:
     solution branch / no grading.yml means individual (the parse's default)."""
     text = get_file_content(master_org, template, GRADING_FILE, ref=SOLUTION_BRANCH)
     return parse_grading_spec(text or "")["type"] == "group"
-
-
-def resolve_is_group(
-    *, force: bool, schedule_type: str | None, template_group: bool | None
-) -> bool:
-    """The SINGLE precedence for group-vs-individual, shared by every resolver.
-
-    An explicit force (the Grade-assignment workflow's checkbox / `--group`) wins; else the
-    COHORT's declaration - `assignments.<slug>.type` in classroom-config/schedule.yml, passed
-    as `schedule_type`; else the template's design-time grading.yml `type:`, passed as
-    `template_group` (True/False, or None when not consulted); else individual. Pure: each
-    caller passes the inputs it already holds, so no consumer re-derives its own precedence
-    (and none re-trusts student-writable teams.csv to decide the kind)."""
-    if force:
-        return True
-    if schedule_type is not None:
-        return schedule_type == "group"
-    if template_group is not None:
-        return template_group
-    return False
 
 
 def assignment_is_group(master_org: str, cohort_org: str, template: str) -> bool:

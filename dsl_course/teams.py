@@ -21,9 +21,9 @@ from __future__ import annotations
 import csv
 import io
 
+from .course import CONFIG_REPO
 from .utils import get_file_content, require_csv_header, strip_bom
 
-CONFIG_REPO = "classroom-config"
 TEAMS_PATH = "teams.csv"
 FIELDS = ("assignment", "team", "github_handle")
 

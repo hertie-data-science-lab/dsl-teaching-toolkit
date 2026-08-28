@@ -291,10 +291,10 @@ def test_seeded_scaffolds_render_this_cohorts_tag(fake):
 
 
 def test_cohort_tag_derivation():
-    assert bc._cohort_tag("Deep-Learning-f2027") == ("f2027", 2027)
-    assert bc._cohort_tag("Stats-S2030") == ("s2030", 2030)
+    assert bc._tag_and_year("Deep-Learning-f2027") == ("f2027", 2027)
+    assert bc._tag_and_year("Stats-S2030") == ("s2030", 2030)
     # No recognisable suffix -> the fallback keeps the examples plausible.
-    assert bc._cohort_tag("Some-Odd-Name") == ("f2026", 2026)
+    assert bc._tag_and_year("Some-Odd-Name") == ("f2026", 2026)
 
 
 def test_the_sample_set_is_the_whole_worked_example_cohort():

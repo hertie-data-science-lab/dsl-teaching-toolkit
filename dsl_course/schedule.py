@@ -78,8 +78,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
+from .course import CONFIG_REPO, coerce_date
 from .utils import (
-    coerce_date,
     default_branch,
     get_file_content,
     log_err,
@@ -87,7 +87,6 @@ from .utils import (
     repo_tree,
 )
 
-CONFIG_REPO = "classroom-config"
 SCHEDULE_PATH = "schedule.yml"
 DEFAULT_TZ = "Europe/Berlin"
 
@@ -104,7 +103,7 @@ def _tz(name: str | None) -> ZoneInfo:
 
 
 # The date-level coercion (semester bounds, whole-day events) is the shared canonical one
-# in utils - `active_today` uses the same, so the two can never drift. Aliased under the
+# in `course` - `active_today` uses the same, so the two can never drift. Aliased under the
 # module's historical private name for its internal callers (and the tests that pin it).
 _coerce_date = coerce_date
 

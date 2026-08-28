@@ -26,6 +26,7 @@ import argparse
 import sys
 
 from . import schedule
+from .course import SYLLABUS_SESSIONS_FILE, session_number
 from .site import (
     READINGS_SECTION,
     _demote_headings,
@@ -33,7 +34,6 @@ from .site import (
     _readings_block,
 )
 from .utils import (
-    SYLLABUS_SESSIONS_FILE,
     default_branch,
     get_file_content,
     log,
@@ -42,7 +42,6 @@ from .utils import (
     log_step,
     put_file,
     repo_tree,
-    session_number,
 )
 
 # How far a reading list's own headings are pushed down here: the syllabus puts a session at

@@ -10,13 +10,13 @@ import re
 import subprocess
 import sys
 from collections.abc import Iterable
-from datetime import date, datetime
 from fnmatch import fnmatch
 from functools import cache, lru_cache
-from pathlib import Path
 from typing import Any
 
 import yaml
+
+from .course import GRADEBOOK_PREFIX
 
 RATE_LIMIT_MARKERS = (
     "secondary rate limit",
@@ -156,13 +156,6 @@ def git(*args: str, cwd: str | None = None) -> tuple[int, str]:
         return 1, f"git: timed out after {GIT_TIMEOUT_SECONDS}s"
     return result.returncode, (result.stdout + result.stderr).strip()
 
-
-# The faculty-only heading in the materials README that `scaffold` seeds. `deploy` refuses
-# to release a README still containing it, so the sentinel is declared ONCE here - the
-# writer and the guard both import it, and neither can lapse when the wording is edited.
-# Here rather than in `scaffold` so that `deploy`, which the scheduler calls, does not pull
-# the whole scaffold/seed chain in for one string.
-FACULTY_ONLY_HEADING = "delete this section before releasing the README"
 
 # Bot identity + disabled hooks for engine-made commits. Spread into git() calls in the
 # clone/commit/push paths of release/site/scaffold/assign: git("-C", wd, *GIT_ENV, ...).
@@ -514,119 +507,6 @@ def reconcile_team_members(
     return errors
 
 
-def coerce_date(value: object) -> date | None:
-    """A YAML date/datetime or an ISO `YYYY-MM-DD` string -> a `date` (None if unparseable).
-    Date-level only (whole-day). The single canonical date coercion: `active_today` here and
-    `schedule._coerce_date` both use it, so the two can never drift. An unquoted
-    `start: 2026-09-01` in YAML parses to a `datetime.date` (or `datetime`), not a string;
-    a quoted one is a string - both land on the same `date`."""
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):  # date and its datetime subclass both land here
-        return value
-    if isinstance(value, str):
-        try:
-            return date.fromisoformat(value.strip()[:10])
-        except ValueError:
-            return None
-    return None
-
-
-def active_today(start: str | date | None, end: str | date | None, today: str) -> bool:
-    """Whether `today` (ISO date string) falls within [start, end], either bound optional
-    (open-ended if omitted). Bounds may be ISO strings or `datetime.date` objects (an
-    unquoted YAML date); an unparseable bound is treated as absent (open-ended on that side)."""
-    today_d = coerce_date(today)
-    start_d = coerce_date(start)
-    end_d = coerce_date(end)
-    if start_d and today_d and today_d < start_d:
-        return False
-    if end_d and today_d and today_d > end_d:  # noqa: SIM103 - guards mirror the docstring
-        return False
-    return True
-
-
-# Session directories are named "<ordinal>_<free text>" (e.g. "00_intro",
-# "07_finals-review") - only the leading, zero-padding-tolerant ordinal is meaningful;
-# the rest is whatever the course calls it. No "week"/"session" literal is required.
-_SESSION_PREFIX_RE = re.compile(r"^0*(\d+)_")
-
-
-def session_number(name: str) -> int | None:
-    """Extract the ordinal prefix from a directory name ('00_intro' -> 0, '07_x' -> 7),
-    or None if it doesn't start with digits followed by an underscore."""
-    m = _SESSION_PREFIX_RE.match(name)
-    return int(m.group(1)) if m else None
-
-
-def session_dirs(dir_paths: Iterable[str]) -> list[tuple[str, str, int]]:
-    """THE session-folder rule, over a flat list of relative directory paths.
-
-    `(parent, folder_name, session_number)` for every ordinal-prefixed directory found
-    at depth 1 (`NN_.../` - the repo itself is one section, so parent is "") or depth 2
-    (`section/NN_.../` - a named section). Anything deeper, and anything without an
-    ordinal prefix, is not a session folder. A `parent` is therefore exactly a
-    releasable section.
-
-    One rule, two transports: the local filesystem (discover_sections here, used by
-    the public-site builder) and the GitHub trees API (dsl_course.discovery) both feed their
-    directory listing through this, so "ordinal-prefixed directory = session folder"
-    is defined once.
-    """
-    found = []
-    for path in dir_paths:
-        parts = path.split("/")
-        if len(parts) > 2:
-            continue
-        n = session_number(parts[-1])
-        if n is None:
-            continue
-        found.append((parts[0] if len(parts) == 2 else "", parts[-1], n))
-    return found
-
-
-def _local_dir_paths(repo_root: Path) -> list[str]:
-    """The relative paths of every directory in `repo_root` down to depth 2 - the
-    filesystem transport for session_dirs (the API side fetches a git tree instead)."""
-    if not repo_root.is_dir():
-        return []
-    paths = []
-    for child in sorted(repo_root.iterdir()):
-        if not child.is_dir():
-            continue
-        paths.append(child.name)
-        paths += [
-            f"{child.name}/{grandchild.name}"
-            for grandchild in sorted(child.iterdir())
-            if grandchild.is_dir()
-        ]
-    return paths
-
-
-def find_session_dir(section_dir: Path, session: str) -> Path | None:
-    """Find the child of `section_dir` whose ordinal prefix matches `session` exactly
-    (session='3' matches '3_x'/'03_x'/'003_x', but not '13_x' or '30_x')."""
-    if not section_dir.is_dir() or not session.isdigit():
-        return None
-    target = int(session)
-    for child in sorted(section_dir.iterdir()):
-        if child.is_dir() and session_number(child.name) == target:
-            return child
-    return None
-
-
-def discover_sections(repo_root: Path) -> list[str]:
-    """Any top-level directory containing at least one ordinal-prefixed subdirectory is
-    a releasable section - no declared config, the directory structure is the only
-    source of truth. Sorted for a deterministic order.
-
-    The local-checkout transport of the session_dirs rule; dsl_course.discovery is the
-    API-side one."""
-    return sorted(
-        {parent for parent, _, _ in session_dirs(_local_dir_paths(repo_root)) if parent}
-    )
-
-
 def grant_team_repo_access(
     org: str, team: str, repo: str, permission: str, *, missing_is_note: bool = False
 ) -> bool:
@@ -925,9 +805,6 @@ def converge_topics(org: str, repos: list[dict], cohort: bool) -> int:
     that reports failures can include it."""
     if not cohort:
         return 0
-    # Local: discovery imports utils, so the names it owns come in at call time.
-    from .discovery import GRADEBOOK_PREFIX
-
     templates = sorted(r["name"] for r in repos if r.get("isTemplate"))
     failures = 0
     for repo in repos:
@@ -1388,37 +1265,15 @@ STUB_MARKS = (
 )
 
 
-def term_tag(name: str) -> str | None:
-    """The fYYYY / sYYYY term tag in an org or repo name (`course-materials-F2026` ->
-    'f2026'), or None. Case-insensitive and lowercased, so the same name cannot yield a tag
-    on one code path and nothing on another - which two of the three copies of this regex
-    did before they were folded into it."""
-    m = re.search(r"[fs]\d{4}", name.lower())
-    return m.group(0) if m else None
-
-
 def is_untouched_stub(text: str) -> bool:
     """Whether `text` is still a stub this toolkit seeded, rather than faculty writing."""
     return any(m in text for m in STUB_MARKS)
 
 
-# Generated faculty-side files, named where every module that has to know about them can
-# see it: `scaffold` writes them, `deploy` refuses to release them, `syllabus` builds one.
-# Named rather than re-spelled per module, so the exclusion cannot lapse when one is renamed.
-SYLLABUS_SAMPLE_FILE = "SYLLABUS.md.sample"
-SYLLABUS_SESSIONS_FILE = "SYLLABUS.sessions.md"
-# How `scaffold_materials` names every materials repo (`course-materials-<tag>`) - the New
-# materials repo workflow takes only the tag, so this prefix is guaranteed by the toolkit
-# rather than a convention faculty could deviate from. Named here because `seed.refresh`
-# has to recognise a materials repo among the code and dataset repos that
-# `discover_content_repos` returns alongside it, and a rename reaching only one side would
-# silently stop the convergence it gates.
-MATERIALS_REPO_PREFIX = "course-materials-"
 # A session's OPTIONAL prose reading list, the one file in a `readings/NN_.../` folder that
-# is inlined as text rather than listed as a download. Named here for the same reason as the
-# two above: `scaffold` seeds it and `site`/`syllabus` match on it, so a rename that reached
-# only one of them would have the scaffold quietly seeding a file the renderer no longer
-# recognises as prose.
+# is inlined as text rather than listed as a download. Named once here because `scaffold`
+# seeds it and `site`/`syllabus` match on it, so a rename that reached only one of them
+# would have the scaffold quietly seeding a file the renderer no longer recognises as prose.
 #
 # Matched by whole filename, never by extension. Deciding by extension made an uploaded
 # `lecture-notes.md` or `refs.bib` - a reading in its own right - get swallowed into the page
