@@ -654,6 +654,37 @@ def people_yaml(
     )
 
 
+ROW_NOUN = {"lecture": "Session", "lab": "Lab"}
+
+
+def row_file(session: str, kind: str) -> str:
+    """The collection filename for one session row - lecture and lab rows of the same
+    week are distinct files (`session-02.md`, `lab-02.md`) in the same collection."""
+    return f"{'lab' if kind == 'lab' else 'session'}-{int(session):02d}.md"
+
+
+def _singular(label: str) -> str:
+    """A section label as a single-item noun for a link name: 'lectures' -> 'lecture',
+    'labs' -> 'lab', 'faq' -> 'faq'. Sections are free-form directory names, so a bare
+    `[:-1]` chopped a real character off every label that isn't a plural ('faq' -> 'fa').
+    Deliberately no inflection library: strip one trailing 's', else leave it alone."""
+    return label[:-1] if len(label) > 1 and label.endswith("s") else label
+
+
+def links_block(sections: list[tuple[str, list[tuple[str, str]]]]) -> str:
+    """A front-matter `links:` block from `(section-label, [(file-name, url), ...])` pairs
+    in publication order, each link named `<section-singular> - <file>` (both sites label
+    them identically), or `links: []` when there is nothing to link."""
+    rows = []
+    for label, pairs in sections:
+        for name, url in pairs:
+            # Route the name through q (escapes `\` AND `"`): a filename with a backslash
+            # (`\sigma.pdf`) is an invalid YAML escape and fails the whole Jekyll build.
+            safe = q(f"{_singular(label)} - {name}")
+            rows.append(f'    - url: {url}\n      name: "{safe}"')
+    return ("links:\n" + "\n".join(rows)) if rows else "links: []"
+
+
 def iso_when(when: date | datetime, fallback_time: str = "09:00:00") -> str:
     """`when` as the offset-free local ISO stamp a front-matter `date:` wants.
 

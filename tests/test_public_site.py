@@ -1,4 +1,4 @@
-"""site.sync_public_site over a real (temp-filesystem) source repo.
+"""public_public_site.sync_public_site over a real (temp-filesystem) source repo.
 
 The public open-courseware site must publish whatever sections the materials repo
 actually HAS - `discover_sessions` is generic across every top-level section, so a course
@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import gh_contents, site, site_repo
+from dsl_course import gh_contents, public_site, site, site_repo
 
 COURSE = "Course-Org"
 SOURCE = "course-materials-f2026"
@@ -75,22 +75,24 @@ def _install_fakes(monkeypatch) -> dict[str, str]:
             )
         return (0, "")
 
-    # `gh` and `repo_exists` are read from both namespaces: `site` clones the SOURCE
+    # `gh` and `repo_exists` are read from both namespaces: `public_site` clones the SOURCE
     # repo and `resync_public_site` looks the site repo up, while the site-repo mechanics
     # next door do the rest.
-    monkeypatch.setattr(site, "gh", fake_gh)
+    monkeypatch.setattr(public_site, "gh", fake_gh)
     monkeypatch.setattr(site_repo, "gh", fake_gh)
     monkeypatch.setattr(site_repo, "git", fake_git)
-    monkeypatch.setattr(site, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr(public_site, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(site_repo, "repo_is_archived", lambda org, name: False)
     monkeypatch.setattr(site_repo, "_acting_login", lambda: None)
-    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
+    monkeypatch.setattr(public_site, "get_file_content", lambda *a, **k: "")
     # site_repo.yaml_file now reads via gh_contents.load_yaml_config, which resolves
     # get_file_content in the UTILS namespace - stub it there too, or the real gh
     # runs (green on an authenticated dev box, red in tokenless CI).
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: "")
-    monkeypatch.setattr(site, "discover_sessions", lambda org, repo: ["1", "2", "3"])
+    monkeypatch.setattr(
+        public_site, "discover_sessions", lambda org, repo: ["1", "2", "3"]
+    )
     return committed
 
 
@@ -100,7 +102,7 @@ def published(monkeypatch):
     committed = _install_fakes(monkeypatch)
 
     def run(**kwargs) -> dict[str, str]:
-        assert site.sync_public_site(COURSE, SOURCE, **kwargs) == 0
+        assert public_site.sync_public_site(COURSE, SOURCE, **kwargs) == 0
         return dict(committed)
 
     return run
@@ -181,14 +183,17 @@ def test_an_archived_site_repo_is_a_quiet_skip_not_a_daily_failure(monkeypatch, 
     # and only the push 403s, so the nightly Sync site run failed on it every single day.
     committed = _install_fakes(monkeypatch)
     monkeypatch.setattr(site_repo, "repo_is_archived", lambda org, name: True)
-    assert site.sync_public_site(COURSE, SOURCE, "actual-readings") == 0
+    assert public_site.sync_public_site(COURSE, SOURCE, "actual-readings") == 0
     assert not committed  # nothing was even cloned
     assert "is archived" in capsys.readouterr().out
 
 
 def test_nothing_to_publish_at_all_is_an_error():
     # No file sections and no readings - refuse before touching a single repo.
-    assert site.sync_public_site(COURSE, SOURCE, "none", include_lectures=False) == 1
+    assert (
+        public_site.sync_public_site(COURSE, SOURCE, "none", include_lectures=False)
+        == 1
+    )
 
 
 def test_publish_persists_its_settings_in_the_site_repo(published):
@@ -207,27 +212,27 @@ def test_cron_resync_repeats_the_last_publishs_settings(monkeypatch):
     # Round-trip: publish once with non-default settings, then re-sync with NO arguments
     # (the cron path) and get byte-identical output - the modes came from the site repo.
     committed = _install_fakes(monkeypatch)
-    assert site.sync_public_site(COURSE, SOURCE, "actual-readings") == 0
+    assert public_site.sync_public_site(COURSE, SOURCE, "actual-readings") == 0
     persisted = dict(committed)
 
     monkeypatch.setattr(
-        site, "get_file_content", lambda org, repo, path: persisted.get(path, "")
+        public_site, "get_file_content", lambda org, repo, path: persisted.get(path, "")
     )
     committed.clear()
-    assert site.resync_public_site(COURSE) == 0
+    assert public_site.resync_public_site(COURSE) == 0
     assert dict(committed) == persisted
 
 
 def test_cron_is_a_quiet_noop_when_the_course_never_published(monkeypatch):
     # This cron ships in every course org's .github; most never opt in. Never a failure.
-    monkeypatch.setattr(site, "sync_public_site", lambda *a, **k: 1)
-    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(public_site, "sync_public_site", lambda *a, **k: 1)
+    monkeypatch.setattr(public_site, "get_file_content", lambda *a, **k: None)
 
-    monkeypatch.setattr(site, "repo_exists", lambda org, name: False)
-    assert site.resync_public_site(COURSE) == 0  # no site repo at all
+    monkeypatch.setattr(public_site, "repo_exists", lambda org, name: False)
+    assert public_site.resync_public_site(COURSE) == 0  # no site repo at all
 
-    monkeypatch.setattr(site, "repo_exists", lambda org, name: True)
-    assert site.resync_public_site(COURSE) == 0  # site, but nothing persisted
+    monkeypatch.setattr(public_site, "repo_exists", lambda org, name: True)
+    assert public_site.resync_public_site(COURSE) == 0  # site, but nothing persisted
 
 
 def test_public_sync_cli_without_source_repo_is_the_resync_path(monkeypatch):

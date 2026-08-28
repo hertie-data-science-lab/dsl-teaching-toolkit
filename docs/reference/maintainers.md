@@ -78,7 +78,9 @@ enforces both that and the absence of function-local imports):
 - **L1, GitHub primitives** - `gh_teams` (org/team membership), `repos` (repo existence,
   creation, topics, descriptions, the publication denylist), `gh_contents` (file reads and
   writes, seeded stubs), `access` (team permissions and the faculty floor).
-- **L2 and up** - `discovery`, `roster`/`teams`/`schedule`, then the CLIs.
+- **L2 and up** - `discovery`, `roster`/`teams`/`schedule`, `schedule_plan` (the session
+  rows a plan declares), `site_repo` (the Jekyll site repo both websites publish into),
+  then the CLIs.
 
 Add a name to the layer that owns the subject, not to whichever module already imports it.
 

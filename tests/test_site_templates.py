@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import site, site_repo
+from dsl_course import public_site, site, site_repo
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "site"
 
@@ -289,16 +289,16 @@ def public_plan(monkeypatch, tmp_path):
     """The `_SitePlan` a public course-site publish builds."""
     captured: dict = {}
     monkeypatch.setattr(
-        site,
+        public_site,
         "sync_site_repo",
         lambda org, build, **kw: captured.update(plan=build(tmp_path)) or 0,
     )
-    monkeypatch.setattr(site, "discover_sessions", lambda org, repo: [])
-    monkeypatch.setattr(site, "discover_sections", lambda src: [])
-    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
-    monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
-    monkeypatch.setattr(site, "gh", lambda *a, **k: (0, ""))
-    assert site.sync_public_site("Course-Org", "course-materials-f2026") == 0
+    monkeypatch.setattr(public_site, "discover_sessions", lambda org, repo: [])
+    monkeypatch.setattr(public_site, "discover_sections", lambda src: [])
+    monkeypatch.setattr(public_site, "yaml_file", lambda *a: {})
+    monkeypatch.setattr(public_site, "people_yaml", lambda *a, **k: "people: []\n")
+    monkeypatch.setattr(public_site, "gh", lambda *a, **k: (0, ""))
+    assert public_site.sync_public_site("Course-Org", "course-materials-f2026") == 0
     return captured["plan"]
 
 

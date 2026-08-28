@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
-from dsl_course import gh_contents, repos, schedule_plan, site, site_repo
+from dsl_course import gh_contents, public_site, repos, schedule_plan, site, site_repo
 
 
 def test_semester_label():
@@ -132,7 +132,7 @@ def test_reading_list_md_inlines_text_lists_binaries_by_name(tmp_path):
     wk.mkdir()
     (wk / "READINGS.md").write_text("# Session 1\n- Smith 2020, ch.1")
     (wk / "paper.pdf").write_bytes(b"%PDF-1.4 copyrighted bytes")
-    md = site._reading_list_md(wk)
+    md = public_site._reading_list_md(wk)
     assert "Smith 2020" in md  # citation text is published
     assert "- paper.pdf" in md  # the PDF is named...
     assert "%PDF" not in md  # ...but its bytes are NOT
@@ -142,7 +142,7 @@ def test_public_links_are_site_relative(tmp_path):
     wk = tmp_path / "lectures"
     wk.mkdir()
     (wk / "01 intro.pdf").write_bytes(b"x")
-    links = site._public_links(
+    links = public_site._public_links(
         wk, "/public-materials/course-materials-f2026/session-1/lectures"
     )
     assert len(links) == 1
@@ -154,7 +154,7 @@ def test_public_links_are_site_relative(tmp_path):
 
 
 def test_public_lecture_entry_reading_list_mode_has_no_links():
-    e = site._public_lecture_entry("1", date(2025, 1, 1), [], "- Smith 2020")
+    e = public_site._public_lecture_entry("1", date(2025, 1, 1), [], "- Smith 2020")
     assert "links: []" in e
     # The citation text rides the front matter, not the body: both sites then feed the
     # theme's Materials layout from one field, and it needs no `{% raw %}` fence.
@@ -189,7 +189,7 @@ def test_lecture_entry_labels_links_by_repo_or_subpath():
 def test_public_lecture_entry_actual_readings_mode_links_are_local():
     lec = [("s.pdf", "/public-materials/m/session-1/lectures/s.pdf")]
     rds = [("r.pdf", "/public-materials/m/session-1/readings/r.pdf")]
-    e = site._public_lecture_entry(
+    e = public_site._public_lecture_entry(
         "1", date(2025, 1, 1), [("lectures", lec), ("readings", rds)], ""
     )
     assert "lecture - s.pdf" in e and "reading - r.pdf" in e
@@ -199,7 +199,7 @@ def test_public_lecture_entry_actual_readings_mode_links_are_local():
 def test_public_lecture_entry_renders_a_lab_row_as_its_own_type():
     # Same split as the cohort site: the labs section is its own row, so the theme's labs
     # page finds it and the session row doesn't list it twice.
-    e = site._public_lecture_entry(
+    e = public_site._public_lecture_entry(
         "2",
         date(2025, 1, 1),
         [("labs", [("lab.ipynb", "/public-materials/m/session-2/labs/lab.ipynb")])],
@@ -212,14 +212,14 @@ def test_public_lecture_entry_renders_a_lab_row_as_its_own_type():
 
 
 def test_row_file_splits_labs_from_lectures():
-    assert site._row_file("2", "lab") == "lab-02.md"
-    assert site._row_file("2", "lecture") == "session-02.md"
+    assert site_repo.row_file("2", "lab") == "lab-02.md"
+    assert site_repo.row_file("2", "lecture") == "session-02.md"
 
 
 def test_public_lecture_entry_labels_any_discovered_section():
     # Sections are free-form directory names - a repo with labs/ and faq/ must get
     # labelled links, not silently nothing (the site used to look only at lectures/).
-    e = site._public_lecture_entry(
+    e = public_site._public_lecture_entry(
         "3",
         date(2025, 1, 1),
         [
@@ -233,10 +233,10 @@ def test_public_lecture_entry_labels_any_discovered_section():
 
 
 def test_singular_strips_only_a_real_trailing_s():
-    assert site._singular("lectures") == "lecture"
-    assert site._singular("labs") == "lab"
-    assert site._singular("faq") == "faq"  # was "fa"
-    assert site._singular("s") == "s"  # never empty
+    assert site_repo._singular("lectures") == "lecture"
+    assert site_repo._singular("labs") == "lab"
+    assert site_repo._singular("faq") == "faq"  # was "fa"
+    assert site_repo._singular("s") == "s"  # never empty
 
 
 _TREE = "\n".join(  # noqa: FLY002 - a list of paths reads better than one long f-string
@@ -437,7 +437,7 @@ def test_the_allowlist_never_leaves_a_public_file_unreachable(tmp_path):
     (tmp_path / "deck.html").write_text("x")
     (tmp_path / "notes.pdf").write_text("x")
     (tmp_path / "libs" / "style.css").write_text("x")
-    names = [n for n, _ in site._public_links(tmp_path, "/m/session-1")]
+    names = [n for n, _ in public_site._public_links(tmp_path, "/m/session-1")]
     assert names == [
         "deck.html",
         "notes.pdf",
@@ -452,7 +452,7 @@ def test_public_links_lists_nested_files_when_nothing_sits_at_the_root(tmp_path)
     (tmp_path / "handouts").mkdir()
     (tmp_path / "handouts" / "notes.pdf").write_text("x")
     (tmp_path / "handouts" / "extra.pdf").write_text("x")
-    names = [n for n, _ in site._public_links(tmp_path, "/m/session-1")]
+    names = [n for n, _ in public_site._public_links(tmp_path, "/m/session-1")]
     assert names == ["handouts/extra.pdf", "handouts/notes.pdf"]
 
 
@@ -964,7 +964,7 @@ def test_a_denylisted_file_is_never_linked_from_a_public_page(tmp_path):
     (tmp_path / "deck.html").write_text("slides")
     (tmp_path / "grading.yml").write_text("points: 10")
     (tmp_path / ".env").write_text("KEY=live")
-    links = site._public_links(tmp_path, "/m/session-1/lectures")
+    links = public_site._public_links(tmp_path, "/m/session-1/lectures")
     assert [name for name, _ in links] == ["deck.html"]
 
 
