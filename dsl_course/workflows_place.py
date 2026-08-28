@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from .gh_contents import put_files
 from .log import log_err, log_ok
-from .workflows_render import render_provision, render_release, system_owned
+from .workflows_render import for_placement, render_provision, render_release
 
 # The run-from-repo workflows push_content_workflows places in every content repo.
 WORKFLOWS = (
@@ -28,6 +28,7 @@ def push_content_workflows(
     repo: str,
     cohort_orgs: list[str],
     assignments: list[str],
+    central_ref: str,
 ) -> int:
     """Place the run-from-repo workflows in one content repo, as ONE commit.
 
@@ -38,15 +39,21 @@ def push_content_workflows(
     folds the retired-workflow removal into it, so retiring a workflow costs no commit of its
     own either.
 
+    `central_ref` is the ref of the central toolkit this org's workflows check the engine
+    out at (discovery.central_ref_for); it is required rather than defaulted, so a caller
+    cannot place a workflow without saying which tier it is placing it at.
+
     Returns 1 if that commit didn't land, so refresh can report a run that didn't
     converge. It is all-or-nothing: put_files moves the branch once, at the end."""
     if not put_files(
         org,
         repo,
         {
-            WORKFLOWS[0]: system_owned(render_release(cohort_orgs, repo)).encode(),
-            WORKFLOWS[1]: system_owned(
-                render_provision(cohort_orgs, assignments)
+            WORKFLOWS[0]: for_placement(
+                render_release(cohort_orgs, repo), central_ref
+            ).encode(),
+            WORKFLOWS[1]: for_placement(
+                render_provision(cohort_orgs, assignments), central_ref
             ).encode(),
         },
         "ci: refresh release workflows",

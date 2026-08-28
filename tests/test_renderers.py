@@ -435,7 +435,11 @@ def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
     monkeypatch.setattr(workflows_place, "put_files", fake_put_files)
     assert (
         workflows_place.push_content_workflows(
-            "Course", "course-materials-f2026", ["Cohort-f2026"], ["assignment-1-f2026"]
+            "Course",
+            "course-materials-f2026",
+            ["Cohort-f2026"],
+            ["assignment-1-f2026"],
+            "release",
         )
         == 0
     )
@@ -479,7 +483,7 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
         return True
 
     monkeypatch.setattr(seed, "put_files", fake_put_files)
-    assert seed.seed_github_workflows("Course") == 0
+    assert seed.seed_github_workflows("Course", "release") == 0
     assert len(commits) == 1
     repo, files, deleted = commits[0]
     assert repo == ".github"
@@ -600,7 +604,7 @@ def test_validate_schedule_workflow_is_seeded_with_the_central_repo_pinned():
     from dsl_course.central import CENTRAL, CENTRAL_REF
     from dsl_course.welcome import _validate_schedule_workflow
 
-    raw = _validate_schedule_workflow()
+    raw = _validate_schedule_workflow(CENTRAL_REF)
     assert "__CENTRAL__" not in raw and "__CENTRAL_REF__" not in raw
     doc = yaml.safe_load(raw)
     trigger = doc.get("on", doc.get(True))
@@ -653,7 +657,7 @@ def test_update_profile_readme_absent_config_falls_back_without_crashing(monkeyp
     )
     monkeypatch.setattr(P, "log_ok", lambda *a, **k: None)
 
-    P.update_profile_readme("Cohort-f2026")  # must not raise
+    P.update_profile_readme("Cohort-f2026", central_ref="release")  # must not raise
     # Both READMEs, using the org name as the fallback - and in ONE commit, since they are
     # rendered from the same org snapshot and always move together.
     assert len(commits) == 1
@@ -741,7 +745,7 @@ def _readme_run(monkeypatch, put_ok):
     monkeypatch.setattr(P, "log_ok", lambda msg: said_ok.append(msg))
     monkeypatch.setattr(P, "log_err", lambda *a, **k: None)
     monkeypatch.setattr(P, "put_files", lambda *a, **k: put_ok)
-    return P.update_profile_readme("Cohort-f2026"), said_ok
+    return P.update_profile_readme("Cohort-f2026", central_ref="release"), said_ok
 
 
 def test_a_failed_readme_commit_is_counted_not_announced(monkeypatch):
@@ -777,7 +781,7 @@ def test_cohort_page_title_follows_the_course_pointer(monkeypatch):
     monkeypatch.setattr(
         P, "put_files", lambda org, repo, files, msg, **k: written.update(files) or True
     )
-    P.update_profile_readme("Cohort-f2026")
+    P.update_profile_readme("Cohort-f2026", central_ref="release")
     page = written["profile/README.md"].decode()
     assert "# Deep Learning" in page
     assert "# Cohort-f2026" not in page
@@ -796,7 +800,9 @@ def _cohort_readme(monkeypatch, existing):
     monkeypatch.setattr(
         P, "put_files", lambda org, repo, files, msg, **k: written.update(files) or True
     )
-    P.update_profile_readme("Cohort-f2026", "Org", "Deep Learning")
+    P.update_profile_readme(
+        "Cohort-f2026", "Org", "Deep Learning", central_ref="release"
+    )
     return written
 
 
@@ -1027,7 +1033,7 @@ def test_update_profile_readme_raises_clearly_on_a_malformed_config(
         lambda *a, **k: "course_name: [unclosed\n",
     )
     with pytest.raises(yaml.YAMLError):
-        P.update_profile_readme("Course-Org")
+        P.update_profile_readme("Course-Org", central_ref="release")
     assert "malformed YAML" in capsys.readouterr().err
 
 
@@ -1098,7 +1104,7 @@ def _spy_sweep(monkeypatch, repos):
     monkeypatch.setattr(P, "log", lambda *a, **k: None)
     monkeypatch.setattr(P, "log_ok", lambda *a, **k: None)
     monkeypatch.setattr(P, "put_files", lambda *a, **k: True)
-    P.update_profile_readme("Org", "Org", "Course")
+    P.update_profile_readme("Org", "Org", "Course", central_ref="release")
     return seen
 
 

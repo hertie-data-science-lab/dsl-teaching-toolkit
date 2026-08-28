@@ -24,7 +24,7 @@ from __future__ import annotations
 import re
 
 from .access import converge_faculty_access, converge_topics
-from .central import CENTRAL, CENTRAL_REF
+from .central import CENTRAL
 from .discovery import (
     course_name_of,
     discover_cohorts,
@@ -184,8 +184,14 @@ def render_profile_readme(
     repos: list[dict],
     is_cohort: bool,
     cohorts: list[str] | None = None,
+    *,
+    central_ref: str,
 ) -> str:
-    """Org overview. Cohort orgs get a student-facing page; course orgs a faculty & instructors one."""
+    """Org overview. Cohort orgs get a student-facing page; course orgs a faculty & instructors one.
+
+    `central_ref` is the ref of the central toolkit this org runs (discovery.central_ref_for);
+    the faculty page links into the docs at it, so an org on `staging` reads the staging docs
+    rather than a runbook for engine code it is not running."""
     if is_cohort:
         return f"""<!-- INSTRUCTOR-OWNED - this is the page students land on, so it is yours to word.
      It is seeded ONCE and every edit you make survives the nightly refresh. The one
@@ -234,7 +240,7 @@ The substantive repos of this org are private (not accessible to enrolled studen
 
 > **Faculty & instructors - start here:** New to the platform?
 > Follow the step-by-step
-> **[workflow runbooks](https://github.com/{CENTRAL}/blob/{CENTRAL_REF}/docs/README.md)**.
+> **[workflow runbooks](https://github.com/{CENTRAL}/blob/{central_ref}/docs/README.md)**.
 > The sections below are a live index of this org's cohorts, repositories, and actions.
 
 ## Cohorts
@@ -271,8 +277,8 @@ _(automatically bootstrapped from the central
 | [**Generate syllabus**](https://github.com/{org}/.github/actions/workflows/generate-syllabus.yml) | Writes the "Course sessions and readings" section of a syllabus - one block per session, with its title, learning objectives and reading list - from a cohort's `classroom-config/schedule.yml` and this repo's `readings/` folders. It lands in `SYLLABUS.sessions.md` beside your syllabus (never released to students) and never edits `SYLLABUS.md` itself. | Run by instructor |
 | [**Check cohort setup**](https://github.com/{org}/.github/actions/workflows/check-cohort-setup.yml) | A per-cohort checklist of everything configured (identity, people, schedule + release plan, roster, teams, grades) with direct edit links for anything missing. Read-only. | Run by instructor |
 | [**Publish course website**](https://github.com/{org}/.github/actions/workflows/publish-site.yml) | **[OPTIONAL]** **[DEFERRED]** Build/refresh a public openware site for the course `{org}.github.io`. This will share this course's lecture materials and (limited) readings with the open internet. Opt-in (the first run scaffolds the site); afterwards a daily cron re-syncs it from the settings that run chose, so later materials edits appear without another click. Pick a materials repo and choose for readings: `reading-list` (citations only) or `actual-readings` (also host the files). Because the materials repos are private, the site **hosts** the shared files itself. This is separate from each cohort's student-facing site. | Run by instructor |
-| [**Release materials**](https://github.com/{org}/.github/actions/workflows/release-materials.yml) | Manually release materials to student-facing cohort orgs *(NB: it is recommended to instead use the [scheduling function](https://github.com/{CENTRAL}/blob/{CENTRAL_REF}/docs/07-schedule-releases.md) for regular releases)*. Select path(s) for any folder or file, one or several at a time. | Run by instructor |
-| [**Release assignment**](https://github.com/{org}/.github/actions/workflows/release-assignment.yml) | Generate one private repo per student from a chosen `assignment-*` template repo. *(NB: it is recommended to instead use the [scheduling function](https://github.com/{CENTRAL}/blob/{CENTRAL_REF}/docs/07-schedule-releases.md) for regular releases)* | Run by instructor |
+| [**Release materials**](https://github.com/{org}/.github/actions/workflows/release-materials.yml) | Manually release materials to student-facing cohort orgs *(NB: it is recommended to instead use the [scheduling function](https://github.com/{CENTRAL}/blob/{central_ref}/docs/07-schedule-releases.md) for regular releases)*. Select path(s) for any folder or file, one or several at a time. | Run by instructor |
+| [**Release assignment**](https://github.com/{org}/.github/actions/workflows/release-assignment.yml) | Generate one private repo per student from a chosen `assignment-*` template repo. *(NB: it is recommended to instead use the [scheduling function](https://github.com/{CENTRAL}/blob/{central_ref}/docs/07-schedule-releases.md) for regular releases)* | Run by instructor |
 | [**Grade assignment**](https://github.com/{org}/.github/actions/workflows/grade-assignment.yml) | Faculty-side autograder: after the deadline, run the HIDDEN tests (from the template's `solution` branch) against each submission and record the machine score into `classroom-config/grades/<assignment>.csv`. Nothing is written to student repos; faculty & instructors then add manual marks. Optional per assignment (skipped if `grading.yml` sets `autograde: false`). | Run by instructor |
 | [**Sync gradebooks**](https://github.com/{org}/.github/actions/workflows/sync-gradebooks.yml) | Ensure every onboarded student has a PRIVATE `grades-<handle>` repo (the single home for all their grades). | Run by instructor |
 | [**Render grades (preview)**](https://github.com/{org}/.github/actions/workflows/render-grades.yml) | Build per-student `gradebook/<handle>.yml` from `classroom-config/grades/<assignment>.csv` and open ONE pull request. **That PR is the preview** - review every student's grades in the diff before sending. | Run by instructor |
@@ -372,7 +378,11 @@ Maintained by the [Hertie Data Science Lab](https://github.com/hertie-data-scien
 
 
 def update_profile_readme(
-    org: str, org_name: str | None = None, course_name: str | None = None
+    org: str,
+    org_name: str | None = None,
+    course_name: str | None = None,
+    *,
+    central_ref: str,
 ) -> int:
     """(Re)generate the org's profile/README.md from its metadata + live repo list.
 
@@ -428,7 +438,9 @@ def update_profile_readme(
     # gradebook off this very page.
     failures = converge_topics(org, repos, cohort=is_cohort)
     cohorts = None if is_cohort else discover_cohorts(org)
-    body = render_profile_readme(org, org_name, course_name, repos, is_cohort, cohorts)
+    body = render_profile_readme(
+        org, org_name, course_name, repos, is_cohort, cohorts, central_ref=central_ref
+    )
     if is_cohort:
         body = _cohort_profile_body(org, repos, body)
     files = {"README.md": render_dotgithub_readme(org, course_name, is_cohort).encode()}

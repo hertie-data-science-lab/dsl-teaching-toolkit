@@ -30,7 +30,7 @@ from .course import (
     SYLLABUS_SAMPLE_FILE,
     pages_repo,
 )
-from .discovery import discover_assignments, discover_cohorts
+from .discovery import central_ref_for, discover_assignments, discover_cohorts
 from .gh_contents import put_files, refresh_stubs, seed_files_if_absent, seed_if_absent
 from .ghcli import GIT_ENV, gh, git
 from .log import log, log_err, log_ok, log_skip, log_step
@@ -505,7 +505,9 @@ def scaffold_materials(org: str, tag: str) -> int:
     # push_content_workflows lands both in one commit, logs its own failure, and returns
     # 1 - a materials repo with no Release workflows must not report success.
     cohorts = discover_cohorts(org)
-    failures += push_content_workflows(org, repo, cohorts, discover_assignments(org))
+    failures += push_content_workflows(
+        org, repo, cohorts, discover_assignments(org), central_ref_for(org)
+    )
     if failures:
         return 1
     log_ok(f"materials repo ready: {org}/{repo}")
