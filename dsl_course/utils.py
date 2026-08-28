@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
@@ -182,6 +183,23 @@ def log_err(msg: str) -> None:
     print(f"  [err] {msg}", file=sys.stderr, flush=True)
 
 
+def log_verbose(msg: str) -> None:
+    """Print `msg` only when `DSL_VERBOSE` is set in the environment.
+
+    Every faculty workflow runs in the course org's PUBLIC `.github`, so its Actions log is
+    world-readable - and a line naming one student's handle, their `<slug>-<handle>` repo,
+    or a team's roster publishes who is in the cohort and who is grouped with whom. Those
+    lines are INFORMATIONAL; what a faculty member actually reads is the aggregate
+    `Done - {...}` summary, which stays. So they are routed through here: printed when
+    someone runs the CLI locally with `DSL_VERBOSE=1`, absent from every workflow, because
+    no rendered workflow sets the variable (a test enforces that).
+
+    An ERROR a faculty member must act on keeps its handle and stays on `log_err` - those
+    are rare, and unactionable without saying who."""
+    if os.environ.get("DSL_VERBOSE"):
+        print(msg, flush=True)
+
+
 def repo_missing(org: str, name: str) -> bool:
     """Whether GitHub positively says the repo is NOT there (a 404). The shape for a
     caller about to record something permanent on the strength of absence: a 5xx or a
@@ -332,7 +350,7 @@ def set_org_membership(org: str, login: str, role: str = "member") -> bool:
     """
     current = org_membership_state(org, login)
     if current:
-        log_skip(f"org membership {login} ({current})")
+        log_verbose(f"  [skip] org membership {login} ({current})")
         return True
     code, out = gh(
         "api",
@@ -343,7 +361,7 @@ def set_org_membership(org: str, login: str, role: str = "member") -> bool:
         f"role={role}",
     )
     if code == 0:
-        log_ok(f"invited {login} to {org}")
+        log_verbose(f"  [ok] invited {login} to {org}")
         return True
     log_err(f"could not invite {login} (not a real account?): {out[:120]}")
     return False
@@ -457,9 +475,9 @@ def reconcile_team_members(
     current_by_fold = {h.casefold(): h for h in current}
     for handle in sorted(_fold_diff(wanted_by_fold, current_by_fold)):
         if dry_run:
-            log(f"    DRY-RUN add {handle} -> {org}/{team}")
+            log_verbose(f"    DRY-RUN add {handle} -> {org}/{team}")
         elif add_team_member(org, team, handle):
-            log_ok(f"{handle} -> {org}/{team}")
+            log_verbose(f"  [ok] {handle} -> {org}/{team}")
         else:
             errors += 1
     if prune:
@@ -475,9 +493,9 @@ def reconcile_team_members(
             if handle == acting or handle in owners:
                 continue
             if dry_run:
-                log(f"    DRY-RUN remove {handle} <- {org}/{team}")
+                log_verbose(f"    DRY-RUN remove {handle} <- {org}/{team}")
             elif remove_team_member(org, team, handle):
-                log_ok(f"removed {handle} from {org}/{team}")
+                log_verbose(f"  [ok] removed {handle} from {org}/{team}")
             else:
                 errors += 1
     return errors

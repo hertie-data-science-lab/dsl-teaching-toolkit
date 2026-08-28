@@ -54,8 +54,8 @@ from .utils import (
     log,
     log_err,
     log_ok,
-    log_skip,
     log_step,
+    log_verbose,
     put_file,
     repo_exists,
     require_csv_header,
@@ -307,7 +307,7 @@ def merge_auto(text: str, updates: list[tuple[str, dict[str, str]]]) -> str:
             setattr(row, key, value)
         if kept:
             preserved += kept
-            log(f"  [keep] {handle}: {kept} existing cell(s) left as they are")
+            log_verbose(f"  [keep] {handle}: {kept} existing cell(s) left as they are")
     if preserved:
         log_ok(
             f"{preserved} existing machine-written cell(s) preserved - "
@@ -384,7 +384,7 @@ def provision_one(cohort_org: str, handle: str) -> str:
     repo = f"{GRADEBOOK_PREFIX}{handle}"
     existed = repo_exists(cohort_org, repo)
     if existed:
-        log_skip(f"gradebook {cohort_org}/{repo}")
+        log_verbose(f"  [skip] gradebook {cohort_org}/{repo}")
     else:
         if not create_repo(
             cohort_org,
@@ -404,7 +404,7 @@ def provision_one(cohort_org: str, handle: str) -> str:
     # on the next run. The CSV is where a mark belongs.
     grant_faculty_read_access(cohort_org, repo)
     if add_collaborator(cohort_org, repo, handle, permission="pull"):
-        log_ok(f"  + @{handle} (read)")
+        log_verbose(f"  [ok]   + @{handle} (read)")
         return "skipped" if existed else "ok"
     # A gradebook the student can't open is a failure, not a partial success - the status
     # starts with "failed" so it reaches the exit code (see sync).
@@ -435,7 +435,9 @@ def sync(cohort_org: str, dry_run: bool = False) -> int:
     results: dict[str, int] = {}
     for s in onboarded:
         if dry_run:
-            log(f"    DRY-RUN  {cohort_org}/{GRADEBOOK_PREFIX}{s.github_handle}")
+            log_verbose(
+                f"    DRY-RUN  {cohort_org}/{GRADEBOOK_PREFIX}{s.github_handle}"
+            )
             continue
         status = provision_one(cohort_org, s.github_handle)
         results[status] = results.get(status, 0) + 1
@@ -514,7 +516,7 @@ def render(cohort_org: str) -> int:
         gbdir.mkdir(exist_ok=True)
         for handle in sorted(books):
             (gbdir / f"{handle}.yml").write_text(render_yaml(books[handle]))
-            log_ok(f"+ {GRADEBOOK_DIR}/{handle}.yml")
+            log_verbose(f"  [ok] + {GRADEBOOK_DIR}/{handle}.yml")
         (wd / COHORT_CSV_NAME).write_text(render_cohort_csv(per))
         log_ok(f"+ {COHORT_CSV_NAME}")
 
@@ -600,7 +602,9 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
         pushed: list[str] = []
         for f in files:
             if dry_run:
-                log(f"    DRY-RUN  would update {GRADEBOOK_PREFIX}{f.stem}/grades.yml")
+                log_verbose(
+                    f"    DRY-RUN  would update {GRADEBOOK_PREFIX}{f.stem}/grades.yml"
+                )
                 pushed.append(f.stem)
                 continue
             status = _push_gradebook(cohort_org, f.stem, f.read_text())
@@ -622,7 +626,7 @@ def _push_gradebook(cohort_org: str, handle: str, content: str) -> str:
     repo = f"{GRADEBOOK_PREFIX}{handle}"
     if not put_file(cohort_org, repo, "grades.yml", content.encode(), "grades: update"):
         return "failed-push"
-    log_ok(f"+ {repo}/grades.yml")
+    log_verbose(f"  [ok] + {repo}/grades.yml")
     return "ok"
 
 

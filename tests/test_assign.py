@@ -163,7 +163,8 @@ def test_a_failed_solution_push_reaches_the_returned_status(tmp_path, monkeypatc
     assert group == "failed-solution"
 
 
-def test_provisioning_skips_auditors(tmp_path, capsys):
+def test_provisioning_skips_auditors(tmp_path, capsys, monkeypatch):
+    monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     path = _roster_file(
         tmp_path,
         "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
@@ -186,7 +187,10 @@ def test_provisioning_skips_auditors(tmp_path, capsys):
     assert "2 student(s)" in out
 
 
-def test_provisioning_still_works_for_a_roster_without_a_role_column(tmp_path, capsys):
+def test_provisioning_still_works_for_a_roster_without_a_role_column(
+    tmp_path, capsys, monkeypatch
+):
+    monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     path = tmp_path / "students.csv"
     path.write_text(
         "student_id,hertie_email,name,github_handle,github_id,section\n"
@@ -204,6 +208,29 @@ def test_provisioning_still_works_for_a_roster_without_a_role_column(tmp_path, c
     assert rc == 0
     assert "assignment-1-ada-l" in out
     assert "auditor row(s) skipped" not in out
+
+
+def test_a_dry_run_names_no_student_in_a_public_log(tmp_path, capsys, monkeypatch):
+    # The Release assignment workflow runs in the course org's PUBLIC .github, so its log
+    # must not publish who is enrolled. The counts a faculty member reads still appear.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    path = _roster_file(
+        tmp_path,
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
+        "bob@uni.edu,Bob,bob-b,43,dsl-def,enrolled",
+    )
+    rc = assign.provision_all(
+        "COURSE",
+        "assignment-1-f2026",
+        "COHORT",
+        roster_path=path,
+        group=False,
+        dry_run=True,
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "ada-l" not in out and "bob-b" not in out
+    assert "2 student(s)" in out  # the aggregate a faculty member actually reads
 
 
 def test_not_yet_onboarded_rows_are_still_skipped_separately(tmp_path, capsys):
@@ -231,6 +258,7 @@ def test_group_none_infers_per_team_from_the_templates_grading_yml(
 ):
     # group=None (the default - scheduler and untick'd button alike) asks the template's
     # own grading.yml: `type: group` provisions per TEAM without anyone force-ticking.
+    monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
         "dsl_course.collect.assignment_is_group", lambda org, cohort, template: True
     )
@@ -261,6 +289,7 @@ def test_group_false_forces_individual_even_for_a_group_template(
     tmp_path, capsys, monkeypatch
 ):
     # An explicit False never consults grading.yml - the caller decided.
+    monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
         "dsl_course.collect.assignment_is_group",
         lambda org, cohort, template: (_ for _ in ()).throw(
@@ -348,6 +377,7 @@ def test_group_provisioning_filters_teams_csv_through_the_roster_allowlist(
     # teams.csv is student-writable (the welcome "Join team" issue appends rows). A handle
     # not on the roster - a typo, or a stranger's login - must be excluded, never invited
     # into the private org with maintain on a repo. An auditor's handle is excluded too.
+    monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
         "dsl_course.collect.assignment_is_group", lambda org, cohort, template: True
     )

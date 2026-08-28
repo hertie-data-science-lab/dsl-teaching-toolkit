@@ -274,7 +274,8 @@ def test_merge_auto_write_once_is_per_row_not_per_file():
     assert rows["anna"].autograde_score == "9" and rows["ben"].autograde_score == "3"
 
 
-def test_merge_auto_logs_how_many_cells_were_preserved(capsys):
+def test_merge_auto_logs_how_many_cells_were_preserved(capsys, monkeypatch):
+    monkeypatch.setenv("DSL_VERBOSE", "1")  # the per-handle [keep] line is verbose-only
     existing = grades.dump_grades(
         [
             grades.GradeRow(
@@ -338,6 +339,7 @@ def test_render_cohort_csv_pivots_to_one_row_per_handle():
 def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
     # Auditors are never assessed, so they get no private gradebook repo. Dry-run keeps
     # this pure - the roster is the only input, and nothing is provisioned.
+    monkeypatch.setenv("DSL_VERBOSE", "1")  # per-student lines are verbose-only
     students = roster.parse(
         "hertie_email,name,github_handle,github_id,enrol_code,role\n"
         "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
@@ -351,6 +353,19 @@ def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
     assert "eve-e" not in out
     assert "Syncing 2 gradebook repo(s)" in out
     assert "1 auditor row(s) skipped" in out
+
+
+def test_gradebook_sync_names_no_student_in_a_public_log(monkeypatch, capsys):
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    students = roster.parse(
+        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+    )
+    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    assert grades.sync("COHORT", dry_run=True) == 0
+    out = capsys.readouterr().out
+    assert "ada-l" not in out
+    assert "Syncing 1 gradebook repo(s)" in out  # the aggregate still reports
 
 
 def test_a_gradebook_the_student_cannot_open_is_a_failure(monkeypatch):

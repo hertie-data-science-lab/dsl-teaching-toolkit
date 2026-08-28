@@ -568,3 +568,37 @@ def test_repo_missing_is_true_only_on_a_404(monkeypatch):
     assert not utils.repo_missing("O", "r")
     monkeypatch.setattr(utils, "gh", lambda *a, **k: (0, "{}"))
     assert not utils.repo_missing("O", "r")
+
+
+# ------------------------------- per-person lines stay out of a world-readable log
+
+
+def test_log_verbose_is_silent_unless_dsl_verbose_is_set(capsys, monkeypatch):
+    # Every faculty workflow runs in the course org's PUBLIC .github, so a line naming a
+    # student may only appear when a human asks for it on their own machine.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    utils.log_verbose("@ada-l")
+    assert capsys.readouterr().out == ""
+    monkeypatch.setenv("DSL_VERBOSE", "1")
+    utils.log_verbose("@ada-l")
+    assert "@ada-l" in capsys.readouterr().out
+
+
+def test_an_empty_dsl_verbose_is_not_verbose(capsys, monkeypatch):
+    monkeypatch.setenv("DSL_VERBOSE", "")
+    utils.log_verbose("@ada-l")
+    assert capsys.readouterr().out == ""
+
+
+def test_reconcile_keeps_the_handles_it_adds_and_removes_out_of_a_public_log(
+    capsys, monkeypatch
+):
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    monkeypatch.setattr(utils, "get_team_members", lambda org, team: {"zoe-zed"})
+    monkeypatch.setattr(utils, "_acting_login", lambda: "bot")
+    monkeypatch.setattr(utils, "get_org_owners", lambda org: frozenset())
+    monkeypatch.setattr(utils, "add_team_member", lambda *a, **k: True)
+    monkeypatch.setattr(utils, "remove_team_member", lambda *a, **k: True)
+    assert utils.reconcile_team_members("org", "students", {"ada-l"}, prune=True) == 0
+    captured = capsys.readouterr()
+    assert "ada-l" not in captured.out and "zoe-zed" not in captured.out

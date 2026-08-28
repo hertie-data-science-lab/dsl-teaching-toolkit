@@ -191,3 +191,28 @@ def test_a_student_cannot_materialise_a_faculty_team_from_teams_csv(capsys):
     assert wanted == {"assignment-4-project-team-x": {"ada-l"}}
     err = capsys.readouterr().err
     assert "course-admin" in err and "instructors-f2026" in err
+
+
+def test_a_rejected_teams_csv_handle_is_counted_publicly_and_named_only_when_verbose(
+    stub_team, monkeypatch, capsys
+):
+    # The handle came from a STUDENT (the public "Join team" issue), and this sync runs in
+    # a world-readable log - so the name is verbose-only, while the count that makes the
+    # run red stays where faculty can see it.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    monkeypatch.setattr(
+        sync_teams.teams,
+        "load",
+        lambda org: {"assignment-4-project": {"wizards": ["ben-baker", "m-stranger"]}},
+    )
+    monkeypatch.setattr(
+        roster, "load", lambda org: _students("ben@uni.edu,Ben,ben-baker,42,,")
+    )
+    assert sync_teams.sync("org", prune=False) == 1
+    captured = capsys.readouterr()
+    assert "m-stranger" not in captured.out + captured.err
+    assert "1 handle(s) in teams.csv are not onboarded roster handles" in captured.err
+
+    monkeypatch.setenv("DSL_VERBOSE", "1")
+    assert sync_teams.sync("org", prune=False) == 1
+    assert "m-stranger" in capsys.readouterr().out

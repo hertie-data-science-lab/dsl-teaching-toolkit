@@ -28,10 +28,10 @@ import sys
 from . import roster, teams
 from .utils import (
     create_team,
-    log,
     log_err,
     log_ok,
     log_step,
+    log_verbose,
     reconcile_team_members,
 )
 
@@ -145,14 +145,23 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
     for slug in sorted(wanted):
         accepted, rejected = vet_handles(sorted(wanted[slug]), allowed_by_fold)
         for member in rejected:
-            log_err(
-                f"{member} in teams.csv is not an onboarded roster handle - "
+            # Names a handle a STUDENT typed into teams.csv, so the detail is verbose-only
+            # (this workflow's log is world-readable). The count below is what a faculty
+            # member acts on, and it names nobody.
+            log_verbose(
+                f"    {member} in teams.csv is not an onboarded roster handle - "
                 f"not adding to {slug} (would invite an arbitrary GitHub account)"
             )
-            errors += 1
+        if rejected:
+            errors += len(rejected)
+            log_err(
+                f"{len(rejected)} handle(s) in teams.csv are not onboarded roster handles "
+                f"- not added to {slug} (they would invite arbitrary GitHub accounts). "
+                f"Re-run the CLI locally with DSL_VERBOSE=1 to see which."
+            )
         members = set(accepted)
         if dry_run:
-            log(
+            log_verbose(
                 f"    DRY-RUN team {slug}: {', '.join('@' + m for m in sorted(members))}"
             )
         elif not ensure_team(cohort_org, slug, members, prune):

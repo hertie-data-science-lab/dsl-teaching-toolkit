@@ -53,6 +53,7 @@ from .utils import (
     log_ok,
     log_skip,
     log_step,
+    log_verbose,
     put_file,
     repo_exists,
     set_repo_topics,
@@ -236,7 +237,7 @@ def provision_one(
     membership changes propagate to access (and members get @mentions + a team space)."""
     existed = repo_exists(cohort_org, repo)
     if existed:
-        log_skip(f"repo {cohort_org}/{repo}")
+        log_verbose(f"  [skip] repo {cohort_org}/{repo}")
         if sol_dir is None and not touch_existing:
             # Nothing is due for this repo. The scheduler re-runs every handed-out release
             # on every hourly tick, so re-granting access here cost 2-4 API calls per
@@ -256,14 +257,15 @@ def provision_one(
     ):
         return "failed-create"
     else:
-        log_ok(f"created {cohort_org}/{repo}")
+        log_verbose(f"  [ok] created {cohort_org}/{repo}")
         if not set_repo_topics(cohort_org, repo, [slug, "submission"]):
-            log_err(f"  ! {repo} is untagged - the nightly sweep converges it")
+            # Not named: this log is public. The nightly sweep converges the topic.
+            log_err("  ! a submission repo is untagged - the nightly sweep converges it")
 
     solution_failed = False
     if sol_dir is not None:
         if push_solution(cohort_org, repo, sol_dir):
-            log_ok("  + solution pushed")
+            log_verbose("  [ok]   + solution pushed")
         else:
             # Reported in the RETURN value, not just the log: provision_all writes a
             # fire-once marker off these statuses, so a push that only logged its failure
@@ -290,7 +292,7 @@ def provision_one(
         team_ok = sync_teams.ensure_team(cohort_org, team, set(handles), prune=False)
         if not grant_team_repo_access(cohort_org, team, repo, "maintain"):
             return "failed-no-access"
-        log_ok(f"  + team {team} (maintain)")
+        log_verbose(f"  [ok]   + team {team} (maintain)")
         if not team_ok:
             log_err(f"  ! team {team} is missing member(s) - they cannot see {repo}")
             return "failed-team-members"
@@ -307,7 +309,7 @@ def provision_one(
     added = 0
     for handle in handles:
         if add_collaborator(cohort_org, repo, handle, permission="maintain"):
-            log_ok(f"  + @{handle} (maintain)")
+            log_verbose(f"  [ok]   + @{handle} (maintain)")
             added += 1
         else:
             log_err(f"  ! could not add @{handle} (not a real account?)")
@@ -506,7 +508,7 @@ def provision_all(
         log(f"    DRY-RUN  cohort template {cohort_org}/{slug}")
         for repo, handles, team in units:
             via = f" (team {team})" if team else ""
-            log(
+            log_verbose(
                 f"    DRY-RUN  {cohort_org}/{repo}{via}  <- {', '.join('@' + h for h in handles)}"
             )
         return 0
@@ -538,7 +540,7 @@ def provision_all(
         # Stage 2: fan out one repo per unit (student, or team) FROM the cohort template.
         results: dict[str, int] = {}
         for repo, handles, team in units:
-            log_step(repo)
+            log_verbose(f"-> {repo}")
             status = provision_one(
                 cohort_org,
                 cohort_template,

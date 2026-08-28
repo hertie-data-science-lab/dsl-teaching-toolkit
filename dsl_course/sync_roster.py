@@ -28,10 +28,10 @@ import sys
 
 from . import roster
 from .utils import (
-    log,
     log_err,
     log_ok,
     log_step,
+    log_verbose,
     reconcile_team_members,
     set_org_membership,
 )
@@ -69,7 +69,7 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
     for team, handles in wanted.items():
         for handle in sorted(handles):
             if dry_run:
-                log(f"    DRY-RUN enroll: {handle} -> org member")
+                log_verbose(f"    DRY-RUN enroll: {handle} -> org member")
             elif not set_org_membership(cohort_org, handle, role="member"):
                 errors += 1
         # Team membership via the shared reconcile so pruning inherits its guard:
