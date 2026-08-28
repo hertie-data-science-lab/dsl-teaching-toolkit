@@ -26,6 +26,21 @@ SHA = "a" * 40
 OTHER_SHA = "b" * 40
 
 
+@pytest.fixture(autouse=True)
+def _grading_deps_present(monkeypatch):
+    """Report every grading dependency as installed, by default.
+
+    `_run_tests` refuses to spawn a grader it knows is not importable, and most tests here
+    stub the subprocess boundary rather than really running one - so a dev box without
+    `nbconvert` on it must not read as a broken runner. A test about the probe itself
+    re-patches `find_spec` in its own body and wins. The verdict is cached for the life of
+    a grading run, so it is cleared either side."""
+    collect._grader_dep_missing.cache_clear()
+    monkeypatch.setattr(collect.importlib.util, "find_spec", lambda name: object())
+    yield
+    collect._grader_dep_missing.cache_clear()
+
+
 def test_parse_grading_spec_defaults_and_overrides():
     assert collect.parse_grading_spec("") == {
         "type": "individual",
@@ -360,6 +375,35 @@ def test_run_tests_abandons_the_submission_on_the_first_convert_timeout(
     assert collect._run_tests(work, tests) is None
     assert len(calls) == 1  # bailed on the FIRST timeout, not once per notebook
     assert "abandoning this submission" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "submission, module",
+    [("starter.py", "pytest"), ("starter.ipynb", "nbconvert")],
+)
+def test_run_tests_names_a_grading_dependency_the_runner_does_not_have(
+    monkeypatch, tmp_path, capsys, submission, module
+):
+    # `_run_limited` sends the child's output to DEVNULL and calls ANY exit code a completed
+    # run, so `python -m pytest` dying on "No module named pytest" was indistinguishable
+    # from a failing submission: a grading-failed zero for every target, a red cron with no
+    # sentinel, and the same again every hour for the rest of the term. Name the fault.
+    monkeypatch.setattr(collect.importlib.util, "find_spec", lambda name: None)
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(
+        collect,
+        "_run_limited",
+        lambda argv, **kw: spawned.append(argv) or True,
+    )
+    work = tmp_path / "sub"
+    work.mkdir()
+    (work / submission).write_text("{}")
+    tests = tmp_path / "hidden"
+    tests.mkdir()
+
+    assert collect._run_tests(work, tests) is None
+    assert spawned == [], f"{module} was invoked although it is not importable"
+    assert f"`{module}` is not installed" in capsys.readouterr().err
 
 
 def test_stray_conversion_ignores_a_same_stem_directory(tmp_path):

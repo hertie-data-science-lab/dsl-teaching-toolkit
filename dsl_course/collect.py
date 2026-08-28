@@ -68,6 +68,7 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import importlib.util
 import io
 import json
 import os
@@ -81,6 +82,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from datetime import datetime, timezone
+from functools import cache
 from pathlib import Path
 
 import yaml
@@ -715,6 +717,33 @@ def _apply_rlimits() -> None:
             pass  # a platform that won't take this limit must not abort the run
 
 
+@cache
+def _grader_dep_missing(module: str) -> bool:
+    """Whether `module` is absent from the interpreter the graded subprocess runs under -
+    logged, loudly, ONCE per run.
+
+    `_run_limited` sends the child's output to DEVNULL and reports ANY exit code as a
+    completed run, so a `python -m pytest` that died on "No module named pytest" was
+    indistinguishable from a submission that failed its tests: every target came back a
+    grading-failed zero, the systemic guard reddened the cron, no sentinel was written, and
+    the next hourly tick did it all again. A missing INTERPRETER dependency is a runner
+    fault with one fix, so it says so in words rather than through a cohort of zeros.
+
+    Checked in-process: the subprocess runs `sys.executable`, and neither PYTHONSAFEPATH
+    nor the runspace PYTHONPATH takes site-packages away from it."""
+    try:
+        present = importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        present = False
+    if not present:
+        log_err(
+            f"  ! `{module}` is not installed in the grading environment - NOTHING can be "
+            f"graded until the workflow installs it (it is pinned in requirements.txt, "
+            f"which every seeded workflow's preamble installs)"
+        )
+    return not present
+
+
 def _run_limited(argv: list[str], *, cwd: str, env: dict, timeout: int) -> bool:
     """Run `argv` in its OWN session/process group under `_apply_rlimits`. Returns True if it
     exited on its own (ANY exit code - a non-zero pytest run is still a valid grading result),
@@ -800,6 +829,8 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
     for nb in _walk_files(workdir):
         if nb.suffix != ".ipynb":
             continue
+        if _grader_dep_missing("nbconvert"):
+            return None
         # A timed-out convert ABORTS this submission rather than continuing to the next
         # notebook: tolerating one per notebook multiplies the budget (100 hanging .ipynb
         # = 100 x RUN_TIMEOUT), blowing the 6h Actions cap so the job dies before the
@@ -848,6 +879,8 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
             f"import sys\nsys.path.append({str(workdir)!r})\n"
         )
         env["PYTHONPATH"] = str(startup)
+        if _grader_dep_missing("pytest"):
+            return None
         report = Path(run) / "report.xml"
         completed = _run_limited(
             [

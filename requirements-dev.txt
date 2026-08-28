@@ -1,2 +1,3 @@
+# pytest is pinned in requirements.txt (the seeded workflows' autograder needs it at run
+# time), so this file no longer floors it - two declarations could only ever disagree.
 -r requirements.txt
-pytest>=8

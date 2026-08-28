@@ -1024,6 +1024,28 @@ def test_the_hourly_scheduler_serialises_against_itself():
     }
 
 
+def test_the_scheduler_installs_the_autograder_it_runs():
+    # The hourly cron autogrades at every passed deadline through the SAME preamble as
+    # every other workflow, which installs requirements.txt and nothing else. When pytest
+    # lived only in the manual Grade assignment step, `python -m pytest` was "No module
+    # named pytest" on the cron: silent zeros for the whole cohort, no sentinel, and the
+    # same red run every hour for the rest of the term.
+    steps = yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]["scheduled-release"][
+        "steps"
+    ]
+    installs = [s["run"] for s in steps if "pip install -r " in str(s.get("run", ""))]
+    assert installs, "the scheduler job installs nothing - it cannot grade"
+    for run in installs:
+        req = ROOT / run.split("pip install -r ")[1].split()[0]
+        pinned = req.read_text()
+        assert re.search(r"^pytest==", pinned, re.MULTILINE), (
+            f"{req.name} does not pin pytest"
+        )
+        assert re.search(r"^nbconvert==", pinned, re.MULTILINE), (
+            f"{req.name} does not pin nbconvert - a notebook submission cannot be graded"
+        )
+
+
 def test_update_profile_readme_raises_clearly_on_a_malformed_config(
     monkeypatch, capsys
 ):
