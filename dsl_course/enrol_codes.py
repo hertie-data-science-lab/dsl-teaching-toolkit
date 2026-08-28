@@ -28,7 +28,7 @@ import sys
 
 from . import mailer, roster
 from .discovery import course_name_for_cohort
-from .gh_contents import get_file_with_sha, put_file, strip_bom
+from .gh_contents import get_file_with_sha, put_file, require_csv_header, strip_bom
 from .log import log_err, log_ok, log_step
 
 # No ambiguous characters (0/O, 1/l/I) so a student can read the code off an email.
@@ -52,6 +52,11 @@ def fill_enrol_codes_in_csv(text: str, codes_by_row: dict[int, str]) -> str:
 
     The `enrol_code` column is appended if the roster predates it."""
     reader = csv.DictReader(io.StringIO(strip_bom(text)))
+    # The guard `roster.parse` applies, which this path bypasses. A German-locale Excel
+    # saves `;`-delimited CSV: DictReader then sees ONE header column, every field reads
+    # "", and this function wrote that mangled file straight back with a code column bolted
+    # on - exit 0, roster destroyed.
+    require_csv_header(reader.fieldnames, roster.REQUIRED_FIELDS, roster.ROSTER_PATH)
     fieldnames = list(reader.fieldnames or [])
     if "enrol_code" not in fieldnames:
         fieldnames.append("enrol_code")
@@ -83,6 +88,7 @@ def rows_for_codes(text: str, codes: list[tuple[int, str, str]]) -> dict[int, st
     was left with no code at all, silently. Those rows keep their original index too."""
     seen: dict[str, int] = {}
     reader = csv.DictReader(io.StringIO(strip_bom(text)))
+    require_csv_header(reader.fieldnames, roster.REQUIRED_FIELDS, roster.ROSTER_PATH)
     for i, row in enumerate(reader):
         email = (row.get("hertie_email") or "").strip()
         if email:

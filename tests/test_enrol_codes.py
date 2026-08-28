@@ -187,11 +187,27 @@ def test_fill_enrol_codes_appends_the_column_when_the_roster_predates_it():
     import csv
     import io
 
-    text = "student_id,name,github_handle\n1,Ada,ada-l\n"
+    # A roster predating the column, but still a roster: the required columns are what
+    # `roster.parse` requires, and only `enrol_code` is optional here.
+    text = "hertie_email,name,github_handle\nada@uni.edu,Ada,ada-l\n"
     out = enrol_codes.fill_enrol_codes_in_csv(text, {0: "dsl-new"})
     rows = list(csv.DictReader(io.StringIO(out)))
     assert rows[0]["enrol_code"] == "dsl-new"
     assert out.splitlines()[0].endswith("enrol_code")  # added at the end
+
+
+def test_a_semicolon_export_is_refused_rather_than_written_back_mangled():
+    # A German-locale Excel saves `;`-delimited CSV. DictReader sees ONE header column and
+    # every field reads "", so this path used to bolt an `enrol_code` column onto the
+    # single mangled column and commit that over the roster - exit 0, nobody told. These
+    # two readers bypassed `roster.parse`, which has refused it all along.
+    text = "hertie_email;name;github_handle\nada@uni.edu;Ada;ada-l\n"
+    for call in (
+        lambda: enrol_codes.fill_enrol_codes_in_csv(text, {0: "dsl-new"}),
+        lambda: enrol_codes.rows_for_codes(text, [(0, "ada@uni.edu", "dsl-new")]),
+    ):
+        with pytest.raises(RuntimeError, match="comma-separated"):
+            call()
 
 
 # ------------------- a code write must not revert a Join binding that landed meanwhile
