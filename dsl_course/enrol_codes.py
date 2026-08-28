@@ -47,7 +47,8 @@ def fill_enrol_codes_in_csv(text: str, codes_by_row: dict[int, str]) -> str:
     other column - including ones `roster.FIELDS` doesn't know about, e.g. a faculty-added
     `notes`/`moodle_id` - is carried through untouched, and no cell's raw text is normalised
     (so a `role` of `audit`/`Auditor` is left exactly as written). This replaces the old
-    round-trip through `roster.dump`, which re-serialised only `roster.FIELDS` and rewrote
+    round-trip through a whole-file re-serialisation, which wrote only `roster.FIELDS` and
+    rewrote
     `role`, silently dropping unknown columns and mangling role text on every code write.
 
     The `enrol_code` column is appended if the roster predates it."""

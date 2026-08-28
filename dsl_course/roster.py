@@ -107,16 +107,6 @@ def enrolled(students: list[Student]) -> list[Student]:
     return [s for s in students if s.is_enrolled]
 
 
-def dump(students: list[Student]) -> str:
-    """Serialise rows back to students.csv text (header + one row per student)."""
-    out = io.StringIO()
-    writer = csv.writer(out)
-    writer.writerow(FIELDS)
-    for s in students:
-        writer.writerow([getattr(s, f) for f in FIELDS])
-    return out.getvalue()
-
-
 def load(cohort_org: str) -> list[Student] | None:
     """Fetch + parse students.csv from the cohort's PRIVATE classroom-config repo.
 

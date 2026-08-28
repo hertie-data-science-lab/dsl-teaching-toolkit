@@ -59,16 +59,6 @@ def test_code_message_names_the_course_and_falls_back_when_unnamed():
     assert subject == "Your course enrolment code"
 
 
-def test_roster_dump_roundtrips_with_enrol_code():
-    students = [
-        _student(email="ada@uni.edu", name="Ada", code="dsl-abc", handle="ada-l")
-    ]
-    reparsed = roster.parse(roster.dump(students))
-    assert reparsed[0].enrol_code == "dsl-abc"
-    assert reparsed[0].hertie_email == "ada@uni.edu"
-    assert reparsed[0].onboarded is True
-
-
 def test_mailer_dry_run_previews_without_config(capsys):
     msgs = [("ada@x.edu", "Subj", "Hello Ada, your code is dsl-abc123")]
     # no SMTP env needed for a dry-run preview
@@ -159,7 +149,7 @@ def test_a_failed_graph_token_is_not_reported_as_nothing_to_send(monkeypatch):
 
 
 def test_fill_enrol_codes_preserves_unknown_columns_and_raw_role():
-    # The old round-trip through roster.dump re-serialised only roster.FIELDS, dropping
+    # The old whole-file round-trip re-serialised only roster.FIELDS, dropping
     # every column the engine does not read - a faculty-added `notes`, and the retired
     # `student_id`/`section` a deployed cohort's roster still carries - and normalising
     # `role`. A surgical cell edit must leave every other column and each cell's raw text
