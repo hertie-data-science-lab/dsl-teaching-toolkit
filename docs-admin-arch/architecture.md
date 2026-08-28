@@ -627,7 +627,7 @@ failing the daily cron forever.
 ## Course website (open courseware)
 
 A course can **optionally** publish a **public** site at `<course-org>.github.io` via the
-**Publish course website** action (`site.sync_public_site`). It reuses the same
+**Publish course website** action (`public_site.sync_public_site`). It reuses the same
 `course-website-template` + `scaffold_site`, but differs from the cohort site in one decisive
 way: the cohort site *links* to files in private repos (404 for non-members, by design),
 whereas the course `course-materials-*` repos are private too, so the public site **hosts the
@@ -725,7 +725,7 @@ Self-contained - workflows and their Python implementation both live in this rep
     assembled from the `people-*.yml` fragments).
   - `cohort/` - a cohort org's `.github/dsl-course.yml` pointer back to its course org.
   - `site/` - the course-specific Jekyll layouts, includes and `_sass/_course.scss` that
-    `site.py` writes into every `<org>.github.io` on each sync (`site._site_templates`).
+    the sync writes into every `<org>.github.io` (`site_repo.site_templates`).
     Not seeded once like the rest of this directory - converged, so a rendering change
     reaches every live site. The generic chrome stays in `dsl-jekyll-theme`, pinned at
-    `site.THEME_REF`.
+    `site_repo.THEME_REF`.

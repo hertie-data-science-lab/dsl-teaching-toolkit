@@ -1,4 +1,4 @@
-"""Pure content transforms in site.py - the logic with real edge cases.
+"""Pure content transforms behind the two websites - the logic with real edge cases.
 
 The headline invariant: a PUBLIC course-site entry must never link into a private repo
 (github.com / raw.githubusercontent), only site-relative paths. reading-list mode must
