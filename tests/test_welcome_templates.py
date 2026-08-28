@@ -372,7 +372,9 @@ def test_onboard_throttles_a_student_before_it_touches_the_roster():
     code = code_of(script_of("onboard.yml", "onboard"))
     throttle = code.index("listForRepo")
     assert "creator: handle" in code and "labels: 'needs-review'" in code
-    assert "unresolved.length >= 3" in code
+    # The THRESHOLD, as a number and not as a prefix: `>= 30` contains `>= 3`, and a
+    # throttle that only fires on the thirtieth open Join issue is no throttle at all.
+    assert re.search(r"unresolved\.length >= 3\b", code)
     assert "unresolved Join issues - contact the teaching team" in code
     assert throttle < code.index("await readRoster()")
     assert throttle < code.index("process.env.HAS_BOT")

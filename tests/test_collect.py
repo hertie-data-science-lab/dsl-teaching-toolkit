@@ -7,6 +7,7 @@ answer, so the pin's every branch is pinned down here with git/gh stubbed.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import signal
 import subprocess
@@ -676,6 +677,80 @@ def _stub_collect(monkeypatch, snapshots):
 
     monkeypatch.setattr(collect, "_grade_target", fake_grade)
     return seen
+
+
+def test_collect_with_no_targets_at_all_records_the_skip(monkeypatch, capsys):
+    # Nothing to grade at a passed deadline is a RESULT (nobody onboarded yet; a group
+    # assignment with no teams), not a failure. Left unrecorded, the cron came back every
+    # hour and went red every hour - it ran that way in the demo cohort for days.
+    _stub_collect(monkeypatch, None)
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group=None, teams_key=None: [],
+    )
+    marked: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        collect,
+        "mark_not_autograded",
+        lambda org, slug, why: marked.append((slug, why)) or True,
+    )
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
+    assert [slug for slug, _why in marked] == ["assignment-1"]
+    assert "no submission targets" in marked[0][1]
+
+
+def test_an_unwritten_no_targets_marker_goes_red(monkeypatch):
+    # The `_skipped.json` record IS the skip. A write that failed and was discarded left
+    # the next tick to re-clone the template and re-decide the identical skip, for ever.
+    _stub_collect(monkeypatch, None)
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group=None, teams_key=None: [],
+    )
+    monkeypatch.setattr(collect, "mark_not_autograded", lambda *a, **k: False)
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
+
+
+def test_collect_looks_teams_up_by_the_schedule_key_not_the_cohort_name(monkeypatch):
+    # `cohort_dest_repo` makes the two differ. Repos are named after the cohort NAME;
+    # teams.csv is keyed on the SCHEDULE KEY (the Join-team form writes what schedule.yml
+    # declares). Passing the name found no teams, so a group assignment silently had
+    # nothing to grade while the repos it should have graded existed.
+    entry = collect.schedule.AssignmentEntry(
+        course_source_repo="assignment-4-project-f2026",
+        cohort_dest_repo="group-project",
+        due_datetime=datetime(2026, 11, 15, tzinfo=ZoneInfo("Europe/Berlin")),
+        type="group",
+    )
+    _stub_collect(monkeypatch, None)
+    monkeypatch.setattr(
+        collect.schedule, "load", lambda org: Schedule(assignments={"project": entry})
+    )
+    asked: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group=None, teams_key=None: (
+            asked.append((slug, teams_key)) or []
+        ),
+    )
+    monkeypatch.setattr(collect, "mark_not_autograded", lambda *a, **k: True)
+    collect.collect("Course", "assignment-4-project-f2026", "Cohort")
+    assert asked == [("group-project", "project")]
+
+
+def test_the_log_tag_cannot_be_recomputed_from_outside_the_run(monkeypatch):
+    # The salt is what stops anyone recomputing the tag: both halves of a submission repo
+    # name are public (the slug on the cohort site, the handle in the welcome repo's Join
+    # issue titles), so an unsalted sha1 would read the student straight back off the log.
+    repo = "assignment-1-ada-l"
+    unsalted = hashlib.sha1(repo.encode()).hexdigest()[:7]
+    first = collect.target_ref(repo)
+    assert not first.endswith(unsalted)
+    monkeypatch.setattr(collect, "_REF_SALT", "a-different-run")
+    assert collect.target_ref(repo) != first, "the tag is stable across RUNS"
 
 
 def test_collect_passes_each_repos_own_snapshot_entry_to_grading(monkeypatch):

@@ -718,6 +718,25 @@ def test_run_snapshots_a_passed_deadline_that_has_no_snapshot_yet(monkeypatch):
     assert deadline.startswith("2026-10-13T23:59:59")
 
 
+def test_the_snapshot_is_named_by_the_cohort_name_and_keyed_by_the_schedule_slug(
+    monkeypatch,
+):
+    # TWO names, and they are not interchangeable. `cohort_dest_repo` makes them differ:
+    # the repos (and so the snapshot) are named after the cohort NAME, while teams.csv is
+    # keyed on the SCHEDULE SLUG - the Join-team form writes what schedule.yml declares.
+    # Freezing a group assignment under the name found no teams and froze nothing at all.
+    taken = _stub_snapshots(monkeypatch, existing=set())
+    entry = _due(13)
+    entry.cohort_dest_repo = "group-project"
+    monkeypatch.setattr(
+        scheduler.schedule, "load", lambda cohort: _assignments(project=entry)
+    )
+    now = datetime(2026, 10, 14, tzinfo=timezone.utc)
+    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
+    org, slug, _deadline, teams_key = taken[0]
+    assert (org, slug, teams_key) == ("Cohort-Org", "group-project", "project")
+
+
 def test_run_never_re_snapshots_an_assignment_already_frozen(monkeypatch):
     # Idempotence is the integrity property: re-freezing hourly would let a late push
     # (backdated) replace the commit that was recorded at the deadline.

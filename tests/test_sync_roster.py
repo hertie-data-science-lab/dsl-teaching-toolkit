@@ -202,6 +202,21 @@ def test_a_dry_run_revokes_nothing(monkeypatch):
     assert removed == []
 
 
+def test_a_pruning_sync_revokes_a_vanished_handles_submission_repos(monkeypatch):
+    # The wiring, not the unit: `sync(prune=True)` has to CALL the revoke, and hand it
+    # exactly the handles still on the roster (casefolded). Deleting the call, or passing
+    # the wrong set, left an off-boarded student with maintain on every repo they had ever
+    # been handed while every report said they had been removed.
+    students = _roster("ada@uni.edu,Ada,Ada-L,42,dsl-abc,enrolled")
+    monkeypatch.setattr(roster, "load", lambda org: students)
+    monkeypatch.setattr(sync_roster, "set_org_membership", lambda *a, **kw: True)
+    monkeypatch.setattr(sync_roster, "reconcile_team_members", lambda *a, **kw: 0)
+    removed = _offboard_stubs(monkeypatch, collaborators={"ada-l", "zoe-z"})
+
+    assert sync_roster.sync("COHORT", prune=True) == 0
+    assert removed == [("assignment-1-zoe-z", "zoe-z")]  # ada-l is still on the roster
+
+
 def test_the_revoke_only_runs_behind_the_prune_flag(monkeypatch):
     monkeypatch.setattr(sync_roster, "reconcile_team_members", lambda *a, **kw: 0)
     monkeypatch.setattr(roster, "load", lambda org: [])
