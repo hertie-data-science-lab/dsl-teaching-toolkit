@@ -1,0 +1,164 @@
+name: Promote
+
+# Move a deployment tier forward. `staging` is what the demo course org runs, `release` is
+# what every real org runs (dsl_course/central.py, and each org's own `central_ref:`), and
+# both are always FAST-FORWARDS of `main` - they carry no commits of their own.
+#
+# That invariant is enforced here, not by convention: the promoted commit must be on
+# main's history, and it must be a descendant of the tier's current tip. So this workflow
+# can only ever move a tier forward along main - it cannot rewrite a tier's history, and
+# there is therefore no way to use it to ship something main has never seen.
+#
+# Rollback is a `git revert` on main, promoted forward (see docs-admin-arch/central-admin.md).
+#
+# Who can run it: dispatching a workflow needs write on this repo, which is the same gate
+# every seeded workflow in every org uses.
+
+on:
+  workflow_dispatch:
+    inputs:
+      to:
+        description: "Tier to promote"
+        required: true
+        type: choice
+        options:
+          - staging
+          - release
+      ref:
+        description: "What to promote (default: main -> staging, staging -> release). A branch, tag or full SHA on main's history."
+        required: false
+        default: ""
+        type: string
+      refresh_orgs:
+        description: "Run 'Refresh actions' on every org at that tier now, rather than waiting for tonight's cron"
+        required: false
+        default: true
+        type: boolean
+
+# Only the promote job writes, and only to this repo's refs. The org-refresh job below
+# authenticates as the bot instead, so it needs nothing from the ambient token.
+permissions: {}
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          fetch-depth: 0
+
+      - name: Fast-forward the tier, or refuse
+        env:
+          TIER: ${{ inputs.to }}
+          SOURCE_INPUT: ${{ inputs.ref }}
+        run: |
+          set -eo pipefail
+          git config user.name "DSL Bot"
+          git config user.email "dsl-bot@hertie-school.org"
+          # fetch-depth: 0 gets the whole history of the checked-out ref only; the tier
+          # branches and main are separate refs and have to be asked for by name.
+          git fetch --quiet origin "+refs/heads/*:refs/remotes/origin/*"
+
+          # staging is promoted from main, release from what has already soaked on staging.
+          # Overridable, because a rollback promotes ONE revert commit rather than
+          # everything main has accumulated since the bad build landed.
+          default_source=main
+          [ "$TIER" = "release" ] && default_source=staging
+          source="${SOURCE_INPUT:-$default_source}"
+
+          # A branch name resolves through origin/; a tag or SHA does not.
+          new=$(git rev-parse --verify --quiet "refs/remotes/origin/$source^{commit}" \
+                || git rev-parse --verify --quiet "$source^{commit}" || true)
+          if [ -z "$new" ]; then
+            echo "::error::'$source' is not a commit in this repository."
+            exit 1
+          fi
+
+          # THE invariant: every tier is a fast-forward of main. Enforced before the tier
+          # check, because a commit off main's history is the more serious mistake - it
+          # would put code into production that main, and therefore CI and review, never saw.
+          if ! git merge-base --is-ancestor "$new" origin/main; then
+            echo "::error::$source ($new) is not on main's history. Every tier is a fast-forward of main - land the change on main first (a rollback is a revert on main), then promote it."
+            exit 1
+          fi
+
+          tip=$(git rev-parse --verify --quiet "refs/remotes/origin/$TIER^{commit}" || true)
+          if [ -n "$tip" ] && ! git merge-base --is-ancestor "$tip" "$new"; then
+            echo "::error::$source ($new) is not a descendant of $TIER ($tip), so promoting it would REWRITE the tier. To undo what is on $TIER, revert it on main and promote the revert forward."
+            echo "Commits on $TIER that $source does not contain:"
+            git --no-pager log --oneline "$new..$tip"
+            exit 1
+          fi
+
+          # --force-with-lease, never a bare -f: the lease is the tip verified above (empty
+          # when the branch does not exist yet, which asserts exactly that), so a tier moved
+          # by someone else since aborts the run rather than being overwritten. The push is
+          # a fast-forward either way - the lease only closes the gap between the check and
+          # the push.
+          git push --force-with-lease="refs/heads/$TIER:$tip" origin "$new:refs/heads/$TIER"
+
+          {
+            echo "## Promoted \`$source\` to \`$TIER\`"
+            echo
+            echo "- from: \`${tip:-(new branch)}\`"
+            echo "- to:   \`$new\`"
+            echo
+            if [ -n "$tip" ] && [ "$tip" != "$new" ]; then
+              echo "### Commits this puts on \`$TIER\`"
+              echo
+              echo '```'
+              git --no-pager log --oneline "$tip..$new"
+              echo '```'
+            elif [ "$tip" = "$new" ]; then
+              echo "_Already there - nothing moved._"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # A promotion changes nothing in an org until that org next re-renders its workflows,
+  # which the nightly "Refresh actions" cron does within 24h. This runs it now, so a
+  # promotion is a deploy rather than a deploy that happens overnight. The bot is an owner
+  # of every course org, so it can dispatch their workflows from here; GITHUB_TOKEN sees
+  # only this repo and could not.
+  refresh-orgs:
+    needs: promote
+    if: ${{ inputs.refresh_orgs }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Refresh every org on this tier
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          TIER: ${{ inputs.to }}
+        run: |
+          set -eo pipefail
+          # Cohort orgs are not dispatched: "Refresh actions" lives in the COURSE org and
+          # converges every cohort registered under it in the same run.
+          orgs=$(python3 -m dsl_course.list_orgs \
+                 | jq -r --arg tier "$TIER" '.course_orgs[] | select(.central_ref == $tier) | .org')
+          if [ -z "$orgs" ]; then
+            echo "No course org runs \`$TIER\` - nothing to refresh." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          echo "## Refreshed on \`$TIER\`" >> "$GITHUB_STEP_SUMMARY"
+          failed=0
+          for org in $orgs; do
+            if gh workflow run refresh-actions.yml -R "$org/.github"; then
+              echo "- $org" >> "$GITHUB_STEP_SUMMARY"
+            else
+              # Not fatal to the promotion - it has already landed, and the org's own
+              # nightly cron converges it within 24h - but it must not read as green.
+              echo "- $org - **dispatch failed**, it converges on tonight's cron" >> "$GITHUB_STEP_SUMMARY"
+              failed=1
+            fi
+          done
+          exit "$failed"
