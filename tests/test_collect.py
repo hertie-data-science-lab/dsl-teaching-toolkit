@@ -483,6 +483,38 @@ def test_snapshot_sha_asks_the_api_for_one_commit_before_a_utc_cutoff(monkeypatc
     assert "until=2026-10-15T21:59:59Z" in args and "per_page=1" in args
 
 
+def test_snapshot_sha_flags_a_commit_dated_after_the_freeze(monkeypatch, capsys):
+    # Only the MOMENT of the freeze is server-timed; WHICH commit it picks is still judged
+    # on the committer date, which the student sets. A chosen commit dated after we looked
+    # cannot have existed then - a skewed or doctored clock - and a marker has to be told,
+    # because everything downstream treats the pinned sha as settled.
+    monkeypatch.setattr(
+        collect, "gh", lambda *a, **k: (0, f"{SHA} 2026-10-16T10:00:00Z")
+    )
+    assert (
+        collect._snapshot_sha(
+            "Cohort",
+            "assignment-1-anna",
+            "2026-10-16",
+            "2026-10-16T09:00:00+00:00",
+        )
+        == SHA
+    )
+    out = capsys.readouterr().out
+    assert "dated after this freeze was taken" in out
+    assert "anna" not in out, "the public log must carry the tag, not the handle"
+
+
+def test_snapshot_sha_says_nothing_about_an_ordinary_commit(monkeypatch, capsys):
+    monkeypatch.setattr(
+        collect, "gh", lambda *a, **k: (0, f"{SHA} 2026-10-15T10:00:00Z")
+    )
+    collect._snapshot_sha(
+        "Cohort", "assignment-1-anna", "2026-10-16", "2026-10-16T09:00:00+00:00"
+    )
+    assert "dated after" not in capsys.readouterr().out
+
+
 def _stub_snapshot_write(monkeypatch, shas: dict[str, str | None], existing=None):
     """Wire snapshot_assignment onto stubs; returns the (path, text) writes it makes."""
     written: list[tuple[str, str]] = []
@@ -495,7 +527,7 @@ def _stub_snapshot_write(monkeypatch, shas: dict[str, str | None], existing=None
         ],
     )
     monkeypatch.setattr(
-        collect, "_snapshot_sha", lambda org, repo, deadline: shas[repo]
+        collect, "_snapshot_sha", lambda org, repo, deadline, at="": shas[repo]
     )
     monkeypatch.setattr(
         collect,

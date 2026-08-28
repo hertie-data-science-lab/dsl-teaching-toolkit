@@ -17,23 +17,29 @@ the result - so a student never sees a score in their own repo.
 
 Student code is run in a subprocess with the GitHub token stripped from the environment.
 
-SNAPSHOTS (server-timed deadlines).  Which commit gets graded cannot be decided from
-commit dates alone: a git committer date is entirely client-supplied (`GIT_COMMITTER_DATE`),
-so late work backdated to before the deadline would pass a `rev-list --before` pin. Instead
-the hourly scheduler freezes each assignment shortly after its grading deadline passes,
-writing one row per submission repo into
+SNAPSHOTS (server-timed FREEZE, not a server-timed deadline).  A git committer date is
+entirely client-supplied (`GIT_COMMITTER_DATE`), so late work backdated to before the
+deadline passes a `rev-list --before` pin. The hourly scheduler therefore freezes each
+assignment shortly after its grading deadline passes, writing one row per submission repo
+into
 
     classroom-config/snapshots/<slug>.csv     repo,sha,recorded_at
 
-recorded at a time the SERVER chose, and never rewritten once written (`snapshot_assignment`
-refuses to overwrite). Grading then pins to the recorded sha; an empty sha means "nothing
-had been pushed by the deadline" and scores zero. Only if no snapshot exists at all does
-grading fall back to the old date-based pin, with a loud warning.
+and never rewriting it (`snapshot_assignment` refuses to overwrite). Grading then pins to
+the recorded sha; an empty sha means "nothing had been pushed by the deadline" and scores
+zero. Only if no snapshot exists at all does grading fall back to the date-based pin, with
+a loud warning.
 
-Honest limitation: a commit pushed AFTER the deadline but BEFORE the next hourly cron tick,
-carrying a spoofed pre-deadline committer date, is still picked up by that first snapshot.
-The window for backdating shrinks from unlimited to <=1h; it does not close. Shortening the
-cron interval shortens it further. (To deliberately re-freeze - e.g. an assignment whose
+Be precise about what that buys, because it is easy to over-read. Only the MOMENT of the
+freeze is server-timed: `recorded_at` is ours, and after it nothing a student pushes can
+move the pin. WHICH commit the freeze chooses is still the last one whose COMMITTER DATE is
+on or before the deadline (the commits API's `until=`), and that date is the student's to
+set. So what the snapshot closes is the unbounded window - not the hour before it.
+Concretely: a commit pushed after the deadline but before the next hourly tick, carrying a
+spoofed pre-deadline committer date, is still picked up by that first snapshot; a shorter
+cron interval shortens that window, and nothing here closes it. A chosen commit whose
+committer date is LATER than `recorded_at` is impossible without a skewed or doctored
+clock, so `_snapshot_sha` logs one. (To deliberately re-freeze - e.g. an assignment whose
 repos were provisioned late - delete the snapshot CSV and let the next tick rebuild it.)
 
 FIRE-ONCE.  The hourly scheduler autogrades each assignment exactly once, just after its
@@ -393,9 +399,16 @@ def _until_param(deadline: str, tz: str | None = None) -> str:
     )
 
 
-def _snapshot_sha(cohort_org: str, repo: str, deadline: str) -> str | None:
+def _snapshot_sha(
+    cohort_org: str, repo: str, deadline: str, recorded_at: str = ""
+) -> str | None:
     """The sha to freeze `repo` at: its last commit on or before `deadline`, read from the
     API (no clone - this runs for every repo of every assignment, hourly).
+
+    "On or before" is judged on the COMMITTER DATE, which the student supplies
+    (`GIT_COMMITTER_DATE`). Freezing does not change that - it only stops the pin moving
+    afterwards. `recorded_at` is the moment of this freeze: a chosen commit dated after it
+    cannot have existed when we looked, so it is a skewed or doctored clock and is logged.
 
     Returns "" when there is nothing to grade: no commit that early, an empty repo, or no
     such repo at all (an on-time submission cannot live in a repo that does not exist).
@@ -412,12 +425,19 @@ def _snapshot_sha(cohort_org: str, repo: str, deadline: str) -> str | None:
         "-f",
         "per_page=1",
         "--jq",
-        '.[0].sha // ""',
+        '(.[0].sha // "") + " " + (.[0].commit.committer.date // "")',
     )
     if code == 0:
-        sha = out.strip()
+        sha, _, committed = out.strip().partition(" ")
         if not sha:
             _warn_if_late_commits_only(cohort_org, repo, deadline)
+        elif _committed_after(committed, recorded_at):
+            # Tag, never the handle: this log is public.
+            log(
+                f"  [warn] {target_ref(repo)} is pinned to a commit dated after this "
+                f"freeze was taken ({committed} > {recorded_at}) - a committer date is "
+                f"client-supplied, so check for a skewed clock before marking"
+            )
         return sha  # a sha, or "" (repo reachable, no commit on/before the deadline)
     # A 409 is an EMPTY repo: it exists but has no commits, so "" is a real recorded
     # non-submission (we freeze it, closing the backdating window for it).
@@ -431,6 +451,23 @@ def _snapshot_sha(cohort_org: str, repo: str, deadline: str) -> str | None:
         return _REPO_ABSENT
     log_err(f"  ! could not read commits for {target_ref(repo)}: {out[:160]}")
     return None
+
+
+def _committed_after(committed: str, recorded_at: str) -> bool:
+    """Whether `committed` (a commit's committer date) is later than `recorded_at` (the
+    moment the freeze was taken). Both ISO; either missing or unparseable means no.
+
+    GitHub answers `...Z` and `datetime.fromisoformat` only learnt to read that in 3.11,
+    so the suffix is spelt out rather than left to the runner's Python version - the
+    difference between a warning that fires and one that never does."""
+    if not (committed and recorded_at):
+        return False
+    try:
+        when = datetime.fromisoformat(committed.replace("Z", "+00:00"))
+        taken = datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return when.tzinfo is not None and taken.tzinfo is not None and when > taken
 
 
 def _warn_if_late_commits_only(cohort_org: str, repo: str, deadline: str) -> None:
@@ -538,10 +575,14 @@ def snapshot_assignment(
     is_group: bool,
     teams_key: str | None = None,
 ) -> bool:
-    """Freeze, at a server-chosen moment, the commit each of `slug`'s submission repos will
+    """Freeze, at a server-chosen MOMENT, the commit each of `slug`'s submission repos will
     be graded at. Write-once: an existing snapshot is never re-taken or overwritten, so a
     late push can never move the pin. Returns False if the snapshot could not be completed
     (nothing is written - the next cron tick tries again).
+
+    The moment is ours; the CHOICE of commit is still made on the student-supplied
+    committer date (see `_snapshot_sha` and the module docstring). What this closes is the
+    unbounded backdating window, not the hour before the freeze.
 
     An assignment with no submission units yet is a no-op, not a failure: nothing is frozen
     and nothing is written, so a later handout still gets its own snapshot.
@@ -570,7 +611,7 @@ def snapshot_assignment(
     rows: list[tuple[str, str, str]] = []
     any_present = False
     for repo, _key, _members in targets:
-        sha = _snapshot_sha(cohort_org, repo, deadline)
+        sha = _snapshot_sha(cohort_org, repo, deadline, recorded_at)
         if sha is None:
             log_err(f"  ! abandoning the {slug} snapshot - will retry on the next run")
             return False
@@ -1112,9 +1153,9 @@ def collect(
                 return 1
             return 0
 
-        # Which commit each repo is graded at was frozen server-side just after the
-        # deadline (see the module docstring). Without that file we can only trust the
-        # student-supplied committer dates - say so loudly rather than silently.
+        # Which commit each repo is graded at was frozen just after the deadline, at a
+        # moment the server chose (see the module docstring). Without that file the pin
+        # moves with every later push - say so loudly rather than silently.
         snapshots = load_snapshots(cohort_org, slug)
         if snapshots is None:
             log_err(
