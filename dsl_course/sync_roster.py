@@ -28,13 +28,9 @@ import sys
 
 from . import roster
 from .discovery import list_org_repos
+from .gh_teams import reconcile_team_members, set_org_membership
 from .log import log_err, log_ok, log_step, log_verbose
-from .utils import (
-    is_collaborator,
-    reconcile_team_members,
-    remove_collaborator,
-    set_org_membership,
-)
+from .repos import is_collaborator, remove_collaborator
 
 TEAM = "students"  # enrolled rows
 AUDITOR_TEAM = "auditors"  # read-only rows

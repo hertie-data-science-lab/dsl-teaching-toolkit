@@ -35,8 +35,8 @@ from .discovery import (
     discover_cohorts,
     discover_content_repos,
 )
+from .gh_teams import _acting_login
 from .log import log_err, log_ok
-from .utils import _acting_login
 
 
 def sync(

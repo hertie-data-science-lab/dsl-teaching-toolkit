@@ -1,7 +1,7 @@
 """Bootstrap seeding is create-only for USER-owned files.
 
 "Bootstrap cohort" is the documented idempotent-repair path (re-run to apply new team
-grants, refresh workflows), so it runs against LIVE cohorts. `utils.create_repo` reports
+grants, refresh workflows), so it runs against LIVE cohorts. `repos.create_repo` reports
 an already-existing repo as success, so the `if create_repo(...)` blocks are no
 first-run guard - the guard has to be per file. These tests pin the split:
 
@@ -28,13 +28,13 @@ import yaml
 
 from dsl_course import bootstrap_course as bc
 from dsl_course import (
+    gh_contents,
     grades,
     roster,
     schedule,
     seed,
     sync_faculty,
     teams,
-    utils,
     welcome,
 )
 
@@ -99,14 +99,14 @@ class FakeOrg:
 @pytest.fixture
 def fake(monkeypatch):
     f = FakeOrg()
-    # USER-owned files go through utils.seed_if_absent / seed_files_if_absent
+    # USER-owned files go through gh_contents.seed_if_absent / seed_files_if_absent
     # (create-if-absent), which resolve get_file_content / put_file / put_files / log_skip
-    # in the utils namespace; SYSTEM-owned files are written by bc.put_file directly. Fake
+    # in the gh_contents namespace; SYSTEM-owned files are written by bc.put_file directly. Fake
     # every layer to the same recorder.
-    monkeypatch.setattr(utils, "get_file_content", f.get_file_content)
-    monkeypatch.setattr(utils, "put_file", f.put_file)
-    monkeypatch.setattr(utils, "put_files", f.put_files)
-    monkeypatch.setattr(utils, "log_skip", lambda msg: f.skips.append(msg))
+    monkeypatch.setattr(gh_contents, "get_file_content", f.get_file_content)
+    monkeypatch.setattr(gh_contents, "put_file", f.put_file)
+    monkeypatch.setattr(gh_contents, "put_files", f.put_files)
+    monkeypatch.setattr(gh_contents, "log_skip", lambda msg: f.skips.append(msg))
     monkeypatch.setattr(bc, "put_file", f.put_file)
     # The welcome repo's SYSTEM-owned files are written by dsl_course.welcome (so that
     # seed.refresh can re-push them without importing bootstrap_course), in one commit per
@@ -214,17 +214,17 @@ def test_the_scaffold_set_lands_as_one_commit_but_stays_create_only_per_file(
     # a live cohort has to write only what is genuinely missing, and leave the roster (enrol
     # codes, onboarded handles) untouched.
     live = {"students.csv": "live-roster-sha"}
-    monkeypatch.setattr(utils, "log_skip", lambda msg: None)
-    monkeypatch.setattr(utils, "default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "repo_blob_shas", lambda org, repo, branch: live)
+    monkeypatch.setattr(gh_contents, "log_skip", lambda msg: None)
+    monkeypatch.setattr(gh_contents, "default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(gh_contents, "repo_blob_shas", lambda org, repo, branch: live)
     committed = []
     monkeypatch.setattr(
-        utils,
+        gh_contents,
         "_commit_tree",
         lambda org, repo, branch, tree, message: committed.append(tree) or True,
     )
 
-    assert utils.seed_files_if_absent(
+    assert gh_contents.seed_files_if_absent(
         "Cohort-f2026",
         "classroom-config",
         {"students.csv": b"header only\n", "teams.csv": b"t\n", "people.yml": b"p\n"},
@@ -240,15 +240,15 @@ def test_seed_files_if_absent_commits_nothing_when_every_file_is_already_there(
     monkeypatch,
 ):
     # The whole set present is the ordinary repair-re-run case, and it must cost no commit.
-    monkeypatch.setattr(utils, "log_skip", lambda msg: None)
-    monkeypatch.setattr(utils, "default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(gh_contents, "log_skip", lambda msg: None)
+    monkeypatch.setattr(gh_contents, "default_branch", lambda org, repo: "main")
     monkeypatch.setattr(
-        utils, "repo_blob_shas", lambda org, repo, branch: {"students.csv": "sha"}
+        gh_contents, "repo_blob_shas", lambda org, repo, branch: {"students.csv": "sha"}
     )
     monkeypatch.setattr(
-        utils, "_commit_tree", lambda *a, **k: pytest.fail("wrote a no-op commit")
+        gh_contents, "_commit_tree", lambda *a, **k: pytest.fail("wrote a no-op commit")
     )
-    assert utils.seed_files_if_absent(
+    assert gh_contents.seed_files_if_absent(
         "Cohort-f2026", "classroom-config", {"students.csv": b"x\n"}, "init: scaffolds"
     )
 
@@ -258,7 +258,7 @@ def test_seed_if_absent_skips_an_empty_existing_file(fake):
     # True (a success, not a failure) and attempts no write. get_file_content returns "" for
     # an existing empty file (grades/.gitkeep) - falsy but present, so it still counts.
     fake.files[("classroom-config", "grades/.gitkeep")] = ""
-    assert utils.seed_if_absent(
+    assert gh_contents.seed_if_absent(
         "Cohort-f2026", "classroom-config", "grades/.gitkeep", b"x", "msg"
     )
     assert fake.writes == []
@@ -269,9 +269,9 @@ def test_seed_if_absent_returns_false_only_when_the_write_fails(monkeypatch):
     # The write-failed case must be distinguishable from a skip: an ABSENT file whose
     # put_file fails returns False, so `if not seed_if_absent(...): failures += 1` counts
     # exactly the real failures (never a skip of a live file).
-    monkeypatch.setattr(utils, "get_file_content", lambda *a, **k: None)
-    monkeypatch.setattr(utils, "put_file", lambda *a, **k: False)
-    assert not utils.seed_if_absent("Org", "repo", "path", b"x", "msg")
+    monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(gh_contents, "put_file", lambda *a, **k: False)
+    assert not gh_contents.seed_if_absent("Org", "repo", "path", b"x", "msg")
 
 
 def test_seeded_scaffolds_render_this_cohorts_tag(fake):
@@ -479,7 +479,7 @@ def test_cohort_extras_reds_when_a_user_file_seed_fails(fake, monkeypatch):
     # A USER-owned scaffold that is absent and whose write FAILS must red the bootstrap -
     # seed_if_absent's False (a real write failure, not a skip of a live file) is now folded
     # into the count.
-    monkeypatch.setattr(utils, "put_file", lambda *a, **k: False)
+    monkeypatch.setattr(gh_contents, "put_file", lambda *a, **k: False)
     assert bc.setup_cohort_extras("Cohort-f2026") >= 1
 
 

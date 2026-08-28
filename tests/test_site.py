@@ -11,8 +11,8 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
+from dsl_course import gh_contents, site
 from dsl_course import schedule as schedule_mod
-from dsl_course import site, utils
 from dsl_course.schedule import AssignmentEntry, Deploy, Event, Release, Schedule
 
 UTC = ZoneInfo("UTC")
@@ -1076,14 +1076,14 @@ def test_two_plan_entries_citing_one_template_stay_two_assignments(
 
 def test_session_files_missing_tree_is_empty(monkeypatch):
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "HTTP 404: Not Found"))
+    monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "HTTP 404: Not Found"))
     assert site._session_files("Cohort-f2026", "materials", "lectures", "03_x") == []
 
 
 def test_session_files_fetch_failure_raises_rather_than_stripping_the_site(monkeypatch):
     # A swallowed failure returned (), the site republished with every material link gone.
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "HTTP 502: bad gateway"))
+    monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "HTTP 502: bad gateway"))
     with pytest.raises(RuntimeError):
         site._session_files("Cohort-f2026", "materials", "lectures", "03_x")
 

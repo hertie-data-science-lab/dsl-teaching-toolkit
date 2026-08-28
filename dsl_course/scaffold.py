@@ -31,19 +31,11 @@ from .course import (
     pages_repo,
 )
 from .discovery import discover_assignments, discover_cohorts
+from .gh_contents import put_files, refresh_stubs, seed_files_if_absent, seed_if_absent
 from .ghcli import GIT_ENV, gh, git
 from .log import log, log_err, log_ok, log_skip, log_step
-from .utils import (
-    READING_OVERLAY_FILE,
-    create_repo,
-    generate_from_template,
-    put_files,
-    refresh_stubs,
-    repo_exists,
-    seed_files_if_absent,
-    seed_if_absent,
-    set_repo_topics,
-)
+from .readings import READING_OVERLAY_FILE
+from .repos import create_repo, generate_from_template, repo_exists, set_repo_topics
 from .workflows_place import push_content_workflows
 
 WEBSITE_TEMPLATE_ORG = "hertie-data-science-lab"
@@ -280,7 +272,7 @@ RETIRED_STUBS = ("readings/01_session-1/reading.md",)
 
 def refreshable_stubs(tag: str) -> dict[str, bytes]:
     """The seeded files that are stubs rather than skeletons - improvable later, while they
-    still carry the mark (see `utils.refresh_stubs`).
+    still carry the mark (see `gh_contents.refresh_stubs`).
 
     Named here, where they are written, and read by `seed.refresh` so the nightly
     convergence reaches repos scaffolded before a stub improved. One list rather than two
@@ -483,7 +475,7 @@ def scaffold_materials(org: str, tag: str) -> int:
     # USER-owned skeletons: create-only, so a re-run against a repo faculty have since
     # authored must not revert their README/SYLLABUS to the stub or resurrect a deleted
     # starter directory. A failed seed (an absent file whose write failed) reds the scaffold.
-    # Stubs that REFRESH while they are still ours (see utils.refresh_stubs): the
+    # Stubs that REFRESH while they are still ours (see gh_contents.refresh_stubs): the
     # improvement then reaches the courses already running, not just the next repo
     # scaffolded. Written before the create-only set below so a re-run's log reads in the
     # order the rules apply.

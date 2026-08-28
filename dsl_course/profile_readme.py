@@ -33,8 +33,9 @@ from .discovery import (
     org_tier,
     student_repo_names,
 )
+from .gh_contents import get_file_content, load_yaml_config, put_files
 from .log import log, log_err, log_ok
-from .utils import converge_descriptions, get_file_content, load_yaml_config, put_files
+from .repos import converge_descriptions
 
 # Per-org identity/people/schedule config, lives at the root of each org's `.github` repo.
 COURSE_CONFIG = "dsl-course.yml"

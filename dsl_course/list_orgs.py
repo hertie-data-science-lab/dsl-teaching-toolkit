@@ -23,9 +23,10 @@ import yaml
 
 from .course import COHORT_TOPIC, COURSE_HUB_TOPIC
 from .discovery import discover_cohorts
+from .gh_contents import load_yaml_config
 from .ghcli import gh_json
 from .log import log_err
-from .utils import load_yaml_config, org_exists
+from .repos import org_exists
 
 # How many results one `gh search repos` page returns. This inventory is fully generated
 # and merged unattended, so silently reading only the first page would quietly delete every
@@ -147,7 +148,7 @@ def _fetch_metadata(org: str) -> dict:
     inventory is fully generated: a wrong refresh is worse than no refresh.
 
     Through `load_yaml_config`, so there is one reader for this file. Its own copy of the
-    404 test drifted from `utils.is_missing_resource`, and its `except Exception: return
+    404 test drifted from `ghcli.is_missing_resource`, and its `except Exception: return
     {}` turned a MALFORMED dsl-course.yml into "this org declares nothing" - which files a
     cohort under Course orgs and rewrites the inventory around it, exactly the wrong
     refresh this docstring warns about."""

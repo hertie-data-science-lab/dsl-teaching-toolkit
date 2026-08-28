@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import site, utils
+from dsl_course import gh_contents, site
 
 COURSE = "Course-Org"
 SOURCE = "course-materials-f2026"
@@ -81,10 +81,10 @@ def _install_fakes(monkeypatch) -> dict[str, str]:
     monkeypatch.setattr(site, "repo_is_archived", lambda org, name: False)
     monkeypatch.setattr(site, "_acting_login", lambda: None)
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
-    # site._yaml_file now reads via utils.load_yaml_config, which resolves
+    # site._yaml_file now reads via gh_contents.load_yaml_config, which resolves
     # get_file_content in the UTILS namespace - stub it there too, or the real gh
     # runs (green on an authenticated dev box, red in tokenless CI).
-    monkeypatch.setattr(utils, "get_file_content", lambda *a, **k: "")
+    monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: "")
     monkeypatch.setattr(site, "discover_sessions", lambda org, repo: ["1", "2", "3"])
     return committed
 

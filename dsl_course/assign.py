@@ -42,12 +42,12 @@ from .access import grant_faculty_read_access, grant_team_repo_access
 from .collect import assignment_is_group
 from .course import CONFIG_REPO, SOLUTION_BRANCH, assignment_slug
 from .discovery import ASSIGNMENT_TEMPLATE_TOPIC
+from .gh_contents import put_file
 from .ghcli import GIT_ENV, gh, git
 from .log import log, log_err, log_ok, log_skip, log_step, log_verbose
-from .utils import (
+from .repos import (
     add_collaborator,
     generate_from_template,
-    put_file,
     repo_exists,
     set_repo_topics,
 )

@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from dsl_course import schedule
+from dsl_course import course, schedule
 from dsl_course.schedule import (
     AssignmentEntry,
     Deploy,
@@ -1259,7 +1259,6 @@ def test_an_absent_optional_value_is_never_flagged():
 
 def test_schedule_and_course_share_one_date_coercion():
     # The two implementations must not drift: schedule re-exports the canonical one.
-    from dsl_course import course
 
     assert schedule._coerce_date is course.coerce_date
 

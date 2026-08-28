@@ -27,15 +27,10 @@ from .course import (
     GRADEBOOK_PREFIX,
     session_dirs,
 )
+from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
 from .ghcli import gh
 from .log import log_err, log_ok
-from .utils import (
-    get_default_branch,
-    get_file_content,
-    load_yaml_config,
-    put_file,
-    repo_tree,
-)
+from .repos import get_default_branch
 
 COHORTS_PATH = (
     "cohort-courses-pages.yml"  # standalone registry in the course org's .github repo
@@ -284,7 +279,7 @@ def unregister_cohort(course_org: str, cohort_org: str) -> bool:
     Removing on anything weaker than that would be the worse bug. A cohort dropped from
     here is invisible to every nightly sync - membership, faculty, site, scheduler - which
     is a SILENT no-op, where a stale entry merely fails loudly once a night. So the
-    liveness verdict belongs to the caller (`utils.org_exists`, which raises rather than
+    liveness verdict belongs to the caller (`repos.org_exists`, which raises rather than
     guessing), and this function only writes down what it was told.
 
     Returns True if the cohort is absent from the registry afterwards."""
@@ -319,7 +314,7 @@ def _repo_tree_dirs(org: str, repo: str) -> tuple[str, ...]:
     shared by every discovery helper that needs a repo's directory structure (rather
     than listing each top-level directory individually - N+1 API calls).
 
-    The fetch itself (and its absent-vs-failed discrimination) is utils.repo_tree, shared
+    The fetch itself (and its absent-vs-failed discrimination) is gh_contents.repo_tree, shared
     with the site builder's blob-side twin: an absent/empty tree is genuinely no
     directories, any other failure RAISES. It must never come back as "no sessions" - the
     site clears and rewrites its collections from these rows, so one rate-limited fetch

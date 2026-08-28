@@ -28,19 +28,12 @@ from . import scaffold, seed, site, sync_faculty
 from .access import COHORT_WRITE_REPOS, COURSE_TEAM_ACCESS, grant_team_repo_access
 from .course import COHORT_TOPIC, COURSE_HUB_TOPIC
 from .discovery import COHORTS_PATH, register_cohort
+from .gh_contents import put_file, seed_files_if_absent, seed_if_absent
+from .gh_teams import create_team
 from .ghcli import gh
 from .log import log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
-from .utils import (
-    create_repo,
-    create_team,
-    put_file,
-    repo_exists,
-    repo_is_private,
-    seed_files_if_absent,
-    seed_if_absent,
-    set_repo_topics,
-)
+from .repos import create_repo, repo_exists, repo_is_private, set_repo_topics
 from .welcome import (
     CLASSROOM_SCAFFOLDS,
     refresh_classroom_samples,
@@ -68,7 +61,7 @@ def _profile_topics(is_cohort: bool, course_code: str = "") -> list[str]:
 # Bootstrap (both "Bootstrap course" and "Bootstrap cohort") is re-run on EXISTING orgs as
 # the documented idempotent-repair path - e.g. to apply new team grants or refresh
 # workflows mid-semester. So every write it makes has to be re-run-safe. `create_repo` is
-# NOT a first-run guard: it treats an already-existing repo as success (utils.create_repo
+# NOT a first-run guard: it treats an already-existing repo as success (repos.create_repo
 # returns True on the 422 "name already exists"), so an `if create_repo(...)` block runs on
 # every re-run. The guard has to be per FILE, and it depends on who owns the file:
 #
@@ -76,7 +69,7 @@ def _profile_topics(is_cohort: bool, course_code: str = "") -> list[str]:
 #   In a cohort: classroom-config/{students.csv, teams.csv, schedule.yml, people.yml,
 #   grades/** (except *.sample)} and welcome/README.md (the student landing page). On a
 #   course org: .github/dsl-course.yml (the faculty/course_admins SSOT). Seed these ONLY
-#   when absent (utils.seed_if_absent) - rewriting them on a re-run destroys live enrolment
+#   when absent (gh_contents.seed_if_absent) - rewriting them on a re-run destroys live enrolment
 #   state (roster rows, enrol codes, onboarded handles) and the faculty's schedule.
 #
 #   SYSTEM-owned - machinery and documentation this repo generates and must be able to fix
@@ -258,7 +251,7 @@ def grant_button_access(org: str) -> int:
 # `classroom-config` is what instructors edit (schedule.yml, students.csv, teams.csv,
 # people.yml) and read (grades/), and `welcome` is where they triage `needs-review`
 # onboarding issues. Course orgs have neither repo, so this is cohort-only. Single-sourced
-# with the nightly sweep's floor (utils.COHORT_WRITE_REPOS), so the two cannot disagree.
+# with the nightly sweep's floor (access.COHORT_WRITE_REPOS), so the two cannot disagree.
 COHORT_FACULTY_REPOS = sorted(COHORT_WRITE_REPOS - {".github"})
 
 
@@ -480,7 +473,7 @@ def set_org_settings(org: str) -> int:
     # `read` every member of it (every TA, every visiting instructor, anyone ever added
     # for one semester) could read all of them. Faculty access to a course org comes from
     # the instructors/course-admin team grants (COURSE_TEAM_ACCESS, converged nightly by
-    # utils.converge_faculty_access), not from being a member, so nobody who should have
+    # access.converge_faculty_access), not from being a member, so nobody who should have
     # access loses it.
     code, out = gh(
         "api",
@@ -540,7 +533,7 @@ def setup_cohort_extras(org: str) -> int:
     # NB: this block (and the classroom-config one below) runs on EVERY bootstrap, re-runs
     # included - create_repo reports an existing repo as success. That is deliberate for
     # SYSTEM-owned files (they refresh so fixes reach running cohorts); USER-owned files are
-    # protected per-file by utils.seed_if_absent. See the ownership note at the top of this file.
+    # protected per-file by gh_contents.seed_if_absent. See the ownership note at the top of this file.
     # A failed create_repo (post-PR1, a genuine failure, not the idempotent 422) leaves the
     # cohort with no student-facing front door, so it must red the bootstrap and skip the
     # seeding rather than the create's False being silently dropped by a bare `if`.

@@ -7,9 +7,10 @@ from __future__ import annotations
 import json
 
 from .course import GRADEBOOK_PREFIX
+from .gh_teams import create_team
 from .ghcli import gh, is_missing_resource
 from .log import log, log_err, log_ok
-from .utils import create_team, set_repo_topics
+from .repos import set_repo_topics
 
 
 def grant_team_repo_access(

@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from dsl_course import list_orgs, utils
+from dsl_course import gh_contents, list_orgs, repos
 
 
 def test_main_reports_a_failed_search_and_exits_nonzero(monkeypatch, capsys):
@@ -108,9 +108,13 @@ def test_a_cohort_pointing_at_no_discovered_course_org_is_listed_as_orphaned(
 def test_metadata_is_empty_only_for_an_org_that_carries_none(monkeypatch):
     # The tier split reads this file (a `course:` pointer means COHORT), so {} from a
     # transient failure used to list a cohort org under Course orgs. Only a 404 is {}.
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    monkeypatch.setattr(
+        gh_contents, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)")
+    )
     assert list_orgs._fetch_metadata("Cohort-f2026") == {}
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: HTTP 403 - forbidden"))
+    monkeypatch.setattr(
+        gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 403 - forbidden")
+    )
     with pytest.raises(RuntimeError, match="Cohort-f2026/.github/dsl-course.yml"):
         list_orgs._fetch_metadata("Cohort-f2026")
 
@@ -119,10 +123,12 @@ def test_a_malformed_dsl_course_yml_is_not_read_as_no_metadata(monkeypatch):
     # `except Exception: return {}` turned unparseable YAML into "this org declares
     # nothing", which files a cohort under Course orgs and rewrites the whole inventory
     # around it - the wrong refresh this reader exists to avoid.
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (0, "course: [unclosed\n"))
+    monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (0, "course: [unclosed\n"))
     with pytest.raises(yaml.YAMLError):
         list_orgs._fetch_metadata("Cohort-f2026")
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (0, "- a list, not a mapping\n"))
+    monkeypatch.setattr(
+        gh_contents, "gh", lambda *a, **k: (0, "- a list, not a mapping\n")
+    )
     with pytest.raises(RuntimeError, match="not a YAML mapping"):
         list_orgs._fetch_metadata("Cohort-f2026")
 
@@ -175,17 +181,17 @@ def test_a_deleted_org_the_search_index_still_returns_is_dropped(monkeypatch):
 def test_only_a_404_counts_as_a_deleted_org(monkeypatch):
     # Fails closed: "could not tell" must never read as "deleted", or one rate-limited
     # call drops a live org from a page that is written out whole.
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (0, "Some-Org"))
-    assert utils.org_exists("Some-Org") is True
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
-    assert utils.org_exists("Some-Org") is False
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: HTTP 403 rate limit"))
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, "Some-Org"))
+    assert repos.org_exists("Some-Org") is True
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    assert repos.org_exists("Some-Org") is False
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 403 rate limit"))
     with pytest.raises(RuntimeError, match="whether the org `Some-Org` still exists"):
-        utils.org_exists("Some-Org")
+        repos.org_exists("Some-Org")
 
 
 def test_metadata_parses_the_yaml_body(monkeypatch):
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (0, "course: My-Course\n"))
+    monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (0, "course: My-Course\n"))
     assert list_orgs._fetch_metadata("Cohort-f2026") == {"course": "My-Course"}
 
 
@@ -195,7 +201,7 @@ def test_a_failed_metadata_read_stops_the_inventory_being_rewritten(
     # The page is fully generated and overwrites whatever is there: a wrong refresh is
     # worse than no refresh, so the CLI must exit 1 with the file untouched.
     monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Cohort-f2026"])
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
+    monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
     page = tmp_path / "inventory.md"
     page.write_text("# the previous, good inventory\n")
     monkeypatch.setattr("sys.argv", ["list_orgs", "--update-file", str(page)])

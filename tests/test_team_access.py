@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import access, bootstrap_course, scaffold, utils
+from dsl_course import access, bootstrap_course, gh_contents, scaffold
 
 
 def test_course_team_access_policy():
@@ -40,9 +40,9 @@ def scaffold_grants(monkeypatch):
     monkeypatch.setattr(scaffold, "set_repo_topics", lambda *a, **k: None)
     monkeypatch.setattr(scaffold, "refresh_stubs", lambda *a, **k: 0)
     monkeypatch.setattr(scaffold, "put_files", lambda *a, **k: True)
-    monkeypatch.setattr(utils, "put_file", lambda *a, **k: True)
-    monkeypatch.setattr(utils, "put_files", lambda *a, **k: True)
-    monkeypatch.setattr(utils, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(gh_contents, "put_file", lambda *a, **k: True)
+    monkeypatch.setattr(gh_contents, "put_files", lambda *a, **k: True)
+    monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(scaffold, "seed_files_if_absent", lambda *a, **k: True)
     monkeypatch.setattr(scaffold, "seed_if_absent", lambda *a, **k: True)
     monkeypatch.setattr(scaffold, "discover_cohorts", lambda org: [])

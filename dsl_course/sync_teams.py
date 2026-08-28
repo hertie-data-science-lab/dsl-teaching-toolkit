@@ -10,7 +10,7 @@ a re-sync overwrites them to match. Provisioning a group assignment grants the m
 on the group's repo (so post-sync membership edits propagate to access automatically).
 
 With --prune, members no longer in the CSV are removed from their team (off-boarding) - never
-an org Owner or the acting login (see utils.reconcile_team_members); off by default here so a
+an org Owner or the acting login (see gh_teams.reconcile_team_members); off by default here so a
 standalone/manual run never silently revokes access. Emptied teams are left in place. The seeded **Sync membership** workflow (dsl_course.sync_membership) always calls this
 with prune=True - config is meant to be the live truth there; this module's own off-by-default
 is only for ad-hoc/CLI use outside that workflow.
@@ -26,8 +26,8 @@ import argparse
 import sys
 
 from . import roster, teams
+from .gh_teams import create_team, reconcile_team_members
 from .log import log_err, log_ok, log_step, log_verbose
-from .utils import create_team, reconcile_team_members
 
 
 def team_slug(assignment: str, team: str) -> str:
@@ -74,7 +74,7 @@ def desired_teams(per: dict[str, dict[str, list[str]]]) -> dict[str, set[str]]:
 def ensure_team(org: str, slug: str, members: set[str], prune: bool) -> bool:
     """Create the team (idempotent) and reconcile its membership to `members`.
 
-    Reconciliation goes through utils.reconcile_team_members so pruning inherits its
+    Reconciliation goes through gh_teams.reconcile_team_members so pruning inherits its
     guard: an org Owner - or the acting login, which GitHub auto-adds as a member of
     whatever team it creates - is never removed. Without it, a maintainer or the bot
     sitting in a project team would be evicted on the next pruning sync."""

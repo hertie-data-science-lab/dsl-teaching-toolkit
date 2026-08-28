@@ -27,8 +27,9 @@ from datetime import date
 import yaml
 
 from . import grades, roster, schedule, sync_faculty, teams
+from .gh_contents import load_yaml_config
 from .log import log_err
-from .utils import get_default_branch, load_yaml_config
+from .repos import get_default_branch
 
 ITEMS = ("B1", "B6", "C2", "C3", "C4", "C5", "C6", "C7")
 # Rows whose input is marked `[required]` in docs/DEPLOYMENT-CHECKLIST.md;
