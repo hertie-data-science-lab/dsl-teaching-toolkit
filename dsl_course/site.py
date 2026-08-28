@@ -46,7 +46,7 @@ import yaml
 
 from . import schedule, seed
 from .assign import assignment_slug
-from .discovery import discover_handed_out_assignments
+from .discovery import discover_handed_out_assignments, list_org_repos
 from .utils import (
     GIT_ENV,
     READING_OVERLAY_NAMES,
@@ -1984,6 +1984,24 @@ def _notify_overwritten_edits(
         log(f"  (manual edits to {len(rows)} file(s) were overwritten - issue filed)")
 
 
+def _stale_site_repo(org: str, site: str) -> str | None:
+    """A `*.github.io` repo in `org` under a name that is NOT `site`, if one exists.
+
+    Renaming an org does not rename its `<org>.github.io` repo, and GitHub quietly
+    demotes the now-mismatched repo from an org site to a project page. The expected
+    site repo is then simply absent, which every sync happily read as "this cohort
+    never opted into a site" - a permanent green no-op while the published site rotted.
+    Finding the old name is what lets the sync say so instead."""
+    for repo in list_org_repos(org):
+        name = repo.get("name", "")
+        if (
+            name.casefold().endswith(".github.io")
+            and name.casefold() != site.casefold()
+        ):
+            return name
+    return None
+
+
 def _sync_site_repo(
     org: str,
     build: Callable[[Path], _SitePlan | None],
@@ -2014,6 +2032,18 @@ def _sync_site_repo(
     site = _site_repo(org)
     just_scaffolded = False
     if not repo_exists(org, site):
+        try:
+            stale = _stale_site_repo(org, site)
+        except RuntimeError as exc:
+            log_err(str(exc))
+            return 1
+        if stale is not None:
+            log_err(
+                f"{org} has no {site}, but it does hold {org}/{stale} - the org was "
+                "renamed and its Pages site was silently demoted to a project page. "
+                f"Rename {stale} to {site} (GitHub does not do it for you), then re-run."
+            )
+            return 1
         if not scaffold_missing:
             log(f"  (no site repo {org}/{site} - skipping site sync)")
             return 0

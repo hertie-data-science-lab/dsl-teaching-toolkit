@@ -919,3 +919,38 @@ def test_the_syllabus_choice_is_stable_when_a_cohort_has_two(monkeypatch):
     assert site._released_syllabus("C", ["aaa", "zzz"]).endswith(
         "/aaa/blob/main/SYLLABUS.md"
     )
+
+
+def _repos(*names):
+    return [{"name": n} for n in names]
+
+
+def test_a_renamed_org_fails_the_sync_instead_of_no_opping(monkeypatch):
+    # Renaming an org leaves `<old>.github.io` behind, demoted to a project page. The
+    # expected site repo is then absent, which used to read as "never opted into a site"
+    # - green forever while the published site rotted.
+    monkeypatch.setattr(site, "repo_exists", lambda org, name: False)
+    monkeypatch.setattr(
+        site, "list_org_repos", lambda org: _repos("welcome", "OLD-NAME.github.io")
+    )
+    built: list[object] = []
+    assert site._sync_site_repo("new-name", lambda wd: built.append(wd)) == 1
+    assert built == []
+
+
+def test_an_org_that_never_had_a_site_is_still_a_quiet_noop(monkeypatch):
+    monkeypatch.setattr(site, "repo_exists", lambda org, name: False)
+    monkeypatch.setattr(
+        site, "list_org_repos", lambda org: _repos("welcome", ".github")
+    )
+    assert site._sync_site_repo("new-name", lambda wd: None) == 0
+
+
+def test_a_failed_repo_listing_is_not_read_as_no_site(monkeypatch):
+    monkeypatch.setattr(site, "repo_exists", lambda org, name: False)
+
+    def boom(org):
+        raise RuntimeError(f"could not list repos in {org}")
+
+    monkeypatch.setattr(site, "list_org_repos", boom)
+    assert site._sync_site_repo("new-name", lambda wd: None) == 1
