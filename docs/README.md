@@ -84,23 +84,15 @@ For a one-page summary of **every workflow**, see [`actions-reference.md`](refer
 for who may run them, [`access-reference.md`](reference/access-reference.md). If you maintain the
 toolkit itself rather than a course, start at [`maintainers.md`](reference/maintainers.md).
 
-## Conventions the machinery depends on
+## Three things that look cosmetic and are not
 
-Three things look cosmetic and are not. Changing one breaks the pipeline silently.
-
-- **Org names.** The cohort org's `fYYYY`/`sYYYY` **suffix** is parsed, not decorative: it drives
-  the semester label, the schedule ordering, and which year's `instructors-<tag>` team and
-  `*-<tag>` content repos a cohort reaches. Nothing validates the course org's name, but keep it
-  to the form above so the tag can never be mistaken for one.
-- **Repo topics are machinery markers.** `dsl-course-hub` (a course org's `.github`), `dsl-cohort`
-  (a cohort org's `.github`), `submission`, `gradebook`, `assignment-template`. Discovery reads
-  these to tell a course org from a cohort, and content repos from per-student ones. Remove a
-  topic by hand and the repo drops out of every sweep that should reach it.
-- **The `.last-refresh` heartbeat.** GitHub disables a repo's scheduled workflows after 60 days
-  with no repository activity - including **Refresh actions**, the cron that would have healed
-  it. So each nightly refresh stamps today's date into `.github/.last-refresh`. A course org that
-  is quiet for two months and has *no* heartbeat commits has already lost its crons; run any
-  workflow by hand to restart them.
+- **The cohort org's `fYYYY`/`sYYYY` suffix** is parsed: it picks the year's `instructors-<tag>`
+  team and `*-<tag>` content repos. The course org's name is not validated.
+- **Repo topics** (`dsl-course-hub`, `dsl-cohort`, `submission`, `gradebook`,
+  `assignment-template`) are how discovery tells orgs and repos apart. Remove one by hand and
+  the repo drops out of every sweep.
+- **`.github/.last-refresh`** is a heartbeat: GitHub disables crons after 60 quiet days, so the
+  nightly refresh commits a date. If it has stopped, run any workflow by hand to restart them.
 
 ## Example org artefacts
 

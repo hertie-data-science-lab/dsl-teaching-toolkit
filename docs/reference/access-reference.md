@@ -98,17 +98,13 @@ Two teams carry every faculty grant: `instructors` (this org's teaching team) an
 | cohort `.github`, `welcome`, `classroom-config` | push | admin |
 | cohort released content, submission repos, `grades-<handle>` | **read** | admin |
 
-Read, not write, on everything a cohort *receives*, because each of those has its source of truth
-elsewhere: a re-release overwrites released material, marking happens in
-`classroom-config/grades/<slug>.csv`, and **Distribute grades** rewrites a gradebook from that CSV.
-An edit made in the received copy looks like it stuck and then vanishes. `.github` keeps push only
-because GitHub requires write on a repo to trigger a `workflow_dispatch` at all - that is what
-every faculty button is.
+Read on everything a cohort *receives*: a re-release overwrites released material, and marks
+live in `classroom-config/grades/<slug>.csv` (**Distribute grades** rewrites gradebooks from it),
+so an edit in the received copy would silently vanish. `.github` keeps push because GitHub
+requires write to trigger a `workflow_dispatch`.
 
-**The grant is set when the repo is created**, and the nightly **Refresh actions** run sweeps every
-repo back up to that floor. The sweep is a *floor*: a repo already granted higher is left alone, so
-it never demotes anyone, and a per-student repo takes the read floor whatever else is true of the
-org.
+Grants are set at repo creation; the nightly **Refresh actions** sweep raises any repo below its
+floor and never demotes.
 
 ## The four `instructors` teams
 
@@ -136,9 +132,8 @@ record who's on it elsewhere. Route FA (faculty assistant) and TA access through
   team or `instructors-<tag>` through the GitHub Teams UI survives only until the next Sync
   membership run, which removes anyone the config doesn't name. A hand-*removal* is likewise
   re-added. Edit the file.
-- **Students hold `maintain` on their own submission repo** - that is how they push their work -
-  and read on their own `grades-<handle>`. Nowhere else, and never on `.github`, so no faculty
-  workflow is visible or runnable for them.
+- **Students hold `maintain` on their own submission repo** and read on their own
+  `grades-<handle>`; nowhere else, so no faculty workflow is visible or runnable for them.
 - **New members must accept a one-time org invite** - membership shows `pending` until they do.
 - **Nobody ever holds the bot token.** Every workflow runs server-side under `DSL_BOT_TOKEN`; the
   actor's own permissions are only ever used as the gate.

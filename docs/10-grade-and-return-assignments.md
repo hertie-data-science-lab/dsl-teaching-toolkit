@@ -53,11 +53,9 @@ there means nothing was pushed by the deadline, and that scores zero.
 
 Nothing is written to any student repo. Auditors are never graded.
 
-The run log is **public** (every workflow runs in the course org's public `.github`), so it
-names each submission by a short `#tag` rather than by repo or handle - salted per run, so
-it cannot be recomputed from outside it. The tag is recorded next to the repo in the private
-per-student detail under `classroom-config/autograde/<slug>/*.json`; the scores themselves
-are in `classroom-config/grades/<slug>.csv`.
+The run log is public, so it names each submission by a per-run `#tag`, not by handle. The tag
+is recorded beside the repo in `classroom-config/autograde/<slug>/*.json`; scores are in
+`classroom-config/grades/<slug>.csv`.
 
 ### What autograde guarantees
 
