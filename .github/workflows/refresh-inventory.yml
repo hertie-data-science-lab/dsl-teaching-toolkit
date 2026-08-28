@@ -82,37 +82,49 @@ jobs:
           ALLOW_NET_DELETION: ${{ inputs.allow_net_deletion }}
         run: |
           set -eo pipefail
+          # An OPEN PR whose branch already carries this exact inventory has nothing new
+          # to commit - but it still has to MERGE: its required `pytest` status was never
+          # posted (the PR predates this step, or the earlier run died before posting), so
+          # it sits blocked for ever. Skip the commit and push, run the check, merge.
+          pr_open=false
+          if gh pr view "$BRANCH" --json state --jq '.state' 2>/dev/null | grep -q OPEN; then
+            pr_open=true
+          fi
           if git diff --quiet bootstrapped-orgs-inventory.md; then
-            echo "No changes to inventory - nothing to do."
-            exit 0
-          fi
+            if [ "$pr_open" != true ]; then
+              echo "No changes to inventory - nothing to do."
+              exit 0
+            fi
+            echo "Inventory unchanged, but PR $BRANCH is open and unmerged - verifying and merging it."
+          else
 
-          # This page is fully generated and merged unattended, so a refresh that DROPS more
-          # rows than it adds must not land on its own: that is the signature of a partial
-          # discovery pass (a rate-limited search, a token that lost an org) rather than of
-          # orgs genuinely going away. Stop red and let a human look - then let them say so,
-          # via the allow_net_deletion dispatch input, rather than editing the page by hand.
-          added=$(git diff --numstat -- bootstrapped-orgs-inventory.md | cut -f1)
-          removed=$(git diff --numstat -- bootstrapped-orgs-inventory.md | cut -f2)
-          if [ "${removed:-0}" -gt "${added:-0}" ] && [ "$ALLOW_NET_DELETION" != "true" ]; then
-            echo "::error::inventory refresh would remove $removed line(s) and add only $added. Either an org really was deleted - re-run this workflow manually with allow_net_deletion=true to let it land - or DSL_BOT_TOKEN lost access to an org it used to see (check its org memberships/grants), in which case the missing rows are still real and must NOT be merged away."
-            git --no-pager diff -- bootstrapped-orgs-inventory.md
-            exit 1
-          fi
+            # This page is fully generated and merged unattended, so a refresh that DROPS more
+            # rows than it adds must not land on its own: that is the signature of a partial
+            # discovery pass (a rate-limited search, a token that lost an org) rather than of
+            # orgs genuinely going away. Stop red and let a human look - then let them say so,
+            # via the allow_net_deletion dispatch input, rather than editing the page by hand.
+            added=$(git diff --numstat -- bootstrapped-orgs-inventory.md | cut -f1)
+            removed=$(git diff --numstat -- bootstrapped-orgs-inventory.md | cut -f2)
+            if [ "${removed:-0}" -gt "${added:-0}" ] && [ "$ALLOW_NET_DELETION" != "true" ]; then
+              echo "::error::inventory refresh would remove $removed line(s) and add only $added. Either an org really was deleted - re-run this workflow manually with allow_net_deletion=true to let it land - or DSL_BOT_TOKEN lost access to an org it used to see (check its org memberships/grants), in which case the missing rows are still real and must NOT be merged away."
+              git --no-pager diff -- bootstrapped-orgs-inventory.md
+              exit 1
+            fi
 
-          git add bootstrapped-orgs-inventory.md
-          git commit -m "chore: refresh course-orgs inventory"
-          # --force-with-lease, never a bare -f: the lease is the tip fetched above (empty
-          # when the branch does not exist yet, which asserts exactly that), so a commit
-          # pushed to the branch since then aborts the run instead of being overwritten.
-          lease=$(git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" || true)
-          git push --force-with-lease="$BRANCH:$lease" origin "HEAD:$BRANCH"
+            git add bootstrapped-orgs-inventory.md
+            git commit -m "chore: refresh course-orgs inventory"
+            # --force-with-lease, never a bare -f: the lease is the tip fetched above (empty
+            # when the branch does not exist yet, which asserts exactly that), so a commit
+            # pushed to the branch since then aborts the run instead of being overwritten.
+            lease=$(git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" || true)
+            git push --force-with-lease="$BRANCH:$lease" origin "HEAD:$BRANCH"
 
-          if ! gh pr view "$BRANCH" --json state --jq '.state' 2>/dev/null | grep -q OPEN; then
-            gh pr create \
-              --title "chore: refresh course-orgs inventory" \
-              --body "Automated refresh by \`refresh-inventory\`. Course orgs discovered via topic \`dsl-course-hub\`, cohort orgs via \`dsl-cohort\`." \
-              --base main --head "$BRANCH"
+            if ! gh pr view "$BRANCH" --json state --jq '.state' 2>/dev/null | grep -q OPEN; then
+              gh pr create \
+                --title "chore: refresh course-orgs inventory" \
+                --body "Automated refresh by \`refresh-inventory\`. Course orgs discovered via topic \`dsl-course-hub\`, cohort orgs via \`dsl-cohort\`." \
+                --base main --head "$BRANCH"
+            fi
           fi
           # main requires the `pytest` check, and this PR can never receive one: GitHub does
           # not trigger workflows from events made with GITHUB_TOKEN, so ci.yml's
