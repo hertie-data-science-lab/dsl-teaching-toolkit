@@ -180,12 +180,18 @@ FACULTY_TEAMS = [
 # never gets these - it holds unreleased materials, model solutions, and hidden tests, so
 # students/auditors must not be near it. Auditors are read-only: assignment release is
 # roster-driven (onboarded students only), so auditors never receive assignment repos.
+#
+# `secret`, not `closed`: a closed team's membership is visible to every member of the org,
+# so any student could open the `auditors` team page and read off exactly who is auditing
+# rather than enrolled - a classmate's academic status, published to the class by the
+# scaffolding. A secret team is visible only to its own members and to org owners, which
+# costs the students nothing (nobody needs to browse the roster to do the course).
 COHORT_TEAMS = [
-    ("students", "Enrolled students", "closed"),
+    ("students", "Enrolled students", "secret"),
     (
         "auditors",
         "Auditors - read-only (released materials only, no assignments)",
-        "closed",
+        "secret",
     ),
 ]
 
@@ -213,7 +219,13 @@ def create_default_teams(org: str) -> int:
 
 def create_cohort_teams(org: str) -> int:
     """Create the cohort-only role teams (COHORT_TEAMS): enrolled students + read-only
-    auditors. Called at cohort bootstrap only - never on the persistent course org."""
+    auditors. Called at cohort bootstrap only - never on the persistent course org.
+
+    Both are SECRET teams, so their membership is not browsable by the students in them
+    (see COHORT_TEAMS). The cost is that a non-owner instructor cannot read the enrolment
+    off the GitHub members view either: the roster CSV
+    (`classroom-config/students.csv`) is the SSOT for who is enrolled, and it always
+    was - the members view only ever showed who had finished onboarding."""
     log_step("Creating cohort teams (students, auditors)")
     return _create_teams(org, COHORT_TEAMS)
 

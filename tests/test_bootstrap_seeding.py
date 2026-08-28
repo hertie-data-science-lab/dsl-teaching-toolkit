@@ -1209,3 +1209,16 @@ def test_a_clean_run_still_reads_as_complete(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "[FAILED]" not in out
     assert "bootstrap complete" in out
+
+
+def test_the_student_facing_teams_are_secret(monkeypatch):
+    # A closed team's membership is browsable by every org member, so any student could
+    # read the `auditors` list and learn a classmate's academic status.
+    created: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        bc,
+        "create_team",
+        lambda org, slug, desc, privacy: created.append((slug, privacy)) or True,
+    )
+    bc.create_cohort_teams("Cohort-f2026")
+    assert created == [("students", "secret"), ("auditors", "secret")]
