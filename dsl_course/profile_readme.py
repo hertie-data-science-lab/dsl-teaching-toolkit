@@ -38,6 +38,7 @@ from .utils import (
     get_file_content,
     load_yaml_config,
     log,
+    log_err,
     log_ok,
     put_files,
 )
@@ -378,11 +379,15 @@ Maintained by the [Hertie Data Science Lab](https://github.com/hertie-data-scien
 
 def update_profile_readme(
     org: str, org_name: str | None = None, course_name: str | None = None
-) -> None:
+) -> int:
     """(Re)generate the org's profile/README.md from its metadata + live repo list.
 
     A cohort org (one with a `welcome` repo) gets a student-facing page; a course org
-    gets the faculty-facing one."""
+    gets the faculty-facing one.
+
+    Returns the number of failed writes (0 or 1), so the nightly refresh can count it:
+    the commit's return used to be discarded under an unconditional "refreshed" line, and
+    a whole org whose landing pages never converged reported success every night."""
     if org_name is None or course_name is None:
         # Guarded load: absent (None) is normal - a cohort org has no dsl-course.yml of its
         # own, so fall back to the org name. A MALFORMED config raises here (with a clear,
@@ -433,12 +438,17 @@ def update_profile_readme(
     # Both are rendered from the same org snapshot and move together, so they belong in one
     # commit - kept separate from the workflow refresh's commit, because `docs:` vs `ci:` is
     # the one distinction in this history worth reading.
-    put_files(org, ".github", files, "docs: refresh org READMEs (profile + .github)")
+    if not put_files(
+        org, ".github", files, "docs: refresh org READMEs (profile + .github)"
+    ):
+        log_err(f"could not write {org}/.github READMEs")
+        return 1
     log_ok(
         "profile + .github READMEs refreshed"
         if "profile/README.md" in files
         else ".github README refreshed (landing page left as the instructor has it)"
     )
+    return 0
 
 
 def _cohort_profile_body(org: str, repos: list[dict], seeded: str) -> str | None:

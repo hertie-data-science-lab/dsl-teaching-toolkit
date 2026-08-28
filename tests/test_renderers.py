@@ -741,6 +741,37 @@ def test_repo_table_drops_submission_and_gradebook_repos():
     assert "| [assignment-1]" not in rows
 
 
+def _readme_run(monkeypatch, put_ok):
+    from dsl_course import profile_readme as P
+
+    monkeypatch.setattr(P, "load_yaml_config", lambda org, repo, path: {})
+    monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
+    monkeypatch.setattr(P, "converge_descriptions", lambda *a, **k: 0)
+    monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
+    monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(P, "log", lambda *a, **k: None)
+    said_ok: list[str] = []
+    monkeypatch.setattr(P, "log_ok", lambda msg: said_ok.append(msg))
+    monkeypatch.setattr(P, "log_err", lambda *a, **k: None)
+    monkeypatch.setattr(P, "put_files", lambda *a, **k: put_ok)
+    return P.update_profile_readme("Cohort-f2026"), said_ok
+
+
+def test_a_failed_readme_commit_is_counted_not_announced(monkeypatch):
+    # The commit's return was discarded under an unconditional "refreshed" line, so the
+    # nightly refresh could not see an org whose landing pages never converged.
+    code, said_ok = _readme_run(monkeypatch, put_ok=False)
+    assert code == 1
+    assert said_ok == []
+
+
+def test_a_written_readme_reports_no_failures(monkeypatch):
+    code, said_ok = _readme_run(monkeypatch, put_ok=True)
+    assert code == 0
+    assert said_ok
+
+
 def test_cohort_page_title_follows_the_course_pointer(monkeypatch):
     from dsl_course import profile_readme as P
 

@@ -428,7 +428,7 @@ def refresh(course_org: str) -> int:
     failures += _propagate_repo_secret(course_org, targets)
     failures += seed_github_workflows(course_org)
     failures += _write_heartbeat(course_org)
-    update_profile_readme(course_org)
+    failures += update_profile_readme(course_org)
     # A cohort's onboarding workflows, classroom-config dispatchers and config samples are
     # seeded at Bootstrap cohort, and would otherwise stay frozen for the whole semester
     # while the engine they call - and the schemas the samples demonstrate - move on.
@@ -464,7 +464,7 @@ def refresh(course_org: str) -> int:
         # marked repo table is refreshed (see profile_readme.splice_repo_table) - which is
         # what keeps that table honest as repos are added, without flattening an
         # instructor's wording around it.
-        update_profile_readme(cohort)
+        failures += update_profile_readme(cohort)
     if failures:
         log_err(f"refresh incomplete: {failures} file(s) could not be written")
         return 1

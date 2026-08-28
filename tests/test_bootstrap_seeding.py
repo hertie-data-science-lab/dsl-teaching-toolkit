@@ -480,7 +480,7 @@ def _stub_bootstrap(monkeypatch) -> None:
     monkeypatch.setattr(bc, "validate_secret_presence", lambda org, secret: True)
     monkeypatch.setattr(bc, "put_file", lambda *a, **k: True)
     monkeypatch.setattr(bc.seed, "register_cohort", lambda course, cohort: True)
-    monkeypatch.setattr(bc.seed, "update_profile_readme", lambda *a, **k: None)
+    monkeypatch.setattr(bc.seed, "update_profile_readme", lambda *a, **k: 0)
     monkeypatch.setattr(bc.sync_faculty, "sync", lambda course, cohorts=None: 0)
 
 
@@ -574,7 +574,7 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "_propagate_repo_secret", lambda org, repos: 0)
     monkeypatch.setattr(seed, "seed_github_workflows", lambda org: seed_failures)
     monkeypatch.setattr(seed, "_write_heartbeat", lambda org: heartbeat_failures)
-    monkeypatch.setattr(seed, "update_profile_readme", lambda org: None)
+    monkeypatch.setattr(seed, "update_profile_readme", lambda org: 0)
     monkeypatch.setattr(seed, "refresh_welcome_workflows", welcome_failures)
     monkeypatch.setattr(seed, "refresh_classroom_samples", sample_failures)
     monkeypatch.setattr(seed, "refresh_classroom_system_files", system_failures)
@@ -633,7 +633,9 @@ def test_refresh_rebuilds_every_cohorts_own_landing_pages(monkeypatch):
     # cohort (a live cohort's .github README sat untouched for months).
     rendered: list[str] = []
     _stub_refresh(monkeypatch)
-    monkeypatch.setattr(seed, "update_profile_readme", lambda org: rendered.append(org))
+    monkeypatch.setattr(
+        seed, "update_profile_readme", lambda org: rendered.append(org) or 0
+    )
 
     assert seed.refresh("Course-Org") == 0
     assert rendered == ["Course-Org", "Cohort-f2026", "Cohort-s2027"]
@@ -664,7 +666,9 @@ def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
 
     rendered: list[str] = []
     pointed: list[str] = []
-    monkeypatch.setattr(seed, "update_profile_readme", lambda org: rendered.append(org))
+    monkeypatch.setattr(
+        seed, "update_profile_readme", lambda org: rendered.append(org) or 0
+    )
     monkeypatch.setattr(
         seed, "refresh_cohort_pointer", lambda org, course: pointed.append(org) or 0
     )
