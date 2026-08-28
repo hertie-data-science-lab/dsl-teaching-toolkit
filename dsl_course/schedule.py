@@ -21,6 +21,8 @@ lifecycle, `events` are display-only calendar rows.
     assignments:                     # each assignment's whole lifecycle. The slug is a
       assignment-1:                  # label; course_source_repo names the COURSE-org repo
         course_source_repo: assignment-1-f2026   # it hands out from, and is REQUIRED.
+        title: Linear regression     # optional, display-only: the assignment's name,
+                                     # beside the slug on the site
         handout_datetime: 2026-09-22T09:00  # A bare due_datetime is END of day (23:59:59)
         due_datetime: 2026-10-13     # - "due on the 13th" closes at day's end.
         grading_datetime: 2026-10-15 # Snapshot freezes + autograder fires (default: due).
@@ -271,6 +273,12 @@ class AssignmentEntry:
     # exactly like a `releases` entry. None = hand out manually (the workflow
     # then records the release moment here).
     handout_datetime: datetime | None = None
+    # Display-only: the assignment's NAME, shown beside the slug on the site exactly as a
+    # `releases:` entry's `title` sits beside its session ordinal. Declared here rather
+    # than left to the template README's `# ` heading, which is the fallback: the README is
+    # embargoed until hand-out, so a name that lives only there cannot appear on the
+    # schedule that publishes the assignment's dates. "" = fall back to the heading.
+    title: str = ""
     # 'group' | 'individual' | None. The COHORT-level declaration of how this assignment
     # fans out; when set it wins over the template's own grading.yml `type:` (the
     # design-time fallback). None = defer to grading.yml (then individual).
@@ -383,6 +391,7 @@ KNOWN_ASSIGNMENT = frozenset(
         "grading_datetime",
         "handout_datetime",
         "solution_datetime",
+        "title",
         "type",
         "max_team_size",
     }
@@ -692,6 +701,7 @@ def _parse_assignments(
             due_datetime=due,
             course_source_repo=source_repo,
             cohort_dest_repo=dest or None,
+            title=str(entry.get("title") or "").strip(),
             grading_datetime=_flagged_datetime(
                 entry,
                 "grading_datetime",

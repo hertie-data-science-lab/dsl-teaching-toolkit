@@ -308,6 +308,7 @@ assignments:
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `due_datetime` | **yes** | - (entry dropped without it) | what students see; bare date = 23:59:59 |
+| `title` | no | the template README's `# ` heading | the assignment's name, beside the slug on the site. Declared here it shows from day one; the README fallback only appears at hand-out |
 | `handout_datetime` | no* | - | when repos are provisioned, automatic. *Required for the schedule to release it. If you hand out via the **Release assignment** workflow instead, the workflow records the release moment here for you |
 | `grading_datetime` | no | `due_datetime` | snapshot freezes + autograder fires (once) |
 | `type` | no | individual | `group` / `individual` - how handout + grading fan out. Can also be set in the template's `grading.yml` |
@@ -319,7 +320,8 @@ assignments:
 semester_start: 2026-09-07
 semester_end: 2026-12-18
 assignments:                          # each assignment's WHOLE lifecycle, keyed by slug
-  assignment-1:                       # (template name minus -fYYYY)
+  assignment-1:                       # (template name minus -fYYYY). Students SEE the slug
+    title: Linear regression          # optional: the name shown beside the slug
     handout_datetime: 2026-09-22T09:00  # optional: provision one repo per student (or per
                                         # team - the template's grading.yml decides), automatic
     due_datetime: 2026-10-13            # what students see

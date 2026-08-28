@@ -1317,6 +1317,36 @@ def _lecture_entry(
     )
 
 
+# Separators faculty put between an assignment's identifier and its name. Two dash
+# characters are in live READMEs already (`Assignment 1 - ...` and `Assignment 1 — ...`),
+# which is exactly why this is a set and not a `-`.
+_NAME_SEPARATORS = "-\u2013\u2014:|"
+
+
+def _assignment_name(heading: str, identifier: str) -> str:
+    """The assignment's NAME out of a template README's `# ` heading, given the identifier
+    the site already shows in bold beside it.
+
+    Faculty conventionally open the heading with the identifier - `# Assignment 1 - linear
+    regression from scratch` - so printing the heading whole under "Assignment 1" reads
+    "Assignment 1 / Assignment 1 - linear regression from scratch". Drop that prefix and
+    whatever separates it.
+
+    A heading that does NOT open with the identifier (`# Group project - an end-to-end
+    modelling report`) is the name already and is returned as it stands. Casefolded, so a
+    heading that differs from the slug only in capitalisation still matches."""
+    name = heading.strip()
+    if name.casefold().startswith(identifier.casefold()):
+        rest = name[len(identifier) :].lstrip()
+        # Only when a separator actually follows: `Assignment 10` must not be read as
+        # `Assignment 1` plus the name "0".
+        if rest[:1] in tuple(_NAME_SEPARATORS):
+            return rest[1:].strip()
+        if not rest:
+            return ""
+    return name
+
+
 def _assignment_entry(
     course_org: str,
     cohort_org: str,
@@ -1404,9 +1434,16 @@ def _assignment_entry(
         template_group=None,
     )
     repo_name = f"{slug}-{'<your-team>' if group else '<your-handle>'}"
-    # The plan-side name - all a pending assignment ever shows, and the fallback for a
-    # released README that opens with no `# ` heading.
+    # The slug's own name: the row's IDENTIFIER, bold beside its name, and the one half
+    # that must not change at hand-out. It used to be overwritten by the README heading, so
+    # a row published as "Assignment 2" became "Assignment 1 - linear regression from
+    # scratch (individual)" the moment it shipped - the same row apparently becoming a
+    # different thing. Exactly `_lecture_entry`'s split: `title` identifies, `subtitle`
+    # names (and the theme renders the pair identically for both).
     title = slug.replace("-", " ").title()
+    # The plan's own declaration wins, and is the only one that can appear BEFORE hand-out:
+    # the README it otherwise comes from is embargoed until then.
+    subtitle = found[1].title if found else ""
     # `repo_name` either way - the shape is the plan's, known before anything ships - and
     # `repo_url` only once there is something at the other end of it. So the theme tests
     # the flag for state and the URL only for "have I somewhere to link", rather than
@@ -1425,8 +1462,8 @@ def _assignment_entry(
     if out:
         readme = get_file_content(course_org, repo, "README.md") or ""
         for line in readme.splitlines():
-            if line.startswith("# "):
-                title = line[2:].strip()
+            if line.startswith("# ") and not subtitle:
+                subtitle = _assignment_name(line[2:], title)
                 break
         brief = "\n".join(
             ln for ln in readme.splitlines() if not ln.startswith("# ")
@@ -1452,17 +1489,24 @@ def _assignment_entry(
             f"`{repo_name}` repo appears when it is._"
         )
     title = _q(title)
+    # After the branch above, which is where a released entry learns its name from the
+    # README. The due row is the same assignment, so it shows the same two halves -
+    # identifier bold, name beneath - rather than one of them.
+    sub_fm = f'subtitle: "{_q(subtitle)}"\n' if subtitle else ""
+    sub_due = f'    subtitle: "{_q(subtitle)}"\n' if subtitle else ""
     return (
         f"---\n"
         f"type: assignment\n"
         f"date: {released}\n"
         f'title: "{title}"\n'
+        f"{sub_fm}"
         f"{flags}"
         f"{repo_fm}"
         f"due_event:\n"
         f"    type: due\n"
         f"    date: {due}\n"
         f'    description: "{title}"\n'
+        f"{sub_due}"
         f"{repo_due}"
         f"---\n"
         f"{body}\n"
@@ -1709,6 +1753,14 @@ def _special_event_entry(
     display-only entry: a clinic, a guest lecture, a review session. Nothing is released;
     the site simply shows it.
 
+    The name goes in `description`, which the theme renders in the schedule's TITLE
+    column - the same place a session's ordinal and an assignment's identifier sit. It
+    used to go in `name`, which the theme renders in the EVENT column, so a guest lecture
+    printed its whole name where "Lecture" / "Lab" / "Exam" print a row's KIND, and left
+    its title cell empty. One meaning per column: Event says what kind of row this is,
+    Title says which one it is. (`semester_start`/`_end` keep `name` - there the kind IS
+    the name, "Term starts", and there is nothing declared to put beside it.)
+
     TBC: an undated entry (`event_datetime: tbc`) still needs a sortable `date:` for the
     theme, so the caller passes end-of-term as `when` plus `dateless=True` - the theme
     then prints "TBC" instead of the placeholder. A dated entry with `tbc=True` keeps its
@@ -1719,10 +1771,9 @@ def _special_event_entry(
     return (
         f"---\n"
         f"type: special_event\n"
-        f'name: "{_q(title)}"\n'
         f"date: {_iso_when(when)}\n"
         f"{flags}"
-        f'description: ""\n'
+        f'description: "{_q(title)}"\n'
         f"---\n"
     )
 
