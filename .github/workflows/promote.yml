@@ -12,7 +12,8 @@ name: Promote
 # Rollback is a `git revert` on main, promoted forward (see docs-admin-arch/central-admin.md).
 #
 # Who can run it: dispatching a workflow needs write on this repo, which is the same gate
-# every seeded workflow in every org uses.
+# every seeded workflow in every org uses. Promoting to `release` is gated a second time by
+# the `release` environment's required reviewers - see docs-admin-arch/central-admin.md.
 
 on:
   workflow_dispatch:
@@ -35,29 +36,44 @@ on:
         default: true
         type: boolean
 
-# Only the promote job writes, and only to this repo's refs. The org-refresh job below
-# authenticates as the bot instead, so it needs nothing from the ambient token.
+# Both jobs authenticate as the bot, so neither needs anything from the ambient token
+# beyond reading this repo for the checkout.
 permissions: {}
 
 jobs:
   promote:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # The tier being promoted to, as a deployment environment: `release` carries the admin
+    # team as required reviewers, so a release promotion pauses for a human, while a
+    # staging soak stays one click. GitHub creates a named environment on first use, so an
+    # environment with no rules is simply no extra gate.
+    environment: ${{ inputs.to }}
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
+          # The push below is the BOT's, not GITHUB_TOKEN's: a branch ruleset can restrict
+          # the tier branches to one account, and GITHUB_TOKEN cannot be that account -
+          # which left the tiers pushable by every write-holder on this repo. Checkout's
+          # own credentials would win over the bot's (it writes an auth header into the
+          # repo config), so they are not persisted.
+          persist-credentials: false
 
       - name: Fast-forward the tier, or refuse
         env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           TIER: ${{ inputs.to }}
           SOURCE_INPUT: ${{ inputs.ref }}
         run: |
           set -eo pipefail
           git config user.name "DSL Bot"
           git config user.email "dsl-bot@hertie-school.org"
+          # Via gh's credential helper, so the token is never in a remote URL or in argv,
+          # where a failed push would echo it back into the log.
+          gh auth setup-git
           # fetch-depth: 0 gets the whole history of the checked-out ref only; the tier
           # branches and main are separate refs and have to be asked for by name.
           git fetch --quiet origin "+refs/heads/*:refs/remotes/origin/*"
