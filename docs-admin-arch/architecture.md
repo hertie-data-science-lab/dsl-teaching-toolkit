@@ -660,11 +660,13 @@ Self-contained - workflows and their Python implementation both live in this rep
 - `dsl_course/`:
   - `central` - the one definition of which repo/ref every seeded workflow checks out; imported
     by both the renderers and the generated READMEs so the two can't disagree.
-  - `bootstrap_course` - configure a course or (`--cohort`) cohort org; create teams; grant
-    button access on `.github` and, cohort-side, on the infra repos faculty actually work in
-    (`grant_cohort_faculty_access` / `COHORT_FACULTY_REPOS` = `welcome`, `classroom-config`, so
-    non-owner instructors get write and course-admin gets admin under
-    `default_repository_permission=none`); propagate the secret.
+  - `bootstrap_course` - configure a course or (`--cohort`) cohort org; tighten BOTH kinds to
+    `default_repository_permission=none` (a course org holds the unreleased materials and the
+    assignment `solution` branches, so members must not read it by default either); create
+    teams; grant button access on `.github` and, cohort-side, on the infra repos faculty
+    actually work in (`grant_cohort_faculty_access` / `COHORT_FACULTY_REPOS` = `welcome`,
+    `classroom-config`, so non-owner instructors get write and course-admin gets admin);
+    propagate the secret.
   - `seed` - place the workflows (central + run-from-repo) and the `refresh` CLI, whose nightly
     run also loops every registered cohort (gone orgs pruned with a hint, archived ones left
     frozen) re-converging its welcome workflows, classroom-config system files and samples; it

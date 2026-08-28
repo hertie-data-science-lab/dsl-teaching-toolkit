@@ -9,7 +9,7 @@ Sets up org-level infrastructure that persists across semesters:
 - Central faculty & instructors workflows seeded into .github (Release materials/assignment +
   Sync membership/Bootstrap-cohort/Refresh); the run-from-repo copies are equipped by Refresh
 
-With --cohort, instead tightens the org and seeds the student-facing welcome (onboard)
+With --cohort, instead seeds the student-facing welcome (onboard)
 and classroom-config (roster) repos.
 
 Usage:
@@ -244,7 +244,7 @@ def grant_button_access(org: str) -> int:
 
 
 # The COHORT infra repos the faculty teams need the same standing grant on as `.github`.
-# A cohort org is tightened to default_repository_permission=none, so without these grants
+# Every org is tightened to default_repository_permission=none, so without these grants
 # only org OWNERS can touch either repo - yet the whole faculty workflow lives in them:
 # `classroom-config` is what instructors edit (schedule.yml, students.csv, teams.csv,
 # people.yml) and read (grades/), and `welcome` is where they triage `needs-review`
@@ -440,10 +440,11 @@ def create_profile_repo(
 
 
 def set_org_settings(org: str) -> int:
-    """Set org-level settings: 2FA, Pages, base permissions. Returns 1 if 2FA could not
-    be enforced - a course org whose members may skip 2FA is a real misconfiguration,
-    not a cosmetic one, so it is counted rather than logged and passed."""
+    """Set org-level settings: 2FA and base permissions. Returns the number of PATCHes
+    that failed - an org whose members may skip 2FA, or that hands every member read on
+    every repo, is a real misconfiguration, not a cosmetic one."""
     log_step("Configuring org settings")
+    failures = 0
 
     # Require 2FA for all members (best practice for course orgs)
     code, out = gh(
@@ -458,9 +459,36 @@ def set_org_settings(org: str) -> int:
     # Note: pages_build_type is set per-repo, not org-wide
     if code == 0:
         log_ok("org settings configured (2FA enforced)")
-        return 0
-    log_err(f"could not enable 2FA: {out[:100]}")
-    return 1
+    else:
+        failures += 1
+        log_err(f"could not enable 2FA: {out[:100]}")
+
+    # Base permissions, in BOTH org kinds. This used to be cohort-only, on the reasoning
+    # that a cohort holds students - but a COURSE org holds the unreleased materials, the
+    # model solutions and the assignment `solution` branches, and at GitHub's default of
+    # `read` every member of it (every TA, every visiting instructor, anyone ever added
+    # for one semester) could read all of them. Faculty access to a course org comes from
+    # the instructors/course-admin team grants (COURSE_TEAM_ACCESS, converged nightly by
+    # utils.converge_faculty_access), not from being a member, so nobody who should have
+    # access loses it.
+    code, out = gh(
+        "api",
+        "--method",
+        "PATCH",
+        f"orgs/{org}",
+        "--field",
+        "default_repository_permission=none",
+        "--field",
+        "members_can_create_repositories=false",
+    )
+    if code == 0:
+        log_ok(
+            "org tightened (default_repository_permission=none, no member repo creation)"
+        )
+    else:
+        failures += 1
+        log_err(f"could not tighten org settings: {out[:120]}")
+    return failures
 
 
 def validate_secret_presence(org: str, secret_name: str) -> bool:
@@ -477,10 +505,10 @@ def validate_secret_presence(org: str, secret_name: str) -> bool:
 
 
 def setup_cohort_extras(org: str) -> int:
-    """Cohort-only: tighten the org and seed the student-facing repos.
+    """Cohort-only: seed the student-facing repos.
 
-    Layered on top of the common bootstrap when --cohort is passed:
-    - safe-by-default permissions (members get no repo access unless granted);
+    Layered on top of the common bootstrap when --cohort is passed (the safe-by-default
+    org permissions both org kinds get are in set_org_settings):
     - public `welcome` repo with the Join issue form + onboard workflow;
     - private `classroom-config` repo with a starter students.csv;
     - the faculty teams' standing grant on both of those repos.
@@ -494,29 +522,9 @@ def setup_cohort_extras(org: str) -> int:
     left half-seeded (onboarding workflow or config samples never landed) reds the
     bootstrap rather than reporting success.
     """
-    log_step("Cohort setup: tighten org + seed welcome/classroom-config")
+    log_step("Cohort setup: seed welcome/classroom-config")
 
     failures = create_cohort_teams(org)
-
-    code, out = gh(
-        "api",
-        "--method",
-        "PATCH",
-        f"orgs/{org}",
-        "--field",
-        "default_repository_permission=none",
-        "--field",
-        "members_can_create_repositories=false",
-    )
-    if code == 0:
-        log_ok(
-            "org tightened (default_repository_permission=none, no member repo creation)"
-        )
-    else:
-        # Without this PATCH the cohort stays open (members get default repo access) - a
-        # real misconfiguration, so it must red the bootstrap, not just log and pass.
-        failures += 1
-        log_err(f"could not tighten org settings: {out[:120]}")
 
     # NB: this block (and the classroom-config one below) runs on EVERY bootstrap, re-runs
     # included - create_repo reports an existing repo as success. That is deliberate for
@@ -715,7 +723,7 @@ def main() -> int:
     parser.add_argument(
         "--cohort",
         action="store_true",
-        help="Also do cohort student-facing setup: tighten the org and seed the "
+        help="Also do cohort student-facing setup: seed the "
         "welcome (onboard) + classroom-config (roster) repos.",
     )
     parser.add_argument(
@@ -970,7 +978,13 @@ def _run(args: argparse.Namespace) -> int:
                     "are created per cohort)"
                 ),
             ),
-            (settings_failures, "Org settings: 2FA enforcement enabled"),
+            (
+                settings_failures,
+                (
+                    "Org settings: 2FA enforced, base permission none, no member repo "
+                    "creation"
+                ),
+            ),
             (profile_failures, ".github profile repo with README"),
             (
                 workflow_failures,
@@ -1016,14 +1030,13 @@ NEXT STEPS (manual):
    "Bootstrap cohort" action here with its name (configures + registers + refreshes).
 
 NB: cohort orgs are made the same way - create the empty org, add the bot as owner,
-then run bootstrap with --cohort (seeds welcome + roster + tightens perms).
+then run bootstrap with --cohort (seeds welcome + roster).
 ============================================================
 """)
 
     if args.cohort:
         log(
             "COHORT extras done:\n"
-            f"- org tightened (default_repository_permission=none)\n"
             f"- welcome repo (public): Join issue form + onboard workflow\n"
             f"- classroom-config repo (private): starter students.csv "
             f"(edit https://github.com/{args.org}/classroom-config/blob/HEAD/students.csv with registrar data), "

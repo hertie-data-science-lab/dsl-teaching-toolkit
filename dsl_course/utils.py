@@ -818,9 +818,9 @@ def converge_faculty_access(
 
     A team grant is set when a repo is created and never revisited, so a repo kind that
     predates its grant, or an org bootstrapped before one existed, keeps whatever it
-    started with. In a cohort org (default_repository_permission=none) that is the WHOLE
-    of a non-owner's access; every live faculty member being an org owner is the only
-    reason it went unnoticed. This is the convergence path.
+    started with. Both org kinds run at default_repository_permission=none, so that grant
+    is the WHOLE of a non-owner's access; every live faculty member being an org owner is
+    the only reason it went unnoticed. This is the convergence path.
 
     A FLOOR, never a level: a repo already granted higher is left alone. Fail closed: a
     grant this sweep cannot rank is skipped, never read as "nothing" and overwritten.

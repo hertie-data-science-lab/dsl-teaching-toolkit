@@ -437,11 +437,32 @@ def test_cohort_extras_reds_when_a_repo_cannot_be_created(fake, monkeypatch):
     assert fake.writes == []
 
 
-def test_cohort_extras_reds_when_the_org_tighten_fails(fake, monkeypatch):
-    # The org-tighten PATCH leaving the cohort open (members keep default repo access) is a
-    # real misconfiguration - a non-zero there must red the bootstrap, not just log and pass.
+def test_org_settings_red_when_the_tighten_patch_fails(monkeypatch):
+    # An org left at GitHub's default (every member reads every repo) is a real
+    # misconfiguration - a non-zero there must red the bootstrap, not just log and pass.
     monkeypatch.setattr(bc, "gh", lambda *a, **k: (1, "gh: HTTP 403"))
-    assert bc.setup_cohort_extras("Cohort-f2026") == 1
+    assert bc.set_org_settings("Cohort-f2026") == 2  # 2FA + base permissions
+
+
+def test_a_course_org_is_tightened_like_a_cohort(monkeypatch):
+    # It used to be cohort-only, so every member of a COURSE org - every TA, every
+    # visiting instructor - could read the unreleased materials, the model solutions and
+    # the assignment `solution` branches. Faculty access comes from the team grants.
+    patched: list[tuple[str, ...]] = []
+    monkeypatch.setattr(bc, "gh", lambda *a, **k: patched.append(a) or (0, ""))
+    assert bc.set_org_settings("Course-Org") == 0
+    fields = [f for call in patched for f in call]
+    assert "default_repository_permission=none" in fields
+    assert "members_can_create_repositories=false" in fields
+
+
+def test_cohort_extras_no_longer_repeat_the_org_tighten(fake, monkeypatch):
+    # One home for the PATCH (set_org_settings), so the two org kinds cannot drift.
+    patched: list[tuple[str, ...]] = []
+    monkeypatch.setattr(bc, "gh", lambda *a, **k: patched.append(a) or (0, ""))
+    bc.setup_cohort_extras("Cohort-f2026")
+    fields = [f for call in patched for f in call]
+    assert "default_repository_permission=none" not in fields
 
 
 def test_cohort_extras_reds_when_a_dispatcher_write_fails(fake, monkeypatch):
@@ -1113,7 +1134,11 @@ def test_org_settings_ok_line_only_prints_when_2fa_was_set(monkeypatch, capsys):
 
 
 def test_a_failed_2fa_patch_is_counted_not_just_logged(monkeypatch):
-    monkeypatch.setattr(bc, "gh", lambda *a, **k: (1, "gh: HTTP 403"))
+    def fake_gh(*args, **k):
+        two_fa = "two_factor_requirement_enabled=true" in args
+        return (1, "gh: HTTP 403") if two_fa else (0, "")
+
+    monkeypatch.setattr(bc, "gh", fake_gh)
     assert bc.set_org_settings("Course-Org") == 1
     monkeypatch.setattr(bc, "gh", lambda *a, **k: (0, ""))
     assert bc.set_org_settings("Course-Org") == 0
@@ -1171,7 +1196,7 @@ def test_the_summary_names_the_step_that_failed(monkeypatch, capsys):
 
     assert bc.main() == 1
     out = capsys.readouterr().out
-    assert "- [FAILED] Org settings: 2FA enforcement enabled" in out
+    assert "- [FAILED] Org settings: 2FA enforced" in out
     assert "- Faculty teams:" in out
     assert "bootstrap INCOMPLETE" in out
 
