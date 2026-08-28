@@ -189,8 +189,15 @@ On both `staging` and `release`:
 To put the demo course on staging, set **`central_ref: staging`** in
 `hertie-dsl-demo-course-e1234/.github/dsl-course.yml` and run **Refresh actions** in that org;
 its cohorts follow. Valid values are `main`, `staging`, `release`, or a full 40-character
-commit SHA - anything else is refused in the log and the org falls back to `release`. A new
-org can be bootstrapped straight onto a tier with `bootstrap_course --central-ref`.
+commit SHA - anything else is refused in the log and the org falls back to `release`.
+
+A new org is bootstrapped straight onto a tier by **Bootstrap Course Org**'s `central_ref`
+input (default `release`). It does two things at once: the run checks the toolkit out at
+that ref, and it records the ref in the new org's `dsl-course.yml`. So the code that
+provisions the org is the same code its workflows will run - bootstrapping from `main` and
+rendering at `release` would leave the org with two different engines. `--central-ref` is
+refused together with `--cohort`: a cohort inherits its course org's tier, so the nightly
+refresh would undo it.
 
 ## What orgs exist
 
