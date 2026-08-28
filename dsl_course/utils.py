@@ -655,6 +655,13 @@ SUPERSEDED_DESCRIPTIONS = {
     "Course website (auto-deployed on push)": (
         "[do not touch]: Course website (auto-deployed)"
     ),
+    # The wording before that one. Found on a cohort scaffolded early enough to predate the
+    # rename, which is the whole reason this table is a mapping and not a single pair: a
+    # description set at creation stays until something converges it, so every wording we
+    # have ever written needs a row here or that org keeps it forever.
+    "Cohort course website (auto-deployed on push)": (
+        "[do not touch]: Course website (auto-deployed)"
+    ),
 }
 
 # Per TIER, because one old wording wants two different new ones. A cohort org's `.github`
