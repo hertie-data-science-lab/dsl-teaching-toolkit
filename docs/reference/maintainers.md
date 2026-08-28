@@ -89,11 +89,11 @@ Add a name to the layer that owns the subject, not to whichever module already i
 Four places, in order - miss the last and every org keeps two buttons for one job:
 
 1. a renderer in `workflows_render.py`;
-2. its path in `seed.seed_github_workflows`'s `files` dict (or `seed.WORKFLOWS` for a
-   run-from-repo one);
+2. its path in `seed.seed_github_workflows`'s `files` dict (or `workflows_place.WORKFLOWS`
+   for a run-from-repo one);
 3. `tests/test_renderers.py`'s `ALL_RENDERED` - a completeness test fails otherwise;
-4. when *retiring* a path, add it to that call's `delete=` tuple (or `seed.RETIRED_WORKFLOWS`), so
-   orgs seeded before the change drop the old file.
+4. when *retiring* a path, add it to that call's `delete=` tuple (or
+   `workflows_place.RETIRED_WORKFLOWS`), so orgs seeded before the change drop the old file.
 
 ## Crons and gates
 
