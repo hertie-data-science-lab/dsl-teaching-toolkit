@@ -29,6 +29,8 @@ from .discovery import (
     discover_cohorts,
     has_infra_topic,
     list_org_repos,
+    org_tier,
+    student_repo_names,
 )
 from .utils import (
     converge_descriptions,
@@ -401,8 +403,10 @@ def update_profile_readme(
     repos = list_org_repos(org)
     # Read off the same listing, and BEFORE the convergence below, which needs the tier:
     # one old description becomes "[do not touch]" on a cohort org and "[control panel]"
-    # on a course org.
-    is_cohort = any(r["name"] == "welcome" for r in repos)
+    # on a course org. `tier` is None for an org the listing cannot place (a legacy cohort
+    # with no topics and no `welcome`); the page renders it as a course org, as before.
+    tier = org_tier(repos)
+    is_cohort = tier == "cohort"
     # The listing carries every repo's description, and the table below is rendered
     # from it - so this is the one place that can fix a reworded description without
     # paying a read for it, and the corrected text reaches the page in the same run.
@@ -411,7 +415,11 @@ def update_profile_readme(
     # a team grant is set at repo creation and never revisited, so every repo kind added
     # since a grant existed keeps whatever it started with. In a cohort org that is the
     # whole of a non-owner instructor's access (default_repository_permission=none).
-    converge_faculty_access(org, repos, cohort=is_cohort)
+    # The sweep fails SAFE where the page merely guesses: only a listing that positively
+    # says "course" gets the write-everywhere floor, and a student repo never gets push.
+    converge_faculty_access(
+        org, repos, cohort=tier != "course", protected=student_repo_names(repos)
+    )
     cohorts = None if is_cohort else discover_cohorts(org)
     body = render_profile_readme(org, org_name, course_name, repos, is_cohort, cohorts)
     if is_cohort:

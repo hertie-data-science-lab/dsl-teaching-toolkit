@@ -303,3 +303,35 @@ def test_seed_facade_still_exposes_discovery(monkeypatch):
     monkeypatch.setattr(discovery, "list_org_repos", lambda org: INFRA_AND_CONTENT)
     assert seed.discover_content_repos("Org") == ["course-materials-f2026", "labs"]
     assert seed.COHORTS_PATH == discovery.COHORTS_PATH
+
+
+def test_org_tier_reads_the_dotgithub_topic_then_the_cohort_only_repos_then_gives_up():
+    # None is a real answer: a legacy cohort (`.github` + student repos, no `welcome`, no
+    # topics) is indistinguishable from a course org by elimination, and the faculty
+    # sweep reads "course" as "push everywhere".
+    gh = lambda *topics: {"name": ".github", "topics": list(topics)}
+    assert discovery.org_tier([gh("dsl-cohort"), {"name": "a1-ada"}]) == "cohort"
+    assert discovery.org_tier([gh("dsl-course-hub"), {"name": "cm-f2026"}]) == "course"
+    assert discovery.org_tier([gh(), {"name": "welcome"}]) == "cohort"
+    assert discovery.org_tier([gh(), {"name": "classroom-config"}]) == "cohort"
+    assert discovery.org_tier([gh(), {"name": "assignment-1-ada"}]) is None
+    assert discovery.org_tier([{"name": "materials"}]) is None  # no .github at all
+
+
+def test_student_repo_names_by_topic_or_by_name():
+    # The topics are stamped after the create and never converged, so a failed PATCH must
+    # not let a student repo be treated as faculty-authored content.
+    repos = [
+        {"name": "assignment-1", "isTemplate": True, "topics": []},
+        {"name": "assignment-1-ada-l", "topics": []},  # topic never landed
+        {"name": "assignment-1-wizards", "topics": ["assignment-1", "submission"]},
+        {"name": "grades-ada-l", "topics": []},
+        {"name": "materials", "topics": []},
+        {"name": "welcome", "topics": []},
+    ]
+    # The template itself is not a student repo unless its own topic says so.
+    assert discovery.student_repo_names(repos) == {
+        "assignment-1-ada-l",
+        "assignment-1-wizards",
+        "grades-ada-l",
+    }

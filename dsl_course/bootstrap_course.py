@@ -25,6 +25,7 @@ import re
 import sys
 
 from . import scaffold, seed, site, sync_faculty
+from .discovery import COHORT_TOPIC, COURSE_HUB_TOPIC
 from .utils import (
     COHORT_WRITE_REPOS,
     COURSE_TEAM_ACCESS,
@@ -50,9 +51,6 @@ from .welcome import (
     refresh_welcome_workflows,
     template,
 )
-
-COURSE_HUB_TOPIC = "dsl-course-hub"
-COHORT_TOPIC = "dsl-cohort"
 
 
 def _profile_topics(is_cohort: bool, course_code: str = "") -> list[str]:

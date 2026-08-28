@@ -562,8 +562,15 @@ def discover_sections(repo_root: Path) -> list[str]:
     )
 
 
-def grant_team_repo_access(org: str, team: str, repo: str, permission: str) -> bool:
-    """Grant a team a permission level on one repo (idempotent)."""
+def grant_team_repo_access(
+    org: str, team: str, repo: str, permission: str, *, missing_is_note: bool = False
+) -> bool:
+    """Grant a team a permission level on one repo (idempotent).
+
+    `missing_is_note`: a team that does not exist yet is logged as a note, not an error -
+    an org can be released into before its teams exist, and the next release or sync
+    fixes it. Any OTHER failure (a 5xx, a rate limit) stays an error either way; it used
+    to read as "team not found" on the read-teams path, which hid real outages."""
     code, out = gh(
         "api",
         "-X",
@@ -574,6 +581,9 @@ def grant_team_repo_access(org: str, team: str, repo: str, permission: str) -> b
     )
     if code == 0:
         return True
+    if missing_is_note and is_missing_resource(out):
+        log(f"  ({team} team not found - create it first)")
+        return False
     log_err(f"  ! could not grant {team} {permission} on {org}/{repo}: {out[:120]}")
     return False
 
@@ -635,7 +645,9 @@ def grant_faculty_read_access(org: str, repo: str) -> None:
     """Give the faculty teams read on `repo` (FACULTY_READ_ACCESS) - for a repo whose source
     of truth is elsewhere, so an edit made here would be overwritten."""
     for team, perm in FACULTY_READ_ACCESS.items():
-        grant_team_repo_access(org, team, repo, perm)
+        # Per-student hot path (every gradebook, every submission repo): a cohort whose
+        # faculty teams are not there yet must not print two errors per student.
+        grant_team_repo_access(org, team, repo, perm, missing_is_note=True)
 
 
 def grant_tagged_team_access(course_org: str, repo: str, tag: str) -> None:
@@ -664,18 +676,8 @@ def grant_read_teams(cohort_org: str, repo: str) -> None:
     missing team is a note, not an error: an org can be released into before its teams
     exist, and the next release (or Sync membership) fixes it."""
     for team in READ_TEAMS:
-        code, _ = gh(
-            "api",
-            "--method",
-            "PUT",
-            f"orgs/{cohort_org}/teams/{team}/repos/{cohort_org}/{repo}",
-            "--field",
-            "permission=pull",
-        )
-        if code == 0:
+        if grant_team_repo_access(cohort_org, team, repo, "pull", missing_is_note=True):
             log_ok(f"{team} team -> read")
-        else:
-            log(f"  ({team} team not found - create it first)")
 
 
 # Descriptions this toolkit wrote in a wording it has since REPLACED, mapped to the
@@ -776,7 +778,12 @@ def team_repo_access(org: str, team: str) -> dict[str, str | None] | None:
     return {r["name"]: _strongest_permission(r["permissions"]) for r in rows}
 
 
-def converge_faculty_access(org: str, repos: list[dict], cohort: bool) -> int:
+def converge_faculty_access(
+    org: str,
+    repos: list[dict],
+    cohort: bool,
+    protected: frozenset[str] = frozenset(),
+) -> int:
     """Raise the faculty teams to their floor (`faculty_floor`) on every live repo of `org`.
 
     A team grant is set when a repo is created and never revisited, so a repo kind that
@@ -787,9 +794,15 @@ def converge_faculty_access(org: str, repos: list[dict], cohort: bool) -> int:
 
     A FLOOR, never a level: a repo already granted higher is left alone. Fail closed: a
     grant this sweep cannot rank is skipped, never read as "nothing" and overwritten.
-    Archived repos are skipped (GitHub refuses the PUT). One read per team plus a PUT per
-    missing grant, so a converged org costs two calls. Never fatal: a failed PUT is a line,
-    not a red refresh, and the next sweep retries. Returns the number changed."""
+    `protected` names the per-student repos (discovery.student_repo_names): they take the
+    READ floor whatever `cohort` says, so a mis-told tier can under-grant a course org but
+    can never hand instructors push on a student's submission or gradebook. Archived repos
+    are skipped (GitHub refuses the PUT).
+
+    Cost: `2 * ceil(N/100)` GETs for a converged org; the FIRST sweep of an unconverged
+    org is one PUT per missing grant (a 300-repo cohort: ~600 sequential PUTs, which may
+    trip the secondary rate limit and crawl through gh()'s backoff - it self-heals, the
+    next night finishes). Never fatal: a failed PUT is a line, not a red refresh."""
     changed = 0
     live = [r["name"] for r in repos if not r.get("archived")]
     for team in COURSE_TEAM_ACCESS:
@@ -802,7 +815,11 @@ def converge_faculty_access(org: str, repos: list[dict], cohort: bool) -> int:
             log(f"  (no {team} team in {org} yet - faculty access not converged)")
             continue
         for name in live:
-            floor = faculty_floor(name, cohort)[team]
+            floor = (
+                FACULTY_READ_ACCESS
+                if name in protected
+                else faculty_floor(name, cohort)
+            )[team]
             if name in have:
                 current = have[name]
                 if current is None:
@@ -843,6 +860,8 @@ def converge_descriptions(org: str, repos: list[dict], cohort: bool = False) -> 
     )
     changed = 0
     for repo in repos:
+        if repo.get("archived"):
+            continue  # GitHub refuses the PATCH; a frozen cohort logged one failure a night
         want = superseded.get((repo.get("description") or "").strip())
         if not want:
             continue

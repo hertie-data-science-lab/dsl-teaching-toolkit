@@ -131,7 +131,9 @@ def _listing(*rows: str) -> str:
     return "\n".join(rows) + "\n"
 
 
-def _sweep(monkeypatch, listings: dict[str, str], repos, cohort: bool):
+def _sweep(
+    monkeypatch, listings: dict[str, str], repos, cohort: bool, protected=frozenset()
+):
     granted = []
 
     def fake_gh(*args, **kwargs):
@@ -148,7 +150,9 @@ def _sweep(monkeypatch, listings: dict[str, str], repos, cohort: bool):
         "grant_team_repo_access",
         lambda org, team, repo, perm: granted.append((team, repo, perm)) or True,
     )
-    changed = utils.converge_faculty_access("Org", repos, cohort=cohort)
+    changed = utils.converge_faculty_access(
+        "Org", repos, cohort=cohort, protected=protected
+    )
     return changed, granted
 
 
@@ -306,3 +310,42 @@ def test_the_listing_is_paginated_in_pages_of_100(monkeypatch):
     assert utils.team_repo_access("Org", "instructors") == {}
     assert "--paginate" in seen[0]
     assert "orgs/Org/teams/instructors/repos?per_page=100" in seen[0]
+
+
+def test_a_protected_repo_takes_the_read_floor_whatever_the_tier_says(monkeypatch):
+    # The tier is a heuristic over a listing; the protected set is the backstop. Even when
+    # the sweep is told "course" (push everywhere), a student's submission repo or
+    # gradebook is never granted push.
+    listings = {"instructors": _listing(), "course-admin": _listing()}
+    repos = [
+        {"name": n} for n in ("assignment-1-ada", "grades-ada", "course-materials")
+    ]
+    _, granted = _sweep(
+        monkeypatch,
+        listings,
+        repos,
+        cohort=False,
+        protected=frozenset({"assignment-1-ada", "grades-ada"}),
+    )
+    assert ("instructors", "assignment-1-ada", "pull") in granted
+    assert ("instructors", "grades-ada", "pull") in granted
+    assert ("instructors", "course-materials", "push") in granted
+    assert not any(p == "push" and r != "course-materials" for _, r, p in granted)
+
+
+def test_a_missing_team_is_a_note_but_any_other_failure_is_an_error(
+    monkeypatch, capsys
+):
+    # grant_read_teams used to print "team not found" for EVERY failure, so a 5xx or a
+    # rate limit read as a cohort that had not made its teams yet.
+    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    assert not utils.grant_team_repo_access(
+        "O", "students", "r", "pull", missing_is_note=True
+    )
+    out = capsys.readouterr()
+    assert "not found" in out.out and out.err == ""
+    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "HTTP 502 bad gateway"))
+    assert not utils.grant_team_repo_access(
+        "O", "students", "r", "pull", missing_is_note=True
+    )
+    assert "could not grant" in capsys.readouterr().err
