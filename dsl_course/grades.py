@@ -41,6 +41,7 @@ from pathlib import Path
 import yaml
 
 from . import mailer, roster
+from .access import grant_faculty_read_access
 from .course import CONFIG_REPO, GRADEBOOK_PREFIX
 from .discovery import course_name_for_cohort
 from .ghcli import GIT_ENV, gh, git
@@ -50,7 +51,6 @@ from .utils import (
     create_repo,
     get_default_branch,
     get_file_content,
-    grant_faculty_read_access,
     put_file,
     repo_exists,
     require_csv_header,

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import course, deploy, utils
+from dsl_course import access, course, deploy, utils
 
 
 def test_a_single_path_with_no_comma_still_works():
@@ -274,7 +274,7 @@ def test_a_released_repo_is_actually_granted_to_both_cohort_role_teams(monkeypat
     # the wrong repo, or not call it at all, and the binding would still match.
     granted: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
-        utils,
+        access,
         "grant_team_repo_access",
         lambda org, team, repo, perm, **k: granted.append((team, repo, perm)) or True,
     )
