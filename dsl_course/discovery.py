@@ -46,11 +46,6 @@ ASSIGNMENT_TEMPLATE_TOPIC = "assignment-template"
 # submission repos and the frozen cohort-side assignment templates (assign.py), and the
 # private per-student gradebooks (grades.py).
 INFRA_TOPICS = {"submission", ASSIGNMENT_TEMPLATE_TOPIC, "gradebook"}
-# The per-student gradebook repo: grades-<handle> (grades.py creates them). Named here so
-# the reader below and the writer cannot drift.
-# Topics on an org's `.github` repo that say which TIER the org is (bootstrap_course stamps
-# them; list_orgs enumerates orgs by them). The repo listing carries them, so a sweep can
-# tell a course org from a cohort without another read.
 # The repos only a cohort org has - the fallback tier signal for an org bootstrapped
 # before the topics existed, or whose topic stamp never landed.
 COHORT_ONLY_REPOS = {"welcome", "classroom-config"}
