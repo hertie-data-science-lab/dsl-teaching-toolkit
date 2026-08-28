@@ -34,17 +34,19 @@ def parse(text: str) -> dict[str, dict[str, list[str]]]:
     Blank rows are skipped; a handle listed twice in a team is de-duplicated; member
     order follows first appearance so provisioning is deterministic.
 
-    Team names are CASEFOLDED. The GitHub team they materialise into is lower-cased
-    (`sync_teams.team_slug`) and so is the repo named after them, so `Wizards` and
-    `wizards` were always one team downstream while reading here as two - two entries in
-    the parsed map, two provisioning units, one repo. The Join-team form already writes
-    lower-case rows; a legacy hand-edited row may be mixed-case, and folding here is what
-    makes the two agree."""
+    Assignment keys and team names are both CASEFOLDED. The GitHub team they materialise
+    into is lower-cased (`sync_teams.team_slug`) and so is the repo named after them, so
+    `Wizards` and `wizards` were always one team downstream while reading here as two -
+    two entries in the parsed map, two provisioning units, one repo. The Join-team form
+    already writes both lower-case; a schedule key declared `Assignment-4` (or a legacy
+    hand-edited row) is what the lookups arrive with, and folding here is what makes the
+    two agree - keyed raw, such an assignment found no teams at all and every group
+    handout, snapshot and grading pass for it silently had nothing to do."""
     out: dict[str, dict[str, list[str]]] = {}
     reader = csv.DictReader(io.StringIO(strip_bom(text)))
     require_csv_header(reader.fieldnames, FIELDS, "teams.csv")
     for row in reader:
-        assignment = (row.get("assignment") or "").strip()
+        assignment = (row.get("assignment") or "").strip().casefold()
         team = (row.get("team") or "").strip().casefold()
         handle = (row.get("github_handle") or "").strip()
         if not (assignment and team and handle):
@@ -68,5 +70,8 @@ def load(cohort_org: str) -> dict[str, dict[str, list[str]]]:
 def teams_for(
     per: dict[str, dict[str, list[str]]], assignment: str
 ) -> dict[str, list[str]]:
-    """The {team: [handles]} map for one assignment (empty if none)."""
-    return per.get(assignment, {})
+    """The {team: [handles]} map for one assignment (empty if none).
+
+    Casefolded on the way in, to match `parse`: the caller's key comes from schedule.yml,
+    which faculty write by hand, while the form writes the lower-cased spelling."""
+    return per.get(assignment.strip().casefold(), {})
