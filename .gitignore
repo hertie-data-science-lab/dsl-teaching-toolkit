@@ -13,3 +13,7 @@ venv/
 # uv writes this on `uv run`, but this project resolves deps from
 # requirements*.txt - pyproject.toml declares no [project] to lock.
 uv.lock
+
+# macOS Finder metadata; packaging residue
+.DS_Store
+*.egg-info/
