@@ -37,7 +37,8 @@ from pathlib import Path
 
 import yaml
 
-from . import roster, sync_teams, teams
+from . import roster, schedule, site, sync_teams, teams
+from .collect import assignment_is_group
 from .course import CONFIG_REPO, SOLUTION_BRANCH, assignment_slug
 from .discovery import ASSIGNMENT_TEMPLATE_TOPIC
 from .utils import (
@@ -446,8 +447,6 @@ def provision_all(
         log_err("master-org and cohort-org must differ.")
         return 1
     if group is None:
-        from .collect import assignment_is_group
-
         # schedule.yml's assignments.<slug>.type wins; grading.yml is the fallback.
         group = assignment_is_group(master_org, cohort_org, template)
         if group:
@@ -474,8 +473,6 @@ def provision_all(
     # They differ exactly when `cohort_dest_repo` is set. Keying the lookup or the team slug
     # on the name then meant no teams found at all, or a team granted on the repo under a
     # slug that Sync membership reconciles a DIFFERENT team for.
-    from . import schedule
-
     found = schedule.entry_for_repo(schedule.load(cohort_org), template)
     key = found[0] if found else assignment_slug(template)
     slug = schedule.cohort_name(*found) if found else key
@@ -581,10 +578,8 @@ def provision_all(
     # fills the field the dispatcher didn't. record_handout keys on the schedule KEY, not the
     # cohort-side name: when `cohort_dest_repo` is set the two differ, and passing the name
     # made it miss the real entry and append a bogus duplicate block (dropping its due date).
-    from . import schedule
 
     schedule.record_handout(cohort_org, key)
-    from . import site
 
     # site.sync_site now RAISES on a genuine tree/team read failure (post-PR2), and a config
     # file that doesn't parse raises yaml.YAMLError - which is NOT a RuntimeError. The repos

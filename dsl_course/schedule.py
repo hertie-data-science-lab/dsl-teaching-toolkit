@@ -82,7 +82,9 @@ from .course import CONFIG_REPO, coerce_date
 from .utils import (
     default_branch,
     get_file_content,
+    log,
     log_err,
+    put_file,
     repo_exists,
     repo_tree,
 )
@@ -1289,8 +1291,6 @@ def record_handout(cohort_org: str, slug: str, stamp: str | None = None) -> None
     handout_datetime (scheduled, or recorded by an earlier run) is never modified. Best
     effort - a failure here must never fail the release itself, but it is never silent
     either: a file this can't edit means the handout happened and is on record nowhere."""
-    from .utils import log, put_file
-
     text = get_file_content(cohort_org, CONFIG_REPO, SCHEDULE_PATH) or ""
     if stamp is None:
         # the release moment, in the cohort's own timezone (naive, like every other

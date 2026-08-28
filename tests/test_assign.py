@@ -285,7 +285,7 @@ def test_group_none_infers_per_team_from_the_templates_grading_yml(
     # own grading.yml: `type: group` provisions per TEAM without anyone force-ticking.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
-        "dsl_course.collect.assignment_is_group", lambda org, cohort, template: True
+        "dsl_course.assign.assignment_is_group", lambda org, cohort, template: True
     )
     monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {"unused": {}})
     monkeypatch.setattr(
@@ -316,7 +316,7 @@ def test_group_false_forces_individual_even_for_a_group_template(
     # An explicit False never consults grading.yml - the caller decided.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
-        "dsl_course.collect.assignment_is_group",
+        "dsl_course.assign.assignment_is_group",
         lambda org, cohort, template: (_ for _ in ()).throw(
             AssertionError("must not be read")
         ),
@@ -404,7 +404,7 @@ def test_group_provisioning_filters_teams_csv_through_the_roster_allowlist(
     # into the private org with maintain on a repo. An auditor's handle is excluded too.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
-        "dsl_course.collect.assignment_is_group", lambda org, cohort, template: True
+        "dsl_course.assign.assignment_is_group", lambda org, cohort, template: True
     )
     monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {"unused": {}})
     monkeypatch.setattr(

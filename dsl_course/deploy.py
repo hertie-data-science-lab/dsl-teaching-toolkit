@@ -32,6 +32,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from . import site
 from .course import (
     FACULTY_ONLY_HEADING,
     SYLLABUS_SAMPLE_FILE,
@@ -356,8 +357,6 @@ def deploy_many(
             changed = True
 
     if sync and changed:
-        from . import site
-
         # site.sync_site RAISES on a genuine tree/team read failure - one cohort's
         # site-sync failure must be logged and counted (making the release non-zero), not
         # an unhandled traceback that aborts the batch.

@@ -19,7 +19,10 @@ import argparse
 import json
 import sys
 
+import yaml
+
 from .course import COHORT_TOPIC, COURSE_HUB_TOPIC
+from .discovery import discover_cohorts
 from .utils import gh_json, load_yaml_config, log_err, org_exists
 
 # How many results one `gh search repos` page returns. This inventory is fully generated
@@ -155,8 +158,6 @@ def _registered_cohorts(course_org: str) -> list[str]:
     Read through discovery so there is ONE parser for that file - the registry raises on a
     malformed one, and this page would rather fail than render a course as running nothing
     because its registry could not be read."""
-    from .discovery import discover_cohorts
-
     return discover_cohorts(course_org)
 
 
@@ -261,8 +262,6 @@ def main() -> int:
     if args.format == "json":
         print(json.dumps(combined, indent=2))
     elif args.format == "yaml":
-        import yaml
-
         print(yaml.safe_dump(combined, sort_keys=False))
     else:
         print(render_tree(orgs, cohorts))
