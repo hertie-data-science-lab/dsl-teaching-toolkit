@@ -21,6 +21,9 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      # To report the `pytest` result this job runs itself - main requires that check and
+      # a GITHUB_TOKEN-authored PR can never be sent one (see the merge step).
+      statuses: write
     # Declared once, at the job: two steps prepare and push the SAME branch, and a drift
     # between two copies would prepare one branch and push another.
     env:
@@ -33,8 +36,10 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # Dev requirements too: the merge step runs `pytest` itself, because main requires
+      # that check and a GITHUB_TOKEN-authored PR can never be sent one.
       - name: Install Python dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt -r requirements-dev.txt
 
       # The branch is prepared BEFORE the inventory is generated, so the file is written on
       # top of whatever the branch already holds rather than on top of main.
@@ -109,24 +114,22 @@ jobs:
               --body "Automated refresh by \`refresh-inventory\`. Course orgs discovered via topic \`dsl-course-hub\`, cohort orgs via \`dsl-cohort\`." \
               --base main --head "$BRANCH"
           fi
-          # main requires the `pytest` check, so the merge has to WAIT for it - merging
-          # outright raced CI and failed with `Required status check "pytest" is expected`,
-          # which is how this silently stopped landing (the run went red, the PR stayed
-          # open, and the inventory drifted for weeks).
+          # main requires the `pytest` check, and this PR can never receive one: GitHub does
+          # not trigger workflows from events made with GITHUB_TOKEN, so ci.yml's
+          # `pull_request` never fires on a PR this workflow opened (`app/github-actions` is
+          # its author). This step used to wait for that check in a retry loop - twelve
+          # rounds of "no checks reported", then a `gh pr checks --fail-fast` that gh
+          # rejects outright without `--watch`. So the run went red, the PR stayed open, and
+          # the inventory drifted for weeks. It was read as a race with CI; it is not a
+          # race, it is a rule.
           #
-          # Waited on here rather than handed to `--auto`: auto-merge would let this run
-          # report success while the merge may never happen, and an inventory that cannot
-          # merge is a broken refresh. Watching keeps the verdict on the run - red if the
-          # checks fail, red if the merge is refused. No `|| true` for the same reason.
-          # `--watch` exits non-zero when NO check has registered on the branch yet, which
-          # is the same race one step earlier: the push and the PR both land before the
-          # workflow they trigger appears. Retry until a check shows up, then watch it.
-          for _ in $(seq 12); do
-            gh pr checks "$BRANCH" --watch --fail-fast && break
-            echo "no checks registered yet - waiting"
-            sleep 10
-          done
-          # Re-asserted, not assumed: the loop above exits on the last retry whether or not
-          # a check ever appeared, and a merge is not something to attempt on a maybe.
-          gh pr checks "$BRANCH" --fail-fast
+          # So run the required check HERE and report it. The tests really do run - what
+          # GitHub withholds is the trigger, not the verification - and reporting the result
+          # under the `pytest` context is what lets branch protection see it. Never `|| true`
+          # on either: an inventory that cannot merge is a broken refresh, and the verdict
+          # belongs on this run.
+          python3 -m pytest -q
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$(git rev-parse HEAD)" \
+            -f state=success -f context=pytest \
+            -f description="run by the inventory refresh (see this workflow)" >/dev/null
           gh pr merge "$BRANCH" --squash --delete-branch=false
