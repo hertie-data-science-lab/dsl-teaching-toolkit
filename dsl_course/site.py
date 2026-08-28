@@ -1358,7 +1358,7 @@ def _assignment_entry(
     repo: str,
     when: date | datetime,
     handout: datetime | None = None,
-    sched: schedule.Schedule | None = None,
+    found: tuple[str, schedule.AssignmentEntry] | None = None,
     handed_out: frozenset[str] = frozenset(),
     now: datetime | None = None,
 ) -> str:
@@ -1370,11 +1370,18 @@ def _assignment_entry(
     released-row where it belongs - at hand-out, not at the deadline - while an
     unscheduled assignment keeps both rows on the due date (the only date known).
 
-    `sched` supplies the cohort-side repo name: resolved exactly as assign.py / collect.py
-    do (`cohort_dest_repo` or the schedule slug when the schedule keys this repo, else the
-    course repo minus its -fYYYY/-sYYYY tag), so the page names the repo students actually
-    get. Deriving it from the course repo alone named the wrong repo - and titled the page
-    wrong - whenever an entry set `cohort_dest_repo`.
+    `found` is this assignment's `(slug, entry)` from the plan, already resolved by the
+    caller, or None for one the plan does not name. It supplies the cohort-side repo name
+    exactly as assign.py / collect.py resolve it (`cohort_dest_repo` else the slug, else
+    the course repo minus its -fYYYY/-sYYYY tag), so the page names the repo students
+    actually get - deriving it from the course repo alone named the wrong repo, and titled
+    the page wrong, whenever an entry set `cohort_dest_repo`.
+
+    Handed IN rather than looked up here, because `schedule.entry_for_repo` maps a repo to
+    the FIRST entry citing it - and two entries may legitimately cite one
+    `course_source_repo` (a copy-paste, or two variants handed out from one template).
+    Looking it up here gave both of them the same slug, the same dates and one collection
+    file, so the second assignment vanished from the site.
 
     BOTH orgs, because the two halves of an assignment live in different ones: the template
     and its README are read from `course_org`, and the repo a student actually works in is
@@ -1416,7 +1423,6 @@ def _assignment_entry(
 
     `now` is the moment to judge the pin against (default: actual now, in the handout's own
     cohort timezone - `_coerce_datetime` hands out nothing naive)."""
-    found = schedule.entry_for_repo(sched, repo) if sched is not None else None
     slug = schedule.cohort_name(*found) if found else assignment_slug(repo)
     # An unscheduled assignment's synthesised fallback date is due end-of-day.
     due = _iso_when(when, "23:59:00")
@@ -1548,17 +1554,15 @@ def _exam_entry(
 
 
 def _assignment_dates(
-    sched: schedule.Schedule, repo: str, fallback: date
+    found: tuple[str, schedule.AssignmentEntry] | None, fallback: date
 ) -> tuple[date | datetime, datetime | None]:
-    """(due, handout) for an assignment from schedule.yml (keyed on the slug, repo minus
-    its -fYYYY/-sYYYY tag). An unscheduled assignment is due on `fallback` and has no
-    handout; a scheduled one has a handout only when the plan pins (or the manual release
-    workflow recorded) one."""
-    found = schedule.entry_for_repo(sched, repo)
-    entry = found[1] if found else None
-    if entry is None:
+    """(due, handout) for an assignment, off the plan entry the caller resolved. An
+    assignment the plan does not name is due on `fallback` and has no handout; a scheduled
+    one has a handout only when the plan pins (or the manual release workflow recorded)
+    one."""
+    if found is None:
         return fallback, None
-    return entry.due_datetime, entry.handout_datetime
+    return found[1].due_datetime, found[1].handout_datetime
 
 
 def _deploy_dest(deploy: schedule.Deploy) -> str:
@@ -2135,6 +2139,29 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # so the whole term is on the schedule the day it is written rather than filling in
         # release by release. Discovery still leads: a folder released outside the plan
         # (the manual workflow, an off-plan extra) keeps its row whether or not it is here.
+        # Every assignment this cohort has, from BOTH sides. Discovery finds the course
+        # org's template repos, which is how one handed out off-plan still appears; the
+        # plan's own `assignments:` entries are how one appears BEFORE its template is
+        # staged - a term written in August names repos nobody has created yet, and the
+        # schedule already publishes those dates. Without the plan side, a cohort could
+        # write four assignments and see one row.
+        #
+        # Keyed on the COHORT-side name - the identity assign.py and collect.py use -
+        # because two plan entries may cite one `course_source_repo`, and keying on the
+        # repo folded them into a single row. Sorted by that name, so an assignment's page
+        # keeps its URL when faculty add another mid-term.
+        by_name: dict[str, tuple[str, tuple[str, schedule.AssignmentEntry] | None]] = {}
+        for repo in assignments:
+            hit = schedule.entry_for_repo(sched, repo)
+            key = schedule.cohort_name(*hit) if hit else assignment_slug(repo)
+            by_name.setdefault(key, (repo, hit))
+        for slug, plan_entry in sched.assignments.items():
+            by_name.setdefault(
+                schedule.cohort_name(slug, plan_entry),
+                (plan_entry.course_source_repo, (slug, plan_entry)),
+            )
+        cohort_assignments = sorted(by_name.items())
+
         planned = _planned_sessions(sched)
         rows = sorted(
             set(sources_by_row) | set(planned), key=lambda k: (int(k[0]), k[1])
@@ -2144,7 +2171,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         log_step(
             f"Syncing {cohort_org}/{_site_repo(cohort_org)}: {len(rows)} session row(s) "
             f"({len(rows) - len(sources_by_row)} not released yet), "
-            f"{len(assignments)} assignment(s)"
+            f"{len(cohort_assignments)} assignment(s)"
         )
 
         # What a session row LINKS, out of everything it released - the default
@@ -2248,21 +2275,19 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 "_lectures": {
                     _row_file(s, kind): session_row(s, kind) for s, kind in rows
                 },
-                # Ordinals come from the position in the full list, so every assignment
-                # keeps its URL for the whole term. A pending one is a placeholder rather
-                # than an absence - see `_assignment_entry`.
+                # Named by the cohort-side name, ordinal from the position in the full
+                # list, so every assignment keeps its URL for the whole term. A pending one
+                # is a placeholder rather than an absence - see `_assignment_entry`.
                 "_assignments": {
-                    f"{i + 1:02d}-{a}.md": _assignment_entry(
+                    f"{i + 1:02d}-{name}.md": _assignment_entry(
                         course_org,
                         cohort_org,
-                        a,
-                        *_assignment_dates(
-                            sched, a, start + timedelta(days=(i + 1) * 14)
-                        ),
-                        sched=sched,
+                        repo,
+                        *_assignment_dates(hit, start + timedelta(days=(i + 1) * 14)),
+                        found=hit,
                         handed_out=handed_out,
                     )
-                    for i, a in enumerate(assignments)
+                    for i, (name, (repo, hit)) in enumerate(cohort_assignments)
                 },
                 "_events": event_entries,
             },
