@@ -533,3 +533,48 @@ def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
     )
     grades._email_updates("COHORT", ["ada-l"])  # the gradebook file's spelling
     assert sent and sent[-1][0][0] == "ada@uni.edu"
+
+
+# ---------------- an unsent notification reddens the run (the count is no longer dropped)
+
+
+def _distribute_with(monkeypatch, tmp_path, *, sent):
+    """`distribute` against a local classroom-config clone, pushing to nothing."""
+    cfg = tmp_path / "cfg"
+
+    def fake_gh(*args, **kwargs):
+        if args[:2] == ("repo", "clone"):
+            from pathlib import Path
+            from shutil import copytree
+
+            copytree(cfg, Path(args[3]))
+        return 0, ""
+
+    (cfg / grades.GRADEBOOK_DIR).mkdir(parents=True)
+    (cfg / grades.GRADEBOOK_DIR / "ada-l.yml").write_text("student: ada-l\n")
+    monkeypatch.setattr(grades, "gh", fake_gh)
+    monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
+    students = roster.parse(
+        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+    )
+    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
+    monkeypatch.setattr(
+        grades.mailer, "send_bulk", lambda msgs, dry_run=False, sample=None: sent
+    )
+    return grades.distribute("COHORT")
+
+
+def test_distribute_goes_red_when_a_notification_could_not_be_sent(
+    tmp_path, monkeypatch, capsys
+):
+    # The grades are pushed by this point, so nothing is undone - but a student who never
+    # got the mail does not know to look, and the count used to be thrown away, so the run
+    # was green and said nothing.
+    assert _distribute_with(monkeypatch, tmp_path, sent=0) == 1
+    assert "1 of 1 grade notification(s) not sent" in capsys.readouterr().err
+
+
+def test_distribute_stays_green_when_every_notification_lands(tmp_path, monkeypatch):
+    assert _distribute_with(monkeypatch, tmp_path, sent=1) == 0

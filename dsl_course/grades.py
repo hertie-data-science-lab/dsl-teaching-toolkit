@@ -627,9 +627,13 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
     else:
         log_ok(f"Done - {json.dumps(results)}")
 
+    notifications_failed = 0
     if notify and pushed:
-        _email_updates(cohort_org, pushed, dry_run=dry_run)
-    return 0 if dry_run else (1 if any(k.startswith("failed") for k in results) else 0)
+        notifications_failed = _email_updates(cohort_org, pushed, dry_run=dry_run)
+    if dry_run:
+        return 0
+    pushes_failed = any(k.startswith("failed") for k in results)
+    return 1 if pushes_failed or notifications_failed else 0
 
 
 def _push_gradebook(cohort_org: str, handle: str, content: str) -> str:
@@ -681,9 +685,14 @@ def sample_body(cohort_org: str, course_name: str = "") -> str:
     return update_message(placeholder, cohort_org, course_name)[2]
 
 
-def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -> None:
+def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -> int:
     """Email each student a 'grades updated' notification to their university inbox,
-    linking to their private gradebook repo (the grade's source of truth)."""
+    linking to their private gradebook repo (the grade's source of truth).
+
+    Returns how many notifications FAILED to send (0 when every one landed, and 0 for a
+    dry run). `distribute` exits on it: the grades themselves are already pushed by this
+    point, so a mail failure is not a reason to undo anything - but a student who never
+    got the notification does not know to look, and a green run told nobody."""
     # Fold-keyed for the same reason merge_auto is: the gradebook filenames come from the
     # grade CSVs (a marker's typing) and the roster's casing is its own, so a case-only
     # difference used to mean a student was silently never told their grades had landed.
@@ -711,17 +720,14 @@ def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -
             continue
         messages.append(update_message(student, cohort_org, course_name))
     if not messages:
-        return
-    # The grades themselves are already pushed by this point, so a mail failure isn't
-    # fatal - but it must not pass unmentioned: a student who never got the notification
-    # doesn't know to look.
+        return 0
     sent = mailer.send_bulk(
         messages, dry_run=dry_run, sample=sample_body(cohort_org, course_name)
     )
-    if sent < len(messages):
-        log_err(
-            f"{len(messages) - sent} of {len(messages)} grade notification(s) not sent"
-        )
+    failed = len(messages) - sent
+    if failed:
+        log_err(f"{failed} of {len(messages)} grade notification(s) not sent")
+    return failed
 
 
 def main() -> int:
