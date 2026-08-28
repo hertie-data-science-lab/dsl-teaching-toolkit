@@ -225,6 +225,8 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
         seed.scaffold, "refresh_materials_system_files", lambda org, repo: 0
     )
     monkeypatch.setattr(seed, "_propagate_repo_secret", lambda org, repos: 0)
+    monkeypatch.setattr(seed, "list_org_repos", lambda org: [])
+    monkeypatch.setattr(seed, "_converge_org_metadata", lambda org, repos: 0)
     monkeypatch.setattr(
         seed,
         "seed_github_workflows",

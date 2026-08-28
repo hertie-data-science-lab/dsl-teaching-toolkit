@@ -16,14 +16,16 @@ Two documents per org:
   generated, and stamped as such.
 
 Rendering is pure (render_profile_readme / render_dotgithub_readme take the repo list);
-update_profile_readme is the one function that touches the network.
+update_profile_readme is the one function that touches the network, and all it does with
+it is read the org and write the two files. The description/access/topic convergence that
+used to ride along here belongs to the nightly sweep, not to a README renderer - see
+seed._converge_org_metadata.
 """
 
 from __future__ import annotations
 
 import re
 
-from .access import converge_faculty_access, converge_topics
 from .central import CENTRAL
 from .discovery import (
     course_name_of,
@@ -31,11 +33,9 @@ from .discovery import (
     is_student_repo,
     list_org_repos,
     org_tier,
-    student_repo_names,
 )
 from .gh_contents import get_file_content, load_yaml_config, put_files
 from .log import log, log_err, log_ok
-from .repos import converge_descriptions
 
 # Per-org identity/people/schedule config, lives at the root of each org's `.github` repo.
 COURSE_CONFIG = "dsl-course.yml"
@@ -383,11 +383,16 @@ def update_profile_readme(
     course_name: str | None = None,
     *,
     central_ref: str,
+    repos: list[dict] | None = None,
 ) -> int:
     """(Re)generate the org's profile/README.md from its metadata + live repo list.
 
     A cohort org (one with a `welcome` repo) gets a student-facing page; a course org
     gets the faculty-facing one.
+
+    `repos` is the caller's listing when it already holds one (seed.refresh does, and has
+    just swept it), so an org's nightly run pays for `list_org_repos` once rather than
+    once per consumer. Fetched here when it is not given.
 
     Returns the number of failed writes (0 or 1), so the nightly refresh can count it:
     the commit's return used to be discarded under an unconditional "refreshed" line, and
@@ -412,31 +417,11 @@ def update_profile_readme(
             or course_name_of(str(cfg.get("course") or ""))
             or org_name
         )
-    repos = list_org_repos(org)
-    # Read off the same listing, and BEFORE the convergence below, which needs the tier:
-    # one old description becomes "[do not touch]" on a cohort org and "[control panel]"
-    # on a course org. `tier` is None for an org the listing cannot place (a legacy cohort
-    # with no topics and no `welcome`); the page renders it as a course org, as before.
-    tier = org_tier(repos)
-    is_cohort = tier == "cohort"
-    # The listing carries every repo's description, and the table below is rendered
-    # from it - so this is the one place that can fix a reworded description without
-    # paying a read for it, and the corrected text reaches the page in the same run.
-    converge_descriptions(org, repos, cohort=is_cohort)
-    # And the faculty teams' standing access, off the same listing and for the same reason:
-    # a team grant is set at repo creation and never revisited, so every repo kind added
-    # since a grant existed keeps whatever it started with. In a cohort org that is the
-    # whole of a non-owner instructor's access (default_repository_permission=none).
-    # The sweep fails SAFE where the page merely guesses: only a listing that positively
-    # says "course" gets the write-everywhere floor, and a student repo never gets push.
-    converge_faculty_access(
-        org, repos, cohort=tier != "course", protected=student_repo_names(repos)
-    )
-    # And the machinery topics, off the same listing: assign/grades stamp them in a
-    # separate PATCH after the create, so a repo whose stamp failed stays untagged
-    # forever - and the topics are what keep a student's submission repo and a private
-    # gradebook off this very page.
-    failures = converge_topics(org, repos, cohort=is_cohort)
+    if repos is None:
+        repos = list_org_repos(org)
+    # `tier` is None for an org the listing cannot place (a legacy cohort with no topics
+    # and no `welcome`); the page renders it as a course org, as before.
+    is_cohort = org_tier(repos) == "cohort"
     cohorts = None if is_cohort else discover_cohorts(org)
     body = render_profile_readme(
         org, org_name, course_name, repos, is_cohort, cohorts, central_ref=central_ref
@@ -453,13 +438,13 @@ def update_profile_readme(
         org, ".github", files, "docs: refresh org READMEs (profile + .github)"
     ):
         log_err(f"could not write {org}/.github READMEs")
-        return failures + 1
+        return 1
     log_ok(
         "profile + .github READMEs refreshed"
         if "profile/README.md" in files
         else ".github README refreshed (landing page left as the instructor has it)"
     )
-    return failures
+    return 0
 
 
 def _cohort_profile_body(org: str, repos: list[dict], seeded: str) -> str | None:
