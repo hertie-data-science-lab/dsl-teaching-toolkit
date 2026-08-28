@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from dsl_course import discovery, seed, utils
+from dsl_course import course, discovery, seed, utils
 
 INFRA_AND_CONTENT = [
     {"name": ".github", "topics": []},
@@ -189,9 +189,9 @@ def test_sections_and_sessions_ignore_root_level_and_over_deep_folders(monkeypat
 
 
 def test_api_and_filesystem_transports_share_one_session_folder_rule(tmp_path):
-    # utils.discover_sections (local checkout, used by the public-site builder) and the API-side
+    # course.discover_sections (local checkout, used by the public-site builder) and the API-side
     # discovery must never drift: both feed their directory listing through
-    # utils.session_dirs, so the same tree yields the same sections either way.
+    # course.session_dirs, so the same tree yields the same sections either way.
     tree = [
         "lectures",
         "lectures/01_intro",
@@ -204,9 +204,9 @@ def test_api_and_filesystem_transports_share_one_session_folder_rule(tmp_path):
     for rel in tree:
         (tmp_path / rel).mkdir(parents=True, exist_ok=True)
     api_sections = sorted(
-        {section for section, _, _ in utils.session_dirs(tree) if section}
+        {section for section, _, _ in course.session_dirs(tree) if section}
     )
-    assert utils.discover_sections(tmp_path) == api_sections == ["labs", "lectures"]
+    assert course.discover_sections(tmp_path) == api_sections == ["labs", "lectures"]
 
 
 def test_repo_tree_dirs_reads_an_absent_or_empty_repo_as_no_directories(monkeypatch):

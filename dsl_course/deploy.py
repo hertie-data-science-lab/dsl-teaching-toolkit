@@ -32,12 +32,14 @@ import sys
 import tempfile
 from pathlib import Path
 
-from .schedule import Deploy
-from .utils import (
+from .course import (
     FACULTY_ONLY_HEADING,
-    GIT_ENV,
     SYLLABUS_SAMPLE_FILE,
     SYLLABUS_SESSIONS_FILE,
+)
+from .schedule import Deploy
+from .utils import (
+    GIT_ENV,
     create_repo,
     gh,
     git,

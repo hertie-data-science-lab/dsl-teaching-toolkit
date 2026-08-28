@@ -25,7 +25,7 @@ import re
 import sys
 
 from . import scaffold, seed, site, sync_faculty
-from .discovery import COHORT_TOPIC, COURSE_HUB_TOPIC
+from .course import COHORT_TOPIC, COURSE_HUB_TOPIC
 from .utils import (
     COHORT_WRITE_REPOS,
     COURSE_TEAM_ACCESS,
@@ -101,7 +101,7 @@ def _profile_topics(is_cohort: bool, course_code: str = "") -> list[str]:
 # ---------------------------------------------------------------------------------------
 
 
-def _cohort_tag(org: str) -> tuple[str, int]:
+def _tag_and_year(org: str) -> tuple[str, int]:
     """This cohort's year tag (fYYYY/sYYYY) and year, derived from the org-name suffix.
 
     Renders the seeded scaffolds' examples (schedule.yml repo names/dates, people.yml
@@ -602,7 +602,7 @@ def setup_cohort_extras(org: str) -> int:
         # releases from, this cohort's people.yml, and returned grades. Re-running
         # "Bootstrap cohort" mid-semester must leave all of it exactly as faculty (and the
         # onboarding/enrol-code/grade flows) left it.
-        tag, year = _cohort_tag(org)
+        tag, year = _tag_and_year(org)
         # The scaffolds: minimal, mostly-commented skeletons faculty fill in. Header-only
         # CSVs carry the full schema (roster.FIELDS / teams.FIELDS); the YAML scaffolds
         # carry structure + one-line field notes. Every filled example lives in the

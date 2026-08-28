@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import deploy, utils
+from dsl_course import course, deploy, utils
 
 
 def test_a_single_path_with_no_comma_still_works():
@@ -444,7 +444,7 @@ def _scaffold_readme() -> str:
         "<!-- FACULTY & INSTRUCTORS: replace the content below -->\n\n"
         "# Course materials\n\n"
         "> **Replace this placeholder.** This file becomes the students' README.\n\n"
-        f"## For faculty & instructors ({utils.FACULTY_ONLY_HEADING})\n\n"
+        f"## For faculty & instructors ({course.FACULTY_ONLY_HEADING})\n\n"
         "- see MAINTAINING.md\n"
     )
 
@@ -462,7 +462,7 @@ def test_a_readme_quoting_one_marker_is_still_released():
     # Both markers must be present. A real overview that happens to quote the stub - or a
     # half-edited one where the faculty section is already gone - is the faculty's writing,
     # and withholding it would be the guard overreaching.
-    half = f"# Real overview\n\nWe kept a note: {utils.FACULTY_ONLY_HEADING}\n"
+    half = f"# Real overview\n\nWe kept a note: {course.FACULTY_ONLY_HEADING}\n"
     assert not deploy._is_withheld_stub("README.md", half)
     assert not deploy._is_withheld_stub(
         "README.md", "# Real\n\n> **Replace this placeholder.** (quoted)\n"
@@ -498,8 +498,8 @@ def test_an_unwritten_syllabus_stub_is_withheld_too():
 
 def test_the_excluded_root_files_are_named_from_one_place():
     # Re-spelling them per module is how an exclusion lapses when a file is renamed.
-    assert utils.SYLLABUS_SAMPLE_FILE in deploy.ROOT_RELEASE_EXCLUDED
-    assert utils.SYLLABUS_SESSIONS_FILE in deploy.ROOT_RELEASE_EXCLUDED
+    assert course.SYLLABUS_SAMPLE_FILE in deploy.ROOT_RELEASE_EXCLUDED
+    assert course.SYLLABUS_SESSIONS_FILE in deploy.ROOT_RELEASE_EXCLUDED
 
 
 # ----------------------------- a bad symlink is one failed copy, not a dead cohort

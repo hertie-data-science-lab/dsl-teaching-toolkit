@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import shutil
 import sys
 import tempfile
@@ -39,6 +38,7 @@ from pathlib import Path
 import yaml
 
 from . import roster, sync_teams, teams
+from .course import CONFIG_REPO, SOLUTION_BRANCH, assignment_slug
 from .discovery import ASSIGNMENT_TEMPLATE_TOPIC
 from .utils import (
     GIT_ENV,
@@ -59,7 +59,6 @@ from .utils import (
     set_repo_topics,
 )
 
-SOLUTION_BRANCH = "solution"
 # Fire-once sentinel for the SCHEDULED solution push, in classroom-config. Needed because
 # `due_releases` is cumulative by design - a handout release re-fires every tick so a late
 # onboarder still gets their repo - and while re-probing a repo is cheap, push_solution
@@ -72,11 +71,6 @@ SOLUTION_BRANCH = "solution"
 SOLUTION_RECORD_DIR = "solutions"
 SOLUTION_DIR = "solution"
 _GIT_ENV = GIT_ENV
-
-
-def assignment_slug(template: str) -> str:
-    """assignment-1-f2026 -> assignment-1 (drop a trailing cohort suffix)."""
-    return re.sub(r"-[fs]\d{4}$", "", template)
 
 
 def _wait_for_content(
@@ -404,8 +398,6 @@ def solution_released(cohort_org: str, slug: str) -> bool:
     Read by the scheduler, so a passed `solution_datetime` fires exactly once. The manual
     Release assignment path does NOT consult it - an operator ticking include_solution is
     asking for it now, and push_solution is an idempotent overwrite anyway."""
-    from .roster import CONFIG_REPO
-
     code, _ = gh(
         "api",
         f"repos/{cohort_org}/{CONFIG_REPO}/contents/{solution_record_path(slug)}",
@@ -422,8 +414,6 @@ def record_solution_released(cohort_org: str, slug: str, repos: int) -> bool:
     re-run, or the students it missed would never receive the solution at all. Returns
     whether the record actually landed: a marker that did not is what makes every later
     tick re-clone every submission repo to re-push a solution they already have."""
-    from .roster import CONFIG_REPO
-
     return put_file(
         cohort_org,
         CONFIG_REPO,

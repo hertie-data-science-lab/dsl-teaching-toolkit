@@ -1,6 +1,5 @@
-"""Session directory helpers: sections/sessions are discovered from the directory
-structure itself (any dir with an ordinal-prefixed subdir is a section) - no declared
-config, so these pure functions are the whole contract."""
+"""The GitHub-facing helpers in `utils`: repo/file reads and writes, team membership
+reconciliation, and the `gh`/`git` wrappers underneath them."""
 
 from __future__ import annotations
 
@@ -9,41 +8,6 @@ import json
 import pytest
 
 from dsl_course import utils
-
-
-def test_session_number_extracts_ordinal_prefix():
-    assert utils.session_number("00_intro") == 0
-    assert utils.session_number("07_finals-review") == 7
-    assert utils.session_number("13_other") == 13
-    assert utils.session_number("3_regression") == 3
-    assert utils.session_number("no-prefix-here") is None
-
-
-def test_find_session_dir_plain_and_padded(tmp_path):
-    section = tmp_path / "lectures"
-    section.mkdir()
-    (section / "00_intro").mkdir()
-    (section / "03_regression").mkdir()  # zero-padded
-    (section / "13_other").mkdir()  # must not match session "3"
-    assert utils.find_session_dir(section, "3").name == "03_regression"
-    assert utils.find_session_dir(section, "13").name == "13_other"
-    assert utils.find_session_dir(section, "9") is None
-
-
-def test_find_session_dir_missing_section_returns_none(tmp_path):
-    assert utils.find_session_dir(tmp_path / "does-not-exist", "1") is None
-
-
-def test_discover_sections_only_counts_dirs_with_ordinal_subdirs(tmp_path):
-    (tmp_path / "lectures" / "00_intro").mkdir(parents=True)
-    (tmp_path / "labs" / "03_regression").mkdir(parents=True)
-    (tmp_path / "readings").mkdir()  # no ordinal subdirs -> not a section
-    (tmp_path / "SYLLABUS.md").write_text("x")  # a file, not a dir
-    assert utils.discover_sections(tmp_path) == ["labs", "lectures"]
-
-
-def test_discover_sections_missing_root_returns_empty(tmp_path):
-    assert utils.discover_sections(tmp_path / "nope") == []
 
 
 def _blob_sha(content: bytes) -> str:
@@ -420,21 +384,6 @@ def test_get_team_members_returns_none_on_failure_not_an_empty_set(monkeypatch):
     assert utils.get_team_members("Org", "students") is None
     monkeypatch.setattr(utils, "gh", lambda *a, **k: (0, '[{"login": "alice"}]'))
     assert utils.get_team_members("Org", "students") == {"alice"}
-
-
-def test_active_today_accepts_date_objects_as_bounds():
-    # An unquoted `start: 2026-09-01` in people.yml parses to a datetime.date, not a
-    # string; `today < start` used to raise TypeError: str < date.
-    from datetime import date, datetime
-
-    assert utils.active_today(date(2026, 9, 1), None, "2026-10-01") is True
-    assert utils.active_today(date(2026, 11, 1), None, "2026-10-01") is False
-    assert utils.active_today(None, date(2026, 9, 30), "2026-10-01") is False
-    assert utils.active_today(None, date(2026, 12, 31), "2026-10-01") is True
-    # a full datetime (date subclass) is sliced back to its date portion
-    assert utils.active_today(datetime(2026, 9, 1, 12, 0), None, "2026-10-01") is True
-    # strings still work exactly as before
-    assert utils.active_today("2026-09-01", "2026-12-31", "2026-10-01") is True
 
 
 def test_load_yaml_config_distinguishes_absent_empty_and_malformed(monkeypatch):

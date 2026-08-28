@@ -19,10 +19,8 @@ import argparse
 import json
 import sys
 
+from .course import COHORT_TOPIC, COURSE_HUB_TOPIC
 from .utils import gh_json, load_yaml_config, log_err, org_exists
-
-COURSE_HUB_TOPIC = "dsl-course-hub"
-COHORT_TOPIC = "dsl-cohort"
 
 # How many results one `gh search repos` page returns. This inventory is fully generated
 # and merged unattended, so silently reading only the first page would quietly delete every

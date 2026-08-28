@@ -41,7 +41,8 @@ from pathlib import Path
 import yaml
 
 from . import mailer, roster
-from .discovery import GRADEBOOK_PREFIX, course_name_for_cohort
+from .course import CONFIG_REPO, GRADEBOOK_PREFIX
+from .discovery import course_name_for_cohort
 from .utils import (
     GIT_ENV,
     add_collaborator,
@@ -63,7 +64,6 @@ from .utils import (
     strip_bom,
 )
 
-CONFIG_REPO = roster.CONFIG_REPO  # classroom-config
 GRADES_DIR = "grades"  # faculty-edited source tables, one CSV per assignment
 GRADEBOOK_DIR = "gradebook"  # rendered per-student YAML staged for the preview PR
 RENDER_BRANCH = "grades-update"

@@ -10,8 +10,8 @@ can't be found by naming convention (they're arbitrary), so they're listed expli
 the course org's .github/cohort-courses-pages.yml (register_cohort appends; faculty &
 instructors can edit it by hand).
 
-The session-folder rule itself lives in utils.session_dirs - this module is only the API
-transport for it (a recursive git-tree fetch); utils.discover_sections is the local
+The session-folder rule itself lives in course.session_dirs - this module is only the API
+transport for it (a recursive git-tree fetch); course.discover_sections is the local
 filesystem transport of the same rule.
 """
 
@@ -21,6 +21,12 @@ import json
 
 import yaml
 
+from .course import (
+    COHORT_TOPIC,
+    COURSE_HUB_TOPIC,
+    GRADEBOOK_PREFIX,
+    session_dirs,
+)
 from .utils import (
     get_default_branch,
     get_file_content,
@@ -30,7 +36,6 @@ from .utils import (
     log_ok,
     put_file,
     repo_tree,
-    session_dirs,
 )
 
 COHORTS_PATH = (
@@ -48,12 +53,9 @@ ASSIGNMENT_TEMPLATE_TOPIC = "assignment-template"
 INFRA_TOPICS = {"submission", ASSIGNMENT_TEMPLATE_TOPIC, "gradebook"}
 # The per-student gradebook repo: grades-<handle> (grades.py creates them). Named here so
 # the reader below and the writer cannot drift.
-GRADEBOOK_PREFIX = "grades-"
 # Topics on an org's `.github` repo that say which TIER the org is (bootstrap_course stamps
 # them; list_orgs enumerates orgs by them). The repo listing carries them, so a sweep can
 # tell a course org from a cohort without another read.
-COURSE_HUB_TOPIC = "dsl-course-hub"
-COHORT_TOPIC = "dsl-cohort"
 # The repos only a cohort org has - the fallback tier signal for an org bootstrapped
 # before the topics existed, or whose topic stamp never landed.
 COHORT_ONLY_REPOS = {"welcome", "classroom-config"}
