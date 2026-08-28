@@ -278,6 +278,32 @@ def test_the_sweep_grants_the_per_repo_floor_where_a_team_holds_nothing(monkeypa
     }
 
 
+def _admin_row(name: str) -> str:
+    return _row(
+        name, "admin", pull=True, triage=True, push=True, maintain=True, admin=True
+    )
+
+
+def test_the_sweep_leaves_a_maintain_or_triage_grant_exactly_as_it_is(monkeypatch):
+    # The two levels between the ones the floors name. A `maintain` grant answers the
+    # listing with FOUR true flags (admin false), and a `triage` grant with two - so a
+    # ranking that read the wrong one, or compared the wrong way round, would nightly
+    # re-PUT an instructor down to the floor: `maintain` -> push on the repo faculty
+    # trigger every button from, `triage` -> pull on a gradebook. Both are above their
+    # floor and both must cost no call at all.
+    listings = {
+        "instructors": _listing(
+            _row(
+                ".github", "maintain", pull=True, triage=True, push=True, maintain=True
+            ),
+            _row("grades-ada", "triage", pull=True, triage=True),
+        ),
+        "course-admin": _listing(_admin_row(".github"), _admin_row("grades-ada")),
+    }
+    repos = [{"name": n} for n in (".github", "grades-ada")]
+    assert _sweep(monkeypatch, listings, repos, cohort=True) == (0, [])
+
+
 def test_the_sweep_raises_a_grant_below_its_floor_but_leaves_one_above(monkeypatch):
     # A floor, not a level: `.github` held at read is raised to push (its floor is write);
     # a submission repo held at push is left alone (its floor is read).
