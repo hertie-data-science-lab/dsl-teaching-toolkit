@@ -48,6 +48,30 @@ def test_desired_members_covers_both_teams_even_when_one_is_empty():
     assert wanted[sync_roster.AUDITOR_TEAM] == set()
 
 
+def test_sync_hands_the_prune_each_teams_own_github_ids(monkeypatch):
+    # The prune needs the ids to tell a renamed student from a stranger - but PER TEAM, or
+    # a role change (students -> auditors) would be protected out of the prune that is
+    # meant to carry it out.
+    students = _roster(
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
+        "bo@uni.edu,Bo,bo-b,99,dsl-def,auditor",
+        "cy@uni.edu,Cy,,,dsl-ghi,enrolled",  # not onboarded - no id yet
+    )
+    monkeypatch.setattr(roster, "load", lambda org: students)
+    monkeypatch.setattr(sync_roster, "set_org_membership", lambda *a, **kw: True)
+    monkeypatch.setattr(sync_roster, "list_org_repos", lambda org: [])
+    seen: dict[str, set[str]] = {}
+    monkeypatch.setattr(
+        sync_roster,
+        "reconcile_team_members",
+        lambda org, team, handles, prune=True, dry_run=False, keep_ids=frozenset(): (
+            seen.update({team: set(keep_ids)}) or 0
+        ),
+    )
+    assert sync_roster.sync("COHORT", prune=True) == 0
+    assert seen == {sync_roster.TEAM: {"42"}, sync_roster.AUDITOR_TEAM: {"99"}}
+
+
 def test_sync_fails_on_a_missing_roster_but_not_an_empty_one(monkeypatch):
     # Missing/unreadable students.csv (load -> None) is an error; a roster that
     # exists but has no rows yet (a freshly bootstrapped cohort) is a valid state

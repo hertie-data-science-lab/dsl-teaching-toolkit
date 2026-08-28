@@ -271,6 +271,22 @@ def test_onboard_retries_the_roster_write_on_a_conflict():
     assert "(row[iRole] || '')" not in code
 
 
+def test_onboard_re_matches_a_renamed_account_by_its_immutable_id():
+    # A login is renameable; a GitHub id is not. Comparing only the handle, a student who
+    # renamed their account got NO_MATCH on every re-run while the nightly reconcile pruned
+    # their new login off every team - a break with no recovery short of a hand edit.
+    # `boundElsewhere` therefore accepts a row whose `github_id` is this user's, and both
+    # the pre-loop guard and the in-loop re-check go through it.
+    code = code_of(script_of("onboard.yml", "onboard"))
+    guard = re.search(r"const boundElsewhere = \(r\) =>(.*?);", code, re.DOTALL)
+    assert guard, "the single-use guard is gone"
+    assert re.search(r"r\[iId\].*!==\s*String\(userId\)", guard.group(1)), (
+        "the guard does not exempt the same account under a new name"
+    )
+    assert "boundElsewhere(row)" in code, "the pre-loop check must use the same guard"
+    assert code.index("const boundElsewhere") < code.index("boundElsewhere(row)")
+
+
 def test_team_formation_retakes_the_cap_decision_on_every_attempt():
     code = code_of(script_of("team-formation.yml", "form-team"))
     loop = retry_loop(code)

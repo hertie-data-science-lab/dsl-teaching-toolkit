@@ -128,6 +128,27 @@ def get_team_members(org: str, team_slug: str) -> set[str] | None:
         return None
 
 
+def get_team_member_ids(org: str, team_slug: str) -> dict[str, str] | None:
+    """`{login.casefold(): GitHub id}` for a team's current members, or None if the listing
+    could not be read.
+
+    The same call `get_team_members` makes, asked for the IMMUTABLE half as well. A login
+    is renameable; an id is not, so this is the only way a reconcile can tell "somebody who
+    does not belong here" from "the same person under a new name" - see the `keep_ids`
+    guard in `reconcile_team_members`."""
+    code, out = gh(
+        "api", f"orgs/{org}/teams/{team_slug}/members?per_page=100", "--paginate"
+    )
+    if code != 0:
+        log_err(f"could not read the members of {org}/{team_slug}: {out[:200]}")
+        return None
+    try:
+        return {m["login"].casefold(): str(m["id"]) for m in json.loads(out)}
+    except (json.JSONDecodeError, KeyError, TypeError):
+        log_err(f"unparseable member listing for {org}/{team_slug}: {out[:200]}")
+        return None
+
+
 def remove_team_member(org: str, team_slug: str, login: str) -> bool:
     code, _ = gh(
         "api", "--method", "DELETE", f"orgs/{org}/teams/{team_slug}/memberships/{login}"
@@ -167,7 +188,12 @@ def _fold_diff(a: dict[str, str], b: dict[str, str]) -> list[str]:
 
 
 def reconcile_team_members(
-    org: str, team: str, wanted: set[str], prune: bool = True, dry_run: bool = False
+    org: str,
+    team: str,
+    wanted: set[str],
+    prune: bool = True,
+    dry_run: bool = False,
+    keep_ids: set[str] = frozenset(),
 ) -> int:
     """Full add(+remove) reconcile of one team's membership to exactly `wanted`.
 
@@ -188,6 +214,14 @@ def reconcile_team_members(
     Membership is compared case-insensitively (`.casefold()`): GitHub logins are
     case-insensitive, so a hand-typed `Anna-Adams` and the API's `anna-adams` are the same
     account - comparing raw casing would add-then-prune it on every run, oscillating access.
+
+    `keep_ids` are GitHub ids that belong in this team however they are currently spelt: a
+    member holding one is never pruned. A login is renameable and an id is not, so a
+    student who renames their account is otherwise indistinguishable from a stranger - the
+    config still names the OLD login, the add 404s and the prune evicts the new one, every
+    night, until someone hand-edits the CSV. The ids cost one extra listing, paid only when
+    a caller supplies some AND there is something to prune; if they cannot be read the
+    prune is skipped whole, on the same rule as the owner list above.
     """
     current = get_team_members(org, team)
     if current is None:
@@ -216,8 +250,27 @@ def reconcile_team_members(
             )
             return errors
         acting = _acting_login()
-        for handle in sorted(_fold_diff(current_by_fold, wanted_by_fold)):
+        stale = sorted(_fold_diff(current_by_fold, wanted_by_fold))
+        protected: set[str] = set()
+        if stale and keep_ids:
+            by_fold = get_team_member_ids(org, team)
+            if by_fold is None:
+                log_err(
+                    f"pruning skipped for {org}/{team}: the member ids could not be read, "
+                    f"and pruning without them evicts anyone who has renamed their account"
+                )
+                return errors
+            protected = {f for f, gid in by_fold.items() if gid in keep_ids}
+        for handle in stale:
             if handle == acting or handle in owners:
+                continue
+            if handle.casefold() in protected:
+                # Same person, new login: the config still names the old one. Leave them
+                # in; the roster's handle cell is re-linked when they next open a Join
+                # issue (templates/welcome/onboard.yml matches on the id too).
+                log_verbose(
+                    f"  [keep] {handle} in {org}/{team} - renamed, same GitHub id"
+                )
                 continue
             if dry_run:
                 log_verbose(f"    DRY-RUN remove {handle} <- {org}/{team}")

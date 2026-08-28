@@ -193,10 +193,19 @@ jobs:
                 `Check the code in your email; if you have already joined from another GitHub account, ` +
                 `or think this is a mistake, contact the teaching team. Do not post the code in a comment - ` +
                 `comments are public and are never redacted.`;
+              // Single-use: a code binds to the FIRST account that claims it. The one
+              // exception is that account under a NEW NAME. A GitHub id is immutable and a
+              // login is not, so a row whose `github_id` is this user's IS this user, whatever
+              // handle the cell still spells - and the rewrite below re-links the row. Without
+              // it a renamed student got NO_MATCH here for ever, while the nightly reconcile
+              // pruned their new login off every team and re-added a login that no longer
+              // exists: unrecoverable without a hand edit nobody knew to make.
+              const boundElsewhere = (r) =>
+                r[iHandle] && r[iHandle].toLowerCase() !== handle.toLowerCase() &&
+                (r[iId] || '').trim() !== String(userId);
               const row = rows.find(r => r[iCode].trim().toLowerCase() === code.toLowerCase());
               if (!row) return fail(NO_MATCH, 'needs-review');
-              if (row[iHandle] && row[iHandle].toLowerCase() !== handle.toLowerCase()) return fail(
-                NO_MATCH, 'needs-review');
+              if (boundElsewhere(row)) return fail(NO_MATCH, 'needs-review');
 
               // Write the authenticated handle + immutable id back (idempotent).
               //
@@ -209,8 +218,6 @@ jobs:
               //
               // `matched` is this student's row IN THE CURRENT SNAPSHOT: each re-read replaces
               // it, so nothing below reads a cell off the table we already discarded.
-              const boundElsewhere = (r) =>
-                r[iHandle] && r[iHandle].toLowerCase() !== handle.toLowerCase();
               // A 409 is a stale sha (someone committed between our read and our write). A 403
               // naming GitHub's SECONDARY rate limit / abuse detection is GitHub asking us to
               // back off - a first-day burst hits it - and is equally worth another attempt.

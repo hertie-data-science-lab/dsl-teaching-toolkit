@@ -49,6 +49,21 @@ def desired_members(students: list[roster.Student]) -> dict[str, set[str]]:
     }
 
 
+def desired_ids(students: list[roster.Student]) -> dict[str, set[str]]:
+    """`{role team: GitHub ids}` for exactly the rows `desired_members` names.
+
+    Handed to the prune as `keep_ids`. A GitHub login is renameable and an id is not, so a
+    student who renames their account leaves the roster's `github_handle` cell stale while
+    still being on the roster: the add of the old login 404s and the prune evicts the new
+    one, every night, until somebody hand-edits the CSV. Keyed per TEAM, not cohort-wide -
+    a role change is meant to prune the handle out of the team it left."""
+    onboarded = [s for s in students if s.onboarded and s.github_id]
+    return {
+        TEAM: {s.github_id for s in onboarded if s.is_enrolled},
+        AUDITOR_TEAM: {s.github_id for s in onboarded if s.is_auditor},
+    }
+
+
 def submission_repo_suffixes(repos: list[dict]) -> list[tuple[str, str]]:
     """`(repo, suffix)` for every `<template>-<suffix>` repo in a cohort org's listing.
 
@@ -127,6 +142,7 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
     # An empty roster (header only - a freshly bootstrapped cohort) is a valid state,
     # not an error: reconcile both role teams to empty like any other edit.
     wanted = desired_members(students)
+    keep_ids = desired_ids(students)
     log_step(
         f"Materialising access for {len(wanted[TEAM])} onboarded student(s) + "
         f"{len(wanted[AUDITOR_TEAM])} auditor(s) in {cohort_org}"
@@ -142,7 +158,12 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
         # Team membership via the shared reconcile so pruning inherits its guard:
         # an org Owner (or the acting bot) on the roster is never evicted.
         errors += reconcile_team_members(
-            cohort_org, team, handles, prune=prune, dry_run=dry_run
+            cohort_org,
+            team,
+            handles,
+            prune=prune,
+            dry_run=dry_run,
+            keep_ids=keep_ids[team],
         )
     if prune:
         # Behind the same flag as the team prune, and for the same reason: this is the

@@ -40,6 +40,55 @@ def test_reconcile_team_members_adds_missing_and_removes_extra(monkeypatch):
     assert removed == ["bob"]
 
 
+def test_reconcile_team_members_never_prunes_a_renamed_account(monkeypatch):
+    # A GitHub login is renameable and its id is not. `ada-new` is not in `wanted` (the
+    # roster still spells the old name), but it carries the id of a roster row - so it is
+    # the same student, and pruning it was the second half of an unrecoverable break: the
+    # add of `ada-old` 404s and the eviction repeats every night. `stranger` has no roster
+    # id and still goes.
+    monkeypatch.setattr(
+        gh_teams, "get_team_members", lambda org, team: {"ada-new", "stranger"}
+    )
+    monkeypatch.setattr(
+        gh_teams,
+        "get_team_member_ids",
+        lambda org, team: {"ada-new": "42", "stranger": "99"},
+    )
+    monkeypatch.setattr(gh_teams, "_acting_login", lambda: None)
+    monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
+    removed = []
+    monkeypatch.setattr(gh_teams, "add_team_member", lambda *a, **k: True)
+    monkeypatch.setattr(
+        gh_teams, "remove_team_member", lambda org, team, h: removed.append(h) or True
+    )
+    errors = gh_teams.reconcile_team_members(
+        "org", "students", {"ada-old"}, keep_ids={"42"}
+    )
+    assert errors == 0
+    assert removed == ["stranger"]
+
+
+def test_reconcile_team_members_skips_the_prune_when_ids_are_unreadable(monkeypatch):
+    # Pruning without the ids is exactly how a renamed student is evicted, so an
+    # unreadable id listing skips the prune whole - the same rule the owner list follows.
+    monkeypatch.setattr(
+        gh_teams, "get_team_members", lambda org, team: {"ada-new", "stranger"}
+    )
+    monkeypatch.setattr(gh_teams, "get_team_member_ids", lambda org, team: None)
+    monkeypatch.setattr(gh_teams, "_acting_login", lambda: None)
+    monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
+    removed = []
+    monkeypatch.setattr(gh_teams, "add_team_member", lambda *a, **k: True)
+    monkeypatch.setattr(
+        gh_teams, "remove_team_member", lambda org, team, h: removed.append(h) or True
+    )
+    assert (
+        gh_teams.reconcile_team_members("org", "students", {"ada-old"}, keep_ids={"42"})
+        == 0
+    )
+    assert removed == []
+
+
 def test_reconcile_team_members_never_prunes_the_acting_login(monkeypatch):
     monkeypatch.setattr(
         gh_teams, "get_team_members", lambda org, team: {"alice", "hertie-dsl-bot"}
