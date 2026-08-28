@@ -78,7 +78,15 @@ def test_an_unusable_solution_branch_does_not_block_provisioning(
     assert recorded == [], "a failed solution must not be recorded as released"
 
 
-def _marker_run(tmp_path, monkeypatch, *, status="created", units=1, site_raises=False):
+def _marker_run(
+    tmp_path,
+    monkeypatch,
+    *,
+    status="created",
+    units=1,
+    site_raises=False,
+    record_ok=True,
+):
     """provision_all with the network stubbed. Returns (rc, what was recorded)."""
     rows = [f"s{i}@uni.edu,S{i},sh{i},{i},dsl-{i},enrolled" for i in range(units)]
     path = _roster_file(tmp_path, *rows)
@@ -98,7 +106,9 @@ def _marker_run(tmp_path, monkeypatch, *, status="created", units=1, site_raises
     monkeypatch.setattr("dsl_course.site.sync_site", sync)
     recorded = []
     monkeypatch.setattr(
-        assign, "record_solution_released", lambda *a, **k: recorded.append(a)
+        assign,
+        "record_solution_released",
+        lambda *a, **k: recorded.append(a) or record_ok,
     )
     rc = assign.provision_all(
         "COURSE",
@@ -142,6 +152,21 @@ def test_the_marker_is_not_written_when_there_is_nobody_to_push_to(
     # every student who onboards afterwards never receives the solution.
     _rc, recorded = _marker_run(tmp_path, monkeypatch, units=0)
     assert recorded == []
+
+
+def test_an_unwritten_solution_marker_goes_red(tmp_path, monkeypatch, capsys):
+    # The marker is what stops the next tick re-cloning every submission repo to re-push a
+    # solution they already have. A write that failed was discarded, so the run went green
+    # and the re-clone recurred every hour for the rest of the term.
+    rc, recorded = _marker_run(tmp_path, monkeypatch, record_ok=False)
+    assert recorded == [("COHORT", "assignment-1", 1)]  # it was attempted
+    assert rc == 1
+    assert "fire-once record could not be written" in capsys.readouterr().err
+
+
+def test_a_recorded_solution_release_stays_green(tmp_path, monkeypatch):
+    rc, recorded = _marker_run(tmp_path, monkeypatch)
+    assert recorded == [("COHORT", "assignment-1", 1)] and rc == 0
 
 
 def test_a_failed_solution_push_reaches_the_returned_status(tmp_path, monkeypatch):

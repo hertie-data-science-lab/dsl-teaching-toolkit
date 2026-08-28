@@ -395,14 +395,16 @@ def solution_released(cohort_org: str, slug: str) -> bool:
     return code == 0
 
 
-def record_solution_released(cohort_org: str, slug: str, repos: int) -> None:
+def record_solution_released(cohort_org: str, slug: str, repos: int) -> bool:
     """Write the fire-once record, so no later tick re-pushes the solution.
 
     Written only after a run in which every solution push succeeded - a partial push must
-    re-run, or the students it missed would never receive the solution at all."""
+    re-run, or the students it missed would never receive the solution at all. Returns
+    whether the record actually landed: a marker that did not is what makes every later
+    tick re-clone every submission repo to re-push a solution they already have."""
     from .roster import CONFIG_REPO
 
-    put_file(
+    return put_file(
         cohort_org,
         CONFIG_REPO,
         solution_record_path(slug),
@@ -607,8 +609,13 @@ def provision_all(
         and bool(units)
         and not results.get("failed-solution")
     )
-    if solution_pushed:
-        record_solution_released(cohort_org, slug, len(units))
+    if solution_pushed and not record_solution_released(cohort_org, slug, len(units)):
+        log_err(
+            f"the solution for {slug} shipped, but its fire-once record could not be "
+            f"written to {cohort_org}/classroom-config - until it is, every hourly tick "
+            f"re-clones every submission repo to push a solution they already have"
+        )
+        failed = True
     return 1 if failed or solution_unavailable else 0
 
 

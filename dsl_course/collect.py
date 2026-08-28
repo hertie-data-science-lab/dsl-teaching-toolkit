@@ -1006,13 +1006,18 @@ def collect(
                 f"tests to run; nothing to collect."
             )
             # Hand-marked, then: say so once in the archive rather than re-deciding it on
-            # every hourly tick (see FIRE-ONCE above).
-            if not dry_run:
-                mark_not_autograded(
-                    cohort_org,
-                    slug,
-                    f"no `{SOLUTION_BRANCH}` branch on {master_org}/{template}",
+            # every hourly tick (see FIRE-ONCE above). A marker that could not be written
+            # is not a skip at all - the next tick re-clones the template and re-decides
+            # the identical skip - so it goes red rather than reporting a quiet success.
+            if not dry_run and not mark_not_autograded(
+                cohort_org,
+                slug,
+                f"no `{SOLUTION_BRANCH}` branch on {master_org}/{template}",
+            ):
+                log_err(
+                    f"{slug}: could not record the skip - the next run re-decides it"
                 )
+                return 1
             return 0
         spec_path = soldir / GRADING_FILE
         spec = parse_grading_spec(spec_path.read_text() if spec_path.is_file() else "")
@@ -1020,10 +1025,13 @@ def collect(
             log_ok(
                 f"{slug}: autograde disabled in {GRADING_FILE} - all-manual, nothing to collect."
             )
-            if not dry_run:
-                mark_not_autograded(
-                    cohort_org, slug, f"`autograde: false` in {GRADING_FILE}"
+            if not dry_run and not mark_not_autograded(
+                cohort_org, slug, f"`autograde: false` in {GRADING_FILE}"
+            ):
+                log_err(
+                    f"{slug}: could not record the skip - the next run re-decides it"
                 )
+                return 1
             return 0
         # group-vs-individual via the single `resolve_is_group` precedence (force -> cohort
         # schedule `type:` -> template grading.yml -> individual). The entry is the one found
@@ -1174,11 +1182,15 @@ def collect(
                 f"{slug}: nothing gradable across {len(targets)} target(s) - recording "
                 f"the skip rather than retrying every hour."
             )
-            mark_not_autograded(
+            if not mark_not_autograded(
                 cohort_org,
                 slug,
                 f"nothing gradable across {len(targets)} target(s) as of {deadline}",
-            )
+            ):
+                log_err(
+                    f"{slug}: could not record the skip - the next run re-decides it"
+                )
+                return 1
             return 0
         if failed_to_run and len(failed_to_run) == len(archives):
             # EVERY target that was examined failed to grade for the same class of reason -

@@ -1275,3 +1275,48 @@ def test_submission_targets_defaults_the_teams_key_to_the_name(monkeypatch):
     assert collect.submission_targets("Cohort", "assignment-4", True) == [
         ("assignment-4-team-1", "team-1", ["ada-l"])
     ]
+
+
+# ------------- a skip that was not recorded is not a skip (the marker write is checked)
+
+
+def _failing_put_file(monkeypatch):
+    monkeypatch.setattr(collect, "put_file", lambda *a, **k: False)
+
+
+def test_an_unwritten_autograde_false_marker_goes_red_rather_than_green(
+    monkeypatch, capsys
+):
+    # The `_skipped.json` record IS the skip: without it the cron re-clones the template
+    # and re-decides the identical skip on every hourly tick, for ever. Returning 0 on a
+    # failed write reported that as done.
+    monkeypatch.setattr(collect, "gh", _clone_writing("autograde: false\n"))
+    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    _failing_put_file(monkeypatch)
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
+    assert "could not record the skip" in capsys.readouterr().err
+
+
+def test_an_unwritten_no_solution_branch_marker_goes_red(monkeypatch, capsys):
+    # No `solution` branch means hand-marked, recorded once. A failed record means the
+    # same clone attempt, and the same decision, every hour.
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "no such branch"))
+    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    _failing_put_file(monkeypatch)
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
+    assert "could not record the skip" in capsys.readouterr().err
+
+
+def test_an_unwritten_nothing_gradable_marker_goes_red(monkeypatch, capsys):
+    _stub_collect(monkeypatch, {"assignment-1-team-x": ""})
+    monkeypatch.setattr(collect, "gh", _clone_writing("type: group\nautograde: true\n"))
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group=None, teams_key=None: [
+            (f"{slug}-team-x", "team-x", [])
+        ],
+    )
+    _failing_put_file(monkeypatch)
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
+    assert "could not record the skip" in capsys.readouterr().err
