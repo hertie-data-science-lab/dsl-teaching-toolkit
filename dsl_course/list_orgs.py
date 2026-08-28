@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 import yaml
 
@@ -284,8 +285,6 @@ def render_page(orgs: list[dict], cohorts: list[dict]) -> str:
 
 def update_file(path: str, page: str) -> bool:
     """Write the fully generated page to `path`. Returns True if the file changed."""
-    from pathlib import Path
-
     p = Path(path)
     if p.exists() and p.read_text() == page:
         return False
