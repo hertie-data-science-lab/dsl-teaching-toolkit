@@ -158,9 +158,13 @@ def test_put_files_refuses_to_commit_when_the_tree_cannot_be_read(monkeypatch):
 
 def test_put_files_seeds_a_repo_that_has_no_commits_yet(monkeypatch):
     # create_repo does not auto-init, so the FIRST seed after it lands in a repo with no
-    # commit, no tree and no ref. The Contents API used to hide that by creating the
-    # initial commit itself; the git data API has to be told, or every fresh cohort's
-    # bootstrap fails at its first write.
+    # commit, no tree and no ref. Such a repo refuses `POST /git/trees` OUTRIGHT - "Git
+    # Repository is empty" (409) - whether or not a base_tree is sent: the git data API
+    # needs a commit to hang a tree off, and only the Contents API will create that first
+    # one. This test used to assert the opposite (that omitting base_tree was enough), with
+    # a stub that let the POST succeed - so the real 409 went unnoticed until the first
+    # cohort org bootstrapped after the classroom-config scaffolds were batched, whose
+    # roster, schedule and people.yml never landed at all.
     calls = []
 
     def fake_gh(*args, **kwargs):
@@ -168,20 +172,25 @@ def test_put_files_seeds_a_repo_that_has_no_commits_yet(monkeypatch):
         url = args[1]
         if url == "repos/org/repo":
             return 0, "main\n"
-        if "git/trees/main" in url or url == "repos/org/repo/commits/main":
+        # every git-data read AND write says the same thing on an empty repo
+        if "git/trees" in url or url == "repos/org/repo/commits/main":
             return 1, "gh: Git Repository is empty. (HTTP 409)"
+        if url == "repos/org/repo/contents/a.yml" and "--method" not in args:
+            return 1, "gh: Not Found (HTTP 404)"  # nothing there to update
         return 0, "new-sha\n"
 
     monkeypatch.setattr(utils, "gh", fake_gh)
     assert utils.put_files("org", "repo", {"a.yml": b"one\n"}, "init: seed") is True
-    posted = [json.loads(stdin) for args, stdin in calls if stdin]
-    assert "base_tree" not in posted[0], "an empty repo has no base tree to build on"
-    assert posted[1]["parents"] == [], "the first commit has no parent"
-    # The ref is CREATED, not moved - there is no refs/heads/main to PATCH yet.
+    # the write went through Contents, which creates the initial commit itself
     assert any(
-        "POST" in args and any(a.endswith("/git/refs") for a in args)
-        for args, _ in calls
+        "PUT" in args and "repos/org/repo/contents/a.yml" in args for args, _ in calls
     )
+    # and no tree was POSTed: the recursive tree READ still happens (it is how we learn the
+    # repo is empty), but building one 409s and must not be attempted.
+    assert not any(
+        "POST" in args and any(a.endswith("/git/trees") for a in args)
+        for args, _ in calls
+    ), "POST /git/trees 409s on an empty repo - it must not be attempted"
 
 
 def test_put_files_still_commits_when_only_the_deletion_is_outstanding(monkeypatch):
