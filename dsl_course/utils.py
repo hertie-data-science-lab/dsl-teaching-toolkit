@@ -680,9 +680,12 @@ SUPERSEDED_DESCRIPTIONS = {
 # reworded literal must be added here or convergence silently stops.
 SUPERSEDED_COHORT_DESCRIPTIONS = {
     "Org profile and configuration": "[do not touch]: Org profile and configuration",
+    # Every org still carries the wording on the LEFT, so this is a single hop rather than
+    # a chain: the interim text this replaced never reached one.
     "PRIVATE cohort config - roster (students.csv). No PII leaves here.": (
-        "[visible to instructors only]: Cohort config - roster, schedule, people, "
-        "grades. No PII leaves here."
+        "[visible to instructors only]: Everything you configure for this cohort is "
+        "here - student roster, teams, term schedule, and marking. Students never see "
+        "it, and no PII leaves this repo."
     ),
 }
 SUPERSEDED_COURSE_DESCRIPTIONS = {
