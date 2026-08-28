@@ -532,7 +532,14 @@ def render(cohort_org: str) -> int:
         log_ok(f"+ {COHORT_CSV_NAME}")
 
         git("-C", str(wd), *GIT_ENV, "add", "-A")
-        code, _ = git(
+        # `git commit` exits non-zero BOTH when there is nothing staged and when the commit
+        # itself fails (a lock, a full disk, a hook). Reported as "nothing new to render",
+        # a real failure looked like the idempotent no-op: green, no preview PR, and the
+        # marker's grades never distributed. Ask what is staged, then commit.
+        if git("-C", str(wd), "diff", "--cached", "--quiet")[0] == 0:
+            log_ok("nothing new to render (gradebooks already match the source).")
+            return 0
+        code, out = git(
             "-C",
             str(wd),
             *GIT_ENV,
@@ -543,8 +550,8 @@ def render(cohort_org: str) -> int:
             "grades: render gradebooks",
         )
         if code != 0:
-            log_ok("nothing new to render (gradebooks already match the source).")
-            return 0
+            log_err(f"could not commit the rendered gradebooks: {out[:200]}")
+            return 1
         if (
             git("-C", str(wd), *GIT_ENV, "push", "-q", "-f", "origin", RENDER_BRANCH)[0]
             != 0

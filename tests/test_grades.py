@@ -578,3 +578,52 @@ def test_distribute_goes_red_when_a_notification_could_not_be_sent(
 
 def test_distribute_stays_green_when_every_notification_lands(tmp_path, monkeypatch):
     assert _distribute_with(monkeypatch, tmp_path, sent=1) == 0
+
+
+# ---------------- "nothing new to render" must mean nothing new, not a failed commit
+
+
+def _render_with(monkeypatch, tmp_path, *, staged, commit_ok=True):
+    """`render` against a local clone; `staged` is what `git diff --cached --quiet` says."""
+    per = {"assignment-1": [grades.GradeRow(github_handle="ada-l", final_grade="88")]}
+    monkeypatch.setattr(grades, "load_grade_sources", lambda org: per)
+    monkeypatch.setattr(grades, "get_default_branch", lambda org, repo: "main")
+
+    def fake_gh(*args, **kwargs):
+        if args[:2] == ("repo", "clone"):
+            from pathlib import Path
+
+            Path(args[3]).mkdir(parents=True, exist_ok=True)
+        return 0, ""
+
+    def fake_git(*args, **kwargs):
+        if "ls-remote" in args:
+            return 1, ""  # no existing render branch
+        if "diff" in args:
+            return (1, "") if staged else (0, "")
+        if "commit" in args:
+            return (
+                (0, "") if commit_ok else (1, "fatal: unable to write new index file")
+            )
+        return 0, ""
+
+    monkeypatch.setattr(grades, "gh", fake_gh)
+    monkeypatch.setattr(grades, "git", fake_git)
+    return grades.render("COHORT")
+
+
+def test_a_failed_render_commit_is_not_reported_as_nothing_to_render(
+    tmp_path, monkeypatch, capsys
+):
+    # `git commit` exits non-zero both for "nothing staged" and for a real failure, so a
+    # lock or a full disk read as the idempotent no-op: green run, no preview PR, and the
+    # marker's grades never distributed.
+    assert _render_with(monkeypatch, tmp_path, staged=True, commit_ok=False) == 1
+    assert "could not commit the rendered gradebooks" in capsys.readouterr().err
+
+
+def test_genuinely_nothing_staged_is_still_the_green_no_op(
+    tmp_path, monkeypatch, capsys
+):
+    assert _render_with(monkeypatch, tmp_path, staged=False) == 0
+    assert "nothing new to render" in capsys.readouterr().out
