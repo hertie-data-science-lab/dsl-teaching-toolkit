@@ -1395,9 +1395,12 @@ def _assignment_entry(
         # `unreleased: true`: the theme leaves the title unlinked off this, and the
         # sentence says why.
         flags = "handout_pending: true\n"
+        # Not `student_repo`: that names the COURSE org ("in `X`'s cohort org"), which
+        # is the one thing a student reading this does not need. The repo's NAME is the
+        # useful half, and it is the half that survives here.
         body = (
-            f"{title} has not been handed out yet - your private {student_repo} "
-            f"appears when it is."
+            f"{title} has not been handed out yet - your private "
+            f"`{slug}-<your-handle>` repo appears when it does."
         )
     title = _q(title)
     return (
