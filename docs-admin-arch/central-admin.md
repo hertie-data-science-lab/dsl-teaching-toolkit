@@ -90,9 +90,11 @@ credential** - a one-time central setup, not per course. `dry_run` previews need
   `SMTP_FROM`). Most M365 tenants disable SMTP AUTH (error `5.7.139`), so Graph is usually the
   only viable route.
 
-Set the secrets once; they must reach each course org's `.github` repo (where the send
-workflows run). **Status: not yet configured in any DSL org** - a request to Hertie IT for the
-Entra app registration is pending.
+Set the secrets once in the **CENTRAL repo**; Bootstrap Course Org copies whichever are
+configured onto the course org, scoped to `.github` (where the send workflows run), so
+changing the mailbox is the same per-org re-run as a token rotation. **Status: not yet
+configured in any DSL org** - a request to Hertie IT for the Entra app registration is
+pending.
 
 ## What orgs exist
 

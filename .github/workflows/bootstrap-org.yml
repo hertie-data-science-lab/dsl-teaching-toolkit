@@ -70,6 +70,18 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           DSL_BOT_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          # Mail transport for enrolment-code / grade emails, held once here on the
+          # central repo (one shared no-reply mailbox) and propagated onto the course org
+          # by --propagate-secret. Unset ones arrive as empty strings and are skipped.
+          GRAPH_TENANT_ID: ${{ secrets.GRAPH_TENANT_ID }}
+          GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
+          GRAPH_CLIENT_SECRET: ${{ secrets.GRAPH_CLIENT_SECRET }}
+          GRAPH_SENDER: ${{ secrets.GRAPH_SENDER }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SET_SECRET: ${{ inputs.set_secret }}
           ADMIN: ${{ inputs.admin }}
           ORG: ${{ inputs.org }}
