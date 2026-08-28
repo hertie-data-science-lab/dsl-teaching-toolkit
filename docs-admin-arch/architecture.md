@@ -176,7 +176,7 @@ faculty / instructors / admin teams`"] -->|"write/admin on"| cr["central repo"] 
   no merge across cohorts. Who-to-declare-where:
   [access-reference](../docs/reference/access-reference.md); the runbook for changing it:
   [05 Manage the teaching team](../docs/05-manage-teaching-team.md).
-- Each person entry takes optional `start`/`end` ISO dates (`utils.active_today`), applied by
+- Each person entry takes optional `start`/`end` ISO dates (`course.active_today`), applied by
   `desired_team_members` to **both** flows. Since every reconcile is a full add-and-remove, a
   lapsed `end` prunes the member with no manual step. An *edit* to `people.yml` /
   `students.csv` / `teams.csv` dispatches Sync membership on the push; a *date* rolling over
@@ -247,7 +247,7 @@ it. A path escaping the clone is refused before any file is touched.
 one private `<slug>-<handle>` repo per onboarded, **enrolled** student *from the frozen copy*.
 Solutions live on the course template's `solution` branch and are never shipped unless
 `include_solution` is ticked. Whether a release fans out per student or per team resolves
-through **one** precedence chain, `collect.resolve_is_group`: the workflow's `group` checkbox
+through **one** precedence chain, `course.resolve_is_group`: the workflow's `group` checkbox
 (force) → the cohort's `assignments.<slug>.type` in schedule.yml → the template's own
 `grading.yml` `type:` (the design-time default the scaffold wrote) → individual. Read-side only -
 the cohort setting never writes back into the course org. Group repos are granted to the
@@ -499,7 +499,7 @@ file · tree · team · repo list`"]
   d -->|"config present but empty"| ok["reconcile to empty · legitimate"]
 ```
 
-- One helper, `utils.is_missing_resource`, owns the 404-vs-failure split; `get_file_content`,
+- One helper, `ghcli.is_missing_resource`, owns the 404-vs-failure split; `get_file_content`,
   `repo_tree`, `load_yaml_config` and `delete_file` all go through it. A returned `None`/`[]`/`{}`
   therefore means *genuinely absent*, never *couldn't read*. Before this, a rate limit could
   republish a cohort site with every session row deleted, green.
@@ -710,8 +710,9 @@ Self-contained - workflows and their Python implementation both live in this rep
   - `roster` / `teams` - read `students.csv` / `teams.csv`.
   - `status` - the **Check cohort setup** per-cohort checklist.
   - `list_orgs` - enumerate DSL course and cohort orgs by topic; drives `refresh-inventory.yml`.
-  - `utils` - shared `gh`/git helpers with rate-limit backoff, and the fail-loud read contract
-    (`is_missing_resource`) plus the prune guard (`reconcile_team_members`).
+  - `ghcli` - the shared `gh`/git subprocess wrappers, their timeouts and rate-limit
+    backoff, and the fail-loud read contract (`is_missing_resource`).
+  - `gh_teams` - team reads/writes, including the prune guard (`reconcile_team_members`).
 - `templates/` - the files bootstrap seeds into a fresh org, verbatim from disk
   (`welcome.template`), one subdirectory per destination:
   - `welcome/` - the cohort onboarding + team-formation workflows and their issue forms.
