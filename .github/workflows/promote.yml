@@ -75,8 +75,9 @@ jobs:
           # Via gh's credential helper, so the token is never in a remote URL or in argv,
           # where a failed push would echo it back into the log.
           gh auth setup-git
-          # fetch-depth: 0 gets the whole history of the checked-out ref only; the tier
-          # branches and main are separate refs and have to be asked for by name.
+          # fetch-depth: 0 already brings every branch and tag, so origin/main and both
+          # tier tips are here before this runs. Re-fetched anyway: one cheap call, and it
+          # narrows the window between the tip read below and the lease it becomes.
           git fetch --quiet origin "+refs/heads/*:refs/remotes/origin/*"
 
           # staging is promoted from main, release from what has already soaked on staging.
