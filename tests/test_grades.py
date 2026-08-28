@@ -480,3 +480,56 @@ def test_parse_grades_survives_an_excel_bom_and_refuses_a_semicolon_export():
     assert [r.github_handle for r in rows] == ["ada-l", "bob-b"]
     with pytest.raises(RuntimeError, match="semicolon"):
         grades.parse_grades("github_handle;team;autograde_score\nada-l;;5\n")
+
+
+# ------------------------------- handles are one account whatever their casing (fix 3)
+
+
+def test_merge_auto_fills_the_existing_row_when_the_casing_differs():
+    # GitHub logins are case-insensitive. Keyed raw, the collector's `ada-l` update did not
+    # find the marker's `Ada-L` row, appended a second one, and the write-once guard on the
+    # first row protected nothing.
+    existing = grades.dump_grades(
+        [grades.GradeRow(github_handle="Ada-L", manual_score="18")]
+    )
+    out = grades.merge_auto(existing, [("ada-l", {"autograde_score": "7"})])
+    rows = grades.parse_grades(out)
+    assert len(rows) == 1
+    assert rows[0].github_handle == "Ada-L"  # the first-seen spelling is kept
+    assert rows[0].autograde_score == "7" and rows[0].manual_score == "18"
+
+
+def test_merge_auto_write_once_holds_across_a_case_difference():
+    existing = grades.dump_grades(
+        [grades.GradeRow(github_handle="Ada-L", autograde_score="9")]
+    )
+    out = grades.merge_auto(existing, [("ADA-L", {"autograde_score": "3"})])
+    (row,) = grades.parse_grades(out)
+    assert row.autograde_score == "9"  # the marker's correction survives
+
+
+def test_build_gradebooks_folds_one_student_written_two_ways():
+    per = {
+        "assignment-1": [grades.GradeRow(github_handle="Ada-L", final_grade="88")],
+        "assignment-2": [grades.GradeRow(github_handle="ada-l", final_grade="91")],
+    }
+    books = grades.build_gradebooks(per)
+    assert set(books) == {"Ada-L"}  # one gradebook, under the first-seen spelling
+    assert set(books["Ada-L"]["assignments"]) == {"assignment-1", "assignment-2"}
+
+
+def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
+    students = roster.parse(
+        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+        "ada@uni.edu,Ada,Ada-L,42,dsl-abc,enrolled\n"
+    )
+    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
+    sent: list[list] = []
+    monkeypatch.setattr(
+        grades.mailer,
+        "send_bulk",
+        lambda msgs, dry_run=False, sample=None: sent.append(msgs) or len(msgs),
+    )
+    grades._email_updates("COHORT", ["ada-l"])  # the gradebook file's spelling
+    assert sent and sent[-1][0][0] == "ada@uni.edu"

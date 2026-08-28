@@ -217,14 +217,15 @@ def build_gradebooks(per_assignment: dict[str, list[GradeRow]]) -> dict[str, dic
     Deterministic: assignments are folded in sorted order so the rendered YAML (and thus
     the preview diff) is stable across runs."""
     books: dict[str, dict] = {}
+    canonical: dict[str, str] = {}  # fold key -> the first spelling seen for it
     for assignment in sorted(per_assignment):
         for row in per_assignment[assignment]:
             if not row.github_handle:
                 continue
-            book = books.setdefault(
-                row.github_handle,
-                {"student": row.github_handle, "assignments": {}},
+            handle = canonical.setdefault(
+                row.github_handle.casefold(), row.github_handle
             )
+            book = books.setdefault(handle, {"student": handle, "assignments": {}})
             book["assignments"][assignment] = gradebook_entry(row)
     return books
 
@@ -290,15 +291,25 @@ def merge_auto(text: str, updates: list[tuple[str, dict[str, str]]]) -> str:
     marker's correction with a recomputed score. To get a fresh machine score, clear those
     cells (or delete the CSV) first, then re-grade."""
     rows = parse_grades(text) if text.strip() else []
-    order = [r.github_handle for r in rows]
-    by_handle = {r.github_handle: r for r in rows}
+    order: list[str] = []
+    by_handle: dict[str, GradeRow] = {}
+    # Fold-keyed: GitHub logins are case-insensitive, so `Ada-L` in a hand-typed CSV and
+    # `ada-l` from the API are one student. Keyed raw, the autograder appended a SECOND row
+    # for the same person and every write-once guard on the first one read as an empty
+    # cell. The row's own spelling - the marker's - is left exactly as written.
+    for r in rows:
+        key = r.github_handle.casefold()
+        if key not in by_handle:
+            by_handle[key] = r
+            order.append(key)
     preserved = 0
     for handle, fields in updates:
-        row = by_handle.get(handle)
+        key = handle.casefold()
+        row = by_handle.get(key)
         if row is None:
             row = GradeRow(github_handle=handle)
-            by_handle[handle] = row
-            order.append(handle)
+            by_handle[key] = row
+            order.append(key)
         kept = 0
         for key, value in fields.items():
             if key in MACHINE_FIELDS and getattr(row, key, ""):
@@ -673,9 +684,13 @@ def sample_body(cohort_org: str, course_name: str = "") -> str:
 def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -> None:
     """Email each student a 'grades updated' notification to their university inbox,
     linking to their private gradebook repo (the grade's source of truth)."""
-    by_handle = {
-        s.github_handle: s for s in roster.load(cohort_org) or [] if s.github_handle
-    }
+    # Fold-keyed for the same reason merge_auto is: the gradebook filenames come from the
+    # grade CSVs (a marker's typing) and the roster's casing is its own, so a case-only
+    # difference used to mean a student was silently never told their grades had landed.
+    by_handle: dict[str, roster.Student] = {}
+    for s in roster.load(cohort_org) or []:
+        if s.github_handle:
+            by_handle.setdefault(s.github_handle.casefold(), s)
     # Name the course in the body - a student taking several of these can't tell one
     # "your grades have been updated" from another. Read live from the course org's
     # dsl-course.yml; a course that carries no name yet keeps the generic wording rather
@@ -691,7 +706,7 @@ def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -
         course_name = ""
     messages = []
     for handle in handles:
-        student = by_handle.get(handle)
+        student = by_handle.get(handle.casefold())
         if not student or not student.hertie_email:
             continue
         messages.append(update_message(student, cohort_org, course_name))
