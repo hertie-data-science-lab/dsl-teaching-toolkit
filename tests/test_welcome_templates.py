@@ -161,19 +161,38 @@ def test_onboard_never_downgrades_an_existing_org_admin():
     assert "no access changes" in script
 
 
-def test_team_formation_refuses_auditors():
+def test_team_formation_refuses_auditors_without_publishing_their_role():
     # Auditors are read-only: assignment release is roster-driven (enrolled rows only), so an
     # auditor recorded in teams.csv would be handed a group assignment repo anyway. They must
-    # be refused on the same comment + needs-review path as every other rejection.
+    # be refused on the same comment + needs-review path as every other rejection - and with
+    # the SAME words a non-enrolee gets. This issue is public and permanent, so "your
+    # enrolment doesn't include project work" published the author's role to anyone reading.
     script = script_of("team-formation.yml", "form-team")
     code = code_of(script)
     assert f"=== '{roster.ROLE_AUDITOR}'" in code  # matches the Python spelling
     refusal = re.search(
         r"if \(iRole >= 0 [^\n]*\n(?:.*\n)*?\s+'needs-review'\);", code
     ).group(0)
-    assert "auditor" in refusal and "can't join a project team" in refusal
+    assert "NOT_A_PARTICIPANT" in refusal, (
+        "the auditor refusal has its own wording again"
+    )
+    assert "enrolment" not in refusal
+    # ... and it is the same constant the not-on-the-roster path uses.
+    assert len(re.findall(r"fail\(\s*NOT_A_PARTICIPANT", code)) == 2
     # refused before anything is written back to teams.csv
     assert code.index("iRole >= 0") < code.index("createOrUpdateFileContents")
+
+
+def test_a_refused_team_name_gives_no_reason():
+    # A team may not be named after a roster handle (a group repo is `<slug>-<team>` and a
+    # per-student one `<slug>-<handle>`), but SAYING so turned the form into a membership
+    # oracle: try a name, and the reply tells you whether that person is in this cohort.
+    # Reserved names and handle collisions share one reason-free refusal.
+    code = code_of(script_of("team-formation.yml", "form-team"))
+    assert "named after a GitHub handle" not in code
+    assert "handles.has(team)) return fail(NAME_TAKEN" in code
+    # ... the same words the reserved-name refusal uses, so the two are indistinguishable.
+    assert len(re.findall(r"fail\(\s*NAME_TAKEN", code)) == 2
 
 
 def test_team_formation_treats_a_missing_role_column_as_enrolled():
