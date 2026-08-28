@@ -62,3 +62,40 @@ def test_git_passes_a_timeout_to_the_subprocess(monkeypatch):
     monkeypatch.setattr(subprocess, "run", fake_run)
     ghcli.git("status")
     assert seen["timeout"] == ghcli.GIT_TIMEOUT_SECONDS
+
+
+def test_gh_json_gets_the_same_timeout_and_retries_as_gh(monkeypatch):
+    # It used to call subprocess directly, so the one call that reads across the whole
+    # estate (list_orgs' topic search) was the only GitHub call here with no ceiling and
+    # no backoff - free to hang a job for six hours, or to fail the weekly inventory on a
+    # limit every other call rides out.
+    import subprocess
+
+    seen: dict = {}
+
+    class Result:
+        returncode = 0
+        stdout = '[{"name": ".github"}]'
+        stderr = ""
+
+    def run(cmd, **kwargs):
+        seen.update(kwargs)
+        return Result()
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert ghcli.gh_json("search", "repos", "topic:x") == [{"name": ".github"}]
+    assert seen["timeout"] == ghcli.GH_TIMEOUT_SECONDS
+
+
+def test_gh_json_parses_stdout_alone(monkeypatch):
+    # gh writes advisories - a token nearing expiry, an update notice - to stderr, so the
+    # joined pair `gh` hands back is not JSON and must never reach the parser.
+    import subprocess
+
+    class Result:
+        returncode = 0
+        stdout = "[]"
+        stderr = "! gh version 2.0 is available\n"
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: Result())
+    assert ghcli.gh_json("search", "repos", "topic:x") == []

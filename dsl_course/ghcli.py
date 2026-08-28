@@ -21,12 +21,17 @@ RATE_LIMIT_MARKERS = (
 GH_TIMEOUT_SECONDS = 120
 
 
-def gh(*args: str, stdin: str | None = None, retries: int = 3) -> tuple[int, str]:
-    """Run a gh CLI command. Returns (returncode, stdout+stderr).
+def _run_gh(
+    args: tuple[str, ...], stdin: str | None, retries: int
+) -> tuple[int, str, str]:
+    """One `gh` invocation with the timeout and the retry ladder: (code, stdout, stderr).
 
-    Retries on GitHub secondary rate limits - and on a subprocess timeout - with
-    exponential backoff.
-    """
+    The streams are kept APART here and joined by `gh` below, because gh_json has to parse
+    stdout on its own - gh writes advisories (a token nearing expiry, an update notice) to
+    stderr, and a joined pair would feed them to the JSON parser.
+
+    Retries on GitHub secondary rate limits, and on a subprocess timeout, with exponential
+    backoff."""
     delay = 30
     for attempt in range(retries + 1):
         try:
@@ -39,23 +44,22 @@ def gh(*args: str, stdin: str | None = None, retries: int = 3) -> tuple[int, str
                 timeout=GH_TIMEOUT_SECONDS,
             )
         except subprocess.TimeoutExpired:
-            out = f"gh: timed out after {GH_TIMEOUT_SECONDS}s"
+            err = f"gh: timed out after {GH_TIMEOUT_SECONDS}s"
             if attempt == retries:
-                return 1, out
+                return 1, "", err
             print(
-                f"  [wait] {out}, retry {attempt + 1}/{retries} in {delay}s",
+                f"  [wait] {err}, retry {attempt + 1}/{retries} in {delay}s",
                 flush=True,
             )
             time.sleep(delay)
             delay *= 2
             continue
-        out = (result.stdout + result.stderr).strip()
         if result.returncode == 0:
-            return result.returncode, out
-        lower = out.lower()
+            return result.returncode, result.stdout, result.stderr
+        lower = (result.stdout + result.stderr).lower()
         is_rate_limited = any(m in lower for m in RATE_LIMIT_MARKERS)
         if not is_rate_limited or attempt == retries:
-            return result.returncode, out
+            return result.returncode, result.stdout, result.stderr
         print(
             f"  [wait] rate-limited, retry {attempt + 1}/{retries} in {delay}s",
             flush=True,
@@ -64,23 +68,33 @@ def gh(*args: str, stdin: str | None = None, retries: int = 3) -> tuple[int, str
         delay *= 2
     # Only reachable with a negative `retries` (the loop never runs); callers unpack a
     # pair, so hand back a failure rather than None.
-    return 1, "gh: not run (retries < 0)"
+    return 1, "", "gh: not run (retries < 0)"
+
+
+def gh(*args: str, stdin: str | None = None, retries: int = 3) -> tuple[int, str]:
+    """Run a gh CLI command. Returns (returncode, stdout+stderr).
+
+    Retries on GitHub secondary rate limits - and on a subprocess timeout - with
+    exponential backoff.
+    """
+    code, out, err = _run_gh(args, stdin, retries)
+    return code, (out + err).strip()
 
 
 def gh_json(*args: str) -> Any:
-    """Run a gh CLI command and parse JSON stdout. Raises on failure."""
-    result = subprocess.run(
-        ["gh"] + list(args),
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    if result.returncode != 0:
+    """Run a gh CLI command and parse JSON stdout. Raises on failure.
+
+    Through the same ladder as `gh`: this used to call subprocess directly, so the one
+    caller that reads across the whole estate (list_orgs' topic search) was the only
+    GitHub call in the toolkit with no timeout and no rate-limit retry - it could hang a
+    job until the 6-hour ceiling, or fail the weekly inventory on a secondary limit that
+    every other call rides out."""
+    code, out, err = _run_gh(args, None, 3)
+    if code != 0:
         raise RuntimeError(
-            f"`gh {' '.join(args)}` failed (exit {result.returncode}): "
-            f"{result.stderr.strip()[:200]}"
+            f"`gh {' '.join(args)}` failed (exit {code}): {err.strip()[:200]}"
         )
-    return json.loads(result.stdout)
+    return json.loads(out)
 
 
 # Per-call ceiling for a single `git` subprocess, the sibling of GH_TIMEOUT_SECONDS.
