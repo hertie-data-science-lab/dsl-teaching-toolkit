@@ -326,6 +326,14 @@ class Schedule:
     # quietly: `load` logs each line, `--validate` exits non-zero on them, and Check cohort
     # setup counts them.
     dropped: list[str] = field(default_factory=list)
+    # Set by `load` when the file could not be read AS A SCHEDULE at all: the YAML did not
+    # parse, or its top level is not a mapping. Distinct from `dropped` (a file that parsed,
+    # minus some entries) and from a cohort that simply has no schedule.yml. `load` still
+    # returns an empty Schedule so nothing downstream raises - but the hourly scheduler
+    # fails its run on this, because an unreadable plan means NOTHING is released, handed
+    # out, snapshotted or graded for the cohort, and an hourly green tick is how that goes
+    # unnoticed for a term.
+    unparseable: bool = False
 
 
 def _drop(drops: list[str], where: str, why: str, cost: str) -> None:
@@ -893,6 +901,7 @@ def load(cohort_org: str) -> Schedule:
     line/column, and an empty Schedule is returned. It must never raise: `load` sits under
     the hourly scheduler AND the site sync, and one cohort's typo froze both."""
     content = get_file_content(cohort_org, CONFIG_REPO, SCHEDULE_PATH)
+    unparseable = False
     try:
         meta = yaml.safe_load(content) if content else {}
     except yaml.YAMLError as exc:
@@ -908,7 +917,19 @@ def load(cohort_org: str) -> Schedule:
             f"snapshots, no autograding) and the site builds without schedule data."
         )
         meta = {}
+        unparseable = True
+    if meta is not None and not isinstance(meta, dict):
+        # Valid YAML, but not a schedule: a bare list, or a stray document separator that
+        # left a string at the top level. Same consequence as a parse failure - nothing in
+        # the file is read - so it must not read as an empty plan either.
+        log_err(
+            f"{cohort_org}/{CONFIG_REPO}/{SCHEDULE_PATH} parses as "
+            f"{type(meta).__name__}, not a mapping - the whole schedule is ignored. "
+            f"Its top level must be keys like `releases:` / `assignments:`."
+        )
+        unparseable = True
     sched = parse(meta if isinstance(meta, dict) else {})
+    sched.unparseable = unparseable
     if sched.dropped:
         # Loud, because this is the failure faculty cannot see: the file is valid YAML and
         # the run goes green, but an entry they wrote is not in the plan. Every caller

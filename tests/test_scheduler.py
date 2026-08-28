@@ -1168,12 +1168,13 @@ def test_release_order_puts_undated_tbc_entries_last():
     assert sorted([tbc, dated], key=scheduler.release_order) == [dated, tbc]
 
 
-def test_run_survives_an_unparseable_schedule_and_exits_zero(monkeypatch, capsys):
-    # The incident: unparseable schedule.yml raised inside schedule.load and killed the
-    # hourly tick for the cohort. Now the tick releases nothing (same as the crash, minus
-    # the collateral) but carries the loud error and stays green - a red run for one
-    # cohort's typo would mask the real per-cohort action failures that DO exit non-zero
-    # (--all-cohorts ORs each run's rc).
+def test_run_survives_an_unparseable_schedule_but_goes_red(monkeypatch, capsys):
+    # The original incident: an unparseable schedule.yml raised inside schedule.load and
+    # killed the hourly tick for the cohort. It must still not RAISE - one cohort's typo
+    # cannot be allowed to abort the others under --all-cohorts, which is why load falls
+    # back to an empty Schedule. But it must not be GREEN either: while the file stands,
+    # nothing is released, handed out, snapshotted or graded for this cohort, and an hourly
+    # green tick is precisely how that survives a term unnoticed.
     from tests.test_schedule import MALFORMED_SCHEDULE
 
     _stub_snapshots(monkeypatch, existing=set())
@@ -1184,11 +1185,39 @@ def test_run_survives_an_unparseable_schedule_and_exits_zero(monkeypatch, capsys
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
 
-    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
+    assert scheduler.run("Course-Org", "Cohort-Org", now) == 1
 
     captured = capsys.readouterr()
     assert "is NOT valid YAML" in captured.err
     assert "0/0 release(s) due" in captured.out
+
+
+def test_a_dry_run_reports_an_unparseable_schedule_too(monkeypatch):
+    # The manual dispatch defaults to dry-run, so this is the preview an operator looks at
+    # first; a green preview of a plan that cannot be read is the wrong answer there too.
+    from tests.test_schedule import MALFORMED_SCHEDULE
+
+    _stub_snapshots(monkeypatch, existing=set())
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "get_file_content",
+        lambda org, repo, path: MALFORMED_SCHEDULE,
+    )
+    now = datetime(2026, 10, 14, tzinfo=timezone.utc)
+    assert scheduler.run("Course-Org", "Cohort-Org", now, dry_run=True) == 1
+
+
+def test_dropped_entries_alone_stay_advisory(monkeypatch):
+    # A file that PARSES but loses an entry is a different fault: the rest of the plan
+    # still runs, so it is logged (loudly, by load) and left advisory as before.
+    _stub_snapshots(monkeypatch, existing=set())
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "get_file_content",
+        lambda org, repo, path: "releases:\n  lab-1:\n    title: no date at all\n",
+    )
+    now = datetime(2026, 10, 14, tzinfo=timezone.utc)
+    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
 
 
 # ---------------------------------------------- per-cohort isolation (--all-cohorts)

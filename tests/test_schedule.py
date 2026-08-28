@@ -724,8 +724,9 @@ def test_unparseable_schedule_loads_as_empty_and_says_so_loudly(monkeypatch, cap
 
     sched = S.load("Cohort-f2026")
 
-    # same shape a missing schedule.yml yields - nothing scheduled, nothing raised
-    assert sched == Schedule()
+    # same shape a missing schedule.yml yields - nothing scheduled, nothing raised - but
+    # flagged, so the hourly scheduler can fail its run instead of ticking green for ever
+    assert sched == Schedule(unparseable=True)
     err = capsys.readouterr().err
     # self-diagnosing: which cohort, which file, the parser's own line/column, what to do
     assert "Cohort-f2026/classroom-config/schedule.yml is NOT valid YAML" in err
@@ -757,15 +758,29 @@ def test_a_wellformed_schedule_is_untouched_by_the_yaml_guard(monkeypatch, capsy
     assert capsys.readouterr().err == ""
 
 
-def test_a_non_mapping_schedule_still_loads_as_empty(monkeypatch):
+def test_a_non_mapping_schedule_still_loads_as_empty(monkeypatch, capsys):
     # parses fine, but isn't a mapping - the pre-existing isinstance guard, pinned here
-    # so the new try/except can't be mistaken for the only defence.
+    # so the new try/except can't be mistaken for the only defence. Same consequence as a
+    # parse failure (nothing in the file is read), so it carries the same flag.
     from dsl_course import schedule as S
 
     monkeypatch.setattr(
         S, "get_file_content", lambda org, repo, path: "- just\n- a list\n"
     )
+    assert S.load("Cohort-f2026") == Schedule(unparseable=True)
+    assert "not a mapping" in capsys.readouterr().err
+
+
+def test_a_comment_only_schedule_is_empty_not_unparseable(monkeypatch, capsys):
+    # `yaml.safe_load` returns None for a file of nothing but comments. That is an empty
+    # plan, exactly like an absent file - not a fault to redden the hourly cron with.
+    from dsl_course import schedule as S
+
+    monkeypatch.setattr(
+        S, "get_file_content", lambda org, repo, path: "# nothing yet\n"
+    )
     assert S.load("Cohort-f2026") == Schedule()
+    assert capsys.readouterr().err == ""
 
 
 # --------------------------------------------------------------- dropped-entry reporting
