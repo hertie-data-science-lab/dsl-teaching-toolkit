@@ -651,6 +651,7 @@ def test_update_profile_readme_absent_config_falls_back_without_crashing(monkeyp
     monkeypatch.setattr("dsl_course.utils.get_file_content", lambda *a, **k: None)
     # profile_readme imported the name, so the module binding is what the splice reads.
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
     monkeypatch.setattr(
         P,
         "list_org_repos",
@@ -748,6 +749,8 @@ def test_cohort_page_title_follows_the_course_pointer(monkeypatch):
     )
     monkeypatch.setattr(P, "course_name_of", lambda org: "Deep Learning")
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
+    monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(P, "log", lambda *a, **k: None)
@@ -766,6 +769,7 @@ def _cohort_readme(monkeypatch, existing):
     from dsl_course import profile_readme as P
 
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: existing)
+    monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(P, "log", lambda *a, **k: None)

@@ -584,10 +584,34 @@ def grant_team_repo_access(org: str, team: str, repo: str, permission: str) -> b
 # owner hand-granting each new repo.
 COURSE_TEAM_ACCESS = {"instructors": "push", "course-admin": "admin"}
 
+# Faculty access to a repo they should READ but not edit: the RELEASED copy of materials,
+# and a student's gradebook. Both have a source of truth elsewhere, so a hand edit here is
+# not durable and looks like one that stuck:
+#   - a re-release copies over the released copy (`copytree(dirs_exist_ok=True)`), so a
+#     correction belongs in the course org's materials repo, then re-release
+#   - `distribute` rewrites a gradebook's grades.yml from
+#     `classroom-config/grades/<slug>.csv`, so a mark belongs in that CSV
+# Submission repos keep COURSE_TEAM_ACCESS above: marking is editing, and feedback commits
+# are the point. `course-admin` stays admin either way - it is the cohort's owner of last
+# resort, and read access cannot fix a broken repo.
+FACULTY_READ_ACCESS = {"instructors": "pull", "course-admin": "admin"}
+
+# GitHub's repo permissions, weakest first. Used to compare a live grant against the floor
+# below rather than overwrite it: a repo deliberately granted higher must not be demoted by
+# a sweep whose job is to guarantee a MINIMUM.
+_PERM_RANK = {"pull": 1, "triage": 2, "push": 3, "maintain": 4, "admin": 5}
+
 
 def grant_course_team_access(org: str, repo: str) -> None:
     """Give the course-org faculty teams their standing access to `repo` (COURSE_TEAM_ACCESS)."""
     for team, perm in COURSE_TEAM_ACCESS.items():
+        grant_team_repo_access(org, team, repo, perm)
+
+
+def grant_faculty_read_access(org: str, repo: str) -> None:
+    """Give the faculty teams read on `repo` (FACULTY_READ_ACCESS) - for a repo whose source
+    of truth is elsewhere, so an edit made here would be overwritten."""
+    for team, perm in FACULTY_READ_ACCESS.items():
         grant_team_repo_access(org, team, repo, perm)
 
 
@@ -688,6 +712,75 @@ SUPERSEDED_COHORT_DESCRIPTIONS = {
 SUPERSEDED_COURSE_DESCRIPTIONS = {
     "Org profile and configuration": "[control panel]: Org profile & configuration",
 }
+
+
+def team_repo_access(org: str, team: str) -> dict[str, str]:
+    """`{repo name: permission}` for every repo `team` already holds - ONE paginated read.
+
+    `{}` when the team does not exist (a 404): an org can be swept before its teams are
+    created, and the next sweep picks it up. Any OTHER failure RAISES, on the same rule as
+    every other listing here - swallowed, an unreadable team reads as "holds nothing" and
+    the caller re-grants every repo in the org."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"orgs/{org}/teams/{team}/repos",
+        "--jq",
+        ".[] | [.name, .role_name] | @tsv",
+    )
+    if code != 0:
+        if is_missing_resource(out):
+            return {}
+        raise RuntimeError(f"could not read {org}/{team}'s repos: {out[:200]}")
+    entries = (line.split("\t") for line in out.splitlines() if "\t" in line)
+    return {name: perm for name, perm in entries}
+
+
+def converge_faculty_access(org: str, repos: list[dict]) -> int:
+    """Give the faculty teams their standing COURSE_TEAM_ACCESS on every repo that lacks it.
+
+    A repo's team grants, like its description, are only ever set when the repo is created -
+    so the sites that create repos cannot be the whole story. A repo kind that predates a
+    grant, or an org bootstrapped before one existed, keeps whatever it started with
+    forever. This is the convergence path, and it is why released content, submission repos
+    and gradebooks could each grant nobody but the student while every creation site looked
+    correct.
+
+    It matters because a cohort org sets `default_repository_permission=none`: a team grant
+    is the WHOLE of a non-owner's access, so a missing one is not a cosmetic drift. Every
+    live faculty member happens to be an org owner, which is the only reason this was
+    invisible.
+
+    A FLOOR (FACULTY_READ_ACCESS), never a level: a repo already granted higher is left
+    exactly as it is. That is what lets this run over every repo in an org without knowing
+    what kind each one is - it never has to decide whether a repo deserves write, only that
+    faculty can open it. The creation sites grant write where writing is the job (a
+    submission repo, the infra repos); this guarantees the minimum everywhere else, so a
+    repo kind nobody has written yet cannot be forgotten.
+
+    Costs one read per team plus a PUT per genuinely-missing grant - a converged org is two
+    calls, not two per repo.
+
+    Never fatal: access is repaired on the next sweep, and a failed PUT is worth a line
+    rather than a failed refresh. Returns the number changed."""
+    changed = 0
+    for team, floor in FACULTY_READ_ACCESS.items():
+        try:
+            have = team_repo_access(org, team)
+        except RuntimeError as exc:
+            log(f"  ({exc})")
+            continue
+        for repo in repos:
+            name = repo["name"]
+            current = _PERM_RANK.get(have.get(name, ""), 0)
+            if current >= _PERM_RANK[floor]:
+                continue
+            if grant_team_repo_access(org, team, name, floor):
+                log_ok(f"{team} -> {floor} on {name}")
+                changed += 1
+            else:
+                log(f"  ({name}: could not grant {team} {floor})")
+    return changed
 
 
 def converge_descriptions(org: str, repos: list[dict], cohort: bool = False) -> int:

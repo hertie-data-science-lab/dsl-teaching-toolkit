@@ -32,6 +32,7 @@ from .discovery import (
 )
 from .utils import (
     converge_descriptions,
+    converge_faculty_access,
     get_file_content,
     load_yaml_config,
     log,
@@ -406,6 +407,11 @@ def update_profile_readme(
     # from it - so this is the one place that can fix a reworded description without
     # paying a read for it, and the corrected text reaches the page in the same run.
     converge_descriptions(org, repos, cohort=is_cohort)
+    # And the faculty teams' standing access, off the same listing and for the same reason:
+    # a team grant is set at repo creation and never revisited, so every repo kind added
+    # since a grant existed keeps whatever it started with. In a cohort org that is the
+    # whole of a non-owner instructor's access (default_repository_permission=none).
+    converge_faculty_access(org, repos)
     cohorts = None if is_cohort else discover_cohorts(org)
     body = render_profile_readme(org, org_name, course_name, repos, is_cohort, cohorts)
     if is_cohort:

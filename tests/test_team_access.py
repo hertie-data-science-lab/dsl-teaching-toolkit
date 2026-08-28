@@ -8,6 +8,8 @@ roster/schedule or triage onboarding issues."""
 
 from __future__ import annotations
 
+import pytest
+
 from dsl_course import bootstrap_course, scaffold, utils
 
 
@@ -82,29 +84,102 @@ def test_cohort_setup_grants_faculty_access_even_when_nothing_is_seeded(monkeypa
     assert granted == ["Course-f2026"]
 
 
-def test_faculty_teams_are_granted_on_every_cohort_repo_kind():
+def test_every_cohort_repo_kind_grants_faculty_at_the_right_level():
     # A cohort org sets default_repository_permission=none, so a team grant is the WHOLE of
     # a non-owner's access. Released content, submission repos and gradebooks each granted
     # only students - so an instructor who was not an org OWNER could not read the material
     # they released, open the work they had to mark, or see the grades they returned. Every
     # live faculty member happens to be an owner, which is why nothing broke.
+    #
+    # WRITE only where writing is the job. A released repo and a gradebook both have their
+    # source of truth elsewhere (the course org's materials; grades/<slug>.csv), and both
+    # are overwritten wholesale by the next release / distribute - so write there would
+    # invite an edit that silently vanishes.
     import inspect
 
     from dsl_course import assign, deploy, grades
 
-    for mod, what in (
-        (deploy, "released content"),
-        (assign, "submission repos"),
-        (grades, "gradebooks"),
+    for mod, call, what in (
+        (assign, "grant_course_team_access", "marking is editing"),
+        (deploy, "grant_faculty_read_access", "a re-release copies over it"),
+        (grades, "grant_faculty_read_access", "distribute rewrites grades.yml"),
     ):
         src = inspect.getsource(mod)
-        assert "grant_course_team_access(cohort_org, repo)" in src, (
-            f"{what} ({mod.__name__}) grants no faculty team - a non-owner instructor "
-            "cannot open it"
+        assert f"{call}(cohort_org, repo)" in src, (
+            f"{mod.__name__} must grant faculty via {call} - {what}"
         )
 
 
-def test_the_faculty_grant_is_one_pair_everywhere():
-    # welcome, classroom-config, .github and now every other cohort repo use the SAME pair,
-    # so "who are faculty here" has one answer rather than one per repo kind.
+def test_the_two_faculty_levels_differ_only_in_the_instructors_grant():
+    # course-admin is the cohort's owner of last resort either way: read access cannot fix
+    # a broken repo. The distinction is whether an INSTRUCTOR should be editing.
     assert utils.COURSE_TEAM_ACCESS == {"instructors": "push", "course-admin": "admin"}
+    assert utils.FACULTY_READ_ACCESS == {"instructors": "pull", "course-admin": "admin"}
+
+
+def test_the_faculty_sweep_asserts_a_floor_and_never_demotes(monkeypatch):
+    # One read per team, then a PUT only where faculty cannot open the repo at all - so a
+    # converged org costs two calls a night, not two per repo. A FLOOR, not a level: a repo
+    # deliberately granted higher (a submission repo, at push) must survive a sweep whose
+    # job is only to guarantee a minimum. That is what lets this run over every repo in an
+    # org without having to decide what kind each one is.
+    listings = {
+        "instructors": "materials\tpull\nassignment-1-ada\tpush\n",
+        "course-admin": "materials\tadmin\nassignment-1-ada\tadmin\n",
+    }
+    granted = []
+
+    def fake_gh(*args, **kwargs):
+        for team, out in listings.items():
+            if any(f"teams/{team}/repos" in a for a in args):
+                return 0, out
+        return 0, ""
+
+    monkeypatch.setattr(utils, "gh", fake_gh)
+    monkeypatch.setattr(utils, "log", lambda *a, **k: None)
+    monkeypatch.setattr(utils, "log_ok", lambda *a, **k: None)
+    monkeypatch.setattr(
+        utils,
+        "grant_team_repo_access",
+        lambda org, team, repo, perm: granted.append((team, repo, perm)) or True,
+    )
+    repos = [
+        {"name": "materials"},
+        {"name": "assignment-1-ada"},
+        {"name": "grades-ada"},
+    ]
+    changed = utils.converge_faculty_access("Cohort-f2026", repos)
+    assert changed == 2  # the gradebook only, for both teams
+    assert ("instructors", "grades-ada", "pull") in granted
+    assert ("course-admin", "grades-ada", "admin") in granted
+    # already at the floor -> no request
+    assert not any(r == "materials" for _, r, _ in granted)
+    # already ABOVE the floor -> not demoted to pull
+    assert not any(r == "assignment-1-ada" for _, r, _ in granted)
+
+
+def test_an_absent_team_is_skipped_and_an_unreadable_one_raises(monkeypatch):
+    # An org can be swept before its teams exist (the next sweep picks it up), but an
+    # unreadable team must NOT read as "holds nothing" - that would re-grant every repo in
+    # the org on a rate limit.
+    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    assert utils.team_repo_access("Org", "instructors") == {}
+    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: rate limited (HTTP 403)"))
+    with pytest.raises(RuntimeError):
+        utils.team_repo_access("Org", "instructors")
+
+
+def test_the_group_assignment_path_also_grants_faculty():
+    # The group arm RETURNS inside itself, so a call placed after the group/individual
+    # split reached individual assignments only - every team project repo would have gone
+    # on granting nobody but the team.
+    import inspect
+
+    from dsl_course import assign
+
+    src = inspect.getsource(assign)
+    grant = src.index("grant_course_team_access(cohort_org, repo)")
+    split = src.index("if team is not None:")
+    assert grant < split, (
+        "the faculty grant must precede the group/individual split, or group repos miss it"
+    )

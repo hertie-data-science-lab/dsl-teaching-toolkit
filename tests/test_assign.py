@@ -150,6 +150,7 @@ def test_a_failed_solution_push_reaches_the_returned_status(tmp_path, monkeypatc
     monkeypatch.setattr(assign, "grant_course_team_access", lambda *a, **k: None)
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_course_team_access", lambda *a, **k: None)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
     individual = assign.provision_one(
         "C", "t", "COHORT", "r", ["ada"], "assignment-1", sol_dir=tmp_path
@@ -308,6 +309,7 @@ def test_a_group_repo_reports_the_teams_own_failures(_provisioned, monkeypatch):
     # ensure_team's result used to be discarded, so a team that couldn't take its members
     # (they see nothing - access is via the team) still reported "ok".
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_course_team_access", lambda *a, **k: None)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: False)
     status = assign.provision_one(
         "COURSE",

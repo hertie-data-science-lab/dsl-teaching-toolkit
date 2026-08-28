@@ -256,6 +256,12 @@ def provision_one(
             log_err("  ! could not push solution")
             solution_failed = True
 
+    # Before the group/individual split, because the group arm RETURNS inside itself: a
+    # call after it reaches individual assignments only, and every team project repo would
+    # have gone on granting nobody but the team. Marking a submission means reading it, and
+    # this repo used to grant no faculty at all - so an instructor who was not an org OWNER
+    # could not open the work they had to mark.
+    grant_course_team_access(cohort_org, repo)
     if team is not None:
         # Group: materialise the team from its members and grant it on the repo, so
         # post-sync membership edits propagate to access (vs. one-off collaborator grants).
@@ -278,11 +284,6 @@ def provision_one(
     # (see the module docstring - groups are the team-based path), and onboarding normally
     # accepts the org invite first, so this stays a direct grant; the group path already
     # routes access through the team to avoid the wedge.
-    # Faculty first, and separately from the student grants below: marking a submission
-    # means reading it, and this repo used to grant nobody but the student - so an
-    # instructor who was not an org OWNER could not open the work they had to mark. The
-    # same COURSE_TEAM_ACCESS pair that holds welcome and classroom-config.
-    grant_course_team_access(cohort_org, repo)
     added = 0
     for handle in handles:
         if add_collaborator(cohort_org, repo, handle, permission="maintain"):

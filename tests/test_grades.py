@@ -357,7 +357,7 @@ def test_a_gradebook_the_student_cannot_open_is_a_failure(monkeypatch):
     # The old "created-no-collaborator" status doesn't start with "failed", so sync's exit
     # predicate ignored it: a student with no read on their own gradebook, reported green.
     monkeypatch.setattr(grades, "repo_exists", lambda org, repo: True)
-    monkeypatch.setattr(grades, "grant_course_team_access", lambda *a, **k: None)
+    monkeypatch.setattr(grades, "grant_faculty_read_access", lambda *a, **k: None)
     monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: False)
     assert grades.provision_one("COHORT", "ada-l").startswith("failed")
 

@@ -41,7 +41,7 @@ from .utils import (
     create_repo,
     gh,
     git,
-    grant_course_team_access,
+    grant_faculty_read_access,
     grant_read_teams,
     is_untouched_stub,
     log,
@@ -202,12 +202,10 @@ def deploy_many(
                 description="Released lectures, labs, readings, & other materials",
             )
             grant_read_teams(cohort_org, repo)
-            # And the faculty teams, which this used to leave out entirely: an instructor
-            # could not open the repo they had just released into unless they happened to
-            # be an org OWNER. Every live faculty member is one, which is why nothing broke
-            # - but the cohort org sets default_repository_permission=none, so team grants
-            # are the whole of a non-owner's access.
-            grant_course_team_access(cohort_org, repo)
+            # Read, not write: this is the RELEASED copy, and a re-release copies over it
+            # (`copytree(dirs_exist_ok=True)`), so an edit made here would vanish. A
+            # correction belongs in the course org's materials repo, then re-release.
+            grant_faculty_read_access(cohort_org, repo)
             dd = root / "out" / repo
             if gh("repo", "clone", f"{cohort_org}/{repo}", str(dd), "--", "-q")[0] != 0:
                 log_err(f"could not clone dest {cohort_org}/{repo}")
