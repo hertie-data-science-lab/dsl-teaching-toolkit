@@ -507,10 +507,20 @@ def provision_all(
         for team, members in sorted(groups.items()):
             vetted, rejected = sync_teams.vet_handles(members, allowed_by_fold)
             for m in rejected:
-                log_err(
-                    f"{m} in teams.csv ({key}/{team}) is not an enrolled, onboarded "
+                # Names a handle a STUDENT typed into teams.csv, and this workflow's log is
+                # world-readable - so the handle is verbose-only and the actionable line
+                # below names nobody. Same split as sync_teams' own rejection log.
+                log_verbose(
+                    f"    {m} in teams.csv ({key}/{team}) is not an enrolled, onboarded "
                     f"roster handle - excluding it (would invite an arbitrary account "
                     f"into {cohort_org})"
+                )
+            if rejected:
+                log_err(
+                    f"{len(rejected)} handle(s) in teams.csv ({key}/{team}) are not "
+                    f"enrolled, onboarded roster handles - excluded (they would invite "
+                    f"arbitrary accounts into {cohort_org}). Re-run the CLI locally with "
+                    f"DSL_VERBOSE=1 to see which."
                 )
             units.append((f"{slug}-{team}", vetted, sync_teams.team_slug(key, team)))
         what = f"{len(units)} team(s)"

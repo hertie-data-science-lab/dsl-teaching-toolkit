@@ -463,10 +463,39 @@ def test_group_provisioning_filters_teams_csv_through_the_roster_allowlist(
     )
     captured = capsys.readouterr()
     assert rc == 0
+    # The DRY-RUN provisioning lines name their members as `@handle`.
     assert "@ada-l" in captured.out  # the one valid, enrolled, onboarded handle
-    assert "stranger-x" not in captured.out  # never provisioned
-    assert "eve-e" not in captured.out  # the auditor's handle is not a team member
-    assert "stranger-x" in captured.err and "Eve-E" in captured.err  # both warned
+    assert "@stranger-x" not in captured.out  # never provisioned
+    assert "@eve-e" not in captured.out  # the auditor's handle is not a team member
+    # Both rejections are reported - but the HANDLES a student typed go to the verbose
+    # channel (this workflow's log is world-readable) and the actionable error is a count.
+    assert "stranger-x" in captured.out and "Eve-E" in captured.out
+    assert "2 handle(s) in teams.csv" in captured.err
+    assert "stranger-x" not in captured.err and "Eve-E" not in captured.err
+
+
+def test_a_rejected_teams_csv_handle_is_not_published_in_the_workflow_log(
+    tmp_path, capsys, monkeypatch
+):
+    # No rendered workflow sets DSL_VERBOSE, so this is what a course org's PUBLIC Actions
+    # log actually shows: a count a faculty member can act on, and no student's typing.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    monkeypatch.setattr(
+        "dsl_course.assign.assignment_is_group", lambda org, cohort, template: True
+    )
+    monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {"unused": {}})
+    monkeypatch.setattr(
+        assign.teams,
+        "teams_for",
+        lambda rows, slug: {"team-1": ["ada-l", "stranger-x"]},
+    )
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    assign.provision_all(
+        "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path, dry_run=True
+    )
+    captured = capsys.readouterr()
+    assert "1 handle(s) in teams.csv" in captured.err
+    assert "stranger-x" not in captured.err + captured.out
 
 
 # ------------------------------------------------ half-created cohort template healing
