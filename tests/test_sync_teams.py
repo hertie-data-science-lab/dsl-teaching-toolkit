@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import roster, sync_teams, utils
+from dsl_course import gh_teams, roster, sync_teams
 
 
 def test_team_slug_is_assignment_prefixed_and_lowercased():
@@ -56,21 +56,21 @@ def stub_team(monkeypatch):
     calls = {"added": [], "removed": []}
     monkeypatch.setattr(sync_teams, "create_team", lambda *a, **k: True)
     monkeypatch.setattr(
-        utils,
+        gh_teams,
         "get_team_members",
         lambda org, team: {"anna-adams", "hertie-dsl-bot", "henrycgbaker", "zoe-zed"},
     )
-    monkeypatch.setattr(utils, "_acting_login", lambda: "hertie-dsl-bot")
+    monkeypatch.setattr(gh_teams, "_acting_login", lambda: "hertie-dsl-bot")
     monkeypatch.setattr(
-        utils, "get_org_owners", lambda org: frozenset({"henrycgbaker"})
+        gh_teams, "get_org_owners", lambda org: frozenset({"henrycgbaker"})
     )
     monkeypatch.setattr(
-        utils,
+        gh_teams,
         "add_team_member",
         lambda org, team, h, role="member": calls["added"].append(h) or True,
     )
     monkeypatch.setattr(
-        utils,
+        gh_teams,
         "remove_team_member",
         lambda org, team, h: calls["removed"].append(h) or True,
     )

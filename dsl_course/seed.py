@@ -46,17 +46,11 @@ from .discovery import (
     discover_content_repos,
     unregister_cohort,
 )
+from .gh_contents import get_file_content, put_file, put_files, refresh_stubs
 from .ghcli import gh
 from .log import log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
-from .utils import (
-    get_file_content,
-    org_exists,
-    put_file,
-    put_files,
-    refresh_stubs,
-    repo_is_archived,
-)
+from .repos import org_exists, repo_is_archived
 from .welcome import (
     refresh_classroom_samples,
     refresh_classroom_system_files,
@@ -332,7 +326,7 @@ def _refresh_stubs(course_org: str, repo: str) -> int:
     scaffolded a month ago kept whatever the toolkit first shipped and every later
     improvement reached new repos only. They now carry a mark, so a stub can be refreshed
     while it is still ours and is never touched once faculty write over it
-    (`utils.refresh_stubs`).
+    (`gh_contents.refresh_stubs`).
 
     `create=False` is the whole reason this is safe to run over EVERY content repo:
     `discover_content_repos` returns the code and dataset repos too, and seeding a syllabus

@@ -28,8 +28,8 @@ import io
 from dataclasses import dataclass
 
 from .course import CONFIG_REPO
+from .gh_contents import get_file_content, require_csv_header, strip_bom
 from .log import log_err
-from .utils import get_file_content, require_csv_header, strip_bom
 
 ROSTER_PATH = "students.csv"
 ROLE_ENROLLED = "enrolled"

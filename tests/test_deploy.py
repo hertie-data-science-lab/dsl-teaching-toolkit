@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import access, course, deploy, utils
+from dsl_course import access, course, deploy, repos
 
 
 def test_a_single_path_with_no_comma_still_works():
@@ -288,18 +288,18 @@ SUPERSEDED = "Released course materials (enrolled students only)"
 CURRENT = "Released lectures, labs, readings, & other materials"
 
 
-def _converge(monkeypatch, repos):
-    """The PATCH calls converge_descriptions makes over `repos`, and the mutated listing."""
+def _converge(monkeypatch, listing):
+    """The PATCH calls converge_descriptions makes over `listing`, and the mutated listing."""
     calls = []
 
     def fake_gh(*args, **kwargs):
         calls.append(args)
         return (0, "")
 
-    monkeypatch.setattr(utils, "gh", fake_gh)
-    monkeypatch.setattr(utils, "log", lambda *a, **k: None)
-    monkeypatch.setattr(utils, "log_ok", lambda *a, **k: None)
-    changed = utils.converge_descriptions("Org", repos)
+    monkeypatch.setattr(repos, "gh", fake_gh)
+    monkeypatch.setattr(repos, "log", lambda *a, **k: None)
+    monkeypatch.setattr(repos, "log_ok", lambda *a, **k: None)
+    changed = repos.converge_descriptions("Org", listing)
     return [a for a in calls if "--method" in a and "PATCH" in a], changed
 
 
@@ -334,7 +334,7 @@ def test_every_superseded_description_names_a_replacement_we_still_write(monkeyp
 
     literals = set()
     for mod in ("bootstrap_course", "deploy", "scaffold", "grades", "assign"):
-        tree = ast.parse((Path(utils.__file__).parent / f"{mod}.py").read_text())
+        tree = ast.parse((Path(deploy.__file__).parent / f"{mod}.py").read_text())
         literals |= {
             n.value
             for n in ast.walk(tree)
@@ -342,9 +342,9 @@ def test_every_superseded_description_names_a_replacement_we_still_write(monkeyp
             if isinstance(n.value, str)
         }
     for table in (
-        utils.SUPERSEDED_DESCRIPTIONS,
-        utils.SUPERSEDED_COHORT_DESCRIPTIONS,
-        utils.SUPERSEDED_COURSE_DESCRIPTIONS,
+        repos.SUPERSEDED_DESCRIPTIONS,
+        repos.SUPERSEDED_COHORT_DESCRIPTIONS,
+        repos.SUPERSEDED_COURSE_DESCRIPTIONS,
     ):
         for old, new in table.items():
             assert new in literals, f"{new!r} is not written anywhere any more"
@@ -357,22 +357,22 @@ def test_the_dotgithub_description_says_the_opposite_thing_per_tier():
     # A cohort org's .github is scaffolding nobody should open; a course org's is where
     # faculty work. Converging both onto one wording would tell half of them the wrong
     # thing, which is why the tier picks the table.
-    repos = [{"name": ".github", "description": "Org profile and configuration"}]
+    listing = [{"name": ".github", "description": "Org profile and configuration"}]
     calls = []
-    original = utils.gh
+    original = repos.gh
 
     def fake(*args, **kwargs):
         calls.append(args)
         return 0, ""
 
-    utils.gh = fake
+    repos.gh = fake
     try:
-        cohort = [dict(r) for r in repos]
-        utils.converge_descriptions("Cohort-f2026", cohort, cohort=True)
-        course = [dict(r) for r in repos]
-        utils.converge_descriptions("Course", course, cohort=False)
+        cohort = [dict(r) for r in listing]
+        repos.converge_descriptions("Cohort-f2026", cohort, cohort=True)
+        course = [dict(r) for r in listing]
+        repos.converge_descriptions("Course", course, cohort=False)
     finally:
-        utils.gh = original
+        repos.gh = original
     assert cohort[0]["description"] == "[do not touch]: Org profile and configuration"
     assert course[0]["description"] == "[control panel]: Org profile & configuration"
 

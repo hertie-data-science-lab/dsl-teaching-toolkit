@@ -55,9 +55,9 @@ from .collect import (
 )
 from .deploy import deploy_many
 from .log import log, log_err, log_ok, log_step
+from .repos import repo_exists
 from .schedule import Deploy, Release
 from .seed import discover_cohorts
-from .utils import repo_exists
 
 # --------------------------------------------------------------------------- pure core
 

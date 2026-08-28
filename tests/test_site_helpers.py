@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
-from dsl_course import site, utils
+from dsl_course import gh_contents, repos, site
 
 
 def test_semester_label():
@@ -265,7 +265,7 @@ def test_session_files_lists_nested_files_by_path(monkeypatch):
     # release.py copytrees a session folder wholesale, so nested files ARE released -
     # a non-recursive listing dropped them from the site entirely.
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", _tree_gh)
+    monkeypatch.setattr(gh_contents, "gh", _tree_gh)
     pairs = site._session_files("Cohort-f2026", "materials", "lectures", "03_week-3")
     assert [n for n, _ in pairs] == [
         "handouts/deep/further.md",  # sorted by path, so nested first
@@ -282,7 +282,7 @@ def test_session_files_lists_nested_files_by_path(monkeypatch):
 
 def test_session_files_root_shape_and_other_sessions_excluded(monkeypatch):
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", _tree_gh)
+    monkeypatch.setattr(gh_contents, "gh", _tree_gh)
     # subpath="" - the release landed at the repo root (default destination)
     assert site._session_files("Cohort-f2026", "lectures", "", "01_intro") == [
         (
@@ -302,7 +302,7 @@ def test_repo_tree_is_fetched_once_per_repo(monkeypatch):
         return (0, _TREE)
 
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", counting_gh)
+    monkeypatch.setattr(gh_contents, "gh", counting_gh)
     for folder in ("03_week-3", "04_week-4", "03_week-30"):
         assert site._session_files("Cohort-f2026", "materials", "lectures", folder)
     assert len(calls) == 1
@@ -311,7 +311,9 @@ def test_repo_tree_is_fetched_once_per_repo(monkeypatch):
 def test_session_files_absent_repo_is_empty(monkeypatch):
     # A genuine 404 (repo/tree absent) is empty - gh's real wording, case included.
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    monkeypatch.setattr(
+        gh_contents, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)")
+    )
     assert site._session_files("Cohort-f2026", "materials", "lectures", "03_x") == []
 
 
@@ -319,7 +321,9 @@ def test_session_files_real_failure_raises(monkeypatch):
     # A non-404 failure must NOT be read as "no files" (which republishes the site with
     # every material link stripped) - it raises instead.
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: HTTP 500 Server Error"))
+    monkeypatch.setattr(
+        gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 500 Server Error")
+    )
     with pytest.raises(RuntimeError, match="could not read the file tree"):
         site._session_files("Cohort-f2026", "materials", "lectures", "03_x")
 
@@ -990,9 +994,9 @@ def test_a_denylisted_file_is_never_linked_from_a_public_page(tmp_path):
 
 
 def test_the_denylist_matches_by_name_at_any_depth_and_ignores_case():
-    assert utils.has_denied_component("labs/01_lab/Solution/answers.ipynb")
-    assert utils.has_denied_component("tests/test_x.py")
-    assert utils.has_denied_component("a/.env.local")
+    assert repos.has_denied_component("labs/01_lab/Solution/answers.ipynb")
+    assert repos.has_denied_component("tests/test_x.py")
+    assert repos.has_denied_component("a/.env.local")
     # ...and does not swallow a file that merely contains a denylisted word.
-    assert not utils.has_denied_component("labs/01_lab/solutions-discussion.md")
-    assert not utils.has_denied_component("labs/testing-guide.md")
+    assert not repos.has_denied_component("labs/01_lab/solutions-discussion.md")
+    assert not repos.has_denied_component("labs/testing-guide.md")

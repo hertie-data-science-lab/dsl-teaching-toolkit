@@ -38,7 +38,7 @@ def _no_live_gh(monkeypatch):
         if cmd and cmd[0] == "gh" and "--help" not in cmd:
             raise AssertionError(
                 f"live `{' '.join(map(str, cmd[:3]))}` from a test - stub what the code "
-                "under test reads (site._repo_tree, utils.get_file_content, ...) instead."
+                "under test reads (site._repo_tree, gh_contents.get_file_content, ...) instead."
             )
         return real_run(cmd, *args, **kwargs)
 

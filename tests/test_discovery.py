@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from dsl_course import course, discovery, utils
+from dsl_course import course, discovery, gh_contents
 
 INFRA_AND_CONTENT = [
     {"name": ".github", "topics": []},
@@ -214,7 +214,7 @@ def test_repo_tree_dirs_reads_an_absent_or_empty_repo_as_no_directories(monkeypa
     # "no session folders" - a brand-new cohort repo is not a failure.
     monkeypatch.setattr(discovery, "get_default_branch", lambda org, repo: "main")
     for out in ("gh: Not Found (HTTP 404)", "gh: Conflict (HTTP 409)"):
-        monkeypatch.setattr(utils, "gh", lambda *a, out=out, **k: (1, out))
+        monkeypatch.setattr(gh_contents, "gh", lambda *a, out=out, **k: (1, out))
         assert discovery._repo_tree_dirs("Cohort-f2026", "materials") == ()
 
 
@@ -225,7 +225,9 @@ def test_repo_tree_dirs_raises_rather_than_reporting_a_repo_with_no_sessions(
     # and rewrites the collections from them - so a rate-limited tree fetch swallowed as
     # `[]` republished the site with every session row deleted, silently and green.
     monkeypatch.setattr(discovery, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: HTTP 502 Bad Gateway"))
+    monkeypatch.setattr(
+        gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 502 Bad Gateway")
+    )
     with pytest.raises(RuntimeError, match="could not read the file tree"):
         discovery.discover_release_sources("Cohort-f2026", ["materials"])
 
@@ -243,7 +245,7 @@ def test_both_transports_share_one_tree_fetch(monkeypatch):
 
     monkeypatch.setattr(discovery, "get_default_branch", lambda org, repo: "main")
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", fake_gh)
+    monkeypatch.setattr(gh_contents, "gh", fake_gh)
     discovery._repo_tree_dirs("Cohort-f2026", "materials")
     site._repo_tree("Cohort-f2026", "materials")
     assert [a[-1] for a in calls] == [

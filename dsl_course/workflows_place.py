@@ -7,8 +7,8 @@ each other for this one function. Nothing else here depends on either.
 
 from __future__ import annotations
 
+from .gh_contents import put_files
 from .log import log_err, log_ok
-from .utils import put_files
 from .workflows_render import render_provision, render_release, system_owned
 
 # The run-from-repo workflows push_content_workflows places in every content repo.

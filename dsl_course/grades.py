@@ -44,18 +44,15 @@ from . import mailer, roster
 from .access import grant_faculty_read_access
 from .course import CONFIG_REPO, GRADEBOOK_PREFIX
 from .discovery import course_name_for_cohort
+from .gh_contents import get_file_content, put_file, require_csv_header, strip_bom
 from .ghcli import GIT_ENV, gh, git
 from .log import log, log_err, log_ok, log_step, log_verbose
-from .utils import (
+from .repos import (
     add_collaborator,
     create_repo,
     get_default_branch,
-    get_file_content,
-    put_file,
     repo_exists,
-    require_csv_header,
     set_repo_topics,
-    strip_bom,
 )
 
 GRADES_DIR = "grades"  # faculty-edited source tables, one CSV per assignment

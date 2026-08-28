@@ -79,8 +79,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import yaml
 
 from .course import CONFIG_REPO, coerce_date
+from .gh_contents import get_file_content, put_file, repo_tree
 from .log import log, log_err
-from .utils import default_branch, get_file_content, put_file, repo_exists, repo_tree
+from .repos import default_branch, repo_exists
 
 SCHEDULE_PATH = "schedule.yml"
 DEFAULT_TZ = "Europe/Berlin"

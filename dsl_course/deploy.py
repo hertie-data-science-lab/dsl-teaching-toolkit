@@ -39,10 +39,11 @@ from .course import (
     SYLLABUS_SAMPLE_FILE,
     SYLLABUS_SESSIONS_FILE,
 )
+from .gh_contents import is_untouched_stub
 from .ghcli import GIT_ENV, gh, git
 from .log import log, log_err, log_ok, log_step
+from .repos import create_repo
 from .schedule import Deploy
-from .utils import create_repo, is_untouched_stub
 
 _GIT_ENV = GIT_ENV
 
@@ -56,7 +57,7 @@ NEVER_COPIED = frozenset({".git"})
 # MAINTAINING.md is the maintainer guide, the syllabus sample is the filled example faculty
 # copy from, and the sessions block is what the Generate syllabus workflow builds for them to
 # paste. Each is written by this toolkit describing itself as never released, so each is
-# named here - and named FROM `utils`, not re-spelled, so the exclusion cannot lapse the
+# named here - and named FROM `course`, not re-spelled, so the exclusion cannot lapse the
 # next time one is renamed. Naming any of these paths explicitly still releases it: that is
 # what "give me everything" means, not a ban.
 ROOT_RELEASE_EXCLUDED = frozenset(

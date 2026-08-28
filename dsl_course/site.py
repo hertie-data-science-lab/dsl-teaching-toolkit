@@ -65,19 +65,17 @@ from .discovery import (
     discover_sessions,
     list_org_repos,
 )
+from .gh_contents import get_file_content, load_yaml_config, repo_tree
+from .gh_teams import _acting_login
 from .ghcli import GIT_ENV, gh, git, is_missing_resource
 from .log import log, log_err, log_ok, log_step
-from .utils import (
-    READING_OVERLAY_NAMES,
-    _acting_login,
+from .readings import READING_OVERLAY_NAMES
+from .repos import (
     get_default_branch,
-    get_file_content,
     has_denied_component,
     is_denied_publication,
-    load_yaml_config,
     repo_exists,
     repo_is_archived,
-    repo_tree,
 )
 
 # Public course site: served folder for the hosted section files.
@@ -93,7 +91,7 @@ PUBLIC_MATERIALS_DIR = "public-materials"
 # So: one filename is the overlay; everything else in the folder is a file, whatever it is.
 # The overlay is optional - a session with only PDFs needs nothing written - and additive: it
 # renders ABOVE the file list, never instead of it (see `_readings_block`).
-# `READING_OVERLAY_NAMES` lives in utils, beside the other generated faculty-side filenames,
+# `READING_OVERLAY_NAMES` lives in `readings`, beside the overlay's other filenames,
 # because `scaffold` seeds the file and this module and `syllabus` match on it. Its name
 # equals `READINGS_SECTION` below by coincidence - a file stem and a folder name - not by
 # derivation.
@@ -750,7 +748,7 @@ def _repo_tree(org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     Unbounded cache: this is a one-shot CLI process, and the trees it reads are the
     handful of repos one cohort released into.
 
-    The fetch itself is utils.repo_tree (shared with discovery's directory-side twin, so
+    The fetch itself is gh_contents.repo_tree (shared with discovery's directory-side twin, so
     the absent-vs-failed discrimination is written once): a genuinely absent/empty tree is
     `()` and the caller simply finds no files, while any other failure RAISES rather than
     reporting an empty tree - swallowed, it republished the site with every material link
@@ -833,7 +831,7 @@ def _is_reading_overlay(name: str) -> bool:
     """Is this path a session's optional prose reading list (`READINGS.md`, `.txt`, `.bib`)?
 
     The ONE test that decides prose-vs-file for a readings folder, by NAME rather than by
-    extension - see `READING_OVERLAY_NAMES` in utils for why that distinction is the whole point.
+    extension - see `READING_OVERLAY_NAMES` in `readings` for why that distinction is the whole point.
     Takes a path or a bare name; only the last segment is read, so it works on the repo-tree
     paths, the release-relative names and the local filenames its callers each hold."""
     return name.rsplit("/", 1)[-1].lower() in READING_OVERLAY_NAMES
@@ -2478,7 +2476,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
 
 def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:
     """A `copytree` ignore filter for the PUBLIC site: drop every denylisted name, at any
-    depth (see utils.PUBLICATION_DENYLIST).
+    depth (see repos.PUBLICATION_DENYLIST).
 
     At any depth, unlike `deploy._copy_ignore`, which anchors its exclusions to the repo
     root: the release path excludes plumbing that only ever lives at the root, while the
@@ -2586,7 +2584,7 @@ def sync_public_site(
     Opt-in: the first run scaffolds the site (Pages), later runs re-sync it. Every run
     records its settings in the site repo (`PUBLISH_CONFIG`) so the daily cron can repeat
     them unattended. Hosts the chosen `course-materials-*` repo's files - every section it
-    actually has (see utils.discover_sections), plus, in `actual-readings` mode, `readings`
+    actually has (see course.discover_sections), plus, in `actual-readings` mode, `readings`
     - in the public site repo and links to them with site-relative URLs. `reading-list` mode
     publishes the citation text only. `include_lectures` toggles the file sections as a
     group (its name predates generic sections; the workflow input is unchanged). Session

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import scaffold, seed, utils
+from dsl_course import gh_contents, scaffold, seed
 
 
 class FakeRepo:
@@ -50,7 +50,7 @@ class FakeRepo:
         meant the stub lifecycle the scaffold actually runs was never the one under test -
         the copy could drift from it silently. Everything it reaches (get_file_content,
         put_files, log_skip) is already faked, so delegating tests the real thing."""
-        return utils.refresh_stubs(*a, **k)
+        return gh_contents.refresh_stubs(*a, **k)
 
     def written(self, repo):
         return {path for r, path in self.writes if r == repo}
@@ -59,16 +59,16 @@ class FakeRepo:
 @pytest.fixture
 def fake(monkeypatch):
     f = FakeRepo()
-    # USER-owned scaffolds go through utils.seed_if_absent / seed_files_if_absent
+    # USER-owned scaffolds go through gh_contents.seed_if_absent / seed_files_if_absent
     # (create-if-absent), which resolve get_file_content / put_file / put_files / log_skip in
-    # the utils namespace; the SYSTEM-owned pair goes through scaffold.put_files directly.
+    # the gh_contents namespace; the SYSTEM-owned pair goes through scaffold.put_files directly.
     # Fake every layer to the same recorder.
-    monkeypatch.setattr(utils, "get_file_content", f.get_file_content)
-    monkeypatch.setattr(utils, "put_file", f.put_file)
-    monkeypatch.setattr(utils, "put_files", f.put_files)
+    monkeypatch.setattr(gh_contents, "get_file_content", f.get_file_content)
+    monkeypatch.setattr(gh_contents, "put_file", f.put_file)
+    monkeypatch.setattr(gh_contents, "put_files", f.put_files)
     monkeypatch.setattr(scaffold, "refresh_stubs", f.refresh_stubs)
     monkeypatch.setattr(scaffold, "put_files", f.put_files)
-    monkeypatch.setattr(utils, "log_skip", lambda msg: f.skips.append(msg))
+    monkeypatch.setattr(gh_contents, "log_skip", lambda msg: f.skips.append(msg))
     monkeypatch.setattr(scaffold, "log_skip", lambda msg: f.skips.append(msg))
     monkeypatch.setattr(scaffold, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(scaffold, "grant_course_team_access", lambda *a, **k: None)
@@ -156,7 +156,9 @@ def test_materials_repo_reds_when_a_user_file_seed_fails(fake, monkeypatch):
     # A USER-owned skeleton whose write FAILS must red the scaffold: the seed returns False
     # only on a real write failure, and that folds into the exit code (a mere skip of a
     # present file is a success, not a failure).
-    monkeypatch.setattr(utils, "put_files", lambda *a, **k: False)  # USER seeds fail
+    monkeypatch.setattr(
+        gh_contents, "put_files", lambda *a, **k: False
+    )  # USER seeds fail
     monkeypatch.setattr(scaffold, "put_files", lambda *a, **k: True)  # SYSTEM pair ok
     assert scaffold.scaffold_materials("Org", "f2026") == 1
 
@@ -206,7 +208,9 @@ def test_assignment_reds_when_a_starter_seed_fails(fake, monkeypatch):
     # the assignment scaffold, matching scaffold_materials - a half-written template is not
     # a green "ready".
     _clone_ok(monkeypatch, _git_ok)
-    monkeypatch.setattr(utils, "put_file", lambda *a, **k: False)  # USER seeds fail
+    monkeypatch.setattr(
+        gh_contents, "put_file", lambda *a, **k: False
+    )  # USER seeds fail
     assert scaffold.scaffold_assignment("Org", "1", "f2026") == 1
 
 
@@ -360,7 +364,9 @@ def test_every_seeded_stub_carries_the_mark_that_makes_it_refreshable(fake):
     # so the mark is asserted on what the scaffold actually writes.
     assert scaffold.scaffold_materials("Org", "f2026") == 0
     for path in ("SYLLABUS.md", "readings/01_session-1/READINGS.md"):
-        assert utils.STUB_MARK in fake.files[("course-materials-f2026", path)], path
+        assert gh_contents.STUB_MARK in fake.files[("course-materials-f2026", path)], (
+            path
+        )
 
 
 def test_refresh_improves_an_existing_stub_but_never_creates_one(monkeypatch):
@@ -373,10 +379,10 @@ def test_refresh_improves_an_existing_stub_but_never_creates_one(monkeypatch):
     # into `lecture-code-f2026` would be nonsense.
 
     f = FakeRepo()
-    monkeypatch.setattr(utils, "get_file_content", f.get_file_content)
-    monkeypatch.setattr(utils, "put_file", f.put_file)
-    monkeypatch.setattr(utils, "put_files", f.put_files)
-    monkeypatch.setattr(utils, "log_skip", lambda msg: f.skips.append(msg))
+    monkeypatch.setattr(gh_contents, "get_file_content", f.get_file_content)
+    monkeypatch.setattr(gh_contents, "put_file", f.put_file)
+    monkeypatch.setattr(gh_contents, "put_files", f.put_files)
+    monkeypatch.setattr(gh_contents, "log_skip", lambda msg: f.skips.append(msg))
     monkeypatch.setattr(seed, "refresh_stubs", f.refresh_stubs)
     # A materials repo with the stub we used to ship, and a code repo with no stub at all.
     f.files[("course-materials-f2026", "SYLLABUS.md")] = (

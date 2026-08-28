@@ -28,8 +28,8 @@ import sys
 
 from . import mailer, roster
 from .discovery import course_name_for_cohort
+from .gh_contents import get_file_with_sha, put_file, strip_bom
 from .log import log_err, log_ok, log_step
-from .utils import get_file_with_sha, put_file, strip_bom
 
 # No ambiguous characters (0/O, 1/l/I) so a student can read the code off an email.
 _ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"

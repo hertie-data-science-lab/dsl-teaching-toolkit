@@ -42,13 +42,9 @@ from .discovery import (
     discover_cohorts,
     discover_content_repos,
 )
+from .gh_contents import load_yaml_config
+from .gh_teams import create_team, is_valid_github_username, reconcile_team_members
 from .log import log, log_err, log_ok, log_step
-from .utils import (
-    create_team,
-    is_valid_github_username,
-    load_yaml_config,
-    reconcile_team_members,
-)
 
 ROLE_TEAM = {
     "instructors": "instructors",

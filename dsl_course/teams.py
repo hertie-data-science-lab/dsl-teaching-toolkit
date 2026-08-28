@@ -22,7 +22,7 @@ import csv
 import io
 
 from .course import CONFIG_REPO
-from .utils import get_file_content, require_csv_header, strip_bom
+from .gh_contents import get_file_content, require_csv_header, strip_bom
 
 TEAMS_PATH = "teams.csv"
 FIELDS = ("assignment", "team", "github_handle")
