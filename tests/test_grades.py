@@ -538,8 +538,13 @@ def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
 # ---------------- an unsent notification reddens the run (the count is no longer dropped)
 
 
-def _distribute_with(monkeypatch, tmp_path, *, sent):
-    """`distribute` against a local classroom-config clone, pushing to nothing."""
+def _distribute_with(
+    monkeypatch, tmp_path, *, sent, live: str | None = None, outbox: list | None = None
+):
+    """`distribute` against a local classroom-config clone, pushing to nothing.
+
+    `live` is what each student's gradebook repo already holds (None = no file yet);
+    `outbox` collects every batch handed to the mailer."""
     cfg = tmp_path / "cfg"
 
     def fake_gh(*args, **kwargs):
@@ -554,6 +559,13 @@ def _distribute_with(monkeypatch, tmp_path, *, sent):
     (cfg / grades.GRADEBOOK_DIR / "ada-l.yml").write_text("student: ada-l\n")
     monkeypatch.setattr(grades, "gh", fake_gh)
     monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
+    monkeypatch.setattr(
+        grades,
+        "get_file_with_sha",
+        lambda *a, **k: (
+            None if live is None else (live, grades.blob_sha(live.encode()))
+        ),
+    )
     students = roster.parse(
         "hertie_email,name,github_handle,github_id,enrol_code,role\n"
         "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
@@ -561,7 +573,12 @@ def _distribute_with(monkeypatch, tmp_path, *, sent):
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
     monkeypatch.setattr(
-        grades.mailer, "send_bulk", lambda msgs, dry_run=False, sample=None: sent
+        grades.mailer,
+        "send_bulk",
+        lambda msgs, dry_run=False, sample=None: (
+            outbox.append(msgs) if outbox is not None else None,
+            sent,
+        )[1],
     )
     return grades.distribute("COHORT")
 
@@ -578,6 +595,24 @@ def test_distribute_goes_red_when_a_notification_could_not_be_sent(
 
 def test_distribute_stays_green_when_every_notification_lands(tmp_path, monkeypatch):
     assert _distribute_with(monkeypatch, tmp_path, sent=1) == 0
+
+
+def test_distribute_emails_nobody_whose_gradebook_did_not_change(tmp_path, monkeypatch):
+    # put_file returns True for a no-op write (it compares blob shas and skips), so
+    # "pushed" was true for every student whose file already held exactly this. A re-run
+    # after one marker's correction then told the WHOLE cohort their grades had been
+    # updated. Only a gradebook that actually changed is notified.
+    outbox: list = []
+    rc = _distribute_with(
+        monkeypatch, tmp_path, sent=1, live="student: ada-l\n", outbox=outbox
+    )
+    assert rc == 0
+    assert outbox == [], "an unchanged gradebook still emailed its student"
+
+    # ... and a gradebook that DID change is still notified.
+    outbox.clear()
+    assert _distribute_with(monkeypatch, tmp_path / "next", sent=1, outbox=outbox) == 0
+    assert [m[0] for batch in outbox for m in batch] == ["ada@uni.edu"]
 
 
 # ---------------- "nothing new to render" must mean nothing new, not a failed commit

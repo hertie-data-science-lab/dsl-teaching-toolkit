@@ -44,7 +44,14 @@ from . import mailer, roster
 from .access import grant_faculty_read_access
 from .course import CONFIG_REPO, GRADEBOOK_PREFIX
 from .discovery import course_name_for_cohort
-from .gh_contents import get_file_content, put_file, require_csv_header, strip_bom
+from .gh_contents import (
+    blob_sha,
+    get_file_content,
+    get_file_with_sha,
+    put_file,
+    require_csv_header,
+    strip_bom,
+)
 from .ghcli import GIT_ENV, gh, git
 from .log import log, log_err, log_ok, log_step, log_verbose
 from .repos import (
@@ -619,6 +626,8 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
                 continue
             status = _push_gradebook(cohort_org, f.stem, f.read_text())
             results[status] = results.get(status, 0) + 1
+            # `unchanged` deliberately does NOT notify: a re-run after one correction used
+            # to email "your grades have been updated" to every student in the cohort.
             if status == "ok":
                 pushed.append(f.stem)
     if dry_run:
@@ -636,9 +645,30 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
 
 
 def _push_gradebook(cohort_org: str, handle: str, content: str) -> str:
-    """Write grades.yml into grades-<handle>. A missing repo (sync not run) -> failed-push."""
+    """Write grades.yml into grades-<handle>. One of `ok` (the file changed), `unchanged`
+    (it already held exactly this) or `failed-push` (a missing repo - sync not run - or an
+    unreadable one).
+
+    The tri-state is what `distribute` notifies off. `put_file` compares blob shas and
+    skips an identical write, but it returns True either way, so a re-run of Distribute
+    told the WHOLE cohort their grades had been updated whenever a marker had corrected
+    one row. Read the sha here instead - the same single GET put_file would have made -
+    and hand it back as `expected_sha`, which also makes this a safe read-modify-write:
+    a gradebook that moved on between the read and the write is refused, not clobbered."""
     repo = f"{GRADEBOOK_PREFIX}{handle}"
-    if not put_file(cohort_org, repo, "grades.yml", content.encode(), "grades: update"):
+    body = content.encode()
+    try:
+        current = get_file_with_sha(cohort_org, repo, "grades.yml")
+    except RuntimeError as exc:
+        log_err(f"could not read {repo}/grades.yml: {exc}")
+        return "failed-push"
+    if current is not None and current[1] == blob_sha(body):
+        log_verbose(f"  [skip] {repo}/grades.yml unchanged")
+        return "unchanged"
+    sha = current[1] if current is not None else ""
+    if not put_file(
+        cohort_org, repo, "grades.yml", body, "grades: update", expected_sha=sha
+    ):
         return "failed-push"
     log_verbose(f"  [ok] + {repo}/grades.yml")
     return "ok"
