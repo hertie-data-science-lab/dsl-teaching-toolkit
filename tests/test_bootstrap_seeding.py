@@ -53,6 +53,7 @@ WELCOME_SYSTEM_OWNED = {
     ".github/workflows/team-formation.yml",
     ".github/ISSUE_TEMPLATE/01-join-course.yml",
     ".github/ISSUE_TEMPLATE/02-join-team.yml",
+    ".github/ISSUE_TEMPLATE/config.yml",
 }
 
 

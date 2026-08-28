@@ -34,6 +34,10 @@ Live example roster: [`example-course/cohort-org/students.csv`](../example-cours
    - Each student opens a **Join course** issue in the cohort's `welcome` repo and pastes their code.
    - That records their GitHub handle agaist their registered `hertie_email`, and adds them to the org and their role's team (student | auditor).
    - They must accept the org invite before they can see anything.
+   - **Triage `needs-review` issues, then delete them.** A failed Join issue still carries the
+     student's code in its body *history* (the workflow redacts the current body, but GitHub
+     keeps every revision readable). Resolve the cause, then delete the issue - or rotate the
+     code by blanking that row's `enrol_code` cell and re-running Send codes.
 
    > The cohort org's `welcome` repo is automatically seeded when the cohort org is [bootstrapped by the course org](04-new-cohort-org.md#steps).
 

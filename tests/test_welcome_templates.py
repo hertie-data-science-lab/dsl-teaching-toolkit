@@ -290,3 +290,39 @@ def test_team_cap_is_read_from_schedule_yml_per_assignment():
     assert "MAX_TEAM_SIZE" not in script
     assert "max_team_size" in script and "schedule.yml" in script
     assert "DEFAULT_TEAM_SIZE = 5" in script
+
+
+def test_the_join_form_code_regex_matches_exactly_the_codes_we_mint():
+    # The workflow REDACTS whatever the regex captured from the public body. A loose
+    # capture (`[A-Za-z0-9-]+`) turned a Unicode hyphen into code="dsl", and split() on
+    # that mangled the body. The strict shape is the one enrol_codes.make_code mints.
+    from dsl_course import enrol_codes
+
+    code = code_of(script_of("onboard.yml", "onboard"))
+    m = re.search(r"match\(/Enrolment code(.*?)/i\)", code)
+    pattern = re.compile("Enrolment code" + m.group(1), re.IGNORECASE)
+    for _ in range(20):
+        minted = enrol_codes.make_code()
+        assert pattern.search(f"Enrolment code\n\n{minted}\n").group(1) == minted
+    assert (
+        pattern.search("Enrolment code\n\ndsl\u2011abc234\n") is None
+    )  # Unicode hyphen
+    assert pattern.search("Enrolment code\n\nabc234\n") is None
+
+
+def test_blank_issues_are_disabled_so_every_issue_carries_a_routing_label(monkeypatch):
+    # A blank issue has no `onboarding`/`team-formation` label, so neither workflow runs on
+    # it: a code pasted there is never redacted and nobody is notified. The config must be
+    # seeded (and refreshed) alongside the forms.
+    from dsl_course import welcome
+
+    cfg = yaml.safe_load((WELCOME / "ISSUE_TEMPLATE" / "config.yml").read_text())
+    assert cfg["blank_issues_enabled"] is False
+    seen: dict[str, bytes] = {}
+    monkeypatch.setattr(
+        welcome,
+        "put_files",
+        lambda org, repo, files, msg, **kw: seen.update(files) or True,
+    )
+    welcome.refresh_welcome_workflows("Org")
+    assert ".github/ISSUE_TEMPLATE/config.yml" in seen

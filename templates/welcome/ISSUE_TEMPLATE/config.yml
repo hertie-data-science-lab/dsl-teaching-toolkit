@@ -1,0 +1,4 @@
+# SYSTEM-OWNED - do not edit. Re-pushed by every bootstrap and nightly refresh.
+# A blank issue carries no routing label, so neither workflow runs on it: a code pasted
+# there is never redacted and nobody is notified. Every issue must come through a form.
+blank_issues_enabled: false

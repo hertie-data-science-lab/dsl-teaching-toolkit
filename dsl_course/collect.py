@@ -72,6 +72,7 @@ import io
 import json
 import os
 import resource
+import secrets
 import shutil
 import signal
 import subprocess
@@ -260,14 +261,21 @@ def score_from_junit(xml_text: str) -> dict:
     }
 
 
+# Salted per RUN. Without the salt the tag is sha1("<slug>-<handle>") and both halves are
+# public (the slug on the cohort site, the handle in the welcome repo's Join issue titles),
+# so anyone could recompute the tag and read the student back off the log.
+_REF_SALT = secrets.token_hex(8)
+
+
 def target_ref(repo: str) -> str:
-    """A short stable tag standing in for a submission repo in the run log.
+    """A short tag standing in for a submission repo in the run log - stable within a run,
+    unrecoverable from outside it.
 
     The log is PUBLIC (every workflow runs in the course org's public `.github`) and a
     submission repo is named `<slug>-<handle>`, so naming it beside a score or a
     non-submission publishes a student's result. The private per-target archive under
     autograde/<slug>/ records the tag next to the repo, which is where a marker looks it up."""
-    return "#" + hashlib.sha1(repo.encode()).hexdigest()[:7]
+    return "#" + hashlib.sha1((_REF_SALT + repo).encode()).hexdigest()[:7]
 
 
 def _zero_result(note: str) -> dict:
@@ -815,7 +823,7 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
             timeout=RUN_TIMEOUT,
         ):
             log_err(
-                f"  ! converting {nb.name} timed out after {RUN_TIMEOUT}s "
+                f"  ! converting a notebook timed out after {RUN_TIMEOUT}s "
                 f"(process group killed) - abandoning this submission"
             )
             return None
@@ -823,8 +831,7 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
         if not script.exists() and (stray := _stray_conversion(nb)):
             stray.rename(script)
             log(
-                f"    ({nb.name} declares no python file_extension - "
-                f"{stray.name} -> {script.name})"
+                "    (a notebook declares no python file_extension - renamed the stray output)"
             )
     with tempfile.TemporaryDirectory() as run:
         tests_dir = Path(run) / "tests"
@@ -1124,7 +1131,7 @@ def collect(
             # one outage must never mark an assignment as permanently not-machine-graded.
             log_err(
                 f"{slug}: none of the {len(unreachable)} submission repo(s) could be read "
-                f"(named above) - nothing graded, and nothing recorded; the next run retries"
+                f"(tagged above) - nothing graded, and nothing recorded; the next run retries"
             )
             return 1
         if not updates:
@@ -1176,7 +1183,7 @@ def collect(
         if unreachable:
             log_err(
                 f"{slug}: recorded {len(updates)} score(s), but {len(unreachable)} "
-                f"submission repo(s) could not be read (named above) - NOT marking {slug} "
+                f"submission repo(s) could not be read (tagged above) - NOT marking {slug} "
                 f"machine-graded; the next run retries the missing one(s)"
             )
             return 1

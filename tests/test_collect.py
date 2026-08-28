@@ -267,7 +267,10 @@ def test_run_tests_renames_a_non_py_nbconvert_output(
         "max": 1,
         "tests": [{"name": "test_solve", "passed": True}],
     }
-    assert "-> starter.py" in capsys.readouterr().out  # the rename is not silent
+    # The rename is not silent - but names no file: the notebook is student-named and the
+    # log is public.
+    out = capsys.readouterr().out
+    assert "renamed the stray output" in out and "starter" not in out
 
 
 def test_run_tests_leaves_a_correct_py_conversion_alone(monkeypatch, tmp_path):
