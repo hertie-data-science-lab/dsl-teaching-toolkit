@@ -41,7 +41,6 @@ from .workflows_place import push_content_workflows
 WEBSITE_TEMPLATE_ORG = "hertie-data-science-lab"
 WEBSITE_TEMPLATE = "course-website-template"
 
-_GIT_ENV = GIT_ENV
 
 _SYLLABUS_STUB = """\
 # {tag} syllabus
@@ -595,7 +594,7 @@ def scaffold_assignment(
                 f"(delete {org}/{repo}'s solution branch first if you really want it rebuilt)"
             )
             return 1
-        if git("-C", str(wd), *_GIT_ENV, "checkout", "-q", "-b", "solution")[0] != 0:
+        if git("-C", str(wd), *GIT_ENV, "checkout", "-q", "-b", "solution")[0] != 0:
             # Any other local failure here must not be swallowed and then misreported as
             # a push failure below.
             log_err("  ! could not create the solution branch")
@@ -637,11 +636,11 @@ def scaffold_assignment(
         (tests / "test_solution.py").write_text(
             _HIDDEN_TEST_NOTEBOOK if fmt == "notebook" else _HIDDEN_TEST_PY
         )
-        git("-C", str(wd), *_GIT_ENV, "add", "-A")
+        git("-C", str(wd), *GIT_ENV, "add", "-A")
         git(
             "-C",
             str(wd),
-            *_GIT_ENV,
+            *GIT_ENV,
             "commit",
             "-q",
             "--no-verify",
@@ -649,7 +648,7 @@ def scaffold_assignment(
             f"solution: assignment {number} (model + grading.yml + hidden tests)",
         )
         if (
-            git("-C", str(wd), *_GIT_ENV, "push", "-q", "-u", "origin", "solution")[0]
+            git("-C", str(wd), *GIT_ENV, "push", "-q", "-u", "origin", "solution")[0]
             != 0
         ):
             log_err("  ! could not push the solution branch")

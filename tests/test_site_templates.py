@@ -316,7 +316,7 @@ def _clone_with(files: dict[str, str]):
             (wd / rel).write_text(body)
         subprocess.run(["git", "-C", str(wd), "add", "-A"], check=True)
         subprocess.run(
-            ["git", "-C", str(wd), *site_repo._GIT_ENV, "commit", "-q", "-m", "seed"],
+            ["git", "-C", str(wd), *site_repo.GIT_ENV, "commit", "-q", "-m", "seed"],
             check=True,
         )
         return (0, "")
