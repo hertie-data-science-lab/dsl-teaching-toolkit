@@ -991,6 +991,46 @@ def test_only_the_nightly_refresh_joins_the_seed_refresh_group():
             )
 
 
+# Every renderer that WRITES shared state, and the group name it must serialise under.
+# Listed rather than derived, because the decision is per workflow: a second overlapping
+# run of any of these races the first into sha conflicts, a clobbered force-push, or a
+# half-reconciled team. Read-only buttons (Check cohort setup) are deliberately absent.
+SERIALISED_WRITERS = {
+    "release": "release-materials",
+    "central_release": "release-materials",
+    "provision": "release-assignment",
+    "grade_assignment": "grade-assignment",
+    "render_grades": "render-grades",
+    "distribute_grades": "distribute-grades",
+    "sync_membership": "sync-membership",
+    "sync_site": "sync-site",
+    "publish_site": "publish-course-website",
+}
+
+
+@pytest.mark.parametrize("name", sorted(SERIALISED_WRITERS))
+def test_every_writer_serialises_against_itself_per_repo(name):
+    doc = yaml.safe_load(ALL_RENDERED[name])
+    assert doc.get("concurrency") == {
+        "group": "${{ github.repository }}-" + SERIALISED_WRITERS[name],
+        "cancel-in-progress": False,
+    }, f"{name} can overlap itself"
+
+
+def test_no_button_joins_the_scheduled_release_group():
+    # The cron's group guards FIRE-ONCE actions across every cohort and can outlive its
+    # slot. A button sharing it would be the third arrival that Actions silently drops -
+    # and a deliberate re-grade that never ran is worse than one that races the cron,
+    # which the autograde marker already makes safe.
+    grouped = {
+        n
+        for n, r in ALL_RENDERED.items()
+        if (yaml.safe_load(r).get("concurrency") or {}).get("group")
+        == "scheduled-release"
+    }
+    assert grouped == {"scheduler"}
+
+
 def test_the_hourly_scheduler_serialises_against_itself():
     # Hourly, and a pass over every cohort can outlive its slot - so it can overlap itself,
     # double-releasing whatever the running pass has not yet marked as fired.
