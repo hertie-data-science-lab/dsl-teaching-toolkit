@@ -26,6 +26,7 @@ import sys
 
 from . import scaffold, seed, site, sync_faculty
 from .utils import (
+    COHORT_WRITE_REPOS,
     COURSE_TEAM_ACCESS,
     create_repo,
     create_team,
@@ -231,8 +232,9 @@ def grant_button_access(org: str) -> None:
 # only org OWNERS can touch either repo - yet the whole faculty workflow lives in them:
 # `classroom-config` is what instructors edit (schedule.yml, students.csv, teams.csv,
 # people.yml) and read (grades/), and `welcome` is where they triage `needs-review`
-# onboarding issues. Course orgs have neither repo, so this is cohort-only.
-COHORT_FACULTY_REPOS = ["welcome", "classroom-config"]
+# onboarding issues. Course orgs have neither repo, so this is cohort-only. Single-sourced
+# with the nightly sweep's floor (utils.COHORT_WRITE_REPOS), so the two cannot disagree.
+COHORT_FACULTY_REPOS = sorted(COHORT_WRITE_REPOS - {".github"})
 
 
 def grant_cohort_faculty_access(org: str) -> None:

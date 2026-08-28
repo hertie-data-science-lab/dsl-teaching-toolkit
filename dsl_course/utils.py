@@ -606,10 +606,23 @@ COURSE_TEAM_ACCESS = {"instructors": "push", "course-admin": "admin"}
 # access cannot fix a broken repo.
 FACULTY_READ_ACCESS = {"instructors": "pull", "course-admin": "admin"}
 
-# GitHub's repo permissions, weakest first. Used to compare a live grant against the floor
-# below rather than overwrite it: a repo deliberately granted higher must not be demoted by
-# a sweep whose job is to guarantee a MINIMUM.
+# The cohort repos faculty AUTHOR in - the only cohort repos that get write. Everything else
+# in a cohort org has its source of truth elsewhere and takes FACULTY_READ_ACCESS. `.github`
+# is here because GitHub requires write on a repo to trigger a workflow_dispatch at all.
+COHORT_WRITE_REPOS = frozenset({".github", "welcome", "classroom-config"})
+
+# GitHub's repo permissions, weakest first, in the vocabulary a PUT takes (`permission=`).
+# A team-repos LISTING answers in a different one (`role_name`: read/write/...) - which is
+# why the sweep reads the listing's `permissions` booleans instead; their keys are these.
 _PERM_RANK = {"pull": 1, "triage": 2, "push": 3, "maintain": 4, "admin": 5}
+
+
+def faculty_floor(repo: str, cohort: bool) -> dict[str, str]:
+    """The faculty teams' MINIMUM grant on `repo`: write where faculty author (every repo of
+    a course org, the COHORT_WRITE_REPOS of a cohort), read everywhere else in a cohort."""
+    if not cohort or repo in COHORT_WRITE_REPOS:
+        return COURSE_TEAM_ACCESS
+    return FACULTY_READ_ACCESS
 
 
 def grant_course_team_access(org: str, repo: str) -> None:
@@ -724,72 +737,84 @@ SUPERSEDED_COURSE_DESCRIPTIONS = {
 }
 
 
-def team_repo_access(org: str, team: str) -> dict[str, str]:
-    """`{repo name: permission}` for every repo `team` already holds - ONE paginated read.
+def _strongest_permission(permissions: dict) -> str | None:
+    """The strongest TRUE flag of a listing's cumulative `permissions` object, in the PUT
+    vocabulary. None when no flag we rank is set - the caller leaves that repo alone."""
+    held = [p for p, on in permissions.items() if on and p in _PERM_RANK]
+    return max(held, key=_PERM_RANK.__getitem__) if held else None
 
-    `{}` when the team does not exist (a 404): an org can be swept before its teams are
-    created, and the next sweep picks it up. Any OTHER failure RAISES, on the same rule as
-    every other listing here - swallowed, an unreadable team reads as "holds nothing" and
-    the caller re-grants every repo in the org."""
+
+def team_repo_access(org: str, team: str) -> dict[str, str | None] | None:
+    """`{repo: permission}` for every repo `team` holds - ONE paginated read, PUT vocabulary.
+
+    None when the team does not exist (a 404): an org can be swept before its teams are
+    created, and the next sweep picks it up. Not `{}` - that reads as "holds nothing", and
+    the caller would then PUT on every repo in the org and 404 on each. Any other failure
+    RAISES, on the same rule as every other listing here.
+
+    Read from the `permissions` booleans, never `.role_name`: the listing's role names
+    (`read`/`write`) are not the PUT vocabulary (`pull`/`push`), and ranking one in the
+    other's table once read every instructor's write as "below read" and demoted them. A
+    repo maps to None when its object sets no flag we rank; the caller must skip it."""
     code, out = gh(
         "api",
         "--paginate",
-        f"orgs/{org}/teams/{team}/repos",
+        f"orgs/{org}/teams/{team}/repos?per_page=100",
         "--jq",
-        ".[] | [.name, .role_name] | @tsv",
+        ".[] | {name, permissions: (.permissions // {})}",
     )
     if code != 0:
         if is_missing_resource(out):
-            return {}
+            return None
         raise RuntimeError(f"could not read {org}/{team}'s repos: {out[:200]}")
-    entries = (line.split("\t") for line in out.splitlines() if "\t" in line)
-    return {name: perm for name, perm in entries}
+    try:
+        rows = [json.loads(line) for line in out.splitlines() if line.strip()]
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"unparseable repo listing for {org}/{team}: {out[:200]}"
+        ) from exc
+    return {r["name"]: _strongest_permission(r["permissions"]) for r in rows}
 
 
-def converge_faculty_access(org: str, repos: list[dict]) -> int:
-    """Give the faculty teams their standing COURSE_TEAM_ACCESS on every repo that lacks it.
+def converge_faculty_access(org: str, repos: list[dict], cohort: bool) -> int:
+    """Raise the faculty teams to their floor (`faculty_floor`) on every live repo of `org`.
 
-    A repo's team grants, like its description, are only ever set when the repo is created -
-    so the sites that create repos cannot be the whole story. A repo kind that predates a
-    grant, or an org bootstrapped before one existed, keeps whatever it started with
-    forever. This is the convergence path, and it is why released content, submission repos
-    and gradebooks could each grant nobody but the student while every creation site looked
-    correct.
+    A team grant is set when a repo is created and never revisited, so a repo kind that
+    predates its grant, or an org bootstrapped before one existed, keeps whatever it
+    started with. In a cohort org (default_repository_permission=none) that is the WHOLE
+    of a non-owner's access; every live faculty member being an org owner is the only
+    reason it went unnoticed. This is the convergence path.
 
-    It matters because a cohort org sets `default_repository_permission=none`: a team grant
-    is the WHOLE of a non-owner's access, so a missing one is not a cosmetic drift. Every
-    live faculty member happens to be an org owner, which is the only reason this was
-    invisible.
-
-    A FLOOR (FACULTY_READ_ACCESS), never a level: a repo already granted higher is left
-    exactly as it is. That is what lets this run over every repo in an org without knowing
-    what kind each one is - it never has to decide whether a repo deserves write, only that
-    faculty can open it. The creation sites grant write where writing is the job (a
-    submission repo, the infra repos); this guarantees the minimum everywhere else, so a
-    repo kind nobody has written yet cannot be forgotten.
-
-    Costs one read per team plus a PUT per genuinely-missing grant - a converged org is two
-    calls, not two per repo.
-
-    Never fatal: access is repaired on the next sweep, and a failed PUT is worth a line
-    rather than a failed refresh. Returns the number changed."""
+    A FLOOR, never a level: a repo already granted higher is left alone. Fail closed: a
+    grant this sweep cannot rank is skipped, never read as "nothing" and overwritten.
+    Archived repos are skipped (GitHub refuses the PUT). One read per team plus a PUT per
+    missing grant, so a converged org costs two calls. Never fatal: a failed PUT is a line,
+    not a red refresh, and the next sweep retries. Returns the number changed."""
     changed = 0
-    for team, floor in FACULTY_READ_ACCESS.items():
+    live = [r["name"] for r in repos if not r.get("archived")]
+    for team in COURSE_TEAM_ACCESS:
         try:
             have = team_repo_access(org, team)
         except RuntimeError as exc:
             log(f"  ({exc})")
             continue
-        for repo in repos:
-            name = repo["name"]
-            current = _PERM_RANK.get(have.get(name, ""), 0)
-            if current >= _PERM_RANK[floor]:
-                continue
+        if have is None:
+            log(f"  (no {team} team in {org} yet - faculty access not converged)")
+            continue
+        for name in live:
+            floor = faculty_floor(name, cohort)[team]
+            if name in have:
+                current = have[name]
+                if current is None:
+                    log(
+                        f"  ({team} holds {name} at a level this sweep cannot rank - left)"
+                    )
+                    continue
+                if _PERM_RANK[current] >= _PERM_RANK[floor]:
+                    continue
             if grant_team_repo_access(org, team, name, floor):
                 log_ok(f"{team} -> {floor} on {name}")
                 changed += 1
-            else:
-                log(f"  ({name}: could not grant {team} {floor})")
     return changed
 
 

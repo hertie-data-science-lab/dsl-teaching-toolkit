@@ -97,7 +97,7 @@ def list_org_repos(org: str) -> list[dict]:
         f"orgs/{org}/repos?per_page=100",
         "--jq",
         ".[] | {name, description, visibility, url: .html_url, "
-        "isTemplate: .is_template, topics: (.topics // [])}",
+        "isTemplate: .is_template, archived, topics: (.topics // [])}",
     )
     if code != 0:
         raise RuntimeError(f"could not list repos in {org}: {out[:200]}")

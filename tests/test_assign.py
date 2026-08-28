@@ -498,3 +498,29 @@ def test_provision_all_records_handout_under_schedule_key_and_survives_site_fail
     )
     assert captured["key"] == "project"  # the schedule key, not "group-project"
     assert rc == 1  # the site failure was counted, not raised as a traceback
+
+
+def test_both_assignment_arms_grant_faculty_read(_provisioned, monkeypatch):
+    # A cohort org is default_repository_permission=none, so a team grant is the WHOLE of
+    # a non-owner instructor's access - and submission repos granted only the student. The
+    # group arm RETURNS inside itself, so the grant must sit before the split or every team
+    # project repo would go on granting nobody but the team. READ, not write: marking
+    # happens in classroom-config/grades/<slug>.csv, after the snapshot froze HEAD.
+    faculty = []
+    monkeypatch.setattr(
+        assign, "grant_faculty_read_access", lambda *a: faculty.append(a)
+    )
+    monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
+    monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
+    assign.provision_one("COURSE", "a1", "COHORT", "a1-ada-l", ["ada-l"], "a1")
+    assign.provision_one(
+        "COURSE",
+        "a1",
+        "COHORT",
+        "a1-wizards",
+        ["ada-l", "bob-b"],
+        "a1",
+        team="a1-wizards",
+    )
+    assert faculty == [("COHORT", "a1-ada-l"), ("COHORT", "a1-wizards")]

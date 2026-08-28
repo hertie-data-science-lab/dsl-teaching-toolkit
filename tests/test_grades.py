@@ -362,6 +362,19 @@ def test_a_gradebook_the_student_cannot_open_is_a_failure(monkeypatch):
     assert grades.provision_one("COHORT", "ada-l").startswith("failed")
 
 
+def test_a_gradebook_grants_faculty_read(monkeypatch):
+    # Read, not write: `distribute` rewrites grades.yml from grades/<slug>.csv, so a mark
+    # corrected in the gradebook itself would be overwritten on the next run.
+    faculty = []
+    monkeypatch.setattr(grades, "repo_exists", lambda org, repo: True)
+    monkeypatch.setattr(
+        grades, "grant_faculty_read_access", lambda *a: faculty.append(a)
+    )
+    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
+    grades.provision_one("COHORT", "ada-l")
+    assert faculty == [("COHORT", "grades-ada-l")]
+
+
 def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
     # The send count used to be discarded, so a student who never got the "your grades are
     # updated" mail left no trace in the log at all.

@@ -8,6 +8,8 @@ roster/schedule or triage onboarding issues."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from dsl_course import bootstrap_course, scaffold, utils
@@ -49,7 +51,12 @@ def test_cohort_infra_repos_get_the_faculty_grant():
     # A cohort org is default_repository_permission=none, so a non-owner instructor could
     # not open classroom-config (schedule.yml/students.csv/teams.csv/people.yml + grades/)
     # or triage welcome's needs-review onboarding issues without these.
-    assert bootstrap_course.COHORT_FACULTY_REPOS == ["welcome", "classroom-config"]
+    assert set(bootstrap_course.COHORT_FACULTY_REPOS) == {"welcome", "classroom-config"}
+    # ...and single-sourced with the nightly sweep's write floor, so a repo cannot be
+    # granted push at bootstrap and then read by the sweep (or the reverse).
+    assert set(bootstrap_course.COHORT_FACULTY_REPOS) | {".github"} == set(
+        utils.COHORT_WRITE_REPOS
+    )
 
 
 def test_cohort_faculty_grant_uses_the_shared_policy(monkeypatch):
@@ -84,58 +91,54 @@ def test_cohort_setup_grants_faculty_access_even_when_nothing_is_seeded(monkeypa
     assert granted == ["Course-f2026"]
 
 
-def test_every_cohort_repo_kind_grants_faculty_at_the_right_level():
-    # A cohort org sets default_repository_permission=none, so a team grant is the WHOLE of
-    # a non-owner's access. Released content, submission repos and gradebooks each granted
-    # only students - so an instructor who was not an org OWNER could not read the material
-    # they released, open the work they had to mark, or see the grades they returned. Every
-    # live faculty member happens to be an owner, which is why nothing broke.
-    #
-    # READ on all three. Each has its source of truth elsewhere - the course org's
-    # materials repo, and `grades/<slug>.csv` for both marks and submissions - and each is
-    # superseded wholesale by the next release / distribute / snapshot, so write would
-    # invite an edit that silently vanishes. Write stays where faculty author:
-    # classroom-config, welcome/README.md, and .github (which GitHub requires for
-    # workflow_dispatch).
-    import inspect
-
-    from dsl_course import assign, deploy, grades
-
-    for mod, call, what in (
-        (assign, "grant_faculty_read_access", "the snapshot already froze HEAD"),
-        (deploy, "grant_faculty_read_access", "a re-release copies over it"),
-        (grades, "grant_faculty_read_access", "distribute rewrites grades.yml"),
-    ):
-        src = inspect.getsource(mod)
-        assert f"{call}(cohort_org, repo)" in src, (
-            f"{mod.__name__} must grant faculty via {call} - {what}"
-        )
-
-
 def test_the_two_faculty_levels_differ_only_in_the_instructors_grant():
     # course-admin is the cohort's owner of last resort either way: read access cannot fix
     # a broken repo. The distinction is whether an INSTRUCTOR should be editing.
     assert utils.COURSE_TEAM_ACCESS == {"instructors": "push", "course-admin": "admin"}
     assert utils.FACULTY_READ_ACCESS == {"instructors": "pull", "course-admin": "admin"}
+    assert utils.COURSE_TEAM_ACCESS.keys() == utils.FACULTY_READ_ACCESS.keys()
 
 
-def test_the_faculty_sweep_asserts_a_floor_and_never_demotes(monkeypatch):
-    # One read per team, then a PUT only where faculty cannot open the repo at all - so a
-    # converged org costs two calls a night, not two per repo. A FLOOR, not a level: a repo
-    # deliberately granted higher (a submission repo, at push) must survive a sweep whose
-    # job is only to guarantee a minimum. That is what lets this run over every repo in an
-    # org without having to decide what kind each one is.
-    listings = {
-        "instructors": "materials\tpull\nassignment-1-ada\tpush\n",
-        "course-admin": "materials\tadmin\nassignment-1-ada\tadmin\n",
+def test_the_floor_is_write_where_faculty_author_and_read_elsewhere():
+    # Every repo of a COURSE org is faculty-authored staging. In a COHORT org only the three
+    # repos faculty edit (and `.github`, which workflow_dispatch needs write on) get write;
+    # released content, submission repos and gradebooks each have their source of truth
+    # elsewhere and are overwritten wholesale, so write there invites an edit that vanishes.
+    for repo in (".github", "course-materials-f2026", "assignment-1"):
+        assert utils.faculty_floor(repo, cohort=False) is utils.COURSE_TEAM_ACCESS
+    for repo in utils.COHORT_WRITE_REPOS:
+        assert utils.faculty_floor(repo, cohort=True) is utils.COURSE_TEAM_ACCESS
+    for repo in ("materials", "assignment-1-ada", "grades-ada", "x.github.io"):
+        assert utils.faculty_floor(repo, cohort=True) is utils.FACULTY_READ_ACCESS
+
+
+# The live shape of one row of GET /orgs/{org}/teams/{team}/repos. `role_name` is in the
+# GET vocabulary (read/write), which is NOT what a PUT takes (pull/push) - the sweep must
+# never rank it. The `permissions` object is cumulative and its keys ARE the PUT vocabulary.
+def _row(name: str, role: str, **flags: bool) -> str:
+    base = {
+        "admin": False,
+        "maintain": False,
+        "pull": False,
+        "push": False,
+        "triage": False,
     }
+    base.update(flags)
+    return json.dumps({"name": name, "role_name": role, "permissions": base})
+
+
+def _listing(*rows: str) -> str:
+    return "\n".join(rows) + "\n"
+
+
+def _sweep(monkeypatch, listings: dict[str, str], repos, cohort: bool):
     granted = []
 
     def fake_gh(*args, **kwargs):
         for team, out in listings.items():
             if any(f"teams/{team}/repos" in a for a in args):
                 return 0, out
-        return 0, ""
+        return 1, "gh: Not Found (HTTP 404)"
 
     monkeypatch.setattr(utils, "gh", fake_gh)
     monkeypatch.setattr(utils, "log", lambda *a, **k: None)
@@ -145,43 +148,161 @@ def test_the_faculty_sweep_asserts_a_floor_and_never_demotes(monkeypatch):
         "grant_team_repo_access",
         lambda org, team, repo, perm: granted.append((team, repo, perm)) or True,
     )
-    repos = [
-        {"name": "materials"},
-        {"name": "assignment-1-ada"},
-        {"name": "grades-ada"},
-    ]
-    changed = utils.converge_faculty_access("Cohort-f2026", repos)
-    assert changed == 2  # the gradebook only, for both teams
-    assert ("instructors", "grades-ada", "pull") in granted
-    assert ("course-admin", "grades-ada", "admin") in granted
-    # already at the floor -> no request
-    assert not any(r == "materials" for _, r, _ in granted)
-    # already ABOVE the floor -> not demoted to pull
-    assert not any(r == "assignment-1-ada" for _, r, _ in granted)
+    changed = utils.converge_faculty_access("Org", repos, cohort=cohort)
+    return changed, granted
 
 
-def test_an_absent_team_is_skipped_and_an_unreadable_one_raises(monkeypatch):
-    # An org can be swept before its teams exist (the next sweep picks it up), but an
-    # unreadable team must NOT read as "holds nothing" - that would re-grant every repo in
-    # the org on a rate limit.
+def test_the_sweep_reads_the_permission_booleans_and_never_demotes_write(monkeypatch):
+    # THE regression. `role_name=write` ranked in the PUT table was 0 < pull, so the sweep
+    # PUT pull on every repo an instructor could write - killing every faculty button for
+    # exactly the non-owner instructor the sweep exists for, and re-firing nightly after
+    # any manual repair. The booleans say push, and push is above the read floor.
+    listings = {
+        "instructors": _listing(
+            _row(".github", "write", pull=True, triage=True, push=True),
+            _row("classroom-config", "write", pull=True, triage=True, push=True),
+            _row("materials", "read", pull=True),
+        ),
+        "course-admin": _listing(
+            _row(
+                ".github",
+                "admin",
+                pull=True,
+                triage=True,
+                push=True,
+                maintain=True,
+                admin=True,
+            ),
+            _row(
+                "classroom-config",
+                "admin",
+                pull=True,
+                triage=True,
+                push=True,
+                maintain=True,
+                admin=True,
+            ),
+            _row(
+                "materials",
+                "admin",
+                pull=True,
+                triage=True,
+                push=True,
+                maintain=True,
+                admin=True,
+            ),
+        ),
+    }
+    repos = [{"name": n} for n in (".github", "classroom-config", "materials")]
+    changed, granted = _sweep(monkeypatch, listings, repos, cohort=True)
+    assert (changed, granted) == (0, [])
+
+
+def test_the_sweep_grants_the_per_repo_floor_where_a_team_holds_nothing(monkeypatch):
+    # Nothing granted anywhere: a cohort's write repos converge at push, the rest at pull,
+    # course-admin at admin throughout. A course org converges at push everywhere.
+    listings = {"instructors": _listing(), "course-admin": _listing()}
+    repos = [{"name": n} for n in ("welcome", "assignment-1-ada", "grades-ada")]
+    changed, granted = _sweep(monkeypatch, listings, repos, cohort=True)
+    assert changed == 6
+    assert set(granted) == {
+        ("instructors", "welcome", "push"),
+        ("instructors", "assignment-1-ada", "pull"),
+        ("instructors", "grades-ada", "pull"),
+        ("course-admin", "welcome", "admin"),
+        ("course-admin", "assignment-1-ada", "admin"),
+        ("course-admin", "grades-ada", "admin"),
+    }
+    repos = [{"name": n} for n in ("course-materials-f2026", "assignment-1")]
+    _, granted = _sweep(monkeypatch, listings, repos, cohort=False)
+    assert {(t, p) for t, _, p in granted} == {
+        ("instructors", "push"),
+        ("course-admin", "admin"),
+    }
+
+
+def test_the_sweep_raises_a_grant_below_its_floor_but_leaves_one_above(monkeypatch):
+    # A floor, not a level: `.github` held at read is raised to push (its floor is write);
+    # a submission repo held at push is left alone (its floor is read).
+    listings = {
+        "instructors": _listing(
+            _row(".github", "read", pull=True),
+            _row("assignment-1-ada", "write", pull=True, triage=True, push=True),
+        ),
+        "course-admin": _listing(
+            _row(
+                ".github",
+                "admin",
+                pull=True,
+                triage=True,
+                push=True,
+                maintain=True,
+                admin=True,
+            ),
+            _row(
+                "assignment-1-ada",
+                "admin",
+                pull=True,
+                triage=True,
+                push=True,
+                maintain=True,
+                admin=True,
+            ),
+        ),
+    }
+    repos = [{"name": ".github"}, {"name": "assignment-1-ada"}]
+    changed, granted = _sweep(monkeypatch, listings, repos, cohort=True)
+    assert (changed, granted) == (1, [("instructors", ".github", "push")])
+
+
+def test_the_sweep_fails_closed_on_a_grant_it_cannot_rank(monkeypatch):
+    # `_PERM_RANK.get(x, 0)` was the defect class: anything unrecognised read as "below
+    # read" and got overwritten. A permissions object setting no flag we rank must be
+    # SKIPPED, never treated as nothing.
+    listings = {
+        "instructors": _listing(
+            json.dumps({"name": "odd", "permissions": {"custom_role": True}})
+        ),
+        "course-admin": _listing(json.dumps({"name": "odd", "permissions": {}})),
+    }
+    changed, granted = _sweep(monkeypatch, listings, [{"name": "odd"}], cohort=True)
+    assert (changed, granted) == (0, [])
+
+
+def test_the_sweep_skips_archived_repos(monkeypatch):
+    # GitHub refuses a PUT on an archived repo, so a frozen cohort (every repo archived)
+    # would otherwise fail 2 writes per repo every night, forever.
+    listings = {"instructors": _listing(), "course-admin": _listing()}
+    repos = [{"name": "old", "archived": True}, {"name": "live", "archived": False}]
+    _, granted = _sweep(monkeypatch, listings, repos, cohort=True)
+    assert {r for _, r, _ in granted} == {"live"}
+
+
+def test_an_absent_team_is_none_and_an_unreadable_one_raises(monkeypatch):
+    # An org can be swept before its teams exist (the next sweep picks it up) - but the
+    # absence must be None, not {}: {} means "holds nothing", and the sweep would PUT on
+    # every repo in the org and 404 on each. An unreadable team must not read as either.
     monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
-    assert utils.team_repo_access("Org", "instructors") == {}
+    assert utils.team_repo_access("Org", "instructors") is None
     monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: rate limited (HTTP 403)"))
+    with pytest.raises(RuntimeError):
+        utils.team_repo_access("Org", "instructors")
+    monkeypatch.setattr(utils, "gh", lambda *a, **k: (0, "not json"))
     with pytest.raises(RuntimeError):
         utils.team_repo_access("Org", "instructors")
 
 
-def test_the_group_assignment_path_also_grants_faculty():
-    # The group arm RETURNS inside itself, so a call placed after the group/individual
-    # split reached individual assignments only - every team project repo would have gone
-    # on granting nobody but the team.
-    import inspect
+def test_an_absent_team_stops_the_sweep_for_that_team_only(monkeypatch):
+    listings = {"course-admin": _listing()}  # instructors -> 404 from the fake
+    _, granted = _sweep(monkeypatch, listings, [{"name": "welcome"}], cohort=True)
+    assert granted == [("course-admin", "welcome", "admin")]
 
-    from dsl_course import assign
 
-    src = inspect.getsource(assign)
-    grant = src.index("grant_faculty_read_access(cohort_org, repo)")
-    split = src.index("if team is not None:")
-    assert grant < split, (
-        "the faculty grant must precede the group/individual split, or group repos miss it"
-    )
+def test_the_listing_is_paginated_in_pages_of_100(monkeypatch):
+    # Every other paginated read here asks for 100 a page; a cohort org holds a repo per
+    # student per assignment plus a gradebook each.
+    seen = []
+    monkeypatch.setattr(utils, "gh", lambda *a, **k: seen.append(a) or (0, ""))
+    assert utils.team_repo_access("Org", "instructors") == {}
+    assert "--paginate" in seen[0]
+    assert "orgs/Org/teams/instructors/repos?per_page=100" in seen[0]

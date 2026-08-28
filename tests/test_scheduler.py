@@ -327,6 +327,24 @@ def _no_io(monkeypatch, fake_gh):
     monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
 
 
+def test_a_released_repo_grants_faculty_read(monkeypatch):
+    # Read, not write: a re-release copies over the released copy
+    # (copytree dirs_exist_ok=True), so a correction made here would vanish - it belongs in
+    # the course org's materials repo, then re-release.
+    _no_io(monkeypatch, _clone_failing("Course-Org/cm"))
+    faculty = []
+    monkeypatch.setattr(
+        deploy, "grant_faculty_read_access", lambda *a: faculty.append(a)
+    )
+    deploy.deploy_many(
+        "Course-Org",
+        "Cohort-Org",
+        [Deploy("cm", "lectures/00_x", "materials", None)],
+        sync=False,
+    )
+    assert faculty == [("Cohort-Org", "materials")]
+
+
 def test_deploy_many_counts_a_doomed_deploy_once(monkeypatch):
     # Source AND dest clone both fail: that is ONE copy lost, not two errors (a
     # double-count made `deploy` report 2 failures for a single deploy).
