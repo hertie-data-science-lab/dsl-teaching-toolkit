@@ -365,7 +365,7 @@ def main() -> int:
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
-        return provision_all(
+        rc, _changed = provision_all(
             args.master_org,
             args.template,
             args.cohort_org,
@@ -374,6 +374,7 @@ def main() -> int:
             group={"auto": None, "individual": False, "group": True}[kind],
             dry_run=args.dry_run,
         )
+        return rc
     except RuntimeError as exc:
         log_err(str(exc))
         return 1
@@ -427,8 +428,16 @@ def provision_all(
     group: bool | None = None,
     dry_run: bool = False,
     touch_existing: bool = True,
-) -> int:
+) -> tuple[int, bool]:
     """Freeze the cohort template, then provision a repo per unit (student, or team).
+
+    Returns `(exit code, whether anything changed)` - the shape `deploy.deploy_many`
+    already uses. The scheduler re-fires every handed-out release on every hourly tick
+    (that is what gets a late onboarder their repo), so almost every tick provisions
+    nothing at all; without the second half of the answer the caller could only assume it
+    had, and re-rendered the whole cohort website once an hour for the rest of the term.
+    `changed` is the same predicate this function's own site sync uses: at least one unit
+    was not `skipped`.
 
     Callable directly (e.g. by the scheduler) as well as from the CLI. `group=None`
     (the default) reads the template's own declaration - `type: group` in the
@@ -436,7 +445,7 @@ def provision_all(
     that doesn't declare it."""
     if master_org == cohort_org:
         log_err("master-org and cohort-org must differ.")
-        return 1
+        return 1, False
     if group is None:
         # schedule.yml's assignments.<slug>.type wins; grading.yml is the fallback.
         group = assignment_is_group(master_org, cohort_org, template)
@@ -445,10 +454,10 @@ def provision_all(
 
     students = roster.load_path(roster_path) if roster_path else roster.load(cohort_org)
     if students is None:  # missing/unreadable roster - load() already logged why
-        return 1
+        return 1, False
     if not students:
         log_err(f"roster in {cohort_org} has no rows yet - nobody to provision for.")
-        return 1
+        return 1, False
     # Auditors are read-only - they see released materials, never an assignment repo.
     participants = roster.enrolled(students)
     auditing = len(students) - len(participants)
@@ -477,7 +486,7 @@ def provision_all(
                 f"no teams for `{key}` in {cohort_org}/classroom-config/teams.csv - "
                 f"students self-select via the welcome 'Join team' issue, or seed the CSV."
             )
-            return 1
+            return 1, False
         # teams.csv is student-writable (the welcome "Join team" issue appends rows), so its
         # handles must pass the SAME roster allowlist sync_teams applies: only enrolled,
         # onboarded roster handles - never a typo or a stranger's login that would be INVITED
@@ -519,13 +528,13 @@ def provision_all(
             log_verbose(
                 f"    DRY-RUN  {cohort_org}/{repo}{via}  <- {', '.join('@' + h for h in handles)}"
             )
-        return 0
+        return 0, False
 
     # Stage 1: freeze the cohort-level template.
     cohort_template = ensure_cohort_template(master_org, template, cohort_org, slug)
     if cohort_template is None:
         log_err("could not create the cohort assignment template.")
-        return 1
+        return 1, False
 
     with tempfile.TemporaryDirectory() as soldir:
         # Solution still comes from the COURSE template's solution branch.
@@ -578,10 +587,11 @@ def provision_all(
     # traceback and misreport the whole handout as failed: log it, count it (so the run goes
     # red and the next Sync site / tick refreshes the site), and return normally.
     site_failed = False
+    changed = any(k != "skipped" for k in results)
     try:
         # A tick that created or changed nothing has nothing to show the site: skipping the
         # sync here is what stops every handed-out assignment re-rendering the site hourly.
-        if any(k != "skipped" for k in results):
+        if changed:
             site.sync_site(master_org, cohort_org)
     except (RuntimeError, yaml.YAMLError) as exc:
         log_err(
@@ -612,7 +622,7 @@ def provision_all(
             f"re-clones every submission repo to push a solution they already have"
         )
         failed = True
-    return 1 if failed or solution_unavailable else 0
+    return (1 if failed or solution_unavailable else 0), changed
 
 
 if __name__ == "__main__":

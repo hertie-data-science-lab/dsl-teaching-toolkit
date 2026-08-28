@@ -209,17 +209,47 @@ def test_run_batches_all_deploys_through_deploy_many(monkeypatch):
     assert synced == [("Course-Org", "Cohort-Org")]
 
 
+def test_a_tick_that_provisions_nothing_does_not_re_render_the_site(monkeypatch):
+    # `due_releases` is CUMULATIVE: a handed-out assignment is due again on every hourly
+    # tick for the rest of the term. Marking the tick as having assigned regardless of what
+    # provisioning actually did meant a full cohort website re-render, once an hour, off a
+    # pass in which every repo was skipped.
+    monkeypatch.setattr(
+        "dsl_course.scheduler.provision_all",
+        lambda *a, **kw: (0, False),  # every unit `skipped`
+    )
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "load",
+        lambda cohort: _sched_with([_r("w1", WHEN, assignment="assignment-2-f2026")]),
+    )
+    synced = []
+    monkeypatch.setattr(
+        "dsl_course.site.sync_site", lambda c, o: synced.append((c, o)) or 0
+    )
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
+    assert synced == [], "an unchanged tick re-rendered the site"
+
+    # ... and a tick that DID provision something still syncs, exactly once.
+    monkeypatch.setattr(
+        "dsl_course.scheduler.provision_all", lambda *a, **kw: (0, True)
+    )
+    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
+    assert synced == [("Course-Org", "Cohort-Org")]
+
+
 def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.scheduler.provision_all",
         lambda master_org, template, cohort_org, solution=False, touch_existing=True: (
-            calls.append((master_org, template, cohort_org, solution, touch_existing))
-            or 0
-        ),
+            calls.append((master_org, template, cohort_org, solution, touch_existing)),
+            (0, True),
+        )[1],
     )
     r = _r("s", WHEN, assignment="assignment-2-f2026")
-    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == 0
+    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == (0, True)
     # The hourly path never re-touches an existing repo (the manual button does).
     assert calls[0] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", False, False)
 
@@ -227,7 +257,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     # scheduled solution can never diverge from what include_solution does by hand.
     r = _r("s", WHEN, assignment="assignment-2-f2026")
     r.assignment_solution = True
-    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == 0
+    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == (0, True)
     assert calls[1] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", True, False)
 
 

@@ -61,7 +61,7 @@ def test_an_unusable_solution_branch_does_not_block_provisioning(
         assign, "record_solution_released", lambda *a, **k: recorded.append(a)
     )
 
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE",
         "assignment-1-f2026",
         "COHORT",
@@ -76,6 +76,36 @@ def test_an_unusable_solution_branch_does_not_block_provisioning(
     assert rc == 1, "an unusable solution must still redden the run"
     assert "provisioning continues without it" in err
     assert recorded == [], "a failed solution must not be recorded as released"
+
+
+def test_a_handout_that_skipped_every_repo_syncs_no_site(tmp_path, monkeypatch):
+    # The scheduler re-fires every handed-out release on every hourly tick (that is what
+    # gets a late onboarder their repo), so nearly every tick provisions nothing at all.
+    # Syncing anyway re-rendered a whole cohort website once an hour for the rest of the
+    # term - and the `changed` half of the answer is what lets the SCHEDULER decide the
+    # same thing for the tick as a whole.
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: None)
+    monkeypatch.setattr("dsl_course.schedule.entry_for_repo", lambda *a, **k: None)
+    synced: list[tuple] = []
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a: synced.append(a))
+
+    def run():
+        return assign.provision_all(
+            "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
+        )
+
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: "skipped")
+    assert run() == (0, False)
+    assert synced == [], "a pass that changed nothing re-rendered the site"
+
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: "ok")
+    assert run() == (0, True)
+    assert synced == [("COURSE", "COHORT")]
 
 
 def _marker_run(
@@ -110,7 +140,7 @@ def _marker_run(
         "record_solution_released",
         lambda *a, **k: recorded.append(a) or record_ok,
     )
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE",
         "assignment-1-f2026",
         "COHORT",
@@ -196,7 +226,7 @@ def test_provisioning_skips_auditors(tmp_path, capsys, monkeypatch):
         "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor",
         "bob@uni.edu,Bob,bob-b,44,dsl-def,",  # blank role -> enrolled
     )
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE",
         "assignment-1-f2026",
         "COHORT",
@@ -221,7 +251,7 @@ def test_provisioning_still_works_for_a_roster_without_a_role_column(
         "student_id,hertie_email,name,github_handle,github_id,section\n"
         "1,ada@uni.edu,Ada,ada-l,42,A\n"
     )
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE",
         "assignment-1-f2026",
         "COHORT",
@@ -244,7 +274,7 @@ def test_a_dry_run_names_no_student_in_a_public_log(tmp_path, capsys, monkeypatc
         "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
         "bob@uni.edu,Bob,bob-b,43,dsl-def,enrolled",
     )
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE",
         "assignment-1-f2026",
         "COHORT",
@@ -299,7 +329,7 @@ def test_group_none_infers_per_team_from_the_templates_grading_yml(
         "bob@uni.edu,Bob,bob-b,43,dsl-def,enrolled",
         "cid@uni.edu,Cid,cid-c,44,dsl-ghi,enrolled",
     )
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path, dry_run=True
     )
     out = capsys.readouterr().out
@@ -322,7 +352,7 @@ def test_group_false_forces_individual_even_for_a_group_template(
         ),
     )
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE",
         "assignment-4-project-f2026",
         "COHORT",
@@ -417,7 +447,7 @@ def test_group_provisioning_filters_teams_csv_through_the_roster_allowlist(
         "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
         "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor",  # an auditor, not a team member
     )
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path, dry_run=True
     )
     captured = capsys.readouterr()
@@ -552,7 +582,7 @@ def test_provision_all_records_handout_under_schedule_key_and_survives_site_fail
 
     monkeypatch.setattr(site, "sync_site", boom_site)
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path, group=False
     )
     assert captured["key"] == "project"  # the schedule key, not "group-project"
@@ -665,7 +695,7 @@ def test_group_handout_looks_teams_up_by_key_and_names_repos_by_dest(
         ),
     )
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE", "wk3-regression-f2026", "COHORT", roster_path=path, dry_run=True
     )
     out = capsys.readouterr().out

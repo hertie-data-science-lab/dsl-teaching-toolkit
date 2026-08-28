@@ -139,17 +139,22 @@ def describe(release: Release, now: datetime | None = None) -> list[str]:
 # ---------------------------------------------------------------------- gh/git wiring
 
 
-def _execute_nondeploy(course_org: str, cohort_org: str, release: Release) -> int:
+def _execute_nondeploy(
+    course_org: str, cohort_org: str, release: Release
+) -> tuple[int, bool]:
     """Run one release's non-deploy action (an assignment handout, and once its
     `solution_datetime` has passed, the model solution with it). Deploys are batched
-    across the whole run (see `run`) so their source/dest repos clone once. Returns the
-    error count."""
+    across the whole run (see `run`) so their source/dest repos clone once. Returns
+    `(error count, whether anything was actually provisioned)` - the same shape
+    `deploy_many` answers in, and for the same reason: `due_releases` is cumulative, so
+    a handed-out release re-fires on every tick and almost all of them change nothing."""
     errors = 0
+    changed = False
     if release.assignment:
         # provision_all's default (group=None) resolves group-vs-individual from the
         # cohort schedule / the template's grading.yml - so a scheduled group handout
         # provisions per TEAM, not one repo per student.
-        failed = provision_all(
+        failed, changed = provision_all(
             course_org,
             release.assignment,
             cohort_org,
@@ -159,7 +164,7 @@ def _execute_nondeploy(course_org: str, cohort_org: str, release: Release) -> in
         )
         if failed != 0:
             errors += 1
-    return errors
+    return errors, changed
 
 
 def _snapshot_passed_deadlines(
@@ -296,8 +301,16 @@ def _run_releases(
                 f"  [{release.label}] assignment handout"
                 + (" + solution" if release.assignment_solution else "")
             )
-            errors += _execute_nondeploy(course_org, cohort_org, release)
-            did_assign = True
+            handout_errors, handout_changed = _execute_nondeploy(
+                course_org, cohort_org, release
+            )
+            errors += handout_errors
+            # Only a handout that PROVISIONED something has anything new to show the site.
+            # `due_releases` is cumulative - every handed-out assignment is due again on
+            # every tick - so setting this unconditionally re-rendered the whole cohort
+            # website once an hour, for the rest of the term, off a pass that had skipped
+            # every repo.
+            did_assign = did_assign or handout_changed
 
     # One website sync at the end, only if something actually changed.
     if changed or did_assign:
