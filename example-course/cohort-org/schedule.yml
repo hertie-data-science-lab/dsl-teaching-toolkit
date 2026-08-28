@@ -121,6 +121,7 @@ releases:
 
 assignments:                    
   assignment-1:
+    title: Linear regression              # NB optional: the name, beside the slug on the site
     course_source_repo: assignment-1-f2026
     handout_datetime: 2026-09-15T14:00  
     due_datetime: 2026-10-13
@@ -132,6 +133,7 @@ assignments:
     handout_datetime: 2026-09-29T14:00
     due_datetime: 2026-10-27T23:59
   assignment-4-project:
+    title: Group project                  # NB if empty, the template README's heading is used
     course_source_repo: assignment-4-project-f2026
     handout_datetime: 2026-10-13T14:00
     type: group

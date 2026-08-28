@@ -202,15 +202,17 @@ def test_event_entry_renders_a_display_only_schedule_row():
     e = Event("project-clinic", "", datetime(2026, 11, 17, 10, 0, tzinfo=BERLIN))
     out = site._event_entry(e, END_OF_TERM)
     assert "type: special_event" in out
-    assert 'name: "Project Clinic"' in out  # prettified from the label
+    # `description`, which the theme renders in the TITLE column - `name` is the EVENT
+    # column, where every other row type prints its KIND
+    assert 'description: "Project Clinic"' in out  # prettified from the label
     assert "date: 2026-11-17T10:00:00" in out
-    assert 'description: ""' in out
+    assert "name:" not in out
     titled = Event(
         "project-clinic",
         "Bring your data",
         datetime(2026, 11, 17, 10, 0, tzinfo=BERLIN),
     )
-    assert 'name: "Bring your data"' in site._event_entry(titled, END_OF_TERM)
+    assert 'description: "Bring your data"' in site._event_entry(titled, END_OF_TERM)
 
 
 def test_event_entry_renders_an_exam_as_an_exam_row():
@@ -317,7 +319,7 @@ def test_an_unhanded_out_assignment_is_a_placeholder(monkeypatch):
     assert "    date: 2026-10-13T23:59:59" in out
     # the plan-side name only, never the README's own title
     assert 'title: "Assignment 1"' in out
-    assert "Not handed out yet" in out
+    assert "**Assignment 1 is not yet released**" in out
 
 
 def test_a_passed_handout_inlines_the_brief(monkeypatch):
@@ -384,9 +386,65 @@ def test_a_released_assignment_links_the_cohort_repo_not_the_course_org(monkeypa
         date(2026, 10, 13),
         handed_out=frozenset({"assignment-1"}),
     )
-    assert "Cohort-f2026/repositories?q=assignment-1-" in out
-    assert 'repo_name: "assignment-1-<your-handle>"' in out
+    # both levels: the theme reaches the due row via `map: "due_event"`, which cannot
+    # see the parent entry's fields
+    assert out.count("Cohort-f2026/repositories?q=assignment-1-") == 2
+    assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
     assert "Course" not in out.split("---")[1]  # the course org names no student repo
+
+
+def test_the_plans_title_is_the_assignments_name_and_beats_the_readme(monkeypatch):
+    # Declared in schedule.yml, so it can appear BEFORE hand-out - the README it otherwise
+    # comes from is embargoed until then.
+    monkeypatch.setattr(
+        site, "get_file_content", lambda *a, **k: "# Assignment 1 - something else"
+    )
+    sched = Schedule(
+        assignments={
+            "assignment-1": AssignmentEntry(
+                course_source_repo="assignment-1-f2026",
+                due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+                title="Fraud detection",
+            )
+        }
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        date(2026, 10, 13),
+        sched=sched,
+        handed_out=frozenset({"assignment-1"}),
+    )
+    assert 'title: "Assignment 1"' in out  # the identifier is always the slug's
+    assert out.count('subtitle: "Fraud detection"') == 2  # entry + due row
+
+
+def test_a_declared_name_that_repeats_the_identifier_is_trimmed(monkeypatch):
+    # Faculty repeat the identifier in a README heading and in a `releases:` title alike,
+    # so printing either whole under its identifier read "Assignment 1 / Assignment 1 -
+    # linear regression..." and "Lab 1 / Lab 1". Both dash characters in live sources are
+    # handled.
+    assert (
+        site._row_name("Assignment 1 - linear regression", "Assignment 1")
+        == "linear regression"
+    )
+    assert (
+        site._row_name("Assignment 1 \u2014 Introduce Yourself", "Assignment 1")
+        == "Introduce Yourself"
+    )
+    # a heading that is the name already survives whole
+    assert (
+        site._row_name("Group project - a report", "Assignment 3 Project")
+        == "Group project - a report"
+    )
+    # and `Assignment 10` is not `Assignment 1` plus a name of "0"
+    assert site._row_name("Assignment 10 revisited", "Assignment 1") == (
+        "Assignment 10 revisited"
+    )
+    # a session's declared title gets the same trim
+    assert site._row_name("Lab 1", "Lab 1") == ""
+    assert site._row_name("Session 3 - Probability", "Session 3") == "Probability"
 
 
 def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
@@ -428,6 +486,8 @@ def test_a_pending_assignment_links_no_repo(monkeypatch):
         now=datetime(2026, 9, 21, tzinfo=BERLIN),
     )
     assert "repo_url" not in out
+    # the SHAPE is still named - it is the plan's, and known before anything ships
+    assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
     assert "`assignment-1-<your-handle>` repo appears when it is" in out
 
 
@@ -1148,7 +1208,11 @@ def test_front_matter_survives_a_backslash_in_a_title(monkeypatch):
         ),  # the README title is only read once out
     )
     front = yaml.safe_load(out.split("---")[1])  # must parse, no ScannerError
-    assert "sigma" in front["title"]
+    # the README heading is the assignment's NAME, so it is `subtitle` that carries the
+    # faculty prose - and therefore the escape risk
+    assert "sigma" in front["subtitle"]
+    assert "sigma" in front["due_event"]["subtitle"]
+    assert front["title"] == "Assignment 1"  # the identifier is the slug's, always
 
 
 def test_links_block_survives_a_backslash_in_a_filename():

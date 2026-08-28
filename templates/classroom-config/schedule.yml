@@ -79,6 +79,7 @@
 #                                   
 # assignments:                      
 #   assignment-1:
+#     title:                        # OPTIONAL - default: the template README's `# ` heading. The assignment's name, beside the slug on the deployed site (students SEE the slug, so keep it short and put the name here)
 #     course_source_repo:           # REQUIRED - the course-org repo it hands out from
 #     cohort_dest_repo:             # OPTIONAL - default: the slug above (here assignment-1)
 #     handout_datetime:             # technically OPTIONAL, but REQUIRED for a scheduled handout - omit it if you hand out via the manual "Release assignment" workflow (which auto-records it here for you)

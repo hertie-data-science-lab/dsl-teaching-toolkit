@@ -154,12 +154,15 @@ inside `labs/02_intro` ships with the 14:00 copy.
 
 For the full assignment lifecyle: hand-out, due date, grading
 
-Keyed by a slug you choose. As with a `deploy:`, `course_source_repo` names where it comes from and `cohort_dest_repo` what it is called in the cohort (default: the slug). 
+Keyed by a slug you choose. As with a `deploy:`, `course_source_repo` names where it comes from and `cohort_dest_repo` what it is called in the cohort (default: the slug).
+
+Unlike a `releases:` label, **an assignment's slug is shown to students**: it names their repo (`assignment-1-<handle>`), and the site prints it as the row's heading - `assignment-3-project` reads "Assignment 3 Project". So keep it short, and put the assignment's name in `title:` beside it. 
 
 > `teams.csv` rows and the grades/snapshot files key on the cohort name too - `cohort_dest_repo` if set, else the slug.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
+| `title` | no | - | the assignment's **name**, shown beside the slug on the schedule and the Assignments tab ("Assignment 1 / Fraud detection"). Declare it here and it appears from the day you write the plan; leave it out and the site falls back to the template README's `# ` heading, which only appears at hand-out |
 | `handout_datetime` | no* | - | when repos are provisioned, automatically. |
 | `due_datetime` | **yes** | - | the deadline students see; a bare date closes at **23:59:59** |
 | `grading_datetime` | no | `due_datetime` | when the snapshot freezes and it is [autograded](#deadline-snapshots-and-autograding) |
@@ -172,6 +175,7 @@ Keyed by a slug you choose. As with a `deploy:`, `course_source_repo` names wher
 ```yaml
 assignments:
   assignment-1:
+    title: Linear regression            # optional: the assignment's name, beside the slug
     course_source_repo: assignment-1-f2026  # required: the course-org repo it hands out from
     cohort_dest_repo: assignment-1-basics # optional: the cohort-side name. Default if undefined: the slug (i.e. assignment-1).
     handout_datetime: 2026-09-22T09:00  
