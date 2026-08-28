@@ -46,6 +46,7 @@ from .utils import (
     generate_from_template,
     gh,
     git,
+    grant_course_team_access,
     grant_team_repo_access,
     log,
     log_err,
@@ -277,6 +278,11 @@ def provision_one(
     # (see the module docstring - groups are the team-based path), and onboarding normally
     # accepts the org invite first, so this stays a direct grant; the group path already
     # routes access through the team to avoid the wedge.
+    # Faculty first, and separately from the student grants below: marking a submission
+    # means reading it, and this repo used to grant nobody but the student - so an
+    # instructor who was not an org OWNER could not open the work they had to mark. The
+    # same COURSE_TEAM_ACCESS pair that holds welcome and classroom-config.
+    grant_course_team_access(cohort_org, repo)
     added = 0
     for handle in handles:
         if add_collaborator(cohort_org, repo, handle, permission="maintain"):

@@ -147,6 +147,7 @@ def test_a_failed_solution_push_reaches_the_returned_status(tmp_path, monkeypatc
     # provision_all could not tell. Both the group and individual paths must report it.
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
     monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_course_team_access", lambda *a, **k: None)
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
@@ -290,6 +291,7 @@ def test_a_repo_no_student_can_open_is_a_failed_handout(_provisioned, monkeypatc
     # The old "created-no-collaborator" status doesn't start with "failed", so a repo
     # nobody can see never reached provision_all's exit predicate: the release went green
     # while the student had nothing to submit into.
+    monkeypatch.setattr(assign, "grant_course_team_access", lambda *a, **k: None)
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: False)
     status = assign.provision_one(
         "COURSE",

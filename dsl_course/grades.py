@@ -50,6 +50,7 @@ from .utils import (
     get_file_content,
     gh,
     git,
+    grant_course_team_access,
     log,
     log_err,
     log_ok,
@@ -391,6 +392,11 @@ def provision_one(cohort_org: str, handle: str) -> str:
         )
         set_repo_topics(cohort_org, repo, ["gradebook"])
 
+    # Faculty, who mark: the student was the only grant on their own gradebook, so an
+    # instructor who was not an org OWNER could not read back what had been returned.
+    # Writes are still meant to go through Distribute grades - its three gates are about
+    # the workflow, not about who holds the repo.
+    grant_course_team_access(cohort_org, repo)
     if add_collaborator(cohort_org, repo, handle, permission="pull"):
         log_ok(f"  + @{handle} (read)")
         return "skipped" if existed else "ok"

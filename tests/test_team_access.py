@@ -80,3 +80,31 @@ def test_cohort_setup_grants_faculty_access_even_when_nothing_is_seeded(monkeypa
     monkeypatch.setattr(bootstrap_course, "grant_cohort_faculty_access", granted.append)
     bootstrap_course.setup_cohort_extras("Course-f2026")
     assert granted == ["Course-f2026"]
+
+
+def test_faculty_teams_are_granted_on_every_cohort_repo_kind():
+    # A cohort org sets default_repository_permission=none, so a team grant is the WHOLE of
+    # a non-owner's access. Released content, submission repos and gradebooks each granted
+    # only students - so an instructor who was not an org OWNER could not read the material
+    # they released, open the work they had to mark, or see the grades they returned. Every
+    # live faculty member happens to be an owner, which is why nothing broke.
+    import inspect
+
+    from dsl_course import assign, deploy, grades
+
+    for mod, what in (
+        (deploy, "released content"),
+        (assign, "submission repos"),
+        (grades, "gradebooks"),
+    ):
+        src = inspect.getsource(mod)
+        assert "grant_course_team_access(cohort_org, repo)" in src, (
+            f"{what} ({mod.__name__}) grants no faculty team - a non-owner instructor "
+            "cannot open it"
+        )
+
+
+def test_the_faculty_grant_is_one_pair_everywhere():
+    # welcome, classroom-config, .github and now every other cohort repo use the SAME pair,
+    # so "who are faculty here" has one answer rather than one per repo kind.
+    assert utils.COURSE_TEAM_ACCESS == {"instructors": "push", "course-admin": "admin"}
