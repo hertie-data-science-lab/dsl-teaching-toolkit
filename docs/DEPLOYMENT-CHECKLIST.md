@@ -320,7 +320,7 @@ assignments:
 semester_start: 2026-09-07
 semester_end: 2026-12-18
 assignments:                          # each assignment's WHOLE lifecycle, keyed by slug
-  assignment-1:                       # (template name minus -fYYYY). Students SEE the slug
+  assignment-1:                       # students SEE this slug: it names their repo (`assignment-1-<handle>`)
     title: Linear regression          # optional: the name shown beside the slug
     handout_datetime: 2026-09-22T09:00  # optional: provision one repo per student (or per
                                         # team - the template's grading.yml decides), automatic
