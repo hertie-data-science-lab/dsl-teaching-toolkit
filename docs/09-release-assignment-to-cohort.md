@@ -40,7 +40,7 @@ or force `individual` / `group` for this dispatch -
 see [Group or individual?](#group-or-individual))
 - `dry_run` (list the repos that *would* be created).
 
-Auditors (`role=auditor`) are skipped. The assignment appears on the cohort site automatically - at hand-out, not before. Until you release it the site says nothing about it at all: no schedule row, no due date, no page. The dates live in `schedule.yml` until then. That holds however you hand out: this workflow and a scheduled `handout_datetime` both open it.
+Auditors (`role=auditor`) are skipped. The assignment's brief appears on the cohort site automatically - at hand-out, not before. Its schedule rows are up from the day the dates land in `schedule.yml`; until you release it they carry only the plan-side name and say it is not handed out yet, and the Assignments tab lists it unlinked. That holds however you hand out: this workflow and a scheduled `handout_datetime` both open it.
 
 ## Group or individual?
 
