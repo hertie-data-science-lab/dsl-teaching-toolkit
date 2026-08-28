@@ -198,3 +198,25 @@ def test_inventory_skips_cohort_pointer_orgs(monkeypatch):
     monkeypatch.setattr(list_orgs, "org_exists", lambda org: True)
     orgs = list_orgs.discover_course_orgs()
     assert [o["org"] for o in orgs] == ["Course-Org"]
+
+
+def test_a_cohort_cannot_be_bootstrapped_onto_its_own_tier(monkeypatch, capsys):
+    # A cohort has no tier of its own: central_ref_for follows its `course:` pointer, and
+    # tonight's refresh re-renders it at whatever the COURSE org declares. The pair looks
+    # like a pin and lasts one night at most, so it is refused rather than silently undone
+    # hours later, in an org nobody is watching.
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "bootstrap_course",
+            "--org",
+            "Cohort-f2026",
+            "--cohort",
+            "--course",
+            "Course-Org",
+            "--central-ref",
+            "staging",
+        ],
+    )
+    assert bc.main() == 1
+    assert "Course-Org/.github/dsl-course.yml" in capsys.readouterr().err
