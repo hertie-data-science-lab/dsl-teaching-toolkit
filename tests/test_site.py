@@ -6,12 +6,13 @@ silently mis-dates the whole schedule page, or hides a lab inside a lecture row.
 from __future__ import annotations
 
 from datetime import date, datetime
+from functools import cache
 from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
 
-from dsl_course import gh_contents, schedule_plan, site
+from dsl_course import gh_contents, schedule_plan, site, site_repo
 from dsl_course import schedule as schedule_mod
 from dsl_course.schedule import AssignmentEntry, Deploy, Event, Release, Schedule
 
@@ -26,7 +27,7 @@ def _no_acting_login(monkeypatch):
     """_team_people asks who the sync is authenticated as, and the real lookup shells out
     to `gh` (green on an authenticated dev box, red in tokenless CI). None excludes
     nobody, which is what every test here but the bot-card one wants."""
-    monkeypatch.setattr(site, "_acting_login", lambda: None)
+    monkeypatch.setattr(site_repo, "_acting_login", lambda: None)
 
 
 def _sched(releases: list[Release]) -> Schedule:
@@ -463,7 +464,7 @@ def _plan(
     captured: dict = {}
     monkeypatch.setattr(
         site,
-        "_sync_site_repo",
+        "sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
     monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
@@ -474,9 +475,9 @@ def _plan(
     monkeypatch.setattr(
         site, "discover_handed_out_assignments", lambda org: frozenset(handed_out)
     )
-    monkeypatch.setattr(site, "_yaml_file", lambda *a: {})
+    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
     monkeypatch.setattr(site.schedule, "load", lambda org: sched)
-    monkeypatch.setattr(site, "_people_yaml", lambda *a, **k: "people: []\n")
+    monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     monkeypatch.setattr(
         site, "_session_files", files or (lambda org, repo, subpath, folder: [])
     )
@@ -484,7 +485,7 @@ def _plan(
     # folder-link URLs. Stubbed even where `_session_files` is faked: without it the fake
     # covers the file list but the branch lookup still reaches GitHub, which passes on an
     # authenticated dev box and fails in CI.
-    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", ()))
+    monkeypatch.setattr(site, "_repo_tree", cache(lambda org, repo: ("main", ())))
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
     assert site.sync_site("Course-Org", "Cohort-f2026") == 0
     return captured["plan"]
@@ -538,7 +539,7 @@ def test_course_description_flows_from_course_metadata_into_config(
     captured = {}
     monkeypatch.setattr(
         site,
-        "_sync_site_repo",
+        "sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
     monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
@@ -548,17 +549,17 @@ def test_course_description_flows_from_course_metadata_into_config(
         site, "discover_handed_out_assignments", lambda org: frozenset()
     )
     monkeypatch.setattr(site.schedule, "load", lambda org: Schedule())
-    monkeypatch.setattr(site, "_people_yaml", lambda *a, **k: "people: []\n")
+    monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
 
-    monkeypatch.setattr(site, "_yaml_file", lambda *a: {})
+    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
     assert site.sync_site("Course-Org", "Cohort-f2026") == 0
     assert "course_description" not in captured["plan"].config
 
     monkeypatch.setattr(
-        site, "_yaml_file", lambda *a: {"course_description": "Nets, from 0."}
+        site, "yaml_file", lambda *a: {"course_description": "Nets, from 0."}
     )
     assert site.sync_site("Course-Org", "Cohort-f2026") == 0
-    cfg = site._set_config(
+    cfg = site_repo._set_config(
         'course_name: "x"\ncourse_description: "old"\ncourse_code: "y"\n',
         "course_description",
         captured["plan"].config["course_description"],
@@ -570,7 +571,7 @@ def test_course_description_flows_from_course_metadata_into_config(
 def test_set_config_writes_one_line_over_a_block_scalar():
     # A faculty `>` block in dsl-course.yml, and/or one already in _config.yml: either way
     # the result must stay valid YAML on one line, its body not stranded as loose text.
-    cfg = site._set_config(
+    cfg = site_repo._set_config(
         "course_description: >\n  an old\n  folded blurb\ncourse_code: 'y'\n",
         "course_description",
         "line one\nline two\n",
@@ -593,7 +594,7 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
     captured = {}
     monkeypatch.setattr(
         site,
-        "_sync_site_repo",
+        "sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
     monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
@@ -602,8 +603,8 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
     monkeypatch.setattr(
         site, "discover_handed_out_assignments", lambda org: frozenset()
     )
-    monkeypatch.setattr(site, "_yaml_file", lambda *a: {"course_name": "Deep Learning"})
-    monkeypatch.setattr(site, "_people_yaml", lambda *a, **k: "people: []\n")
+    monkeypatch.setattr(site, "yaml_file", lambda *a: {"course_name": "Deep Learning"})
+    monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     # the REAL schedule.load, fed the malformed file
     monkeypatch.setattr(
         site.schedule, "get_file_content", lambda org, repo, path: MALFORMED_SCHEDULE
@@ -976,14 +977,14 @@ def test_session_files_fetch_failure_raises_rather_than_stripping_the_site(monke
 
 
 def test_team_people_missing_team_is_empty(monkeypatch):
-    monkeypatch.setattr(site, "gh", lambda *a, **k: (1, "HTTP 404: Not Found"))
-    assert site._team_people("Course", "instructors") == []
+    monkeypatch.setattr(site_repo, "gh", lambda *a, **k: (1, "HTTP 404: Not Found"))
+    assert site_repo._team_people("Course", "instructors") == []
 
 
 def test_team_people_read_failure_raises_rather_than_wiping_the_team(monkeypatch):
-    monkeypatch.setattr(site, "gh", lambda *a, **k: (1, "HTTP 500: boom"))
+    monkeypatch.setattr(site_repo, "gh", lambda *a, **k: (1, "HTTP 500: boom"))
     with pytest.raises(RuntimeError):
-        site._team_people("Course", "instructors")
+        site_repo._team_people("Course", "instructors")
 
 
 def _member_gh(profile: tuple[int, str]):
@@ -996,8 +997,8 @@ def _member_gh(profile: tuple[int, str]):
 
 
 def test_team_people_skips_a_deleted_account_but_says_so(monkeypatch, capsys):
-    monkeypatch.setattr(site, "gh", _member_gh((1, "gh: Not Found (HTTP 404)")))
-    assert site._team_people("Course", "instructors") == []
+    monkeypatch.setattr(site_repo, "gh", _member_gh((1, "gh: Not Found (HTTP 404)")))
+    assert site_repo._team_people("Course", "instructors") == []
     assert "jane" in capsys.readouterr().out  # one card fewer, not silently
 
 
@@ -1006,9 +1007,9 @@ def test_team_people_per_member_failure_raises_rather_than_dropping_one_card(
 ):
     # The team read is fail-loud; the per-MEMBER read used to swallow everything, so a
     # transient error republished the site one instructor short with nothing to show for it.
-    monkeypatch.setattr(site, "gh", _member_gh((1, "gh: HTTP 502 Bad Gateway")))
+    monkeypatch.setattr(site_repo, "gh", _member_gh((1, "gh: HTTP 502 Bad Gateway")))
     with pytest.raises(RuntimeError, match="could not read the GitHub profile of jane"):
-        site._team_people("Course", "instructors")
+        site_repo._team_people("Course", "instructors")
 
 
 def test_team_people_never_renders_the_syncs_own_bot_account(monkeypatch, capsys):
@@ -1020,11 +1021,11 @@ def test_team_people_never_renders_the_syncs_own_bot_account(monkeypatch, capsys
         assert "users/hertie-dsl-bot" not in args
         return (0, "Jane\thttps://a/j.png\thttps://gh/jane")
 
-    monkeypatch.setattr(site, "gh", fake)
+    monkeypatch.setattr(site_repo, "gh", fake)
     monkeypatch.setattr(
-        site, "_acting_login", lambda: "Hertie-DSL-Bot"
+        site_repo, "_acting_login", lambda: "Hertie-DSL-Bot"
     )  # logins fold case
-    assert site._team_people("Course", "instructors") == [
+    assert site_repo._team_people("Course", "instructors") == [
         ("Jane", "https://a/j.png", "https://gh/jane")
     ]
     assert "hertie-dsl-bot" in capsys.readouterr().out  # skipped out loud
@@ -1047,14 +1048,16 @@ def test_yaml_file_raises_on_a_malformed_file_rather_than_wiping_what_it_feeds(
     # A cohort's people.yml with one bad indent used to parse to `{}` - "nothing declared" -
     # and republish the site with every teaching-team card gone, green.
     err = _bad_indent_error()
-    monkeypatch.setattr(site, "load_yaml_config", lambda *a: (_ for _ in ()).throw(err))
+    monkeypatch.setattr(
+        site_repo, "load_yaml_config", lambda *a: (_ for _ in ()).throw(err)
+    )
     with pytest.raises(yaml.YAMLError):
-        site._yaml_file("Cohort-f2026", "classroom-config", "people.yml")
+        site_repo.yaml_file("Cohort-f2026", "classroom-config", "people.yml")
 
 
 def test_yaml_file_reads_an_absent_file_as_nothing_declared(monkeypatch):
-    monkeypatch.setattr(site, "load_yaml_config", lambda *a: None)
-    assert site._yaml_file("Cohort-f2026", "classroom-config", "people.yml") == {}
+    monkeypatch.setattr(site_repo, "load_yaml_config", lambda *a: None)
+    assert site_repo.yaml_file("Cohort-f2026", "classroom-config", "people.yml") == {}
 
 
 def test_main_reports_a_malformed_config_as_one_line_not_a_traceback(
@@ -1202,10 +1205,10 @@ def test_iso_when_prints_the_datetime_it_is_given_offset_free():
     # The cohort-tz conversion happens ONCE, in schedule's parser (below), so every
     # datetime reaching the renderers is already cohort wall-clock: printing it is just
     # dropping the offset, with no zone for a renderer to forget to pass.
-    assert site._iso_when(datetime(2026, 9, 15, 12, 0, tzinfo=BERLIN)) == (
+    assert site_repo.iso_when(datetime(2026, 9, 15, 12, 0, tzinfo=BERLIN)) == (
         "2026-09-15T12:00:00"
     )
-    assert site._iso_when(datetime(2026, 9, 15, 10, 0, tzinfo=UTC)) == (
+    assert site_repo.iso_when(datetime(2026, 9, 15, 10, 0, tzinfo=UTC)) == (
         "2026-09-15T10:00:00"
     )
 
@@ -1298,14 +1301,14 @@ def test_the_site_readme_does_not_promise_the_tab_pages_are_safe():
     # It used to say "pages ... are never rewritten. Change them freely", while every sync
     # overwrites the tab pages - so following it lost the edit AND opened an
     # "edits overwritten" issue. Also: the public sync writes no materials index.
-    from dsl_course.site import _site_pages
+    from dsl_course.site_repo import _site_pages
 
-    cohort_readme = site._site_readme("org", cohort=True)
+    cohort_readme = site_repo.site_readme("org", cohort=True)
     for pg in _site_pages(cohort=True):
         assert f"`{pg.file}`" in cohort_readme, pg.file
     assert "pages, `Gemfile`" not in cohort_readme
     assert "`_data/materials.yml`" in cohort_readme
-    assert "`_data/materials.yml`" not in site._site_readme("org", cohort=False)
+    assert "`_data/materials.yml`" not in site_repo.site_readme("org", cohort=False)
 
 
 def test_readings_pending_reaches_the_rendered_row():
@@ -1343,7 +1346,9 @@ def test_readings_pending_reaches_the_rendered_row():
 
 
 def test_a_generated_page_states_its_ownership_inside_its_front_matter():
-    page = site._stamp_front_matter('---\ntype: lecture\ntitle: "Session 1"\n---\n')
+    page = site_repo._stamp_front_matter(
+        '---\ntype: lecture\ntitle: "Session 1"\n---\n'
+    )
     # Jekyll needs `---` on line 1, so the notice cannot go above it
     assert page.startswith("---\n# SYSTEM-OWNED - do not edit.")
     assert "type: lecture" in page and 'title: "Session 1"' in page
@@ -1353,11 +1358,11 @@ def test_a_generated_page_states_its_ownership_inside_its_front_matter():
 
 
 def test_stamping_a_page_with_no_front_matter_leaves_it_untouched():
-    assert site._stamp_front_matter("just text\n") == "just text\n"
+    assert site_repo._stamp_front_matter("just text\n") == "just text\n"
 
 
 def test_the_site_readme_names_what_the_sync_rewrites_and_what_it_does_not():
-    r = site._site_readme("hertie-x-f2026", cohort=True)
+    r = site_repo.site_readme("hertie-x-f2026", cohort=True)
     assert r.startswith("<!-- SYSTEM-OWNED - do not edit.")
     assert "Do not edit this repository." in r
     for owned in ("_lectures/", "_assignments/", "_events/", "_data/people.yml"):
@@ -1367,7 +1372,7 @@ def test_the_site_readme_names_what_the_sync_rewrites_and_what_it_does_not():
 
 
 def test_the_config_header_names_the_identity_keys_the_sync_overwrites():
-    cfg = site._stamp_config(
+    cfg = site_repo._stamp_config(
         "# Edit the fields below for your course.\ncourse_name: x\n",
         ["course_code", "course_name"],
     )
@@ -1377,4 +1382,7 @@ def test_the_config_header_names_the_identity_keys_the_sync_overwrites():
 
 
 def test_a_config_without_the_template_header_line_is_left_alone():
-    assert site._stamp_config("course_name: x\n", ["course_name"]) == "course_name: x\n"
+    assert (
+        site_repo._stamp_config("course_name: x\n", ["course_name"])
+        == "course_name: x\n"
+    )

@@ -32,7 +32,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(ROOT))
 
-from dsl_course import schedule_plan, site
+from dsl_course import schedule_plan, site, site_repo
 
 BERLIN = ZoneInfo("Europe/Berlin")
 COURSE_ORG = "hertie-dsl-fixture-course"
@@ -215,10 +215,10 @@ def collections() -> dict[str, dict[str, str]]:
 def data_files() -> dict[str, str]:
     """The generated `_data/*.yml`, keyed by repo-relative path."""
     return {
-        "_data/people.yml": site._people_yaml(
+        "_data/people.yml": site_repo.people_yaml(
             COHORT_ORG, PEOPLE, edit_at=f"{COHORT_ORG}/classroom-config/people.yml"
         ),
-        "_data/nav.yml": site._nav_yaml(cohort=True),
+        "_data/nav.yml": site_repo.nav_yaml(cohort=True),
         "_data/materials.yml": site._materials_index(
             COHORT_ORG,
             [MATERIALS],
@@ -238,7 +238,7 @@ def generated() -> dict[str, dict[str, str] | dict[str, dict[str, str]]]:
     try:
         return {
             "collections": collections(),
-            "files": {**data_files(), **site._theme_pages(cohort=True)},
+            "files": {**data_files(), **site_repo.theme_pages(cohort=True)},
         }
     finally:
         site._repo_tree, site.get_file_content = real_tree, real_content
@@ -272,9 +272,9 @@ def build(dest: Path) -> None:
         (dest / coll).mkdir(parents=True, exist_ok=True)
         for name, body in entries.items():
             (dest / coll / name).write_text(
-                site._stamp_front_matter(body), encoding="utf-8"
+                site_repo._stamp_front_matter(body), encoding="utf-8"
             )
-    for rel, body in {**out["files"], **site._site_templates()}.items():
+    for rel, body in {**out["files"], **site_repo.site_templates()}.items():
         path = dest / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(body, encoding="utf-8")
@@ -287,11 +287,13 @@ def build(dest: Path) -> None:
         "course_code": "E1234",
         "github_org": COHORT_ORG,
     }.items():
-        cfg = site._set_config(cfg, key, value)
-    for key, value in site._THEME_CONFIG.items():
-        cfg = site._set_config(cfg, key, value, insert=True)
-    cfg = site._ensure_config_block(cfg, "collections", site._COLLECTIONS_BLOCK)
-    cfg = site._ensure_config_block(cfg, "defaults", site._DEFAULTS_BLOCK)
+        cfg = site_repo._set_config(cfg, key, value)
+    for key, value in site_repo._THEME_CONFIG.items():
+        cfg = site_repo._set_config(cfg, key, value, insert=True)
+    cfg = site_repo._ensure_config_block(
+        cfg, "collections", site_repo._COLLECTIONS_BLOCK
+    )
+    cfg = site_repo._ensure_config_block(cfg, "defaults", site_repo._DEFAULTS_BLOCK)
     (dest / "_config.yml").write_text(cfg, encoding="utf-8")
     (dest / "_config.offline.yml").write_text(OFFLINE_CONFIG, encoding="utf-8")
 

@@ -30,12 +30,9 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import re
 import shutil
 import sys
 import tempfile
-import time
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from functools import cache
@@ -44,9 +41,8 @@ from urllib.parse import quote
 
 import yaml
 
-from . import scaffold, schedule, welcome
+from . import schedule
 from .course import (
-    active_today,
     assignment_slug,
     discover_sections,
     find_session_dir,
@@ -63,19 +59,16 @@ from .discovery import (
     discover_handed_out_assignments,
     discover_release_sources,
     discover_sessions,
-    list_org_repos,
 )
-from .gh_contents import get_file_content, load_yaml_config, repo_tree
-from .gh_teams import _acting_login
-from .ghcli import GIT_ENV, gh, git, is_missing_resource
-from .log import log, log_err, log_ok, log_step
+from .gh_contents import get_file_content, repo_tree
+from .ghcli import gh
+from .log import log, log_err, log_step
 from .readings import demote_headings, is_reading_overlay, readings_block
 from .repos import (
     get_default_branch,
     has_denied_component,
     is_denied_publication,
     repo_exists,
-    repo_is_archived,
 )
 from .schedule_plan import (
     READINGS_SECTION,
@@ -83,60 +76,25 @@ from .schedule_plan import (
     planned_sessions,
     row_kind,
 )
+from .site_repo import (
+    PUBLISH_CONFIG,
+    SitePlan,
+    block,
+    iso_when,
+    liquid_raw,
+    nav_yaml,
+    people_yaml,
+    q,
+    site_readme,
+    site_templates,
+    slug,
+    sync_site_repo,
+    theme_pages,
+    yaml_file,
+)
 
 # Public course site: served folder for the hosted section files.
 PUBLIC_MATERIALS_DIR = "public-materials"
-# The settings of the last manual publish, committed into the site repo so the daily cron
-# can re-sync unattended. Leading `_`, so Jekyll ignores it rather than serving it.
-PUBLISH_CONFIG = "_publish-config.yml"
-_GIT_ENV = GIT_ENV
-
-# The shared Jekyll theme, and the ref every generated site pins it at.
-#
-# Pinned, because sites used to track its `main`: a theme PR reached all six live sites
-# the moment it merged, and twice took two of them down before anyone had opened one.
-# What the theme still owns is the GENERIC chrome - header, footer, nav, brand colours,
-# the `default`/`page`/`post` layouts. The course-specific layouts, includes and
-# stylesheet ship from `templates/site/` in THIS repo (see `_site_templates`), where they
-# sit beside the renderers whose front matter they read.
-#
-# A commit, not a tag, because the theme carries no release tags yet; `remote_theme:`
-# takes either form, so this becomes `@v1.0.0` the day one is cut.
-THEME_REPO = "hertie-data-science-lab/dsl-jekyll-theme"
-THEME_REF = "9288394c5c6d78cf8e881bf4e22ab025a5da1888"
-
-# `_config.yml` keys the sync owns because the templates it ships DEPEND on them, as
-# opposed to the course-identity keys, which are content. Written whether or not the
-# site's own `_config.yml` already has them: a site generated before this existed has no
-# `remote_theme:` line to replace, and a site missing `dateformat` prints every date on
-# every page as a raw ISO timestamp.
-_THEME_CONFIG = {
-    "remote_theme": f"{THEME_REPO}@{THEME_REF}",
-    "dateformat": "%m/%d/%Y",
-}
-
-# The collections the shipped templates read (`site.lectures`, `site.assignments`,
-# `site.events`, `site.announcements`) and the layout an assignment page gets. Both are
-# multi-line blocks rather than scalars, so `_ensure_config_block` writes them; both are
-# a CONTRACT of templates/site/ rather than a preference, and a site missing either
-# builds green into empty pages - the worst way for this to be wrong.
-_COLLECTIONS_BLOCK = """collections:
-  events:
-    output: true
-  lectures:
-    output: true
-  assignments:
-    output: true
-  announcements:
-    output: false
-"""
-_DEFAULTS_BLOCK = """defaults:
-  - scope:
-      path: ""
-      type: "assignments"
-    values:
-      layout: "assignment"
-"""
 
 
 def _semester_start(cohort_org: str) -> date:
@@ -147,582 +105,10 @@ def _semester_start(cohort_org: str) -> date:
     return date(2026, 1, 1)
 
 
-def _slug(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-") or "exam"
-
-
 def _semester_label(cohort_org: str) -> str:
     """fYYYY -> 'Fall YYYY', sYYYY -> 'Spring YYYY' (for site.course_semester)."""
     tag = term_tag(cohort_org)
     return f"{'Fall' if tag[0] == 'f' else 'Spring'} {tag[1:]}" if tag else ""
-
-
-def _q(value: str) -> str:
-    """Quote-safe a value for a ONE-LINE double-quoted YAML scalar: escape the two
-    characters that are special inside one (`\\` and `"`), and fold newlines away - a
-    multi-line value (a faculty `>` block in dsl-course.yml, say) would otherwise write a
-    raw newline mid-scalar and break the file it lands in."""
-    return " ".join(value.replace("\\", "\\\\").replace('"', "'").split())
-
-
-def _liquid_raw(text: str) -> str:
-    """Fence faculty-written text that is inlined verbatim into a Jekyll document. A `{{`
-    or `{%` in it would otherwise run as Liquid, and a malformed tag fails the whole build;
-    `{% raw %}` renders it literally."""
-    return f"{{% raw %}}\n{text}\n{{% endraw %}}"
-
-
-def _block(key: str, text: str) -> str:
-    """A multi-line front-matter value as a YAML literal block - faculty-written text (a
-    reading list) inlined verbatim, rather than folded onto one line by `_q`.
-
-    The indentation indicator (`|2`) is deliberate: without it YAML takes the block's
-    indentation from its first non-empty line, so a list that happens to start indented
-    would make every following line look like the end of the block and break the whole
-    file. Tabs are expanded for the same reason. Front matter is data, not a Liquid
-    template, so unlike the body route (`_liquid_raw`) a `{{` in the text needs no fence."""
-    lines = text.expandtabs(4).rstrip().splitlines()
-    body = "\n".join(f"  {ln}" if ln.strip() else "" for ln in lines)
-    return f"{key}: |2\n{body}\n"
-
-
-# A generated collection page states its ownership INSIDE its front matter: Jekyll needs
-# `---` on line 1, so a comment above it would break the page. Stamped at the write site
-# (`_sync_site_repo`) rather than in each of the six renderers, so a renderer added later
-# cannot ship an unstamped page.
-_FRONT_MATTER_STAMP = (
-    "# SYSTEM-OWNED - do not edit. Generated by the DSL course sync, which clears and\n"
-    "# rewrites this whole collection on every run. Edit the source instead: the cohort's\n"
-    "# classroom-config/schedule.yml (dates, titles) or its org structure (what released).\n"
-)
-
-
-def _stamp_front_matter(text: str) -> str:
-    """Insert the ownership notice as the first line inside a page's front matter.
-
-    A page that somehow has no leading `---` is returned untouched rather than corrupted -
-    stamping is a courtesy to whoever opens the file, never worth breaking a build for."""
-    if not text.startswith("---\n"):
-        return text
-    return "---\n" + _FRONT_MATTER_STAMP + text[len("---\n") :]
-
-
-# The site repo's own README. It is generated from `course-website-template`, whose README
-# describes the TEMPLATE - so a deployed site repo used to carry no notice at all that it
-# is machine-written and redeployed on every push. Written through `plan.files`, so it
-# converges on every sync exactly like `_data/people.yml`.
-def _site_readme(org: str, cohort: bool) -> str:
-    # Named from the same page table the sync writes them from, so the list cannot claim a
-    # page this site does not have - or omit one it rewrites.
-    tab_pages = ", ".join(f"`{pg.file}`" for pg in _site_pages(cohort))
-    source = (
-        "the cohort's `classroom-config/` files (`schedule.yml`, `people.yml`) and what "
-        "the course org actually releases"
-        if cohort
-        else "the course org's `.github/dsl-course.yml` and the materials repo it publishes"
-    )
-    return (
-        f"<!-- SYSTEM-OWNED - do not edit. Generated and redeployed by the DSL course "
-        f"sync. -->\n\n"
-        f"# {org} - auto-deployed course website\n\n"
-        f"**Do not edit this repository.** It is machine-written: every sync rewrites the "
-        f"generated files below and pushing redeploys the site, so an edit here is "
-        f"overwritten and lost.\n\n"
-        f"Its content comes from {source}.\n\n"
-        f"## What the sync owns\n\n"
-        f"| Path | Holds |\n"
-        f"| --- | --- |\n"
-        f"| `_lectures/` | one page per session and lab |\n"
-        f"| `_assignments/` | one page per handed-out assignment |\n"
-        f"| `_events/` | exams, term dates, display-only rows |\n"
-        f"| `_data/people.yml` | the staff cards |\n"
-        f"| `_data/nav.yml` | the nav bar |\n"
-        + ("| `_data/materials.yml` | the All Materials index |\n" if cohort else "")
-        + f"| the tab pages - {tab_pages} | the wrappers the tabs point at |\n"
-        + "| `_layouts/`, `_includes/`, `_sass/_course.scss` | how every page renders |\n"
-        + "| `_config.yml` | the course identity keys, the pinned theme, and the "
-        "`collections:`/`defaults:` the layouts need |\n\n"
-        "Each collection is CLEARED and rewritten on every sync, so a file you add to one "
-        "disappears on the next run. The tab pages are rewritten too - they are generated "
-        "wrappers, so put your own words in `index.md`, or in a page of your own linked "
-        "from there.\n\n"
-        "## Everything else is yours\n\n"
-        "`index.md`, any page you add yourself, `_announcements/`, `_images/`, `Gemfile`, "
-        "further `_data/*.yml` - never rewritten. Change them freely.\n\n"
-        "The rendering is not yours to change here: `_layouts/`, `_includes/` and "
-        "`_sass/_course.scss` are shipped from `templates/site/` in the DSL teaching "
-        "toolkit, and the rest of the styling from the shared `dsl-jekyll-theme`. An edit "
-        "in this repo is overwritten on the next sync; open a PR against the toolkit "
-        "instead, and every course site gets it.\n\n"
-        "If you edit a generated file anyway, the sync opens an issue naming the commit it "
-        "overwrote, so the change can be copied back out of it.\n"
-    )
-
-
-def _stamp_config(text: str, keys: list[str]) -> str:
-    """Correct `_config.yml`'s "Edit the fields below" header for the keys the sync owns.
-
-    The template's header invites faculty to edit the fields under it - true of most of
-    them, but not of the course-identity keys this sync overwrites from `dsl-course.yml`
-    every run. Naming exactly which keys are machine-written keeps the rest of the header's
-    invitation honest. A template that has dropped the line is left alone: the header is
-    theme text, not a contract, and a missing line is not worth a failed sync."""
-    line = "# Edit the fields below for your course.\n"
-    if line not in text:
-        return text
-    owned = ", ".join(f"`{k}`" for k in keys)
-    return text.replace(
-        line,
-        "# Edit the fields below for your course - EXCEPT the course-identity keys the DSL\n"
-        f"# course sync owns and rewrites on every run: {owned}.\n"
-        "# Change those in the course org's .github/dsl-course.yml instead.\n",
-        1,
-    )
-
-
-# Stamped above anything this sync ADDS to a `_config.yml` it did not write - so a reader
-# of the file can tell the lines that are theirs from the lines that get rewritten.
-_MANAGED_MARKER = "# managed by the DSL course sync - rewritten on every run"
-
-
-def _set_config(text: str, key: str, value: str, *, insert: bool = False) -> str:
-    """Replace a top-level `key: ...` line in _config.yml, preserving the rest.
-
-    The value is always written as a one-line double-quoted scalar (see `_q`). Any
-    indented continuation lines are consumed with it, so replacing a key someone left as
-    a `>`/`|` block scalar doesn't strand its body as invalid YAML.
-
-    A key the template's `_config.yml` doesn't have is a no-op - logged, so template drift
-    (a key the code sets that the site theme dropped) is visible rather than silent. That
-    is right for the course-IDENTITY keys, which are content: a site that dropped
-    `course_code:` chose to. `insert=True` appends the key instead, for the handful the
-    shipped templates DEPEND on (`_THEME_CONFIG`): there a missing key is not a choice, it
-    is a site generated before the key existed, and leaving it out renders a broken page."""
-    new, n = re.subn(
-        rf"(?m)^({re.escape(key)}:[ \t]*).*(?:\n[ \t]+\S.*)*$",
-        lambda m: f'{m.group(1)}"{_q(value)}"',
-        text,
-        count=1,
-    )
-    if n:
-        return new
-    if not insert:
-        log(f"  (_config.yml has no `{key}:` key - not written; template drift?)")
-        return new
-    added = f'{_MANAGED_MARKER}\n{key}: "{_q(value)}"\n'
-    return text.rstrip("\n") + "\n\n" + added
-
-
-def _ensure_config_block(text: str, key: str, block: str) -> str:
-    """Write a verbatim MULTI-LINE `_config.yml` block (`collections:`, `defaults:`),
-    replacing whatever the site had under that key and appending it when it had none.
-
-    Not `_set_config`, which folds a value onto one quoted line - right for a course name,
-    impossible for a nested mapping. These two are a contract of the templates this sync
-    ships rather than anything faculty choose, so the block goes in whole: a site whose
-    `collections:` lost `lectures` renders an empty Lectures page and builds green, which
-    is the failure nobody notices.
-
-    The block is matched with or without the marker line above it, so a second sync
-    replaces what the first wrote rather than stacking another copy."""
-    body = _MANAGED_MARKER + "\n" + block.rstrip("\n") + "\n"
-    new, n = re.subn(
-        rf"(?m)^(?:{re.escape(_MANAGED_MARKER)}\n)?{re.escape(key)}:[ \t]*.*$"
-        r"(?:\n[ \t]+.*)*\n?",
-        lambda _m: body,
-        text,
-        count=1,
-    )
-    if n:
-        return new
-    return text.rstrip("\n") + "\n\n" + body
-
-
-# The session pages. Their CONTENT is a theme layout (dsl-jekyll-theme's
-# `_layouts/lectures.html`, `labs.html`, `readings.html`, `materials.html`,
-# `assignments.html`), so these are the front matter that points at one plus the page's own
-# intro line. Owned here, not left to the site template, because a template edit only
-# reaches orgs created after it - the rendering used to live as inline Liquid in each site
-# repo, and by the time it needed changing there were seven live sites to hand-patch. Every
-# later change to how sessions render now ships from the theme alone.
-#
-# `_overwritten_edits` still reports a hand edit these replace, as it does for any other
-# generated surface. (It does NOT fire on the first sync that takes them over: the page a
-# site was generated with was authored by the token account, which reads as a machine.)
-@dataclass(frozen=True)
-class _ThemePage:
-    """One generated page and its nav entry, declared together.
-
-    Together deliberately: the tab bar and the pages it points at were two structures
-    holding the same permalinks and titles, kept consistent only by both being written in
-    the same breath. The day someone generated the nav for the public site too, its
-    Readings tab would have pointed at a page that site never gets - a 404 nobody edited
-    into existence. One row per page makes that impossible.
-
-    Each page carries its OWN access sentence, because they genuinely differ: a materials
-    page is open to auditors, who read released materials but get no assignments, so the
-    assignments page names students alone. `gated_note` is what a COHORT site says;
-    `open_note` what the public open-courseware site says instead, where the same files are
-    published on purpose."""
-
-    file: str
-    layout: str
-    title: str
-    permalink: str
-    icon: str
-    gated_note: str
-    open_note: str = ""
-    # Pages only a COHORT site has. A public course site has no cohort repos to index, so
-    # it keeps `/materials/` as the readings page it has always been.
-    cohort_only: bool = False
-
-
-_THEME_PAGES = (
-    _ThemePage(
-        "lectures.md",
-        "lectures",
-        "Lectures",
-        "/lectures/",
-        "fas fa-book-reader",
-        "Lecture slides are only accessible to enrolled students & auditors.",
-        "Lecture slides by session.",
-    ),
-    _ThemePage(
-        "labs.md",
-        "labs",
-        "Labs",
-        "/labs/",
-        "fas fa-flask",
-        "Lab materials are only accessible to enrolled students & auditors.",
-        "Lab materials by session.",
-    ),
-    _ThemePage(
-        "readings.md",
-        "readings",
-        "Readings",
-        "/readings/",
-        "fas fa-book",
-        "Hosted files are only accessible to enrolled students & auditors.",
-        "Readings by session.",
-        cohort_only=True,
-    ),
-    _ThemePage(
-        "assignments.md",
-        "assignments",
-        "Assignments",
-        "/assignments/",
-        "fas fa-user-graduate",
-        # The layout says "No assignments released yet." when the collection is empty, so
-        # this line is only ever shown beside an actual list.
-        "Assignments repos are only accessible to enrolled students.",
-        "Assignments by hand-out date.",
-    ),
-    _ThemePage(
-        "materials.md",
-        "materials",
-        "All Materials",
-        "/materials/",
-        "fas fa-folder-open",
-        # Deliberately not "everything released": a cohort org also holds each student's
-        # private submission repo, which this must never list. See `_indexable_repos`.
-        "All released course material so far; only accessible to enrolled "
-        "students/auditors.",
-        cohort_only=True,
-    ),
-)
-
-# The public site's `/materials/` - the readings page under its original name, which is
-# where that site has always kept them.
-_PUBLIC_MATERIALS_PAGE = _ThemePage(
-    "materials.md",
-    "readings",
-    "Materials",
-    "/materials/",
-    "fas fa-book",
-    "",
-    "Readings by session.",
-)
-
-# Tabs the theme provides rather than generating: the template's own index.md and the
-# Schedule, which is driven by the collections. Everything else is a row above.
-_STATIC_NAV = (
-    ("Home", "/", "fa fa-home fa-lg"),
-    ("Schedule", "/schedule/", "fas fa-calendar-alt"),
-)
-
-
-def _site_pages(cohort: bool) -> tuple[_ThemePage, ...]:
-    """The pages this kind of site gets, in nav order. A public course site drops the two
-    cohort-only pages and keeps `/materials/` as its readings page."""
-    if cohort:
-        return _THEME_PAGES
-    return tuple(pg for pg in _THEME_PAGES if not pg.cohort_only) + (
-        _PUBLIC_MATERIALS_PAGE,
-    )
-
-
-def _theme_pages(cohort: bool) -> dict[str, str]:
-    """The `{path: content}` for the pages whose rendering lives in the theme."""
-    return {
-        pg.file: (
-            f"---\nlayout: {pg.layout}\ntitle: {pg.title}\n"
-            f"permalink: {pg.permalink}\n---\n\n"
-            + ((pg.gated_note if cohort else pg.open_note) or pg.open_note)
-            + "\n"
-        )
-        for pg in _site_pages(cohort)
-    }
-
-
-def _nav_yaml(cohort: bool) -> str:
-    """`_data/nav.yml` - the site's tab bar (the theme's `_includes/nav.html` reads it),
-    built from the same page table, so a tab can never point at a page this site lacks."""
-    rows = list(_STATIC_NAV) + [
-        (pg.title, pg.permalink, pg.icon) for pg in _site_pages(cohort)
-    ]
-    body = "\n\n".join(
-        f"- url: {url}\n  name: {name}\n  icon_class: {icon}"
-        for name, url, icon in rows
-    )
-    return (
-        "# Generated by `python3 -m dsl_course.site sync`. Rewritten on every sync - add a\n"
-        "# page of your own as a file in the repo and link it from `index.md` instead.\n"
-        "items:\n" + body + "\n"
-    )
-
-
-@cache
-def _site_templates() -> dict[str, str]:
-    """`{repo-relative path: content}` for everything under `templates/site/` - the
-    course-specific Jekyll layouts, includes and stylesheet this repo owns.
-
-    Walked, not enumerated: a template added to the directory ships on the next sync with
-    no second edit here, which is the only way the two cannot disagree. The paths are the
-    site-repo paths verbatim (`_layouts/schedule.html`, `_sass/_course.scss`), so they drop
-    straight into `plan.files`.
-
-    Read from real files rather than Python literals for the same reason as
-    `welcome.template`: faculty (and the theme's maintainer) can read and PR the thing a
-    site will actually receive."""
-    root = welcome.TEMPLATES / "site"
-    return {
-        path.relative_to(root).as_posix(): path.read_text(encoding="utf-8")
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    }
-
-
-def _yaml_file(org: str, repo: str, path: str) -> dict:
-    """A YAML config file from a repo as a mapping - `{}` when it is genuinely absent or
-    empty (nothing declared: the site renders its defaults, which is correct).
-
-    A file that exists but does NOT parse - or parses to a list/scalar - raises out of
-    here (via load_yaml_config), to the per-cohort isolation the callers already have. It
-    used to be coerced to `{}`, so one bad indent in a cohort's people.yml republished the
-    site with the whole teaching team's cards wiped, green - exactly the failure
-    `_team_people` next door is hardened against."""
-    return load_yaml_config(org, repo, path) or {}
-
-
-def _team_people(course_org: str, team: str) -> list[tuple[str, str, str]]:
-    """(display-name, avatar-url, profile-url) for each member of a course-org team.
-
-    A missing team (404) is an empty list - the site falls back gracefully. Any OTHER
-    failure RAISES rather than returning `[]`: a swallowed failure wrote `instructors: []`
-    and republished the site with the whole teaching team wiped. Fail-loud, like
-    get_team_members - and the same rule per MEMBER: a deleted account (404) is one card
-    the site can't show, but a transient failure on one lookup must not quietly drop that
-    instructor's card from the republished site.
-
-    The account running the sync is never a card: the bot sits in `instructors` for the
-    access it needs, and it rendered on the public site as a member of the teaching team."""
-    code, out = gh(
-        "api",
-        "--paginate",
-        f"orgs/{course_org}/teams/{team}/members",
-        "--jq",
-        ".[].login",
-    )
-    if code != 0:
-        if is_missing_resource(out):
-            return []  # no such team - fall back, don't wipe
-        raise RuntimeError(
-            f"could not read the members of {course_org}/{team}: {out[:200]}"
-        )
-    people = []
-    # None means the login could not be read; the gh-auth fail-fast guard has already run,
-    # so that is not this function's problem - it just excludes nobody.
-    acting = _acting_login()
-    for login in out.splitlines():
-        login = login.strip()
-        if not login:
-            continue
-        if acting and login.lower() == acting.lower():
-            log(
-                f"  (skipping the sync's own account {login} - not a person on the site)"
-            )
-            continue
-        c, u = gh(
-            "api",
-            f"users/{login}",
-            "--jq",
-            "[(.name // .login), .avatar_url, .html_url] | @tsv",
-        )
-        if c != 0:
-            # A 404 is a genuinely gone account: one card fewer, said out loud rather than
-            # silently. Anything else is a read failure, and dropping the card on it would
-            # republish the site one instructor short with no sign anything went wrong.
-            if is_missing_resource(u):
-                log(f"  (no GitHub profile for {login} - no card on the site)")
-                continue
-            raise RuntimeError(
-                f"could not read the GitHub profile of {login}: {u[:200]}"
-            )
-        if not u.strip():
-            log(f"  (empty GitHub profile for {login} - no card on the site)")
-            continue
-        parts = (u.rstrip("\n").split("\t") + ["", "", ""])[:3]
-        people.append(tuple(parts))
-    return people
-
-
-# A person entry mixes two concerns: who gets the GitHub grant, and what the website
-# card shows. These keys drive the grant and are never rendered; everything else is
-# display and is passed through to `_data/people.yml` as-is.
-ACCESS_ONLY = ("github_handle", "start", "end")
-# Our config spelling -> the key the Jekyll theme reads.
-CARD_ALIASES = {"photo": "profile_pic", "url": "webpage"}
-# Leading keys, so a generated file has a stable, readable order.
-CARD_ORDER = ("name", "profile_pic", "webpage", "title")
-
-
-def _card(entry: dict) -> dict:
-    """One person entry -> the card dict written into `_data/people.yml`: drop the
-    access-only keys, rename `photo`/`url` to the theme's names, keep everything else
-    the course declared. Ordered by CARD_ORDER first, then the extras alphabetically."""
-    card = {
-        CARD_ALIASES.get(k, k): "" if v is None else str(v)
-        for k, v in entry.items()
-        if k not in ACCESS_ONLY
-    }
-    ordered = {k: card[k] for k in CARD_ORDER if k in card}
-    ordered.update({k: card[k] for k in sorted(card) if k not in ordered})
-    return ordered
-
-
-def _people_from_meta(meta: dict) -> tuple[list[dict], list[dict]] | None:
-    """Declared people from a `people:` block - either the COURSE org's
-    `.github/dsl-course.yml` (course site: instructors only, TAs are never declared
-    there) or a cohort's own `classroom-config/people.yml` (cohort site: instructors
-    AND TAs). Same schema either way.
-
-    Returns `(instructors, teaching_assistants)` as lists of **card dicts** keyed the way
-    the Jekyll theme reads them, for entries active today (per optional start/end dates)
-    that also declare a display `name`; or None when there is no `people:` block at all
-    (then fall back to the GitHub teams). Schema (templates/course/people-header.yml +
-    people-cards.yml for the course org's block, templates/classroom-config/people.yml
-    for a cohort's):
-
-        people:
-          instructors:
-            - github_handle: ...
-              start: ...
-              end: ...
-              name: ...
-              photo: <img-url>
-              url: <bio-link>
-              title: ...
-          teaching_assistants:
-            - github_handle: ...
-              name: ...
-              photo: ...
-              url: ...
-              title: ...
-
-    Every declared field is passed through to the card: `photo`/`url` are renamed to the
-    theme's `profile_pic`/`webpage`, ACCESS_ONLY keys are dropped (they govern the GitHub
-    grant, not the display), and anything else a course chooses to add rides along
-    verbatim, so a new field needs a theme change but no change here.
-    """
-    people = meta.get("people") if isinstance(meta, dict) else None
-    if not isinstance(people, dict):
-        return None
-    today = date.today().isoformat()
-
-    def rows(key: str) -> list[dict]:
-        out = []
-        for p in people.get(key) or []:
-            if not isinstance(p, dict) or not p.get("name"):
-                continue
-            if not active_today(p.get("start"), p.get("end"), today):
-                continue
-            out.append(_card(p))
-        return out
-
-    return rows("instructors"), rows("teaching_assistants")
-
-
-def _people_yaml(
-    org: str, meta: dict | None = None, *, edit_at: str, include_tas: bool = True
-) -> str:
-    """Build _data/people.yml. Prefer the declared `people:` block in the supplied meta
-    (the course org's dsl-course.yml for the course site, a cohort's classroom-config/
-    people.yml for the cohort site); else fall back to the GitHub `instructors` team of
-    `org` (GitHub display name + avatar + profile link).
-
-    `edit_at` names the file a human should edit instead - every sync rewrites this one,
-    and an instructor who edited the generated file lost the change on the next run, so
-    the header says so and points at `edit_at` in BOTH modes.
-
-    `include_tas=False` (the course site) drops TA cards entirely - TAs are cohort-only,
-    so the multi-year open-courseware site shows instructors only. Instructors and TAs
-    share one GitHub team (there's no separate `teaching-assistants` team - see
-    bootstrap_course.FACULTY_TEAMS), so the fallback can't distinguish TAs from
-    instructors; declare a `people:` block to get separate TA cards."""
-    override = _people_from_meta(meta or {})
-    if override is not None:
-        instructors, tas = override
-        note = "declared in the `people:` block"
-    else:
-        instructors = [
-            {"name": n, "profile_pic": p, "webpage": w}
-            for n, p, w in _team_people(org, "instructors")
-        ]
-        tas = []
-        note = "auto-generated from the org's instructors team"
-    if not include_tas:
-        tas = []
-
-    def block(items: list[dict]) -> str:
-        if not items:
-            return " []"
-        rows = []
-        for card in items:
-            # The theme's three core keys are always emitted, empty or not (a card the
-            # theme can't find `profile_pic` on renders differently from one where it is
-            # blank); optional fields appear only when they carry something.
-            fields = [
-                f'{k}: "{_q(card.get(k, ""))}"'
-                for k in ("name", "profile_pic", "webpage")
-            ] + [
-                f'{k}: "{_q(v)}"'
-                for k, v in card.items()
-                if k not in ("name", "profile_pic", "webpage") and v != ""
-            ]
-            rows.append("  - " + "\n    ".join(fields))
-        return "\n" + "\n".join(rows)
-
-    featured = instructors[0] if instructors else {"name": "Course staff"}
-    return (
-        "# GENERATED by the DSL course sync - do not edit this file. Every sync rewrites\n"
-        f"# it and your change is lost. Edit {edit_at} instead.\n"
-        f"# These cards are {note}.\n\n"
-        f'instructor:\n  name: "{_q(featured.get("name", ""))}"\n'
-        f'  profile_pic: "{_q(featured.get("profile_pic", ""))}"\n'
-        f'  webpage: "{_q(featured.get("webpage", ""))}"\n\n'
-        f"instructors:{block(instructors)}\n\n"
-        f"teaching_assistants:{block(tas)}\n"
-    )
 
 
 @cache
@@ -1016,7 +402,7 @@ def _emit_entries(entries: list[_IndexEntry], indent: str) -> list[str]:
     the top, just deeper in the page."""
     lines: list[str] = []
     for e in entries:
-        lines.append(f'{indent}- name: "{_q(e.label)}"')
+        lines.append(f'{indent}- name: "{q(e.label)}"')
         lines.append(f"{indent}  url: {e.url}")
         if e.is_dir:
             lines.append(f"{indent}  files: {e.files}")
@@ -1137,14 +523,14 @@ def _materials_index(
     rows_out: list[str] = []
     for section in sorted(found):
         entries = _sorted_entries(found[section])
-        rows_out.append(f'  - name: "{_q(section)}"')
+        rows_out.append(f'  - name: "{q(section)}"')
         rows_out.append(f"    files: {sum(e.files for e in entries)}")
         rows_out.append("    entries:")
         rows_out.extend(_emit_entries(entries, "      "))
     doc_rows = [
         line
         for e in sorted(docs.values(), key=lambda e: e.name.lower())
-        for line in (f'  - name: "{_q(e.name)}"', f"    url: {e.url}")
+        for line in (f'  - name: "{q(e.name)}"', f"    url: {e.url}")
     ]
     header = (
         "# Generated by `python3 -m dsl_course.site sync` - every released file, nested\n"
@@ -1175,19 +561,6 @@ def _singular(label: str) -> str:
     return label[:-1] if len(label) > 1 and label.endswith("s") else label
 
 
-def _iso_when(when: date | datetime, fallback_time: str = "09:00:00") -> str:
-    """`when` as the offset-free local ISO stamp a front-matter `date:` wants.
-
-    A datetime from schedule.yml is ALREADY in the cohort timezone - the parser converts
-    an entry written with an explicit offset (`...T10:00+00:00`) into the cohort's own
-    clock - so printing it needs no conversion here, only the offset dropped. A bare date
-    (a synthesised fallback, or a whole-day schedule entry) has no clock and gets
-    `fallback_time`."""
-    if isinstance(when, datetime):
-        return when.strftime("%Y-%m-%dT%H:%M:%S")
-    return f"{when.isoformat()}T{fallback_time}"
-
-
 def _links_block(sections: list[tuple[str, list[tuple[str, str]]]]) -> str:
     """A front-matter `links:` block from `(section-label, [(file-name, url), ...])` pairs
     in publication order, each link named `<section-singular> - <file>` (both sites label
@@ -1195,9 +568,9 @@ def _links_block(sections: list[tuple[str, list[tuple[str, str]]]]) -> str:
     rows = []
     for label, pairs in sections:
         for name, url in pairs:
-            # Route the name through _q (escapes `\` AND `"`): a filename with a backslash
+            # Route the name through q (escapes `\` AND `"`): a filename with a backslash
             # (`\sigma.pdf`) is an invalid YAML escape and fails the whole Jekyll build.
-            safe = _q(f"{_singular(label)} - {name}")
+            safe = q(f"{_singular(label)} - {name}")
             rows.append(f'    - url: {url}\n      name: "{safe}"')
     return ("links:\n" + "\n".join(rows)) if rows else "links: []"
 
@@ -1228,14 +601,14 @@ def _describe(text: str) -> str:
     """A row's `description:` front matter - the session's learning objectives.
 
     A block scalar once it has a newline in it. The Hertie syllabus format writes these as
-    a paragraph (sometimes two), and `_q` folds every newline away, so a one-line scalar
+    a paragraph (sometimes two), and `q` folds every newline away, so a one-line scalar
     silently ran two paragraphs together. Empty stays absent rather than blank, so the
     theme can test for it."""
     if not text.strip():
         return ""
     if "\n" in text.strip():
-        return _block("description", text)
-    return f'description: "{_q(text)}"\n'
+        return block("description", text)
+    return f'description: "{q(text)}"\n'
 
 
 def _lecture_entry(
@@ -1327,12 +700,12 @@ def _lecture_entry(
     return (
         f"---\n"
         f"type: {kind}\n"
-        f"date: {_iso_when(row.when)}\n"
+        f"date: {iso_when(row.when)}\n"
         f'title: "{title}"\n'
-        + (f'subtitle: "{_q(subtitle)}"\n' if subtitle else "")
+        + (f'subtitle: "{q(subtitle)}"\n' if subtitle else "")
         + _describe(description)
         + flags
-        + (_block("reading_list", reading_list) if reading_list else "")
+        + (block("reading_list", reading_list) if reading_list else "")
         + f"{links}\n"
         f"---\n"
         f"{body}\n"
@@ -1444,8 +817,8 @@ def _assignment_entry(
     cohort timezone - `_coerce_datetime` hands out nothing naive)."""
     slug = schedule.cohort_name(*found) if found else assignment_slug(repo)
     # An unscheduled assignment's synthesised fallback date is due end-of-day.
-    due = _iso_when(when, "23:59:00")
-    released = _iso_when(handout) if handout is not None else due
+    due = iso_when(when, "23:59:00")
+    released = iso_when(handout) if handout is not None else due
     pinned_out = handout is not None and handout <= (
         now or datetime.now(handout.tzinfo)
     )
@@ -1476,7 +849,7 @@ def _assignment_entry(
     # `repo_url` only once there is something at the other end of it. So the theme tests
     # the flag for state and the URL only for "have I somewhere to link", rather than
     # inferring one from the other.
-    repo_lines = [f'repo_name: "{_q(repo_name)}"']
+    repo_lines = [f'repo_name: "{q(repo_name)}"']
     if out:
         repo_lines.insert(
             0,
@@ -1500,7 +873,7 @@ def _assignment_entry(
         # No trailing "your repo appears once the teaching team provisions it" line: the
         # repo exists by the time this renders, and the theme now links it twice off the
         # fields above. The body is the brief, and nothing else.
-        body = _liquid_raw(brief or "Assignment brief.")
+        body = liquid_raw(brief or "Assignment brief.")
     else:
         # A flag as well as the prose: the theme leaves the title unlinked off this,
         # and the sentence says why. Its twin on a session row, `unreleased: true`, is
@@ -1516,12 +889,12 @@ def _assignment_entry(
             f"_**{title} is not yet released** - your private "
             f"`{repo_name}` repo appears when it is._"
         )
-    title = _q(title)
+    title = q(title)
     # After the branch above, which is where a released entry learns its name from the
     # README. The due row is the same assignment, so it shows the same two halves -
     # identifier bold, name beneath - rather than one of them.
-    sub_fm = f'subtitle: "{_q(subtitle)}"\n' if subtitle else ""
-    sub_due = f'    subtitle: "{_q(subtitle)}"\n' if subtitle else ""
+    sub_fm = f'subtitle: "{q(subtitle)}"\n' if subtitle else ""
+    sub_due = f'    subtitle: "{q(subtitle)}"\n' if subtitle else ""
     return (
         f"---\n"
         f"type: assignment\n"
@@ -1562,9 +935,9 @@ def _exam_entry(
     return (
         f"---\n"
         f"type: exam\n"
-        f"date: {_iso_when(when)}\n"
+        f"date: {iso_when(when)}\n"
         f"{flags}"
-        f'description: "{_q(title)}"\n'
+        f'description: "{q(title)}"\n'
         f"---\n"
         f"Details to be confirmed.\n"
     )
@@ -1615,9 +988,9 @@ def _special_event_entry(
     return (
         f"---\n"
         f"type: special_event\n"
-        f"date: {_iso_when(when)}\n"
+        f"date: {iso_when(when)}\n"
         f"{flags}"
-        f'description: "{_q(title)}"\n'
+        f'description: "{q(title)}"\n'
         f"---\n"
     )
 
@@ -1643,350 +1016,12 @@ def _term_date_entry(name: str, when: date) -> str:
     return (
         f"---\n"
         f"type: term_date\n"
-        f"date: {_iso_when(when)}\n"
+        f"date: {iso_when(when)}\n"
         f"hide_time: true\n"
-        f'name: "{_q(name)}"\n'
+        f'name: "{q(name)}"\n'
         f'description: ""\n'
         f"---\n"
     )
-
-
-@dataclass
-class _SitePlan:
-    """What one sync wants its site repo to contain, handed back to `_sync_site_repo`.
-
-    `config` are the `_config.yml` keys to overwrite (course identity); `collections` the
-    collection dirs this sync OWNS, each cleared then rewritten from its `{filename:
-    content}` (so an entry that is no longer generated - a de-released session, a template
-    placeholder - disappears, and a collection the sync does not own is left alone);
-    `files` every other tracked file to write, by repo-relative path (`_data/people.yml`,
-    the publish config, ...); `retire` paths to DELETE if the site still has them;
-    `commit` the commit subject; `label`/`done` the wording of this sync's log lines.
-
-    `retire` exists because `files` cannot express a removal: the apply step is `git add
-    -A` over a checkout, so a file the toolkit stops shipping simply stays in the repo
-    forever. It is the local-checkout twin of `put_files(delete=...)`, and a path already
-    absent is not an error - `git rm --ignore-unmatch` - so the same list is safe to
-    re-declare on every sync until every site has converged."""
-
-    config: dict[str, str]
-    collections: dict[str, dict[str, str]]
-    commit: str
-    files: dict[str, str] = field(default_factory=dict)
-    retire: tuple[str, ...] = ()
-    label: str = "site"
-    done: str = "synced + redeploying"
-
-
-def _git_identity(key: str) -> str:
-    """What GIT_ENV sets `user.name` / `user.email` to - read off GIT_ENV itself, so the
-    machine-author test below cannot drift from the identity the sync commits under."""
-    prefix = f"{key}="
-    return next(v[len(prefix) :] for v in _GIT_ENV if v.startswith(prefix))
-
-
-def _is_machine_author(name: str, email: str) -> bool:
-    """Whether a commit's author is this engine rather than a person: the sync's own git
-    identity, the token account (which authors the commits made through the API - the
-    scaffold's "Initial commit"), or any GitHub App. An unreadable acting login is None
-    and matches nobody, which errs towards calling a commit human - the wrong guess there
-    is one unnecessary issue, the other way round is a silently discarded edit."""
-    acting = _acting_login()
-    return (
-        name == _git_identity("user.name")
-        or email == _git_identity("user.email")
-        or (acting is not None and name.casefold() == acting.casefold())
-        or name.endswith("[bot]")
-    )
-
-
-def _overwritten_edits(wd: Path) -> dict[str, tuple[str, list[str]]]:
-    """The human commits the sync commit at HEAD just discarded: `{sha: (author, paths)}`.
-
-    For every path HEAD rewrote, the last commit to touch it BEFORE HEAD is the edit that
-    was replaced; a machine author there is the previous sync (nothing lost), anything
-    else is a person. A path no earlier commit touched is a file this sync created.
-    HEAD^ always exists - the clone carries at least the scaffold's initial commit."""
-    code, out = git("-C", str(wd), "show", "--name-only", "--format=", "HEAD")
-    if code != 0:
-        raise RuntimeError(f"could not list the files the sync commit changed: {out}")
-    overwritten: dict[str, tuple[str, list[str]]] = {}
-    for path in (ln.strip() for ln in out.splitlines()):
-        if not path:
-            continue
-        code, out = git(
-            "-C", str(wd), "log", "-1", "--format=%H%x09%an%x09%ae", "HEAD^", "--", path
-        )
-        if code != 0 or not out.strip():
-            continue
-        sha, _, rest = out.strip().partition("\t")
-        name, _, email = rest.partition("\t")
-        if _is_machine_author(name, email):
-            continue
-        overwritten.setdefault(sha, (name, []))[1].append(path)
-    return overwritten
-
-
-OVERWRITE_ISSUE_TITLE = (
-    "Manual edits to generated site files are overwritten by the sync"
-)
-
-
-def _commit_login(org: str, site: str, sha: str) -> str | None:
-    """The GitHub login behind a commit, or None when its git email is linked to no
-    account - then the caller falls back to the git author name, which is all GitHub
-    itself knows about that author either."""
-    code, out = gh("api", f"repos/{org}/{site}/commits/{sha}", "--jq", ".author.login")
-    login = out.strip()
-    return login if code == 0 and login and login != "null" else None
-
-
-def _notify_overwritten_edits(
-    org: str, site: str, overwritten: dict[str, tuple[str, list[str]]]
-) -> None:
-    """Open (or comment on) one issue in the site repo naming the edits this sync just
-    replaced, linking the discarded commits and pointing at the files to edit instead.
-
-    A courtesy, not data: every failure here is logged and swallowed, including by the
-    caller. The site is already regenerated and pushed by the time this runs, so making
-    the notice able to fail the sync would turn a helper against silent data loss into a
-    new source of red crons - inverting the incident it exists to prevent."""
-    rows = []
-    unmentionable = False
-    for sha, (name, paths) in overwritten.items():
-        # An @-mention when the git email is linked to an account, else the git author
-        # name - which is all GitHub knows about that author either.
-        login = _commit_login(org, site, sha)
-        unmentionable = unmentionable or login is None
-        who = f"@{login}" if login else f"`{name}`"
-        for path in paths:
-            rows.append(
-                f"- `{path}` - edited by {who} in "
-                f"[`{sha[:7]}`](https://github.com/{org}/{site}/commit/{sha})"
-            )
-    body = (
-        "The site sync regenerates parts of this repo from the org structure, so an edit "
-        "made directly here is replaced the next time it runs. It has just replaced:\n\n"
-        + "\n".join(rows)
-        + "\n\nNothing is lost - each link above is the commit that was overwritten, so "
-        "the change can be copied back out of it.\n\nMake the edit at the source "
-        "instead, and it survives every sync:\n\n"
-        "- **Staff cards** - the cohort's `classroom-config/people.yml` (for a public "
-        "course site, the `people:` block of the course org's "
-        "`.github/dsl-course.yml`).\n"
-        "- **Schedule rows, sessions, assignments** - the org structure and the cohort's "
-        "`classroom-config/schedule.yml`.\n\n"
-        "The sync owns `_lectures/`, `_assignments/`, `_events/`, `_data/people.yml` and "
-        "a few `_config.yml` keys, and names the source in a header where the file format "
-        "allows one. Everything else in this repo is yours and is never rewritten.\n"
-    )
-    # An issue only emails people it mentions. When an author's git email is linked to no
-    # account there is nobody to ping - which was the incident - so fall back to the org's
-    # instructors team, who can pass it on. Only then: a group ping when the direct one
-    # already worked is noise for everyone who did not touch the file.
-    if unmentionable:
-        body += (
-            f"\ncc @{org}/instructors - a commit author's email is not linked to a "
-            "GitHub account, so they could not be mentioned directly.\n"
-        )
-    repo = f"{org}/{site}"
-    code, out = gh(
-        "issue",
-        "list",
-        "--repo",
-        repo,
-        "--state",
-        "open",
-        "--search",
-        f"{OVERWRITE_ISSUE_TITLE} in:title",
-        "--json",
-        "number",
-        "--jq",
-        ".[0].number",
-    )
-    # A lookup that failed (or answered with anything but a number) is not fatal: filing a
-    # duplicate issue beats not telling anyone their edit was discarded.
-    existing = out.strip() if code == 0 and out.strip().isdigit() else ""
-    if existing:
-        code, out = gh("issue", "comment", existing, "--repo", repo, "--body", body)
-    else:
-        code, out = gh(
-            "issue",
-            "create",
-            "--repo",
-            repo,
-            "--title",
-            OVERWRITE_ISSUE_TITLE,
-            "--body",
-            body,
-        )
-    if code != 0:
-        log_err(f"could not notify {repo} about the overwritten edits: {out[:200]}")
-    else:
-        log(f"  (manual edits to {len(rows)} file(s) were overwritten - issue filed)")
-
-
-def _stale_site_repo(org: str, site: str) -> str | None:
-    """A `*.github.io` repo in `org` under a name that is NOT `site`, if one exists.
-
-    Renaming an org does not rename its `<org>.github.io` repo, and GitHub quietly
-    demotes the now-mismatched repo from an org site to a project page. The expected
-    site repo is then simply absent, which every sync happily read as "this cohort
-    never opted into a site" - a permanent green no-op while the published site rotted.
-    Finding the old name is what lets the sync say so instead."""
-    for repo in list_org_repos(org):
-        name = repo.get("name", "")
-        if (
-            name.casefold().endswith(".github.io")
-            and name.casefold() != site.casefold()
-        ):
-            return name
-    return None
-
-
-def _sync_site_repo(
-    org: str,
-    build: Callable[[Path], _SitePlan | None],
-    *,
-    scaffold_missing: bool = False,
-) -> int:
-    """The site-repo mechanics both syncs drive: ensure `<org>.github.io` exists, clone it,
-    let `build` gather that sync's own data (writing into the working tree it is handed -
-    the public site hosts files there) and declare a `_SitePlan`, apply the plan, then
-    commit-if-changed and push. Pushing redeploys the site.
-
-    `build` returns None to abort with exit 1, having logged its own reason. A missing site
-    repo is a quiet no-op (a cohort that never opted into a site), unless
-    `scaffold_missing` - the public course site's opt-in first publish, which creates it.
-    An ARCHIVED one is the same quiet no-op: a past cohort's site is deliberately frozen,
-    and it clones and commits happily before 403ing on the push, so without the check the
-    daily cron failed on it every day forever.
-
-    A pushed sync that discarded someone's manual edit also files an issue naming it - a
-    courtesy that never changes this function's exit code."""
-    # `--all-cohorts` loops this in one process, and the index reads EVERY release
-    # destination's tree, not just the session-bearing ones - so the memo would pin a few
-    # hundred KB per repo for the whole run. Cleared on ENTRY rather than on the way out:
-    # most cohorts in a daily cron are already up to date and return early, so an exit-path
-    # clear ran on the rare path and never on the common one. Keys include the org, so this
-    # is purely about memory, never staleness.
-    _repo_tree.cache_clear()
-    site = pages_repo(org)
-    just_scaffolded = False
-    if not repo_exists(org, site):
-        try:
-            stale = _stale_site_repo(org, site)
-        except RuntimeError as exc:
-            log_err(str(exc))
-            return 1
-        if stale is not None:
-            log_err(
-                f"{org} has no {site}, but it does hold {org}/{stale} - the org was "
-                "renamed and its Pages site was silently demoted to a project page. "
-                f"Rename {stale} to {site} (GitHub does not do it for you), then re-run."
-            )
-            return 1
-        if not scaffold_missing:
-            log(f"  (no site repo {org}/{site} - skipping site sync)")
-            return 0
-        log_step(f"No public site yet - scaffolding {org}/{site}")
-        if scaffold.scaffold_site(org) != 0:
-            return 1
-        just_scaffolded = True
-    elif repo_is_archived(org, site):
-        log(f"  (site repo {org}/{site} is archived - skipping site sync)")
-        return 0
-
-    with tempfile.TemporaryDirectory() as work:
-        wd = Path(work) / "site"
-        # A repo THIS run just created can lag its template-generate, so retry the clone;
-        # an existing site repo either clones now or is a real failure.
-        attempts = 6 if just_scaffolded else 1
-        for attempt in range(attempts):
-            if gh("repo", "clone", f"{org}/{site}", str(wd), "--", "-q")[0] == 0:
-                break
-            if attempt + 1 < attempts:
-                time.sleep(5)
-        else:
-            log_err(f"could not clone {org}/{site}")
-            return 1
-
-        plan = build(wd)
-        if plan is None:
-            return 1
-
-        # _config.yml, in two halves. The plan's own keys are course IDENTITY (course_name
-        # / _semester / _code / _description, github_org) and are replace-only. The theme
-        # keys and the two blocks are the CONTRACT of the templates written below - a site
-        # that lacks them renders those templates wrong - so they go in whether the file
-        # has them or not.
-        cfg_path = wd / "_config.yml"
-        if cfg_path.is_file():
-            cfg = cfg_path.read_text()
-            for key, value in plan.config.items():
-                cfg = _set_config(cfg, key, value)
-            for key, value in _THEME_CONFIG.items():
-                cfg = _set_config(cfg, key, value, insert=True)
-            cfg = _ensure_config_block(cfg, "collections", _COLLECTIONS_BLOCK)
-            cfg = _ensure_config_block(cfg, "defaults", _DEFAULTS_BLOCK)
-            owned = [*plan.config, *_THEME_CONFIG, "collections", "defaults"]
-            cfg_path.write_text(_stamp_config(cfg, sorted(owned)))
-
-        # Regenerate the owned collections; leave everything else (layouts, pages) as the
-        # template provides.
-        for coll, entries in plan.collections.items():
-            d = wd / coll
-            if d.is_dir():
-                shutil.rmtree(d)
-            d.mkdir(parents=True)
-            (d / ".gitkeep").write_text("")
-            for fname, content in entries.items():
-                (d / fname).write_text(_stamp_front_matter(content))
-
-        for rel, content in plan.files.items():
-            (wd / rel).parent.mkdir(parents=True, exist_ok=True)
-            (wd / rel).write_text(content)
-
-        # Removals. `git add -A` below stages everything the working tree holds, so a file
-        # the toolkit no longer ships would otherwise live on in the site repo untouched.
-        for rel in plan.retire:
-            git(
-                "-C",
-                str(wd),
-                *_GIT_ENV,
-                "rm",
-                "-r",
-                "-q",
-                "--ignore-unmatch",
-                "--",
-                rel,
-            )
-
-        git("-C", str(wd), *_GIT_ENV, "add", "-A")
-        code, _ = git(
-            "-C", str(wd), *_GIT_ENV, "commit", "-q", "--no-verify", "-m", plan.commit
-        )
-        if code != 0:
-            log_ok(f"{plan.label} already up to date")
-            return 0
-        if git("-C", str(wd), *_GIT_ENV, "push", "-q", "origin", "HEAD")[0] != 0:
-            log_err(f"{plan.label} push failed")
-            return 1
-        # Only now is anything actually overwritten on the remote: a run that committed
-        # nothing replaced nothing, and a failed push left the remote as it was. Whatever
-        # happens in here, the site is correct and published - so the return code below is
-        # deliberately untouched (see _notify_overwritten_edits).
-        try:
-            overwritten = _overwritten_edits(wd)
-            if overwritten:
-                _notify_overwritten_edits(org, site, overwritten)
-        except Exception as exc:
-            log_err(
-                f"could not check {org}/{site} for overwritten manual edits "
-                f"({type(exc).__name__}): {exc}"
-            )
-    log_ok(f"{plan.label} {plan.done} -> https://{site}/")
-    return 0
 
 
 def sync_site(course_org: str, cohort_org: str) -> int:
@@ -1995,7 +1030,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
     ones marked not-yet-released), this year's assignments, and the display-only rows of
     the schedule (exams, special events, term dates)."""
 
-    def build(_wd: Path) -> _SitePlan:
+    def build(_wd: Path) -> SitePlan:
         content_repos = discover_cohort_repos([cohort_org])
         release_sources = discover_release_sources(cohort_org, content_repos)
         # One row per (ordinal, kind): a week's lecture materials and its lab are separate
@@ -2017,7 +1052,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         handed_out = discover_handed_out_assignments(cohort_org)
 
         # Course identity comes from the course org metadata, semester from the cohort tag.
-        meta = _yaml_file(course_org, ".github", "dsl-course.yml")
+        meta = yaml_file(course_org, ".github", "dsl-course.yml")
         # Schedule is cohort-specific (it varies by year), so it comes from the cohort's
         # own classroom-config/schedule.yml. So do this cohort's instructors/TAs - read
         # from its own classroom-config/people.yml below, NOT the course org (whose
@@ -2048,10 +1083,10 @@ def sync_site(course_org: str, cohort_org: str) -> int:
             hit = schedule.entry_for_repo(sched, repo)
             key = schedule.cohort_name(*hit) if hit else assignment_slug(repo)
             by_name.setdefault(key, (repo, hit))
-        for slug, plan_entry in sched.assignments.items():
+        for plan_slug, plan_entry in sched.assignments.items():
             by_name.setdefault(
-                schedule.cohort_name(slug, plan_entry),
-                (plan_entry.course_source_repo, (slug, plan_entry)),
+                schedule.cohort_name(plan_slug, plan_entry),
+                (plan_entry.course_source_repo, (plan_slug, plan_entry)),
             )
         cohort_assignments = sorted(by_name.items())
 
@@ -2104,7 +1139,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
             config["course_code"] = str(meta["course_code"])
         # The site's blurb. Declared once in the course org's dsl-course.yml and pushed to
         # every cohort site; left as the site repo has it when the course doesn't declare
-        # one. Written as a single line whatever the source shape (see _q).
+        # one. Written as a single line whatever the source shape (see q).
         if meta.get("course_description"):
             config["course_description"] = str(meta["course_description"])
         # The footer's GitHub link (the site's only click-back). This is the COHORT site,
@@ -2116,7 +1151,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # declared (exam or special event); an undated (TBC) one sorts at end-of-term.
         end = sched.semester_end or start + timedelta(weeks=15)
         event_entries = {
-            f"{i + 1:02d}-{_slug(e.label)}.md": _event_entry(e, end)
+            f"{i + 1:02d}-{slug(e.label)}.md": _event_entry(e, end)
             for i, e in enumerate(sched.events)
         }
         # Every course has exams, so a schedule that names none still gets stub mid/end
@@ -2137,19 +1172,19 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 "Term ends", sched.semester_end
             )
 
-        return _SitePlan(
+        return SitePlan(
             config=config,
             # People: this cohort's own classroom-config/people.yml (instructors AND TAs -
             # the per-cohort teaching team; schema in
             # templates/classroom-config/people.yml), else its instructors team.
             files={
-                "README.md": _site_readme(cohort_org, cohort=True),
-                "_data/people.yml": _people_yaml(
+                "README.md": site_readme(cohort_org, cohort=True),
+                "_data/people.yml": people_yaml(
                     cohort_org,
-                    _yaml_file(cohort_org, "classroom-config", "people.yml"),
+                    yaml_file(cohort_org, "classroom-config", "people.yml"),
                     edit_at=f"{cohort_org}/classroom-config/people.yml",
                 ),
-                "_data/nav.yml": _nav_yaml(cohort=True),
+                "_data/nav.yml": nav_yaml(cohort=True),
                 # The catch-all index behind the All Materials tab: every released file,
                 # including what no session ordinal covers - across the repos faculty
                 # actually release into, never everything discovery failed to exclude.
@@ -2160,12 +1195,12 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                     # line rather than an empty one.
                     syllabus=_released_syllabus(cohort_org, indexable),
                 ),
-                **_theme_pages(cohort=True),
+                **theme_pages(cohort=True),
                 # The course-specific layouts, includes and stylesheet - shipped
                 # from templates/site/, not from the shared theme, so a change to
                 # how a session renders is tested against the generator that
                 # writes its front matter before any site sees it.
-                **_site_templates(),
+                **site_templates(),
             },
             # Assignment handout/due dates come from schedule.yml when set (keyed on the
             # assignment slug), else a synthesised fortnightly cadence.
@@ -2192,7 +1227,14 @@ def sync_site(course_org: str, cohort_org: str) -> int:
             commit="site: sync from org structure",
         )
 
-    return _sync_site_repo(cohort_org, build)
+    # `--all-cohorts` loops this in one process, and the index reads EVERY release
+    # destination's tree, not just the session-bearing ones - so the memo would pin a few
+    # hundred KB per repo for the whole run. Cleared on ENTRY rather than on the way out:
+    # most cohorts in a daily cron are already up to date and return early, so an exit-path
+    # clear ran on the rare path and never on the common one. Keys include the org, so this
+    # is purely about memory, never staleness.
+    _repo_tree.cache_clear()
+    return sync_site_repo(cohort_org, build)
 
 
 def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:
@@ -2285,9 +1327,9 @@ def _public_lecture_entry(
     return (
         f"---\n"
         f"type: {kind}\n"
-        f"date: {_iso_when(when)}\n"
+        f"date: {iso_when(when)}\n"
         f'title: "{title}"\n'
-        + (_block("reading_list", reading_list_md) if reading_list_md else "")
+        + (block("reading_list", reading_list_md) if reading_list_md else "")
         + f"{links_block}\n"
         f"---\n"
         f"Materials for {title.lower()}.\n"
@@ -2315,14 +1357,14 @@ def sync_public_site(
         log_err("nothing to publish - file sections off and readings set to none.")
         return 1
 
-    def build(site_wd: Path) -> _SitePlan | None:
+    def build(site_wd: Path) -> SitePlan | None:
         sessions = discover_sessions(course_org, source_repo)
         log_step(
             f"Publishing {course_org}/{pages_repo(course_org)} from {source_repo}: "
             f"{len(sessions)} session(s), readings={readings_mode}, "
             f"file sections={'on' if include_lectures else 'off'}"
         )
-        meta = _yaml_file(course_org, ".github", "dsl-course.yml")
+        meta = yaml_file(course_org, ".github", "dsl-course.yml")
         # A course site spans years and has no per-cohort schedule.yml to read (that's
         # cohort-scoped), so the date is a neutral fallback that only orders the session
         # entries.
@@ -2420,7 +1462,7 @@ def sync_public_site(
         # footer links there - unlike a cohort site, which links its cohort org.
         config["github_org"] = course_org
 
-        return _SitePlan(
+        return SitePlan(
             config=config,
             # Sessions only: regen _lectures, and clear _assignments/_events so any
             # template placeholders (and a previous run's content) stay off a public site.
@@ -2434,21 +1476,21 @@ def sync_public_site(
                 # teams). Instructors only - the open-courseware site is multi-year, and
                 # TAs are declared per cohort (in each cohort's people.yml), never
                 # course-level.
-                "_data/people.yml": _people_yaml(
+                "_data/people.yml": people_yaml(
                     course_org,
                     meta,
                     edit_at=f"the `people:` block of {course_org}/.github/dsl-course.yml",
                     include_tas=False,
                 ),
-                "README.md": _site_readme(course_org, cohort=False),
+                "README.md": site_readme(course_org, cohort=False),
                 # No cohort repos to index, so `/materials/` stays the readings page.
-                "_data/nav.yml": _nav_yaml(cohort=False),
-                **_theme_pages(cohort=False),
+                "_data/nav.yml": nav_yaml(cohort=False),
+                **theme_pages(cohort=False),
                 # The course-specific layouts, includes and stylesheet - shipped
                 # from templates/site/, not from the shared theme, so a change to
                 # how a session renders is tested against the generator that
                 # writes its front matter before any site sees it.
-                **_site_templates(),
+                **site_templates(),
                 # Persist the settings THIS publish used, in the site repo itself, so the
                 # daily cron can repeat it with no inputs (see resync_public_site).
                 PUBLISH_CONFIG: (
@@ -2465,7 +1507,11 @@ def sync_public_site(
             done="published",
         )
 
-    return _sync_site_repo(course_org, build, scaffold_missing=True)
+    # One process can sync several sites (`--all-cohorts`), and the memo pins every tree
+    # it read - see the note on `_repo_tree`. Cleared on entry, not on the way out: a
+    # cohort already up to date returns early, so an exit-path clear ran on the rare path.
+    _repo_tree.cache_clear()
+    return sync_site_repo(course_org, build, scaffold_missing=True)
 
 
 def resync_public_site(course_org: str) -> int:
