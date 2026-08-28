@@ -47,7 +47,7 @@ def scaffold_grants(monkeypatch):
     monkeypatch.setattr(scaffold, "seed_if_absent", lambda *a, **k: True)
     monkeypatch.setattr(scaffold, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(scaffold, "discover_assignments", lambda org: [])
-    monkeypatch.setattr(scaffold.seed, "_push_workflows", lambda *a, **k: 0)
+    monkeypatch.setattr(scaffold, "push_content_workflows", lambda *a, **k: 0)
 
     def fake_gh(*args, **kwargs):
         if args[:2] == ("repo", "clone"):

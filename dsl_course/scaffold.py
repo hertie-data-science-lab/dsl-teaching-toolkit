@@ -23,7 +23,6 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import seed
 from .course import (
     FACULTY_ONLY_HEADING,
     MATERIALS_REPO_PREFIX,
@@ -52,6 +51,7 @@ from .utils import (
     seed_if_absent,
     set_repo_topics,
 )
+from .workflows_place import push_content_workflows
 
 WEBSITE_TEMPLATE_ORG = "hertie-data-science-lab"
 WEBSITE_TEMPLATE = "course-website-template"
@@ -517,10 +517,10 @@ def scaffold_materials(org: str, tag: str) -> int:
     if not seed_files_if_absent(org, repo, user_files, "init: materials skeleton"):
         failures += 1
     # Equip the run-from-repo Release workflows (same as Refresh does for content repos).
-    # _push_workflows lands both in one commit, logs its own failure, and returns 1 - a
-    # materials repo with no Release workflows must not report success.
+    # push_content_workflows lands both in one commit, logs its own failure, and returns
+    # 1 - a materials repo with no Release workflows must not report success.
     cohorts = discover_cohorts(org)
-    failures += seed._push_workflows(org, repo, cohorts, discover_assignments(org))
+    failures += push_content_workflows(org, repo, cohorts, discover_assignments(org))
     if failures:
         return 1
     log_ok(f"materials repo ready: {org}/{repo}")
