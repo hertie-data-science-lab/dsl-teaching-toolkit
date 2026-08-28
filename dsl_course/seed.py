@@ -243,10 +243,10 @@ def seed_github_workflows(course_org: str) -> int:
     CENTRAL Release materials (course-source-repo dropdown), Release assignment, plus Sync
     enrolment / Bootstrap cohort / Refresh.
 
-    All sixteen land as ONE commit (and the retired ones go in the same commit). They are
+    All of them land as ONE commit (and the retired ones go in the same commit). They are
     rendered from one set of inputs by shared helpers, so in practice they change together:
     an edit to the run preamble or to a dropdown helper re-renders every one of them, and
-    file-by-file writes turned each such edit into a wall of sixteen near-identical
+    file-by-file writes turned each such edit into a wall of near-identical
     `ci: <file>.yml` commits in the repo whose history faculty actually browse.
 
     Returns 1 if that commit didn't land - a workflow that didn't land is exactly the thing a
