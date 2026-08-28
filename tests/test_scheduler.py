@@ -213,20 +213,22 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.assign.provision_all",
-        lambda master_org, template, cohort_org, solution=False: (
-            calls.append((master_org, template, cohort_org, solution)) or 0
+        lambda master_org, template, cohort_org, solution=False, touch_existing=True: (
+            calls.append((master_org, template, cohort_org, solution, touch_existing))
+            or 0
         ),
     )
     r = _r("s", WHEN, assignment="assignment-2-f2026")
     assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == 0
-    assert calls[0] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", False)
+    # The hourly path never re-touches an existing repo (the manual button does).
+    assert calls[0] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", False, False)
 
     # The solution release is the SAME call, asked to push the solution too - so a
     # scheduled solution can never diverge from what include_solution does by hand.
     r = _r("s", WHEN, assignment="assignment-2-f2026")
     r.assignment_solution = True
     assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == 0
-    assert calls[1] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", True)
+    assert calls[1] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", True, False)
 
 
 def _git_with_staged_changes(*args):

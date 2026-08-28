@@ -6,6 +6,8 @@ without touching gh/git.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import yaml
 
@@ -283,8 +285,11 @@ def test_group_false_forces_individual_even_for_a_group_template(
 
 @pytest.fixture
 def _provisioned(monkeypatch):
-    """An existing repo, so provision_one only exercises the access half."""
-    monkeypatch.setattr(assign, "repo_exists", lambda org, repo: True)
+    """A repo that creates cleanly, so provision_one exercises the access half. (An
+    EXISTING repo with nothing due returns before any access call - see below.)"""
+    monkeypatch.setattr(assign, "repo_exists", lambda org, repo: False)
+    monkeypatch.setattr(assign, "generate_from_template", lambda **k: True)
+    monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
 
 
 def test_a_repo_no_student_can_open_is_a_failed_handout(_provisioned, monkeypatch):
@@ -331,7 +336,7 @@ def test_a_group_repo_reports_the_teams_own_failures(_provisioned, monkeypatch):
         "assignment-1",
         team="assignment-1-wizards",
     )
-    assert status == "skipped"
+    assert status == "ok"
 
 
 # ------------------------------------- group provisioning honours the roster allowlist
@@ -523,3 +528,43 @@ def test_both_assignment_arms_grant_faculty_read(_provisioned, monkeypatch):
         team="a1-wizards",
     )
     assert faculty == [("COHORT", "a1-ada-l"), ("COHORT", "a1-wizards")]
+
+
+def test_the_scheduler_leaves_an_existing_repo_alone_but_the_button_repairs_it(
+    monkeypatch,
+):
+    # The scheduler re-runs every handed-out release hourly. Re-granting access to an
+    # existing repo on every tick cost 2-4 API calls per student per assignment for the
+    # rest of term. The hourly path (touch_existing=False) skips it; the manual Release
+    # assignment button keeps re-granting, so re-running it still repairs a student's
+    # access. With a solution to push, the push happens either way.
+    calls = []
+    monkeypatch.setattr(assign, "repo_exists", lambda org, repo: True)
+    for name in (
+        "add_collaborator",
+        "grant_team_repo_access",
+        "grant_faculty_read_access",
+    ):
+        monkeypatch.setattr(
+            assign, name, lambda *a, _n=name, **k: calls.append(_n) or True
+        )
+    monkeypatch.setattr(
+        assign.sync_teams, "ensure_team", lambda *a, **k: calls.append("team") or True
+    )
+    hourly = {"touch_existing": False}
+    assert assign.provision_one("C", "t", "K", "a1-ada", ["ada"], "a1", **hourly) == (
+        "skipped"
+    )
+    assert assign.provision_one(
+        "C", "t", "K", "a1-w", ["ada"], "a1", team="a1-w", **hourly
+    ) == ("skipped")
+    assert calls == []
+    # the button (default) re-grants
+    assert assign.provision_one("C", "t", "K", "a1-ada", ["ada"], "a1") == "skipped"
+    assert calls == ["grant_faculty_read_access", "add_collaborator"]
+    pushed = []
+    monkeypatch.setattr(assign, "push_solution", lambda *a: pushed.append(a) or True)
+    assert assign.provision_one(
+        "C", "t", "K", "a1-ada", ["ada"], "a1", sol_dir=Path("s"), **hourly
+    ) == ("skipped")
+    assert len(pushed) == 1

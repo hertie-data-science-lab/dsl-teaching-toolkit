@@ -221,8 +221,14 @@ def provision_one(
     slug: str,
     sol_dir: Path | None = None,
     team: str | None = None,
+    touch_existing: bool = True,
 ) -> str:
     """Generate one submission repo and grant its members access.
+
+    `touch_existing=False` (the hourly scheduler): a repo that already exists, with no
+    solution due, is left exactly as it is - no access re-grant, no team reconcile. The
+    manual Release assignment button keeps the default and so remains the way a faculty
+    member repairs one student's access by re-running it.
 
     Individual assignments pass a single-element `handles` list (a team of one) and no
     `team`, so each member is added as a collaborator. Group assignments also pass the
@@ -231,6 +237,15 @@ def provision_one(
     existed = repo_exists(cohort_org, repo)
     if existed:
         log_skip(f"repo {cohort_org}/{repo}")
+        if sol_dir is None and not touch_existing:
+            # Nothing is due for this repo. The scheduler re-runs every handed-out release
+            # on every hourly tick, so re-granting access here cost 2-4 API calls per
+            # student per assignment for the rest of the term (1,440+/hour for a large
+            # cohort) - mostly writes, against a 5,000/hour budget shared by every cron.
+            # Faculty access repairs are the nightly sweep's job (converge_faculty_access),
+            # a team's late joiners arrive through Sync membership, and a student's access
+            # is repaired by re-running the Release assignment button (touch_existing).
+            return "skipped"
     elif not generate_from_template(
         template_org=master_org,
         template_name=template,
@@ -404,6 +419,7 @@ def provision_all(
     solution: bool = False,
     group: bool | None = None,
     dry_run: bool = False,
+    touch_existing: bool = True,
 ) -> int:
     """Freeze the cohort template, then provision a repo per unit (student, or team).
 
@@ -531,6 +547,7 @@ def provision_all(
                 slug,
                 sol_dir,
                 team=team,
+                touch_existing=touch_existing,
             )
             results[status] = results.get(status, 0) + 1
 
@@ -553,7 +570,10 @@ def provision_all(
     # red and the next Sync site / tick refreshes the site), and return normally.
     site_failed = False
     try:
-        site.sync_site(master_org, cohort_org)
+        # A tick that created or changed nothing has nothing to show the site: skipping the
+        # sync here is what stops every handed-out assignment re-rendering the site hourly.
+        if any(k != "skipped" for k in results):
+            site.sync_site(master_org, cohort_org)
     except (RuntimeError, yaml.YAMLError) as exc:
         log_err(
             f"site sync failed after provisioning {slug} - the repos are handed out; the "

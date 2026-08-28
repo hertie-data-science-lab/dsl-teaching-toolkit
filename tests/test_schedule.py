@@ -392,16 +392,16 @@ def test_max_team_size_parses_and_defaults_to_none():
     meta = {
         "assignments": {
             "assignment-4-project": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-1",
                 "due_datetime": "2026-11-15",
                 "max_team_size": 3,
             },
             "assignment-1": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-2",
                 "due_datetime": "2026-10-13",
             },
             "bad": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-3",
                 "due_datetime": "2026-10-20",
                 "max_team_size": "lots",
             },
@@ -417,12 +417,12 @@ def test_assignment_handout_parses():
     meta = {
         "assignments": {
             "assignment-1": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-1",
                 "due_datetime": "2026-10-13",
                 "handout_datetime": "2026-09-22T09:00",
             },
             "assignment-2": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-2",
                 "due_datetime": "2026-11-10",
             },
         }
@@ -443,13 +443,13 @@ def test_assignment_solution_datetime_parses_and_has_no_default():
     meta = {
         "assignments": {
             "assignment-1": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-1",
                 "due_datetime": "2026-10-13",
                 "handout_datetime": "2026-09-22T09:00",
                 "solution_datetime": "2026-10-16T09:00",
             },
             "assignment-2": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-2",
                 "due_datetime": "2026-11-10",
             },
         }
@@ -605,21 +605,21 @@ def test_assignment_type_parses_and_rejects_unknown_values():
     meta = {
         "assignments": {
             "assignment-4-project": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-1",
                 "due_datetime": "2026-11-15",
                 "type": "group",
             },
             "assignment-1": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-2",
                 "due_datetime": "2026-10-13",
                 "type": "Individual",
             },
             "assignment-2": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-3",
                 "due_datetime": "2026-10-27",
             },
             "typo": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-4",
                 "due_datetime": "2026-11-01",
                 "type": "grp",
             },
@@ -848,14 +848,14 @@ def test_cohort_dest_repo_parses_and_defaults_to_the_slug():
     sched = parse(
         {
             "assignments": {
-                "hw": {"course_source_repo": "a-f2026", "due_datetime": "2026-10-13"},
+                "hw": {"course_source_repo": "a-f2026-1", "due_datetime": "2026-10-13"},
                 "named": {
-                    "course_source_repo": "a-f2026",
+                    "course_source_repo": "a-f2026-2",
                     "cohort_dest_repo": "homework-1",
                     "due_datetime": "2026-10-20",
                 },
                 "blank": {
-                    "course_source_repo": "a-f2026",
+                    "course_source_repo": "a-f2026-3",
                     "cohort_dest_repo": "  ",
                     "due_datetime": "2026-10-27",
                 },
@@ -1635,3 +1635,26 @@ def test_worst_severity_is_the_loudest_not_the_first(monkeypatch):
     ]
     assert schedule.worst_severity(faults, now) is schedule.Severity.ERROR
     assert schedule.worst_severity([], now) is None
+
+
+def test_two_assignments_cannot_hand_out_the_same_repo():
+    # A copy-paste in Maths f2026 had assignments 3 and 4 both citing assignment-2's repo.
+    # Downstream nothing can tell them apart: the handout "skips" the other assignment's
+    # repos and ships nothing, then the autograder re-grades the other assignment hourly
+    # under this key. The second claimant is dropped, loudly, naming the first.
+    meta = {
+        "assignments": {
+            "assignment-2": {
+                "course_source_repo": "a2-f2026",
+                "due_datetime": "2026-10-13",
+            },
+            "assignment-3": {
+                "course_source_repo": "a2-f2026",
+                "due_datetime": "2026-11-10",
+            },
+        }
+    }
+    sched = parse(meta)
+    assert set(sched.assignments) == {"assignment-2"}
+    (drop,) = [d for d in sched.dropped if "assignments.assignment-3" in d]
+    assert "already used by assignments.assignment-2" in drop
