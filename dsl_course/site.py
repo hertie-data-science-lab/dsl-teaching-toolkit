@@ -1390,20 +1390,23 @@ def _assignment_entry(
         now or datetime.now(handout.tzinfo)
     )
     out = slug in handed_out or pinned_out
-    # A group assignment fans out one repo per TEAM, so the shape a student should look for
-    # differs. Only an explicit `type: group` says so - `None` defers to the template's own
-    # grading.yml, which this does not read, and individual is the documented default.
-    entry = found[1] if found else None
-    holder = (
-        "<your-team>"
-        if entry is not None and entry.type == "group"
-        else "<your-handle>"
+    # A group assignment fans out one repo per TEAM, so the shape a student looks for
+    # differs. Through `resolve_is_group` rather than testing `type == "group"` here: that
+    # is the single precedence every other consumer resolves through, and a second copy of
+    # it in the one place students READ the answer is how the site comes to name a shape
+    # the handout does not create. `template_group=None` leaves the design-time grading.yml
+    # unconsulted - the site will not spend an API call per assignment on a repo name.
+    from .collect import resolve_is_group
+
+    group = resolve_is_group(
+        force=False,
+        schedule_type=found[1].type if found else None,
+        template_group=None,
     )
-    repo_name = f"{slug}-{holder}"
+    repo_name = f"{slug}-{'<your-team>' if group else '<your-handle>'}"
     # The plan-side name - all a pending assignment ever shows, and the fallback for a
     # released README that opens with no `# ` heading.
     title = slug.replace("-", " ").title()
-    flags = ""
     if out:
         readme = get_file_content(course_org, repo, "README.md") or ""
         for line in readme.splitlines():
@@ -1415,28 +1418,35 @@ def _assignment_entry(
         ).strip()
         flags = (
             f'repo_url: "https://github.com/orgs/{cohort_org}/repositories?q={slug}-"\n'
-            f'repo_name: "{repo_name}"\n'
+            f'repo_name: "{_q(repo_name)}"\n'
         )
         # No trailing "your repo appears once the teaching team provisions it" line: the
         # repo exists by the time this renders, and the theme now links it twice off the
         # fields above. The body is the brief, and nothing else.
         body = _liquid_raw(brief or "Assignment brief.")
     else:
-        # A flag as well as the prose, exactly as an unreleased session row carries
-        # `unreleased: true`: the theme leaves the title unlinked off this, and the
-        # sentence says why.
+        # A flag as well as the prose: the theme leaves the title unlinked off this,
+        # and the sentence says why. Its twin on a session row, `unreleased: true`, is
+        # written for the same reason - and the Readings tab now reads it rather than
+        # inferring the state from an empty body.
         # No `repo_url`: there is nothing at the other end of it yet.
         flags = "handout_pending: true\n"
+        # The same shape as an unreleased session's line (`_lecture_entry`) - bold lead
+        # inside italics - because they render on adjacent tabs and read as one status
+        # vocabulary or as two. Kept short: the assignment schedule row prints this body in
+        # a table cell, exactly as the lecture row prints its own.
         body = (
-            f"{title} has not been handed out yet - your private `{repo_name}` "
-            f"repo appears when it does."
+            f"_**Not handed out yet** - your private `{repo_name}` repo "
+            f"appears when it is._"
         )
     title = _q(title)
     return (
         f"---\n"
         f"type: assignment\n"
         f"date: {released}\n"
-        f'title: "{title}"\n' + flags + f"due_event:\n"
+        f'title: "{title}"\n'
+        f"{flags}"
+        f"due_event:\n"
         f"    type: due\n"
         f"    date: {due}\n"
         f'    description: "{title}"\n'

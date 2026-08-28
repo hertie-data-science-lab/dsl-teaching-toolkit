@@ -317,7 +317,7 @@ def test_an_unhanded_out_assignment_is_a_placeholder(monkeypatch):
     assert "    date: 2026-10-13T23:59:59" in out
     # the plan-side name only, never the README's own title
     assert 'title: "Assignment 1"' in out
-    assert "has not been handed out yet" in out
+    assert "Not handed out yet" in out
 
 
 def test_a_passed_handout_inlines_the_brief(monkeypatch):
@@ -428,7 +428,7 @@ def test_a_pending_assignment_links_no_repo(monkeypatch):
         now=datetime(2026, 9, 21, tzinfo=BERLIN),
     )
     assert "repo_url" not in out
-    assert "`assignment-1-<your-handle>` repo appears when it does" in out
+    assert "`assignment-1-<your-handle>` repo appears when it is" in out
 
 
 def test_an_early_manual_release_beats_a_pin_still_in_the_future(monkeypatch):
