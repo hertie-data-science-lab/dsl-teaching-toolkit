@@ -103,7 +103,22 @@ def discover_course_orgs() -> list[dict]:
     """
     orgs = []
     for owner in _tagged_orgs(COURSE_HUB_TOPIC):
-        meta = _fetch_metadata(owner)
+        meta = _metadata_or_none(owner)
+        if meta is None:
+            # Carried through with a null tier rather than dropped: the page must still
+            # show the org (an absence reads as "deleted"), and a null matches no tier,
+            # so Promote's fan-out skips exactly this org and refreshes the rest.
+            orgs.append(
+                {
+                    "org": owner,
+                    "org_name": owner,
+                    "course_name": "",
+                    "course_code": "",
+                    "central_ref": None,
+                    "url": f"https://github.com/{owner}",
+                }
+            )
+            continue
         if meta.get("course"):
             # A cohort org's dsl-course.yml is a pointer back to its course org
             # (`course:`/`org:` keys only). Cohorts bootstrapped before the topic split
@@ -137,16 +152,19 @@ def discover_cohort_orgs() -> list[dict]:
     Returns a list of dicts with keys: org, course, url - sorted by course org, then
     cohort, so the table groups each course's deliveries together.
     """
-    cohorts = [
-        {
-            "org": owner,
-            # `or ""` also covers a bare `course:` key parsed as YAML null.
-            "course": _fetch_metadata(owner).get("course") or "",
-            "url": f"https://github.com/{owner}",
-        }
-        for owner in _tagged_orgs(COHORT_TOPIC)
-    ]
-    cohorts.sort(key=lambda c: (c["course"].lower(), c["org"].lower()))
+    cohorts = []
+    for owner in _tagged_orgs(COHORT_TOPIC):
+        meta = _metadata_or_none(owner)
+        cohorts.append(
+            {
+                "org": owner,
+                # None is "could not read it", distinct from "" - a genuinely absent or
+                # null `course:` key. Both end up under Orphaned, saying which.
+                "course": None if meta is None else (meta.get("course") or ""),
+                "url": f"https://github.com/{owner}",
+            }
+        )
+    cohorts.sort(key=lambda c: ((c["course"] or "").lower(), c["org"].lower()))
     return cohorts
 
 
@@ -164,6 +182,29 @@ def _fetch_metadata(org: str) -> dict:
     cohort under Course orgs and rewrites the inventory around it, exactly the wrong
     refresh this docstring warns about."""
     return load_yaml_config(org, ".github", "dsl-course.yml") or {}
+
+
+def _metadata_or_none(org: str) -> dict | None:
+    """`org`'s metadata, or None when it could not be read.
+
+    A malformed `dsl-course.yml` in ONE org used to abort every consumer of this module.
+    For the inventory that is the right answer and is still what happens (see `main`),
+    but Promote's fan-out reads the same listing to decide which orgs to refresh, and one
+    org's typo leaving the whole estate un-refreshed is not a trade worth making. So the
+    failure is logged and localised to that org here, and the caller decides."""
+    try:
+        return _fetch_metadata(org)
+    except RuntimeError as exc:
+        log_err(f"{org}: could not read .github/dsl-course.yml - {exc}")
+        return None
+
+
+def unreadable(orgs: list[dict], cohorts: list[dict]) -> list[str]:
+    """The orgs whose metadata this run could not read - see _metadata_or_none."""
+    return sorted(
+        [o["org"] for o in orgs if o["central_ref"] is None]
+        + [c["org"] for c in cohorts if c["course"] is None]
+    )
 
 
 def _registered_cohorts(course_org: str) -> list[str]:
@@ -205,7 +246,11 @@ def render_tree(orgs: list[dict], cohorts: list[dict]) -> str:
         lines.append(
             f"- **[{o['org']}]({o['url']})**"
             + (f" - {name}" if name else "")
-            + f" - toolkit `{o['central_ref']}`"
+            + (
+                " - **dsl-course.yml unreadable**"
+                if o["central_ref"] is None
+                else f" - toolkit `{o['central_ref']}`"
+            )
         )
         registered = set(_registered_cohorts(o["org"]))
         mine = by_course.pop(o["org"], [])
@@ -221,7 +266,12 @@ def render_tree(orgs: list[dict], cohorts: list[dict]) -> str:
         lines.append("")
         lines.append("**Orphaned cohort orgs** _(no course org discovered for them)_:")
         lines += [
-            f"- [{c['org']}]({c['url']}) -> `{c['course'] or 'no course: pointer'}`"
+            f"- [{c['org']}]({c['url']}) -> "
+            + (
+                "**dsl-course.yml unreadable**"
+                if c["course"] is None
+                else f"`{c['course'] or 'no course: pointer'}`"
+            )
             for c in sorted(orphans, key=lambda c: c["org"].lower())
         ]
     return "\n".join(lines)
@@ -268,7 +318,21 @@ def main() -> int:
         log_err(str(exc))
         return 1
 
+    # The page is fully generated and merged unattended, so an org this run could not
+    # read must not be written out as if the listing were complete. The JSON/YAML forms
+    # still print - Promote reads them, and a null tier is a value it can act on - but the
+    # exit code says the picture is partial either way.
+    partial = unreadable(orgs, cohorts)
+    if partial:
+        log_err(
+            "could not read the metadata of: "
+            + ", ".join(partial)
+            + " - the inventory below is incomplete"
+        )
+
     if args.update_file:
+        if partial:
+            return 1
         changed = update_file(args.update_file, render_page(orgs, cohorts))
         print(
             f"{'updated' if changed else 'no change'}: {args.update_file} "
@@ -284,7 +348,7 @@ def main() -> int:
     else:
         print(render_tree(orgs, cohorts))
 
-    return 0
+    return 1 if partial else 0
 
 
 if __name__ == "__main__":
