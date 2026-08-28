@@ -198,7 +198,7 @@ def deploy_many(
                 cohort_org,
                 repo,
                 private=True,
-                description="Released lectures, labs, readings, and other materials",
+                description="Released lectures, labs, readings, & other materials",
             )
             grant_read_teams(cohort_org, repo)
             dd = root / "out" / repo

@@ -529,7 +529,13 @@ def setup_cohort_extras(org: str) -> int:
         org,
         "classroom-config",
         private=True,
-        description="PRIVATE cohort config - roster (students.csv). No PII leaves here.",
+        # Instructors and course-admin hold it and nobody else does: the cohort org sets
+        # default_repository_permission=none, so a student is not a reader of this by
+        # default - it does not appear in their repo list at all.
+        description=(
+            "[visible to instructors only]: Cohort config - roster, schedule, "
+            "people, grades. No PII leaves here."
+        ),
     ):
         failures += 1
         log_err(f"could not create the classroom-config repo in {org}")

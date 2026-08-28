@@ -275,7 +275,7 @@ def test_released_repos_are_read_by_both_cohort_role_teams():
 
 
 SUPERSEDED = "Released course materials (enrolled students only)"
-CURRENT = "Released lectures, labs, readings, and other materials"
+CURRENT = "Released lectures, labs, readings, & other materials"
 
 
 def _converge(monkeypatch, repos):
