@@ -158,7 +158,7 @@ def test_the_cli_succeeds_on_a_real_schedule(monkeypatch, capsys, wired):
 def test_a_titleless_entry_does_not_blank_a_session_the_site_names(wired, monkeypatch):
     # Re-deriving the naming rule here took the title from the EARLIEST deploy touching a
     # session whether or not that entry declared one - so a readings-only or "Course opens"
-    # entry silently blanked a session the website names. Reading `site._planned_sessions`
+    # entry silently blanked a session the website names. Reading `schedule_plan.planned_sessions`
     # is what makes the two agree.
     sched = syllabus.schedule.load("Cohort-f2026")
     sched.releases.append(

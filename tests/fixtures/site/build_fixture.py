@@ -32,7 +32,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(ROOT))
 
-from dsl_course import site
+from dsl_course import schedule_plan, site
 
 BERLIN = ZoneInfo("Europe/Berlin")
 COURSE_ORG = "hertie-dsl-fixture-course"
@@ -112,25 +112,25 @@ def _get_file_content(_org: str, _repo: str, path: str) -> str | None:
 
 def _lectures() -> dict[str, str]:
     """The `_lectures` collection: the four session states that render differently."""
-    released = site._PlannedRow(
+    released = schedule_plan.PlannedRow(
         when=datetime(2026, 9, 7, 10, 0, tzinfo=BERLIN),
         subtitle="What a neural network is",
         description="Perceptrons, activation functions and the chain rule.",
         readings_planned=True,
     )
-    pending_readings = site._PlannedRow(
+    pending_readings = schedule_plan.PlannedRow(
         when=datetime(2026, 9, 14, 10, 0, tzinfo=BERLIN),
         subtitle="Backpropagation",
         readings_planned=True,
     )
-    unreleased = site._PlannedRow(
+    unreleased = schedule_plan.PlannedRow(
         when=datetime(2026, 9, 21, 10, 0, tzinfo=BERLIN),
         dests={f"{MATERIALS}/lectures/03_week-3": None},
         subtitle="Convolutions",
         description="Why weight sharing works.\n\nAnd where it does not.",
         readings_planned=True,
     )
-    lab = site._PlannedRow(when=datetime(2026, 9, 9, 14, 0, tzinfo=BERLIN))
+    lab = schedule_plan.PlannedRow(when=datetime(2026, 9, 9, 14, 0, tzinfo=BERLIN))
     return {
         # Released, with a reading list inlined off the released READINGS.md overlay.
         "session-01.md": site._lecture_entry(
