@@ -1,0 +1,10 @@
+---
+# Stub for the shared theme's stylesheet entrypoint. The theme is not fetched in this
+# build, so without this `_sass/_course.scss` is never compiled and a Sass error in it
+# would ship. Declares only the two variables the course styles read, then imports them
+# last - the position the theme's own main.scss gives it.
+---
+$display-font: 'Titillium Web', sans-serif;
+$grey-color-dark: #4a4a4a;
+
+@import "course";
