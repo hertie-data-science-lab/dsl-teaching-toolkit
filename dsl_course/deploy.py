@@ -33,6 +33,7 @@ import tempfile
 from pathlib import Path
 
 from . import site
+from .access import grant_faculty_read_access, grant_read_teams
 from .course import (
     FACULTY_ONLY_HEADING,
     SYLLABUS_SAMPLE_FILE,
@@ -41,12 +42,7 @@ from .course import (
 from .ghcli import GIT_ENV, gh, git
 from .log import log, log_err, log_ok, log_step
 from .schedule import Deploy
-from .utils import (
-    create_repo,
-    grant_faculty_read_access,
-    grant_read_teams,
-    is_untouched_stub,
-)
+from .utils import create_repo, is_untouched_stub
 
 _GIT_ENV = GIT_ENV
 

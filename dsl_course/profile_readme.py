@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import re
 
+from .access import converge_faculty_access, converge_topics
 from .central import CENTRAL, CENTRAL_REF
 from .discovery import (
     course_name_of,
@@ -33,14 +34,7 @@ from .discovery import (
     student_repo_names,
 )
 from .log import log, log_err, log_ok
-from .utils import (
-    converge_descriptions,
-    converge_faculty_access,
-    converge_topics,
-    get_file_content,
-    load_yaml_config,
-    put_files,
-)
+from .utils import converge_descriptions, get_file_content, load_yaml_config, put_files
 
 # Per-org identity/people/schedule config, lives at the root of each org's `.github` repo.
 COURSE_CONFIG = "dsl-course.yml"

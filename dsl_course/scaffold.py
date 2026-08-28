@@ -23,6 +23,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from .access import grant_course_team_access, grant_tagged_team_access
 from .course import (
     FACULTY_ONLY_HEADING,
     MATERIALS_REPO_PREFIX,
@@ -36,8 +37,6 @@ from .utils import (
     READING_OVERLAY_FILE,
     create_repo,
     generate_from_template,
-    grant_course_team_access,
-    grant_tagged_team_access,
     put_files,
     refresh_stubs,
     repo_exists,
