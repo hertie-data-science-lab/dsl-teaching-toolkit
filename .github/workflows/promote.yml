@@ -160,24 +160,37 @@ jobs:
           TIER: ${{ inputs.to }}
         run: |
           set -eo pipefail
+          # list_orgs exits non-zero when it could not read SOME org's dsl-course.yml, and
+          # still prints the rest. One org's malformed file must not leave the whole
+          # estate un-refreshed, so that exit is tolerated here - but only if an inventory
+          # actually came back; an empty capture fails the jq below, as it should.
+          inventory=$(python3 -m dsl_course.list_orgs) \
+            || echo "::warning::list_orgs could not read every org - see the log; refreshing the ones it could"
           # Cohort orgs are not dispatched: "Refresh actions" lives in the COURSE org and
           # converges every cohort registered under it in the same run.
-          orgs=$(python3 -m dsl_course.list_orgs \
-                 | jq -r --arg tier "$TIER" '.course_orgs[] | select(.central_ref == $tier) | .org')
-          if [ -z "$orgs" ]; then
-            echo "No course org runs \`$TIER\` - nothing to refresh." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          echo "## Refreshed on \`$TIER\`" >> "$GITHUB_STEP_SUMMARY"
+          orgs=$(jq -r --arg tier "$TIER" '.course_orgs[] | select(.central_ref == $tier) | .org' <<<"$inventory")
+          # A null tier is an org whose metadata could not be read, so nothing can say
+          # which tier it is on. Named in the summary rather than passed over in silence:
+          # it may well be an org this promotion was meant to reach.
+          unknown=$(jq -r '.course_orgs[] | select(.central_ref == null) | .org' <<<"$inventory")
+          {
+            echo "## Refresh on \`$TIER\`"
+            echo
+            [ -n "$orgs" ] || echo "_No course org runs \`$TIER\`._"
+          } >> "$GITHUB_STEP_SUMMARY"
           failed=0
           for org in $orgs; do
             if gh workflow run refresh-actions.yml -R "$org/.github"; then
-              echo "- $org" >> "$GITHUB_STEP_SUMMARY"
+              echo "- $org - dispatched" >> "$GITHUB_STEP_SUMMARY"
             else
               # Not fatal to the promotion - it has already landed, and the org's own
               # nightly cron converges it within 24h - but it must not read as green.
               echo "- $org - **dispatch failed**, it converges on tonight's cron" >> "$GITHUB_STEP_SUMMARY"
               failed=1
             fi
+          done
+          for org in $unknown; do
+            echo "- $org - **skipped**, its \`dsl-course.yml\` could not be read" >> "$GITHUB_STEP_SUMMARY"
+            failed=1
           done
           exit "$failed"

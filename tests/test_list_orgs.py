@@ -5,6 +5,8 @@ neither may be written out as an inventory of zero (or mis-tiered) orgs.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 import yaml
 
@@ -256,3 +258,88 @@ def test_each_course_org_reports_the_toolkit_tier_it_runs(monkeypatch):
         ("Live", "release"),
         ("Soak", "staging"),
     ]
+
+
+def test_one_unreadable_org_does_not_hide_every_other_one(monkeypatch, capsys):
+    # Promote's fan-out reads this listing to decide which orgs to refresh. It used to
+    # abort on the first malformed dsl-course.yml, so one org's typo left the whole
+    # estate un-refreshed. The bad org comes back with a null tier instead - which the
+    # tier filter cannot match, so it is skipped and the others still go.
+    monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Bad", "Good"])
+
+    def meta(org):
+        if org == "Bad":
+            raise RuntimeError("Bad/.github/dsl-course.yml is not a YAML mapping")
+        return {"central_ref": "staging"}
+
+    monkeypatch.setattr(list_orgs, "_fetch_metadata", meta)
+
+    orgs = list_orgs.discover_course_orgs()
+    assert [(o["org"], o["central_ref"]) for o in orgs] == [
+        ("Bad", None),
+        ("Good", "staging"),
+    ]
+    assert list_orgs.unreadable(orgs, []) == ["Bad"]
+    assert "Bad" in capsys.readouterr().err
+
+
+def test_an_unreadable_org_is_shown_on_the_tree_not_dropped_from_it(monkeypatch):
+    # An org missing from this page reads as "never bootstrapped, or deleted". Saying
+    # the file could not be read is the whole point of noticing.
+    monkeypatch.setattr(list_orgs, "discover_cohorts", lambda org: [])
+    out = list_orgs.render_tree(
+        [
+            {
+                "org": "Bad",
+                "org_name": "Bad",
+                "course_name": "",
+                "course_code": "",
+                "central_ref": None,
+                "url": "https://github.com/Bad",
+            }
+        ],
+        [
+            {
+                "org": "Loose-f2026",
+                "course": None,
+                "url": "https://github.com/Loose-f2026",
+            }
+        ],
+    )
+    assert "**dsl-course.yml unreadable**" in out
+    assert "Loose-f2026" in out
+
+
+def test_an_unreadable_org_still_stops_the_inventory_being_rewritten(
+    monkeypatch, tmp_path
+):
+    # Localising the failure must not quietly downgrade the page's own guarantee: it is
+    # fully generated and merged unattended, so a partial listing is never written.
+    monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Bad"])
+    monkeypatch.setattr(
+        list_orgs,
+        "_fetch_metadata",
+        lambda org: (_ for _ in ()).throw(RuntimeError("nope")),
+    )
+    page = tmp_path / "inventory.md"
+    page.write_text("# the previous, good inventory\n")
+    monkeypatch.setattr("sys.argv", ["list_orgs", "--update-file", str(page)])
+
+    assert list_orgs.main() == 1
+    assert page.read_text() == "# the previous, good inventory\n"
+
+
+def test_the_json_form_still_prints_what_it_could_read(monkeypatch, capsys):
+    # Promote parses this. It has to get the listing even when the run is partial, so the
+    # verdict rides on the exit code rather than on withholding the output.
+    monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Bad"])
+    monkeypatch.setattr(
+        list_orgs,
+        "_fetch_metadata",
+        lambda org: (_ for _ in ()).throw(RuntimeError("nope")),
+    )
+    monkeypatch.setattr("sys.argv", ["list_orgs"])
+
+    assert list_orgs.main() == 1
+    printed = json.loads(capsys.readouterr().out)
+    assert [o["central_ref"] for o in printed["course_orgs"]] == [None]
