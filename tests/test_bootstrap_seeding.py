@@ -17,6 +17,12 @@ first-run guard - the guard has to be per file. These tests pin the split:
 Every user-editable classroom-config file is a scaffold/sample PAIR - `<file>` seeded once,
 `<file>.sample` always converged - and the samples are injected from
 example-course/cohort-org/ rather than authored twice.
+
+The COURSE tier of example-course/ is validated here too. Only its SYLLABUS.md is a seeded
+pair (SYLLABUS.md.sample is derived from it); the rest is documentation, linked from docs/
+and never pushed anywhere. Both halves are parsed by the engine's own readers all the same,
+because the docs call that tree the live example and an unvalidated example goes
+schema-stale in silence - which is how a cohort's schedule.yml once parsed as zero releases.
 """
 
 from __future__ import annotations
@@ -26,18 +32,24 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import yaml
 
-from dsl_course import bootstrap_course as bc
 from dsl_course import (
+    assign,
+    collect,
+    course,
     gh_contents,
     gh_teams,
     grades,
+    readings,
     roster,
+    scaffold,
     schedule,
     seed,
+    site_repo,
     sync_faculty,
     teams,
     welcome,
 )
+from dsl_course import bootstrap_course as bc
 from dsl_course.central import CENTRAL
 from dsl_course.repos import Converged
 from tests.conftest import repo_row
@@ -378,12 +390,12 @@ def test_scaffold_and_sample_carry_the_engines_current_column_sets():
     def header(text: str) -> tuple[str, ...]:
         return tuple(text.splitlines()[0].split(","))
 
-    for scaffold, fields in (
+    for name, fields in (
         ("students.csv", roster.FIELDS),
         ("teams.csv", teams.FIELDS),
     ):
-        assert header(welcome.template(f"classroom-config/{scaffold}")) == fields
-        assert header(welcome.example_cohort_file(scaffold)) == fields
+        assert header(welcome.template(f"classroom-config/{name}")) == fields
+        assert header(welcome.example_cohort_file(name)) == fields
     # header-only scaffolds: nobody to enrol, and no team to provision, by accident
     assert roster.parse(welcome.template("classroom-config/students.csv")) == []
     assert teams.parse(welcome.template("classroom-config/teams.csv")) == {}
@@ -412,6 +424,152 @@ def test_the_people_sample_names_nobody_real():
         yaml.safe_load(welcome.example_cohort_file("people.yml")) or {}
     )
     for role, people in faculty.items():
+        for person in people:
+            handle = (person.get("github_handle") or "").strip()
+            assert not handle or (
+                handle.startswith("demo-") and handle.endswith("-placeholder")
+            ), f"{role}: {handle}"
+
+
+# ------------------------------- the COURSE tier of the worked example
+#
+# example-course/course-org/ is what docs/02, docs/03, docs/README and DEPLOYMENT-CHECKLIST
+# all send faculty to as the canonical live example. Only SYLLABUS.md is seeded (as the
+# `.sample` half of the materials repo's syllabus pair); the rest is read by humans. Either
+# way it is parsed by the ENGINE'S readers below - never a second checker written for tests
+# - so a schema move that leaves this tree behind fails here rather than in a faculty repo.
+
+
+def _shipped_syllabus_sample() -> str:
+    return scaffold.materials_system_files("Course-E1", "course-materials-f2026")[
+        course.SYLLABUS_SAMPLE_FILE
+    ].decode()
+
+
+def test_the_syllabus_sample_is_read_from_the_example_course_not_authored_twice(
+    monkeypatch,
+):
+    # The course tier's one scaffold/sample pair follows the cohort rule: DERIVED. Asserting
+    # that the shipped sample contains the example's text would be tautological (it is read
+    # from it), so feed the reader a sentinel instead - that fails the moment anyone
+    # reintroduces a hand-authored literal, which is how the two copies drifted to a filled
+    # syllabus and a three-line stub in the first place.
+    monkeypatch.setattr(
+        scaffold,
+        "example_course_file",
+        lambda rel: "# Sentinel\n\nbody of the sentinel\n",
+    )
+    shipped = _shipped_syllabus_sample()
+    assert shipped.startswith("# Sentinel\n")
+    assert "body of the sentinel" in shipped
+
+
+def test_the_syllabus_samples_ownership_notice_is_added_at_the_write_site():
+    # The notice is NOT carried in the example: in its own org that file is a course team's
+    # own INSTRUCTOR-OWNED syllabus and must not claim the toolkit overwrites it. It is
+    # stamped on the way out instead, under the title (an H1 on line 1 is what the
+    # derivation splits on, and what every renderer of this file assumes).
+    example = welcome.example_course_file(scaffold.EXAMPLE_SYLLABUS)
+    shipped = _shipped_syllabus_sample()
+
+    assert example.startswith("# "), "the example syllabus must open with its H1 title"
+    assert "SYSTEM-OWNED" not in example
+    lines = shipped.splitlines()
+    assert lines[0] == example.splitlines()[0]
+    assert "SYSTEM-OWNED" in "\n".join(lines[1:8])
+
+
+def test_the_example_course_declares_every_key_the_generator_writes():
+    # If `_course_metadata` gains an identity key, the worked example must teach it. The
+    # expectation is DERIVED from the generator's own template, never a hand-kept list
+    # that could drift the same way.
+    generated = yaml.safe_load(
+        welcome.template("course/dsl-course.yml").format(
+            org="Course-E1",
+            org_name="Course",
+            course_name="Deep Learning",
+            course_code="E1",
+        )
+    )
+    example = yaml.safe_load(welcome.example_course_file("dsl-course.yml"))
+    assert set(generated) <= set(example), (
+        f"the worked example omits {sorted(set(generated) - set(example))}"
+    )
+
+
+def test_the_example_courses_people_block_feeds_both_of_its_readers():
+    # One block, two consumers: sync_faculty grants GitHub access from it, site_repo.py renders
+    # website cards from it. A card key the theme cannot read is invisible until a real
+    # site is built, so check the mapping here.
+    meta = yaml.safe_load(welcome.example_course_file("dsl-course.yml"))
+    faculty = sync_faculty.parse_faculty_from_meta(meta)
+    assert faculty["course_admins"], "course_admins is the SSOT for course-wide admin"
+    assert faculty["instructors"], (
+        "instructor cards are what the public course site shows"
+    )
+
+    for entry in faculty["instructors"]:
+        # the example must teach OUR spelling - `photo`/`url` are what a course declares,
+        # and an example already written in the theme's names would pass the mapping below
+        # while teaching faculty a key the docs never document
+        assert "photo" in entry and "url" in entry, sorted(entry)
+        card = site_repo._card(entry)
+        # ...and the theme's on the way out
+        assert "photo" not in card and "url" not in card
+        assert card.get("profile_pic") and card.get("webpage")
+        # access-only keys never reach a public page
+        assert not set(card) & set(site_repo.ACCESS_ONLY)
+
+
+def test_every_example_assignment_parses_with_the_real_grading_reader():
+    # grading.yml is design-time faculty input, and `parse_grading_spec` defaults every
+    # missing key - so a retired spelling in the example reads as a silent default rather
+    # than an error. Assert the VALUES, not just that it parses.
+    kinds = {}
+    for a in sorted(welcome.EXAMPLE_COURSE.glob("assignment-*")):
+        spec_file = a / "solution" / collect.GRADING_FILE
+        assert spec_file.is_file(), f"{a.name}: no solution/{collect.GRADING_FILE}"
+        spec = collect.parse_grading_spec(spec_file.read_text())
+        kinds[a.name] = spec["type"]
+        # the hidden tests the Grade assignment workflow runs live where the file says
+        assert (a / "solution" / spec["tests"]).is_dir(), (
+            f"{a.name}: `tests: {spec['tests']}` names no directory"
+        )
+        assert spec["autograde"] is True
+    # both kinds are demonstrated - `type: group` is what drives team provisioning, and an
+    # example that only ever showed individual assignments taught half the schema
+    assert "group" in kinds.values() and "individual" in kinds.values(), kinds
+
+
+def test_every_example_assignment_has_the_layout_the_engine_pushes():
+    # `assign` pushes `main/` to the student repo's main branch and `solution/` to the
+    # solution branch. A worked example missing either half is not a copyable one.
+    for a in sorted(welcome.EXAMPLE_COURSE.glob("assignment-*")):
+        assert (a / "main").is_dir(), f"{a.name}: no main/ - students would get nothing"
+        assert (a / assign.SOLUTION_DIR).is_dir(), f"{a.name}: no solution/"
+        assert any((a / "main").iterdir()), f"{a.name}: main/ is empty"
+
+
+def test_the_example_materials_tree_is_a_releasable_one():
+    # A section is any top-level dir with an ordinal-prefixed subdir - the structure IS
+    # the config, so an example that renamed a folder out of that shape would document a
+    # tree the Release actions cannot see.
+    materials = welcome.EXAMPLE_COURSE / "course-materials-f2026"
+    sections = course.discover_sections(materials)
+    assert {"lectures", "labs", "readings"} <= set(sections), sections
+    # the readings redesign: the overlay is named by FILENAME, not extension
+    overlays = sorted(materials.glob(f"readings/*/{readings.READING_OVERLAY_FILE}"))
+    assert overlays, (
+        f"no {readings.READING_OVERLAY_FILE} in the example's readings sessions - the "
+        f"example must show the optional prose overlay, not just uploaded files"
+    )
+
+
+def test_the_example_course_names_nobody_real():
+    # Same rule as the cohort samples, for the same reason: faculty copy this file, and a
+    # real handle would send an unasked-for org invitation (the file says so itself).
+    meta = yaml.safe_load(welcome.example_course_file("dsl-course.yml"))
+    for role, people in sync_faculty.parse_faculty_from_meta(meta).items():
         for person in people:
             handle = (person.get("github_handle") or "").strip()
             assert not handle or (
