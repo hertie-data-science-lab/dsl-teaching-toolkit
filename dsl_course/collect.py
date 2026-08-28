@@ -375,16 +375,32 @@ def submission_targets(
     return targets
 
 
-def _until_param(deadline: str) -> str:
-    """`deadline` (ISO date or datetime, with or without an offset) as a UTC `...Z` stamp -
-    the form the commits API's `until=` takes. A bare date means end of that day, matching
-    the date-pin fallback; a naive datetime is read as UTC (every schedule-derived deadline
-    is already offset-carrying)."""
+def local_deadline(deadline: str, tz: str | None = None) -> str:
+    """`deadline` (ISO date or datetime) as an OFFSET-CARRYING ISO string in the COHORT's
+    own timezone. Raises ValueError on anything that is not ISO.
+
+    A bare date means the END of that day, and a naive datetime is a local time, because
+    the deadline a student was given ("submit by the 15th") is a local one - the site shows
+    it in the cohort's zone and schedule.yml declares that zone. Read as UTC, as it was,
+    "the 15th" ran until 01:59 on the 16th in Berlin summer time: two hours of late work
+    graded as on time, and the snapshot froze at the wrong instant to match.
+
+    `tz` is the schedule's `timezone` (`schedule._tz` supplies the default and tolerates an
+    unknown zone). A deadline that already carries an offset names an instant and is only
+    re-expressed, never moved."""
     raw = deadline if ("T" in deadline or ":" in deadline) else f"{deadline}T23:59:59"
     dt = datetime.fromisoformat(raw)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    zone = schedule._tz(tz)
+    return (dt.replace(tzinfo=zone) if dt.tzinfo is None else dt).isoformat()
+
+
+def _until_param(deadline: str, tz: str | None = None) -> str:
+    """`deadline` as a UTC `...Z` stamp - the form the commits API's `until=` takes."""
+    return (
+        datetime.fromisoformat(local_deadline(deadline, tz))
+        .astimezone(timezone.utc)
+        .strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
 
 
 def _snapshot_sha(cohort_org: str, repo: str, deadline: str) -> str | None:
@@ -974,11 +990,16 @@ def collect(
         or schedule.grading_datetime_iso(sched, key)
         or _today_in_cohort_tz(sched)
     )
-    # Validate the deadline up front (raises on a non-ISO string). git's `rev-list --before`
-    # would otherwise take an unparseable `--deadline` as an approxidate that silently matches
+    # Pin the deadline to an explicit instant in the COHORT's timezone, once, here: a bare
+    # `--deadline 2026-11-15` means the end of the 15th where the students are, and every
+    # consumer below (the commits API `until=`, git's `rev-list --before`, the log lines)
+    # then reads the same moment instead of each defaulting to the runner's UTC.
+    #
+    # It also validates (raises on a non-ISO string). git's `rev-list --before` would
+    # otherwise take an unparseable `--deadline` as an approxidate that silently matches
     # NOTHING, zeroing every submission in the cohort without a word.
     try:
-        _until_param(deadline)
+        deadline = local_deadline(deadline, sched.timezone)
     except ValueError:
         log_err(
             f"--deadline '{deadline}' is not an ISO date/datetime - refusing to grade "

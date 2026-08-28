@@ -122,17 +122,33 @@ def test_snapshot_path_lives_under_snapshots():
 
 
 @pytest.mark.parametrize(
-    "deadline,expected",
+    "deadline,tz,expected",
     [
-        ("2026-10-13", "2026-10-13T23:59:59Z"),  # bare date -> end of day, like the pin
-        ("2026-10-15T23:59:59+02:00", "2026-10-15T21:59:59Z"),  # offset -> UTC
-        ("2026-10-15T23:59:59", "2026-10-15T23:59:59Z"),  # naive read as UTC
+        # A bare date is the end of that day WHERE THE STUDENTS ARE. Read as end-of-day
+        # UTC, "the 13th" ran until 01:59 on the 14th in Berlin summer time - two hours of
+        # late work graded as on time.
+        ("2026-10-13", "Europe/Berlin", "2026-10-13T21:59:59Z"),
+        ("2026-10-13", "America/New_York", "2026-10-14T03:59:59Z"),
+        ("2026-10-13", "UTC", "2026-10-13T23:59:59Z"),
+        # A naive datetime is a local one, for the same reason.
+        ("2026-10-15T12:00:00", "Europe/Berlin", "2026-10-15T10:00:00Z"),
+        # An explicit offset already names an instant - only re-expressed, never moved.
+        ("2026-10-15T23:59:59+02:00", "America/New_York", "2026-10-15T21:59:59Z"),
+        # No zone given: the schedule's own default, exactly as _today_in_cohort_tz uses.
+        ("2026-10-13", None, "2026-10-13T21:59:59Z"),
     ],
 )
-def test_until_param_is_always_a_utc_z_stamp(deadline, expected):
+def test_until_param_is_a_utc_z_stamp_of_the_cohorts_own_deadline(
+    deadline, tz, expected
+):
     # A `+HH:MM` offset in a query string would be read as a space, silently shifting the
     # cutoff by hours - so the API cutoff is always normalised to UTC Z.
-    assert collect._until_param(deadline) == expected
+    assert collect._until_param(deadline, tz) == expected
+
+
+def test_an_unparseable_deadline_still_raises_rather_than_matching_nothing():
+    with pytest.raises(ValueError):
+        collect.local_deadline("last thursday", "Europe/Berlin")
 
 
 # ------------------------------------------------------------------------------ the pin
