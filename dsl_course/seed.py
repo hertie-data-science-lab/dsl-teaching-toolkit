@@ -39,6 +39,7 @@ import sys
 from datetime import datetime, timezone
 
 from . import scaffold
+from .access import converge_faculty_access, converge_topics
 from .central import CENTRAL, central_ref_exists
 from .course import CONFIG_REPO, term_tag
 from .discovery import (
@@ -46,13 +47,16 @@ from .discovery import (
     discover_assignments,
     discover_cohorts,
     discover_content_repos,
+    list_org_repos,
+    org_tier,
+    student_repo_names,
     unregister_cohort,
 )
 from .gh_contents import get_file_content, put_file, put_files, refresh_stubs
 from .ghcli import gh
 from .log import log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
-from .repos import org_exists, repo_is_archived
+from .repos import converge_descriptions, org_exists, repo_is_archived
 from .welcome import (
     refresh_classroom_samples,
     refresh_classroom_system_files,
@@ -325,6 +329,39 @@ def _propagate_repo_secret(course_org: str, repos: list[str]) -> int:
     return failures
 
 
+def _converge_org_metadata(org: str, repos: list[dict]) -> int:
+    """Bring an org's repo descriptions, faculty-team access and machinery topics up to
+    what the toolkit now says they should be - all three off ONE listing.
+
+    Each of the three is set once, when a repo is created, and never revisited: a repo
+    kind that predates its grant, an org bootstrapped before one existed, a description
+    the toolkit has since reworded, a topic whose PATCH failed after the create. This is
+    the convergence path for all of them, and it is the nightly sweep's job - it used to
+    ride inside update_profile_readme, which meant a README renderer was quietly the only
+    thing granting repo permissions in the estate.
+
+    Costs no reads beyond the listing the caller passes in (which carries `description`,
+    `topics` and `isTemplate`), and converge_descriptions mutates it in place, so the
+    landing page rendered from the same listing shows the corrected wording in this run
+    rather than the next.
+
+    Returns the failure count that must reach the refresh's exit code - the topic stamps.
+    A failed description PATCH is documentation and logs a line; a failed access PUT
+    self-heals on the next sweep and is likewise not fatal."""
+    # `tier` is None for an org the listing cannot place (a legacy cohort with no topics
+    # and no `welcome`). The description table and the topic sweep read that as "course";
+    # the ACCESS sweep must not, so it takes `cohort=tier != "course"` - only a listing
+    # that positively says "course" earns the write-everywhere floor, and `protected`
+    # holds every per-student repo to READ whatever the tier turns out to be.
+    tier = org_tier(repos)
+    is_cohort = tier == "cohort"
+    converge_descriptions(org, repos, cohort=is_cohort)
+    converge_faculty_access(
+        org, repos, cohort=tier != "course", protected=student_repo_names(repos)
+    )
+    return converge_topics(org, repos, cohort=is_cohort)
+
+
 def _refresh_stubs(course_org: str, repo: str) -> int:
     """Bring a content repo's seeded STUBS up to date, without creating any.
 
@@ -361,7 +398,9 @@ def refresh(course_org: str) -> int:
     """Refresh both layers: the run-from-repo content actions in every content repo,
     AND the central org-level workflows in .github; converge each materials repo's
     SYSTEM-owned files (maintainer guide, syllabus example) and its seeded stubs;
-    repopulate dropdowns; rebuild the org profile README; re-push every registered cohort's welcome workflows, its
+    repopulate dropdowns; converge each org's repo descriptions, faculty-team
+    access and machinery topics (_converge_org_metadata) and rebuild its profile README
+    off the same listing; re-push every registered cohort's welcome workflows, its
     classroom-config SYSTEM-owned files (README contract, dispatch-sync*.yml,
     validate-schedule.yml) and its `*.sample` worked examples (skipping cohorts whose
     repos are archived) - never its own config, which stays create-if-missing; (Free-plan
@@ -423,7 +462,14 @@ def refresh(course_org: str) -> int:
     if ref_live:
         failures += seed_github_workflows(course_org, central_ref)
     failures += _write_heartbeat(course_org)
-    failures += update_profile_readme(course_org, central_ref=central_ref)
+    # One listing, swept and then rendered: the sweep corrects the descriptions the
+    # landing page's table is built from, so both see the same snapshot and the page is
+    # right in this run rather than one run behind.
+    listing = list_org_repos(course_org)
+    failures += _converge_org_metadata(course_org, listing)
+    failures += update_profile_readme(
+        course_org, central_ref=central_ref, repos=listing
+    )
     # A cohort's onboarding workflows, classroom-config dispatchers and config samples are
     # seeded at Bootstrap cohort, and would otherwise stay frozen for the whole semester
     # while the engine they call - and the schemas the samples demonstrate - move on.
@@ -461,7 +507,11 @@ def refresh(course_org: str) -> int:
         # marked repo table is refreshed (see profile_readme.splice_repo_table) - which is
         # what keeps that table honest as repos are added, without flattening an
         # instructor's wording around it.
-        failures += update_profile_readme(cohort, central_ref=central_ref)
+        cohort_repos = list_org_repos(cohort)
+        failures += _converge_org_metadata(cohort, cohort_repos)
+        failures += update_profile_readme(
+            cohort, central_ref=central_ref, repos=cohort_repos
+        )
     if failures:
         log_err(f"refresh incomplete: {failures} file(s) could not be written")
         return 1

@@ -609,6 +609,8 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: [])
     monkeypatch.setattr(seed, "discover_assignments", lambda org: [])
     monkeypatch.setattr(seed, "_propagate_repo_secret", lambda org, repos: 0)
+    monkeypatch.setattr(seed, "list_org_repos", lambda org: [])
+    monkeypatch.setattr(seed, "_converge_org_metadata", lambda org, repos: 0)
     monkeypatch.setattr(seed, "seed_github_workflows", lambda org, ref: seed_failures)
     monkeypatch.setattr(seed, "_write_heartbeat", lambda org: heartbeat_failures)
     monkeypatch.setattr(seed, "update_profile_readme", lambda org, **k: 0)
@@ -1284,3 +1286,102 @@ def test_the_student_facing_teams_are_secret(monkeypatch):
     )
     bc.create_cohort_teams("Cohort-f2026")
     assert created == [("students", "secret"), ("auditors", "secret")]
+
+
+# ---------------------------------------------------- the nightly convergence sweep
+# Descriptions, faculty-team access and machinery topics are each set once at repo
+# creation and never revisited. Converging them is the nightly refresh's job; it used to
+# ride inside update_profile_readme, which made a README renderer the only thing granting
+# repo permissions in the estate.
+
+
+def _r(name, **extra):
+    return {
+        "name": name,
+        "url": "u",
+        "visibility": "private",
+        "description": "",
+        **extra,
+    }
+
+
+def _spy_sweep(monkeypatch, repos):
+    """Run the sweep over `repos` and return what converge_faculty_access was told."""
+    seen: dict = {}
+
+    def spy(org, repos, cohort, protected):
+        seen.update(cohort=cohort, protected=set(protected))
+        return 0
+
+    monkeypatch.setattr(seed, "converge_faculty_access", spy)
+    monkeypatch.setattr(seed, "converge_descriptions", lambda *a, **k: 0)
+    monkeypatch.setattr(seed, "converge_topics", lambda *a, **k: 0)
+    seed._converge_org_metadata("Org", repos)
+    return seen
+
+
+def test_the_sweep_is_told_the_tier_and_the_student_repos(monkeypatch):
+    # Deleting the call, or passing cohort=False for a cohort, would otherwise be
+    # invisible: every other test stubs the sweep to a no-op. This pins what the one call
+    # site passes.
+    cohort = [_r(".github", topics=["dsl-cohort"]), _r("welcome"), _r("grades-ada")]
+    assert _spy_sweep(monkeypatch, cohort) == {
+        "cohort": True,
+        "protected": {"grades-ada"},
+    }
+
+    course = [_r(".github", topics=["dsl-course-hub"]), _r("course-materials-f2026")]
+    assert _spy_sweep(monkeypatch, course) == {"cohort": False, "protected": set()}
+
+
+def test_an_org_of_unknown_tier_gets_the_read_floor(monkeypatch):
+    # A legacy cohort: `.github` without topics, student repos, no `welcome`. The landing
+    # page renders it as a course org, but the sweep must NOT hand instructors push on
+    # every submission repo - so it is told "cohort" (read floor), and the student repos
+    # are protected by name as well.
+    legacy = [
+        _r(".github"),
+        _r("assignment-1", isTemplate=True),
+        _r("assignment-1-ada"),
+        _r("grades-ada"),
+    ]
+    assert _spy_sweep(monkeypatch, legacy) == {
+        "cohort": True,
+        "protected": {"assignment-1-ada", "grades-ada"},
+    }
+
+
+def test_a_failed_topic_stamp_reds_the_refresh(monkeypatch):
+    # A missing `submission`/`gradebook` topic is what puts a student's repo on the public
+    # landing page and into the release targets, so it counts; a reworded description or
+    # a retryable access PUT does not.
+    monkeypatch.setattr(seed, "converge_descriptions", lambda *a, **k: 0)
+    monkeypatch.setattr(seed, "converge_faculty_access", lambda *a, **k: 0)
+    monkeypatch.setattr(seed, "converge_topics", lambda *a, **k: 2)
+    assert seed._converge_org_metadata("Org", [_r(".github")]) == 2
+
+
+def test_refresh_sweeps_every_org_off_one_listing(monkeypatch):
+    # The course org AND every live cohort - a cohort's grants are the whole of a
+    # non-owner instructor's access there. One list_org_repos per org, shared with the
+    # landing page so the page renders the descriptions this run just corrected.
+    listings: list[str] = []
+    swept: list[str] = []
+    rendered: list[tuple[str, int]] = []
+    _stub_refresh(monkeypatch)
+    monkeypatch.setattr(
+        seed, "list_org_repos", lambda org: listings.append(org) or [_r(".github")]
+    )
+    monkeypatch.setattr(
+        seed, "_converge_org_metadata", lambda org, repos: swept.append(org) or 0
+    )
+    monkeypatch.setattr(
+        seed,
+        "update_profile_readme",
+        lambda org, **k: rendered.append((org, len(k["repos"]))) or 0,
+    )
+
+    assert seed.refresh("Course-Org") == 0
+    assert swept == ["Course-Org", "Cohort-f2026", "Cohort-s2027"]
+    assert listings == swept
+    assert rendered == [("Course-Org", 1), ("Cohort-f2026", 1), ("Cohort-s2027", 1)]
