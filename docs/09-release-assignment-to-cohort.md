@@ -75,7 +75,7 @@ Teams must exist **before** you release a group assignment. Two ways to form the
 
 
 The release then grants each team its one shared repo. Full flow:
-[Enrol students → groups](06-enrol-students-to-cohort.md#group-assignments).
+[Enrol students → groups](06-enrol-students-to-cohort.md#group-assignments-rolling-basis).
 
 ## Deadlines
 

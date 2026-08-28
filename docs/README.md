@@ -6,8 +6,8 @@ Step-by-step runbooks for instructor-facing processes, end to end.
 
 | Tier | Lives in | Lifetime | Holds |
 |------|----------|----------|-------|
-| **Course org** | e.g. `<course-name>-<CODE>` | persistent (all years) | materials, assignment templates, the faculty & instructors **control panel** (`.github`) |
-| **Cohort org** | e.g. `<course-name>-f/sYYYY` | one per year | released materials, student repos, roster, the cohort website |
+| **Course org** | `hertie-<course-slug>-<code>`, e.g. `hertie-dsl-demo-course-e1234` | persistent (all years) | materials, assignment templates, the faculty & instructors **control panel** (`.github`) |
+| **Cohort org** | `hertie-<course-slug>-<termtag>`, termtag `fYYYY`/`sYYYY`, e.g. `hertie-dsl-demo-f2026` | one per year | released materials, student repos, roster, the cohort website |
 
 The course org is the single source of truth (SSOT); each cohort org receives **releases** of it.
 Full model: [`../docs-admin-arch/architecture.md`](../docs-admin-arch/architecture.md).
@@ -81,7 +81,26 @@ Numbered in reading order - **course-level** (01-03) before **cohort-level** (04
 | 11 | [Configure the cohort website](11-configure-cohort-site.md) | course + cohort | whenever the site should say something different - and to know what not to hand-edit |
 
 For a one-page summary of **every workflow**, see [`actions-reference.md`](reference/actions-reference.md);
-for who may run them, [`access-reference.md`](reference/access-reference.md).
+for who may run them, [`access-reference.md`](reference/access-reference.md). If you maintain the
+toolkit itself rather than a course, start at [`maintainers.md`](reference/maintainers.md).
+
+## Conventions the machinery depends on
+
+Three things look cosmetic and are not. Changing one breaks the pipeline silently.
+
+- **Org names.** The cohort org's `fYYYY`/`sYYYY` **suffix** is parsed, not decorative: it drives
+  the semester label, the schedule ordering, and which year's `instructors-<tag>` team and
+  `*-<tag>` content repos a cohort reaches. Nothing validates the course org's name, but keep it
+  to the form above so the tag can never be mistaken for one.
+- **Repo topics are machinery markers.** `dsl-course-hub` (a course org's `.github`), `dsl-cohort`
+  (a cohort org's `.github`), `submission`, `gradebook`, `assignment-template`. Discovery reads
+  these to tell a course org from a cohort, and content repos from per-student ones. Remove a
+  topic by hand and the repo drops out of every sweep that should reach it.
+- **The `.last-refresh` heartbeat.** GitHub disables a repo's scheduled workflows after 60 days
+  with no repository activity - including **Refresh actions**, the cron that would have healed
+  it. So each nightly refresh stamps today's date into `.github/.last-refresh`. A course org that
+  is quiet for two months and has *no* heartbeat commits has already lost its crons; run any
+  workflow by hand to restart them.
 
 ## Example org artefacts
 
