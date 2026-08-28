@@ -29,9 +29,9 @@ from . import schedule
 from .course import SYLLABUS_SESSIONS_FILE, session_number
 from .gh_contents import get_file_content, put_file, repo_tree
 from .log import log, log_err, log_ok, log_step
+from .readings import demote_headings, readings_block
 from .repos import default_branch
 from .schedule_plan import READINGS_SECTION, planned_sessions
-from .site import _demote_headings, _readings_block
 
 # How far a reading list's own headings are pushed down here: the syllabus puts a session at
 # `###`, so its `# Session N readings` has to land below that.
@@ -42,7 +42,7 @@ def _readings_for(course_org: str, repo: str, paths: tuple[str, ...], n: int) ->
     """Session `n`'s reading list from its `readings/NN_.../` folder, or "" when it has none.
     The folder is matched on its ordinal prefix, since faculty choose the rest.
 
-    `_readings_block`'s rule, so the syllabus says what the two websites say. It used to keep
+    `readings_block`'s rule, so the syllabus says what the two websites say. It used to keep
     only citation-extension files, which made a session whose readings are PDFs come out as a
     bare heading with nothing under it - the one destination where uploading a reading and
     writing no prose left NOTHING at all."""
@@ -58,7 +58,7 @@ def _readings_for(course_org: str, repo: str, paths: tuple[str, ...], n: int) ->
     )
     if prefix is None:
         return ""
-    return _readings_block(
+    return readings_block(
         [p[len(prefix) + 1 :] for p in paths if p.startswith(f"{prefix}/")],
         lambda name: get_file_content(course_org, repo, f"{prefix}/{name}"),
     )
@@ -102,7 +102,7 @@ def build(course_org: str, cohort_org: str, source_repo: str) -> tuple[str, int]
             # The teaching team's own headings and ordering kept verbatim - a syllabus's
             # `Required Readings` / `Optional Readings` split is theirs to make - but pushed
             # below the session heading above them.
-            out.append(_demote_headings(readings, _READINGS_SHIFT))
+            out.append(demote_headings(readings, _READINGS_SHIFT))
             out.append("")
     return "\n".join(out).rstrip() + "\n", len(rows)
 

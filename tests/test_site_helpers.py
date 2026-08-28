@@ -799,32 +799,6 @@ def test_nav_order_does_not_depend_on_a_string_tie_break():
     assert names.index("All Materials") == names.index("Assignments") + 1
 
 
-# ------------------------------------------------- the Hertie syllabus shape, rendered
-def test_demote_headings_nests_a_reading_list_under_the_session_heading():
-    # A reading file written in the Hertie syllabus shape: `# Session N readings`, then
-    # `## Required Readings` / `## Optional Readings`. At their written levels those
-    # outrank the page's own <h2>Session N, which is backwards.
-    src = "# Session 1 readings\n\n## Required Readings\n\n- Gill (2015)\n\n## Optional Readings\n"
-    out = site._demote_headings(src)
-    assert "### Session 1 readings" in out
-    assert "#### Required Readings" in out and "#### Optional Readings" in out
-
-
-def test_demote_headings_leaves_code_and_prose_alone():
-    # A `#` comment inside a fence is not a heading, and deepening it would rewrite the
-    # example the faculty member wrote.
-    src = "# Real heading\n\n```bash\n# install first\ncd x\n```\n\n#hashtag not a heading\n"
-    out = site._demote_headings(src)
-    assert "### Real heading" in out
-    assert "\n# install first\n" in out
-    assert "#hashtag not a heading" in out
-
-
-def test_demote_headings_clamps_at_six():
-    assert site._demote_headings("##### deep").startswith("###### deep")
-    assert site._demote_headings("###### deepest").startswith("###### deepest")
-
-
 def test_describe_keeps_the_paragraphs_of_a_multi_line_objective():
     # Hertie learning objectives run to a paragraph, sometimes two. `_q` folds newlines, so
     # a one-line scalar silently ran them together.
