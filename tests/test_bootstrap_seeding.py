@@ -21,7 +21,7 @@ example-course/cohort-org/ rather than authored twice.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 import yaml
@@ -599,8 +599,9 @@ def _stub_refresh(
     failure count, which is what refresh's exit code is built from.
 
     Returns the in-memory `.github` file store, seeded with `prior_misses` as the
-    previous night's miss ledger (MISSES_PATH) - so a test can drive the two-consecutive-
-    misses rule across runs without stubbing the rule itself."""
+    previous night's miss ledger (MISSES_PATH) - so a test can drive the two-misses rule
+    across runs without stubbing the rule itself. Each entry is a `<cohort> <first missed
+    at>` line; `_missed_at` builds one at a chosen age."""
     monkeypatch.setattr(seed, "central_ref_for", lambda org: "release")
     monkeypatch.setattr(seed, "central_ref_exists", lambda ref: True)
     monkeypatch.setattr(
@@ -737,6 +738,12 @@ def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
     assert "refresh incomplete" not in out.err
 
 
+def _missed_at(cohort: str, hours_ago: float) -> str:
+    """A miss-ledger line for `cohort`, first missed `hours_ago` hours ago."""
+    when = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
+    return f"{cohort.casefold()} {when.isoformat(timespec='seconds')}"
+
+
 def _missing_cohort_run(monkeypatch, prior_misses=()):
     """One refresh in which Cohort-f2026 does not answer; returns what it did."""
     refreshed: list[str] = []
@@ -757,24 +764,53 @@ def _missing_cohort_run(monkeypatch, prior_misses=()):
     return seed.refresh("Course-Org"), refreshed, pruned, store
 
 
-def test_refresh_prunes_a_cohort_missing_two_runs_running(monkeypatch, capsys):
+def test_refresh_prunes_a_cohort_missing_since_the_day_before(monkeypatch, capsys):
     # A cohort org DELETED after it was registered 404s on every write - which reds the
     # nightly cron forever (distinct from an archived cohort, which still exists). It is
     # skipped AND dropped from the registry: logging "prune it by hand" left the dead org
     # registered, so every nightly sync in every tool went on trying it.
     code, refreshed, pruned, store = _missing_cohort_run(
-        monkeypatch, prior_misses=["Cohort-f2026"]
+        monkeypatch, prior_misses=[_missed_at("Cohort-f2026", 25)]
     )
 
-    assert code == 0
     assert refreshed == ["Cohort-s2027"] * 3  # deleted cohort skipped whole
     assert pruned == [
         ("Course-Org", "Cohort-f2026")
     ]  # and unregistered, not just noted
     assert store[seed.MISSES_PATH] == ""  # the ledger is cleared once it has acted
+    # Unregistering is never a silent success: nothing re-adds a cohort, so the run that
+    # did it has to be a run somebody looks at.
+    assert code == 1
     out = capsys.readouterr()
     assert "[skip] Cohort-f2026" in out.out
-    assert "refresh incomplete" not in out.err
+    assert "refresh incomplete" in out.err
+
+
+def test_a_second_miss_hours_after_the_first_does_not_unregister(monkeypatch):
+    # "Two consecutive refreshes" was nominally a night apart, but two manual runs minutes
+    # apart are also two consecutive refreshes - which unregistered a live cohort inside
+    # one bad afternoon, off a token blip that was over by the morning.
+    code, _refreshed, pruned, store = _missing_cohort_run(
+        monkeypatch, prior_misses=[_missed_at("Cohort-f2026", 2)]
+    )
+
+    assert code == 0
+    assert pruned == []
+    # ... and the ORIGINAL timestamp survives, or the grace period would restart nightly
+    # and nothing would ever be unregistered.
+    assert store[seed.MISSES_PATH].strip() == _missed_at("Cohort-f2026", 2)
+
+
+def test_a_ledger_written_before_timestamps_costs_one_more_grace_period(monkeypatch):
+    # The live orgs carry a bare `<cohort>` line. Reading that as "missed at the epoch"
+    # would unregister every one of them on the first run of this code; it reads as "too
+    # recent to act on" instead, and the next run has a real timestamp to measure from.
+    code, _refreshed, pruned, store = _missing_cohort_run(
+        monkeypatch, prior_misses=["Cohort-f2026"]
+    )
+
+    assert (code, pruned) == (0, [])
+    assert store[seed.MISSES_PATH].startswith("cohort-f2026 20")
 
 
 def test_a_first_miss_never_unregisters_a_cohort(monkeypatch, capsys):
@@ -786,12 +822,13 @@ def test_a_first_miss_never_unregisters_a_cohort(monkeypatch, capsys):
     assert code == 0
     assert pruned == []
     assert refreshed == ["Cohort-s2027"] * 3  # skipped for tonight, not unregistered
-    assert store[seed.MISSES_PATH] == "Cohort-f2026\n"  # remembered for the next run
+    # remembered for the next run, WITH the moment it was first missed
+    assert store[seed.MISSES_PATH].startswith("cohort-f2026 20")
     assert "Cohort-f2026 did not answer" in capsys.readouterr().err
 
 
 def test_a_cohort_that_answers_again_clears_its_miss(monkeypatch):
-    store = _stub_refresh(monkeypatch, prior_misses=["Cohort-f2026"])
+    store = _stub_refresh(monkeypatch, prior_misses=[_missed_at("Cohort-f2026", 25)])
     pruned: list = []
     monkeypatch.setattr(
         seed, "unregister_cohort", lambda course, cohort: pruned.append(cohort)

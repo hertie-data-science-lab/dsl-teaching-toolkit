@@ -36,7 +36,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from . import scaffold
 from .access import converge_faculty_access, converge_topics
@@ -95,6 +95,14 @@ HEARTBEAT_PATH = ".github/.last-refresh"
 # already writes to is the only state this toolkit has that does.
 MISSES_PATH = ".github/.missing-cohorts"
 
+# How long a cohort must have been unreachable before a second miss may unregister it.
+# "Two consecutive refreshes" was nominally a night apart, but nothing enforced that: two
+# manual runs ten minutes apart, or a cron that fired twice around a retry, unregistered a
+# live cohort inside one bad afternoon. The ledger therefore carries the moment of the
+# FIRST miss, and the second one only acts once this much time has passed - loose enough
+# for the cron's own drift, tight enough that it is genuinely another day.
+MISS_GRACE_HOURS = 20
+
 
 def _write_heartbeat(course_org: str) -> int:
     """Stamp today's date into the `.github` repo, so its schedules stay alive.
@@ -126,34 +134,52 @@ def _write_heartbeat(course_org: str) -> int:
     return 1
 
 
-def _read_misses(course_org: str) -> set[str]:
-    """The cohorts the PREVIOUS refresh could not see - see MISSES_PATH."""
+def _read_misses(course_org: str) -> dict[str, str]:
+    """`{cohort: when it was FIRST missed}` from the previous refreshes - see MISSES_PATH.
+
+    A line carrying no timestamp - a ledger written before they were recorded - maps to
+    "", which reads as "too recent to act on" and costs one more grace period. That is the
+    safe direction: never an unregistration."""
     content = get_file_content(course_org, ".github", MISSES_PATH)
-    return {
-        line.strip().casefold() for line in (content or "").splitlines() if line.strip()
-    }
+    out: dict[str, str] = {}
+    for line in (content or "").splitlines():
+        cohort, _, first_seen = line.strip().partition(" ")
+        if cohort:
+            out[cohort.casefold()] = first_seen.strip()
+    return out
 
 
-def _write_misses(course_org: str, misses: set[str], previous: set[str]) -> None:
+def _write_misses(
+    course_org: str, misses: dict[str, str], previous: dict[str, str]
+) -> None:
     """Record this run's misses, if they differ from the last run's.
+
+    Each line is `<cohort> <first missed at>`, and a cohort still missing keeps the
+    ORIGINAL timestamp - re-stamping it every night would restart the grace period every
+    night and nothing would ever be unregistered.
 
     Best effort: a failed write only costs a second grace period (the next miss reads as
     a first one), which is the safe direction - never an unregistration."""
-    if {m.casefold() for m in misses} == previous:
+    if misses == previous:
         return
     put_file(
         course_org,
         ".github",
         MISSES_PATH,
-        ("".join(f"{m}\n" for m in sorted(misses))).encode(),
+        ("".join(f"{c} {at}\n" for c, at in sorted(misses.items()))).encode(),
         "chore: record cohort orgs this refresh could not see",
     )
 
 
-def _live_cohorts(course_org: str) -> list[str]:
+def _live_cohorts(course_org: str) -> tuple[list[str], int]:
     """The registry, converged: every registered cohort whose org still exists, with any
-    that has been missing for two consecutive refreshes dropped from the registry on the
-    way past.
+    that has been missing for two refreshes at least MISS_GRACE_HOURS apart dropped from
+    the registry on the way past. Returns `(live cohorts, how many were unregistered)`.
+
+    The count is the caller's, and it goes into the refresh's failure total. Removing a
+    cohort from the registry is not a routine convergence step - nothing re-adds it, and
+    every nightly sync in every tool stops looking at that org - so a run that did it must
+    not be reported as an ordinary green night.
 
     A cohort ORG DELETED after it was registered 404s on every write, which would red the
     nightly cron forever. Detect a genuinely-gone org by probing the ORG ITSELF: probing
@@ -166,20 +192,24 @@ def _live_cohorts(course_org: str) -> list[str]:
     every tool went on trying it. Removal is safe precisely because the org is proven gone
     - see `unregister_cohort` for why the ADD side stays manual.
 
-    TWO consecutive misses, though, not one. GitHub answers 404 - not 403 - for an org the
-    TOKEN cannot see, so a bot dropped from one org, or a rotated token never re-invited
-    to it, is indistinguishable from a deleted org: one bad night would have silently
-    unregistered a live cohort from every nightly sync, and nothing re-adds it. The first
-    miss is loud and costs the cohort only that night's refresh; MISSES_PATH carries the
-    verdict to the next run, and a cohort that answers again clears it.
+    TWO misses, though, not one - and on two different days. GitHub answers 404 - not 403 -
+    for an org the TOKEN cannot see, so a bot dropped from one org, or a rotated token
+    never re-invited to it, is indistinguishable from a deleted org: one bad night would
+    have silently unregistered a live cohort from every nightly sync, and nothing re-adds
+    it. The first miss is loud and costs the cohort only that night's refresh; MISSES_PATH
+    carries the moment of it to the next run, and a cohort that answers again clears it.
+    Counting bare consecutiveness was not enough on its own: two manual runs minutes apart
+    are two consecutive refreshes, so MISS_GRACE_HOURS has to have passed as well.
 
     `org_exists` raises rather than guessing, and the safe reading of "could not tell" here
     is LIVE: the cohort is refreshed as usual and fails loudly on its own if something is
     really wrong, rather than being unregistered on a rate limit or a 502."""
     registered = discover_cohorts(course_org)
     previous = _read_misses(course_org)
+    now = datetime.now(timezone.utc)
     live: list[str] = []
-    missing: set[str] = set()
+    missing: dict[str, str] = {}
+    unregistered = 0
     for cohort in registered:
         try:
             gone = not org_exists(cohort)
@@ -189,16 +219,26 @@ def _live_cohorts(course_org: str) -> list[str]:
         if not gone:
             live.append(cohort)
             continue
-        if cohort.casefold() not in previous:
-            missing.add(cohort)
+        first_seen = previous.get(cohort.casefold(), "")
+        try:
+            since = now - datetime.fromisoformat(first_seen)
+        except ValueError:
+            since = timedelta(0)  # never recorded, or unparseable - start the clock now
+        if since < timedelta(hours=MISS_GRACE_HOURS):
+            missing[cohort.casefold()] = first_seen or now.isoformat(timespec="seconds")
             log_err(
                 f"{cohort} did not answer - it is either deleted or no longer visible to "
                 f"this token. Left registered and skipped for tonight; if it is still "
-                f"missing at the next refresh it will be unregistered from {course_org}."
+                f"missing at a refresh more than {MISS_GRACE_HOURS}h from the first miss "
+                f"it will be unregistered from {course_org}."
             )
             continue
-        log(f"  [skip] {cohort} (missing for a second consecutive refresh)")
+        log(
+            f"  [skip] {cohort} (missing since {first_seen} - unregistering it from "
+            f"{course_org})"
+        )
         unregister_cohort(course_org, cohort)
+        unregistered += 1
         # The cohort's own `instructors-<tag>` team lives in the COURSE org, so deleting
         # the cohort org does not take it with it - and once unregistered, sync_faculty
         # never looks at it again. Say so here: before the prune this showed up as a
@@ -209,7 +249,7 @@ def _live_cohorts(course_org: str) -> list[str]:
             f"an orphaned team with push access - delete it by hand if so"
         )
     _write_misses(course_org, missing, previous)
-    return live
+    return live, unregistered
 
 
 def seed_github_workflows(course_org: str, central_ref: str) -> int:
@@ -431,7 +471,7 @@ def refresh(course_org: str) -> int:
     # beat current workflows that cannot check anything out - and every other step of the
     # refresh proceeds as usual.
     ref_live = central_ref_exists(central_ref)
-    cohorts = _live_cohorts(course_org)
+    cohorts, unregistered = _live_cohorts(course_org)
     targets = discover_content_repos(course_org)
     assignments = discover_assignments(
         course_org
@@ -440,7 +480,8 @@ def refresh(course_org: str) -> int:
         f"Refreshing {course_org} at central ref {central_ref}: {len(targets)} content "
         f"repo(s), cohorts {cohorts or 'none'}"
     )
-    failures = 0
+    # An unregistration is never a silent success: see _live_cohorts.
+    failures = unregistered
     if not ref_live:
         log_err(
             f"{CENTRAL}@{central_ref} does not exist, so {course_org}'s workflows are "

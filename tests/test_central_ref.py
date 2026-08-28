@@ -212,7 +212,7 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
     rendered: list[str] = []
     monkeypatch.setattr(seed, "central_ref_for", lambda org: "release")
     monkeypatch.setattr(seed, "central_ref_exists", lambda ref: ref_exists)
-    monkeypatch.setattr(seed, "_live_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(seed, "_live_cohorts", lambda org: (["Cohort-f2026"], 0))
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["materials-f2026"])
     monkeypatch.setattr(seed, "discover_assignments", lambda org: [])
     monkeypatch.setattr(
