@@ -35,7 +35,8 @@ from .discovery import (
     discover_cohorts,
     discover_content_repos,
 )
-from .utils import _acting_login, log_err, log_ok
+from .log import log_err, log_ok
+from .utils import _acting_login
 
 
 def sync(

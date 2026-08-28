@@ -65,22 +65,16 @@ from .discovery import (
     discover_sessions,
     list_org_repos,
 )
+from .ghcli import GIT_ENV, gh, git, is_missing_resource
+from .log import log, log_err, log_ok, log_step
 from .utils import (
-    GIT_ENV,
     READING_OVERLAY_NAMES,
     _acting_login,
     get_default_branch,
     get_file_content,
-    gh,
-    git,
     has_denied_component,
     is_denied_publication,
-    is_missing_resource,
     load_yaml_config,
-    log,
-    log_err,
-    log_ok,
-    log_step,
     repo_exists,
     repo_is_archived,
     repo_tree,

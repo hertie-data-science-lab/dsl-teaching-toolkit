@@ -23,7 +23,9 @@ import yaml
 
 from .course import COHORT_TOPIC, COURSE_HUB_TOPIC
 from .discovery import discover_cohorts
-from .utils import gh_json, load_yaml_config, log_err, org_exists
+from .ghcli import gh_json
+from .log import log_err
+from .utils import load_yaml_config, org_exists
 
 # How many results one `gh search repos` page returns. This inventory is fully generated
 # and merged unattended, so silently reading only the first page would quietly delete every

@@ -2,7 +2,7 @@
 comma-separated inputs into (course_source_path, cohort_dest_path) pairs, and the read
 grant covers both cohort role teams.
 
-(Session-directory discovery/matching lives in utils.py - see test_utils.py; the deploy
+(Session-directory discovery/matching lives in course.py - see test_course.py; the deploy
 batching itself is exercised in test_scheduler.py, which drives the same
 `deploy_many` the button now goes through.)"""
 

@@ -17,8 +17,9 @@ from functools import cache
 from pathlib import Path
 
 from .central import CENTRAL, CENTRAL_REF
+from .log import log_err, log_ok
 from .roster import CONFIG_REPO
-from .utils import log_err, log_ok, put_files
+from .utils import put_files
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "templates"

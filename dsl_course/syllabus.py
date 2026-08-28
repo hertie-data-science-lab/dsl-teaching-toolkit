@@ -27,22 +27,14 @@ import sys
 
 from . import schedule
 from .course import SYLLABUS_SESSIONS_FILE, session_number
+from .log import log, log_err, log_ok, log_step
 from .site import (
     READINGS_SECTION,
     _demote_headings,
     _planned_sessions,
     _readings_block,
 )
-from .utils import (
-    default_branch,
-    get_file_content,
-    log,
-    log_err,
-    log_ok,
-    log_step,
-    put_file,
-    repo_tree,
-)
+from .utils import default_branch, get_file_content, put_file, repo_tree
 
 # How far a reading list's own headings are pushed down here: the syllabus puts a session at
 # `###`, so its `# Session N readings` has to land below that.

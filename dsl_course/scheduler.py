@@ -54,9 +54,10 @@ from .collect import (
     template_is_group,
 )
 from .deploy import deploy_many
+from .log import log, log_err, log_ok, log_step
 from .schedule import Deploy, Release
 from .seed import discover_cohorts
-from .utils import log, log_err, log_ok, log_step, repo_exists
+from .utils import repo_exists
 
 # --------------------------------------------------------------------------- pure core
 

@@ -43,20 +43,14 @@ import yaml
 from . import mailer, roster
 from .course import CONFIG_REPO, GRADEBOOK_PREFIX
 from .discovery import course_name_for_cohort
+from .ghcli import GIT_ENV, gh, git
+from .log import log, log_err, log_ok, log_step, log_verbose
 from .utils import (
-    GIT_ENV,
     add_collaborator,
     create_repo,
     get_default_branch,
     get_file_content,
-    gh,
-    git,
     grant_faculty_read_access,
-    log,
-    log_err,
-    log_ok,
-    log_step,
-    log_verbose,
     put_file,
     repo_exists,
     require_csv_header,

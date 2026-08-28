@@ -27,6 +27,8 @@ import json
 import re
 
 from .central import CENTRAL
+from .ghcli import gh
+from .log import log_err, log_ok, log_step
 from .schedule import (
     CONFIG_REPO,
     SOURCE_ERROR_WINDOW,
@@ -35,7 +37,6 @@ from .schedule import (
     SourceFault,
     worst_severity,
 )
-from .utils import gh, log_err, log_ok, log_step
 
 # Stable, because the workflow finds its own issue by searching this exact title - a title
 # that varied with the faults would never match, and every run would open a new issue.

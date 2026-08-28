@@ -30,20 +30,14 @@ from .course import (
     pages_repo,
 )
 from .discovery import discover_assignments, discover_cohorts
+from .ghcli import GIT_ENV, gh, git
+from .log import log, log_err, log_ok, log_skip, log_step
 from .utils import (
-    GIT_ENV,
     READING_OVERLAY_FILE,
     create_repo,
     generate_from_template,
-    gh,
-    git,
     grant_course_team_access,
     grant_tagged_team_access,
-    log,
-    log_err,
-    log_ok,
-    log_skip,
-    log_step,
     put_files,
     refresh_stubs,
     repo_exists,

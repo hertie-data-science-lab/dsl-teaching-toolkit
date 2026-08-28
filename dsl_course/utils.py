@@ -5,10 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import os
 import re
-import subprocess
-import sys
 from collections.abc import Iterable
 from fnmatch import fnmatch
 from functools import cache, lru_cache
@@ -17,82 +14,8 @@ from typing import Any
 import yaml
 
 from .course import GRADEBOOK_PREFIX
-
-RATE_LIMIT_MARKERS = (
-    "secondary rate limit",
-    "api rate limit exceeded",
-    "abuse detection",
-)
-
-# Per-call ceiling for a single `gh` subprocess. A hung TLS connection would otherwise
-# block the whole Actions job until GitHub's 6-hour limit; a timeout is treated as a
-# retryable failure within the retry ladder below.
-GH_TIMEOUT_SECONDS = 120
-
-
-def gh(*args: str, stdin: str | None = None, retries: int = 3) -> tuple[int, str]:
-    """Run a gh CLI command. Returns (returncode, stdout+stderr).
-
-    Retries on GitHub secondary rate limits - and on a subprocess timeout - with
-    exponential backoff.
-    """
-    import time
-
-    delay = 30
-    for attempt in range(retries + 1):
-        try:
-            result = subprocess.run(
-                ["gh"] + list(args),
-                capture_output=True,
-                check=False,
-                text=True,
-                input=stdin,
-                timeout=GH_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired:
-            out = f"gh: timed out after {GH_TIMEOUT_SECONDS}s"
-            if attempt == retries:
-                return 1, out
-            print(
-                f"  [wait] {out}, retry {attempt + 1}/{retries} in {delay}s",
-                flush=True,
-            )
-            time.sleep(delay)
-            delay *= 2
-            continue
-        out = (result.stdout + result.stderr).strip()
-        if result.returncode == 0:
-            return result.returncode, out
-        lower = out.lower()
-        is_rate_limited = any(m in lower for m in RATE_LIMIT_MARKERS)
-        if not is_rate_limited or attempt == retries:
-            return result.returncode, out
-        print(
-            f"  [wait] rate-limited, retry {attempt + 1}/{retries} in {delay}s",
-            flush=True,
-        )
-        time.sleep(delay)
-        delay *= 2
-    # Only reachable with a negative `retries` (the loop never runs); callers unpack a
-    # pair, so hand back a failure rather than None.
-    return 1, "gh: not run (retries < 0)"
-
-
-def gh_json(*args: str) -> Any:
-    """Run a gh CLI command and parse JSON stdout. Raises on failure."""
-    result = subprocess.run(
-        ["gh"] + list(args),
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"`gh {' '.join(args)}` failed (exit {result.returncode}): "
-            f"{result.stderr.strip()[:200]}"
-        )
-    return json.loads(result.stdout)
-
+from .ghcli import gh, is_missing_resource
+from .log import log, log_err, log_ok, log_skip, log_verbose
 
 # GitHub usernames: 1-39 chars, ASCII alphanumerics or single hyphens, no leading/
 # trailing hyphen and no consecutive hyphens. Used to reject a typo'd faculty handle
@@ -130,80 +53,6 @@ def strip_bom(text: str) -> str:
     `csv.DictReader` reads it into the first header name so every lookup on that column
     misses and rows are silently dropped."""
     return text.lstrip("﻿")
-
-
-# Per-call ceiling for a single `git` subprocess, the sibling of GH_TIMEOUT_SECONDS.
-# Larger, because these are clones and pushes of whole materials repos rather than one API
-# call - but bounded, because an unauthenticated remote that decides to prompt, or a hung
-# TLS connection, otherwise blocks the job until GitHub's 6-hour limit kills it with no
-# message anyone can act on.
-GIT_TIMEOUT_SECONDS = 600
-
-
-def git(*args: str, cwd: str | None = None) -> tuple[int, str]:
-    """Run a git command. A timeout comes back as a normal failure pair, so every caller's
-    existing `!= 0` check reports it rather than seeing an exception."""
-    try:
-        result = subprocess.run(
-            ["git"] + list(args),
-            capture_output=True,
-            check=False,
-            text=True,
-            cwd=cwd,
-            timeout=GIT_TIMEOUT_SECONDS,
-        )
-    except subprocess.TimeoutExpired:
-        return 1, f"git: timed out after {GIT_TIMEOUT_SECONDS}s"
-    return result.returncode, (result.stdout + result.stderr).strip()
-
-
-# Bot identity + disabled hooks for engine-made commits. Spread into git() calls in the
-# clone/commit/push paths of release/site/scaffold/assign: git("-C", wd, *GIT_ENV, ...).
-GIT_ENV = [
-    "-c",
-    "user.email=bot@dsl.local",
-    "-c",
-    "user.name=dsl-bot",
-    "-c",
-    "core.hooksPath=/dev/null",
-]
-
-
-def log(msg: str) -> None:
-    print(msg, flush=True)
-
-
-def log_step(msg: str) -> None:
-    print(f"\n-> {msg}", flush=True)
-
-
-def log_ok(msg: str) -> None:
-    print(f"  [ok] {msg}", flush=True)
-
-
-def log_skip(msg: str) -> None:
-    print(f"  [skip] {msg} (already exists)", flush=True)
-
-
-def log_err(msg: str) -> None:
-    print(f"  [err] {msg}", file=sys.stderr, flush=True)
-
-
-def log_verbose(msg: str) -> None:
-    """Print `msg` only when `DSL_VERBOSE` is set in the environment.
-
-    Every faculty workflow runs in the course org's PUBLIC `.github`, so its Actions log is
-    world-readable - and a line naming one student's handle, their `<slug>-<handle>` repo,
-    or a team's roster publishes who is in the cohort and who is grouped with whom. Those
-    lines are INFORMATIONAL; what a faculty member actually reads is the aggregate
-    `Done - {...}` summary, which stays. So they are routed through here: printed when
-    someone runs the CLI locally with `DSL_VERBOSE=1`, absent from every workflow, because
-    no rendered workflow sets the variable (a test enforces that).
-
-    An ERROR a faculty member must act on keeps its handle and stays on `log_err` - those
-    are rare, and unactionable without saying who."""
-    if os.environ.get("DSL_VERBOSE"):
-        print(msg, flush=True)
 
 
 def repo_missing(org: str, name: str) -> bool:
@@ -1386,18 +1235,6 @@ def seed_files_if_absent(
     Returns True whenever every path is now present as intended (written just now, or
     already there), and False only when a write was attempted and failed."""
     return put_files(org, repo, files, message, create_only=True)
-
-
-def is_missing_resource(out: str) -> bool:
-    """Whether a failed `gh` output means the resource is genuinely ABSENT (a 404) rather
-    than a real error to raise on. The one shared marker test: callers that distinguish
-    "not there yet" from "couldn't read it" must agree on what absence looks like, so the
-    marker list lives here instead of being re-inlined (and drifting) at each call site.
-
-    Matches gh's own casing (`gh: Not Found (HTTP 404)`) exactly - deliberately case-
-    SENSITIVE, so a lowercase `not found` inside some other error's text (a jq key miss,
-    say) is NOT misread as a 404 and does not suppress a real failure."""
-    return "HTTP 404" in out or "Not Found" in out
 
 
 def get_file_content(org: str, repo: str, path: str, ref: str = "") -> str | None:

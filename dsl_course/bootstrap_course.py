@@ -27,18 +27,15 @@ import sys
 from . import scaffold, seed, site, sync_faculty
 from .course import COHORT_TOPIC, COURSE_HUB_TOPIC
 from .discovery import COHORTS_PATH, register_cohort
+from .ghcli import gh
+from .log import log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
 from .utils import (
     COHORT_WRITE_REPOS,
     COURSE_TEAM_ACCESS,
     create_repo,
     create_team,
-    gh,
     grant_team_repo_access,
-    log,
-    log_err,
-    log_ok,
-    log_step,
     put_file,
     repo_exists,
     repo_is_private,
