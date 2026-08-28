@@ -761,7 +761,11 @@ def scaffold_site(org: str) -> int:
         "build_type=workflow",
     )
     if code != 0 and "409" not in out and "already" not in out.lower():
-        gh(
+        # POST creates; PUT updates a site that already has a different build type. Its
+        # return used to be dropped, so a repo where BOTH calls failed - no Pages at all -
+        # went on to "site scaffolded -> https://...", a URL that has never served
+        # anything. Nothing downstream re-enables Pages, so this is the only chance.
+        code, out = gh(
             "api",
             "--method",
             "PUT",
@@ -769,11 +773,16 @@ def scaffold_site(org: str) -> int:
             "-f",
             "build_type=workflow",
         )
+        if code != 0:
+            log_err(f"  ! could not enable Pages on {org}/{site}: {out[:200]}")
+            return 1
 
     # The auto-created github-pages environment restricts which branches may deploy -
     # clear the policy so any branch (the template's default, plus sync-site's pushes)
-    # can deploy.
-    gh(
+    # can deploy. Not fatal: Pages IS on, the default branch usually deploys anyway, and
+    # the environment can lag its repo - but a silent failure here is what makes a
+    # sync-site push deploy nothing, so say it.
+    code, out = gh(
         "api",
         "--method",
         "PUT",
@@ -781,6 +790,11 @@ def scaffold_site(org: str) -> int:
         "-F",
         "deployment_branch_policy=null",
     )
+    if code != 0:
+        log_err(
+            f"  ! could not clear the github-pages branch policy on {org}/{site}: "
+            f"{out[:160]} - pushes from a non-default branch will not deploy"
+        )
 
     # template-generate doesn't fire workflows, so kick the first deploy by hand AND
     # confirm it lands. Enabling Pages with build_type=workflow races the platform's

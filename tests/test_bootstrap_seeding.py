@@ -115,7 +115,7 @@ def fake(monkeypatch):
     # everything else setup_cohort_extras does is repo-level and safe to re-run; it is
     # stubbed out so these tests stay pure (no gh calls).
     monkeypatch.setattr(bc, "create_repo", lambda *a, **k: True)
-    monkeypatch.setattr(bc, "create_cohort_teams", lambda org: None)
+    monkeypatch.setattr(bc, "create_cohort_teams", lambda org: 0)
     monkeypatch.setattr(bc, "grant_cohort_faculty_access", lambda org: None)
     monkeypatch.setattr(bc, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(bc.scaffold, "scaffold_site", lambda org: 0)
@@ -468,15 +468,19 @@ def test_cohort_extras_reds_when_a_user_file_seed_fails(fake, monkeypatch):
 def _stub_bootstrap(monkeypatch) -> None:
     """Neutralise everything a cohort bootstrap does EXCEPT the site sync - the org-level
     gh/git layer, the repo seeding (covered above) and the summary output."""
-    for name in ("set_org_settings", "create_default_teams", "grant_button_access"):
-        monkeypatch.setattr(bc, name, lambda *a, **k: None)
-    # setup_cohort_extras / seed_workflows report a failure count that _run threads into
-    # its exit code - a clean stub reports zero failures.
-    for name in ("setup_cohort_extras", "seed_workflows"):
+    # Every configuration step reports a failure count that _run threads into its exit
+    # code and into the closing summary - a clean stub reports zero failures.
+    for name in (
+        "set_org_settings",
+        "create_default_teams",
+        "grant_button_access",
+        "setup_cohort_extras",
+        "seed_workflows",
+        "create_profile_repo",
+    ):
         monkeypatch.setattr(bc, name, lambda *a, **k: 0)
     monkeypatch.setattr(bc, "preflight", lambda org: True)
-    monkeypatch.setattr(bc, "create_profile_repo", lambda *a, **k: None)
-    monkeypatch.setattr(bc, "add_course_admins", lambda org, handles: None)
+    monkeypatch.setattr(bc, "add_course_admins", lambda org, handles: 0)
     monkeypatch.setattr(bc, "validate_secret_presence", lambda org, secret: True)
     monkeypatch.setattr(bc, "put_file", lambda *a, **k: True)
     monkeypatch.setattr(bc.seed, "register_cohort", lambda course, cohort: True)
@@ -1102,3 +1106,81 @@ def test_org_settings_ok_line_only_prints_when_2fa_was_set(monkeypatch, capsys):
     monkeypatch.setattr(bc, "gh", lambda *a, **k: (0, ""))
     bc.set_org_settings("Course-Org")
     assert "2FA enforced" in capsys.readouterr().out
+
+
+# ------------------------------------ every claimed step is counted, and the summary
+# ------------------------------------ is rendered from what actually happened
+
+
+def test_a_failed_2fa_patch_is_counted_not_just_logged(monkeypatch):
+    monkeypatch.setattr(bc, "gh", lambda *a, **k: (1, "gh: HTTP 403"))
+    assert bc.set_org_settings("Course-Org") == 1
+    monkeypatch.setattr(bc, "gh", lambda *a, **k: (0, ""))
+    assert bc.set_org_settings("Course-Org") == 0
+
+
+def test_a_team_that_could_not_be_created_is_counted(monkeypatch):
+    # create_team already absorbs the idempotent duplicate-name 422, so a False here is a
+    # real failure - and an org missing `instructors` is one nobody but its owner can use.
+    monkeypatch.setattr(bc, "create_team", lambda *a, **k: False)
+    assert bc.create_default_teams("Course-Org") == len(bc.FACULTY_TEAMS)
+    assert bc.create_cohort_teams("Cohort-f2026") == len(bc.COHORT_TEAMS)
+    monkeypatch.setattr(bc, "create_team", lambda *a, **k: True)
+    assert bc.create_default_teams("Course-Org") == 0
+
+
+def _profile_repo_run(monkeypatch, *, seeded=True, topics=True):
+    monkeypatch.setattr(bc, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(bc, "seed_if_absent", lambda *a, **k: seeded)
+    monkeypatch.setattr(bc, "set_repo_topics", lambda *a, **k: topics)
+    return bc.create_profile_repo("Course-Org", "Org", "Course", "C1", is_cohort=False)
+
+
+def test_an_unseeded_course_ssot_reds_the_bootstrap(monkeypatch, capsys):
+    # No dsl-course.yml means no faculty SSOT and no course identity for the site, but
+    # its write used to be unchecked under an unconditional "initialised" line.
+    assert _profile_repo_run(monkeypatch, seeded=False) == 1
+    out = capsys.readouterr()
+    assert "profile repo initialised" not in out.out
+    assert "dsl-course.yml" in out.err
+
+
+def test_an_untagged_github_repo_reds_the_bootstrap(monkeypatch):
+    # Without `dsl-course-hub` the org is invisible to list_orgs.
+    assert _profile_repo_run(monkeypatch, topics=False) == 1
+    assert _profile_repo_run(monkeypatch) == 0
+
+
+def test_a_missing_bot_token_reds_the_bootstrap(monkeypatch, capsys):
+    # It used to print a WARNING and exit 0, so an org could be handed over with no
+    # token at all - every seeded workflow in it fails on its first run, weeks later.
+    _stub_bootstrap(monkeypatch)
+    monkeypatch.setattr(bc, "validate_secret_presence", lambda org, secret: False)
+    monkeypatch.setattr("sys.argv", ["bootstrap_course", "--org", "Course-Org"])
+
+    assert bc.main() == 1
+    assert "DSL_BOT_TOKEN not set" in capsys.readouterr().err
+
+
+def test_the_summary_names_the_step_that_failed(monkeypatch, capsys):
+    # The closing block used to assert every line whatever happened, so an operator read
+    # "2FA enforcement enabled" off a run that never enforced it.
+    _stub_bootstrap(monkeypatch)
+    monkeypatch.setattr(bc, "set_org_settings", lambda org: 1)
+    monkeypatch.setattr("sys.argv", ["bootstrap_course", "--org", "Course-Org"])
+
+    assert bc.main() == 1
+    out = capsys.readouterr().out
+    assert "- [FAILED] Org settings: 2FA enforcement enabled" in out
+    assert "- Faculty teams:" in out
+    assert "bootstrap INCOMPLETE" in out
+
+
+def test_a_clean_run_still_reads_as_complete(monkeypatch, capsys):
+    _stub_bootstrap(monkeypatch)
+    monkeypatch.setattr("sys.argv", ["bootstrap_course", "--org", "Course-Org"])
+
+    assert bc.main() == 0
+    out = capsys.readouterr().out
+    assert "[FAILED]" not in out
+    assert "bootstrap complete" in out

@@ -82,7 +82,7 @@ def test_cohort_setup_grants_faculty_access_even_when_nothing_is_seeded(monkeypa
     # cohort bootstrapped before the grant existed.
     granted = []
     monkeypatch.setattr(bootstrap_course, "gh", lambda *a, **k: (0, ""))
-    monkeypatch.setattr(bootstrap_course, "create_cohort_teams", lambda org: None)
+    monkeypatch.setattr(bootstrap_course, "create_cohort_teams", lambda org: 0)
     monkeypatch.setattr(bootstrap_course, "create_repo", lambda *a, **k: False)
     monkeypatch.setattr(bootstrap_course, "put_file", lambda *a, **k: True)
     monkeypatch.setattr(bootstrap_course.scaffold, "scaffold_site", lambda org: 0)

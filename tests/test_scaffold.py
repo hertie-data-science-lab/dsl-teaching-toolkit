@@ -479,3 +479,52 @@ def test_a_readings_file_faculty_wrote_is_never_retired(fake):
         "course-materials-f2026",
         "readings/01_session-1/reading.md",
     ) not in fake.deletes
+
+
+# ------------------------------------------------------------------- site scaffold
+
+
+def _site_gh(monkeypatch, pages_post, pages_put, env_put=(0, "")):
+    """Drive scaffold_site's three org-level calls; the deploy dispatch never fires."""
+
+    def fake_gh(*args, **k):
+        path = next((a for a in args if a.startswith("repos/")), "")
+        if path.endswith("/pages"):
+            return pages_post if "POST" in args else pages_put
+        if path.endswith("/environments/github-pages"):
+            return env_put
+        return (1, "")
+
+    monkeypatch.setattr(scaffold, "gh", fake_gh)
+    monkeypatch.setattr(scaffold, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr(scaffold, "_dispatch_deploy", lambda org, site: None)
+
+
+def test_site_scaffold_reds_when_pages_could_not_be_enabled(monkeypatch, capsys):
+    # Both calls failing means the repo serves nothing at all, yet the PUT's return was
+    # dropped and the scaffold went on to log "site scaffolded -> https://...".
+    _site_gh(monkeypatch, pages_post=(1, "HTTP 422"), pages_put=(1, "HTTP 403"))
+    assert scaffold.scaffold_site("Org") == 1
+    out = capsys.readouterr()
+    assert "could not enable Pages" in out.err
+    assert "site scaffolded" not in out.out
+
+
+def test_site_scaffold_accepts_the_put_fallback(monkeypatch):
+    _site_gh(monkeypatch, pages_post=(1, "HTTP 422"), pages_put=(0, ""))
+    assert scaffold.scaffold_site("Org") == 0
+
+
+def test_an_already_enabled_pages_site_is_not_a_failure(monkeypatch):
+    _site_gh(monkeypatch, pages_post=(1, "HTTP 409"), pages_put=(1, "never called"))
+    assert scaffold.scaffold_site("Org") == 0
+
+
+def test_a_failed_branch_policy_clear_is_reported(monkeypatch, capsys):
+    # Not fatal - Pages is on - but silently dropping it is what makes a sync-site push
+    # from a non-default branch deploy nothing.
+    _site_gh(
+        monkeypatch, pages_post=(0, ""), pages_put=(0, ""), env_put=(1, "HTTP 404")
+    )
+    assert scaffold.scaffold_site("Org") == 0
+    assert "github-pages branch policy" in capsys.readouterr().err
