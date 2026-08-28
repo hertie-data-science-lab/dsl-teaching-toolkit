@@ -21,6 +21,8 @@ update_profile_readme is the one function that touches the network.
 
 from __future__ import annotations
 
+import re
+
 from .central import CENTRAL, CENTRAL_REF
 from .discovery import (
     course_name_of,
@@ -81,6 +83,38 @@ def _repo_table_block(repos: list[dict]) -> str:
         f"{_repo_table(repos)}\n"
         f"{TABLE_END}"
     )
+
+
+# The seeded page's first heading is `# <org>.`, and every self-reference below it - the
+# welcome line, the site link, the Join link - names that same org. So the heading is where
+# a rename shows up first, and it is enough to detect one.
+_H1_ORG_RE = re.compile(r"^#\s+([A-Za-z0-9][\w.-]*?)\.?\s*$", re.MULTILINE)
+
+
+def retitle_renamed_org(existing: str, org: str) -> tuple[str, str | None]:
+    """`(page, old name)` with a renamed org's former name replaced throughout, or the page
+    unchanged and None.
+
+    Renaming an org leaves every self-reference in its own profile page pointing at a name
+    that no longer resolves - including the Join link, so a student cannot enrol. The prose
+    is instructor-owned and the refresh deliberately leaves it alone (see
+    `_cohort_profile_body`), which is right for wording someone improved and wrong here: an
+    org name that is not this org's is not a stylistic choice, it is a stale fact. That is a
+    narrower signal than "the page still looks generated", which is the heuristic that
+    function's docstring rejects - it would flatten reworded prose, and this cannot.
+
+    Keyed on the H1, which the generator seeds as the org's own name. A page whose heading
+    an instructor has replaced with a human title matches nothing and is left alone, as is
+    one whose heading already names this org. Word-boundary substitution, so a name that is
+    a prefix of another (`hertie-nlp-f2026` inside `hertie-nlp-f2026-archive`) is not
+    corrupted."""
+    m = _H1_ORG_RE.search(existing)
+    if m is None:
+        return existing, None
+    was = m.group(1)
+    if was.casefold() == org.casefold() or "-" not in was:
+        return existing, None
+    return re.sub(rf"\b{re.escape(was)}\b", org, existing), was
 
 
 def splice_repo_table(existing: str, repos: list[dict]) -> str | None:
@@ -412,6 +446,11 @@ def _cohort_profile_body(org: str, repos: list[dict], seeded: str) -> str | None
     existing = get_file_content(org, ".github", "profile/README.md")
     if existing is None:
         return seeded
+    # Before anything else, and whether or not the markers are there: a page naming an org
+    # this is not is stale by construction, and its Join link is a dead end for students.
+    existing, renamed_from = retitle_renamed_org(existing, org)
+    if renamed_from:
+        log_ok(f"profile/README.md: {renamed_from} -> {org} (org renamed)")
     spliced = splice_repo_table(existing, repos)
     if spliced is not None:
         return spliced
@@ -419,4 +458,6 @@ def _cohort_profile_body(org: str, repos: list[dict], seeded: str) -> str | None
         f"  ({org}/.github/profile/README.md has no dsl:repo-table markers - left as it "
         "is. Paste them back around the repo table to resume refreshing it.)"
     )
-    return None
+    # Except a rename: the page is theirs, but the old org's name in it is not a wording
+    # choice, and a Join link that 404s costs a student their enrolment.
+    return existing if renamed_from else None

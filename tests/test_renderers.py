@@ -967,3 +967,51 @@ def test_update_profile_readme_raises_clearly_on_a_malformed_config(
     with pytest.raises(yaml.YAMLError):
         P.update_profile_readme("Course-Org")
     assert "malformed YAML" in capsys.readouterr().err
+
+
+def test_a_renamed_orgs_profile_page_stops_naming_the_dead_org():
+    # Renaming an org leaves every self-reference in its own profile page pointing at a
+    # name that no longer resolves - including the Join link, so a student cannot enrol.
+    page = (
+        "# hertie-nlp-e1282-f2026.\n\n"
+        "Welcome! This is the course organisation for **hertie-nlp-e1282-f2026**.\n\n"
+        "**[hertie-nlp-e1282-f2026 - course website]"
+        "(https://hertie-nlp-e1282-f2026.github.io/)** - schedule,\n"
+        "[`welcome`](https://github.com/hertie-nlp-e1282-f2026/welcome/issues/new/choose)"
+        " to enrol\n"
+    )
+    out, was = profile_readme.retitle_renamed_org(page, "hertie-nlp-f2026")
+    assert was == "hertie-nlp-e1282-f2026"
+    assert "e1282-f2026" not in out
+    assert out.count("hertie-nlp-f2026") == 5  # heading, prose, link text, both URLs
+
+
+def test_a_page_already_naming_its_own_org_is_untouched():
+    page = "# hertie-nlp-f2026.\n\nWelcome to **hertie-nlp-f2026**.\n"
+    assert profile_readme.retitle_renamed_org(page, "hertie-nlp-f2026") == (page, None)
+
+
+def test_an_instructor_retitled_page_is_left_alone():
+    # The signal is the H1 naming an org that is not this one. A human title matches
+    # nothing, so prose someone has made their own is never rewritten - which is the
+    # difference between this and "the page still looks generated", the heuristic
+    # _cohort_profile_body's docstring rejects.
+    page = (
+        "# NLP, Autumn 2026\n\nSee hertie-nlp-e1282-f2026 for last year's materials.\n"
+    )
+    assert profile_readme.retitle_renamed_org(page, "hertie-nlp-f2026") == (page, None)
+
+
+def test_a_renamed_org_is_corrected_even_with_no_repo_table_markers():
+    # A marker-less page is otherwise left entirely alone (the instructor owns it), but a
+    # dead Join link costs a student their enrolment - so the name is still corrected.
+    page = "# old-org-f2026.\n\nJoin at https://github.com/old-org-f2026/welcome\n"
+    monkey = {"profile/README.md": page}
+    original = profile_readme.get_file_content
+    profile_readme.get_file_content = lambda org, repo, path: monkey.get(path)
+    try:
+        out = profile_readme._cohort_profile_body("new-org-f2026", [], "SEEDED")
+    finally:
+        profile_readme.get_file_content = original
+    assert out is not None, "a rename must still be written even with no markers"
+    assert "old-org-f2026" not in out
