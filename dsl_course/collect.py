@@ -87,7 +87,7 @@ from pathlib import Path
 
 import yaml
 
-from . import grades, roster, schedule, teams
+from . import grades, roster, schedule, sync_teams, teams
 from .course import CONFIG_REPO, SOLUTION_BRANCH, assignment_slug, resolve_is_group
 from .gh_contents import get_file_content, put_file
 from .ghcli import GIT_ENV, gh, git, is_missing_resource
@@ -328,10 +328,29 @@ def submission_targets(
         if not groups:
             log_err(f"no teams for `{key}` in {cohort_org}/{CONFIG_REPO}/teams.csv.")
             return []
-        return [
-            (f"{slug}-{team}", team, members)
-            for team, members in sorted(groups.items())
-        ]
+        # teams.csv is student-writable (the welcome "Join team" issue appends rows), so its
+        # handles pass the SAME roster allowlist `assign.provision_all` vets them through
+        # before they are handed out. Unvetted, a typo'd or invented handle earned a row of
+        # its OWN in the grades CSV - the file faculty mark from and `render` fans out into
+        # per-student gradebooks - for an account with no place in the cohort at all.
+        allowed_by_fold = {
+            h.casefold(): h
+            for h in sync_teams.known_handles(
+                roster.enrolled(roster.load(cohort_org) or [])
+            )
+        }
+        out = []
+        for team, members in sorted(groups.items()):
+            vetted, rejected = sync_teams.vet_handles(members, allowed_by_fold)
+            if rejected:
+                # A count, not the handles: this log is public, and the handles are a
+                # student's own typing.
+                log_err(
+                    f"  ! {len(rejected)} handle(s) in teams.csv for `{key}` are not "
+                    f"enrolled, onboarded roster handles - they get no grade row"
+                )
+            out.append((f"{slug}-{team}", team, vetted))
+        return out
     # Enrolled participants only, matching assign/grades: an auditor deliberately has no
     # submission repo, so listing one makes it an unclonable phantom target (noise, and a
     # spurious "could not be read"). `roster.enrolled` drops auditors; `onboarded` drops

@@ -1303,12 +1303,50 @@ def test_a_zero_is_recorded_only_when_github_says_the_repo_is_gone(monkeypatch):
 # ---------- teams.csv is keyed on the SCHEDULE KEY, submission repos on the cohort name
 
 
+def _roster_of(monkeypatch, *rows: str):
+    """The cohort roster `submission_targets` vets teams.csv against."""
+    monkeypatch.setattr(
+        collect.roster,
+        "load",
+        lambda org: collect.roster.parse(
+            "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+            + "".join(r + "\n" for r in rows)
+        ),
+    )
+
+
+def test_submission_targets_vets_teams_csv_against_the_roster(monkeypatch, capsys):
+    # teams.csv is student-writable, and a handle in it earned a row of its OWN in the
+    # grades CSV - the file faculty mark from and `render` fans out into gradebooks. A
+    # typo, an invented name or an auditor must not appear there at all. Same allowlist
+    # `assign.provision_all` vets a group handout through.
+    _roster_of(
+        monkeypatch,
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
+        "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor",
+        "cy@uni.edu,Cy,,,dsl-ghi,enrolled",  # not onboarded
+    )
+    monkeypatch.setattr(collect.teams, "load", lambda org: {})
+    monkeypatch.setattr(
+        collect.teams,
+        "teams_for",
+        lambda rows, slug: {"team-1": ["Ada-L", "stranger-x", "eve-e", "cy"]},
+    )
+    targets = collect.submission_targets("Cohort", "assignment-4", True)
+    # the roster's casing wins; everyone else is dropped
+    assert targets == [("assignment-4-team-1", "team-1", ["ada-l"])]
+    err = capsys.readouterr().err
+    assert "3 handle(s) in teams.csv" in err
+    assert "stranger-x" not in err, "a student's typing must not reach a public log"
+
+
 def test_submission_targets_looks_teams_up_by_the_schedule_key(monkeypatch):
     # `cohort_dest_repo` makes the cohort-side name differ from the schedule key. teams.csv
     # carries the key (the Join-team form writes what schedule.yml declares), so looking up
     # by the name found no teams and the whole group assignment silently had nothing to
     # grade - while the repos it should have graded existed under the name.
     asked: list[str] = []
+    _roster_of(monkeypatch, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
     monkeypatch.setattr(collect.teams, "load", lambda org: {})
     monkeypatch.setattr(
         collect.teams,
@@ -1326,6 +1364,7 @@ def test_submission_targets_looks_teams_up_by_the_schedule_key(monkeypatch):
 
 
 def test_submission_targets_defaults_the_teams_key_to_the_name(monkeypatch):
+    _roster_of(monkeypatch, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
     monkeypatch.setattr(collect.teams, "load", lambda org: {})
     monkeypatch.setattr(
         collect.teams,
