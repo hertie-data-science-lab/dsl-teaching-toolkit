@@ -200,16 +200,29 @@ def _send_via_smtp(cfg: SMTPConfig, messages: list[Message]) -> int:
 # ---------------------------------------------------------------------------------- public
 
 
-def send_bulk(messages: list[Message], dry_run: bool = False) -> int:
+SAMPLE_HEADER = "--- sample (placeholders) ---"
+
+
+def send_bulk(
+    messages: list[Message], dry_run: bool = False, sample: str | None = None
+) -> int:
     """Preview (dry_run) or send a batch. Returns the count previewed/sent.
 
-    dry_run lists masked recipients + subjects and sends nothing. Never the body: the
+    dry_run lists masked recipients + subjects and sends nothing. Never a REAL body: the
     enrolment-code email carries the student's name and a live credential, and this runs
-    in a public repo whose Actions log anyone can read. Otherwise the transport is chosen
-    by whichever secrets are configured (Graph preferred, SMTP fallback)."""
+    in a public repo whose Actions log anyone can read.
+
+    `sample` is the one thing a masked list cannot give a reviewer - the wording. It is a
+    body the CALLER rendered from placeholders (`<name>`, `<code>`), never one of
+    `messages`, and it is printed once, under `SAMPLE_HEADER`, so faculty can proof-read
+    the email before a real send. Otherwise the transport is chosen by whichever secrets
+    are configured (Graph preferred, SMTP fallback)."""
     if dry_run:
         for to, subject, _body in messages:
             log(f"  would send -> {mask_email(to)}: {subject}")
+        if sample:
+            log(SAMPLE_HEADER)
+            log(sample)
         log_ok(f"DRY-RUN previewed {len(messages)} message(s) - nothing sent")
         return len(messages)
 

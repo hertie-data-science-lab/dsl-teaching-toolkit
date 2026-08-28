@@ -626,6 +626,46 @@ def _push_gradebook(cohort_org: str, handle: str, content: str) -> str:
     return "ok"
 
 
+def update_message(
+    student: roster.Student, cohort_org: str, course_name: str = ""
+) -> mailer.Message:
+    """The 'your grades have been updated' email for one student: (to, subject, body).
+
+    The course goes in the SUBJECT as well as the body: the inbox list is where a student
+    taking several of these actually tells them apart, and by the time they have opened it
+    the body is redundant. A course that carries no name yet keeps the generic wording
+    rather than emailing a blank."""
+    url = f"https://github.com/{cohort_org}/{GRADEBOOK_PREFIX}{student.github_handle}"
+    course_suffix = f" for {course_name}" if course_name else ""
+    body = (
+        f"Hello {student.name or 'there'},\n\n"
+        f"Your grades{course_suffix} have been updated. View them in your private "
+        f"gradebook:\n"
+        f"  {url}\n"
+    )
+    subject = (
+        f"Your grades for {course_name} have been updated"
+        if course_name
+        else "Your grades have been updated"
+    )
+    return (student.hertie_email, subject, body)
+
+
+def sample_body(cohort_org: str, course_name: str = "") -> str:
+    """The notification rendered with PLACEHOLDERS, for the dry-run preview.
+
+    Same reason as `enrol_codes.sample_body`: a dry run masks every recipient and prints no
+    real body, so the wording - the only thing left to review - would never be seen. No
+    student's name or handle appears, so this is safe in a world-readable Actions log."""
+    placeholder = roster.Student(
+        hertie_email="<email>",
+        name="<name>",
+        github_handle="<handle>",
+        github_id="",
+    )
+    return update_message(placeholder, cohort_org, course_name)[2]
+
+
 def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -> None:
     """Email each student a 'grades updated' notification to their university inbox,
     linking to their private gradebook repo (the grade's source of truth)."""
@@ -645,34 +685,20 @@ def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -
     except Exception as exc:  # a name is never worth losing the notifications over
         log_err(f"could not read the course name ({exc}) - mailing without it")
         course_name = ""
-    course_suffix = f" for {course_name}" if course_name else ""
     messages = []
     for handle in handles:
         student = by_handle.get(handle)
         if not student or not student.hertie_email:
             continue
-        url = f"https://github.com/{cohort_org}/{GRADEBOOK_PREFIX}{handle}"
-        body = (
-            f"Hello {student.name or 'there'},\n\n"
-            f"Your grades{course_suffix} have been updated. View them in your private "
-            f"gradebook:\n"
-            f"  {url}\n"
-        )
-        # The course goes in the SUBJECT as well as the body: the inbox list is where a
-        # student taking several of these actually tells them apart, and by the time they
-        # have opened it the body is redundant.
-        subject = (
-            f"Your grades for {course_name} have been updated"
-            if course_name
-            else "Your grades have been updated"
-        )
-        messages.append((student.hertie_email, subject, body))
+        messages.append(update_message(student, cohort_org, course_name))
     if not messages:
         return
     # The grades themselves are already pushed by this point, so a mail failure isn't
     # fatal - but it must not pass unmentioned: a student who never got the notification
     # doesn't know to look.
-    sent = mailer.send_bulk(messages, dry_run=dry_run)
+    sent = mailer.send_bulk(
+        messages, dry_run=dry_run, sample=sample_body(cohort_org, course_name)
+    )
     if sent < len(messages):
         log_err(
             f"{len(messages) - sent} of {len(messages)} grade notification(s) not sent"

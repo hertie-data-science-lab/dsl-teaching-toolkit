@@ -385,7 +385,9 @@ def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
-    monkeypatch.setattr(grades.mailer, "send_bulk", lambda msgs, dry_run=False: 1)
+    monkeypatch.setattr(
+        grades.mailer, "send_bulk", lambda msgs, dry_run=False, sample=None: 1
+    )
     grades._email_updates("COHORT", ["ada-l", "bob-b"])
     assert "1 of 2 grade notification(s) not sent" in capsys.readouterr().err
 
@@ -401,7 +403,9 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     sent: list[list] = []
     monkeypatch.setattr(
-        grades.mailer, "send_bulk", lambda msgs, dry_run=False: sent.append(msgs) or 1
+        grades.mailer,
+        "send_bulk",
+        lambda msgs, dry_run=False, sample=None: sent.append(msgs) or 1,
     )
 
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "Deep Learning")
@@ -416,6 +420,26 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
     _to, subject, body = sent[-1][0]
     assert "Your grades have been updated." in body
     assert subject == "Your grades have been updated"
+
+
+def test_grade_notification_dry_run_carries_a_placeholder_sample(monkeypatch):
+    students = roster.parse(
+        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+    )
+    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "Deep Learning")
+    seen: dict = {}
+    monkeypatch.setattr(
+        grades.mailer,
+        "send_bulk",
+        lambda msgs, dry_run=False, sample=None: seen.update(sample=sample) or 1,
+    )
+    grades._email_updates("COHORT", ["ada-l"], dry_run=True)
+    # The reviewer sees the wording; no real student's name or handle is in it.
+    assert "<name>" in seen["sample"] and "<handle>" in seen["sample"]
+    assert "Ada" not in seen["sample"] and "ada-l" not in seen["sample"]
+    assert "Deep Learning" in seen["sample"]
 
 
 # ------------------------------------------ render must not clobber a reviewer's edit (fix 16)

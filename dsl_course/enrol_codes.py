@@ -111,6 +111,23 @@ def code_message(
     return (student.hertie_email, subject, body)
 
 
+def sample_body(welcome_url: str, course_name: str = "") -> str:
+    """The code email rendered with PLACEHOLDERS, for the dry-run preview.
+
+    A dry run masks every recipient and prints no real body, which leaves the one thing a
+    reviewer actually wants to check - the wording - invisible. This is the same
+    `code_message` template with `<name>`/`<code>` in place of a student's name and a live
+    credential, so it can be printed in a world-readable Actions log."""
+    placeholder = roster.Student(
+        hertie_email="<email>",
+        name="<name>",
+        github_handle="",
+        github_id="",
+        enrol_code="<code>",
+    )
+    return code_message(placeholder, welcome_url, course_name)[2]
+
+
 def run(cohort_org: str, dry_run: bool = False) -> int:
     # Fetch the RAW roster text once: we parse it for the students, and (below) edit the same
     # text in place so writing codes back never disturbs columns roster doesn't model.
@@ -170,7 +187,9 @@ def run(cohort_org: str, dry_run: bool = False) -> int:
         log_err(f"could not read the course name ({exc}) - mailing without it")
         course_name = ""
     messages = [code_message(s, welcome_url, course_name) for s in targets]
-    sent = mailer.send_bulk(messages, dry_run=dry_run)
+    sent = mailer.send_bulk(
+        messages, dry_run=dry_run, sample=sample_body(welcome_url, course_name)
+    )
     return 0 if sent == len(messages) else 1
 
 

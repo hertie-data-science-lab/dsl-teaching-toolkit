@@ -80,6 +80,37 @@ def test_mailer_dry_run_previews_without_config(capsys):
     assert "a***@x.edu" in out and "Subj" in out
 
 
+def test_dry_run_prints_one_placeholder_sample_and_no_real_body(capsys):
+    # The wording is the one thing a masked recipient list cannot show a reviewer, so a
+    # dry run prints ONE body - rendered from placeholders, never a student's own.
+    msgs = [
+        ("ada@x.edu", "Subj", "Hello Ada, your code is dsl-abc123"),
+        ("bo@x.edu", "Subj", "Hello Bo, your code is dsl-def456"),
+    ]
+    sample = enrol_codes.sample_body("https://github.com/org/welcome/issues")
+    assert mailer.send_bulk(msgs, dry_run=True, sample=sample) == 2
+    out = capsys.readouterr().out
+    assert out.count(mailer.SAMPLE_HEADER) == 1
+    assert "<code>" in out and "<name>" in out
+    assert "dsl-abc123" not in out and "Ada" not in out and "Bo" not in out
+
+
+def test_a_real_send_never_prints_the_sample(capsys, monkeypatch):
+    monkeypatch.setattr(mailer, "graph_config_from_env", lambda: None)
+    monkeypatch.setattr(mailer, "smtp_config_from_env", lambda: None)
+    mailer.send_bulk([("ada@x.edu", "Subj", "Body")], sample="SHOULD NOT APPEAR")
+    captured = capsys.readouterr()
+    assert "SHOULD NOT APPEAR" not in captured.out + captured.err
+
+
+def test_sample_body_names_the_course_like_a_real_message():
+    named = enrol_codes.sample_body(
+        "https://github.com/org/welcome/issues", "Deep Learning"
+    )
+    assert "To join the Deep Learning course on GitHub" in named
+    assert "<code>" in named and "<name>" in named
+
+
 def test_mask_email_keeps_one_character_and_the_domain():
     assert mailer.mask_email("katarzyna.nowak@students.hertie-school.org") == (
         "k***@students.hertie-school.org"
