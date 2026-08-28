@@ -919,8 +919,15 @@ def test_every_cron_files_and_closes_its_own_failure_issue(name):
     assert "cc @%s/course-admin" in opener["run"]
     assert '"${REPO%%/*}"' in opener["run"]
     assert opener["env"]["REPO"] == "${{ github.repository }}"
-    # One $body serves both branches, so create and comment carry the same mention.
-    assert opener["run"].count('--body "$body"') == 2
+    # ...on the FIRST report only. A repeat comment posts $note, the same text without
+    # the mention: whoever it reached the first time is already subscribed to the thread.
+    assert opener["run"].count('--body "$body"') == 1
+    assert '--body "$note"' in opener["run"]
+    # And a repeat waits for the thread to have been quiet for six hours. The hourly
+    # scheduler fails every hour while a fault stands, so an unthrottled comment buried
+    # the issue and mentioned course-admin 24 times a day about the one fault.
+    assert "updatedAt" in opener["run"]
+    assert "21600" in opener["run"]
     # A job killed by its own `timeout-minutes` is CANCELLED, not failed - and a cron that
     # reliably runs out of time is exactly the silent failure this exists to surface.
     assert "cancelled()" in opener["if"]
