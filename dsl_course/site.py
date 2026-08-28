@@ -343,8 +343,8 @@ _THEME_PAGES = (
         "fas fa-folder-open",
         # Deliberately not "everything released": a cohort org also holds each student's
         # private submission repo, which this must never list. See `_indexable_repos`.
-        "Every course material released to this cohort, session or not. Course materials "
-        "are only accessible to enrolled students.",
+        "All released course material so far; only accessible to enrolled "
+        "students/auditors.",
         cohort_only=True,
     ),
 )
@@ -1283,10 +1283,14 @@ def _lecture_entry(
         flags = "unreleased: true\n"
         links = _links_block([])
         where = ", ".join(_dest_link(cohort_org, d, live_repos) for d in row.dests)
+        # Italic, with the lead in bold: this is the one line on an unreleased row, and
+        # it sat in the same weight as the session description above it - so a reader
+        # scanning the Lectures tab read a paragraph before learning there was nothing to
+        # open. `.session-note` sets the gap above it (dsl-jekyll-theme's _layout.scss).
         body = (
-            f"Materials for {title.lower()} are not released yet"
-            + (f" - they will appear in {where} when released" if where else "")
-            + "."
+            f"_**Materials for {title.lower()} are not yet released**"
+            + (f" - they will appear in {where} when they are" if where else "")
+            + "._"
         )
         # `subtitle` and `description` are deliberately KEPT here. They describe what the
         # session is about, which is known the day the plan is written; the body next to
@@ -1315,19 +1319,16 @@ def _lecture_entry(
 
 def _assignment_entry(
     course_org: str,
+    cohort_org: str,
     repo: str,
     when: date | datetime,
     handout: datetime | None = None,
     sched: schedule.Schedule | None = None,
     handed_out: frozenset[str] = frozenset(),
     now: datetime | None = None,
-) -> str | None:
+) -> str:
     """An assignment's page, plus the two schedule rows it drives: the entry's own
     `date:` is the "released!" row and its `due_event:` sub-block the due row.
-
-    `None` when the assignment has NOT been handed out - it gets no page and no rows at
-    all until it does (see below); the caller drops it from the collection, and the sync's
-    rebuild of `_assignments/` then deletes any page a previous run left behind.
 
     `when` is the due date (a real one from schedule.yml, or a synthesised fallback);
     `handout` the scheduled provisioning moment when there is one. A handout dates the
@@ -1340,14 +1341,33 @@ def _assignment_entry(
     get. Deriving it from the course repo alone named the wrong repo - and titled the page
     wrong - whenever an entry set `cohort_dest_repo`.
 
-    An assignment NOT YET HANDED OUT is absent from the site entirely - no page, no
-    released row, no due row. The rows are driven by the course org's `assignment-*`
-    TEMPLATE repos (`discovery.discover_assignments`), which exist from the moment faculty
-    write the assignment - weeks before it hands out - so publishing their README on sight
-    put whole briefs on the cohort site, which is PUBLIC, while the scheduler was still
-    correctly holding the student repos back. Withholding only the brief still announced
-    the assignment, so the site now says nothing about it until it ships; the plan lives in
-    the cohort's `classroom-config/schedule.yml`, which is where faculty read it.
+    BOTH orgs, because the two halves of an assignment live in different ones: the template
+    and its README are read from `course_org`, and the repo a student actually works in is
+    in `cohort_org`. This took `course_org` alone and used it for both, so every released
+    assignment told students their repo was "in `<course-org>`'s cohort org" - naming the
+    org they have no access to, and leaving them to guess the one they do.
+
+    A released entry carries `repo_url` / `repo_name` for that repo. The URL is the cohort
+    org's repo list filtered to this assignment, not a per-student address: the site is one
+    public page for the whole cohort and cannot know who is reading it, but GitHub shows a
+    signed-in student only the repos they can see - so the filter resolves to their own (or
+    their team's). `repo_name` is the shape to expect, `<slug>-<your-handle>` or
+    `-<your-team>` for a group assignment.
+
+    An assignment NOT YET HANDED OUT is a PLACEHOLDER, flagged `handout_pending: true`:
+    both schedule rows, and an entry the Assignments tab renders unlinked, saying it is
+    not out yet. What is withheld is the assignment's CONTENT, which is the same line
+    `_lecture_entry` draws for an unreleased session - the plan is public from the day it
+    is written, the payload arrives on release.
+
+    The distinction matters here more than anywhere else on the site. The rows are driven
+    by the course org's `assignment-*` TEMPLATE repos
+    (`discovery.discover_assignments`), which exist from the moment faculty write the
+    assignment - weeks before it hands out - so the README is not read at all while the
+    assignment is pending: neither the brief nor the real title (`# Detecting fraud in the
+    transfer dataset` is the assignment, not its name) can reach the public cohort site
+    early. The placeholder carries only what the plan already publishes on the schedule -
+    the slug's own name, the hand-out date and the deadline.
 
     Handed out means EITHER of two things, and it takes both being false to withhold:
 
@@ -1359,13 +1379,6 @@ def _assignment_entry(
     - `handout` has passed. A pin whose provisioning then failed still says the brief was
       meant to be out by now, and a schedule that says so is not a secret worth keeping.
 
-    This is stricter than `_lecture_entry`, which keeps an unshipped session's row and
-    drops only its links. A session is a fixed point in the term - it happens whether or
-    not its slides are up - whereas an assignment the cohort has not been given is not yet
-    a thing students have. Its README is not read at all while it is pending, so neither
-    the brief nor the real title (`# Detecting fraud in the transfer dataset` is the
-    assignment, not its name) can reach the public site.
-
     `now` is the moment to judge the pin against (default: actual now, in the handout's own
     cohort timezone - `_coerce_datetime` hands out nothing naive)."""
     found = schedule.entry_for_repo(sched, repo) if sched is not None else None
@@ -1376,29 +1389,63 @@ def _assignment_entry(
     pinned_out = handout is not None and handout <= (
         now or datetime.now(handout.tzinfo)
     )
-    if slug not in handed_out and not pinned_out:
-        return None
-    student_repo = f"`{slug}-<your-handle>` repo in `{course_org}`'s cohort org"
-    # The plan-side name, used when the README opens with no `# ` heading.
-    title = slug.replace("-", " ").title()
-    readme = get_file_content(course_org, repo, "README.md") or ""
-    for line in readme.splitlines():
-        if line.startswith("# "):
-            title = line[2:].strip()
-            break
-    brief = "\n".join(
-        ln for ln in readme.splitlines() if not ln.startswith("# ")
-    ).strip()
-    body = (
-        f"{_liquid_raw(brief or 'Assignment brief.')}\n\n"
-        f"_Your private {student_repo} appears once the teaching team provisions it._"
+    out = slug in handed_out or pinned_out
+    # A group assignment fans out one repo per TEAM, so the shape a student looks for
+    # differs. Through `resolve_is_group` rather than testing `type == "group"` here: that
+    # is the single precedence every other consumer resolves through, and a second copy of
+    # it in the one place students READ the answer is how the site comes to name a shape
+    # the handout does not create. `template_group=None` leaves the design-time grading.yml
+    # unconsulted - the site will not spend an API call per assignment on a repo name.
+    from .collect import resolve_is_group
+
+    group = resolve_is_group(
+        force=False,
+        schedule_type=found[1].type if found else None,
+        template_group=None,
     )
+    repo_name = f"{slug}-{'<your-team>' if group else '<your-handle>'}"
+    # The plan-side name - all a pending assignment ever shows, and the fallback for a
+    # released README that opens with no `# ` heading.
+    title = slug.replace("-", " ").title()
+    if out:
+        readme = get_file_content(course_org, repo, "README.md") or ""
+        for line in readme.splitlines():
+            if line.startswith("# "):
+                title = line[2:].strip()
+                break
+        brief = "\n".join(
+            ln for ln in readme.splitlines() if not ln.startswith("# ")
+        ).strip()
+        flags = (
+            f'repo_url: "https://github.com/orgs/{cohort_org}/repositories?q={slug}-"\n'
+            f'repo_name: "{_q(repo_name)}"\n'
+        )
+        # No trailing "your repo appears once the teaching team provisions it" line: the
+        # repo exists by the time this renders, and the theme now links it twice off the
+        # fields above. The body is the brief, and nothing else.
+        body = _liquid_raw(brief or "Assignment brief.")
+    else:
+        # A flag as well as the prose: the theme leaves the title unlinked off this,
+        # and the sentence says why. Its twin on a session row, `unreleased: true`, is
+        # written for the same reason - and the Readings tab now reads it rather than
+        # inferring the state from an empty body.
+        # No `repo_url`: there is nothing at the other end of it yet.
+        flags = "handout_pending: true\n"
+        # The same shape as an unreleased session's line (`_lecture_entry`) - bold lead
+        # inside italics - because they render on adjacent tabs and read as one status
+        # vocabulary or as two. Kept short: the assignment schedule row prints this body in
+        # a table cell, exactly as the lecture row prints its own.
+        body = (
+            f"_**Not handed out yet** - your private `{repo_name}` repo "
+            f"appears when it is._"
+        )
     title = _q(title)
     return (
         f"---\n"
         f"type: assignment\n"
         f"date: {released}\n"
         f'title: "{title}"\n'
+        f"{flags}"
         f"due_event:\n"
         f"    type: due\n"
         f"    date: {due}\n"
@@ -2131,28 +2178,21 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 "_lectures": {
                     _row_file(s, kind): session_row(s, kind) for s, kind in rows
                 },
-                # Ordinals come from the position in the full list, so an assignment's
-                # URL does not shift when an earlier one is still pending. A pending
-                # assignment yields None and is left out altogether - see
-                # `_assignment_entry`.
+                # Ordinals come from the position in the full list, so every assignment
+                # keeps its URL for the whole term. A pending one is a placeholder rather
+                # than an absence - see `_assignment_entry`.
                 "_assignments": {
-                    fname: entry
-                    for fname, entry in (
-                        (
-                            f"{i + 1:02d}-{a}.md",
-                            _assignment_entry(
-                                course_org,
-                                a,
-                                *_assignment_dates(
-                                    sched, a, start + timedelta(days=(i + 1) * 14)
-                                ),
-                                sched=sched,
-                                handed_out=handed_out,
-                            ),
-                        )
-                        for i, a in enumerate(assignments)
+                    f"{i + 1:02d}-{a}.md": _assignment_entry(
+                        course_org,
+                        cohort_org,
+                        a,
+                        *_assignment_dates(
+                            sched, a, start + timedelta(days=(i + 1) * 14)
+                        ),
+                        sched=sched,
+                        handed_out=handed_out,
                     )
-                    if entry is not None
+                    for i, a in enumerate(assignments)
                 },
                 "_events": event_entries,
             },

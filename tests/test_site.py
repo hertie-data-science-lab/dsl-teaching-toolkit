@@ -140,7 +140,7 @@ def test_lecture_entry_shows_real_time_from_a_datetime(monkeypatch):
         "Cohort", "2", _row(datetime(2026, 9, 15, 14, 30, tzinfo=BERLIN)), RELEASED
     )
     assert "date: 2026-09-15T14:30:00" in md
-    assert "not released yet" not in md
+    assert "not yet released" not in md
 
 
 def test_lecture_entry_falls_back_to_0900_for_a_bare_date(monkeypatch):
@@ -267,6 +267,7 @@ def test_assignment_entry_dates_the_released_row_from_the_handout(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
+        "Cohort-f2026",
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
@@ -283,6 +284,7 @@ def test_assignment_entry_falls_back_to_the_due_date_without_a_handout(monkeypat
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
     out = site._assignment_entry(
         "Course",
+        "Cohort-f2026",
         "assignment-2-f2026",
         date(2026, 11, 10),
         handed_out=frozenset({"assignment-2"}),
@@ -290,26 +292,32 @@ def test_assignment_entry_falls_back_to_the_due_date_without_a_handout(monkeypat
     assert out.count("date: 2026-11-10T23:59:00") == 2  # both rows on the due date
 
 
-def test_an_unhanded_out_assignment_is_absent_from_the_site(monkeypatch):
+def test_an_unhanded_out_assignment_is_a_placeholder(monkeypatch):
     # The template repo exists from the day faculty write the assignment; publishing its
     # README on sight put the whole brief on the PUBLIC cohort site weeks before hand-out,
-    # while the scheduler was still correctly holding the student repos back. Withholding
-    # only the brief still announced the assignment, so a pending one gets no entry at all
-    # - no page, no released row, no due row. The plan stays in schedule.yml.
+    # while the scheduler was still correctly holding the student repos back. So the
+    # CONTENT is embargoed - the README is not read at all - but the entry still exists,
+    # and with it the two schedule rows. Withholding those left an assignment students
+    # could read about in schedule.yml missing from the schedule that publishes it.
     def _no_reads(*a, **k):
         raise AssertionError("the embargoed README must not be read at all")
 
     monkeypatch.setattr(site, "get_file_content", _no_reads)
-    assert (
-        site._assignment_entry(
-            "Course",
-            "assignment-1-f2026",
-            datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
-            datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
-            now=datetime(2026, 9, 21, tzinfo=BERLIN),
-        )
-        is None
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        now=datetime(2026, 9, 21, tzinfo=BERLIN),
     )
+    assert "handout_pending: true" in out
+    # both rows, on their real dates - the hand-out row and the due row
+    assert "date: 2026-09-22T09:00:00" in out.split("due_event:")[0]
+    assert "    date: 2026-10-13T23:59:59" in out
+    # the plan-side name only, never the README's own title
+    assert 'title: "Assignment 1"' in out
+    assert "Not handed out yet" in out
 
 
 def test_a_passed_handout_inlines_the_brief(monkeypatch):
@@ -318,6 +326,7 @@ def test_a_passed_handout_inlines_the_brief(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
+        "Cohort-f2026",
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
@@ -337,6 +346,7 @@ def test_a_manual_handout_releases_the_brief_with_no_date_pinned(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
+        "Cohort-f2026",
         "assignment-2-f2026",
         date(2026, 11, 10),
         handed_out=frozenset({"assignment-2"}),
@@ -345,16 +355,80 @@ def test_a_manual_handout_releases_the_brief_with_no_date_pinned(monkeypatch):
     assert "unreleased: true" not in out
 
 
-def test_an_assignment_with_no_handout_on_record_is_withheld(monkeypatch):
-    # Neither signal fires: no cohort template repo, no pin. Withholding is the safe
-    # direction - the assignment appears the moment either says it went out.
+def test_an_assignment_with_no_handout_on_record_withholds_its_brief(monkeypatch):
+    # Neither signal fires: no cohort template repo, no pin. Withholding the CONTENT is
+    # the safe direction - the brief appears the moment either says it went out - but the
+    # row is still the plan's, and the plan is already public.
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# Assignment 2\nThe brief."
     )
-    assert (
-        site._assignment_entry("Course", "assignment-2-f2026", date(2026, 11, 10))
-        is None
+    out = site._assignment_entry(
+        "Course", "Cohort-f2026", "assignment-2-f2026", date(2026, 11, 10)
     )
+    assert "handout_pending: true" in out
+    assert "The brief." not in out
+    assert 'title: "Assignment 2"' in out
+
+
+def test_a_released_assignment_links_the_cohort_repo_not_the_course_org(monkeypatch):
+    # The two halves of an assignment live in different orgs, and this took only the
+    # course one - so the page told students their repo was "in `<course-org>`'s cohort
+    # org": the org they cannot open, and not the one they can.
+    monkeypatch.setattr(
+        site, "get_file_content", lambda *a, **k: "# Assignment 1\nThe brief."
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        date(2026, 10, 13),
+        handed_out=frozenset({"assignment-1"}),
+    )
+    assert "Cohort-f2026/repositories?q=assignment-1-" in out
+    assert 'repo_name: "assignment-1-<your-handle>"' in out
+    assert "Course" not in out.split("---")[1]  # the course org names no student repo
+
+
+def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
+    # A group assignment fans out one repo per team, so `<your-handle>` is the wrong thing
+    # to go looking for.
+    monkeypatch.setattr(
+        site, "get_file_content", lambda *a, **k: "# Group project\nThe brief."
+    )
+    sched = Schedule(
+        assignments={
+            "assignment-3": AssignmentEntry(
+                course_source_repo="assignment-3-f2026",
+                due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+                type="group",
+            )
+        }
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-3-f2026",
+        date(2026, 10, 13),
+        sched=sched,
+        handed_out=frozenset({"assignment-3"}),
+    )
+    assert 'repo_name: "assignment-3-<your-team>"' in out
+
+
+def test_a_pending_assignment_links_no_repo(monkeypatch):
+    # Nothing exists at the other end of the link yet, so the placeholder names the shape
+    # to expect and stops there.
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN),
+        now=datetime(2026, 9, 21, tzinfo=BERLIN),
+    )
+    assert "repo_url" not in out
+    assert "`assignment-1-<your-handle>` repo appears when it is" in out
 
 
 def test_an_early_manual_release_beats_a_pin_still_in_the_future(monkeypatch):
@@ -365,6 +439,7 @@ def test_an_early_manual_release_beats_a_pin_still_in_the_future(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
+        "Cohort-f2026",
         "assignment-1-f2026",
         datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
         datetime(2026, 10, 20, 14, 0, tzinfo=BERLIN),
@@ -390,17 +465,16 @@ def test_handed_out_keys_on_the_cohort_dest_repo_not_the_slug(monkeypatch):
             )
         }
     )
-    args = ("Course", "assignment-1-f2026", date(2026, 10, 13))
+    args = ("Course", "Cohort-f2026", "assignment-1-f2026", date(2026, 10, 13))
     assert "The brief." in site._assignment_entry(
         *args, sched=sched, handed_out=frozenset({"homework-1"})
     )
     # the slug is NOT the name it was frozen under, so it must not open the gate
-    assert (
-        site._assignment_entry(
-            *args, sched=sched, handed_out=frozenset({"assignment-1"})
-        )
-        is None
+    withheld = site._assignment_entry(
+        *args, sched=sched, handed_out=frozenset({"assignment-1"})
     )
+    assert "handout_pending: true" in withheld
+    assert "The brief." not in withheld
 
 
 def test_assignment_dates_read_the_schedule():
@@ -643,8 +717,8 @@ def test_the_whole_planned_term_gets_rows_before_anything_is_released(
     # Dated from the plan, and openly marked as having nothing to open yet.
     assert "date: 2026-09-10T14:00:00" in lectures["lab-02.md"]
     assert "links: []" in lectures["lab-02.md"]
-    assert "lab 2 are not released yet" in lectures["lab-02.md"]
-    assert "session 2 are not released yet" in lectures["session-02.md"]
+    assert "lab 2 are not yet released" in lectures["lab-02.md"]
+    assert "session 2 are not yet released" in lectures["session-02.md"]
 
 
 def test_an_unreleased_row_names_where_its_materials_will_land(monkeypatch, tmp_path):
@@ -693,7 +767,7 @@ def test_a_released_row_replaces_its_placeholder_with_links(monkeypatch, tmp_pat
     )
     body = plan.collections["_lectures"]["lab-02.md"]
     assert 'name: "lab - lab.pdf"' in body
-    assert "not released yet" not in body
+    assert "not yet released" not in body
 
 
 def test_a_row_released_off_plan_survives_the_planned_rows(monkeypatch, tmp_path):
@@ -715,8 +789,8 @@ def test_a_row_released_off_plan_survives_the_planned_rows(monkeypatch, tmp_path
         sources=[("materials", "labs", "05_bonus", 5)],
     )
     assert sorted(plan.collections["_lectures"]) == ["lab-05.md", "session-02.md"]
-    assert "not released yet" in plan.collections["_lectures"]["session-02.md"]
-    assert "not released yet" not in plan.collections["_lectures"]["lab-05.md"]
+    assert "not yet released" in plan.collections["_lectures"]["session-02.md"]
+    assert "not yet released" not in plan.collections["_lectures"]["lab-05.md"]
 
 
 def test_an_undated_release_raises_no_placeholder_row(monkeypatch, tmp_path):
@@ -826,12 +900,13 @@ def test_assignment_entry_names_the_cohort_dest_repo_not_the_course_repo(monkeyp
     )
     out = site._assignment_entry(
         "Course",
+        "Cohort-f2026",
         "assignment-1-f2026",
         date(2026, 10, 13),
         sched=sched,
         handed_out=frozenset({"homework-1"}),
     )
-    assert "`homework-1-<your-handle>`" in out
+    assert 'repo_name: "homework-1-<your-handle>"' in out
     assert 'title: "Homework 1"' in out
 
 
@@ -851,13 +926,13 @@ def test_the_site_build_gates_a_brief_on_what_the_cohort_actually_holds(
     )
     args = {"sched": sched, "assignments": ["assignment-1-f2026"]}
     withheld = _plan(monkeypatch, tmp_path, **args).collections["_assignments"]
-    # No page, so no released row and no due row either - the whole collection is empty.
-    assert withheld == {}
+    # The entry - and so both schedule rows - is there; only the brief is held back.
+    assert "handout_pending: true" in withheld["01-assignment-1-f2026.md"]
 
     out = _plan(monkeypatch, tmp_path, **args, handed_out=["assignment-1"]).collections[
         "_assignments"
     ]
-    assert "01-assignment-1-f2026.md" in out
+    assert "handout_pending: true" not in out["01-assignment-1-f2026.md"]
 
 
 def test_a_pending_assignment_does_not_shift_a_later_ones_ordinal(
@@ -872,7 +947,9 @@ def test_a_pending_assignment_does_not_shift_a_later_ones_ordinal(
         assignments=["assignment-1-f2026", "assignment-2-f2026"],
         handed_out=["assignment-2"],
     ).collections["_assignments"]
-    assert list(out) == ["02-assignment-2-f2026.md"]
+    assert list(out) == ["01-assignment-1-f2026.md", "02-assignment-2-f2026.md"]
+    assert "handout_pending: true" in out["01-assignment-1-f2026.md"]
+    assert "handout_pending: true" not in out["02-assignment-2-f2026.md"]
 
 
 # ---------------------------------------------- fail-loud reads (fixes 5 and 6)
@@ -1063,6 +1140,7 @@ def test_front_matter_survives_a_backslash_in_a_title(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
+        "Cohort-f2026",
         "assignment-1-f2026",
         date(2026, 11, 10),
         handed_out=frozenset(
@@ -1087,6 +1165,7 @@ def test_assignment_readme_body_is_fenced_as_liquid_raw(monkeypatch):
     )
     out = site._assignment_entry(
         "Course",
+        "Cohort-f2026",
         "assignment-1-f2026",
         date(2026, 11, 10),
         handed_out=frozenset({"assignment-1"}),  # the README is only inlined once out
@@ -1190,7 +1269,7 @@ def test_an_unreleased_row_still_says_what_the_session_is_about():
     # which is what the body says.
     assert 'subtitle: "Expectation"' in out
     assert 'description: "Linearity of expectation."' in out
-    assert "will appear in `materials/lectures/03_week-3` when released." in out
+    assert "will appear in `materials/lectures/03_week-3` when they are." in out
 
 
 def test_the_plan_carries_a_rows_title_description_and_readings(monkeypatch):
@@ -1385,7 +1464,7 @@ def test_readings_pending_reaches_the_rendered_row():
     page = site._lecture_entry("COHORT", "2", row, sources=[], live_repos=frozenset())
     assert "readings_pending: true" in page
     assert "materials/readings/02_x" in page
-    assert "not released yet" in page
+    assert "not yet released" in page
 
 
 def test_a_silent_release_raises_no_row_of_its_own():

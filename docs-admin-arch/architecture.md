@@ -592,6 +592,13 @@ colour - from it alone: `lecture`, `lab`, `assignment` (with a nested `due` even
 (`labs/`), never by a faculty declaration; term rows are synthesised from `semester_start` /
 `semester_end`; undated entries sort to the end of term and render as TBC.
 
+**The plan is public; the payload is gated.** Every dated entry in `schedule.yml` gets its row
+the day it is written, whether or not it has shipped - so the schedule publishes the whole term.
+What release adds is the row's CONTENT: a session picks up its file links (`unreleased: true` /
+`readings_pending: true` until then) and an assignment its brief and its README-given title
+(`handout_pending: true` until then, and the README is not read at all while it holds - the
+template repo exists weeks early and the cohort site is public).
+
 **People.** Cards come from that cohort's `classroom-config/people.yml`. With no `people:` block
 at all, they fall back to the cohort org's `instructors` GitHub team - minus the sync's own bot
 account, which sits in that team for access and is not a member of staff. A 404'd member is
