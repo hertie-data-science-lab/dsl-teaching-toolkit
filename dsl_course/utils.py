@@ -1695,6 +1695,34 @@ def add_collaborator(org: str, repo: str, login: str, permission: str = "push") 
     return False
 
 
+def is_collaborator(org: str, repo: str, login: str) -> bool | None:
+    """Whether `login` is a DIRECT collaborator on `org/repo`.
+
+    None means the answer could not be read. Kept distinct from False on purpose: the one
+    caller is about to REVOKE access, and a rate limit or a network drop must never read as
+    "not a collaborator, nothing to do" - nor, worse, be acted on either way."""
+    code, out = gh("api", f"repos/{org}/{repo}/collaborators/{login}")
+    if code == 0:
+        return True
+    if is_missing_resource(out):
+        return False
+    log_err(
+        f"could not check whether {login} collaborates on {org}/{repo}: {out[:160]}"
+    )
+    return None
+
+
+def remove_collaborator(org: str, repo: str, login: str) -> bool:
+    """Revoke a direct collaborator grant. Idempotent - GitHub 204s either way."""
+    code, out = gh(
+        "api", "--method", "DELETE", f"repos/{org}/{repo}/collaborators/{login}"
+    )
+    if code == 0:
+        return True
+    log_err(f"could not remove {login} from {org}/{repo}: {out[:160]}")
+    return False
+
+
 def generate_from_template(
     template_org: str,
     template_name: str,
