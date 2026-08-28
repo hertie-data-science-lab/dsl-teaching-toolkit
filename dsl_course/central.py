@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import re
 
+from .ghcli import gh, is_missing_resource
 from .log import log_err
 
 CENTRAL = "hertie-data-science-lab/dsl-teaching-toolkit"
@@ -59,3 +60,32 @@ def resolve_central_ref(value: object, *, source: str) -> str:
         f"40-character commit SHA - falling back to '{CENTRAL_REF}'"
     )
     return CENTRAL_REF
+
+
+def central_ref_exists(ref: str) -> bool:
+    """Whether `ref` is actually present on the central repo right now.
+
+    Every seeded workflow in the org checks the central repo out at this ref, INCLUDING
+    the Refresh that re-renders them - so rendering a ref that does not exist bricks the
+    org's whole Actions tab with no way back in from inside the org. A tier branch nobody
+    has created yet is exactly that case, and `release` is the default: the check has to
+    happen before the render, not after the first red run.
+
+    "Could not tell" reads as PRESENT: a rate limit or a 502 must not stall every org's
+    convergence, and proceeding is only ever the behaviour that stood before this check.
+    Only a definite 404 - the one answer that proves the ref is not there - stops a
+    render."""
+    endpoint = (
+        f"repos/{CENTRAL}/commits/{ref}"
+        if _SHA.fullmatch(ref)
+        else f"repos/{CENTRAL}/branches/{ref}"
+    )
+    code, out = gh("api", endpoint, "--silent")
+    if code == 0:
+        return True
+    if is_missing_resource(out):
+        return False
+    log_err(
+        f"could not check whether {CENTRAL}@{ref} exists ({out[:120]}) - assuming it does"
+    )
+    return True

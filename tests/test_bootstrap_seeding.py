@@ -602,6 +602,7 @@ def _stub_refresh(
     previous night's miss ledger (MISSES_PATH) - so a test can drive the two-consecutive-
     misses rule across runs without stubbing the rule itself."""
     monkeypatch.setattr(seed, "central_ref_for", lambda org: "release")
+    monkeypatch.setattr(seed, "central_ref_exists", lambda ref: True)
     monkeypatch.setattr(
         seed, "discover_cohorts", lambda org: ["Cohort-f2026", "Cohort-s2027"]
     )
@@ -1105,6 +1106,7 @@ def test_refresh_cli_logs_an_unreachable_api_instead_of_a_traceback(
         raise RuntimeError("could not list repos in Course-Org: gh: HTTP 502")
 
     monkeypatch.setattr(seed, "central_ref_for", lambda org: "release")
+    monkeypatch.setattr(seed, "central_ref_exists", lambda ref: True)
     monkeypatch.setattr(seed, "discover_cohorts", boom)
     monkeypatch.setattr("sys.argv", ["seed", "refresh", "--course-org", "Course-Org"])
 

@@ -10,7 +10,14 @@ from __future__ import annotations
 
 import yaml
 
-from dsl_course import discovery, profile_readme, seed, welcome, workflows_place
+from dsl_course import (
+    central,
+    discovery,
+    profile_readme,
+    seed,
+    welcome,
+    workflows_place,
+)
 from dsl_course.central import CENTRAL, CENTRAL_REF, CENTRAL_REF_PLACEHOLDER
 
 SHA = "0" * 40
@@ -160,3 +167,102 @@ def test_the_faculty_landing_page_links_the_docs_at_the_orgs_ref():
     )
     assert f"https://github.com/{CENTRAL}/blob/staging/docs/README.md" in page
     assert "/blob/release/" not in page
+
+
+# ------------------------------------------------- and that the ref is THERE before use
+
+
+def _api_calls(monkeypatch, answer: tuple[int, str]) -> list[tuple[str, ...]]:
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        central, "gh", lambda *args, **k: (calls.append(args), answer)[1]
+    )
+    return calls
+
+
+def test_a_tier_branch_that_exists_is_checked_as_a_branch(monkeypatch):
+    calls = _api_calls(monkeypatch, (0, ""))
+    assert central.central_ref_exists("release") is True
+    assert calls == [("api", f"repos/{CENTRAL}/branches/release", "--silent")]
+
+
+def test_a_pinned_sha_is_checked_as_a_commit(monkeypatch):
+    # `branches/<sha>` 404s for a perfectly good commit, so the endpoint has to follow
+    # what the ref IS - otherwise every SHA-pinned org reads as bricked.
+    calls = _api_calls(monkeypatch, (0, ""))
+    assert central.central_ref_exists(SHA) is True
+    assert calls == [("api", f"repos/{CENTRAL}/commits/{SHA}", "--silent")]
+
+
+def test_a_missing_ref_is_reported_as_missing(monkeypatch):
+    _api_calls(monkeypatch, (1, "gh: Not Found (HTTP 404)"))
+    assert central.central_ref_exists("release") is False
+
+
+def test_a_ref_that_cannot_be_checked_is_assumed_present(monkeypatch, capsys):
+    # A rate limit or a 502 must not stall every org's convergence; proceeding is only
+    # ever the behaviour that stood before this check existed.
+    _api_calls(monkeypatch, (1, "HTTP 502 Bad Gateway"))
+    assert central.central_ref_exists("release") is True
+    assert "assuming it does" in capsys.readouterr().err
+
+
+def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
+    """`seed.refresh`'s exit code, and which of its renderers actually ran."""
+    rendered: list[str] = []
+    monkeypatch.setattr(seed, "central_ref_for", lambda org: "release")
+    monkeypatch.setattr(seed, "central_ref_exists", lambda ref: ref_exists)
+    monkeypatch.setattr(seed, "_live_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["materials-f2026"])
+    monkeypatch.setattr(seed, "discover_assignments", lambda org: [])
+    monkeypatch.setattr(
+        seed,
+        "push_content_workflows",
+        lambda *a: rendered.append("content-workflows") or 0,
+    )
+    monkeypatch.setattr(seed, "_refresh_stubs", lambda org, repo: 0)
+    monkeypatch.setattr(
+        seed.scaffold, "refresh_materials_system_files", lambda org, repo: 0
+    )
+    monkeypatch.setattr(seed, "_propagate_repo_secret", lambda org, repos: 0)
+    monkeypatch.setattr(
+        seed,
+        "seed_github_workflows",
+        lambda org, ref: rendered.append("org-workflows") or 0,
+    )
+    monkeypatch.setattr(seed, "_write_heartbeat", lambda org: 0)
+    monkeypatch.setattr(seed, "update_profile_readme", lambda org, **k: 0)
+    monkeypatch.setattr(seed, "repo_is_archived", lambda org, repo: False)
+    monkeypatch.setattr(seed, "refresh_welcome_workflows", lambda org: 0)
+    monkeypatch.setattr(
+        seed,
+        "refresh_classroom_system_files",
+        lambda org, ref: rendered.append("classroom-system-files") or 0,
+    )
+    monkeypatch.setattr(seed, "refresh_classroom_samples", lambda org: 0)
+    monkeypatch.setattr(seed, "refresh_cohort_pointer", lambda org, course: 0)
+    return seed.refresh("Course-Org"), rendered
+
+
+def test_refresh_renders_the_workflows_when_the_ref_is_there(monkeypatch):
+    code, rendered = _refresh_against(monkeypatch, ref_exists=True)
+    assert code == 0
+    assert rendered == [
+        "content-workflows",
+        "org-workflows",
+        "classroom-system-files",
+    ]
+
+
+def test_refresh_refuses_to_render_workflows_at_a_ref_that_does_not_exist(
+    monkeypatch, capsys
+):
+    # Rendering a missing ref writes a checkout nothing can satisfy into EVERY workflow
+    # in the org, Refresh included - so the org loses the one button that would heal it.
+    # Leaving last night's rendering in place keeps the org running on stale-but-working
+    # workflows; the failure count turns the cron red so somebody creates the ref.
+    code, rendered = _refresh_against(monkeypatch, ref_exists=False)
+    assert code == 1
+    assert rendered == []
+    err = capsys.readouterr().err
+    assert "release" in err and "Course-Org" in err
