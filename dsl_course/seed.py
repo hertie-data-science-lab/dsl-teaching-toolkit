@@ -28,8 +28,8 @@ CLI:
                            schema README, the dispatchers, the schedule validator) and
                            `*.sample` worked examples. (Run by the Bootstrap-cohort
                            workflow, and by Refresh actions - on demand and on its nightly
-                           cron, which is how an org converges on central without anyone
-                           pressing anything.)
+                           cron, which is how an org converges on central `release`
+                           without anyone pressing anything.)
 """
 
 from __future__ import annotations

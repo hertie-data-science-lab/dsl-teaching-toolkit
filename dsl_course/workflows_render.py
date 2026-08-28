@@ -805,7 +805,7 @@ def render_refresh() -> str:
     return f"""name: Refresh actions
 
 # Every seeded workflow is frozen at the moment it was seeded, while the engine it calls is
-# always checked out from central main - so an org left alone drifts, until a stale workflow
+# always checked out from central `release` - so an org left alone drifts, until a stale workflow
 # calls engine code that has since moved. This re-seeds the org daily, so every org
 # converges on central within 24h with nobody pressing anything. The refresh is idempotent
 # and skips files whose content is unchanged, so a night with no central changes is silent.

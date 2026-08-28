@@ -437,12 +437,15 @@ non-bot commit sits on it - a reviewer's correction is never clobbered.
 ## Convergence - the daily self-refresh
 
 Seeded workflow YAML is frozen in each org at seed time, while the engine it calls is always
-checked out from central `main`. Engine changes therefore land on the next press; *workflow
-shape* changes land because every course org re-seeds itself nightly.
+checked out from central `release` (`central.CENTRAL_REF`). A merge to `main` changes nothing
+in any live course: promoting it to `release` is a deliberate second act, and a rollback is a
+revert on `release`, which every org picks up on its next run with no re-seed. Engine changes
+therefore land on the first press after a promotion; *workflow shape* changes land because
+every course org re-seeds itself nightly.
 
 ```mermaid
 flowchart LR
-  c["`central main
+  c["`central release
 dsl-teaching-toolkit`"]
   c -->|"checked out by every run"| eng["engine - current on every press"]
   c -.->|"`Refresh actions
