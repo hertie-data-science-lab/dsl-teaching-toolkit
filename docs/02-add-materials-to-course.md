@@ -18,7 +18,7 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
 1. **Scaffold the repo.** 
    - Course org → `.github` → **Actions** →
-   [New materials repo](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/new-materials.yml); input `tag` = `f/sYYY` 
+   [New materials repo](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/new-materials.yml); input `tag` = `fYYYY`/`sYYYY` (e.g. `f2026`) 
    - this creates **`course-materials-f2026`** - a private repo, pre-seeded with (edit as needed):
       - `lectures/01_session-1/`, 
       - `readings/01_session-1/`, 
@@ -26,7 +26,7 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
       - a `README.md` 
       - a `MAINTAINING.md`, 
       - a placeholder `SYLLABUS.md` 
-      >It also seeds the three Release workflows & later scheduled release functionality. 
+      >It also seeds the two run-from-repo Release workflows (Release materials, Release assignment) & later scheduled release functionality. 
    - You have push on it immediately.
 
 2. **Clone the repo locally**
@@ -38,7 +38,7 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
    lectures/01_session-1/   any files - slides, demo code, notebooks …
    readings/01_session-1/   just drop the readings in - every hosted file here is listed
                             and linked for enrolled students to access automatically.
-                            Additionally, an optinal READINGS.md (or .txt/.bib) acts as an overlay, to add what a directly hosted file cannot express (a URL, pointers, page & chapter numbers to focus on, or metadata in clean citation format); it is published publicly on the deployed site (whereas the hosted files themselves are privately hosted and accessible to enrolled students and auditors only)
+                            Additionally, an optional READINGS.md (or .txt/.bib) acts as an overlay, to add what a directly hosted file cannot express (a URL, pointers, page & chapter numbers to focus on, or metadata in clean citation format); it is published publicly on the deployed site (whereas the hosted files themselves are privately hosted and accessible to enrolled students and auditors only)
    labs/01_session-1/       any files 
    SYLLABUS.md              optional - or any name you like (SYLLABUS.pdf, ...):
                             a root file releases by being named as the path
@@ -55,8 +55,11 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
    *NB: material with no `NN_` session folder (a root `SYLLABUS.md`, a flat `datasets/`) still releases, and appears on the cohort site's **All Materials** tab - the Lectures/Labs/Readings tabs are keyed on the session ordinal.*
 
-3. **Run Refresh actions** in the course org's `.github` Actions tab. 
-   - This updates the `session` dropdown and each section's checkbox with what you just pushed.
+3. **Run Refresh actions** in the course org's `.github` Actions tab - only after creating a
+   *new repo*, not after pushing content into one.
+   - The Release workflows have no session dropdown: you type the path (`course_source_path`),
+     so new sessions need no refresh. What Refresh actions repopulates is the repo dropdowns -
+     `course_source_repo`, the assignment list, the cohort list - and it runs itself nightly.
 
 ## Next
 
