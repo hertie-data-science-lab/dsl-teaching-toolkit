@@ -668,7 +668,7 @@ Self-contained - workflows and their Python implementation both live in this rep
     `classroom-config`, so non-owner instructors get write and course-admin gets admin);
     propagate the secret.
   - `seed` - place the workflows (central + run-from-repo) and the `refresh` CLI, whose nightly
-    run also loops every registered cohort (gone orgs pruned with a hint, archived ones left
+    run also loops every registered cohort (orgs missing two runs running pruned with a hint, archived ones left
     frozen) re-converging its welcome workflows, classroom-config system files and samples; it
     delegates to four modules and re-exports a few of their names (see `__all__`; new code
     imports from the owner):

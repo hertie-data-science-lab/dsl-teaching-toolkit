@@ -215,7 +215,13 @@ def org_exists(org: str) -> bool:
     from every nightly sync). Reading "could not tell" as "deleted" would do that on any
     transient failure, so it raises instead. `repo_exists` above is deliberately the
     opposite shape: it answers a cheap should-I-create question where a wrong guess costs
-    a retry, not a deletion."""
+    a retry, not a deletion.
+
+    Even the 404 is weaker evidence than it looks: GitHub answers 404, not 403, for an org
+    the TOKEN cannot see, so a bot removed from one org - or running on a rotated token
+    that was never re-invited - reads identically to a deleted org. False therefore means
+    "not visible to this token", and a caller that acts destructively on it needs more
+    than one look (see seed._live_cohorts, which requires two consecutive misses)."""
     code, out = gh("api", f"orgs/{org}", "--jq", ".login")
     if code == 0:
         return True

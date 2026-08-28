@@ -53,6 +53,7 @@ from .discovery import (
 from .profile_readme import update_profile_readme
 from .roster import CONFIG_REPO
 from .utils import (
+    get_file_content,
     gh,
     log,
     log_err,
@@ -130,6 +131,12 @@ RETIRED_WORKFLOWS = (".github/workflows/release-code.yml",)
 # from. See _write_heartbeat.
 HEARTBEAT_PATH = ".github/.last-refresh"
 
+# The cohort orgs the last refresh could not see, one per line, beside the heartbeat in the
+# course org's `.github` repo. One 404 is not proof an org is gone (see _live_cohorts), so
+# the verdict has to survive until the next nightly run - and a file in the repo the cron
+# already writes to is the only state this toolkit has that does.
+MISSES_PATH = ".github/.missing-cohorts"
+
 
 def _write_heartbeat(course_org: str) -> int:
     """Stamp today's date into the `.github` repo, so its schedules stay alive.
@@ -161,9 +168,34 @@ def _write_heartbeat(course_org: str) -> int:
     return 1
 
 
+def _read_misses(course_org: str) -> set[str]:
+    """The cohorts the PREVIOUS refresh could not see - see MISSES_PATH."""
+    content = get_file_content(course_org, ".github", MISSES_PATH)
+    return {
+        line.strip().casefold() for line in (content or "").splitlines() if line.strip()
+    }
+
+
+def _write_misses(course_org: str, misses: set[str], previous: set[str]) -> None:
+    """Record this run's misses, if they differ from the last run's.
+
+    Best effort: a failed write only costs a second grace period (the next miss reads as
+    a first one), which is the safe direction - never an unregistration."""
+    if {m.casefold() for m in misses} == previous:
+        return
+    put_file(
+        course_org,
+        ".github",
+        MISSES_PATH,
+        ("".join(f"{m}\n" for m in sorted(misses))).encode(),
+        "chore: record cohort orgs this refresh could not see",
+    )
+
+
 def _live_cohorts(course_org: str) -> list[str]:
     """The registry, converged: every registered cohort whose org still exists, with any
-    that no longer does dropped from the registry on the way past.
+    that has been missing for two consecutive refreshes dropped from the registry on the
+    way past.
 
     A cohort ORG DELETED after it was registered 404s on every write, which would red the
     nightly cron forever. Detect a genuinely-gone org by probing the ORG ITSELF: probing
@@ -176,11 +208,21 @@ def _live_cohorts(course_org: str) -> list[str]:
     every tool went on trying it. Removal is safe precisely because the org is proven gone
     - see `unregister_cohort` for why the ADD side stays manual.
 
+    TWO consecutive misses, though, not one. GitHub answers 404 - not 403 - for an org the
+    TOKEN cannot see, so a bot dropped from one org, or a rotated token never re-invited
+    to it, is indistinguishable from a deleted org: one bad night would have silently
+    unregistered a live cohort from every nightly sync, and nothing re-adds it. The first
+    miss is loud and costs the cohort only that night's refresh; MISSES_PATH carries the
+    verdict to the next run, and a cohort that answers again clears it.
+
     `org_exists` raises rather than guessing, and the safe reading of "could not tell" here
     is LIVE: the cohort is refreshed as usual and fails loudly on its own if something is
     really wrong, rather than being unregistered on a rate limit or a 502."""
-    live = []
-    for cohort in discover_cohorts(course_org):
+    registered = discover_cohorts(course_org)
+    previous = _read_misses(course_org)
+    live: list[str] = []
+    missing: set[str] = set()
+    for cohort in registered:
         try:
             gone = not org_exists(cohort)
         except RuntimeError as exc:
@@ -189,7 +231,15 @@ def _live_cohorts(course_org: str) -> list[str]:
         if not gone:
             live.append(cohort)
             continue
-        log(f"  [skip] {cohort} (org no longer exists)")
+        if cohort.casefold() not in previous:
+            missing.add(cohort)
+            log_err(
+                f"{cohort} did not answer - it is either deleted or no longer visible to "
+                f"this token. Left registered and skipped for tonight; if it is still "
+                f"missing at the next refresh it will be unregistered from {course_org}."
+            )
+            continue
+        log(f"  [skip] {cohort} (missing for a second consecutive refresh)")
         unregister_cohort(course_org, cohort)
         # The cohort's own `instructors-<tag>` team lives in the COURSE org, so deleting
         # the cohort org does not take it with it - and once unregistered, sync_faculty
@@ -200,6 +250,7 @@ def _live_cohorts(course_org: str) -> list[str]:
             f"  [note] {course_org}/instructors-{term_tag(cohort) or cohort} may now be "
             f"an orphaned team with push access - delete it by hand if so"
         )
+    _write_misses(course_org, missing, previous)
     return live
 
 

@@ -267,8 +267,10 @@ def unregister_cohort(course_org: str, cohort_org: str) -> bool:
     (Bootstrap cohort), because a cohort's absence can be intended - a faculty member may
     unregister one to stop its nightly syncs, and a refresh that re-added every org it
     discovered would silently override that. Removal cannot be intent in the same way:
-    the caller has already established that the ORG ITSELF is gone (see `seed.refresh`),
-    and nothing can be synced into an org that does not exist.
+    the caller has already established that the ORG ITSELF is gone (see
+    `seed._live_cohorts`, which needs the org to have missed two consecutive refreshes,
+    because a 404 alone only says the token cannot see it), and nothing can be synced
+    into an org that does not exist.
 
     Removing on anything weaker than that would be the worse bug. A cohort dropped from
     here is invisible to every nightly sync - membership, faculty, site, scheduler - which

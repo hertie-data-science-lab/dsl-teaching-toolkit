@@ -588,9 +588,14 @@ def _stub_refresh(
     pointer_failures=lambda org, course: 0,
     seed_failures=0,
     heartbeat_failures=0,
-) -> None:
+    prior_misses=(),
+) -> dict[str, str]:
     """Neutralise every network call seed.refresh makes; the write paths report a
-    failure count, which is what refresh's exit code is built from."""
+    failure count, which is what refresh's exit code is built from.
+
+    Returns the in-memory `.github` file store, seeded with `prior_misses` as the
+    previous night's miss ledger (MISSES_PATH) - so a test can drive the two-consecutive-
+    misses rule across runs without stubbing the rule itself."""
     monkeypatch.setattr(
         seed, "discover_cohorts", lambda org: ["Cohort-f2026", "Cohort-s2027"]
     )
@@ -611,6 +616,18 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "org_exists", lambda org: True)
     monkeypatch.setattr(seed, "unregister_cohort", lambda course, cohort: True)
     monkeypatch.setattr(seed, "repo_is_archived", lambda org, repo: False)
+    store = {seed.MISSES_PATH: "".join(f"{m}\n" for m in prior_misses)}
+    monkeypatch.setattr(
+        seed, "get_file_content", lambda org, repo, path: store.get(path)
+    )
+    monkeypatch.setattr(
+        seed,
+        "put_file",
+        lambda org, repo, path, content, msg: (
+            store.__setitem__(path, content.decode()) or True
+        ),
+    )
+    return store
 
 
 @pytest.mark.parametrize(
@@ -711,17 +728,15 @@ def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
     assert "refresh incomplete" not in out.err
 
 
-def test_refresh_prunes_a_deleted_cohort_org(monkeypatch, capsys):
-    # A cohort org DELETED after it was registered 404s on every write - which reds the
-    # nightly cron forever (distinct from an archived cohort, which still exists). It is
-    # skipped AND dropped from the registry: logging "prune it by hand" left the dead org
-    # registered, so every nightly sync in every tool went on trying it.
+def _missing_cohort_run(monkeypatch, prior_misses=()):
+    """One refresh in which Cohort-f2026 does not answer; returns what it did."""
     refreshed: list[str] = []
-    _stub_refresh(
+    store = _stub_refresh(
         monkeypatch,
         welcome_failures=lambda org: refreshed.append(org) or 0,
         sample_failures=lambda org: refreshed.append(org) or 0,
         system_failures=lambda org: refreshed.append(org) or 0,
+        prior_misses=prior_misses,
     )
     monkeypatch.setattr(seed, "org_exists", lambda org: org != "Cohort-f2026")
     pruned: list[tuple[str, str]] = []
@@ -730,15 +745,52 @@ def test_refresh_prunes_a_deleted_cohort_org(monkeypatch, capsys):
         "unregister_cohort",
         lambda course, cohort: pruned.append((course, cohort)),
     )
+    return seed.refresh("Course-Org"), refreshed, pruned, store
 
-    assert seed.refresh("Course-Org") == 0
+
+def test_refresh_prunes_a_cohort_missing_two_runs_running(monkeypatch, capsys):
+    # A cohort org DELETED after it was registered 404s on every write - which reds the
+    # nightly cron forever (distinct from an archived cohort, which still exists). It is
+    # skipped AND dropped from the registry: logging "prune it by hand" left the dead org
+    # registered, so every nightly sync in every tool went on trying it.
+    code, refreshed, pruned, store = _missing_cohort_run(
+        monkeypatch, prior_misses=["Cohort-f2026"]
+    )
+
+    assert code == 0
     assert refreshed == ["Cohort-s2027"] * 3  # deleted cohort skipped whole
     assert pruned == [
         ("Course-Org", "Cohort-f2026")
     ]  # and unregistered, not just noted
+    assert store[seed.MISSES_PATH] == ""  # the ledger is cleared once it has acted
     out = capsys.readouterr()
     assert "[skip] Cohort-f2026" in out.out
     assert "refresh incomplete" not in out.err
+
+
+def test_a_first_miss_never_unregisters_a_cohort(monkeypatch, capsys):
+    # GitHub answers 404, not 403, for an org the TOKEN cannot see, so a bot dropped from
+    # one org reads exactly like a deleted org. Acting on one look silently removed a LIVE
+    # cohort from every nightly sync, and nothing re-adds it.
+    code, refreshed, pruned, store = _missing_cohort_run(monkeypatch)
+
+    assert code == 0
+    assert pruned == []
+    assert refreshed == ["Cohort-s2027"] * 3  # skipped for tonight, not unregistered
+    assert store[seed.MISSES_PATH] == "Cohort-f2026\n"  # remembered for the next run
+    assert "Cohort-f2026 did not answer" in capsys.readouterr().err
+
+
+def test_a_cohort_that_answers_again_clears_its_miss(monkeypatch):
+    store = _stub_refresh(monkeypatch, prior_misses=["Cohort-f2026"])
+    pruned: list = []
+    monkeypatch.setattr(
+        seed, "unregister_cohort", lambda course, cohort: pruned.append(cohort)
+    )
+
+    assert seed.refresh("Course-Org") == 0
+    assert pruned == []
+    assert store[seed.MISSES_PATH] == ""
 
 
 def test_refresh_does_not_prune_on_a_transient_read_failure(monkeypatch):
