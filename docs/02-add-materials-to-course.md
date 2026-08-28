@@ -14,7 +14,7 @@ later copies session folders from here into a cohort. One repo per year: `course
 
 ## Steps
 
-Live example: [`example-course/course-org/course-materials-f2026/`](../example-course/course-org/course-materials-f2026).
+Live example: [`example-course/course-org/course-materials-f2026/`](../example-course/course-org/course-materials-f2026). Its [`SYLLABUS.md`](../example-course/course-org/course-materials-f2026/SYLLABUS.md) is the same file you receive as `SYLLABUS.md.sample` beside your own - the toolkit seeds it from there, so the two cannot drift.
 
 1. **Scaffold the repo.** 
    - Course org → `.github` → **Actions** →

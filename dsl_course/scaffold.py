@@ -36,7 +36,7 @@ from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
 from .log import log, log_err, log_ok, log_skip, log_step
 from .readings import READING_OVERLAY_FILE
 from .repos import create_repo, repo_exists, set_repo_topics
-from .welcome import TEMPLATES
+from .welcome import TEMPLATES, example_course_file
 from .workflows_place import push_content_workflows
 
 # The site repo's Pages build, seeded as its FIRST commit. `create_repo` does not auto-init,
@@ -98,76 +98,29 @@ _SYLLABUS_STUB = """\
      read one and see the other. -->
 """
 
-_SYLLABUS_SAMPLE = """\
-# Deep Learning (Demo) - E1234 - syllabus
-
+# The filled syllabus faculty copy from, seeded beside their own SYLLABUS.md as
+# SYLLABUS.md.sample. Its BODY is the worked example course's real syllabus
+# (example-course/course-org/course-materials-f2026/SYLLABUS.md) rather than a second copy
+# authored here - the same rule the classroom-config samples follow, so the syllabus the
+# docs link to as the live example is the one faculty actually receive. Only the ownership
+# notice is added here, at the write site: the example file is a course team's own
+# INSTRUCTOR-OWNED syllabus in its own org, and must not claim otherwise.
+_SYLLABUS_SAMPLE_NOTICE = """
 *Optional - a worked example to copy from; delete it if you do not want it.*
 
 <!-- SYSTEM-OWNED - do not edit, edits here are overwritten. A FILLED example, kept
      current by the toolkit: copy from it. Your own syllabus is SYLLABUS.md beside this
      file. This file is never released to students. -->
-
-## 1. General information
-
-| | |
-| --- | --- |
-| Instructor | Prof. Jane Doe |
-| E-mail | doe@hertie-school.org |
-| Office hours | Tuesdays 14:00-15:00, or by appointment |
-| Term | Fall 2026 (7 September - 18 December) |
-| Sessions | Tuesdays 10:00-12:00; lab Thursdays 14:00-16:00 |
-| Language of instruction | English |
-
-## 2. Course contents and learning objectives
-
-### Course contents
-
-An applied introduction to deep learning for public policy. We build up from linear
-models to neural networks, and spend as much time on what a model cannot tell you as on
-what it can.
-
-### Main learning objectives
-
-By the end of the course students can:
-
-- state what a supervised learning problem is, and recognise when a question is not one;
-- fit, tune and honestly evaluate a model, distinguishing training from test error;
-- read a published ML result critically, including its choice of baseline.
-
-### Target group
-
-MDS students in their second year. Prior ML experience required.
-
-### Prerequisites
-
-Machine Learning or equivalent; comfort writing a function and reading a data frame in
-Python or R.
-
-## 3. Grading and assignments
-
-| Component | Weight | Due |
-| --- | --- | --- |
-| Problem set 1 | 20% | 13 October |
-| Problem set 2 | 20% | 27 October |
-| Group project | 40% | 15 November |
-| Participation | 20% | continuous |
-
-Late work loses one grade step per 24 hours. Extensions are granted before the deadline,
-not after it.
-
-## 4. General readings
-
-No required textbook. Both of these are free and used throughout:
-
-- James, Witten, Hastie & Tibshirani, *An Introduction to Statistical Learning*.
-  <https://www.statlearning.com/>
-- Goodfellow, Bengio & Courville, *Deep Learning*. <https://www.deeplearningbook.org/>
-
-## 5. Course sessions and readings
-
-Published on the course website, generated from `classroom-config/schedule.yml` and each
-session's `readings/` folder.
 """
+
+EXAMPLE_SYLLABUS = "course-materials-f2026/SYLLABUS.md"
+
+
+def _syllabus_sample() -> str:
+    """The worked example syllabus with the sample's ownership notice under its title."""
+    title, _, body = example_course_file(EXAMPLE_SYLLABUS).partition("\n")
+    return f"{title}\n{_SYLLABUS_SAMPLE_NOTICE}{body}"
+
 
 # The seeded reading list, shaped like a Hertie syllabus's readings block so a course
 # team can paste theirs straight in: `Required Readings` / `Optional Readings` as
@@ -376,7 +329,7 @@ def materials_system_files(org: str, repo: str) -> dict[str, bytes]:
     from both the scaffold and the nightly refresh - one list rather than two that drift,
     the same contract as `refreshable_stubs` for the other half of the ownership split."""
     return {
-        SYLLABUS_SAMPLE_FILE: _SYLLABUS_SAMPLE.encode(),
+        SYLLABUS_SAMPLE_FILE: _syllabus_sample().encode(),
         "MAINTAINING.md": _maintaining(org, repo).encode(),
     }
 

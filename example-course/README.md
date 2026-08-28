@@ -50,6 +50,15 @@ example-course/
 > and links written as full URLs (a repo-relative `docs/...` link resolves to nothing once the
 > file has landed in a cohort org).
 
+> NB: **`course-org/` is documentation, with one exception.** Nothing here is pushed into a
+> course org - the docs link to it, faculty copy from it by hand. The exception is
+> `course-materials-f2026/SYLLABUS.md`, which is the source of the `SYLLABUS.md.sample` seeded
+> beside every materials repo's own syllabus (`scaffold._syllabus_sample`), so the syllabus the
+> docs call the live example is the one faculty actually receive. **The rule for both tiers:** a
+> file here gets a derived `.sample` when the toolkit seeds a scaffold/sample PAIR for it;
+> everything else is reference material only. Either way every file is parsed by the engine's own
+> readers in `tests/test_bootstrap_seeding.py`, so nothing here can go schema-stale in silence.
+
 > NB: **Assignment layout:** each `assignment-*/` splits into `main/` (→ the repo's `main` branch,
 > what students get) and `solution/` (→ the `solution` branch: model solution, `grading.yml`, and
 > the HIDDEN `tests/` that **Grade assignment** runs). Student repos never get `solution/`.
