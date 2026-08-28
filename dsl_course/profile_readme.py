@@ -32,6 +32,7 @@ from .discovery import (
 )
 from .utils import (
     converge_descriptions,
+    converge_faculty_access,
     get_file_content,
     load_yaml_config,
     log,
@@ -410,6 +411,7 @@ def update_profile_readme(
     # a team grant is set at repo creation and never revisited, so every repo kind added
     # since a grant existed keeps whatever it started with. In a cohort org that is the
     # whole of a non-owner instructor's access (default_repository_permission=none).
+    converge_faculty_access(org, repos, cohort=is_cohort)
     cohorts = None if is_cohort else discover_cohorts(org)
     body = render_profile_readme(org, org_name, course_name, repos, is_cohort, cohorts)
     if is_cohort:
