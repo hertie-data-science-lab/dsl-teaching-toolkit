@@ -1283,13 +1283,14 @@ def _lecture_entry(
         flags = "unreleased: true\n"
         links = _links_block([])
         where = ", ".join(_dest_link(cohort_org, d, live_repos) for d in row.dests)
-        # Bold: this is the one line on an unreleased row, and it sat in the same weight
-        # as the session description above it - so a reader scanning the Lectures tab read
-        # a paragraph before learning there was nothing to open.
+        # Italic, with the lead in bold: this is the one line on an unreleased row, and
+        # it sat in the same weight as the session description above it - so a reader
+        # scanning the Lectures tab read a paragraph before learning there was nothing to
+        # open. `.session-note` sets the gap above it (dsl-jekyll-theme's _layout.scss).
         body = (
-            f"**Materials for {title.lower()} are not yet released**"
+            f"_**Materials for {title.lower()} are not yet released**"
             + (f" - they will appear in {where} when they are" if where else "")
-            + "."
+            + "._"
         )
         # `subtitle` and `description` are deliberately KEPT here. They describe what the
         # session is about, which is known the day the plan is written; the body next to
