@@ -42,7 +42,7 @@ def test_main_writes_the_inventory_when_discovery_succeeds(
         ],
     )
     monkeypatch.setattr(list_orgs, "discover_cohort_orgs", list)
-    monkeypatch.setattr(list_orgs, "_registered_cohorts", lambda org: [])
+    monkeypatch.setattr(list_orgs, "discover_cohorts", lambda org: [])
     page = tmp_path / "inventory.md"
     monkeypatch.setattr("sys.argv", ["list_orgs", "--update-file", str(page)])
 
@@ -53,7 +53,7 @@ def test_main_writes_the_inventory_when_discovery_succeeds(
 
 def test_the_tree_nests_each_cohort_under_its_own_course_org(monkeypatch):
     monkeypatch.setattr(
-        list_orgs, "_registered_cohorts", lambda org: ["C1-f2025", "C1-f2026"]
+        list_orgs, "discover_cohorts", lambda org: ["C1-f2025", "C1-f2026"]
     )
     orgs = [
         {
@@ -91,7 +91,7 @@ def test_a_live_but_unregistered_cohort_is_marked_on_the_tree(monkeypatch):
     # It exists and is tagged, but its course's registry does not list it - so every
     # nightly sync fans out past it and does NOTHING, the one failure mode that reports
     # itself nowhere else. Marked, never auto-registered: absence can be deliberate.
-    monkeypatch.setattr(list_orgs, "_registered_cohorts", lambda org: ["C1-f2025"])
+    monkeypatch.setattr(list_orgs, "discover_cohorts", lambda org: ["C1-f2025"])
     out = list_orgs.render_tree(
         [
             {
@@ -114,7 +114,7 @@ def test_a_live_but_unregistered_cohort_is_marked_on_the_tree(monkeypatch):
 def test_a_cohort_pointing_at_no_discovered_course_org_is_listed_as_orphaned(
     monkeypatch,
 ):
-    monkeypatch.setattr(list_orgs, "_registered_cohorts", lambda org: [])
+    monkeypatch.setattr(list_orgs, "discover_cohorts", lambda org: [])
     # Its `course:` pointer is dangling, or that org lost its dsl-course-hub topic. It
     # nests nowhere, and dropping it silently is how a broken pointer stays broken.
     out = list_orgs.render_tree(

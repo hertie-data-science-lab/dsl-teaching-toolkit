@@ -208,15 +208,6 @@ def unreadable(orgs: list[dict], cohorts: list[dict]) -> list[str]:
     )
 
 
-def _registered_cohorts(course_org: str) -> list[str]:
-    """What the course org's registry claims, for comparison against what GitHub shows.
-
-    Read through discovery so there is ONE parser for that file - the registry raises on a
-    malformed one, and this page would rather fail than render a course as running nothing
-    because its registry could not be read."""
-    return discover_cohorts(course_org)
-
-
 def render_tree(orgs: list[dict], cohorts: list[dict]) -> str:
     """The estate as it is actually shaped: each course org, with the cohort orgs that
     point at it nested underneath.
@@ -253,7 +244,10 @@ def render_tree(orgs: list[dict], cohorts: list[dict]) -> str:
                 else f" - toolkit `{o['central_ref']}`"
             )
         )
-        registered = set(_registered_cohorts(o["org"]))
+        # Straight through discovery, so there is ONE parser for that file: it raises on
+        # a malformed registry, and this page would rather fail than render a course as
+        # running nothing because its registry could not be read.
+        registered = set(discover_cohorts(o["org"]))
         mine = by_course.pop(o["org"], [])
         lines += [
             f"    - [{c['org']}]({c['url']})"
