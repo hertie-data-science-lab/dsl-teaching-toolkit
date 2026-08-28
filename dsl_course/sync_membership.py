@@ -58,15 +58,17 @@ def sync(
     # registry is the authority on which cohorts this course org owns, so a name that is
     # not in it is refused rather than acted on. Compared casefold: GitHub org names are
     # case-insensitive, and the registry's spelling need not match the dispatch's.
-    if (
-        cohort_org
-        and all_registered
-        and cohort_org.casefold() not in {c.casefold() for c in all_registered}
-    ):
+    # An EMPTY registry authorises nothing. It used to short-circuit the whole check, so
+    # a course org that had never registered a cohort accepted any org name a dispatch
+    # cared to name - and then reconciled and PRUNED that org's roster and teams.
+    if cohort_org and cohort_org.casefold() not in {
+        c.casefold() for c in all_registered
+    }:
+        listed = ", ".join(sorted(all_registered)) or "nothing"
         log_err(
             f"{cohort_org} is not registered under {course_org} "
-            f"({seed.COHORTS_PATH} lists {', '.join(sorted(all_registered))}) - refusing "
-            f"to reconcile it. Register the cohort first if this is genuinely its course org."
+            f"({seed.COHORTS_PATH} lists {listed}) - refusing to reconcile it. Register "
+            f"the cohort first if this is genuinely its course org."
         )
         return 1
     errors = sync_faculty.sync_course_admins(

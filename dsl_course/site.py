@@ -2670,14 +2670,15 @@ def main() -> int:
         # scheduler, the --all-cohorts loop above) already passes a cohort it read FROM the
         # registry - only the CLI takes one from outside. Casefold: GitHub org names are
         # case-insensitive.
+        # An EMPTY registry authorises nothing. It used to short-circuit the whole check,
+        # so a course org that had never registered a cohort - or whose registry failed to
+        # parse to anything - accepted any org name a dispatch cared to name.
         registered = seed.discover_cohorts(args.course_org)
-        if registered and args.cohort_org.casefold() not in {
-            c.casefold() for c in registered
-        }:
+        if args.cohort_org.casefold() not in {c.casefold() for c in registered}:
+            listed = ", ".join(sorted(registered)) or "nothing"
             log_err(
                 f"{args.cohort_org} is not registered under {args.course_org} "
-                f"({seed.COHORTS_PATH} lists {', '.join(sorted(registered))}) - refusing "
-                f"to sync its site."
+                f"({seed.COHORTS_PATH} lists {listed}) - refusing to sync its site."
             )
             return 1
         return sync_site(args.course_org, args.cohort_org)
