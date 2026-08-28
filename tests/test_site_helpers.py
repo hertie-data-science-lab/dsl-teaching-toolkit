@@ -755,11 +755,14 @@ def test_every_page_states_its_own_access_rule():
     cohort = site._theme_pages(cohort=True)
     # Each page's gate is its own sentence, because they genuinely differ: readings are a
     # public citation list over gated files, the rest are gated outright.
-    assert "accessible to enrolled students." in cohort["lectures.md"]
-    assert "only accessible to enrolled students." in cohort["labs.md"]
-    assert "Citation lists are public" in cohort["readings.md"]
+    # auditors read released materials but get no assignments, so the three materials
+    # pages name them and the assignments page does not
+    assert "enrolled students & auditors." in cohort["lectures.md"]
+    assert "enrolled students & auditors." in cohort["labs.md"]
+    assert "enrolled students & auditors." in cohort["readings.md"]
     assert "only accessible to enrolled students/auditors." in cohort["materials.md"]
-    assert "Assignments are only accessible" in cohort["assignments.md"]
+    assert "only accessible to enrolled students." in cohort["assignments.md"]
+    assert "auditors" not in cohort["assignments.md"]
     # The public open-courseware site publishes the same files on purpose, so it claims no
     # gate anywhere.
     for page in site._theme_pages(cohort=False).values():
