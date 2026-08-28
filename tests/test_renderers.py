@@ -314,11 +314,13 @@ def test_both_release_buttons_take_exactly_a_deploy_entrys_fields(rendered):
     assert inp["cohort_org"]["required"] is True
     assert inp["course_source_repo"]["required"] is True
     assert inp["course_source_path"]["required"] is True
-    # Naming the destination repo is forced rather than defaulted - a release that lands
-    # in an unnoticed second materials repo is invisible to the cohort. (The schedule's
-    # `deploy:` may still omit it; deploy.main's `materials` fallback covers that path.)
+    # The destination repo carries the SAME default an omitted `cohort_dest_repo:` takes in
+    # schedule.yml, so the button and the plan cannot disagree about where a release lands.
+    # Pre-filled rather than required-and-blank: `materials` is what the system supplies
+    # either way, so showing it teaches the default, and it spares faculty hand-typing the
+    # word on every release (which was the typo risk the blank box was meant to prevent).
+    assert inp["cohort_dest_repo"]["default"] == "materials"
     assert inp["cohort_dest_repo"]["required"] is True
-    assert "default" not in inp["cohort_dest_repo"]
     # cohort_dest_path is the one optional box, and ships EMPTY - a `default:` on a
     # free-text field is submitted verbatim, so pre-filling puts words in the faculty
     # member's mouth. Its fallback is stated on the box instead, or it is invisible.
