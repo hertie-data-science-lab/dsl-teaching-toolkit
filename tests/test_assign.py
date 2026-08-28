@@ -706,3 +706,59 @@ def test_the_granted_team_slug_matches_the_one_sync_teams_reconciles(
     assert sync_teams.desired_teams({"regression": {"team-1": ["ada-l"]}}) == {
         "regression-team-1": {"ada-l"}
     }
+
+
+# --------------- a failed solution push outranks every other fault (the marker depends on it)
+
+
+@pytest.mark.parametrize(
+    "broken",
+    ["grant_team_repo_access", "add_collaborator"],
+)
+def test_a_failed_solution_wins_over_a_failed_access_grant(
+    tmp_path, monkeypatch, broken
+):
+    # provision_all writes the FIRE-ONCE solution marker off these statuses, so a repo that
+    # reported `failed-no-access` / `failed-no-collaborator` had its missing solution
+    # forgotten - and the marker guaranteed no later tick would ever retry it.
+    monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
+    monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
+    monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
+    monkeypatch.setattr(assign, broken, lambda *a, **k: False)
+    team = "t-a" if broken == "grant_team_repo_access" else None
+    status = assign.provision_one(
+        "C", "t", "COHORT", "r", ["ada"], "assignment-1", sol_dir=tmp_path, team=team
+    )
+    assert status == "failed-solution"
+
+
+def test_a_failed_solution_wins_over_a_team_missing_members(tmp_path, monkeypatch):
+    monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
+    monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
+    monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: False)
+    status = assign.provision_one(
+        "C", "t", "COHORT", "r", ["ada"], "assignment-1", sol_dir=tmp_path, team="t-a"
+    )
+    assert status == "failed-solution"
+
+
+def test_a_group_whose_members_were_all_rejected_is_a_failed_unit(monkeypatch, capsys):
+    # Every handle in the teams.csv row failed the roster allowlist, so the team is empty
+    # and the repo is granted to nobody. Reported "ok", that left a repo no student could
+    # open looking like a successful handout.
+    monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: False)
+    monkeypatch.setattr(assign, "generate_from_template", lambda **k: True)
+    monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
+    monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
+    status = assign.provision_one(
+        "C", "t", "COHORT", "a1-team-1", [], "assignment-1", team="assignment-1-team-1"
+    )
+    assert status == "failed-no-members"
+    assert "nobody can open a1-team-1" in capsys.readouterr().err

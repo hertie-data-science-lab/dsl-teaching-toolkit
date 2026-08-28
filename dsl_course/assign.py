@@ -290,14 +290,30 @@ def provision_one(
         # A team that couldn't take all its members grants access to nobody missing, so
         # its result counts towards this repo's status rather than being discarded.
         team_ok = sync_teams.ensure_team(cohort_org, team, set(handles), prune=False)
-        if not grant_team_repo_access(cohort_org, team, repo, "maintain"):
-            return "failed-no-access"
-        log_verbose(f"  [ok]   + team {team} (maintain)")
+        access_ok = grant_team_repo_access(cohort_org, team, repo, "maintain")
+        if access_ok:
+            log_verbose(f"  [ok]   + team {team} (maintain)")
         if not team_ok:
             log_err(f"  ! team {team} is missing member(s) - they cannot see {repo}")
-            return "failed-team-members"
+        if not handles:
+            # Every member of this team was rejected by the roster allowlist upstream, so
+            # the team is empty and the repo is granted to nobody. The individual arm calls
+            # that failed-no-collaborator; a group of nobody is the same handout failure,
+            # and reporting "ok" left a repo no student could open looking successful.
+            log_err(f"  ! team {team} has no vetted members - nobody can open {repo}")
+        # A failed solution push WINS over every other fault here. provision_all writes the
+        # FIRE-ONCE solution marker off these statuses, so a repo that reported any other
+        # failure had its missing solution forgotten - and the marker guaranteed no later
+        # tick would retry. Every other fault below is persistent and unrelated to the
+        # push; only this one must reach `failed-solution`.
         if solution_failed:
             return "failed-solution"
+        if not access_ok:
+            return "failed-no-access"
+        if not team_ok:
+            return "failed-team-members"
+        if not handles:
+            return "failed-no-members"
         return "skipped" if existed else "ok"
 
     # Ordering hazard (individual path): granting a repo collaborator BEFORE the student has
@@ -313,12 +329,14 @@ def provision_one(
             added += 1
         else:
             log_err(f"  ! could not add @{handle} (not a real account?)")
+    # Same precedence as the group arm above: a failed solution push wins, because it is
+    # the only fault the fire-once marker must not be written over.
+    if solution_failed:
+        return "failed-solution"
     if added == 0:
         # A repo nobody can open is a failed handout - "failed" is what the exit code
         # keys on (see provision_all), so the run goes red rather than quietly ok.
         return "failed-no-collaborator"
-    if solution_failed:
-        return "failed-solution"
     return "skipped" if existed else "ok"
 
 
