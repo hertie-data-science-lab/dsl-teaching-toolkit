@@ -4,18 +4,19 @@ For whoever maintains **this repo**. Everything here is a constraint the code de
 only its comments record. If you run a course rather than the toolkit, you want
 [the runbooks](../README.md) instead.
 
-## A merge to main is a live deploy
+## A merge to main is not a deploy
 
-Every seeded workflow, in every bootstrapped org, checks this repo out at `central.CENTRAL_REF`
-and runs the engine from there. So:
+Every seeded workflow, in every bootstrapped org, checks this repo out at the ref **that org**
+runs - `central_ref:` in its course org's `.github/dsl-course.yml`, defaulting to
+`central.CENTRAL_REF` (`release`). Landing on `main` therefore changes nothing anywhere.
 
-- **engine changes are instant** - the next cron tick in every org runs your commit;
-- **workflow *shapes*** (inputs, jobs, crons) are re-rendered into each org by its nightly
-  **Refresh actions**, so they converge within 24h.
-
-There is no staging. **The process is a `release` branch:** `main` is where work lands, `release`
-is what orgs run, and promoting is a deliberate fast-forward of `release`. Rollback is
-`git revert` on `release` - never a force-push, which every org would pick up mid-flight.
+Deploying is promoting: `main` -> `staging` (the demo org) -> `release` (everything else), via
+the **Promote** workflow, which can only fast-forward a tier along main's history. Engine
+changes are then live on the next press in each org; workflow *shapes* (inputs, jobs, crons)
+are re-rendered by each org's nightly **Refresh actions**, which Promote also dispatches so
+they land at once. Rollback is a `git revert` on `main`, promoted forward - never a force-push.
+Tiers, soak checklist and the full rollback procedure:
+[central-admin.md](../../docs-admin-arch/central-admin.md#deploying-the-toolkit).
 
 ## Doc filenames are a public API
 

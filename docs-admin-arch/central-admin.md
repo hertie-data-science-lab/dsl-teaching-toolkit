@@ -1,6 +1,7 @@
 # Central admin - the DSL org
 
-Who may provision course orgs, how to rotate the bot's token, and where to see which orgs exist.
+Who may provision course orgs, how to rotate the bot's token, how a toolkit change reaches
+live orgs, and where to see which orgs exist.
 Per-course access: [access-reference.md](../docs/reference/access-reference.md). PAT scopes and the token model:
 [admin-setup.md](admin-setup.md).
 
@@ -93,6 +94,93 @@ credential** - a one-time central setup, not per course. `dry_run` previews need
 Set the secrets once; they must reach each course org's `.github` repo (where the send
 workflows run). **Status: not yet configured in any DSL org** - a request to Hertie IT for the
 Entra app registration is pending.
+
+## Deploying the toolkit
+
+Every seeded workflow in every org checks this repo out at run time, so whatever sits on the
+ref an org runs **is** that org's engine. Three tiers, three branches:
+
+| Tier | Branch | Runs on |
+|---|---|---|
+| dev | `main` | nobody - CI only. PRs squash-merge here exactly as before |
+| staging | `staging` | the demo course org and its cohorts |
+| release | `release` | every real org, and the default for one that declares nothing |
+
+`staging` and `release` never carry commits of their own: both are always fast-forwards of
+`main`. An org's tier is `central_ref:` in its **course** org's `.github/dsl-course.yml`;
+cohorts inherit it. The [inventory page](../bootstrapped-orgs-inventory.md) shows it per
+course org, and **Check cohort setup** shows it per cohort.
+
+Neither tier branch exists until someone makes it. `central.CENTRAL_REF` is already
+`release`, so **`release` must exist before that value reaches any org** or every seeded
+workflow fails at checkout: `git push origin main:release`, and the same for `staging`.
+(A Promote run creates a missing tier branch too.)
+
+### Promote
+
+Run **Promote** (Actions tab of this repo) with `to: staging`, then, once it has soaked,
+`to: release`. `ref:` defaults to `main` for staging and `staging` for release; name a
+commit to promote only that one.
+
+Promote refuses anything that is not both on `main`'s history and a descendant of the tier's
+current tip, so it can only ever move a tier forward - it cannot rewrite one, and cannot ship
+what `main` has not seen. It then dispatches **Refresh actions** on every course org at that
+tier, so they converge in minutes rather than at the next 05:27 cron.
+
+Anyone with write on this repo can run it. Nothing else should push to either tier branch.
+
+### Soak on staging
+
+After promoting to `staging`, check the demo org (`hertie-dsl-demo-course-e1234` and
+`hertie-dsl-demo-f2026`) before promoting on. A day covers one nightly refresh:
+
+- [ ] **Refresh actions** green, both the Promote-triggered run and the next nightly cron
+- [ ] one **Scheduled release** tick green (hourly; a dry run is enough if nothing is due)
+- [ ] a **Join** issue with a deliberately wrong code is rejected as usual
+- [ ] **Send enrolment codes** with `dry_run` previews codes and emails and sends nothing
+- [ ] no failure issue opened in `hertie-dsl-demo-course-e1234/.github`
+
+### Rollback
+
+**The rule: revert on `main`, then promote the revert.**
+
+1. `git revert <the bad commit>` on a branch, PR it, squash-merge to `main` as usual.
+2. Run **Promote** with `to: release` and `ref: <the revert commit on main>` - promoting the
+   branch tip would also ship everything else `main` has gathered since. Repeat for `staging`.
+
+Every tier stays a fast-forward of `main`, so nothing is ever force-pushed and no org is
+handed a history CI never ran. Promote cannot move a tier backwards by design: the only way
+to undo something is a commit that says so.
+
+**An org that already picked the bad build up** has nothing to undo - orgs keep no copy of
+the engine, they check it out per run, so the next run uses the reverted code. The exception
+is rendered workflow *shape* (inputs, jobs, crons), which is frozen in the org until its next
+**Refresh actions**; Promote dispatches that, and any faculty member can re-run it by hand.
+
+**Faster than a revert**, if one course is affected and a PR would take too long: set that
+course org's `central_ref:` to the last known-good commit SHA and run **Refresh actions**.
+One file edit, no review, and it moves only that course.
+
+### Branch protection (set by hand)
+
+On both `staging` and `release`:
+
+- **Require linear history** - a tier is only ever a fast-forward.
+- **Restrict who can push** to the GitHub Actions app: Promote's `GITHUB_TOKEN` should be the
+  only thing that moves them.
+- **Block force pushes** and **block deletions**. Promote passes `--force-with-lease` purely
+  as a concurrency guard; every push it makes is a fast-forward, so the setting never blocks it.
+
+`main` keeps what it has: PR only, `pytest` required.
+
+### Putting an org on a tier
+
+`central_ref:` is documented (commented out) in every course org's `.github/dsl-course.yml`.
+To put the demo course on staging, set **`central_ref: staging`** in
+`hertie-dsl-demo-course-e1234/.github/dsl-course.yml` and run **Refresh actions** in that org;
+its cohorts follow. Valid values are `main`, `staging`, `release`, or a full 40-character
+commit SHA - anything else is refused in the log and the org falls back to `release`. A new
+org can be bootstrapped straight onto a tier with `bootstrap_course --central-ref`.
 
 ## What orgs exist
 

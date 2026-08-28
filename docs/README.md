@@ -82,7 +82,9 @@ Numbered in reading order - **course-level** (01-03) before **cohort-level** (04
 
 For a one-page summary of **every workflow**, see [`actions-reference.md`](reference/actions-reference.md);
 for who may run them, [`access-reference.md`](reference/access-reference.md). If you maintain the
-toolkit itself rather than a course, start at [`maintainers.md`](reference/maintainers.md).
+toolkit itself rather than a course, start at [`maintainers.md`](reference/maintainers.md); to
+get a toolkit change out to live orgs, see
+[Deploying the toolkit](../docs-admin-arch/central-admin.md#deploying-the-toolkit).
 
 ## Three things that look cosmetic and are not
 

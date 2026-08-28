@@ -437,15 +437,19 @@ non-bot commit sits on it - a reviewer's correction is never clobbered.
 ## Convergence - the daily self-refresh
 
 Seeded workflow YAML is frozen in each org at seed time, while the engine it calls is always
-checked out from central `release` (`central.CENTRAL_REF`). A merge to `main` changes nothing
-in any live course: promoting it to `release` is a deliberate second act, and a rollback is a
-revert on `release`, which every org picks up on its next run with no re-seed. Engine changes
-therefore land on the first press after a promotion; *workflow shape* changes land because
-every course org re-seeds itself nightly.
+checked out from central at **that org's** ref - `central_ref:` in its course org's
+`.github/dsl-course.yml`, defaulting to `central.CENTRAL_REF` (`release`); cohorts inherit
+their course org's. A merge to `main` changes nothing in any live course: promoting it to
+`staging` (the demo org) and then `release` is a deliberate second act, and a rollback is a
+revert on `main` promoted forward, which every org picks up on its next run with no re-seed.
+Engine changes therefore land on the first press after a promotion; *workflow shape* changes
+land because every course org re-seeds itself nightly - and the Promote workflow dispatches
+that refresh rather than leaving it to the cron. See
+[central-admin.md](central-admin.md#deploying-the-toolkit).
 
 ```mermaid
 flowchart LR
-  c["`central release
+  c["`central, at the org's central_ref
 dsl-teaching-toolkit`"]
   c -->|"checked out by every run"| eng["engine - current on every press"]
   c -.->|"`Refresh actions
