@@ -283,7 +283,7 @@ RETIRED_STUBS = ("readings/01_session-1/reading.md",)
 
 def refreshable_stubs(tag: str) -> dict[str, bytes]:
     """The seeded files that are stubs rather than skeletons - improvable later, while they
-    still carry the mark (see `utils.seed_or_refresh_stub`).
+    still carry the mark (see `utils.refresh_stubs`).
 
     Named here, where they are written, and read by `seed.refresh` so the nightly
     convergence reaches repos scaffolded before a stub improved. One list rather than two
@@ -486,7 +486,7 @@ def scaffold_materials(org: str, tag: str) -> int:
     # USER-owned skeletons: create-only, so a re-run against a repo faculty have since
     # authored must not revert their README/SYLLABUS to the stub or resurrect a deleted
     # starter directory. A failed seed (an absent file whose write failed) reds the scaffold.
-    # Stubs that REFRESH while they are still ours (see utils.seed_or_refresh_stub): the
+    # Stubs that REFRESH while they are still ours (see utils.refresh_stubs): the
     # improvement then reaches the courses already running, not just the next repo
     # scaffolded. Written before the create-only set below so a re-run's log reads in the
     # order the rules apply.

@@ -292,7 +292,7 @@ def _push_workflows(
 def seed_github_workflows(course_org: str) -> int:
     """Seed/refresh the org-level workflows into the course org's .github repo: the
     CENTRAL Release materials (course-source-repo dropdown), Release assignment, plus Sync
-    enrolment / Bootstrap cohort / Refresh.
+    membership / Bootstrap cohort / Refresh.
 
     All of them land as ONE commit (and the retired ones go in the same commit). They are
     rendered from one set of inputs by shared helpers, so in practice they change together:
@@ -409,7 +409,7 @@ def _refresh_stubs(course_org: str, repo: str) -> int:
     scaffolded a month ago kept whatever the toolkit first shipped and every later
     improvement reached new repos only. They now carry a mark, so a stub can be refreshed
     while it is still ours and is never touched once faculty write over it
-    (`utils.seed_or_refresh_stub`).
+    (`utils.refresh_stubs`).
 
     `create=False` is the whole reason this is safe to run over EVERY content repo:
     `discover_content_repos` returns the code and dataset repos too, and seeding a syllabus
@@ -456,7 +456,7 @@ def refresh(course_org: str) -> int:
     from . import scaffold
 
     # Converge the registry FIRST, so `cohorts` is the live list for everything below.
-    # Seventeen org-level workflow dropdowns, the run-from-repo workflows in every content
+    # Every org-level workflow dropdown, the run-from-repo workflows in every content
     # repo and the profile README's cohort list are all rendered from it further down;
     # pruning after them wrote the dead org into all of them one last time and self-healed
     # a night later, which is the same "converges eventually, if someone waits" the prune

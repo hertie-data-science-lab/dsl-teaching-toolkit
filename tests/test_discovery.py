@@ -279,6 +279,16 @@ def test_read_cohorts_tolerates_a_bare_list_registry(monkeypatch):
     assert discovery.discover_cohorts("Course") == ["Course-f2025", "Course-f2026"]
 
 
+def test_read_cohorts_names_the_file_when_the_yaml_does_not_parse(monkeypatch):
+    # The bare safe_load surfaced a raw PyYAML traceback from wherever the registry
+    # happened to be read, naming "<unicode string>" rather than the file to fix.
+    monkeypatch.setattr(
+        discovery, "get_file_content", _registry("cohorts: [unclosed\n")
+    )
+    with pytest.raises(RuntimeError, match="malformed cohort registry in Course"):
+        discovery._read_cohorts("Course")
+
+
 def test_read_cohorts_raises_on_a_malformed_registry_shape(monkeypatch):
     # A malformed shape used to be flattened to [], which renders every dropdown as
     # "(none-yet)" and lets a whole-course sync go quietly green. Now it raises.

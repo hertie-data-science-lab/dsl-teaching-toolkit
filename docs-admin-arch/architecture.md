@@ -532,7 +532,7 @@ READMEs.
 - **course_source_repo** (central only) / **assignment** - the course org's content / `assignment-*` repos.
 - Every list-taking dropdown **pre-selects the newest term year** rather than letting GitHub
   select the alphabetically-first option, which used to pre-select last year's cohort. The one
-  deliberate exception is Sync enrolment, pinned to a `(faculty only)` placeholder so acting on
+  deliberate exception is Sync membership, pinned to a `(faculty only)` placeholder so acting on
   membership stays opt-in.
 - **course_source_path / cohort_dest_path** - free text. Both accept a comma-separated list,
   paired by index; a blank `cohort_dest_path` mirrors every `course_source_path`, and a count

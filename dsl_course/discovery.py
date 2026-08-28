@@ -169,14 +169,22 @@ def _read_cohorts(course_org: str) -> list[str]:
 
     A genuinely absent or empty registry is [] (a valid brand-new course org). The
     machine-written form is a `{cohorts: [...]}` mapping, but the file is human-editable
-    and a bare top-level list has always been accepted too. Anything else - a scalar, or
-    a cohort list that isn't all strings - is malformed, logged and raised, never silently
-    flattened to [] (which downstream renders every dropdown as "(none-yet)" and lets a
-    whole-course sync go quietly green)."""
+    and a bare top-level list has always been accepted too. Anything else - YAML that does
+    not parse, a scalar, or a cohort list that isn't all strings - is malformed, logged and
+    raised, never silently flattened to [] (which downstream renders every dropdown as
+    "(none-yet)" and lets a whole-course sync go quietly green)."""
     content = get_file_content(course_org, ".github", COHORTS_PATH)
     if not content:
         return []
-    data = yaml.safe_load(content)
+    try:
+        data = yaml.safe_load(content)
+    except yaml.YAMLError as exc:
+        # Unparseable is malformed, exactly like the shape check below - and the bare
+        # safe_load surfaced it as a raw PyYAML traceback from wherever the registry
+        # happened to be read, naming a "<unicode string>" rather than the file.
+        msg = f"malformed cohort registry in {course_org}/.github/{COHORTS_PATH}: {exc}"
+        log_err(msg)
+        raise RuntimeError(msg) from exc
     cohorts = data.get("cohorts", []) if isinstance(data, dict) else data
     if not isinstance(cohorts, list) or not all(isinstance(c, str) for c in cohorts):
         msg = (

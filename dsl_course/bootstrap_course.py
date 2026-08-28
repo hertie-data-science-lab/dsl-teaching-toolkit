@@ -288,7 +288,9 @@ def add_course_admins(org: str, handles: str) -> int:
     """Add this course's admin(s) to its `course-admin` team (per-course, so nobody is
     added to a course they don't run). `handles` is a comma/space-separated list of GitHub
     logins; each gets an org invite they accept once (membership shows `pending` until
-    then). Instructors/TAs are added later to the `instructors` team via the Teams page.
+    then). Instructors/TAs are declared per cohort in that cohort's
+    classroom-config/people.yml, which Sync membership reconciles into the `instructors`
+    team - never added on the Teams page, which the next sync reverts.
 
     This is a direct, immediate team invite ONLY - it does not persist anywhere. On the
     course org, `_course_metadata` also seeds these same handles into
@@ -742,7 +744,8 @@ def main() -> int:
         "--course",
         default=None,
         help="With --cohort: the parent course org. Registers this cohort in that "
-        "course's .github/dsl-course.yml so it appears in the faculty & instructors dropdowns.",
+        "course's .github/cohort-courses-pages.yml so it appears in the faculty & "
+        "instructors dropdowns.",
     )
     parser.add_argument(
         "--propagate-secret",
@@ -756,8 +759,9 @@ def main() -> int:
         help="GitHub handle(s) of this course's admin(s), comma/space-separated. Added to "
         "the course-admin team (admin on .github) so they can run the workflows - and, on "
         "a course-org bootstrap, declared in dsl-course.yml's SSOT so a later sync doesn't "
-        "revert it. Each accepts an org invite once. Add instructors/TAs later via the "
-        "org's Teams page.",
+        "revert it. Each accepts an org invite once. Instructors/TAs are declared per "
+        "cohort, in that cohort's classroom-config/people.yml (docs/05) - never on the "
+        "Teams page, which Sync membership reconciles away.",
     )
     args = parser.parse_args()
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
@@ -920,7 +924,7 @@ def _run(args: argparse.Namespace) -> int:
                 secret_failures += 1
             elif not set_org_secret(args.org, "DSL_BOT_TOKEN", token):
                 secret_failures += 1
-        except (OSError, FileNotFoundError) as e:
+        except OSError as e:
             log_err(f"could not read secret file: {e}")
             return 1
     elif args.propagate_secret:

@@ -3,10 +3,10 @@
 The same idempotent release functions as the manual workflows, fired automatically from the
 cohort's own `classroom-config/schedule.yml` `releases:` plan (see
 `dsl_course.schedule`). Each labelled release carries a `when` datetime and a mix of
-actions - `deploy` (copy a source path from a COURSE-org repo into a COHORT-org repo),
-`assignment` (provision one student repo per enrolled student from a template), and
-`grade` (run the faculty-side autograder). An hourly cron fires every release whose
-`when` has arrived. Because every release is idempotent, re-runs are no-ops and there is
+actions - `deploy` (copy a source path from a COURSE-org repo into a COHORT-org repo) and
+`assignment` (provision one student repo per enrolled student from a template). Grading is
+NOT one of them: it is driven off each assignment's own deadline, below, not off a
+`releases:` entry. An hourly cron fires every release whose `when` has arrived. Because every release is idempotent, re-runs are no-ops and there is
 no "already released" state to track. Grading is the exception - see AUTOGRADE below.
 
 Assignment handouts are declared with the rest of the assignment's lifecycle -
