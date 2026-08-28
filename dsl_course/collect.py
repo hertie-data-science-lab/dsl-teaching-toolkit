@@ -333,11 +333,18 @@ def _sanitised_env() -> dict:
 
 
 def submission_targets(
-    cohort_org: str, slug: str, is_group: bool
+    cohort_org: str, slug: str, is_group: bool, teams_key: str | None = None
 ) -> list[tuple[str, str, list[str]]]:
     """The submission units for `slug` as (repo, key, members): one per team for a group
     assignment, one per onboarded student otherwise. Empty - with the reason logged - when
     there is nothing to grade.
+
+    `slug` is the cohort-side NAME (`schedule.cohort_name`), which is what every repo here
+    is named after. `teams_key` is the SCHEDULE KEY, which is what teams.csv is keyed on -
+    the Join-team form validates the assignment against `assignments:` in schedule.yml and
+    writes that key. The two differ whenever `cohort_dest_repo` is set, and looking teams
+    up by the name then found none, so a group assignment silently had no targets at all.
+    Defaults to `slug` for the (usual) case where they are the same.
 
     `is_group` is decided upstream by `resolve_is_group` (force -> schedule -> grading.yml)
     and passed in; it is NEVER inferred from teams.csv here. teams.csv is student-writable (a
@@ -345,9 +352,10 @@ def submission_targets(
     decide the assignment's KIND would let a student turn an individual assignment into a group
     one - it is read only to enumerate a KNOWN-group assignment's teams."""
     if is_group:
-        groups = teams.teams_for(teams.load(cohort_org), slug)
+        key = teams_key or slug
+        groups = teams.teams_for(teams.load(cohort_org), key)
         if not groups:
-            log_err(f"no teams for `{slug}` in {cohort_org}/{CONFIG_REPO}/teams.csv.")
+            log_err(f"no teams for `{key}` in {cohort_org}/{CONFIG_REPO}/teams.csv.")
             return []
         return [
             (f"{slug}-{team}", team, members)
@@ -517,7 +525,12 @@ def load_snapshots(cohort_org: str, slug: str) -> dict[str, str] | None:
 
 
 def snapshot_assignment(
-    cohort_org: str, slug: str, deadline: str, *, is_group: bool
+    cohort_org: str,
+    slug: str,
+    deadline: str,
+    *,
+    is_group: bool,
+    teams_key: str | None = None,
 ) -> bool:
     """Freeze, at a server-chosen moment, the commit each of `slug`'s submission repos will
     be graded at. Write-once: an existing snapshot is never re-taken or overwritten, so a
@@ -534,7 +547,7 @@ def snapshot_assignment(
     if load_snapshots(cohort_org, slug) is not None:
         log_skip(f"snapshot {snapshot_path(slug)}")
         return True
-    targets = submission_targets(cohort_org, slug, is_group)
+    targets = submission_targets(cohort_org, slug, is_group, teams_key)
     if not targets:
         # Nobody onboarded, or no teams for a group assignment - which is also what an
         # assignment not handed out yet looks like from here. The snapshot is write-once,
@@ -1029,8 +1042,9 @@ def collect(
             )
             return 1
 
-        # Targets: one per team (group) or one per onboarded student (individual).
-        targets = submission_targets(cohort_org, slug, is_group)
+        # Targets: one per team (group) or one per onboarded student (individual). Repos
+        # are named after the cohort-side `slug`; teams.csv is keyed on the schedule `key`.
+        targets = submission_targets(cohort_org, slug, is_group, key)
         if not targets:
             # Nothing to grade at a passed deadline is a RESULT (the reason is logged
             # above): a cohort with nobody onboarded, or a group assignment whose teams.csv

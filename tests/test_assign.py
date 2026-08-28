@@ -598,3 +598,86 @@ def test_the_scheduler_leaves_an_existing_repo_alone_but_the_button_repairs_it(
         "C", "t", "K", "a1-ada", ["ada"], "a1", sol_dir=Path("s"), **hourly
     ) == ("skipped")
     assert len(pushed) == 1
+
+
+# ------------- teams.csv is keyed on the SCHEDULE KEY, repos on the cohort-side name
+
+
+def _scheduled(monkeypatch, key: str, dest: str, source: str):
+    """A cohort schedule with ONE assignment whose cohort-side name differs from its key."""
+    from datetime import datetime, timezone
+
+    from dsl_course.schedule import AssignmentEntry
+
+    entry = AssignmentEntry(
+        due_datetime=datetime(2026, 11, 1, tzinfo=timezone.utc),
+        course_source_repo=source,
+        cohort_dest_repo=dest,
+        type="group",
+    )
+    monkeypatch.setattr(
+        "dsl_course.schedule.load", lambda org: Schedule(assignments={key: entry})
+    )
+
+
+def test_group_handout_looks_teams_up_by_key_and_names_repos_by_dest(
+    tmp_path, capsys, monkeypatch
+):
+    # With `cohort_dest_repo` set the two names diverge. teams.csv is keyed on the SCHEDULE
+    # KEY (the Join-team form validates the slug against `assignments:` and writes it), so
+    # looking teams up by the cohort-side name found none at all - the handout failed with
+    # "no teams" while the CSV was full.
+    monkeypatch.setenv("DSL_VERBOSE", "1")
+    _scheduled(monkeypatch, "regression", "wk3-regression", "wk3-regression-f2026")
+    asked: list[str] = []
+    monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {"unused": {}})
+    monkeypatch.setattr(
+        assign.teams,
+        "teams_for",
+        lambda rows, slug: (
+            asked.append(slug)
+            or ({"team-1": ["ada-l"]} if slug == "regression" else {})
+        ),
+    )
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    rc = assign.provision_all(
+        "COURSE", "wk3-regression-f2026", "COHORT", roster_path=path, dry_run=True
+    )
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert asked == ["regression"]  # keyed on the schedule key, not the dest repo
+    assert "COHORT/wk3-regression-team-1" in out  # the repo keeps the cohort-side name
+
+
+def test_the_granted_team_slug_matches_the_one_sync_teams_reconciles(
+    tmp_path, monkeypatch
+):
+    # sync_teams.desired_teams derives its slug from the teams.csv key, so a handout that
+    # derived its own from the cohort-side name granted `wk3-regression-team-1` while Sync
+    # membership kept reconciling `regression-team-1`: two teams, and the members were in
+    # the one with no repo.
+    from dsl_course import sync_teams
+
+    _scheduled(monkeypatch, "regression", "wk3-regression", "wk3-regression-f2026")
+    monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {"unused": {}})
+    monkeypatch.setattr(
+        assign.teams, "teams_for", lambda rows, slug: {"team-1": ["ada-l"]}
+    )
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "wk3-regression"
+    )
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+    granted: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        assign,
+        "provision_one",
+        lambda *a, **k: granted.append((a[3], k["team"])) or "ok",
+    )
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    assign.provision_all("COURSE", "wk3-regression-f2026", "COHORT", roster_path=path)
+    assert granted == [("wk3-regression-team-1", "regression-team-1")]
+    # ... which is exactly what the membership sync materialises from the same CSV.
+    assert sync_teams.desired_teams({"regression": {"team-1": ["ada-l"]}}) == {
+        "regression-team-1": {"ada-l"}
+    }

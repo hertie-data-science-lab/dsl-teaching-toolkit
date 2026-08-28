@@ -430,7 +430,9 @@ def _stub_snapshot_write(monkeypatch, shas: dict[str, str | None], existing=None
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=False: [(r, r.split("-")[-1], []) for r in shas],
+        lambda org, slug, is_group=False, teams_key=None: [
+            (r, r.split("-")[-1], []) for r in shas
+        ],
     )
     monkeypatch.setattr(
         collect, "_snapshot_sha", lambda org, repo, deadline: shas[repo]
@@ -567,7 +569,7 @@ def _stub_collect(monkeypatch, snapshots):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None: [
+        lambda org, slug, is_group=None, teams_key=None: [
             (f"{slug}-{h}", h, [h]) for h in ("anna", "ben", "cara")
         ],
     )
@@ -629,7 +631,7 @@ def test_collect_resolves_the_cohort_type_from_the_entry_not_the_cohort_name(
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None: (
+        lambda org, slug, is_group=None, teams_key=None: (
             kinds.append(is_group) or [(f"{slug}-team-x", "team-x", ["anna", "ben"])]
         ),
     )
@@ -693,7 +695,9 @@ def test_collect_with_nothing_gradable_records_a_skip_and_succeeds(monkeypatch, 
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None: [(f"{slug}-team-x", "team-x", [])],
+        lambda org, slug, is_group=None, teams_key=None: [
+            (f"{slug}-team-x", "team-x", [])
+        ],
     )
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
@@ -975,7 +979,7 @@ def test_snapshot_assignment_requires_and_passes_is_group_through(monkeypatch):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group: seen.append(is_group) or [],
+        lambda org, slug, is_group, teams_key=None: seen.append(is_group) or [],
     )
     collect.snapshot_assignment("Cohort", "assignment-1", "2026-11-15", is_group=False)
     collect.snapshot_assignment("Cohort", "assignment-1", "2026-11-15", is_group=True)
@@ -1234,3 +1238,40 @@ def test_a_zero_is_recorded_only_when_github_says_the_repo_is_gone(monkeypatch):
     monkeypatch.setattr(collect, "repo_missing", lambda *a: True)  # GitHub says 404
     result = collect._grade_target("K", "a1-ada", {}, None, "2026-09-08")
     assert result["score"] == 0 and "does not exist" in result["note"]
+
+
+# ---------- teams.csv is keyed on the SCHEDULE KEY, submission repos on the cohort name
+
+
+def test_submission_targets_looks_teams_up_by_the_schedule_key(monkeypatch):
+    # `cohort_dest_repo` makes the cohort-side name differ from the schedule key. teams.csv
+    # carries the key (the Join-team form writes what schedule.yml declares), so looking up
+    # by the name found no teams and the whole group assignment silently had nothing to
+    # grade - while the repos it should have graded existed under the name.
+    asked: list[str] = []
+    monkeypatch.setattr(collect.teams, "load", lambda org: {})
+    monkeypatch.setattr(
+        collect.teams,
+        "teams_for",
+        lambda rows, slug: (
+            asked.append(slug)
+            or ({"team-1": ["ada-l"]} if slug == "regression" else {})
+        ),
+    )
+    targets = collect.submission_targets(
+        "Cohort", "wk3-regression", True, teams_key="regression"
+    )
+    assert asked == ["regression"]
+    assert targets == [("wk3-regression-team-1", "team-1", ["ada-l"])]
+
+
+def test_submission_targets_defaults_the_teams_key_to_the_name(monkeypatch):
+    monkeypatch.setattr(collect.teams, "load", lambda org: {})
+    monkeypatch.setattr(
+        collect.teams,
+        "teams_for",
+        lambda rows, slug: {"team-1": ["ada-l"]} if slug == "assignment-4" else {},
+    )
+    assert collect.submission_targets("Cohort", "assignment-4", True) == [
+        ("assignment-4-team-1", "team-1", ["ada-l"])
+    ]

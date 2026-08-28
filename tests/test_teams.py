@@ -53,3 +53,17 @@ def test_a_semicolon_delimited_teams_csv_is_refused():
 
     with pytest.raises(RuntimeError, match="semicolon"):
         teams.parse("assignment;team;github_handle\na1;t;ada\n")
+
+
+def test_team_names_are_casefolded():
+    # The GitHub team a row materialises into is lower-cased (sync_teams.team_slug) and so
+    # is the repo named after it, so `Wizards` and `wizards` were always one team
+    # downstream while parsing as two units here.
+    text = (
+        "assignment,team,github_handle\n"
+        "assignment-4-project,Wizards,ada-l\n"
+        "assignment-4-project,wizards,ben-b\n"
+    )
+    assert teams.parse(text) == {
+        "assignment-4-project": {"wizards": ["ada-l", "ben-b"]}
+    }

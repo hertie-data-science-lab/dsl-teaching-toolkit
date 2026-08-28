@@ -452,21 +452,29 @@ def provision_all(
     auditing = len(students) - len(participants)
     onboarded = [s for s in participants if s.onboarded]
     skipped = len(participants) - len(onboarded)
-    # The cohort-side name: `cohort_dest_repo`, else the schedule slug, else (for a
-    # handout of an unscheduled template) the template name minus its tag. Everything
-    # downstream - repos, teams.csv, snapshots, grades - keys on this one name.
+    # TWO names, and they are not interchangeable.
+    #   `slug`: the cohort-side NAME - `cohort_dest_repo`, else the schedule key, else (for
+    #     a handout of an unscheduled template) the template name minus its tag. Every repo
+    #     made here, and every snapshot/autograde/grades artefact, is named after it.
+    #   `key`: the SCHEDULE KEY. teams.csv is keyed on it - the welcome Join-team form
+    #     validates the assignment against `assignments:` in schedule.yml and writes that
+    #     key - and `sync_teams.desired_teams` derives its GitHub team slugs from it.
+    # They differ exactly when `cohort_dest_repo` is set. Keying the lookup or the team slug
+    # on the name then meant no teams found at all, or a team granted on the repo under a
+    # slug that Sync membership reconciles a DIFFERENT team for.
     from . import schedule
 
     found = schedule.entry_for_repo(schedule.load(cohort_org), template)
-    slug = schedule.cohort_name(*found) if found else assignment_slug(template)
+    key = found[0] if found else assignment_slug(template)
+    slug = schedule.cohort_name(*found) if found else key
 
-    # A provisioning unit is (repo_name, [member handles]). Individual = one per student
-    # (a team of one); group = one per team from teams.csv, keyed on this assignment slug.
+    # A provisioning unit is (repo_name, [member handles], team slug). Individual = one per
+    # student (a team of one); group = one per team from teams.csv, keyed on `key`.
     if group:
-        groups = teams.teams_for(teams.load(cohort_org), slug)
+        groups = teams.teams_for(teams.load(cohort_org), key)
         if not groups:
             log_err(
-                f"no teams for `{slug}` in {cohort_org}/classroom-config/teams.csv - "
+                f"no teams for `{key}` in {cohort_org}/classroom-config/teams.csv - "
                 f"students self-select via the welcome 'Join team' issue, or seed the CSV."
             )
             return 1
@@ -483,11 +491,11 @@ def provision_all(
             vetted, rejected = sync_teams.vet_handles(members, allowed_by_fold)
             for m in rejected:
                 log_err(
-                    f"{m} in teams.csv ({slug}/{team}) is not an enrolled, onboarded "
+                    f"{m} in teams.csv ({key}/{team}) is not an enrolled, onboarded "
                     f"roster handle - excluding it (would invite an arbitrary account "
                     f"into {cohort_org})"
                 )
-            units.append((f"{slug}-{team}", vetted, sync_teams.team_slug(slug, team)))
+            units.append((f"{slug}-{team}", vetted, sync_teams.team_slug(key, team)))
         what = f"{len(units)} team(s)"
     else:
         units = [
@@ -563,7 +571,7 @@ def provision_all(
     # made it miss the real entry and append a bogus duplicate block (dropping its due date).
     from . import schedule
 
-    schedule.record_handout(cohort_org, found[0] if found else slug)
+    schedule.record_handout(cohort_org, key)
     from . import site
 
     # site.sync_site now RAISES on a genuine tree/team read failure (post-PR2), and a config

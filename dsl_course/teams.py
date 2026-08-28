@@ -32,13 +32,20 @@ def parse(text: str) -> dict[str, dict[str, list[str]]]:
     """Parse teams.csv into {assignment: {team: [handles]}}.
 
     Blank rows are skipped; a handle listed twice in a team is de-duplicated; member
-    order follows first appearance so provisioning is deterministic."""
+    order follows first appearance so provisioning is deterministic.
+
+    Team names are CASEFOLDED. The GitHub team they materialise into is lower-cased
+    (`sync_teams.team_slug`) and so is the repo named after them, so `Wizards` and
+    `wizards` were always one team downstream while reading here as two - two entries in
+    the parsed map, two provisioning units, one repo. The Join-team form already writes
+    lower-case rows; a legacy hand-edited row may be mixed-case, and folding here is what
+    makes the two agree."""
     out: dict[str, dict[str, list[str]]] = {}
     reader = csv.DictReader(io.StringIO(strip_bom(text)))
     require_csv_header(reader.fieldnames, FIELDS, "teams.csv")
     for row in reader:
         assignment = (row.get("assignment") or "").strip()
-        team = (row.get("team") or "").strip()
+        team = (row.get("team") or "").strip().casefold()
         handle = (row.get("github_handle") or "").strip()
         if not (assignment and team and handle):
             continue

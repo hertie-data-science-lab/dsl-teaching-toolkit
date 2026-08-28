@@ -196,7 +196,10 @@ def _snapshot_passed_deadlines(
         is_group = resolve_is_group(
             force=False, schedule_type=entry.type, template_group=template_group
         )
-        if not snapshot_assignment(cohort_org, name, deadline, is_group=is_group):
+        # `name` names the repos, `slug` (the schedule key) is what teams.csv is keyed on.
+        if not snapshot_assignment(
+            cohort_org, name, deadline, is_group=is_group, teams_key=slug
+        ):
             errors += 1
     return errors
 

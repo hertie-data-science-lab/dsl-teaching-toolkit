@@ -652,7 +652,7 @@ def _stub_autograde(monkeypatch, marked: bool = True):
 
 def _stub_snapshots(monkeypatch, existing: set[str]):
     """Track snapshot_assignment calls; `existing` are the slugs already frozen."""
-    taken: list[tuple[str, str, str]] = []
+    taken: list[tuple[str, str, str, str | None]] = []
     monkeypatch.setattr(
         collect, "load_snapshots", lambda org, slug: {} if slug in existing else None
     )
@@ -661,8 +661,8 @@ def _stub_snapshots(monkeypatch, existing: set[str]):
         "snapshot_assignment",
         # `is_group` is REQUIRED (no default), so a scheduler that stopped passing it fails
         # these tests loudly instead of silently freezing every assignment as individual.
-        lambda org, slug, deadline, *, is_group: (
-            taken.append((org, slug, deadline)) or True
+        lambda org, slug, deadline, *, is_group, teams_key=None: (
+            taken.append((org, slug, deadline, teams_key)) or True
         ),
     )
     # The snapshot pass resolves group-ness from the template grading.yml when the schedule
@@ -683,7 +683,7 @@ def test_run_snapshots_a_passed_deadline_that_has_no_snapshot_yet(monkeypatch):
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
     assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
-    org, slug, deadline = taken[0]
+    org, slug, deadline, _key = taken[0]
     assert (org, slug) == ("Cohort-Org", "assignment-1")
     assert deadline.startswith("2026-10-13T23:59:59")
 
@@ -737,7 +737,7 @@ def test_run_snapshots_even_with_no_releases(monkeypatch):
         )
         == 0
     )
-    assert [slug for _org, slug, _dl in taken] == ["assignment-1"]
+    assert [slug for _org, slug, _dl, _key in taken] == ["assignment-1"]
 
 
 def test_run_dry_run_snapshots_nothing(monkeypatch):
@@ -755,7 +755,9 @@ def test_run_dry_run_snapshots_nothing(monkeypatch):
 def test_run_reports_a_failed_snapshot(monkeypatch):
     monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: None)
     monkeypatch.setattr(
-        collect, "snapshot_assignment", lambda org, slug, deadline, *, is_group: False
+        collect,
+        "snapshot_assignment",
+        lambda org, slug, deadline, *, is_group, teams_key=None: False,
     )
     _stub_autograde(monkeypatch)
     monkeypatch.setattr(
@@ -833,7 +835,9 @@ def _only_snapshots_taken(monkeypatch):
     """Snapshots always succeed and are never the subject of these tests."""
     monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: {})
     monkeypatch.setattr(
-        collect, "snapshot_assignment", lambda org, slug, dl, *, is_group: True
+        collect,
+        "snapshot_assignment",
+        lambda org, slug, dl, *, is_group, teams_key=None: True,
     )
 
 
@@ -1124,7 +1128,9 @@ def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):
     # September handout is processed after a December release.
     monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: {})
     monkeypatch.setattr(
-        collect, "snapshot_assignment", lambda org, slug, dl, *, is_group: True
+        collect,
+        "snapshot_assignment",
+        lambda org, slug, dl, *, is_group, teams_key=None: True,
     )
     _stub_autograde(monkeypatch)
     monkeypatch.setattr(
