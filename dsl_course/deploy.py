@@ -256,43 +256,64 @@ def deploy_many(
                 )
                 errors += 1
                 continue
-            if srcp.is_dir():
-                # A WHOLE-REPO release carries the root README along, which is how the
-                # placeholder actually reached students. Checked on the SOURCE and skipped
-                # before the copy, never deleted after it: faculty who fixed a leaked
-                # placeholder by editing the cohort repo's own README would otherwise have
-                # that fix staged as a deletion by the next release - while the log said
-                # everything else shipped.
-                #
-                # Whole-repo only: a copy of one section picks up that section's own
-                # `README.md`, which is faculty writing about the section, not the stub.
-                withheld = frozenset()
-                if srcp == src_root:
-                    for stub in WITHHELD_ROOT_STUBS:
-                        f = srcp / stub
-                        if f.is_file() and _is_withheld_stub(
-                            stub, f.read_text(encoding="utf-8", errors="replace")
-                        ):
-                            withheld |= {stub}
-                            _warn_withheld_stub(source_org, d.course_source_repo, stub)
-                shutil.copytree(
-                    srcp,
-                    destp,
-                    dirs_exist_ok=True,
-                    ignore=_copy_ignore(srcp if srcp == src_root else None, withheld),
+            try:
+                if srcp.is_dir():
+                    # A WHOLE-REPO release carries the root README along, which is how the
+                    # placeholder actually reached students. Checked on the SOURCE and
+                    # skipped before the copy, never deleted after it: faculty who fixed a
+                    # leaked placeholder by editing the cohort repo's own README would
+                    # otherwise have that fix staged as a deletion by the next release -
+                    # while the log said everything else shipped.
+                    #
+                    # Whole-repo only: a copy of one section picks up that section's own
+                    # `README.md`, which is faculty writing about the section, not the stub.
+                    withheld = frozenset()
+                    if srcp == src_root:
+                        for stub in WITHHELD_ROOT_STUBS:
+                            f = srcp / stub
+                            if f.is_file() and _is_withheld_stub(
+                                stub, f.read_text(encoding="utf-8", errors="replace")
+                            ):
+                                withheld |= {stub}
+                                _warn_withheld_stub(
+                                    source_org, d.course_source_repo, stub
+                                )
+                    # symlinks=True copies each link AS a link. Following them, a symlink
+                    # pointing at nothing raised shutil.Error and a directory symlink
+                    # pointing at its own parent recursed - and this runs under the hourly
+                    # cron, so one such path in one materials repo aborted the whole
+                    # cohort's release, every hour, until someone noticed.
+                    shutil.copytree(
+                        srcp,
+                        destp,
+                        dirs_exist_ok=True,
+                        symlinks=True,
+                        ignore=_copy_ignore(
+                            srcp if srcp == src_root else None, withheld
+                        ),
+                    )
+                elif _is_withheld_stub(
+                    d.course_source_path,
+                    srcp.read_text(encoding="utf-8", errors="replace"),
+                ):
+                    # Named outright rather than swept up by a whole-repo release: nothing
+                    # else was asked for, so this copy is simply a no-op.
+                    _warn_withheld_stub(
+                        source_org, d.course_source_repo, d.course_source_path
+                    )
+                    continue
+                else:
+                    destp.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(srcp, destp)
+            except (shutil.Error, OSError) as exc:
+                # One unreadable path is ONE failed copy, counted like any other - not an
+                # exception out of deploy_many that takes every other release with it.
+                log_err(
+                    f"could not copy `{d.course_source_path}` from "
+                    f"{source_org}/{d.course_source_repo}: {exc}"
                 )
-            elif _is_withheld_stub(
-                d.course_source_path, srcp.read_text(encoding="utf-8", errors="replace")
-            ):
-                # Named outright rather than swept up by a whole-repo release: nothing else
-                # was asked for, so this copy is simply a no-op.
-                _warn_withheld_stub(
-                    source_org, d.course_source_repo, d.course_source_path
-                )
+                errors += 1
                 continue
-            else:
-                destp.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(srcp, destp)
             log_ok(f"+ {d.cohort_dest_repo}/{dest_rel or '(repo root)'}")
             touched.add(d.cohort_dest_repo)
 

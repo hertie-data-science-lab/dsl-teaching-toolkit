@@ -490,3 +490,113 @@ def test_the_excluded_root_files_are_named_from_one_place():
     # Re-spelling them per module is how an exclusion lapses when a file is renamed.
     assert utils.SYLLABUS_SAMPLE_FILE in deploy.ROOT_RELEASE_EXCLUDED
     assert utils.SYLLABUS_SESSIONS_FILE in deploy.ROOT_RELEASE_EXCLUDED
+
+
+# ----------------------------- a bad symlink is one failed copy, not a dead cohort
+
+
+def _stub_deploy_many(monkeypatch, build_source):
+    """Drive deploy_many against local trees: `build_source(path)` fills each source clone,
+    dest clones start empty, and nothing is committed.
+
+    Returns `{dest repo: {relative path: "@link" or the file's text}}`, snapshotted at
+    `git add` time - deploy_many's clones live in a TemporaryDirectory it deletes on the
+    way out, so the state has to be captured while it is still there."""
+    import os
+    from pathlib import Path
+
+    snapshots: dict[str, dict[str, str]] = {}
+
+    def fake_gh(*args, **kwargs):
+        if args[:2] == ("repo", "clone"):
+            slug, target = args[2], Path(args[3])
+            target.mkdir(parents=True, exist_ok=True)
+            if slug.startswith("COURSE/"):
+                build_source(target)
+        return 0, ""
+
+    def fake_git(*args, **kwargs):
+        # `git diff --cached --quiet` == 0 means nothing staged, so deploy_many stops
+        # before any commit or push: the copies are what this exercises.
+        if len(args) > 1 and args[0] == "-C" and "add" in args:
+            root = Path(args[1])
+            snap: dict[str, str] = {}
+            for dirpath, dirnames, filenames in os.walk(root):  # never follows links
+                for name in list(dirnames) + filenames:
+                    f = Path(dirpath) / name
+                    rel = str(f.relative_to(root))
+                    if f.is_symlink():
+                        snap[rel] = "@link"
+                    elif f.is_file():
+                        snap[rel] = f.read_text()
+            snapshots[root.name] = snap
+        return 0, ""
+
+    monkeypatch.setattr(deploy, "gh", fake_gh)
+    monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "git", fake_git)
+    return snapshots
+
+
+def _deploy(path: str):
+    from dsl_course.schedule import Deploy
+
+    return Deploy(course_source_repo="materials", course_source_path=path)
+
+
+def test_a_dangling_symlink_is_copied_as_a_link_not_followed(monkeypatch):
+    # Followed, a link pointing at nothing raises shutil.Error - and this runs under the
+    # hourly cron, so it aborted the whole cohort's release every hour.
+    def build(src):
+        (src / "sec").mkdir()
+        (src / "sec" / "notes.md").write_text("real\n")
+        (src / "sec" / "gone.md").symlink_to("nowhere.md")
+
+    snaps = _stub_deploy_many(monkeypatch, build)
+    errors, _changed = deploy.deploy_many(
+        "COURSE", "COHORT", [_deploy("sec")], sync=False
+    )
+    assert errors == 0
+    assert snaps["materials"]["sec/notes.md"] == "real\n"
+    assert snaps["materials"]["sec/gone.md"] == "@link"
+
+
+def test_a_directory_symlink_loop_does_not_recurse(monkeypatch):
+    def build(src):
+        (src / "sec").mkdir()
+        (src / "sec" / "notes.md").write_text("real\n")
+        (src / "sec" / "loop").symlink_to(src / "sec", target_is_directory=True)
+
+    snaps = _stub_deploy_many(monkeypatch, build)
+    errors, _changed = deploy.deploy_many(
+        "COURSE", "COHORT", [_deploy("sec")], sync=False
+    )
+    assert errors == 0
+    assert snaps["materials"]["sec/loop"] == "@link"
+
+
+def test_one_unusable_path_is_one_counted_error_and_the_rest_still_ship(monkeypatch):
+    import shutil
+
+    def build(src):
+        for name in ("bad", "good"):
+            (src / name).mkdir()
+            (src / name / "notes.md").write_text(name)
+
+    snaps = _stub_deploy_many(monkeypatch, build)
+    real_copytree = shutil.copytree
+
+    def flaky(src, dst, **kwargs):
+        if str(src).endswith("/bad"):
+            raise shutil.Error("unreadable")
+        return real_copytree(src, dst, **kwargs)
+
+    monkeypatch.setattr(deploy.shutil, "copytree", flaky)
+    errors, _changed = deploy.deploy_many(
+        "COURSE", "COHORT", [_deploy("bad"), _deploy("good")], sync=False
+    )
+    assert errors == 1  # not an exception out of deploy_many
+    assert snaps["materials"]["good/notes.md"] == "good"
+    assert "bad/notes.md" not in snaps["materials"]
