@@ -69,7 +69,7 @@ from .gh_contents import get_file_content, load_yaml_config, repo_tree
 from .gh_teams import _acting_login
 from .ghcli import GIT_ENV, gh, git, is_missing_resource
 from .log import log, log_err, log_ok, log_step
-from .readings import READING_OVERLAY_NAMES
+from .readings import demote_headings, is_reading_overlay, readings_block
 from .repos import (
     get_default_branch,
     has_denied_component,
@@ -86,21 +86,6 @@ from .schedule_plan import (
 
 # Public course site: served folder for the hosted section files.
 PUBLIC_MATERIALS_DIR = "public-materials"
-# The OVERLAY - a session's optional prose reading list, identified by NAME.
-#
-# By name and not by extension, which is what this used to be. An extension test called every
-# `.md`/`.txt`/`.bib` in a readings folder "the reading list" and inlined it into the page, so
-# a faculty member who uploaded `lecture-notes.md` or `handout.txt` as an actual READING found
-# it swallowed into the prose instead of listed as a download, and a `.bib` dumped raw BibTeX
-# onto the page. No rule keyed on file type can treat every file type alike.
-#
-# So: one filename is the overlay; everything else in the folder is a file, whatever it is.
-# The overlay is optional - a session with only PDFs needs nothing written - and additive: it
-# renders ABOVE the file list, never instead of it (see `_readings_block`).
-# `READING_OVERLAY_NAMES` lives in `readings`, beside the overlay's other filenames,
-# because `scaffold` seeds the file and this module and `syllabus` match on it. Its name
-# equals `schedule_plan.READINGS_SECTION` by coincidence - a file stem and a folder name - not by
-# derivation.
 # The settings of the last manual publish, committed into the site repo so the daily cron
 # can re-sync unattended. Leading `_`, so Jekyll ignores it rather than serving it.
 PUBLISH_CONFIG = "_publish-config.yml"
@@ -830,50 +815,6 @@ def _ext(name: str) -> str:
     return name.rsplit(".", 1)[-1].lower() if "." in name.rsplit("/", 1)[-1] else ""
 
 
-def _is_reading_overlay(name: str) -> bool:
-    """Is this path a session's optional prose reading list (`READINGS.md`, `.txt`, `.bib`)?
-
-    The ONE test that decides prose-vs-file for a readings folder, by NAME rather than by
-    extension - see `READING_OVERLAY_NAMES` in `readings` for why that distinction is the whole point.
-    Takes a path or a bare name; only the last segment is read, so it works on the repo-tree
-    paths, the release-relative names and the local filenames its callers each hold."""
-    return name.rsplit("/", 1)[-1].lower() in READING_OVERLAY_NAMES
-
-
-def _readings_block(names: list[str], read_overlay: Callable[[str], str | None]) -> str:
-    """A session's reading list: its overlay prose, then every OTHER file by name.
-
-    THE rule, in one place, because its three readers - the cohort site, the public course
-    site and the generated syllabus - each used to decide it for themselves and disagreed. A
-    folder holding only PDFs rendered as links on one site, as a name list on another, and as
-    nothing whatsoever in the syllabus, where a session came out an empty heading.
-
-    Additive, never suppressive. The overlay is prose a reader wants first, so it leads; the
-    files are what a student downloads, so they always follow. Neither hides the other:
-    - files only - the file list IS the reading list, and nobody had to write anything;
-    - overlay only - the URL-only week, one line of markdown and no citation format imposed;
-    - both - prose on top, files beneath.
-
-    `names` is every path in the session's readings folder; `read_overlay` reads one of them,
-    and is a callable because its two callers hold different transports - the public site a
-    local file, the syllabus a blob in the course org. Lazy, so only the overlay is ever
-    fetched: reading eagerly would pull every PDF over the API just to find the prose.
-
-    Raw filenames, deliberately: deriving "Blitzstein 2019 ch.1" from `blitzstein-ch1.pdf`
-    would be inventing a citation. Faculty who want that write it in the overlay.
-
-    The overlay is never ALSO listed as a download - its content is already on the page."""
-    prose, files = [], []
-    for name in sorted(names):
-        if _is_reading_overlay(name):
-            text = (read_overlay(name) or "").strip()
-            if text:
-                prose.append(text)
-        else:
-            files.append(f"- {name.rsplit('/', 1)[-1]}")
-    return "\n\n".join(prose + (["\n".join(files)] if files else []))
-
-
 def _shape_links(
     blobs: list[tuple[str, str]], tree_base: str, allow: frozenset[str]
 ) -> list[tuple[str, str]]:
@@ -946,45 +887,14 @@ def _row_links(
     links = _session_links(org, repo, subpath, folder, allow)
     if _source_section(repo, subpath) != READINGS_SECTION:
         return links
-    return [(n, u) for n, u in links if not _is_reading_overlay(n)]
-
-
-# How far the inlined reading list's own headings are pushed down, so they nest under the
-# session heading the page puts above them. A reading file written in the Hertie syllabus
-# shape opens with `# Session 1 readings` and sub-heads `## Required Readings`; at their
-# written levels those outrank the page's own `<h2>Session 1`, which is exactly backwards.
-_HEADING_SHIFT = 2
-
-
-def _demote_headings(text: str, shift: int = _HEADING_SHIFT) -> str:
-    """Push every ATX heading in faculty-written markdown down `shift` levels.
-
-    `shift` is the caller's, because the heading it has to nest under differs: the site puts
-    a session at `<h2>`, the syllabus generator at `<h3>`.
-
-    Only outside fenced code blocks: a `# comment` on the first line of a shell example is
-    not a heading, and deepening it would rewrite the example. A heading also needs
-    whitespace after its hashes, so `#hashtag` stays prose. Levels clamp at 6, which is as
-    deep as HTML goes."""
-    out, fenced = [], False
-    for line in text.splitlines():
-        stripped = line.lstrip()
-        if stripped.startswith(("```", "~~~")):
-            fenced = not fenced
-        elif not fenced and stripped.startswith("#"):
-            hashes = len(stripped) - len(stripped.lstrip("#"))
-            rest = stripped[hashes:]
-            if rest[:1] in (" ", "\t", ""):
-                line = "#" * min(hashes + shift, 6) + rest
-        out.append(line)
-    return "\n".join(out)
+    return [(n, u) for n, u in links if not is_reading_overlay(n)]
 
 
 def _released_reading_list(cohort_org: str, sources: list[tuple[str, str, str]]) -> str:
     """The prose a session row inlines: the text of the OVERLAY released into its `readings`
     section (`READINGS.md`), verbatim.
 
-    Prose ONLY here, unlike the public site and the syllabus (`_readings_block`), which name
+    Prose ONLY here, unlike the public site and the syllabus (`readings_block`), which name
     the other files because they have nowhere else to put them. This row does: every
     non-overlay file is already a real download beside it, via `_row_links`. Naming them here
     as well would print each reading twice on the same row.
@@ -1001,13 +911,13 @@ def _released_reading_list(cohort_org: str, sources: list[tuple[str, str, str]])
             continue
         prefix = _source_prefix(subpath, folder)
         for name, _url in _session_files(cohort_org, repo, subpath, folder):
-            if not _is_reading_overlay(name):
+            if not is_reading_overlay(name):
                 continue
             text = (
                 get_file_content(cohort_org, repo, f"{prefix}/{name}") or ""
             ).strip()
             if text:
-                parts.append(_demote_headings(text))
+                parts.append(demote_headings(text))
     return "\n\n".join(parts)
 
 
@@ -2337,12 +2247,12 @@ def _public_links(local_dir: Path, url_prefix: str) -> list[tuple[str, str]]:
 def _reading_list_md(readings_session_dir: Path) -> str:
     """The readings rendered as TEXT for `reading-list` mode (no files hosted, no links).
 
-    `_readings_block`'s rule over a local directory: the overlay's prose inlined verbatim,
+    `readings_block`'s rule over a local directory: the overlay's prose inlined verbatim,
     then every other file by NAME only - so the public sees WHAT to read without the
     copyrighted bytes being published. This mode links nothing, so naming the files here is
     the only way they appear at all."""
     d = readings_session_dir
-    return _readings_block(
+    return readings_block(
         [p.relative_to(d).as_posix() for p in d.rglob("*") if p.is_file()],
         lambda n: (d / n).read_text(encoding="utf-8", errors="replace"),
     )
