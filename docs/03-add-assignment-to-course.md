@@ -13,7 +13,7 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
 
 1. **Scaffold the template.** 
    - In the course org → `.github` → **Actions tab** → [New assignment](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/new-assignment.yml). Inputs:
-      - `number` = `1`, `2`, etc (the assigment number)
+      - `number` = `1`, `2`, etc (the assignment number)
       - `tag` = `f/sYYYY`, 
       - `format` (`py` starter script or `notebook`) - picks which starter stub you get.
         Either way the autograder accepts both: it `nbconvert`s any `.ipynb` the
@@ -33,7 +33,10 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
    - Brief + starter → `main`
    - Model solution, `grading.yml` and the hidden `tests/` → `solution`
    - Student repos are generated from **`main` only**, unless you tick `include_solution` at release time. 
-   - For a purely hand-marked assignment, set `autograde: false` in `grading.yml` (or delete the file).
+   - For a purely hand-marked assignment, set `autograde: false` in `grading.yml` - or push no
+     `solution` branch at all. **Do not delete `grading.yml`**: a missing file falls back to
+     `autograde: true, tests: tests`, and the grading run then errors on the `tests/` folder
+     that isn't there.
    - For a partially machine-marked assignment set `autograde: true` in `grading.yml`:
       - put the hidden tests in `tests/` (path configurable via `grading.yml`'s `tests:` field) plain pytest files that `from starter import ...` and check the submission, run faculty-side only, never shipped to students. 
      - `autograde_score` in `grades/<slug>.csv` then records how many of them each submission passed - a count for you to mark against, not the mark itself.
@@ -50,7 +53,7 @@ Repeat for each assignment (`number` = 2, 3, …).
 - For group projects, both handout and grading then run per team automatically (i.e one repo per team is created, and the grading run assesses at the team-level with individual carve outs for comments / grade adjustments):
 
 > The type is determined in the assignment's solution branch in the `grading.yml`'s field `type: individual | group`. 
->- This fiels is initially set (1) at the course-level when the assignment itself is created using the ` New assignment` workflow (in the course org's `.github`'s Actions tab) 
+>- This field is initially set (1) at the course-level when the assignment itself is created using the ` New assignment` workflow (in the course org's `.github`'s Actions tab) 
 > - It can be also be set in (2) the cohort's `classroom-config/schedule.yml`, which is more accessible to TAs with only cohort org write access:
 >
 >```yaml
