@@ -27,7 +27,7 @@ CLI:
                            schema README, the dispatchers, the schedule validator) and
                            `*.sample` worked examples. (Run by the Bootstrap-cohort
                            workflow, and by Refresh actions - on demand and on its nightly
-                           cron, which is how an org converges on central `release`
+                           cron, which is how an org converges on its central ref
                            without anyone pressing anything.)
 """
 
@@ -41,6 +41,7 @@ from datetime import datetime, timezone
 from . import scaffold
 from .course import CONFIG_REPO, term_tag
 from .discovery import (
+    central_ref_for,
     discover_assignments,
     discover_cohorts,
     discover_content_repos,
@@ -59,6 +60,7 @@ from .welcome import (
 )
 from .workflows_place import push_content_workflows
 from .workflows_render import (
+    for_placement,
     render_bootstrap_cohort,
     render_central_release,
     render_distribute_grades,
@@ -76,7 +78,6 @@ from .workflows_render import (
     render_sync_gradebooks,
     render_sync_membership,
     render_sync_site,
-    system_owned,
 )
 
 # The heartbeat file, in the course org's `.github` repo - the repo every seeded cron runs
@@ -206,7 +207,7 @@ def _live_cohorts(course_org: str) -> list[str]:
     return live
 
 
-def seed_github_workflows(course_org: str) -> int:
+def seed_github_workflows(course_org: str, central_ref: str) -> int:
     """Seed/refresh the org-level workflows into the course org's .github repo: the
     CENTRAL Release materials (course-source-repo dropdown), Release assignment, plus Sync
     membership / Bootstrap cohort / Refresh.
@@ -249,11 +250,16 @@ def seed_github_workflows(course_org: str) -> int:
         ".github/workflows/refresh-actions.yml": render_refresh(),
         ".github/workflows/scheduled-release.yml": render_scheduler(),
     }
-    log_step(f"Seeding org-level workflows into {course_org}/.github")
+    log_step(
+        f"Seeding org-level workflows into {course_org}/.github at central ref {central_ref}"
+    )
     if not put_files(
         course_org,
         ".github",
-        {path: system_owned(content).encode() for path, content in files.items()},
+        {
+            path: for_placement(content, central_ref).encode()
+            for path, content in files.items()
+        },
         "ci: refresh org workflows",
         # Retired workflows - remove any copies already seeded into orgs bootstrapped before
         # the change, so faculty never see two workflows for one job. sync-enrolment/sync-teams
@@ -371,25 +377,33 @@ def refresh(course_org: str) -> int:
     # pruning after them wrote the dead org into all of them one last time and self-healed
     # a night later, which is the same "converges eventually, if someone waits" the prune
     # exists to end.
+    # ONE read of this org's tier, threaded into everything below: the course org's
+    # workflows, its content repos' workflows, and every cohort's classroom-config
+    # validator all have to be pinned to the same ref, and a cohort inherits its course
+    # org's (central_ref_for), so re-reading it per cohort could only ever disagree.
+    central_ref = central_ref_for(course_org)
     cohorts = _live_cohorts(course_org)
     targets = discover_content_repos(course_org)
     assignments = discover_assignments(
         course_org
     )  # org-wide; discover once, not per repo
     log_step(
-        f"Refreshing {len(targets)} content repo(s) in {course_org} with cohorts {cohorts or 'none'}"
+        f"Refreshing {course_org} at central ref {central_ref}: {len(targets)} content "
+        f"repo(s), cohorts {cohorts or 'none'}"
     )
     failures = 0
     for repo in sorted(targets):
-        failures += push_content_workflows(course_org, repo, cohorts, assignments)
+        failures += push_content_workflows(
+            course_org, repo, cohorts, assignments, central_ref
+        )
         failures += _refresh_stubs(course_org, repo)
         # A no-op on the code and dataset repos this sweep also returns; the gate is
         # inside, so no caller can forget it.
         failures += scaffold.refresh_materials_system_files(course_org, repo)
     failures += _propagate_repo_secret(course_org, targets)
-    failures += seed_github_workflows(course_org)
+    failures += seed_github_workflows(course_org, central_ref)
     failures += _write_heartbeat(course_org)
-    failures += update_profile_readme(course_org)
+    failures += update_profile_readme(course_org, central_ref=central_ref)
     # A cohort's onboarding workflows, classroom-config dispatchers and config samples are
     # seeded at Bootstrap cohort, and would otherwise stay frozen for the whole semester
     # while the engine they call - and the schemas the samples demonstrate - move on.
@@ -411,7 +425,7 @@ def refresh(course_org: str) -> int:
         # SYSTEM-owned files only (see welcome.CLASSROOM_SYSTEM_FILES): the cohort's own
         # students.csv/teams.csv/schedule.yml/people.yml are never touched here, or this
         # nightly cron would overwrite a live roster every night.
-        failures += refresh_classroom_system_files(cohort)
+        failures += refresh_classroom_system_files(cohort, central_ref)
         failures += refresh_classroom_samples(cohort)
         # The pointer its dispatchers read to find this course org. Also SYSTEM-owned and
         # also only ever written by Bootstrap cohort until now - same bug class.
@@ -425,7 +439,7 @@ def refresh(course_org: str) -> int:
         # marked repo table is refreshed (see profile_readme.splice_repo_table) - which is
         # what keeps that table honest as repos are added, without flattening an
         # instructor's wording around it.
-        failures += update_profile_readme(cohort)
+        failures += update_profile_readme(cohort, central_ref=central_ref)
     if failures:
         log_err(f"refresh incomplete: {failures} file(s) could not be written")
         return 1

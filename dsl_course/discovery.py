@@ -21,6 +21,7 @@ import json
 
 import yaml
 
+from .central import resolve_central_ref
 from .course import (
     COHORT_TOPIC,
     COURSE_HUB_TOPIC,
@@ -218,6 +219,26 @@ def course_name_of(course_org: str) -> str:
         return ""
     meta = load_yaml_config(course_org, ".github", "dsl-course.yml") or {}
     return str(meta.get("course_name") or meta.get("org_name") or "")
+
+
+def central_ref_for(org: str) -> str:
+    """Which ref of the central toolkit this org's seeded workflows run the engine from.
+
+    Declared as `central_ref:` in the COURSE org's `.github/dsl-course.yml`, so one edit
+    moves a course and every cohort under it between tiers together. A cohort org's own
+    file is only a pointer (`course:`), so this follows it - a `central_ref:` written into
+    a cohort's file is ignored, because a cohort running a different engine from the course
+    org that releases into it is not a state anyone wants to debug.
+
+    Absent, or unreadable as a tier, means `central.CENTRAL_REF` - see resolve_central_ref
+    for why junk falls back rather than failing the run."""
+    meta = load_yaml_config(org, ".github", "dsl-course.yml") or {}
+    course = str(meta.get("course") or "")
+    if course:
+        org, meta = course, load_yaml_config(course, ".github", "dsl-course.yml") or {}
+    return resolve_central_ref(
+        meta.get("central_ref"), source=f"{org}/.github/dsl-course.yml"
+    )
 
 
 def discover_cohorts(course_org: str) -> list[str]:

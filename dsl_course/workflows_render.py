@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 
-from .central import CENTRAL, CENTRAL_REF
+from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER
 
 # Third-party actions pinned to full commit SHAs. Every job below runs with an org-owner
 # PAT in its env, so a mutable tag (`@v4`) is a standing invitation: whoever can move the
@@ -45,9 +45,15 @@ SYSTEM_OWNED_BANNER = (
 )
 
 
-def system_owned(rendered: str) -> str:
-    """Prefix a rendered workflow with the ownership banner."""
-    return SYSTEM_OWNED_BANNER + rendered
+def for_placement(rendered: str, central_ref: str) -> str:
+    """Make a rendered workflow ready to write into an org: stamp the ownership banner,
+    and pin the central ref THIS org runs the engine from.
+
+    Both happen at the write site rather than inside each renderer, for the same reason: a
+    new renderer cannot ship without either, and `central_ref` is a required argument, so
+    a caller that places a workflow cannot forget to say which ref it is placing it at.
+    `discovery.central_ref_for` is where that ref comes from."""
+    return SYSTEM_OWNED_BANNER + rendered.replace(CENTRAL_REF_PLACEHOLDER, central_ref)
 
 
 # Workflow-level permissions for every rendered workflow. Each one authenticates with
@@ -148,7 +154,8 @@ _TIMEOUT_GRADING = 120
 
 
 # The head of any job that runs toolkit code: a runner, the central repo checked out at
-# CENTRAL_REF, Python, and the deps. Used bare by the UNGATED jobs (cron /
+# the org's central ref (left as a placeholder here, pinned by for_placement), Python, and
+# the deps. Used bare by the UNGATED jobs (cron /
 # repository_dispatch / push paths have no actor to gate on), and behind the check-team
 # gate via _run_preamble by every workflow. Ends after `pip install`, so a renderer appends
 # its own `      - name: ...` step directly. The timeout is the ONE thing that varies, so
@@ -160,7 +167,7 @@ def _ungated_preamble(minutes: int = _TIMEOUT_DEFAULT) -> str:
       - uses: {_CHECKOUT}
         with:
           repository: {CENTRAL}
-          ref: {CENTRAL_REF}
+          ref: {CENTRAL_REF_PLACEHOLDER}
       - uses: {_SETUP_PYTHON}
         with:
           python-version: "3.12"
@@ -838,10 +845,13 @@ def render_refresh() -> str:
     return f"""name: Refresh actions
 
 # Every seeded workflow is frozen at the moment it was seeded, while the engine it calls is
-# always checked out from central `release` - so an org left alone drifts, until a stale workflow
-# calls engine code that has since moved. This re-seeds the org daily, so every org
+# always checked out from this org's central ref - so an org left alone drifts, until a stale
+# workflow calls engine code that has since moved. This re-seeds the org daily, so every org
 # converges on central within 24h with nobody pressing anything. The refresh is idempotent
 # and skips files whose content is unchanged, so a night with no central changes is silent.
+#
+# It is also how a promotion reaches an org: after the tier branch moves, the next run here
+# re-renders every workflow at the org's ref. Run it by hand to pick a promotion up now.
 
 on:
   schedule:

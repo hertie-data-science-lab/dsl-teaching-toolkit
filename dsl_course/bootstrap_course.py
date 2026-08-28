@@ -26,8 +26,9 @@ import sys
 
 from . import scaffold, seed, site, sync_faculty
 from .access import COHORT_WRITE_REPOS, COURSE_TEAM_ACCESS, grant_team_repo_access
+from .central import resolve_central_ref
 from .course import COHORT_TOPIC, COURSE_HUB_TOPIC
-from .discovery import COHORTS_PATH, register_cohort
+from .discovery import COHORTS_PATH, central_ref_for, register_cohort
 from .gh_contents import put_file, seed_files_if_absent, seed_if_absent
 from .gh_teams import create_team
 from .ghcli import gh
@@ -352,19 +353,33 @@ def _course_metadata(
     course_name: str,
     course_code: str,
     admins: list[str] | None = None,
+    central_ref: str | None = None,
 ) -> str:
     """dsl-course.yml for the persistent COURSE org: identity + course_admins (the
     single source of truth for course-wide admin access, mirrored into every cohort
     org's own course-admin team by sync_faculty). Instructors/TAs and the schedule
     both stay per-cohort instead (they change year to year and, for instructors/TAs,
-    usually the people too)."""
+    usually the people too).
+
+    `central_ref` writes the deployment tier this course runs (--central-ref) as a live
+    key. Omitted, the file declares nothing and the course runs `central.CENTRAL_REF` -
+    which is what every real course should do; the demo course is the one that is meant to
+    sit on `staging`. It is appended rather than templated in beside `course_code` because
+    the template is itself parsed as YAML by the shipped-workflow sweep, so it cannot carry
+    a placeholder on a line of its own."""
     identity = template("course/dsl-course.yml").format(
         org=org,
         org_name=org_name,
         course_name=course_name,
         course_code=course_code or "",
     )
-    return identity + _course_admins_block(admins)
+    tier = (
+        f"# Set by `--central-ref` at bootstrap - see the commented note above.\n"
+        f"central_ref: {central_ref}\n\n"
+        if central_ref
+        else ""
+    )
+    return identity + tier + _course_admins_block(admins)
 
 
 def _cohort_metadata(org: str, course: str) -> str:
@@ -383,6 +398,7 @@ def create_profile_repo(
     *,
     is_cohort: bool = False,
     admins: list[str] | None = None,
+    central_ref: str | None = None,
 ) -> int:
     """Create the .github profile repo with README, and (course orgs only) course
     metadata. Returns the number of steps that failed.
@@ -423,7 +439,9 @@ def create_profile_repo(
         # USER-owned: seeded once, never rewritten by a later repair run.
         # (The org-overview profile/README.md is generated at the end of bootstrap,
         # once all repos exist, by profile_readme.update_profile_readme - see main.)
-        metadata = _course_metadata(org, org_name, course_name, course_code, admins)
+        metadata = _course_metadata(
+            org, org_name, course_name, course_code, admins, central_ref
+        )
         if not seed_if_absent(
             org,
             ".github",
@@ -508,7 +526,7 @@ def validate_secret_presence(org: str, secret_name: str) -> bool:
     return exists
 
 
-def setup_cohort_extras(org: str) -> int:
+def setup_cohort_extras(org: str, central_ref: str) -> int:
     """Cohort-only: seed the student-facing repos.
 
     Layered on top of the common bootstrap when --cohort is passed (the safe-by-default
@@ -632,7 +650,7 @@ def setup_cohort_extras(org: str) -> int:
         # running cohorts - and, since they live in welcome.py, on every nightly
         # seed.refresh too, so a cohort no longer waits for someone to run this by hand.
         # A failed dispatcher write means membership/site sync never triggers, so count it.
-        failures += refresh_classroom_system_files(org)
+        failures += refresh_classroom_system_files(org, central_ref)
 
     # Faculty access on the two repos just seeded - unconditional (not inside the
     # create_repo blocks above), so a re-run repairs an org that predates this.
@@ -644,14 +662,14 @@ def setup_cohort_extras(org: str) -> int:
     return failures
 
 
-def seed_workflows(org: str) -> int:
+def seed_workflows(org: str, central_ref: str) -> int:
     """Seed the org-level workflows into the course org's .github repo. The full set
     (central Release materials/assignment + Sync membership/Bootstrap-cohort/Refresh) is
     rendered by dsl_course.seed (single source of truth).
 
     Returns the number of writes that failed - a workflow that never landed (e.g. the token
     lost `workflow` scope) is exactly what a green bootstrap must not hide."""
-    return seed.seed_github_workflows(org)
+    return seed.seed_github_workflows(org, central_ref)
 
 
 def preflight(org: str) -> bool:
@@ -738,6 +756,14 @@ def main() -> int:
         "instructors dropdowns.",
     )
     parser.add_argument(
+        "--central-ref",
+        default=None,
+        help="Which tier of the central toolkit this course org's seeded workflows run "
+        "the engine from: main, staging, release (default), or a full commit SHA. Written "
+        "to .github/dsl-course.yml as `central_ref:`; cohorts inherit their course org's. "
+        "Only the demo course should sit anywhere but release.",
+    )
+    parser.add_argument(
         "--propagate-secret",
         action="store_true",
         help="Set DSL_BOT_TOKEN on this org to the DSL_BOT_TOKEN env value "
@@ -779,6 +805,15 @@ def _run(args: argparse.Namespace) -> int:
     org_name = args.org_name or args.org
     course_name = args.course_name or org_name
     admin_logins = _parse_handles(args.admins)
+    # Which tier of the toolkit everything seeded below runs: the flag when given (a
+    # course org's own dsl-course.yml does not exist yet on a first bootstrap), else what
+    # the org already declares - and for a cohort that is its COURSE org's declaration,
+    # which is the file central_ref_for reads through the pointer anyway.
+    central_ref = (
+        resolve_central_ref(args.central_ref, source="--central-ref")
+        if args.central_ref
+        else central_ref_for(args.course or args.org)
+    )
     # Sub-steps that write machinery (workflows, welcome/config seeds, the cohort
     # registration, the faculty sync) each report a failure count; a half-configured org
     # must exit non-zero, so they are threaded here rather than logged and dropped.
@@ -812,6 +847,10 @@ def _run(args: argparse.Namespace) -> int:
         args.course_code,
         is_cohort=args.cohort,
         admins=admin_logins if not args.cohort else None,
+        # The validated value, and only when the flag was actually given: an
+        # undeclared course runs central.CENTRAL_REF, and writing that in would freeze
+        # every new org against a default it should simply follow.
+        central_ref=central_ref if args.central_ref else None,
     )
     failures += profile_failures
 
@@ -819,7 +858,7 @@ def _run(args: argparse.Namespace) -> int:
     workflow_failures = 0
     if args.cohort:
         # Cohort: student-facing welcome + roster + tightened perms.
-        workflow_failures = setup_cohort_extras(args.org)
+        workflow_failures = setup_cohort_extras(args.org, central_ref)
         failures += workflow_failures
         if args.course:
             # Pointer back to the course org, in this cohort's .github/dsl-course.yml -
@@ -888,7 +927,7 @@ def _run(args: argparse.Namespace) -> int:
             )
     else:
         # Course: seed the org-level workflows (incl. the central Release actions) into .github.
-        workflow_failures = seed_workflows(args.org)
+        workflow_failures = seed_workflows(args.org, central_ref)
         failures += workflow_failures
 
     # 3c. Workflow access: grant this course's own instructors/course-admin teams write/admin
@@ -954,7 +993,9 @@ def _run(args: argparse.Namespace) -> int:
     failures += secret_failures
 
     # 5. Generate the org-overview README now that all repos exist (clickable index).
-    failures += update_profile_readme(args.org, org_name, course_name)
+    failures += update_profile_readme(
+        args.org, org_name, course_name, central_ref=central_ref
+    )
 
     if admin_logins and not args.cohort:
         admins_step = (
