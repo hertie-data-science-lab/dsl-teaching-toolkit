@@ -137,7 +137,9 @@ current tip, so it can only ever move a tier forward - it cannot rewrite one, an
 what `main` has not seen. It then dispatches **Refresh actions** on every course org at that
 tier, so they converge in minutes rather than at the next 05:27 cron.
 
-Anyone with write on this repo can run it. Nothing else should push to either tier branch.
+Anyone with write on this repo can run it; promoting to `release` then waits on the
+environment's required reviewers. Nothing else can push to either tier branch - see
+[Protecting the tiers](#protecting-the-tiers-set-by-hand).
 
 ### Soak on staging
 
@@ -171,16 +173,23 @@ is rendered workflow *shape* (inputs, jobs, crons), which is frozen in the org u
 course org's `central_ref:` to the last known-good commit SHA and run **Refresh actions**.
 One file edit, no review, and it moves only that course.
 
-### Branch protection (set by hand)
+### Protecting the tiers (set by hand)
 
-On both `staging` and `release`:
+Promote's checks are worth nothing on their own: `faculty` and `instructors` both hold write
+here, so without this any of them can `git push origin whatever:release` and put unreviewed
+code straight into every live org. Three settings, none of them in code:
 
-- **Require linear history** - a tier is only ever a fast-forward.
-- **Restrict who can push** to the GitHub Actions app: Promote's `GITHUB_TOKEN` should be the
-  only thing that moves them.
-- **Block force pushes** and **block deletions**. Promote passes `--force-with-lease` purely
-  as a concurrency guard; every push it makes is a fast-forward, so the setting never blocks it.
-
+1. **Give the DSL bot `write` on this repo.** Promote pushes as the bot, not as
+   `GITHUB_TOKEN` - a ruleset can restrict a branch to a named account, and the Actions
+   token cannot be one.
+2. **A ruleset on `staging` and `release`** (Settings -> Rules -> Rulesets, targeting both
+   branches): *restrict updates* to the bot account only, *block force pushes*, *block
+   deletions*, *require linear history*. Promote passes `--force-with-lease` purely as a
+   concurrency guard; every push it makes is a fast-forward, so blocking force pushes never
+   blocks it.
+3. **Create the `release` environment** (Settings -> Environments) with the `admin` team as
+   **required reviewers**. Promote's job runs in the environment named by its `to:` input,
+   so a release promotion waits for an approval and a staging soak does not.
 `main` keeps what it has: PR only, `pytest` required.
 
 ### Putting an org on a tier
