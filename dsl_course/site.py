@@ -277,10 +277,11 @@ class _ThemePage:
     Readings tab would have pointed at a page that site never gets - a 404 nobody edited
     into existence. One row per page makes that impossible.
 
-    Each page carries its OWN access sentence, because they genuinely differ: readings are
-    a public citation list over gated files, everything else is gated outright. `gated_note`
-    is what a COHORT site says; `open_note` what the public open-courseware site says
-    instead, where the same files are published on purpose."""
+    Each page carries its OWN access sentence, because they genuinely differ: a materials
+    page is open to auditors, who read released materials but get no assignments, so the
+    assignments page names students alone. `gated_note` is what a COHORT site says;
+    `open_note` what the public open-courseware site says instead, where the same files are
+    published on purpose."""
 
     file: str
     layout: str
@@ -301,7 +302,7 @@ _THEME_PAGES = (
         "Lectures",
         "/lectures/",
         "fas fa-book-reader",
-        "Lecture slides are accessible to enrolled students.",
+        "Lecture slides are only accessible to enrolled students & auditors.",
         "Lecture slides by session.",
     ),
     _ThemePage(
@@ -310,7 +311,7 @@ _THEME_PAGES = (
         "Labs",
         "/labs/",
         "fas fa-flask",
-        "Lab materials are only accessible to enrolled students.",
+        "Lab materials are only accessible to enrolled students & auditors.",
         "Lab materials by session.",
     ),
     _ThemePage(
@@ -319,8 +320,7 @@ _THEME_PAGES = (
         "Readings",
         "/readings/",
         "fas fa-book",
-        "Citation lists are public; the files themselves are accessible to enrolled "
-        "students.",
+        "Hosted files are only accessible to enrolled students & auditors.",
         "Readings by session.",
         cohort_only=True,
     ),
@@ -332,7 +332,7 @@ _THEME_PAGES = (
         "fas fa-user-graduate",
         # The layout says "No assignments released yet." when the collection is empty, so
         # this line is only ever shown beside an actual list.
-        "Assignments are only accessible to enrolled students.",
+        "Assignments repos are only accessible to enrolled students.",
         "Assignments by hand-out date.",
     ),
     _ThemePage(
