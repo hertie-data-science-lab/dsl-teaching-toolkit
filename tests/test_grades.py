@@ -428,3 +428,16 @@ def test_human_commit_authors_flags_only_non_bot_commits():
     assert grades._human_commit_authors(log) == ["Dr Reviewer"]  # de-duplicated, sorted
     assert grades._human_commit_authors("dsl-bot\ndsl-bot\n") == []  # only bot renders
     assert grades._human_commit_authors("") == []  # branch absent / no commits
+
+
+def test_parse_grades_survives_an_excel_bom_and_refuses_a_semicolon_export():
+    # The BOM glued itself to the first header name, so every handle read "" and merge_auto
+    # folded every student onto one row - hand-entered marks destroyed. roster and teams
+    # already stripped it; this was the one hand-edited CSV that did not.
+    import pytest
+
+    text = "\ufeffgithub_handle,team,autograde_score\nada-l,,5\nbob-b,,3\n"
+    rows = grades.parse_grades(text)
+    assert [r.github_handle for r in rows] == ["ada-l", "bob-b"]
+    with pytest.raises(RuntimeError, match="semicolon"):
+        grades.parse_grades("github_handle;team;autograde_score\nada-l;;5\n")

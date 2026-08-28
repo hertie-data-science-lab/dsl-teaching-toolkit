@@ -107,3 +107,14 @@ def test_example_dataset_roster_declares_roles_and_ships_an_auditor():
     # so this can only be checked against the CSV text)
     rows = list(csv.DictReader(path.read_text().splitlines()))
     assert any(r["role"] == "" for r in rows)
+
+
+def test_a_semicolon_delimited_roster_is_refused_not_read_as_empty():
+    # German-locale Excel saves `;`-CSV. DictReader then sees one header column and every
+    # field reads "" - no error, an empty roster, and enrol_codes once wrote it back mangled
+    # with exit 0. A header that cannot name the required columns is a hard error.
+    import pytest
+
+    text = "hertie_email;name;github_handle;github_id;enrol_code;role\na@x;A;ada;1;;\n"
+    with pytest.raises(RuntimeError, match="semicolon"):
+        roster.parse(text)

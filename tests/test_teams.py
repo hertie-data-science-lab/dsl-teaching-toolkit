@@ -46,3 +46,10 @@ def test_teams_for_returns_empty_for_unknown_assignment():
     per = teams.parse("assignment,team,github_handle\na1,t1,anna\n")
     assert teams.teams_for(per, "nope") == {}
     assert teams.teams_for(per, "a1") == {"t1": ["anna"]}
+
+
+def test_a_semicolon_delimited_teams_csv_is_refused():
+    import pytest
+
+    with pytest.raises(RuntimeError, match="semicolon"):
+        teams.parse("assignment;team;github_handle\na1;t;ada\n")

@@ -21,7 +21,7 @@ from __future__ import annotations
 import csv
 import io
 
-from .utils import get_file_content, strip_bom
+from .utils import get_file_content, require_csv_header, strip_bom
 
 CONFIG_REPO = "classroom-config"
 TEAMS_PATH = "teams.csv"
@@ -34,7 +34,9 @@ def parse(text: str) -> dict[str, dict[str, list[str]]]:
     Blank rows are skipped; a handle listed twice in a team is de-duplicated; member
     order follows first appearance so provisioning is deterministic."""
     out: dict[str, dict[str, list[str]]] = {}
-    for row in csv.DictReader(io.StringIO(strip_bom(text))):
+    reader = csv.DictReader(io.StringIO(strip_bom(text)))
+    require_csv_header(reader.fieldnames, FIELDS, "teams.csv")
+    for row in reader:
         assignment = (row.get("assignment") or "").strip()
         team = (row.get("team") or "").strip()
         handle = (row.get("github_handle") or "").strip()
