@@ -758,7 +758,7 @@ def test_every_page_states_its_own_access_rule():
     assert "accessible to enrolled students." in cohort["lectures.md"]
     assert "only accessible to enrolled students." in cohort["labs.md"]
     assert "Citation lists are public" in cohort["readings.md"]
-    assert "Course materials are only accessible" in cohort["materials.md"]
+    assert "only accessible to enrolled students/auditors." in cohort["materials.md"]
     assert "Assignments are only accessible" in cohort["assignments.md"]
     # The public open-courseware site publishes the same files on purpose, so it claims no
     # gate anywhere.

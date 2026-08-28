@@ -343,8 +343,8 @@ _THEME_PAGES = (
         "fas fa-folder-open",
         # Deliberately not "everything released": a cohort org also holds each student's
         # private submission repo, which this must never list. See `_indexable_repos`.
-        "Every course material released to this cohort, session or not. Course materials "
-        "are only accessible to enrolled students.",
+        "All released course material so far; only accessible to enrolled "
+        "students/auditors.",
         cohort_only=True,
     ),
 )
@@ -1283,9 +1283,12 @@ def _lecture_entry(
         flags = "unreleased: true\n"
         links = _links_block([])
         where = ", ".join(_dest_link(cohort_org, d, live_repos) for d in row.dests)
+        # Bold: this is the one line on an unreleased row, and it sat in the same weight
+        # as the session description above it - so a reader scanning the Lectures tab read
+        # a paragraph before learning there was nothing to open.
         body = (
-            f"Materials for {title.lower()} are not released yet"
-            + (f" - they will appear in {where} when released" if where else "")
+            f"**Materials for {title.lower()} are not yet released**"
+            + (f" - they will appear in {where} when they are" if where else "")
             + "."
         )
         # `subtitle` and `description` are deliberately KEPT here. They describe what the
@@ -1315,6 +1318,7 @@ def _lecture_entry(
 
 def _assignment_entry(
     course_org: str,
+    cohort_org: str,
     repo: str,
     when: date | datetime,
     handout: datetime | None = None,
@@ -1335,6 +1339,19 @@ def _assignment_entry(
     course repo minus its -fYYYY/-sYYYY tag), so the page names the repo students actually
     get. Deriving it from the course repo alone named the wrong repo - and titled the page
     wrong - whenever an entry set `cohort_dest_repo`.
+
+    BOTH orgs, because the two halves of an assignment live in different ones: the template
+    and its README are read from `course_org`, and the repo a student actually works in is
+    in `cohort_org`. This took `course_org` alone and used it for both, so every released
+    assignment told students their repo was "in `<course-org>`'s cohort org" - naming the
+    org they have no access to, and leaving them to guess the one they do.
+
+    A released entry carries `repo_url` / `repo_name` for that repo. The URL is the cohort
+    org's repo list filtered to this assignment, not a per-student address: the site is one
+    public page for the whole cohort and cannot know who is reading it, but GitHub shows a
+    signed-in student only the repos they can see - so the filter resolves to their own (or
+    their team's). `repo_name` is the shape to expect, `<slug>-<your-handle>` or
+    `-<your-team>` for a group assignment.
 
     An assignment NOT YET HANDED OUT is a PLACEHOLDER, flagged `handout_pending: true`:
     both schedule rows, and an entry the Assignments tab renders unlinked, saying it is
@@ -1372,7 +1389,16 @@ def _assignment_entry(
         now or datetime.now(handout.tzinfo)
     )
     out = slug in handed_out or pinned_out
-    student_repo = f"`{slug}-<your-handle>` repo in `{course_org}`'s cohort org"
+    # A group assignment fans out one repo per TEAM, so the shape a student should look for
+    # differs. Only an explicit `type: group` says so - `None` defers to the template's own
+    # grading.yml, which this does not read, and individual is the documented default.
+    entry = found[1] if found else None
+    holder = (
+        "<your-team>"
+        if entry is not None and entry.type == "group"
+        else "<your-handle>"
+    )
+    repo_name = f"{slug}-{holder}"
     # The plan-side name - all a pending assignment ever shows, and the fallback for a
     # released README that opens with no `# ` heading.
     title = slug.replace("-", " ").title()
@@ -1386,21 +1412,23 @@ def _assignment_entry(
         brief = "\n".join(
             ln for ln in readme.splitlines() if not ln.startswith("# ")
         ).strip()
-        body = (
-            f"{_liquid_raw(brief or 'Assignment brief.')}\n\n"
-            f"_Your private {student_repo} appears once the teaching team provisions it._"
+        flags = (
+            f'repo_url: "https://github.com/orgs/{cohort_org}/repositories?q={slug}-"\n'
+            f'repo_name: "{repo_name}"\n'
         )
+        # No trailing "your repo appears once the teaching team provisions it" line: the
+        # repo exists by the time this renders, and the theme now links it twice off the
+        # fields above. The body is the brief, and nothing else.
+        body = _liquid_raw(brief or "Assignment brief.")
     else:
         # A flag as well as the prose, exactly as an unreleased session row carries
         # `unreleased: true`: the theme leaves the title unlinked off this, and the
         # sentence says why.
+        # No `repo_url`: there is nothing at the other end of it yet.
         flags = "handout_pending: true\n"
-        # Not `student_repo`: that names the COURSE org ("in `X`'s cohort org"), which
-        # is the one thing a student reading this does not need. The repo's NAME is the
-        # useful half, and it is the half that survives here.
         body = (
-            f"{title} has not been handed out yet - your private "
-            f"`{slug}-<your-handle>` repo appears when it does."
+            f"{title} has not been handed out yet - your private `{repo_name}` "
+            f"repo appears when it does."
         )
     title = _q(title)
     return (
@@ -2145,6 +2173,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 "_assignments": {
                     f"{i + 1:02d}-{a}.md": _assignment_entry(
                         course_org,
+                        cohort_org,
                         a,
                         *_assignment_dates(
                             sched, a, start + timedelta(days=(i + 1) * 14)
