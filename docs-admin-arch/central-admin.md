@@ -218,10 +218,12 @@ refresh would undo it.
 
 ## What orgs exist
 
-**[`bootstrapped-orgs-inventory.md`](../bootstrapped-orgs-inventory.md)** is the live list: two
-tables, course orgs (topic `dsl-course`) and cohort orgs (topic `dsl-cohort`) mapped to the
-course they point at, with any orphan sorted to the top. It is auto-generated **Mondays 06:00
-UTC** (and on demand); when the list changed it opens a PR and merges it in the same run. Don't
+**[`bootstrapped-orgs-inventory.md`](../bootstrapped-orgs-inventory.md)** is the live list: one
+nested tree, each course org (topic `dsl-course-hub`) with the toolkit tier it runs and the
+cohort orgs (topic `dsl-cohort`) that point at it listed underneath. A cohort GitHub shows
+but the course's registry does not is marked **not registered**; a cohort pointing at no
+discovered course org is **orphaned** and listed at the end. It is auto-generated **Mondays
+06:00 UTC** (and on demand); when the list changed it opens a PR and merges it in the same run. Don't
 hand-edit it - a missing org means a failed or never-run bootstrap, not a forgotten edit. The
 refresh aborts rather than committing a net deletion (a truncated search page must not read as
 "these orgs are gone").
