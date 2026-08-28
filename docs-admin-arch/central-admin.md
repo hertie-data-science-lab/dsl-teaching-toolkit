@@ -154,24 +154,29 @@ After promoting to `staging`, check the demo org (`hertie-dsl-demo-course-e1234`
 
 ### Rollback
 
-**The rule: revert on `main`, then promote the revert.**
+**First, if the damage is live: pin the affected org back.** Set that course org's
+`central_ref:` to the last known-good commit SHA in its `.github/dsl-course.yml` and run
+**Refresh actions**. One file edit, no PR, no review, and it moves that course only - every
+other org keeps running the tier. This is the isolated hotfix path, and it is available
+immediately.
+
+**Then fix it properly: revert on `main`, and promote.**
 
 1. `git revert <the bad commit>` on a branch, PR it, squash-merge to `main` as usual.
-2. Run **Promote** with `to: release` and `ref: <the revert commit on main>` - promoting the
-   branch tip would also ship everything else `main` has gathered since. Repeat for `staging`.
+2. Run **Promote** with `to: staging`, then `to: release`.
+3. Unpin whatever you pinned in step 1.
 
-Every tier stays a fast-forward of `main`, so nothing is ever force-pushed and no org is
-handed a history CI never ran. Promote cannot move a tier backwards by design: the only way
-to undo something is a commit that says so.
+Promotion is a fast-forward, so it ships **everything on `main` up to the commit named**,
+not that commit alone - naming the revert commit rather than the branch tip stops at the
+revert instead of also taking whatever landed after it, but it still carries every commit
+before it. That is the whole model: the only way to undo something is a commit that says so.
+Promote cannot move a tier backwards, nothing is ever force-pushed, and no org is handed a
+history CI never ran.
 
 **An org that already picked the bad build up** has nothing to undo - orgs keep no copy of
 the engine, they check it out per run, so the next run uses the reverted code. The exception
 is rendered workflow *shape* (inputs, jobs, crons), which is frozen in the org until its next
 **Refresh actions**; Promote dispatches that, and any faculty member can re-run it by hand.
-
-**Faster than a revert**, if one course is affected and a PR would take too long: set that
-course org's `central_ref:` to the last known-good commit SHA and run **Refresh actions**.
-One file edit, no review, and it moves only that course.
 
 ### Protecting the tiers (set by hand)
 

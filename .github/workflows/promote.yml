@@ -9,7 +9,8 @@ name: Promote
 # can only ever move a tier forward along main - it cannot rewrite a tier's history, and
 # there is therefore no way to use it to ship something main has never seen.
 #
-# Rollback is a `git revert` on main, promoted forward (see docs-admin-arch/central-admin.md).
+# Rollback is a `git revert` on main, promoted forward; pinning one org to the last good SHA
+# is the way to move faster than that (see docs-admin-arch/central-admin.md).
 #
 # Who can run it: dispatching a workflow needs write on this repo, which is the same gate
 # every seeded workflow in every org uses. Promoting to `release` is gated a second time by
@@ -26,7 +27,7 @@ on:
           - staging
           - release
       ref:
-        description: "What to promote (default: main -> staging, staging -> release). A branch, tag or full SHA on main's history."
+        description: "What to promote (default: main -> staging, staging -> release). A branch, tag or full SHA on main's history - everything up to it ships."
         required: false
         default: ""
         type: string
@@ -79,8 +80,9 @@ jobs:
           git fetch --quiet origin "+refs/heads/*:refs/remotes/origin/*"
 
           # staging is promoted from main, release from what has already soaked on staging.
-          # Overridable, because a rollback promotes ONE revert commit rather than
-          # everything main has accumulated since the bad build landed.
+          # Overridable, to promote a point on main short of its tip - a tier is a
+          # fast-forward, so this chooses HOW FAR up main to move, never which commits to
+          # take: naming a commit ships it and everything before it.
           default_source=main
           [ "$TIER" = "release" ] && default_source=staging
           source="${SOURCE_INPUT:-$default_source}"
