@@ -349,3 +349,70 @@ def test_a_missing_team_is_a_note_but_any_other_failure_is_an_error(
         "O", "students", "r", "pull", missing_is_note=True
     )
     assert "could not grant" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------ converge_topics
+
+
+def _topic_repos():
+    return [
+        {"name": ".github", "topics": ["dsl-cohort"]},
+        {"name": "assignment-1", "topics": ["assignment-template"], "isTemplate": True},
+        {"name": "assignment-1-ada", "topics": []},  # stamp never landed
+        {"name": "assignment-1-bob", "topics": ["assignment-1", "submission"]},
+        {"name": "grades-ada", "topics": []},
+        {"name": "grades-bob", "topics": ["gradebook"]},
+        {"name": "welcome", "topics": []},
+    ]
+
+
+def _converge(monkeypatch, repos, ok=True):
+    stamped: list[tuple[str, list[str]]] = []
+    monkeypatch.setattr(
+        utils,
+        "set_repo_topics",
+        lambda org, repo, topics: stamped.append((repo, topics)) or ok,
+    )
+    failures = utils.converge_topics("Cohort-f2026", repos, cohort=True)
+    return failures, dict(stamped)
+
+
+def test_only_the_repos_missing_a_topic_are_patched(monkeypatch):
+    # The stamp is a separate PATCH after the create, so a repo whose stamp failed stayed
+    # untagged forever - and the topics are what keep a submission repo and a private
+    # gradebook off the org landing page and on the faculty READ floor.
+    failures, stamped = _converge(monkeypatch, _topic_repos())
+    assert failures == 0
+    assert stamped == {
+        "assignment-1-ada": ["assignment-1", "submission"],
+        "grades-ada": ["gradebook"],
+    }
+
+
+def test_converging_topics_never_removes_one(monkeypatch):
+    repos = [
+        {"name": "assignment-1", "isTemplate": True, "topics": []},
+        {"name": "assignment-1-ada", "topics": ["group-project"]},
+    ]
+    _, stamped = _converge(monkeypatch, repos)
+    assert stamped["assignment-1-ada"] == [
+        "assignment-1",
+        "group-project",
+        "submission",
+    ]
+
+
+def test_an_archived_repo_and_a_course_org_are_left_alone(monkeypatch):
+    repos = [{"name": "grades-ada", "topics": [], "archived": True}]
+    assert _converge(monkeypatch, repos) == (0, {})
+    monkeypatch.setattr(
+        utils,
+        "set_repo_topics",
+        lambda *a: pytest.fail("course orgs have no such repo"),
+    )
+    assert utils.converge_topics("Course-Org", _topic_repos(), cohort=False) == 0
+
+
+def test_a_failed_stamp_is_counted(monkeypatch):
+    failures, _ = _converge(monkeypatch, _topic_repos(), ok=False)
+    assert failures == 2

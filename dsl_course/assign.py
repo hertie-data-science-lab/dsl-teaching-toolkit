@@ -257,7 +257,8 @@ def provision_one(
         return "failed-create"
     else:
         log_ok(f"created {cohort_org}/{repo}")
-        set_repo_topics(cohort_org, repo, [slug, "submission"])
+        if not set_repo_topics(cohort_org, repo, [slug, "submission"]):
+            log_err(f"  ! {repo} is untagged - the nightly sweep converges it")
 
     solution_failed = False
     if sol_dir is not None:

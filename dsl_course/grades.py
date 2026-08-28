@@ -396,7 +396,8 @@ def provision_one(cohort_org: str, handle: str) -> str:
         put_file(
             cohort_org, repo, "README.md", _STARTER_README.encode(), "init gradebook"
         )
-        set_repo_topics(cohort_org, repo, ["gradebook"])
+        if not set_repo_topics(cohort_org, repo, ["gradebook"]):
+            log_err(f"  ! {repo} is untagged - the nightly sweep converges it")
 
     # Read, not write: `distribute` rewrites grades.yml from
     # `classroom-config/grades/<slug>.csv`, so a mark corrected here would be overwritten

@@ -35,6 +35,7 @@ from .discovery import (
 from .utils import (
     converge_descriptions,
     converge_faculty_access,
+    converge_topics,
     get_file_content,
     load_yaml_config,
     log,
@@ -428,6 +429,11 @@ def update_profile_readme(
     converge_faculty_access(
         org, repos, cohort=tier != "course", protected=student_repo_names(repos)
     )
+    # And the machinery topics, off the same listing: assign/grades stamp them in a
+    # separate PATCH after the create, so a repo whose stamp failed stays untagged
+    # forever - and the topics are what keep a student's submission repo and a private
+    # gradebook off this very page.
+    failures = converge_topics(org, repos, cohort=is_cohort)
     cohorts = None if is_cohort else discover_cohorts(org)
     body = render_profile_readme(org, org_name, course_name, repos, is_cohort, cohorts)
     if is_cohort:
@@ -442,13 +448,13 @@ def update_profile_readme(
         org, ".github", files, "docs: refresh org READMEs (profile + .github)"
     ):
         log_err(f"could not write {org}/.github READMEs")
-        return 1
+        return failures + 1
     log_ok(
         "profile + .github READMEs refreshed"
         if "profile/README.md" in files
         else ".github README refreshed (landing page left as the instructor has it)"
     )
-    return 0
+    return failures
 
 
 def _cohort_profile_body(org: str, repos: list[dict], seeded: str) -> str | None:

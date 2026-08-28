@@ -872,6 +872,54 @@ def converge_faculty_access(
     return changed
 
 
+def converge_topics(org: str, repos: list[dict], cohort: bool) -> int:
+    """Stamp the machinery topics missing from a COHORT org's per-student repos.
+
+    `submission` (plus the template's own name) on `<template>-<handle>`, `gradebook` on
+    `grades-<handle>` - exactly what assign.py and grades.py stamp at creation. That stamp
+    is a separate PATCH after the create, so any repo whose stamp failed, or that predates
+    the topic, is permanently untagged; nothing ever revisited it. Untagged matters: the
+    topics are what keep a student's submission repo and a private gradebook off the org
+    landing page, out of the release targets, and on the READ floor of the faculty sweep.
+    Both readers have a name rule as a backstop for exactly that reason, but a backstop is
+    not a reason to leave the record wrong.
+
+    ADDITIVE, and only where something is missing: the PUT replaces the whole topic list,
+    so whatever else a repo carries is read off the listing and written back with it, and
+    a repo already carrying its topics costs no call at all. Course orgs are skipped -
+    they have neither repo kind.
+
+    Costs no reads (the caller's listing carries `topics` and `isTemplate`) and is never
+    fatal: set_repo_topics logs its own failure, and this returns the count so a caller
+    that reports failures can include it."""
+    if not cohort:
+        return 0
+    # Local: discovery imports utils, so the names it owns come in at call time.
+    from .discovery import GRADEBOOK_PREFIX
+
+    templates = sorted(r["name"] for r in repos if r.get("isTemplate"))
+    failures = 0
+    for repo in repos:
+        if repo.get("archived"):
+            continue
+        name = repo["name"]
+        template = next((t for t in templates if name.startswith(f"{t}-")), None)
+        if template is not None:
+            wanted = {template, "submission"}
+        elif name.startswith(GRADEBOOK_PREFIX):
+            wanted = {"gradebook"}
+        else:
+            continue
+        have = set(repo.get("topics") or [])
+        if wanted <= have:
+            continue
+        if set_repo_topics(org, name, sorted(have | wanted)):
+            log_ok(f"topics converged on {name}")
+        else:
+            failures += 1
+    return failures
+
+
 def converge_descriptions(org: str, repos: list[dict], cohort: bool = False) -> int:
     """Update every repo in `repos` whose description we have since reworded.
 

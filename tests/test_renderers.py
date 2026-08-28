@@ -748,6 +748,7 @@ def _readme_run(monkeypatch, put_ok):
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
     monkeypatch.setattr(P, "converge_descriptions", lambda *a, **k: 0)
+    monkeypatch.setattr(P, "converge_topics", lambda *a, **k: 0)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(P, "log", lambda *a, **k: None)
@@ -1065,6 +1066,7 @@ def _spy_sweep(monkeypatch, repos):
 
     monkeypatch.setattr(P, "converge_faculty_access", spy)
     monkeypatch.setattr(P, "converge_descriptions", lambda *a, **k: 0)
+    monkeypatch.setattr(P, "converge_topics", lambda *a, **k: 0)
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(P, "list_org_repos", lambda org: repos)
     monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
