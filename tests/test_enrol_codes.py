@@ -192,3 +192,80 @@ def test_fill_enrol_codes_appends_the_column_when_the_roster_predates_it():
     rows = list(csv.DictReader(io.StringIO(out)))
     assert rows[0]["enrol_code"] == "dsl-new"
     assert out.splitlines()[0].endswith("enrol_code")  # added at the end
+
+
+# ------------------- a code write must not revert a Join binding that landed meanwhile
+
+
+HEADER = "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+STALE = HEADER + "ada@uni.edu,Ada,,,,enrolled\nbob@uni.edu,Bob,,,,enrolled\n"
+# What the roster looks like after a Join issue bound Ada's handle mid-run.
+FRESH = HEADER + "ada@uni.edu,Ada,ada-l,42,,enrolled\nbob@uni.edu,Bob,,,,enrolled\n"
+
+
+def _codes():
+    return [(0, "ada@uni.edu", "dsl-aaa111"), (1, "bob@uni.edu", "dsl-bbb222")]
+
+
+def test_a_refused_write_is_retried_against_the_fresh_roster(monkeypatch):
+    # The failure: put_file re-read the sha at write time, so this run's stale copy - with
+    # no handle for Ada - overwrote the Join binding, and Ada could not be provisioned.
+    written: list[str] = []
+    attempts = {"n": 0}
+
+    def fake_put_file(org, repo, path, content, message, expected_sha=None):
+        attempts["n"] += 1
+        written.append(content.decode())
+        return expected_sha == "fresh"  # only the up-to-date sha is accepted
+
+    monkeypatch.setattr(enrol_codes, "put_file", fake_put_file)
+    monkeypatch.setattr(
+        enrol_codes, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
+    )
+    assert enrol_codes.write_codes("COHORT", STALE, "stale", _codes()) is True
+    assert attempts["n"] == 2
+    # The retry carries Ada's handle - it was never this run's to remove - and both codes.
+    assert "ada-l" in written[-1]
+    assert "dsl-aaa111" in written[-1] and "dsl-bbb222" in written[-1]
+
+
+def test_the_retry_gives_up_after_a_bounded_number_of_attempts(monkeypatch):
+    monkeypatch.setattr(enrol_codes, "put_file", lambda *a, **k: False)
+    monkeypatch.setattr(
+        enrol_codes, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
+    )
+    assert enrol_codes.write_codes("COHORT", STALE, "stale", _codes()) is False
+
+
+def test_a_code_that_arrived_in_between_is_left_alone(monkeypatch):
+    # Another run (or a faculty edit) already filled Ada's cell. Ours must not replace it.
+    theirs = (
+        HEADER + "ada@uni.edu,Ada,,,dsl-theirs,enrolled\nbob@uni.edu,Bob,,,,enrolled\n"
+    )
+    written: list[str] = []
+
+    def fake_put_file(org, repo, path, content, message, expected_sha=None):
+        written.append(content.decode())
+        return expected_sha == "fresh"
+
+    monkeypatch.setattr(enrol_codes, "put_file", fake_put_file)
+    monkeypatch.setattr(
+        enrol_codes, "get_file_with_sha", lambda org, repo, path: (theirs, "fresh")
+    )
+    assert enrol_codes.write_codes("COHORT", STALE, "stale", _codes())
+    assert "dsl-theirs" in written[-1] and "dsl-aaa111" not in written[-1]
+
+
+def test_rows_are_relocated_by_email_not_by_their_original_index():
+    # A row inserted above shifts every index below it; the email is what identifies the
+    # student the code was generated for.
+    shifted = HEADER + "zoe@uni.edu,Zoe,,,,enrolled\n" + STALE[len(HEADER) :]
+    assert enrol_codes.rows_for_codes(shifted, _codes()) == {
+        1: "dsl-aaa111",
+        2: "dsl-bbb222",
+    }
+
+
+def test_a_row_with_no_email_keeps_its_original_index():
+    text = HEADER + ",Anonymous,,,,enrolled\n"
+    assert enrol_codes.rows_for_codes(text, [(0, "", "dsl-zzz")]) == {0: "dsl-zzz"}

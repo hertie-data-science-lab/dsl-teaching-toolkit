@@ -1035,14 +1035,29 @@ def blob_sha(content: bytes) -> str:
     ).hexdigest()
 
 
-def put_file(org: str, repo: str, path: str, content: bytes, message: str) -> bool:
+def put_file(
+    org: str,
+    repo: str,
+    path: str,
+    content: bytes,
+    message: str,
+    expected_sha: str | None = None,
+) -> bool:
     """Create or update a file via the Contents API.
 
-    Updates require the existing file's SHA; we fetch it first if present. That SHA is
-    git's blob sha, so comparing it with the blob sha of `content` computed locally tells
-    us - with no extra API call - whether the write would change anything: an identical
-    file is left alone. Callers may therefore run on a schedule without filling repos with
-    no-op commits.
+    Updates require the existing file's SHA. By default it is fetched here, immediately
+    before the write. That SHA is git's blob sha, so comparing it with the blob sha of
+    `content` computed locally tells us - with no extra API call - whether the write would
+    change anything: an identical file is left alone. Callers may therefore run on a
+    schedule without filling repos with no-op commits.
+
+    `expected_sha` is for a read-modify-write: pass the sha the content was READ at (see
+    get_file_with_sha) and that sha is sent as-is, no fresh read. GitHub then REFUSES the
+    write if the file has moved on since - which is the whole point. Re-reading the sha at
+    write time makes the API call succeed however stale the content is, so a commit that
+    landed between the read and the write is silently reverted; that is how Send codes
+    could wipe a Join binding out of students.csv. A caller passing it must be ready to
+    re-read, re-apply its change, and retry.
 
     One file, one commit. Use put_files when several files belong in the SAME commit.
     """
@@ -1057,17 +1072,23 @@ def put_file(org: str, repo: str, path: str, content: bytes, message: str) -> bo
         "--field",
         f"content={b64}",
     ]
-    # If the file already exists, fetch its SHA (required for update)
-    code, sha = gh(
-        "api",
-        f"repos/{org}/{repo}/contents/{path}",
-        "--jq",
-        ".sha",
-    )
-    if code == 0 and sha:
-        if sha == blob_sha(content):
-            return True
-        args += ["--field", f"sha={sha}"]
+    if expected_sha is not None:
+        if expected_sha == blob_sha(content):
+            return True  # the file already holds exactly this
+        if expected_sha:
+            args += ["--field", f"sha={expected_sha}"]
+    else:
+        # If the file already exists, fetch its SHA (required for update)
+        code, sha = gh(
+            "api",
+            f"repos/{org}/{repo}/contents/{path}",
+            "--jq",
+            ".sha",
+        )
+        if code == 0 and sha:
+            if sha == blob_sha(content):
+                return True
+            args += ["--field", f"sha={sha}"]
     code, out = gh(*args)
     if code == 0:
         return True
@@ -1507,6 +1528,31 @@ def get_file_content(org: str, repo: str, path: str, ref: str = "") -> str | Non
             return None
         raise RuntimeError(f"could not read {org}/{repo}/{path}: {out[:200]}")
     return out
+
+
+def get_file_with_sha(
+    org: str, repo: str, path: str, ref: str = ""
+) -> tuple[str, str] | None:
+    """`(decoded text, blob sha)` for a file, or None if it is genuinely absent (a 404).
+
+    The read half of a safe read-modify-write: hand the sha back to
+    `put_file(..., expected_sha=...)` and the write is refused if anything else committed
+    to the file in between. Same fail-loud rule as get_file_content - any failure that is
+    NOT a 404 raises, because a caller treating it as "not there" would write over a file
+    it never managed to read.
+
+    The sha comes first in the jq output, on its own line, because the content may contain
+    newlines and a sha may not."""
+    url = f"repos/{org}/{repo}/contents/{path}"
+    if ref:
+        url += f"?ref={ref}"
+    code, out = gh("api", url, "--jq", r'"\(.sha)\n" + (.content | @base64d)')
+    if code != 0:
+        if is_missing_resource(out):
+            return None
+        raise RuntimeError(f"could not read {org}/{repo}/{path}: {out[:200]}")
+    sha, _, text = out.partition("\n")
+    return text, sha
 
 
 def repo_tree(org: str, repo: str, branch: str, kind: str = "") -> tuple[str, ...]:

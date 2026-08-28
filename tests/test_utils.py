@@ -602,3 +602,69 @@ def test_reconcile_keeps_the_handles_it_adds_and_removes_out_of_a_public_log(
     assert utils.reconcile_team_members("org", "students", {"ada-l"}, prune=True) == 0
     captured = capsys.readouterr()
     assert "ada-l" not in captured.out and "zoe-zed" not in captured.out
+
+
+# ------------------------- a read-modify-write must not clobber a concurrent commit
+
+
+def _record_gh(monkeypatch, answers):
+    """Stub utils.gh with a queue of (code, out) answers; returns the arg tuples seen."""
+    queue = list(answers)
+    calls: list[tuple[str, ...]] = []
+
+    def fake_gh(*args, **kwargs):
+        calls.append(args)
+        return queue.pop(0) if queue else (0, "")
+
+    monkeypatch.setattr(utils, "gh", fake_gh)
+    return calls
+
+
+def test_put_file_sends_the_sha_the_caller_read_without_re_reading(monkeypatch):
+    # The bug: put_file fetched the sha immediately before writing, so the write succeeded
+    # however stale its content was - and a commit that landed in between was reverted.
+    calls = _record_gh(monkeypatch, [(0, "")])
+    assert utils.put_file(
+        "O", "R", "students.csv", b"new", "msg", expected_sha="abc123"
+    )
+    assert len(calls) == 1  # the write only - no fresh read to race against
+    assert "sha=abc123" in calls[0]
+
+
+def test_put_file_with_an_expected_sha_reports_a_refused_write(monkeypatch, capsys):
+    _record_gh(monkeypatch, [(1, "HTTP 409: is at ... but expected abc123")])
+    assert not utils.put_file(
+        "O", "R", "students.csv", b"new", "msg", expected_sha="abc123"
+    )
+    assert "failed to put students.csv" in capsys.readouterr().err
+
+
+def test_put_file_skips_a_write_that_would_change_nothing(monkeypatch):
+    calls = _record_gh(monkeypatch, [])
+    content = b"unchanged"
+    assert utils.put_file(
+        "O", "R", "f", content, "msg", expected_sha=utils.blob_sha(content)
+    )
+    assert calls == []  # no read, no write
+
+
+def test_put_file_without_an_expected_sha_still_reads_then_writes(monkeypatch):
+    calls = _record_gh(monkeypatch, [(0, "livesha"), (0, "")])
+    assert utils.put_file("O", "R", "f", b"new", "msg")
+    assert len(calls) == 2 and "sha=livesha" in calls[1]
+
+
+def test_get_file_with_sha_splits_the_sha_off_the_content(monkeypatch):
+    _record_gh(monkeypatch, [(0, "abc123\nname,email\nAda,a@x.edu")])
+    assert utils.get_file_with_sha("O", "R", "students.csv") == (
+        "name,email\nAda,a@x.edu",
+        "abc123",
+    )
+
+
+def test_get_file_with_sha_is_none_only_for_a_genuine_404(monkeypatch):
+    _record_gh(monkeypatch, [(1, "gh: Not Found (HTTP 404)")])
+    assert utils.get_file_with_sha("O", "R", "students.csv") is None
+    _record_gh(monkeypatch, [(1, "HTTP 403: rate limited")])
+    with pytest.raises(RuntimeError, match="could not read"):
+        utils.get_file_with_sha("O", "R", "students.csv")
