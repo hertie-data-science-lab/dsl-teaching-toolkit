@@ -364,11 +364,14 @@ def update_profile_readme(
             or org_name
         )
     repos = list_org_repos(org)
+    # Read off the same listing, and BEFORE the convergence below, which needs the tier:
+    # one old description becomes "[do not touch]" on a cohort org and "[control panel]"
+    # on a course org.
+    is_cohort = any(r["name"] == "welcome" for r in repos)
     # The listing carries every repo's description, and the table below is rendered
     # from it - so this is the one place that can fix a reworded description without
     # paying a read for it, and the corrected text reaches the page in the same run.
-    converge_descriptions(org, repos)
-    is_cohort = any(r["name"] == "welcome" for r in repos)
+    converge_descriptions(org, repos, cohort=is_cohort)
     cohorts = None if is_cohort else discover_cohorts(org)
     body = render_profile_readme(org, org_name, course_name, repos, is_cohort, cohorts)
     if is_cohort:
