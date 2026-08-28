@@ -13,7 +13,7 @@
 - **[hertie-maths-data-science-C23](https://github.com/hertie-maths-data-science-C23)** - Maths for Data Science - GRAD-C23
     - [hertie-maths-data-science-f2026](https://github.com/hertie-maths-data-science-f2026)
 - **[hertie-nlp-e1282](https://github.com/hertie-nlp-e1282)** - Natural Language Processing - E1282
-    - _no cohorts yet_
+    - [hertie-nlp-f2026](https://github.com/hertie-nlp-f2026)
 
 ## Regenerate on demand
 
