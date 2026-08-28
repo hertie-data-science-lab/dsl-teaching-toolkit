@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
+from dsl_course import schedule as schedule_mod
 from dsl_course import site, utils
 from dsl_course.schedule import AssignmentEntry, Deploy, Event, Release, Schedule
 
@@ -413,7 +414,7 @@ def test_the_plans_title_is_the_assignments_name_and_beats_the_readme(monkeypatc
         "Cohort-f2026",
         "assignment-1-f2026",
         date(2026, 10, 13),
-        sched=sched,
+        found=("assignment-1", sched.assignments["assignment-1"]),
         handed_out=frozenset({"assignment-1"}),
     )
     assert 'title: "Assignment 1"' in out  # the identifier is always the slug's
@@ -467,7 +468,7 @@ def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
         "Cohort-f2026",
         "assignment-3-f2026",
         date(2026, 10, 13),
-        sched=sched,
+        found=("assignment-3", sched.assignments["assignment-3"]),
         handed_out=frozenset({"assignment-3"}),
     )
     assert 'repo_name: "assignment-3-<your-team>"' in out
@@ -526,12 +527,13 @@ def test_handed_out_keys_on_the_cohort_dest_repo_not_the_slug(monkeypatch):
         }
     )
     args = ("Course", "Cohort-f2026", "assignment-1-f2026", date(2026, 10, 13))
+    found = ("assignment-1", sched.assignments["assignment-1"])
     assert "The brief." in site._assignment_entry(
-        *args, sched=sched, handed_out=frozenset({"homework-1"})
+        *args, found=found, handed_out=frozenset({"homework-1"})
     )
     # the slug is NOT the name it was frozen under, so it must not open the gate
     withheld = site._assignment_entry(
-        *args, sched=sched, handed_out=frozenset({"assignment-1"})
+        *args, found=found, handed_out=frozenset({"assignment-1"})
     )
     assert "handout_pending: true" in withheld
     assert "The brief." not in withheld
@@ -549,11 +551,12 @@ def test_assignment_dates_read_the_schedule():
             )
         }
     )
-    due, handout = site._assignment_dates(sched, "assignment-1-f2026", date(2026, 1, 1))
+    found = schedule_mod.entry_for_repo(sched, "assignment-1-f2026")
+    due, handout = site._assignment_dates(found, date(2026, 1, 1))
     assert due == datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN)
     assert handout == datetime(2026, 9, 22, 9, 0, tzinfo=BERLIN)
     # unscheduled: the synthesised fallback, and no handout row
-    assert site._assignment_dates(sched, "assignment-9-f2026", date(2026, 1, 1)) == (
+    assert site._assignment_dates(None, date(2026, 1, 1)) == (
         date(2026, 1, 1),
         None,
     )
@@ -963,7 +966,7 @@ def test_assignment_entry_names_the_cohort_dest_repo_not_the_course_repo(monkeyp
         "Cohort-f2026",
         "assignment-1-f2026",
         date(2026, 10, 13),
-        sched=sched,
+        found=("assignment-1", sched.assignments["assignment-1"]),
         handed_out=frozenset({"homework-1"}),
     )
     assert 'repo_name: "homework-1-<your-handle>"' in out
@@ -987,12 +990,12 @@ def test_the_site_build_gates_a_brief_on_what_the_cohort_actually_holds(
     args = {"sched": sched, "assignments": ["assignment-1-f2026"]}
     withheld = _plan(monkeypatch, tmp_path, **args).collections["_assignments"]
     # The entry - and so both schedule rows - is there; only the brief is held back.
-    assert "handout_pending: true" in withheld["01-assignment-1-f2026.md"]
+    assert "handout_pending: true" in withheld["01-assignment-1.md"]
 
     out = _plan(monkeypatch, tmp_path, **args, handed_out=["assignment-1"]).collections[
         "_assignments"
     ]
-    assert "handout_pending: true" not in out["01-assignment-1-f2026.md"]
+    assert "handout_pending: true" not in out["01-assignment-1.md"]
 
 
 def test_a_pending_assignment_does_not_shift_a_later_ones_ordinal(
@@ -1007,9 +1010,67 @@ def test_a_pending_assignment_does_not_shift_a_later_ones_ordinal(
         assignments=["assignment-1-f2026", "assignment-2-f2026"],
         handed_out=["assignment-2"],
     ).collections["_assignments"]
-    assert list(out) == ["01-assignment-1-f2026.md", "02-assignment-2-f2026.md"]
-    assert "handout_pending: true" in out["01-assignment-1-f2026.md"]
-    assert "handout_pending: true" not in out["02-assignment-2-f2026.md"]
+    # named by the COHORT-side name, which is what students see
+    assert list(out) == ["01-assignment-1.md", "02-assignment-2.md"]
+    assert "handout_pending: true" in out["01-assignment-1.md"]
+    assert "handout_pending: true" not in out["02-assignment-2.md"]
+
+
+def test_an_assignment_in_the_plan_gets_rows_before_its_template_is_staged(
+    monkeypatch, tmp_path
+):
+    # A term written in August names template repos nobody has created yet. Discovery finds
+    # none of them, and the site used to render one row for a cohort that had written four
+    # - dates published in schedule.yml, nothing on the schedule that publishes them.
+    sched = Schedule(
+        assignments={
+            f"assignment-{n}": AssignmentEntry(
+                course_source_repo=f"assignment-{n}-f2026",
+                due_datetime=datetime(2026, 9, 10 + n, 23, 59, tzinfo=BERLIN),
+                handout_datetime=datetime(2026, 9, n, 7, 0, tzinfo=BERLIN),
+            )
+            for n in (1, 2, 3, 4)
+        }
+    )
+    out = _plan(
+        monkeypatch,
+        tmp_path,
+        sched=sched,
+        assignments=["assignment-1-f2026"],  # only the first is staged
+    ).collections["_assignments"]
+    assert list(out) == [
+        "01-assignment-1.md",
+        "02-assignment-2.md",
+        "03-assignment-3.md",
+        "04-assignment-4.md",
+    ]
+    # each on its own dates, and none of them claiming to be released
+    assert "date: 2026-09-02T07:00:00" in out["02-assignment-2.md"]
+    assert all("handout_pending: true" in e for e in out.values())
+
+
+def test_two_plan_entries_citing_one_template_stay_two_assignments(
+    monkeypatch, tmp_path
+):
+    # `schedule.entry_for_repo` maps a repo to the FIRST entry citing it, so resolving the
+    # entry from the repo gave both of these the same slug, the same dates and one
+    # collection file - the second assignment simply vanished.
+    sched = Schedule(
+        assignments={
+            "assignment-3": AssignmentEntry(
+                course_source_repo="shared-f2026",
+                due_datetime=datetime(2026, 10, 18, 23, 59, tzinfo=BERLIN),
+            ),
+            "assignment-4": AssignmentEntry(
+                course_source_repo="shared-f2026",
+                due_datetime=datetime(2026, 11, 8, 23, 59, tzinfo=BERLIN),
+            ),
+        }
+    )
+    out = _plan(monkeypatch, tmp_path, sched=sched).collections["_assignments"]
+    assert list(out) == ["01-assignment-3.md", "02-assignment-4.md"]
+    assert "    date: 2026-10-18T23:59:00" in out["01-assignment-3.md"]
+    assert "    date: 2026-11-08T23:59:00" in out["02-assignment-4.md"]
 
 
 # ---------------------------------------------- fail-loud reads (fixes 5 and 6)
