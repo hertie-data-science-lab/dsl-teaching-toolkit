@@ -720,3 +720,8 @@ Self-contained - workflows and their Python implementation both live in this rep
   - `course/` - the course org's `.github/dsl-course.yml` (identity + the `people:` block,
     assembled from the `people-*.yml` fragments).
   - `cohort/` - a cohort org's `.github/dsl-course.yml` pointer back to its course org.
+  - `site/` - the course-specific Jekyll layouts, includes and `_sass/_course.scss` that
+    `site.py` writes into every `<org>.github.io` on each sync (`site._site_templates`).
+    Not seeded once like the rest of this directory - converged, so a rendering change
+    reaches every live site. The generic chrome stays in `dsl-jekyll-theme`, pinned at
+    `site.THEME_REF`.
