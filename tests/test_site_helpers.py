@@ -256,8 +256,9 @@ _TREE = "\n".join(  # noqa: FLY002 - a list of paths reads better than one long 
 
 
 def _tree_gh(*args, **kwargs):
-    """Fake `gh api .../git/trees/<branch>?recursive=1` - the repo's blob paths."""
-    return (0, _TREE)
+    """Fake `gh api .../git/trees/<branch>?recursive=1` - the `truncated` flag the jq asks
+    for first, then the repo's blob paths."""
+    return (0, "false\n" + _TREE)
 
 
 def test_session_files_lists_nested_files_by_path(monkeypatch):

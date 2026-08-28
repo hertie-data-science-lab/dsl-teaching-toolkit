@@ -132,15 +132,28 @@ def strip_bom(text: str) -> str:
     return text.lstrip("﻿")
 
 
+# Per-call ceiling for a single `git` subprocess, the sibling of GH_TIMEOUT_SECONDS.
+# Larger, because these are clones and pushes of whole materials repos rather than one API
+# call - but bounded, because an unauthenticated remote that decides to prompt, or a hung
+# TLS connection, otherwise blocks the job until GitHub's 6-hour limit kills it with no
+# message anyone can act on.
+GIT_TIMEOUT_SECONDS = 600
+
+
 def git(*args: str, cwd: str | None = None) -> tuple[int, str]:
-    """Run a git command."""
-    result = subprocess.run(
-        ["git"] + list(args),
-        capture_output=True,
-        check=False,
-        text=True,
-        cwd=cwd,
-    )
+    """Run a git command. A timeout comes back as a normal failure pair, so every caller's
+    existing `!= 0` check reports it rather than seeing an exception."""
+    try:
+        result = subprocess.run(
+            ["git"] + list(args),
+            capture_output=True,
+            check=False,
+            text=True,
+            cwd=cwd,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return 1, f"git: timed out after {GIT_TIMEOUT_SECONDS}s"
     return result.returncode, (result.stdout + result.stderr).strip()
 
 
@@ -1096,6 +1109,30 @@ def put_file(
     return False
 
 
+class TruncatedTree(RuntimeError):
+    """A recursive git-tree listing GitHub had to cut short."""
+
+
+def _untruncated(out: str, org: str, repo: str) -> list[str]:
+    """The tree listing's path lines, having first checked the `truncated` flag it carries
+    on its FIRST line.
+
+    The git-tree API caps a recursive listing (100k entries / 7MB) and says so in
+    `truncated: true` rather than failing. Read past it, a partial listing looks exactly
+    like a smaller repo - so a site sync drops the material links it did not see, and
+    put_files rewrites the files it thinks are missing. Both callers here are the fail-loud
+    kind (see their docstrings), so this is one more way the answer can be untrustworthy
+    and must raise rather than be believed."""
+    lines = out.splitlines()
+    if lines and lines[0].strip() == "true":
+        raise TruncatedTree(
+            f"the recursive git tree of {org}/{repo} came back TRUNCATED - GitHub could "
+            f"not list every path, and acting on a partial listing would delete or "
+            f"rewrite whatever it left out. Split the repo, or read it per directory."
+        )
+    return lines[1:] if lines else []
+
+
 def repo_blob_shas(org: str, repo: str, branch: str) -> dict[str, str]:
     """`{path: blob sha}` for every file in `org/repo`'s `branch` - ONE recursive fetch.
 
@@ -1112,13 +1149,14 @@ def repo_blob_shas(org: str, repo: str, branch: str) -> dict[str, str]:
         "api",
         f"repos/{org}/{repo}/git/trees/{branch}?recursive=1",
         "--jq",
-        '.tree[] | select(.type=="blob") | [.path, .sha] | @tsv',
+        r'"\(.truncated)", (.tree[] | select(.type=="blob") | [.path, .sha] | @tsv)',
     )
     if code != 0:
         if is_missing_resource(out) or "HTTP 409" in out:
             return {}
         raise RuntimeError(f"could not read the tree of {org}/{repo}: {out[:200]}")
-    entries = (line.split("\t") for line in out.splitlines() if "\t" in line)
+    lines = _untruncated(out, org, repo)
+    entries = (line.split("\t") for line in lines if "\t" in line)
     return {path: sha for path, sha in entries}
 
 
@@ -1575,7 +1613,7 @@ def repo_tree(org: str, repo: str, branch: str, kind: str = "") -> tuple[str, ..
         "api",
         f"repos/{org}/{repo}/git/trees/{branch}?recursive=1",
         "--jq",
-        f".tree[]{select} | .path",
+        f'"\\(.truncated)", (.tree[]{select} | .path)',
     )
     if code != 0:
         # 404 = no such tree; 409 = an empty repo (no commits) - a tree-specific signal on
@@ -1583,7 +1621,7 @@ def repo_tree(org: str, repo: str, branch: str, kind: str = "") -> tuple[str, ..
         if is_missing_resource(out) or "HTTP 409" in out:
             return ()
         raise RuntimeError(f"could not read the file tree of {org}/{repo}: {out[:200]}")
-    return tuple(sorted(out.splitlines()))
+    return tuple(sorted(_untruncated(out, org, repo)))
 
 
 def load_yaml_config(org: str, repo: str, path: str) -> dict | None:

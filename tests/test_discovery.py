@@ -239,7 +239,7 @@ def test_both_transports_share_one_tree_fetch(monkeypatch):
 
     def fake_gh(*args, **kwargs):
         calls.append(args)
-        return (0, "lectures\nlectures/01_intro\n")
+        return (0, "false\nlectures\nlectures/01_intro\n")
 
     monkeypatch.setattr(discovery, "get_default_branch", lambda org, repo: "main")
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
@@ -247,8 +247,8 @@ def test_both_transports_share_one_tree_fetch(monkeypatch):
     discovery._repo_tree_dirs("Cohort-f2026", "materials")
     site._repo_tree("Cohort-f2026", "materials")
     assert [a[-1] for a in calls] == [
-        '.tree[] | select(.type=="tree") | .path',
-        '.tree[] | select(.type=="blob") | .path',
+        '"\\(.truncated)", (.tree[] | select(.type=="tree") | .path)',
+        '"\\(.truncated)", (.tree[] | select(.type=="blob") | .path)',
     ]
 
 
