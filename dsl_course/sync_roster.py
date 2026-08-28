@@ -128,9 +128,12 @@ def revoke_offboarded_access(
         else:
             errors += 1
     if revoked:
+        # Only DIRECT collaborator grants are counted, because only those were removed:
+        # `is_collaborator` reads the affiliation=direct listing, so a repo whose suffix
+        # merely matches somebody with team or owner access is never one of these.
         log_ok(
-            f"{revoked} submission-repo grant(s) revoked for handle(s) no longer on the "
-            f"roster{' (dry run)' if dry_run else ''}"
+            f"{revoked} direct submission-repo grant(s) revoked for handle(s) no longer "
+            f"on the roster{' (dry run)' if dry_run else ''}"
         )
     return errors
 

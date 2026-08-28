@@ -316,16 +316,29 @@ def add_collaborator(org: str, repo: str, login: str, permission: str = "push") 
 
 
 def is_collaborator(org: str, repo: str, login: str) -> bool | None:
-    """Whether `login` is a DIRECT collaborator on `org/repo`.
+    """Whether `login` holds a DIRECT collaborator grant on `org/repo`.
 
-    None means the answer could not be read. Kept distinct from False on purpose: the one
-    caller is about to REVOKE access, and a rate limit or a network drop must never read as
-    "not a collaborator, nothing to do" - nor, worse, be acted on either way."""
-    code, out = gh("api", f"repos/{org}/{repo}/collaborators/{login}")
+    Read from the `affiliation=direct` LISTING, not from
+    `GET /collaborators/{login}` - that endpoint 204s for anyone who can reach the repo
+    at all, including through a team and by being an org owner. Its answer is therefore
+    "has access", and the one caller here revokes on it: every faculty member and the bot
+    would have read as a direct collaborator on every repo named after a handle they
+    happen to share, and the DELETE that followed reported a revoke that removed nothing.
+
+    None means the answer could not be read. Kept distinct from False on purpose: the
+    caller is about to REVOKE access, and a rate limit or a network drop must never read
+    as "not a collaborator, nothing to do" - nor, worse, be acted on either way."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"repos/{org}/{repo}/collaborators?affiliation=direct&per_page=100",
+        "--jq",
+        ".[].login",
+    )
     if code == 0:
-        return True
+        return login.casefold() in {ln.strip().casefold() for ln in out.splitlines()}
     if is_missing_resource(out):
-        return False
+        return False  # no such repo - nothing to revoke on it
     log_err(
         f"could not check whether {login} collaborates on {org}/{repo}: {out[:160]}"
     )

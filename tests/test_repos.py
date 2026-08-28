@@ -51,3 +51,24 @@ def test_repo_missing_is_true_only_on_a_404(monkeypatch):
     assert not repos.repo_missing("O", "r")
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, "{}"))
     assert not repos.repo_missing("O", "r")
+
+
+def test_is_collaborator_asks_for_direct_grants_only(monkeypatch):
+    # `GET /collaborators/{login}` 204s for anyone who can reach the repo AT ALL - through
+    # a team, or by being an org owner - so it answers "has access", not "is a direct
+    # collaborator". Its one caller revokes on the answer, and only a direct grant is
+    # revocable: reading team access as a direct grant reported revokes that removed
+    # nothing, on repos named after a handle nobody had ever been granted directly.
+    seen: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        repos, "gh", lambda *a, **k: seen.append(a) or (0, "Ada-L\nhertie-dsl-bot\n")
+    )
+    assert repos.is_collaborator("Cohort", "assignment-1-ada-l", "ada-l") is True
+    assert any("affiliation=direct" in a for a in seen[0])
+    assert repos.is_collaborator("Cohort", "assignment-1-ada-l", "zoe-z") is False
+
+    # An unreadable answer is neither - the caller must not revoke on a rate limit.
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 502 bad gateway"))
+    assert repos.is_collaborator("Cohort", "assignment-1-ada-l", "ada-l") is None
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    assert repos.is_collaborator("Cohort", "gone", "ada-l") is False
