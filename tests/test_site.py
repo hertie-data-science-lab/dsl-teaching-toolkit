@@ -1177,7 +1177,7 @@ def test_front_matter_survives_a_backslash_in_a_title(monkeypatch):
 
 
 def test_links_block_survives_a_backslash_in_a_filename():
-    block = site._links_block([("lectures", [("notes \\x.pdf", "https://x/1")])])
+    block = site_repo.links_block([("lectures", [("notes \\x.pdf", "https://x/1")])])
     parsed = yaml.safe_load(block)  # must parse, no ScannerError
     assert "notes" in parsed["links"][0]["name"]
 
