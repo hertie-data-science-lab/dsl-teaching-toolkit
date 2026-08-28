@@ -16,12 +16,13 @@ from __future__ import annotations
 import importlib.util
 import re
 import subprocess
+from functools import cache
 from pathlib import Path
 
 import pytest
 import yaml
 
-from dsl_course import site
+from dsl_course import site, site_repo
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "site"
 
@@ -161,7 +162,7 @@ def written_fields(documents, generated) -> set[str]:
 
 
 def _templates() -> dict[str, str]:
-    return site._site_templates()
+    return site_repo.site_templates()
 
 
 def _liquid_templates() -> dict[str, str]:
@@ -266,7 +267,7 @@ def cohort_plan(monkeypatch, tmp_path):
     captured: dict = {}
     monkeypatch.setattr(
         site,
-        "_sync_site_repo",
+        "sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
     monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
@@ -275,10 +276,10 @@ def cohort_plan(monkeypatch, tmp_path):
     monkeypatch.setattr(
         site, "discover_handed_out_assignments", lambda org: frozenset()
     )
-    monkeypatch.setattr(site, "_yaml_file", lambda *a: {})
+    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
     monkeypatch.setattr(site.schedule, "load", lambda org: site.schedule.Schedule())
-    monkeypatch.setattr(site, "_people_yaml", lambda *a, **k: "people: []\n")
-    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", ()))
+    monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
+    monkeypatch.setattr(site, "_repo_tree", cache(lambda org, repo: ("main", ())))
     assert site.sync_site("Course-Org", ORG) == 0
     return captured["plan"]
 
@@ -289,13 +290,13 @@ def public_plan(monkeypatch, tmp_path):
     captured: dict = {}
     monkeypatch.setattr(
         site,
-        "_sync_site_repo",
+        "sync_site_repo",
         lambda org, build, **kw: captured.update(plan=build(tmp_path)) or 0,
     )
     monkeypatch.setattr(site, "discover_sessions", lambda org, repo: [])
     monkeypatch.setattr(site, "discover_sections", lambda src: [])
-    monkeypatch.setattr(site, "_yaml_file", lambda *a: {})
-    monkeypatch.setattr(site, "_people_yaml", lambda *a, **k: "people: []\n")
+    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
+    monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     monkeypatch.setattr(site, "gh", lambda *a, **k: (0, ""))
     assert site.sync_public_site("Course-Org", "course-materials-f2026") == 0
     return captured["plan"]
@@ -315,7 +316,7 @@ def _clone_with(files: dict[str, str]):
             (wd / rel).write_text(body)
         subprocess.run(["git", "-C", str(wd), "add", "-A"], check=True)
         subprocess.run(
-            ["git", "-C", str(wd), *site._GIT_ENV, "commit", "-q", "-m", "seed"],
+            ["git", "-C", str(wd), *site_repo._GIT_ENV, "commit", "-q", "-m", "seed"],
             check=True,
         )
         return (0, "")
@@ -327,21 +328,21 @@ def test_a_retired_path_leaves_the_site_repo_and_the_rest_stays(monkeypatch):
     # `files` cannot express a removal - the apply step is `git add -A` - so without
     # `retire` a template the toolkit stops shipping stays on every live site forever.
     tracked: dict = {}
-    monkeypatch.setattr(site, "repo_exists", lambda org, name: True)
-    monkeypatch.setattr(site, "repo_is_archived", lambda org, name: False)
+    monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr(site_repo, "repo_is_archived", lambda org, name: False)
     monkeypatch.setattr(
-        site,
+        site_repo,
         "gh",
         _clone_with({"_layouts/class.html": "old\n", "_layouts/page.html": "keep\n"}),
     )
-    real_git = site.git
+    real_git = site_repo.git
     monkeypatch.setattr(
-        site,
+        site_repo,
         "git",
         lambda *a: (0, "") if "push" in a else real_git(*a),
     )
     monkeypatch.setattr(
-        site,
+        site_repo,
         "_overwritten_edits",
         lambda wd: (
             tracked.update(
@@ -356,8 +357,8 @@ def test_a_retired_path_leaves_the_site_repo_and_the_rest_stays(monkeypatch):
         ),
     )
 
-    def build(_wd: Path) -> site._SitePlan:
-        return site._SitePlan(
+    def build(_wd: Path) -> site_repo.SitePlan:
+        return site_repo.SitePlan(
             config={},
             collections={},
             files={"_layouts/new.html": "new\n"},
@@ -365,7 +366,7 @@ def test_a_retired_path_leaves_the_site_repo_and_the_rest_stays(monkeypatch):
             commit="site: sync",
         )
 
-    assert site._sync_site_repo(ORG, build) == 0
+    assert site_repo.sync_site_repo(ORG, build) == 0
     # Retired and gone; a retired path the site never had is not an error; everything
     # else the site holds is untouched.
     assert "_layouts/class.html" not in tracked["files"]

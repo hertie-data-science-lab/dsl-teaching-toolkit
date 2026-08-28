@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import gh_contents, site
+from dsl_course import gh_contents, site, site_repo
 
 COURSE = "Course-Org"
 SOURCE = "course-materials-f2026"
@@ -75,13 +75,18 @@ def _install_fakes(monkeypatch) -> dict[str, str]:
             )
         return (0, "")
 
+    # `gh` and `repo_exists` are read from both namespaces: `site` clones the SOURCE
+    # repo and `resync_public_site` looks the site repo up, while the site-repo mechanics
+    # next door do the rest.
     monkeypatch.setattr(site, "gh", fake_gh)
-    monkeypatch.setattr(site, "git", fake_git)
+    monkeypatch.setattr(site_repo, "gh", fake_gh)
+    monkeypatch.setattr(site_repo, "git", fake_git)
     monkeypatch.setattr(site, "repo_exists", lambda org, name: True)
-    monkeypatch.setattr(site, "repo_is_archived", lambda org, name: False)
-    monkeypatch.setattr(site, "_acting_login", lambda: None)
+    monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr(site_repo, "repo_is_archived", lambda org, name: False)
+    monkeypatch.setattr(site_repo, "_acting_login", lambda: None)
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
-    # site._yaml_file now reads via gh_contents.load_yaml_config, which resolves
+    # site_repo.yaml_file now reads via gh_contents.load_yaml_config, which resolves
     # get_file_content in the UTILS namespace - stub it there too, or the real gh
     # runs (green on an authenticated dev box, red in tokenless CI).
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: "")
@@ -175,7 +180,7 @@ def test_an_archived_site_repo_is_a_quiet_skip_not_a_daily_failure(monkeypatch, 
     # A past cohort's site repo is frozen read-only. The clone and the commit both succeed
     # and only the push 403s, so the nightly Sync site run failed on it every single day.
     committed = _install_fakes(monkeypatch)
-    monkeypatch.setattr(site, "repo_is_archived", lambda org, name: True)
+    monkeypatch.setattr(site_repo, "repo_is_archived", lambda org, name: True)
     assert site.sync_public_site(COURSE, SOURCE, "actual-readings") == 0
     assert not committed  # nothing was even cloned
     assert "is archived" in capsys.readouterr().out
@@ -188,14 +193,14 @@ def test_nothing_to_publish_at_all_is_an_error():
 
 def test_publish_persists_its_settings_in_the_site_repo(published):
     cfg = yaml.safe_load(
-        published(readings_mode="actual-readings")[site.PUBLISH_CONFIG]
+        published(readings_mode="actual-readings")[site_repo.PUBLISH_CONFIG]
     )
     assert cfg == {
         "source_repo": SOURCE,
         "readings_mode": "actual-readings",
         "include_lectures": True,
     }
-    assert site.PUBLISH_CONFIG.startswith("_")  # so Jekyll ignores it
+    assert site_repo.PUBLISH_CONFIG.startswith("_")  # so Jekyll ignores it
 
 
 def test_cron_resync_repeats_the_last_publishs_settings(monkeypatch):

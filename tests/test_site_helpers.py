@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
-from dsl_course import gh_contents, repos, schedule_plan, site
+from dsl_course import gh_contents, repos, schedule_plan, site, site_repo
 
 
 def test_semester_label():
@@ -24,8 +24,8 @@ def test_semester_label():
 
 
 def test_slug():
-    assert site._slug("MidTerm Exam") == "midterm-exam"
-    assert site._slug("") == "exam"
+    assert site_repo.slug("MidTerm Exam") == "midterm-exam"
+    assert site_repo.slug("") == "exam"
 
 
 def test_exam_entry_date_only_keeps_the_nine_am_placeholder():
@@ -56,14 +56,14 @@ _PEOPLE_META = {
 
 def test_people_yaml_cohort_includes_tas():
     # The cohort site reads its own people.yml and renders instructors AND TAs.
-    out = site._people_yaml("Some-Cohort-f2026", _PEOPLE_META, edit_at="people.yml")
+    out = site_repo.people_yaml("Some-Cohort-f2026", _PEOPLE_META, edit_at="people.yml")
     assert "Prof. Jane" in out
     assert "Alex TA" in out
 
 
 def test_people_yaml_course_site_drops_tas():
     # The multi-year open-courseware site shows instructors only - TAs are cohort-only.
-    out = site._people_yaml(
+    out = site_repo.people_yaml(
         "Some-Course", _PEOPLE_META, edit_at="dsl-course.yml", include_tas=False
     )
     assert "Prof. Jane" in out
@@ -74,11 +74,11 @@ def test_people_yaml_course_site_drops_tas():
 def test_people_yaml_header_says_it_is_generated_and_where_to_edit(monkeypatch):
     # An instructor edited the generated file and the next sync overwrote him. Both modes
     # - declared block and team fallback - must say so and name the real source file.
-    declared = site._people_yaml(
+    declared = site_repo.people_yaml(
         "Some-Cohort-f2026", _PEOPLE_META, edit_at="Cohort/classroom-config/people.yml"
     )
-    monkeypatch.setattr(site, "_team_people", lambda org, team: [])
-    fallback = site._people_yaml(
+    monkeypatch.setattr(site_repo, "_team_people", lambda org, team: [])
+    fallback = site_repo.people_yaml(
         "Some-Course",
         {},
         edit_at="the `people:` block of Course/.github/dsl-course.yml",
@@ -111,7 +111,7 @@ def test_people_yaml_passes_every_declared_display_field_through():
             ]
         }
     }
-    out = site._people_yaml("Some-Cohort-f2026", meta, edit_at="people.yml")
+    out = site_repo.people_yaml("Some-Cohort-f2026", meta, edit_at="people.yml")
     assert 'title: "Professor of Things"' in out
     assert 'office_hours: "Tue 14:00, Room 3.21"' in out
     assert 'profile_pic: "j.jpg"' in out  # `photo` renamed to the theme's key
@@ -122,7 +122,7 @@ def test_people_yaml_passes_every_declared_display_field_through():
 
 def test_set_config_replaces_only_the_named_key():
     cfg = 'course_name: "old"\ncourse_code: "X"\n'
-    out = site._set_config(cfg, "course_name", "Deep Learning")
+    out = site_repo._set_config(cfg, "course_name", "Deep Learning")
     assert 'course_name: "Deep Learning"' in out
     assert 'course_code: "X"' in out  # untouched
 
@@ -474,7 +474,7 @@ def test_block_survives_an_indented_first_line():
     # Without the explicit `|2` indicator YAML would take the block's indentation from its
     # first line, and every following line would look like the end of the block - breaking
     # the whole file, not just this field.
-    out = site._block("reading_list", "   - indented\n- flush")
+    out = site_repo.block("reading_list", "   - indented\n- flush")
     assert yaml.safe_load(out)["reading_list"] == "   - indented\n- flush\n"
 
 
@@ -482,7 +482,7 @@ def test_block_keeps_liquid_verbatim_and_expands_tabs():
     # Front matter is data, not a template, so no `{% raw %}` fence is needed here.
     text = "a\tb\n{{ site.x }} {% if y %}"
     assert (
-        yaml.safe_load(site._block("k", text))["k"]
+        yaml.safe_load(site_repo.block("k", text))["k"]
         == "a   b\n{{ site.x }} {% if y %}\n"
     )
 
@@ -741,20 +741,20 @@ def test_index_gives_a_non_ordinal_directory_its_own_section(monkeypatch):
 
 
 def test_theme_pages_split_readings_out_only_where_there_is_an_index():
-    cohort = site._theme_pages(cohort=True)
+    cohort = site_repo.theme_pages(cohort=True)
     assert "layout: readings" in cohort["readings.md"]
     assert "layout: materials" in cohort["materials.md"]
     assert "All Materials" in cohort["materials.md"]
     # A public course site has no cohort repos to index, so /materials/ stays the readings
     # page it has always been rather than becoming an empty catch-all.
-    public = site._theme_pages(cohort=False)
+    public = site_repo.theme_pages(cohort=False)
     assert "readings.md" not in public
     assert "layout: readings" in public["materials.md"]
     assert "permalink: /materials/" in public["materials.md"]
 
 
 def test_every_page_states_its_own_access_rule():
-    cohort = site._theme_pages(cohort=True)
+    cohort = site_repo.theme_pages(cohort=True)
     # Each page's gate is its own sentence, because they genuinely differ: readings are a
     # public citation list over gated files, the rest are gated outright.
     # auditors read released materials but get no assignments, so the three materials
@@ -767,7 +767,7 @@ def test_every_page_states_its_own_access_rule():
     assert "auditors" not in cohort["assignments.md"]
     # The public open-courseware site publishes the same files on purpose, so it claims no
     # gate anywhere.
-    for page in site._theme_pages(cohort=False).values():
+    for page in site_repo.theme_pages(cohort=False).values():
         assert "enrolled" not in page
 
 
@@ -776,15 +776,17 @@ def test_no_nav_tab_can_point_at_a_page_this_site_does_not_get():
     # the public site cannot ship a Readings tab pointing at a page only cohort sites get.
     for cohort in (True, False):
         tabs = {
-            i["url"] for i in yaml.safe_load(site._nav_yaml(cohort=cohort))["items"]
+            i["url"] for i in yaml.safe_load(site_repo.nav_yaml(cohort=cohort))["items"]
         }
         generated = {
-            f"/{f.removesuffix('.md')}/" for f in site._theme_pages(cohort=cohort)
+            f"/{f.removesuffix('.md')}/" for f in site_repo.theme_pages(cohort=cohort)
         }
         assert generated <= tabs  # every generated page has a tab
         # ...and every remaining tab is one the theme provides rather than generates.
         assert tabs - generated == {"/", "/schedule/"}
-    public = {i["url"] for i in yaml.safe_load(site._nav_yaml(cohort=False))["items"]}
+    public = {
+        i["url"] for i in yaml.safe_load(site_repo.nav_yaml(cohort=False))["items"]
+    }
     assert "/readings/" not in public  # a cohort-only page, so a cohort-only tab
 
 
@@ -792,7 +794,9 @@ def test_nav_order_does_not_depend_on_a_string_tie_break():
     # Assignments used to be pinned to integer position 5, which tied with the fourth
     # generated page - so the tab order came down to comparing "/assignments/" against
     # "/materials/". It now follows the page it belongs behind.
-    names = [i["name"] for i in yaml.safe_load(site._nav_yaml(cohort=True))["items"]]
+    names = [
+        i["name"] for i in yaml.safe_load(site_repo.nav_yaml(cohort=True))["items"]
+    ]
     # Assignments is a generated page now, so its position comes from the page table like
     # every other - no integer slots, nothing to tie.
     assert names.index("Assignments") == names.index("Readings") + 1
@@ -905,31 +909,31 @@ def test_a_renamed_org_fails_the_sync_instead_of_no_opping(monkeypatch):
     # Renaming an org leaves `<old>.github.io` behind, demoted to a project page. The
     # expected site repo is then absent, which used to read as "never opted into a site"
     # - green forever while the published site rotted.
-    monkeypatch.setattr(site, "repo_exists", lambda org, name: False)
+    monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: False)
     monkeypatch.setattr(
-        site, "list_org_repos", lambda org: _repos("welcome", "OLD-NAME.github.io")
+        site_repo, "list_org_repos", lambda org: _repos("welcome", "OLD-NAME.github.io")
     )
     built: list[object] = []
-    assert site._sync_site_repo("new-name", lambda wd: built.append(wd)) == 1
+    assert site_repo.sync_site_repo("new-name", lambda wd: built.append(wd)) == 1
     assert built == []
 
 
 def test_an_org_that_never_had_a_site_is_still_a_quiet_noop(monkeypatch):
-    monkeypatch.setattr(site, "repo_exists", lambda org, name: False)
+    monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: False)
     monkeypatch.setattr(
-        site, "list_org_repos", lambda org: _repos("welcome", ".github")
+        site_repo, "list_org_repos", lambda org: _repos("welcome", ".github")
     )
-    assert site._sync_site_repo("new-name", lambda wd: None) == 0
+    assert site_repo.sync_site_repo("new-name", lambda wd: None) == 0
 
 
 def test_a_failed_repo_listing_is_not_read_as_no_site(monkeypatch):
-    monkeypatch.setattr(site, "repo_exists", lambda org, name: False)
+    monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: False)
 
     def boom(org):
         raise RuntimeError(f"could not list repos in {org}")
 
-    monkeypatch.setattr(site, "list_org_repos", boom)
-    assert site._sync_site_repo("new-name", lambda wd: None) == 1
+    monkeypatch.setattr(site_repo, "list_org_repos", boom)
+    assert site_repo.sync_site_repo("new-name", lambda wd: None) == 1
 
 
 # ------------------------------------------------------- the publication denylist
