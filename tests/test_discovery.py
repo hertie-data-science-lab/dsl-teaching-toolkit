@@ -27,6 +27,22 @@ INFRA_AND_CONTENT = [
 ]
 
 
+def test_a_gradebook_or_submission_repo_is_recognised_by_name_too():
+    # The topic is stamped in a separate call after the create and never converged, so a
+    # failed PATCH must not put `grades-<handle>` or `<slug>-<handle>` on a public page.
+    repos = [
+        {"name": "assignment-1", "isTemplate": True, "topics": []},
+        {"name": "assignment-1-ada-l", "isTemplate": False, "topics": []},
+        {"name": "grades-ada-l", "topics": []},
+        {"name": "materials", "topics": []},
+    ]
+    assert discovery.has_infra_topic({"name": "grades-ada-l", "topics": []})
+    assert discovery.is_student_repo(repos[1], repos)
+    assert discovery.is_student_repo(repos[2], repos)
+    assert not discovery.is_student_repo(repos[3], repos)
+    assert not discovery.is_student_repo(repos[0], repos)  # the template itself
+
+
 def test_is_infra_repo_excludes_by_name_and_by_topic():
     infra, content = INFRA_AND_CONTENT[:7], INFRA_AND_CONTENT[7:]
     assert all(discovery._is_infra_repo(r) for r in infra)

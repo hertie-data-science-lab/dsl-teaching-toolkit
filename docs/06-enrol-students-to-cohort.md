@@ -26,7 +26,7 @@ Live example roster: [`example-course/cohort-org/students.csv`](../example-cours
 2. **Send enrolment codes.**
    - In Your **course** org → `.github` → **Actions** → **Send enrolment codes**: pick the cohort.
    - This workflow writes an `enrol_code` onto every roster row that lacks one and emails each not-yet-onboarded student at their `hertie_email`.
-   - NB: `dry_run` defaults to `true`. Untick it to write and send.
+   - NB: `dry_run` defaults to `true`. It lists masked recipients and subjects only - never a code or a name, because the run log is public. Untick it to write and send.
    
    > **If the emailing integration isn't live for any reason** the codes can still be written into `students.csv` by the `Send enrolment codes` workflow → then copy each student's code into an email of your own and send out manually.
 
@@ -52,8 +52,9 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
 - There are 2 methods to form groups:
    1. Students open a **Join team** issue in `welcome`, 
    2. instructors edit `classroom-config/teams.csv`(`assignment, team, github_handle`)
-- The self-serve issue flow enforces a **team-size cap**: `max_team_size` per assignment under
-  `assignments:` in `classroom-config/schedule.yml` (default 5 when unset).
+- The self-serve issue flow only accepts an assignment already declared under `assignments:` in
+  `classroom-config/schedule.yml`, and enforces its **team-size cap** there: `max_team_size`
+  (default 5 when unset). Team names cannot be a GitHub handle or a faculty team name.
 - The **Sync membership** workflow then creates a GitHub team per group.
 - A **Release assignment** run with `group` ticked then grants each team its shared repo.
 

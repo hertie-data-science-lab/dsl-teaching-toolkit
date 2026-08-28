@@ -27,7 +27,7 @@ from .central import CENTRAL, CENTRAL_REF
 from .discovery import (
     course_name_of,
     discover_cohorts,
-    has_infra_topic,
+    is_student_repo,
     list_org_repos,
 )
 from .utils import (
@@ -53,7 +53,9 @@ def _repo_table(repos: list[dict]) -> str:
     the thing this pipeline keeps out of public view. The site repo stays: it is public
     anyway, and faculty need the "do not touch" row.
     """
-    visible = [r for r in repos if r["name"] != ".github" and not has_infra_topic(r)]
+    visible = [
+        r for r in repos if r["name"] != ".github" and not is_student_repo(r, repos)
+    ]
     visible.sort(key=lambda r: (r["name"].lower() != "welcome", r["name"].lower()))
     rows = []
     for r in visible:

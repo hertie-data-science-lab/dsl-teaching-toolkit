@@ -69,10 +69,22 @@ def test_roster_dump_roundtrips_with_enrol_code():
     assert reparsed[0].onboarded is True
 
 
-def test_mailer_dry_run_previews_without_config():
-    msgs = [("a@x.edu", "Subj", "Body"), ("b@x.edu", "Subj", "Body")]
+def test_mailer_dry_run_previews_without_config(capsys):
+    msgs = [("ada@x.edu", "Subj", "Hello Ada, your code is dsl-abc123")]
     # no SMTP env needed for a dry-run preview
-    assert mailer.send_bulk(msgs, dry_run=True) == 2
+    assert mailer.send_bulk(msgs, dry_run=True) == 1
+    # The workflow log is PUBLIC: never the body (name + live enrol code), never the
+    # address in full.
+    out = capsys.readouterr().out
+    assert "dsl-abc123" not in out and "Ada" not in out and "ada@x.edu" not in out
+    assert "a***@x.edu" in out and "Subj" in out
+
+
+def test_mask_email_keeps_one_character_and_the_domain():
+    assert mailer.mask_email("katarzyna.nowak@students.hertie-school.org") == (
+        "k***@students.hertie-school.org"
+    )
+    assert mailer.mask_email("nodomain") == "n***"
 
 
 def test_smtp_config_from_env_needs_all_three(monkeypatch):

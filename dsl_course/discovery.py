@@ -46,6 +46,9 @@ ASSIGNMENT_TEMPLATE_TOPIC = "assignment-template"
 # submission repos and the frozen cohort-side assignment templates (assign.py), and the
 # private per-student gradebooks (grades.py).
 INFRA_TOPICS = {"submission", ASSIGNMENT_TEMPLATE_TOPIC, "gradebook"}
+# The per-student gradebook repo: grades-<handle> (grades.py creates them). Named here so
+# the reader below and the writer cannot drift.
+GRADEBOOK_PREFIX = "grades-"
 
 
 def _is_infra_repo(repo: dict) -> bool:
@@ -71,8 +74,26 @@ def has_infra_topic(repo: dict) -> bool:
     Split out of _is_infra_repo because the org landing page needs this half and not the
     other: it must drop those per-student repos (naming them exposes the roster and every
     team's membership on a page students land on) while KEEPING `welcome`,
-    `classroom-config` and the site repo, which _is_infra_repo also excludes."""
+    `classroom-config` and the site repo, which _is_infra_repo also excludes.
+
+    A gradebook is also recognised by NAME: the topic is stamped in a separate call after
+    the create, and a failed stamp must not put `grades-<handle>` on a public page."""
+    if repo["name"].startswith(GRADEBOOK_PREFIX):
+        return True
     return bool(set(repo.get("topics") or []) & INFRA_TOPICS)
+
+
+def is_student_repo(repo: dict, repos: list[dict]) -> bool:
+    """Whether `repo` is a per-student/team repo, by topic OR by name.
+
+    Submission repos are `<slug>-<handle>` generated from the cohort template `<slug>`,
+    which is the one template repo in a cohort org. The topic that marks them is stamped
+    after the create and never converged, so a repo named off a template in the same
+    listing counts too - on a PUBLIC page the roster must not depend on one PATCH."""
+    if has_infra_topic(repo):
+        return True
+    templates = {r["name"] for r in repos if r.get("isTemplate")}
+    return any(repo["name"].startswith(f"{t}-") for t in templates)
 
 
 def list_org_repos(org: str) -> list[dict]:

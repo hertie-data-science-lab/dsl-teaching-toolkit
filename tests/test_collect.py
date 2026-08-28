@@ -59,15 +59,21 @@ def test_score_from_junit_handles_testsuites_root():
     assert result == {"score": 1, "max": 1, "tests": [{"name": "a", "passed": True}]}
 
 
-def test_summary_lines_use_tick_cross_not_emoji():
-    result = {
-        "score": 1,
-        "max": 2,
-        "tests": [{"name": "a", "passed": True}, {"name": "b", "passed": False}],
-    }
-    text = "\n".join(collect.summary_lines(result))
-    assert "✓ a" in text and "✗ b" in text
-    assert "✅" not in text and "❌" not in text
+def test_the_public_log_never_names_a_submission_repo(monkeypatch, capsys):
+    # Every grading log line is world-readable (the workflows run in the course org's
+    # PUBLIC .github), and a submission repo is `<slug>-<handle>`. The tag is stable so a
+    # marker can match it to the private archive, and carries no handle.
+    ref = collect.target_ref("assignment-1-ada-l")
+    assert ref == collect.target_ref("assignment-1-ada-l")
+    assert ref.startswith("#") and len(ref) == 8
+    assert "ada" not in ref
+    # The clone-failure paths log the tag, not the repo.
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    monkeypatch.setattr(collect, "repo_exists", lambda *a, **k: False)
+    collect._grade_target("COHORT", "assignment-1-ada-l", {}, None, "2026-09-08")
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "ada-l" not in out and ref in out
 
 
 def test_today_in_cohort_tz_follows_the_schedule_timezone():

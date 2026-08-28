@@ -103,8 +103,6 @@ jobs:
             // Parse the assignment slug + team name from the issue form.
             const aMatch = (issue.body || '').match(/Assignment\s*[\r\n]+\s*([A-Za-z0-9][\w.-]*)/i);
             const tMatch = (issue.body || '').match(/Team\s*[\r\n]+\s*([A-Za-z0-9][\w-]*)/i);
-            const assignment = aMatch && aMatch[1];
-            const team = tMatch && tMatch[1];
 
             // Per-assignment team-size cap, set by the teaching team in the PRIVATE
             // classroom-config/schedule.yml:
@@ -112,7 +110,10 @@ jobs:
             //     assignment-4-project:
             //       max_team_size: 4        # (or inline: {due_datetime: ..., max_team_size: 4})
             // Line-scanned (github-script has no YAML lib) tolerant of comments and both
-            // block and flow styles. No file / no key -> DEFAULT_TEAM_SIZE.
+            // block and flow styles. Returns null when the slug is NOT under `assignments:`
+            // (or there is no schedule.yml): a team may only form for an assignment the
+            // teaching team has declared, or one student could mint any number of real GitHub
+            // teams under names of their choosing. A declared slug with no cap -> DEFAULT_TEAM_SIZE.
             const DEFAULT_TEAM_SIZE = 5;
             const teamCap = async (slug) => {
               let text;
@@ -121,8 +122,9 @@ jobs:
                 text = Buffer.from(got.data.content, 'base64').toString('utf8');
               } catch (e) {
                 if (e.status !== 404) throw e;
-                return DEFAULT_TEAM_SIZE;
+                return null;
               }
+              let known = false;
               let inAssignments = false, inSlug = false;
               for (const raw of text.split(/\r?\n/)) {
                 const line = raw.replace(/#.*$/, '').trimEnd();
@@ -132,7 +134,8 @@ jobs:
                 if (!inAssignments) continue;
                 if (indent === 2) {
                   const m = line.trim().match(/^([\w.-]+):\s*(\{.*\})?$/);
-                  inSlug = !!m && m[1] === slug;
+                  inSlug = !!m && m[1].toLowerCase() === slug;
+                  known = known || inSlug;
                   if (inSlug && m && m[2]) {
                     const f = m[2].match(/max_team_size:\s*(\d+)/);
                     if (f) return parseInt(f[1], 10);
@@ -144,12 +147,25 @@ jobs:
                   if (f) return parseInt(f[1], 10);
                 }
               }
-              return DEFAULT_TEAM_SIZE;
+              return known ? DEFAULT_TEAM_SIZE : null;
             };
 
-            if (!assignment || !team) return fail(
+            if (!aMatch || !tMatch) return fail(
               `Thanks @${handle} - I couldn't read both an **Assignment** and a **Team** from the form. ` +
-              `Team names use letters, numbers and dashes only. Please edit the issue.`,
+              `Team names use letters, numbers and dashes only. Please open a new issue.`,
+              'needs-review');
+            // Compared and stored lower-case: dsl_course.sync_teams lower-cases the slug it
+            // materialises, so `Team-X` and `team-x` ARE the same team - the size cap and the
+            // one-team-per-assignment rule below must see them that way too.
+            const assignment = aMatch[1].toLowerCase();
+            const team = tMatch[1].toLowerCase();
+            // The GitHub team this row becomes is `<assignment>-<team>` (sync_teams.team_slug).
+            // `course` + `admin` is `course-admin` - the faculty team with admin on every repo
+            // in this org. Never let a form submission name a faculty team.
+            const RESERVED = new Set(['course-admin', 'instructors', 'students', 'auditors']);
+            const slug = `${assignment}-${team}`;
+            if (RESERVED.has(slug) || slug.startsWith('instructors-')) return fail(
+              `Thanks @${handle} - that assignment + team combination is reserved. Pick another team name.`,
               'needs-review');
 
             // Verify the author is an onboarded student (handle recorded in the roster).
@@ -176,10 +192,18 @@ jobs:
             // so they never receive an assignment repo - and a group assignment's repo goes to
             // the whole team. Refuse politely rather than recording a membership that would
             // hand an auditor a group repo.
+            // Neutral wording: this issue is public, and the roster role is not.
             if (iRole >= 0 && (myRow[iRole] || '').trim().toLowerCase() === 'auditor') return fail(
-              `Thanks @${handle} - you're on the roster as an **auditor** (read-only: the released ` +
-              `materials, but no assignment repos and no grades), so you can't join a project team. ` +
-              `Contact the teaching team if you should be enrolled instead.`,
+              `Thanks @${handle} - your enrolment doesn't include project work, so you can't join a project team. ` +
+              `Contact the teaching team if you think this is a mistake.`,
+              'needs-review');
+            // A team may not be named after a roster handle: submission repos are
+            // `<slug>-<handle>` and a group repo is `<slug>-<team>`, so a team called after a
+            // classmate would be granted that classmate's repo if the assignment were ever
+            // provisioned as a group.
+            const handles = new Set(rosterTable.slice(1).map(r => (r[iRosterHandle] || '').trim().toLowerCase()).filter(Boolean));
+            if (handles.has(team)) return fail(
+              `Thanks @${handle} - a team can't be named after a GitHub handle. Pick another team name.`,
               'needs-review');
 
             // Read teams.csv (create it on first use). Columns: dsl_course.teams.FIELDS.
@@ -200,6 +224,10 @@ jobs:
             // The cap is per-assignment config in schedule.yml, not a property of teams.csv,
             // so it is read once rather than on every retry below.
             const cap = await teamCap(assignment);
+            if (cap === null) return fail(
+              `Thanks @${handle} - \`${assignment}\` isn't an assignment in this cohort's schedule yet. ` +
+              `Check the slug with the teaching team, or ask them to add it to classroom-config/schedule.yml.`,
+              'needs-review');
 
             // Read-modify-write, retried on a 409. Many Join-team issues are in flight at
             // once near a project deadline, and each appends to the SAME file; the `sha`
@@ -227,8 +255,8 @@ jobs:
 
               // One team per student per assignment; respect the size cap; idempotent re-open.
               const mine = rows.find(r =>
-                cell(r, iAssign) === assignment && cell(r, iHandle).toLowerCase() === handle.toLowerCase());
-              if (mine && cell(mine, iTeam) === team) {
+                cell(r, iAssign).toLowerCase() === assignment && cell(r, iHandle).toLowerCase() === handle.toLowerCase());
+              if (mine && cell(mine, iTeam).toLowerCase() === team) {
                 await github.rest.issues.createComment({
                   owner: org, repo: context.repo.repo, issue_number: issue.number,
                   body: `You're already in **${team}** for \`${assignment}\` @${handle} - nothing to do.` });
@@ -241,7 +269,7 @@ jobs:
                 `Contact the teaching team to switch teams.`,
                 'needs-review');
               const size = rows.filter(r =>
-                cell(r, iAssign) === assignment && cell(r, iTeam) === team).length;
+                cell(r, iAssign).toLowerCase() === assignment && cell(r, iTeam).toLowerCase() === team).length;
               if (size >= cap) return fail(
                 `Team **${team}** for \`${assignment}\` is full (${cap} member${cap === 1 ? '' : 's'} - ` +
                 `the cap the teaching team set via \`max_team_size\` in classroom-config/schedule.yml). ` +
@@ -287,6 +315,6 @@ jobs:
             // Title is auto-derived - the form's fixed default plus author + form fields.
             await github.rest.issues.update({
               owner: org, repo: context.repo.repo, issue_number: issue.number,
-              title: `Join team: ${team} (${assignment}) - ${handle}`, state: 'closed' });
+              title: `Join team: ${handle}`, state: 'closed' });
         env:
           HAS_BOT: ${{ secrets.DSL_BOT_TOKEN != '' || '' }}

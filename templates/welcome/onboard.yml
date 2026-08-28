@@ -14,9 +14,11 @@ name: Onboard student
 # Existing org ADMINS (owners - e.g. a course admin testing the student flow) get the roster
 # link but no access change: granting them `member` would demote the owner.
 #
-# The code carries no personal data, so nothing in the public issue needs redacting; and
-# because it's unguessable + single-use (the "already linked" guard), a classmate can't
-# bind your roster row to their account.
+# The code carries no personal data, but it IS a live credential: it binds a roster row to
+# the FIRST account that claims it. So the first thing this does is redact it from the
+# public issue body - every later path (a typo, an unarmed bot, a roster fault) would
+# otherwise leave an unclaimed code readable by anyone, forever. It is single-use once
+# bound (the "already linked" guard), so a classmate can't bind your row to their account.
 #
 # Runs under secrets.DSL_BOT_TOKEN, which needs, on the cohort org: Contents R/W on
 # classroom-config, Members R/W (org invite + team), Issues R/W on welcome.
@@ -100,19 +102,26 @@ jobs:
               core.setFailed(msg.replace(/\*\*/g, ''));
             };
 
+            // Read the enrolment code from the issue form, then REDACT it from the public
+            // body before anything else can fail. This uses the ambient token's issues:write on
+            // THIS repo, so it works even when the bot token is unset.
+            const m = (issue.body || '').match(/Enrolment code\s*[\r\n]+\s*([A-Za-z0-9-]+)/i);
+            const code = m && m[1].trim();
+            if (code) {
+              await github.rest.issues.update({
+                owner: org, repo: context.repo.repo, issue_number: issue.number,
+                body: issue.body.split(code).join('dsl-[redacted]') });
+            }
+            if (!code) return fail(
+              `Thanks @${handle} - I couldn't read an **enrolment code** from the form. Please open a new issue with the code.`,
+              'needs-review');
+
             if (!process.env.HAS_BOT) {
               return fail(
                 `Thanks @${handle} - enrolment is **not yet armed**: the \`DSL_BOT_TOKEN\` secret is unset, ` +
                 `so I can't read the private roster or invite you. A maintainer will action this.`,
                 'needs-review');
             }
-
-            // Read the enrolment code from the issue form.
-            const m = (issue.body || '').match(/Enrolment code\s*[\r\n]+\s*([A-Za-z0-9-]+)/i);
-            const code = m && m[1].trim();
-            if (!code) return fail(
-              `Thanks @${handle} - I couldn't read an **enrolment code** from the form. Please edit the issue and add it.`,
-              'needs-review');
 
             // Read the PRIVATE roster. Columns (dsl_course.roster.FIELDS):
             // hertie_email,name,github_handle,github_id,enrol_code,role
@@ -143,16 +152,17 @@ jobs:
               `(\`github_handle\`, \`github_id\`, \`enrol_code\`). A maintainer will action this.`,
               'needs-review');
 
-            // Match the code to a registrar-seeded row - reject non-enrolees.
+            // Match the code to a registrar-seeded row - reject non-enrolees. ONE message for
+            // "no such code" and "code already bound to another account": telling them apart
+            // in a public issue confirms to anyone that a pasted code is a real, live one.
+            const NO_MATCH =
+              `Thanks @${handle} - that enrolment code could not be matched to an unclaimed roster row. ` +
+              `Check the code in your email; if you have already joined from another GitHub account, ` +
+              `or think this is a mistake, contact the teaching team.`;
             const row = rows.find(r => r[iCode].trim().toLowerCase() === code.toLowerCase());
-            if (!row) return fail(
-              `Thanks @${handle} - that enrolment code isn't recognised. Check the code in your email, ` +
-              `or contact the teaching team.`,
-              'needs-review');
+            if (!row) return fail(NO_MATCH, 'needs-review');
             if (row[iHandle] && row[iHandle].toLowerCase() !== handle.toLowerCase()) return fail(
-              `That enrolment code is already linked to a different GitHub account. ` +
-              `Contact the teaching team to resolve this.`,
-              'needs-review');
+              NO_MATCH, 'needs-review');
 
             // Write the authenticated handle + immutable id back (idempotent).
             //
@@ -187,10 +197,7 @@ jobs:
                 // Re-check the single-use binding on the FRESH row, not only before the loop:
                 // two issues quoting the same code race here, and the loser must not overwrite
                 // the winner's handle when it re-applies its edit.
-                if (boundElsewhere(matched)) return fail(
-                  `That enrolment code is already linked to a different GitHub account. ` +
-                  `Contact the teaching team to resolve this.`,
-                  'needs-review');
+                if (boundElsewhere(matched)) return fail(NO_MATCH, 'needs-review');
                 matched[iHandle] = handle; matched[iId] = String(userId);
                 const body = serialiseCsv([header, ...rows]);
                 try {
@@ -270,14 +277,13 @@ jobs:
                 `Welcome **@${handle}** - your enrolment code is matched.`,
                 ``,
                 `- **Check your email and accept the invitation to the \`${org}\` org** - until you accept, you can't see anything here.`,
-                `- Your handle + GitHub id are recorded; you've been added to the **${team}** team (unlocks released materials once you've accepted).`,
-                isAuditor
-                  ? `- You're enrolled as an **auditor**: you get the released materials, but no assignment repos and no grades.`
-                  : `- Your assignment repos appear here once the teaching team provisions each assignment.`,
+                `- Your handle + GitHub id are recorded and your access is set from the roster (released materials unlock once you've accepted; assignment repos, if your enrolment includes them, appear as the teaching team provisions each one).`,
               ].join('\n') });
+            // One label for everyone. This issue is public and permanent: a per-role label
+            // would publish each student's enrolment status (enrolled vs auditing).
             await github.rest.issues.addLabels({
               owner: org, repo: context.repo.repo, issue_number: issue.number,
-              labels: [isAuditor ? 'auditor' : 'enrolled'] });
+              labels: ['onboarded'] });
             // Title is auto-derived - the form's fixed default plus the authenticated author.
             await github.rest.issues.update({
               owner: org, repo: context.repo.repo, issue_number: issue.number,
