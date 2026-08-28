@@ -309,11 +309,11 @@ def merge_auto(text: str, updates: list[tuple[str, dict[str, str]]]) -> str:
             by_handle[key] = row
             order.append(key)
         kept = 0
-        for key, value in fields.items():
-            if key in MACHINE_FIELDS and getattr(row, key, ""):
+        for field, value in fields.items():
+            if field in MACHINE_FIELDS and getattr(row, field, ""):
                 kept += 1  # already filled (hand-edited or graded before) - leave it
                 continue
-            setattr(row, key, value)
+            setattr(row, field, value)
         if kept:
             preserved += kept
             log_verbose(f"  [keep] {handle}: {kept} existing cell(s) left as they are")
