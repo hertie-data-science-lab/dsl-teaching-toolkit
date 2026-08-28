@@ -10,6 +10,7 @@ import subprocess
 import sys
 from collections.abc import Iterable
 from datetime import date, datetime
+from fnmatch import fnmatch
 from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any
@@ -1297,6 +1298,39 @@ MATERIALS_REPO_PREFIX = "course-materials-"
 # Matched by whole filename, never by extension. Deciding by extension made an uploaded
 # `lecture-notes.md` or `refs.bib` - a reading in its own right - get swallowed into the page
 # as prose instead of listed as a file a student can download.
+# Path components a PUBLISHED course page must never carry - matched by NAME, at every
+# depth, case-insensitively, and as glob patterns so `.env.local` is caught alongside
+# `.env`. The public site copies whole discovered session folders wholesale, so anything a
+# faculty member happens to keep beside their teaching material is published with it: a
+# `solution/` next to the lab it answers, the `grading.yml` that says how it is marked, the
+# hidden `tests/`, a `.env` with a live key. None of those is a release decision anyone
+# made; they are what "copy the folder" means.
+#
+# NOT a release policy for the cohort path - `deploy` deliberately releases what faculty
+# name, including a solution, because a cohort repo is private and marking sometimes needs
+# one. This is the PUBLIC site, where there is no such case.
+PUBLICATION_DENYLIST = (
+    "solution",
+    "solutions",
+    "grading.yml",
+    "tests",
+    ".env",
+    ".env.*",
+    ".git",
+)
+
+
+def is_denied_publication(name: str) -> bool:
+    """Whether one path COMPONENT is on PUBLICATION_DENYLIST."""
+    lowered = name.casefold()
+    return any(fnmatch(lowered, pattern) for pattern in PUBLICATION_DENYLIST)
+
+
+def has_denied_component(path: str) -> bool:
+    """Whether any component of `path` is on PUBLICATION_DENYLIST."""
+    return any(is_denied_publication(part) for part in path.split("/") if part)
+
+
 READING_OVERLAY_FILE = "READINGS.md"
 READING_OVERLAY_NAMES = frozenset(
     {"readings.md", "readings.markdown", "readings.txt", "readings.bib"}

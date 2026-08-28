@@ -58,6 +58,8 @@ from .utils import (
     get_file_content,
     gh,
     git,
+    has_denied_component,
+    is_denied_publication,
     is_missing_resource,
     load_yaml_config,
     log,
@@ -1093,6 +1095,12 @@ def _materials_index(
     for repo in sorted(content_repos):
         branch, paths = _repo_tree(cohort_org, repo)
         for path in paths:
+            # A released `solution/`, `grading.yml` or hidden `tests/` is not course
+            # material, and this index is the one page that lists everything a release
+            # happened to carry - so it was the shortest route from "someone released a
+            # folder wholesale" to "the whole class has the answers".
+            if has_denied_component(path):
+                continue
             if "/" not in path:
                 docs.setdefault(
                     path,
@@ -2327,6 +2335,17 @@ def sync_site(course_org: str, cohort_org: str) -> int:
     return _sync_site_repo(cohort_org, build)
 
 
+def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:
+    """A `copytree` ignore filter for the PUBLIC site: drop every denylisted name, at any
+    depth (see utils.PUBLICATION_DENYLIST).
+
+    At any depth, unlike `deploy._copy_ignore`, which anchors its exclusions to the repo
+    root: the release path excludes plumbing that only ever lives at the root, while the
+    thing this exists to stop - a `solution/` beside the lab it answers - is precisely a
+    nested folder."""
+    return {n for n in names if is_denied_publication(n)}
+
+
 def _public_links(local_dir: Path, url_prefix: str) -> list[tuple[str, str]]:
     """(display-name, site-relative URL) for the files of a copied session folder that the
     page LISTS - not every file it serves.
@@ -2352,7 +2371,14 @@ def _public_links(local_dir: Path, url_prefix: str) -> list[tuple[str, str]]:
     the allowlist excluded would be served and unreachable. The cohort site takes the extra
     narrowing because it CAN offer a folder link; this one keeps every file reachable."""
     files = sorted(q for q in local_dir.rglob("*") if q.is_file())
-    rels = [q.relative_to(local_dir).as_posix() for q in files]
+    # Denylisted paths are already absent from a folder THIS run copied
+    # (`_publication_ignore`), so this is the second lock on the same door - and the one
+    # that holds if a file ever reaches the served tree by another route.
+    rels = [
+        rel
+        for rel in (q.relative_to(local_dir).as_posix() for q in files)
+        if not has_denied_component(rel)
+    ]
     if any("/" not in rel for rel in rels):
         rels = [rel for rel in rels if "/" not in rel]
     return [(rel, f"{url_prefix}/{quote(rel)}") for rel in rels]
@@ -2483,7 +2509,9 @@ def sync_public_site(
                     if sec_src is None:
                         continue
                     dest = site_session / section
-                    shutil.copytree(sec_src, dest, dirs_exist_ok=True)
+                    shutil.copytree(
+                        sec_src, dest, dirs_exist_ok=True, ignore=_publication_ignore
+                    )
                     links = _public_links(dest, f"{url_base}/{section}")
                     if links:
                         rows = (
@@ -2495,7 +2523,12 @@ def sync_public_site(
                 if read_src is not None:
                     if readings_mode == "actual-readings":
                         dest = site_session / READINGS_SECTION
-                        shutil.copytree(read_src, dest, dirs_exist_ok=True)
+                        shutil.copytree(
+                            read_src,
+                            dest,
+                            dirs_exist_ok=True,
+                            ignore=_publication_ignore,
+                        )
                         links = _public_links(dest, f"{url_base}/{READINGS_SECTION}")
                         if links:
                             section_links.append((READINGS_SECTION, links))
