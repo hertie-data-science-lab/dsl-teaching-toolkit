@@ -533,8 +533,9 @@ def setup_cohort_extras(org: str) -> int:
         # default_repository_permission=none, so a student is not a reader of this by
         # default - it does not appear in their repo list at all.
         description=(
-            "[visible to instructors only]: Cohort config - roster, schedule, "
-            "people, grades. No PII leaves here."
+            "[visible to instructors only]: Everything you configure for this cohort "
+            "is here - student roster, teams, term schedule, and marking. Students "
+            "never see it, and no PII leaves this repo."
         ),
     ):
         failures += 1
