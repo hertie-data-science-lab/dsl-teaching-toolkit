@@ -1,4 +1,4 @@
-"""public_public_site.sync_public_site over a real (temp-filesystem) source repo.
+"""public_site.sync_public_site over a real (temp-filesystem) source repo.
 
 The public open-courseware site must publish whatever sections the materials repo
 actually HAS - `discover_sessions` is generic across every top-level section, so a course
