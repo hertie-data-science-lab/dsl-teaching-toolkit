@@ -43,6 +43,9 @@ jobs:
           JEKYLL_ENV: production
           # jekyll-remote-theme needs a token to fetch the shared theme repo.
           JEKYLL_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # jekyll-github-metadata synthesises site.title/description and refuses to build
+          # unless it is told which repo it is attributing them to.
+          PAGES_REPO_NWO: ${{ github.repository }}
           BASE_PATH: ${{ steps.pages.outputs.base_path }}
         run: bundle exec jekyll build --baseurl "$BASE_PATH"
 

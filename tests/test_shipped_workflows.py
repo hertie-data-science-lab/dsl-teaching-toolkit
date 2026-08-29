@@ -163,3 +163,18 @@ def test_bootstrap_org_offers_no_dev_tier():
     trigger = doc.get("on", doc.get(True))
     options = trigger["workflow_dispatch"]["inputs"]["central_ref"]["options"]
     assert options == ["release", "staging"]
+
+
+def _site_build_step() -> dict:
+    doc = SHIPPED_WORKFLOWS["templates/site/.github/workflows/deploy.yml"]
+    return next(
+        s for s in doc["jobs"]["build"]["steps"] if s.get("name") == "Build site"
+    )
+
+
+def test_the_site_build_tells_github_metadata_which_repo_it_is_building():
+    # jekyll-github-metadata synthesises `site.title` and `site.description` from the
+    # repository, and dies with "No repo name found" unless something names it - the
+    # Actions checkout's origin is not a name it will take. Every cohort site went down
+    # this way under theme v2.0.0, whose layouts read `site.title` as their fallback.
+    assert _site_build_step()["env"]["PAGES_REPO_NWO"] == "${{ github.repository }}"
