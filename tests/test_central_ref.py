@@ -186,12 +186,26 @@ def test_a_tier_branch_that_exists_is_checked_as_a_branch(monkeypatch):
     assert calls == [("api", f"repos/{CENTRAL}/branches/release", "--silent")]
 
 
-def test_a_pinned_sha_is_checked_as_a_commit(monkeypatch):
+def test_a_pinned_sha_is_checked_against_mains_history(monkeypatch):
     # `branches/<sha>` 404s for a perfectly good commit, so the endpoint has to follow
-    # what the ref IS - otherwise every SHA-pinned org reads as bricked.
-    calls = _api_calls(monkeypatch, (0, ""))
+    # what the ref IS - otherwise every SHA-pinned org reads as bricked. And it is
+    # compared with main rather than merely fetched: `commits/<sha>` answers for the whole
+    # FORK NETWORK, so it accepted a commit off somebody's fork - code main, and therefore
+    # CI and review, never saw - and pinned a live org to it.
+    calls = _api_calls(monkeypatch, (0, "behind"))
     assert central.central_ref_exists(SHA) is True
-    assert calls == [("api", f"repos/{CENTRAL}/commits/{SHA}", "--silent")]
+    assert calls == [
+        ("api", f"repos/{CENTRAL}/compare/main...{SHA}", "--jq", ".status")
+    ]
+
+
+def test_a_sha_that_is_not_on_mains_history_is_refused(monkeypatch):
+    # `ahead` is a commit main does not contain; `diverged` is a fork's. Neither may be
+    # pinned into an org's workflows.
+    for status in ("ahead", "diverged"):
+        central.central_ref_exists.cache_clear()
+        _api_calls(monkeypatch, (0, status))
+        assert central.central_ref_exists(SHA) is False
 
 
 def test_a_missing_ref_is_reported_as_missing(monkeypatch):

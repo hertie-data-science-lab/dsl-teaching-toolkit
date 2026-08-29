@@ -78,8 +78,11 @@ def _the_central_ref_is_present(monkeypatch):
     the org's ref is on the central repo before pinning a workflow to it. Nothing here is
     meant to reach GitHub (see the module docstring), and "it is there" is the
     uninteresting answer for every test but the ones about the check itself - which set
-    their own `central.gh` after this fixture and win."""
-    monkeypatch.setattr(central, "gh", lambda *a, **k: (0, ""))
+    their own `central.gh` after this fixture and win.
+
+    `identical` is what the SHA path reads off `compare/main...{sha}`; the branch path
+    only looks at the exit code."""
+    monkeypatch.setattr(central, "gh", lambda *a, **k: (0, "identical"))
 
 
 @pytest.fixture(autouse=True)

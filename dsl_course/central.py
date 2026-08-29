@@ -71,20 +71,28 @@ class MissingCentralRef(RuntimeError):
 def central_ref_exists(ref: str) -> bool:
     """Whether `ref` is on the central repo right now.
 
+    A pinned SHA must be on `main`'s HISTORY, not merely fetchable: `repos/.../commits/{sha}`
+    answers for the whole fork network, so it accepted a commit from anybody's fork of this
+    repo - code main, and therefore CI and review, had never seen - and pinned an org to it.
+    `compare/main...{sha}` says how the two relate; `behind` (an ancestor of main) and
+    `identical` are the two answers that mean "on main's history".
+
     "Could not tell" reads as PRESENT: a rate limit or a 502 must not stall every org's
     convergence, and proceeding is only ever the behaviour that stood before this check.
     Only a definite 404 - the one answer that proves the ref is not there - is False.
 
     Cached per ref: a whole convergence pins the same one or two refs into dozens of
     workflows, and the answer cannot change under a single run."""
-    endpoint = (
-        f"repos/{CENTRAL}/commits/{ref}"
-        if _SHA.fullmatch(ref)
-        else f"repos/{CENTRAL}/branches/{ref}"
-    )
-    code, out = gh("api", endpoint, "--silent")
-    if code == 0:
-        return True
+    if _SHA.fullmatch(ref):
+        code, out = gh(
+            "api", f"repos/{CENTRAL}/compare/main...{ref}", "--jq", ".status"
+        )
+        if code == 0:
+            return out.strip() in ("behind", "identical")
+    else:
+        code, out = gh("api", f"repos/{CENTRAL}/branches/{ref}", "--silent")
+        if code == 0:
+            return True
     if is_missing_resource(out):
         return False
     log_err(
@@ -104,8 +112,9 @@ def pin_central_ref(text: str, ref: str) -> str:
     has created yet is exactly that case, and `release` is the default."""
     if not central_ref_exists(ref):
         raise MissingCentralRef(
-            f"{CENTRAL}@{ref} does not exist - refusing to render workflows that would "
-            f"every one of them fail at checkout. Create the ref (Promote), or fix "
-            f"`central_ref:` in the course org's .github/dsl-course.yml."
+            f"{CENTRAL}@{ref} is not a tier branch or a commit on main's history - "
+            f"refusing to render workflows that would every one of them fail at checkout. "
+            f"Create the ref (Promote), or fix `central_ref:` in the course org's "
+            f".github/dsl-course.yml."
         )
     return text.replace(CENTRAL_REF_PLACEHOLDER, ref)
