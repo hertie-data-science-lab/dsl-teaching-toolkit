@@ -2,30 +2,15 @@
 SYSTEM-OWNED - do not edit. Written by the DSL course sync from templates/site/ in the
 toolkit; every sync rewrites it.
 {%- endcomment -%}
-<div class="col col-1" style="color: #3c763d ;font-weight: bold;" data-label="Event">Lab</div>
-<div class="col col-1-2" data-label="Date">
-    {{ include.event.date | date: site.dateformat }}
-    {{ include.event.date | date: "%H:%M" }}
-    <br class="date-spliter"/>{{ include.event.date | date: "%A" }}
-</div>
 {%- comment -%}
-`title` is the ordinal ("Session 3"); `subtitle` is the name the schedule.yml entry
-declared for it. The ordinal is what ties the row to `materials/lectures/03_...`, so it
-stays and the name sits under it rather than replacing it.
+A lab row IS a lecture row: the same date cell, the same ordinal-and-name title cell, the
+same "the materials, or the not-released-yet sentence" details cell. Only the kind and the
+colour of the first cell differ, and those are what this passes in - so a fix to any of the
+other three reaches both rows instead of one.
+
+It stays its own FILE because `_layouts/schedule.html` dispatches by name, one branch per
+row type, on purpose: an include name built out of `event.type` would ask Jekyll for a file
+that does not exist the first time a schedule.yml carries an unknown type, and fail the
+whole build.
 {%- endcomment -%}
-<div class="col col-2" data-label="Title">
-    <b>{{ include.event.title }}</b>
-    {%- if include.event.subtitle %}<br/>{{ include.event.subtitle }}{%- endif -%}
-</div>
-{%- comment -%}
-The materials themselves once they exist, and the "not released yet" sentence until then.
-The body used to render here either way, which told a reader of the SCHEDULE to "open the
-links above" - links that live on the Lectures tab, not this page.
-{%- endcomment -%}
-<div class="col col-4 markdown-content" data-label="Details">
-    {%- if include.event.links and include.event.links.size > 0 -%}
-    {% include lecture_links.html lecture=include.event %}
-    {%- else -%}
-    {{ include.event.content }}
-    {%- endif -%}
-</div>
+{%- include schedule_row_lecture.html event=include.event kind="Lab" colour="#3c763d" -%}
