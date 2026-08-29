@@ -210,16 +210,28 @@ def test_a_ref_that_cannot_be_checked_is_assumed_present(monkeypatch, capsys):
 def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
     """`seed.refresh`'s exit code, and which of its renderers actually ran."""
     rendered: list[str] = []
+
+    def renders(name: str):
+        """A renderer double that pins the ref exactly as the real one does - through the
+        one chokepoint that refuses a ref the central repo does not have."""
+
+        def step(*args) -> int:
+            central.pin_central_ref("", args[-1])
+            rendered.append(name)
+            return 0
+
+        return step
+
     monkeypatch.setattr(seed, "central_ref_for", lambda org: "release")
-    monkeypatch.setattr(seed, "central_ref_exists", lambda ref: ref_exists)
+    monkeypatch.setattr(
+        central,
+        "gh",
+        lambda *a, **k: (0, "") if ref_exists else (1, "gh: Not Found (HTTP 404)"),
+    )
     monkeypatch.setattr(seed, "_live_cohorts", lambda org: (["Cohort-f2026"], 0))
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["materials-f2026"])
     monkeypatch.setattr(seed, "discover_assignments", lambda org: [])
-    monkeypatch.setattr(
-        seed,
-        "push_content_workflows",
-        lambda *a: rendered.append("content-workflows") or 0,
-    )
+    monkeypatch.setattr(seed, "push_content_workflows", renders("content-workflows"))
     monkeypatch.setattr(seed, "_refresh_stubs", lambda org, repo: 0)
     monkeypatch.setattr(
         seed.scaffold, "refresh_materials_system_files", lambda org, repo: 0
@@ -227,19 +239,13 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
     monkeypatch.setattr(seed, "_propagate_repo_secret", lambda org, repos: 0)
     monkeypatch.setattr(seed, "list_org_repos", lambda org: [])
     monkeypatch.setattr(seed, "_converge_org_metadata", lambda org, repos: 0)
-    monkeypatch.setattr(
-        seed,
-        "seed_github_workflows",
-        lambda org, ref: rendered.append("org-workflows") or 0,
-    )
+    monkeypatch.setattr(seed, "seed_github_workflows", renders("org-workflows"))
     monkeypatch.setattr(seed, "_write_heartbeat", lambda org: 0)
     monkeypatch.setattr(seed, "update_profile_readme", lambda org, **k: 0)
     monkeypatch.setattr(seed, "repo_is_archived", lambda org, repo: False)
     monkeypatch.setattr(seed, "refresh_welcome_workflows", lambda org: 0)
     monkeypatch.setattr(
-        seed,
-        "refresh_classroom_system_files",
-        lambda org, ref: rendered.append("classroom-system-files") or 0,
+        seed, "refresh_classroom_system_files", renders("classroom-system-files")
     )
     monkeypatch.setattr(seed, "refresh_classroom_samples", lambda org: 0)
     monkeypatch.setattr(seed, "refresh_cohort_pointer", lambda org, course: 0)

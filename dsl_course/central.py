@@ -8,6 +8,7 @@ both sides must name the same repo/ref. One definition, imported by both.
 from __future__ import annotations
 
 import re
+from functools import cache
 
 from .ghcli import gh, is_missing_resource
 from .log import log_err
@@ -62,19 +63,20 @@ def resolve_central_ref(value: object, *, source: str) -> str:
     return CENTRAL_REF
 
 
-def central_ref_exists(ref: str) -> bool:
-    """Whether `ref` is actually present on the central repo right now.
+class MissingCentralRef(RuntimeError):
+    """A workflow was about to be pinned to a ref the central repo does not have."""
 
-    Every seeded workflow in the org checks the central repo out at this ref, INCLUDING
-    the Refresh that re-renders them - so rendering a ref that does not exist bricks the
-    org's whole Actions tab with no way back in from inside the org. A tier branch nobody
-    has created yet is exactly that case, and `release` is the default: the check has to
-    happen before the render, not after the first red run.
+
+@cache
+def central_ref_exists(ref: str) -> bool:
+    """Whether `ref` is on the central repo right now.
 
     "Could not tell" reads as PRESENT: a rate limit or a 502 must not stall every org's
     convergence, and proceeding is only ever the behaviour that stood before this check.
-    Only a definite 404 - the one answer that proves the ref is not there - stops a
-    render."""
+    Only a definite 404 - the one answer that proves the ref is not there - is False.
+
+    Cached per ref: a whole convergence pins the same one or two refs into dozens of
+    workflows, and the answer cannot change under a single run."""
     endpoint = (
         f"repos/{CENTRAL}/commits/{ref}"
         if _SHA.fullmatch(ref)
@@ -89,3 +91,21 @@ def central_ref_exists(ref: str) -> bool:
         f"could not check whether {CENTRAL}@{ref} exists ({out[:120]}) - assuming it does"
     )
     return True
+
+
+def pin_central_ref(text: str, ref: str) -> str:
+    """Substitute `ref` for the placeholder in a rendered workflow - refusing a ref the
+    central repo does not have.
+
+    THE chokepoint, so no writer can place a workflow without the check. Every seeded
+    workflow checks the central repo out at this ref, the Refresh that re-renders them
+    included: pin one that does not exist and the org's entire Actions tab goes down at
+    once, taking with it the one button that would have healed it. A tier branch nobody
+    has created yet is exactly that case, and `release` is the default."""
+    if not central_ref_exists(ref):
+        raise MissingCentralRef(
+            f"{CENTRAL}@{ref} does not exist - refusing to render workflows that would "
+            f"every one of them fail at checkout. Create the ref (Promote), or fix "
+            f"`central_ref:` in the course org's .github/dsl-course.yml."
+        )
+    return text.replace(CENTRAL_REF_PLACEHOLDER, ref)

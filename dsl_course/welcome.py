@@ -16,7 +16,7 @@ from __future__ import annotations
 from functools import cache
 from pathlib import Path
 
-from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER
+from .central import CENTRAL, pin_central_ref
 from .gh_contents import put_files
 from .log import log_err, log_ok
 from .roster import CONFIG_REPO
@@ -158,11 +158,9 @@ def _validate_schedule_workflow(central_ref: str) -> str:
 
     Placeholders rather than `str.format`, because the file is full of `${{ }}` GitHub
     expressions that `format` would try to interpret."""
-    return (
-        template("classroom-config/validate-schedule.yml")
-        .replace(CENTRAL_REF_PLACEHOLDER, central_ref)
-        .replace("__CENTRAL__", CENTRAL)
-    )
+    return pin_central_ref(
+        template("classroom-config/validate-schedule.yml"), central_ref
+    ).replace("__CENTRAL__", CENTRAL)
 
 
 # The SYSTEM-owned half of a cohort's classroom-config: the schema contract faculty read,

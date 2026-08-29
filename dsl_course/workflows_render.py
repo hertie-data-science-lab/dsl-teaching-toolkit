@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import re
 
-from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER
+from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER, pin_central_ref
 
 # Third-party actions pinned to full commit SHAs. Every job below runs with an org-owner
 # PAT in its env, so a mutable tag (`@v4`) is a standing invitation: whoever can move the
@@ -52,8 +52,9 @@ def for_placement(rendered: str, central_ref: str) -> str:
     Both happen at the write site rather than inside each renderer, for the same reason: a
     new renderer cannot ship without either, and `central_ref` is a required argument, so
     a caller that places a workflow cannot forget to say which ref it is placing it at.
-    `discovery.central_ref_for` is where that ref comes from."""
-    return SYSTEM_OWNED_BANNER + rendered.replace(CENTRAL_REF_PLACEHOLDER, central_ref)
+    `discovery.central_ref_for` is where that ref comes from; `central.pin_central_ref`
+    refuses a ref the central repo does not have."""
+    return SYSTEM_OWNED_BANNER + pin_central_ref(rendered, central_ref)
 
 
 # Workflow-level permissions for every rendered workflow. Each one authenticates with

@@ -14,7 +14,7 @@ import subprocess
 import pytest
 import yaml
 
-from dsl_course import site
+from dsl_course import central, repos, site
 
 
 @pytest.fixture(autouse=True)
@@ -46,10 +46,25 @@ def _no_live_gh(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _clear_repo_tree_memo():
-    """`site._repo_tree` memoises a repo's tree for the whole process (one CLI run); tests
-    reuse the same org/repo names with different fakes, so clear it between them."""
+def _the_central_ref_is_present(monkeypatch):
+    """Answer `central.central_ref_exists`'s probe with "yes" by default.
+
+    Every workflow write goes through `central.pin_central_ref`, which asks GitHub whether
+    the org's ref is on the central repo before pinning a workflow to it. Nothing here is
+    meant to reach GitHub (see the module docstring), and "it is there" is the
+    uninteresting answer for every test but the ones about the check itself - which set
+    their own `central.gh` after this fixture and win."""
+    monkeypatch.setattr(central, "gh", lambda *a, **k: (0, ""))
+
+
+@pytest.fixture(autouse=True)
+def _clear_process_memos():
+    """The per-process memos a single CLI run is entitled to keep: a repo's tree, a repo's
+    metadata, whether a central ref exists. Tests reuse the same org/repo names with
+    different fakes, so clear them between tests."""
     site._repo_tree.cache_clear()
+    central.central_ref_exists.cache_clear()
+    repos.default_branch.cache_clear()
 
 
 def workflow_inputs(rendered: str) -> dict:

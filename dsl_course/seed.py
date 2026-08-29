@@ -35,11 +35,12 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
 from . import scaffold
 from .access import converge_faculty_access, converge_topics
-from .central import CENTRAL, central_ref_exists
+from .central import MissingCentralRef
 from .course import CONFIG_REPO, term_tag
 from .discovery import (
     central_ref_for,
@@ -448,15 +449,6 @@ def refresh(course_org: str) -> int:
     # validator all have to be pinned to the same ref, and a cohort inherits its course
     # org's (central_ref_for), so re-reading it per cohort could only ever disagree.
     central_ref = central_ref_for(course_org)
-    # ...and one check that the ref is THERE, before a single workflow is rendered at it.
-    # The ref goes into the checkout step of every workflow this run writes, Refresh
-    # itself included, so rendering a ref that does not exist takes the org's entire
-    # Actions tab down at once and removes the one button that would have healed it. A
-    # tier branch nobody created yet is that case, and `release` is the default. When the
-    # ref is missing the previous rendering is LEFT IN PLACE - stale workflows that run
-    # beat current workflows that cannot check anything out - and every other step of the
-    # refresh proceeds as usual.
-    ref_live = central_ref_exists(central_ref)
     cohorts, unregistered = _live_cohorts(course_org)
     targets = discover_content_repos(course_org)
     assignments = discover_assignments(
@@ -468,26 +460,36 @@ def refresh(course_org: str) -> int:
     )
     # An unregistration is never a silent success: see _live_cohorts.
     failures = unregistered
-    if not ref_live:
-        log_err(
-            f"{CENTRAL}@{central_ref} does not exist, so {course_org}'s workflows are "
-            f"NOT being re-rendered - they would all fail at checkout, Refresh included. "
-            f"Create the ref (Promote), or fix `central_ref:` in "
-            f"{course_org}/.github/dsl-course.yml."
-        )
-        failures += 1
+    # `central.pin_central_ref` refuses a ref the central repo does not have, and every
+    # workflow write below goes through it. Caught ONCE, here: the first refusal counts a
+    # single failure and skips every later workflow write, leaving the PREVIOUS rendering
+    # exactly where it is - stale workflows that run beat current workflows that cannot
+    # check anything out - while every other step of the refresh proceeds as usual.
+    refused = False
+
+    def render(step: Callable[[], int]) -> int:
+        nonlocal refused
+        if refused:
+            return 0
+        try:
+            return step()
+        except MissingCentralRef as exc:
+            refused = True
+            log_err(f"{exc} {course_org}'s workflows are NOT being re-rendered.")
+            return 1
+
     for repo in sorted(targets):
-        if ref_live:
-            failures += push_content_workflows(
+        failures += render(
+            lambda repo=repo: push_content_workflows(
                 course_org, repo, cohorts, assignments, central_ref
             )
+        )
         failures += _refresh_stubs(course_org, repo)
         # A no-op on the code and dataset repos this sweep also returns; the gate is
         # inside, so no caller can forget it.
         failures += scaffold.refresh_materials_system_files(course_org, repo)
     failures += _propagate_repo_secret(course_org, targets)
-    if ref_live:
-        failures += seed_github_workflows(course_org, central_ref)
+    failures += render(lambda: seed_github_workflows(course_org, central_ref))
     failures += _write_heartbeat(course_org)
     # One listing, swept and then rendered: the sweep corrects the descriptions the
     # landing page's table is built from, so both see the same snapshot and the page is
@@ -519,8 +521,9 @@ def refresh(course_org: str) -> int:
         # students.csv/teams.csv/schedule.yml/people.yml are never touched here, or this
         # nightly cron would overwrite a live roster every night. Skipped whole when the
         # ref is missing: the set includes validate-schedule.yml, which is rendered at it.
-        if ref_live:
-            failures += refresh_classroom_system_files(cohort, central_ref)
+        failures += render(
+            lambda cohort=cohort: refresh_classroom_system_files(cohort, central_ref)
+        )
         failures += refresh_classroom_samples(cohort)
         # The pointer its dispatchers read to find this course org. Also SYSTEM-owned and
         # also only ever written by Bootstrap cohort until now - same bug class.
