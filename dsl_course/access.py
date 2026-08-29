@@ -148,18 +148,6 @@ def grant_read_teams(cohort_org: str, repo: str) -> None:
             log_ok(f"{team} team -> read")
 
 
-# Descriptions this toolkit wrote in a wording it has since REPLACED, mapped to the
-# current one. A repo carrying an old string is carrying OUR text, so it is ours to
-# update; anything else a human typed, and is left alone.
-#
-# There is deliberately no entry for a CURRENT wording - a repo already carrying it needs
-# no change - so this is exactly the rename log, and rewording a description means adding
-# a line here or convergence silently stops. That forcing function is why this is a
-# mapping rather than the set of "everything we ever wrote": the set had to be edited in
-# lockstep with a literal in another file, and forgetting would have frozen the old
-# wording on every existing org while classifying it as faculty's.
-
-
 def _strongest_permission(permissions: dict) -> str | None:
     """The strongest TRUE flag of a listing's cumulative `permissions` object, in the PUT
     vocabulary. None when no flag we rank is set - the caller leaves that repo alone."""

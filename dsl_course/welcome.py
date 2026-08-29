@@ -152,22 +152,9 @@ def refresh_classroom_samples(org: str) -> int:
     return 0
 
 
-def _validate_schedule_workflow(central_ref: str) -> str:
-    """The classroom-config schedule validator, with the central repo and this cohort's
-    central ref pinned into it.
-
-    Placeholders rather than `str.format`, because the file is full of `${{ }}` GitHub
-    expressions that `format` would try to interpret."""
-    return pin_central_ref(
-        template("classroom-config/validate-schedule.yml"), central_ref
-    ).replace("__CENTRAL__", CENTRAL)
-
-
 # The SYSTEM-owned half of a cohort's classroom-config: the schema contract faculty read,
-# and the three workflows that make the repo act on what they put in it. `(path, content
-# reader)` - the content is read lazily, at call time, so importing this module never
-# touches the filesystem. Every reader takes the cohort's central ref, whether or not it
-# pins one, so the table stays one uniform shape.
+# and the three workflows that make the repo act on what they put in it, as
+# `(path in the repo, template file)`.
 #
 # HARD INVARIANT: nothing the cohort edits may join this table. students.csv, teams.csv,
 # schedule.yml, people.yml and grades/ hold the cohort's LIVE state (enrol codes, onboarded
@@ -175,17 +162,34 @@ def _validate_schedule_workflow(central_ref: str) -> str:
 # that way. Adding one here would have the nightly refresh overwrite it every night.
 # tests/test_bootstrap_seeding.py pins this set exactly, so an addition fails loud.
 CLASSROOM_SYSTEM_FILES = (
-    ("README.md", lambda ref: template("classroom-config/README.md")),
-    (
-        ".github/workflows/dispatch-sync.yml",
-        lambda ref: template("classroom-config/dispatch-sync.yml"),
-    ),
+    ("README.md", "classroom-config/README.md"),
+    (".github/workflows/dispatch-sync.yml", "classroom-config/dispatch-sync.yml"),
     (
         ".github/workflows/dispatch-sync-site.yml",
-        lambda ref: template("classroom-config/dispatch-sync-site.yml"),
+        "classroom-config/dispatch-sync-site.yml",
     ),
-    (".github/workflows/validate-schedule.yml", _validate_schedule_workflow),
+    (
+        ".github/workflows/validate-schedule.yml",
+        "classroom-config/validate-schedule.yml",
+    ),
 )
+
+
+def classroom_system_files(central_ref: str) -> dict[str, bytes]:
+    """CLASSROOM_SYSTEM_FILES rendered for one cohort, read at call time so importing this
+    module never touches the filesystem.
+
+    Placeholders rather than `str.format`, because these files are full of `${{ }}` GitHub
+    expressions that `format` would try to interpret. The whole set goes through
+    `pin_central_ref`, which refuses a ref the central repo does not have - the schedule
+    validator checks the toolkit out at it, and the set is written as one commit anyway.
+    """
+    return {
+        path: pin_central_ref(template(rel), central_ref)
+        .replace("__CENTRAL__", CENTRAL)
+        .encode()
+        for path, rel in CLASSROOM_SYSTEM_FILES
+    }
 
 
 def refresh_cohort_pointer(org: str, course_org: str) -> int:
@@ -230,10 +234,7 @@ def refresh_classroom_system_files(org: str, central_ref: str) -> int:
     if not put_files(
         org,
         CONFIG_REPO,
-        {
-            path: content(central_ref).encode()
-            for path, content in CLASSROOM_SYSTEM_FILES
-        },
+        classroom_system_files(central_ref),
         "ci: refresh classroom-config contract + dispatchers",
     ):
         log_err(f"classroom-config system files not written in {org}")

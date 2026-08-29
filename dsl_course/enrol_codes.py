@@ -91,10 +91,11 @@ def rows_for_codes(text: str, codes: list[tuple[int, str, str]]) -> dict[int, st
         if email:
             # -1 marks "more than one row carries this" - not usable as a destination.
             seen[email] = i if email not in seen else -1
-    return {
-        (at if (at := seen.get(email, -1)) >= 0 else index): code
-        for index, email, code in codes
-    }
+    placed: dict[int, str] = {}
+    for index, email, code in codes:
+        at = seen.get(email, -1)
+        placed[at if at >= 0 else index] = code
+    return placed
 
 
 # Bounded: each attempt costs a read and a write, and a roster being edited faster than
@@ -186,18 +187,12 @@ def code_message(
 def sample_body(welcome_url: str, course_name: str = "") -> str:
     """The code email rendered with PLACEHOLDERS, for the dry-run preview.
 
-    A dry run masks every recipient and prints no real body, which leaves the one thing a
-    reviewer actually wants to check - the wording - invisible. This is the same
-    `code_message` template with `<name>`/`<code>` in place of a student's name and a live
-    credential, so it can be printed in a world-readable Actions log."""
-    placeholder = roster.Student(
-        hertie_email="<email>",
-        name="<name>",
-        github_handle="",
-        github_id="",
+    `code_message` with `<name>`/`<code>` where a student's name and a live credential
+    would go - see `mailer.sample_of`."""
+    return mailer.sample_of(
+        lambda student: code_message(student, welcome_url, course_name),
         enrol_code="<code>",
     )
-    return code_message(placeholder, welcome_url, course_name)[2]
 
 
 def run(cohort_org: str, dry_run: bool = False) -> int:

@@ -26,9 +26,11 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from email.message import EmailMessage
 
+from . import roster
 from .log import log, log_err, log_ok
 
 # A single message: (recipient, subject, body).
@@ -164,9 +166,10 @@ def _graph_send_one(
             time.sleep(wait)
             continue
         # Status only: a Graph error body echoes the request, recipient included.
+        # The last attempt cannot `continue` (the guard above requires another to come),
+        # so every path out of this loop is one of the two returns.
         log_err(f"send to {mask_email(to)} failed ({status})")
         return False
-    return False
 
 
 def _send_via_graph(cfg: GraphConfig, messages: list[Message]) -> int:
@@ -297,3 +300,22 @@ def send_bulk(
         "SMTP_* secrets. Nothing sent."
     )
     return 0
+
+
+def sample_of(
+    build: Callable[[roster.Student], tuple[str, str, str]], **placeholders: str
+) -> str:
+    """One message rendered against a PLACEHOLDER student, for a dry-run preview.
+
+    A dry run masks every recipient and prints no real body, which leaves the one thing a
+    reviewer actually wants to check - the wording - invisible. `build` is the caller's
+    own (to, subject, body) builder; `placeholders` override the stand-in student's fields
+    where the message shows one (`<code>`, `<handle>`). No real name, handle or credential
+    appears, so the result is safe in a world-readable Actions log."""
+    fields = {
+        "hertie_email": "<email>",
+        "name": "<name>",
+        "github_handle": "",
+        "github_id": "",
+    } | placeholders
+    return build(roster.Student(**fields))[2]

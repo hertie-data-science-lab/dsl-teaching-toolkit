@@ -683,16 +683,11 @@ def update_message(
 def sample_body(cohort_org: str, course_name: str = "") -> str:
     """The notification rendered with PLACEHOLDERS, for the dry-run preview.
 
-    Same reason as `enrol_codes.sample_body`: a dry run masks every recipient and prints no
-    real body, so the wording - the only thing left to review - would never be seen. No
-    student's name or handle appears, so this is safe in a world-readable Actions log."""
-    placeholder = roster.Student(
-        hertie_email="<email>",
-        name="<name>",
+    `update_message` with a placeholder in place of a student - see `mailer.sample_of`."""
+    return mailer.sample_of(
+        lambda student: update_message(student, cohort_org, course_name),
         github_handle="<handle>",
-        github_id="",
     )
-    return update_message(placeholder, cohort_org, course_name)[2]
 
 
 def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -> int:

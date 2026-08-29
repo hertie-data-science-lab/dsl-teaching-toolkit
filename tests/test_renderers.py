@@ -602,9 +602,11 @@ def test_validate_schedule_workflow_is_seeded_with_the_central_repo_pinned():
     # Seeded into a cohort's classroom-config, so it must carry the central repo and ref
     # baked in - the cohort repo has no other way to reach the parser.
     from dsl_course.central import CENTRAL, CENTRAL_REF
-    from dsl_course.welcome import _validate_schedule_workflow
+    from dsl_course.welcome import classroom_system_files
 
-    raw = _validate_schedule_workflow(CENTRAL_REF)
+    raw = classroom_system_files(CENTRAL_REF)[
+        ".github/workflows/validate-schedule.yml"
+    ].decode()
     assert "__CENTRAL__" not in raw and "__CENTRAL_REF__" not in raw
     doc = yaml.safe_load(raw)
     trigger = doc.get("on", doc.get(True))

@@ -433,7 +433,6 @@ def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) 
     # cohort, and an hourly GREEN tick is exactly how that goes unnoticed. `load` has
     # already logged what is wrong and where; this is what makes anyone look.
     # (Individually DROPPED entries stay advisory, as before - the rest of the plan runs.)
-    unreadable_plan = 1 if sched.unparseable else 0
     # Re-sorted, not just concatenated: the synthesised handouts carry their own datetimes
     # and would otherwise land after every scheduled release whatever their date.
     releases = sorted(
@@ -449,7 +448,7 @@ def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) 
     # Freeze passed deadlines FIRST: server-timed, and before anything grades against the
     # snapshot. Then autograde those same assignments, once each. Both are independent of
     # the release plan - a cohort can pin due dates without scheduling a single release.
-    errors = unreadable_plan
+    errors = int(sched.unparseable)
     errors += _snapshot_passed_deadlines(course_org, cohort_org, sched, now, dry_run)
     errors += _autograde_passed_deadlines(course_org, cohort_org, sched, now, dry_run)
     # Look AHEAD as well as at what is due: a deploy whose source was never staged fails
@@ -464,7 +463,7 @@ def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) 
         for release in due:
             for line in describe(release, now):
                 log(f"    DRY-RUN  [{release.label}] {line}")
-        return unreadable_plan
+        return int(sched.unparseable)
 
     if not releases:
         log(
