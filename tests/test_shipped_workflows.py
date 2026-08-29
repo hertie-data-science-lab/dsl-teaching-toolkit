@@ -149,3 +149,13 @@ def test_promote_refresh_carries_both_bot_tokens():
     env = _refresh_step()["env"]
     assert env["GH_TOKEN"] == "${{ secrets.DSL_BOT_TOKEN }}"
     assert env["DSL_BOT_TOKEN"] == "${{ secrets.DSL_BOT_TOKEN }}"
+
+
+def test_bootstrap_org_offers_no_dev_tier():
+    # `main` is the dev tier - nobody live. An org bootstrapped onto it runs every merge
+    # as production the moment it lands, with no promotion in between; a soak goes on
+    # staging, which is what that tier is for.
+    doc = SHIPPED_WORKFLOWS[".github/workflows/bootstrap-org.yml"]
+    trigger = doc.get("on", doc.get(True))
+    options = trigger["workflow_dispatch"]["inputs"]["central_ref"]["options"]
+    assert options == ["release", "staging"]
