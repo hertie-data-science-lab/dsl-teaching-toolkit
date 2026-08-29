@@ -668,8 +668,9 @@ def test_the_scheduler_leaves_an_existing_repo_alone_but_the_button_repairs_it(
     # The scheduler re-runs every handed-out release hourly. Re-granting access to an
     # existing repo on every tick cost 2-4 API calls per student per assignment for the
     # rest of term. The hourly path (touch_existing=False) skips it; the manual Release
-    # assignment button keeps re-granting, so re-running it still repairs a student's
-    # access. With a solution to push, the push happens either way.
+    # assignment button keeps re-granting the STUDENT, so re-running it still repairs a
+    # student's access. The faculty grant is not re-run on either path - the nightly sweep
+    # owns that floor. With a solution to push, the push happens either way.
     calls = []
     monkeypatch.setattr(assign, "repo_exists", lambda org, repo: True)
     for name in (
@@ -691,9 +692,9 @@ def test_the_scheduler_leaves_an_existing_repo_alone_but_the_button_repairs_it(
         "C", "t", "K", "a1-w", ["ada"], "a1", team="a1-w", **hourly
     ) == ("skipped")
     assert calls == []
-    # the button (default) re-grants
+    # the button (default) re-grants the student, and only the student
     assert assign.provision_one("C", "t", "K", "a1-ada", ["ada"], "a1") == "skipped"
-    assert calls == ["grant_faculty", "add_collaborator"]
+    assert calls == ["add_collaborator"]
     pushed = []
     monkeypatch.setattr(assign, "push_solution", lambda *a: pushed.append(a) or True)
     assert assign.provision_one(

@@ -377,15 +377,27 @@ def test_a_gradebook_the_student_cannot_open_is_a_failure(monkeypatch):
     assert grades.provision_one("COHORT", "ada-l").startswith("failed")
 
 
-def test_a_gradebook_grants_faculty_read(monkeypatch):
+def test_a_new_gradebook_grants_faculty_read_and_an_existing_one_is_left_alone(
+    monkeypatch,
+):
     # Read, not write: `distribute` rewrites grades.yml from grades/<slug>.csv, so a mark
     # corrected in the gradebook itself would be overwritten on the next run.
+    #
+    # At CREATION only. A team grant does not decay and the nightly sweep
+    # (access.converge_faculty_access) owns the floor, so re-granting on every Sync
+    # membership cost two PUTs per student a night for nothing.
     faculty = []
-    monkeypatch.setattr(grades, "repo_exists", lambda org, repo: True)
+    exists = {"grades-ada-l"}
+    monkeypatch.setattr(grades, "repo_exists", lambda org, repo: repo in exists)
     monkeypatch.setattr(grades, "grant_faculty", lambda *a, **k: faculty.append(a))
     monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
+    monkeypatch.setattr(grades, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
+    monkeypatch.setattr(grades, "set_repo_topics", lambda *a, **k: True)
     grades.provision_one("COHORT", "ada-l")
-    assert faculty == [("COHORT", "grades-ada-l", grades.FACULTY_READ_ACCESS)]
+    assert faculty == [], "the existing gradebook was re-granted"
+    grades.provision_one("COHORT", "bob-b")
+    assert faculty == [("COHORT", "grades-bob-b", grades.FACULTY_READ_ACCESS)]
 
 
 def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):

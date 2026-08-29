@@ -396,10 +396,14 @@ def provision_one(cohort_org: str, handle: str) -> str:
             # Not named: this log is public. The nightly sweep converges the topic.
             log_err("  ! a gradebook is untagged - the nightly sweep converges it")
 
-    # Read, not write: `distribute` rewrites grades.yml from
-    # `classroom-config/grades/<slug>.csv`, so a mark corrected here would be overwritten
-    # on the next run. The CSV is where a mark belongs.
-    grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
+        # At creation only: a team grant does not decay, and the nightly sweep
+        # (access.converge_faculty_access) owns the floor for every gradebook that already
+        # exists - so re-granting on every sync cost two PUTs per student for nothing.
+        #
+        # Read, not write: `distribute` rewrites grades.yml from
+        # `classroom-config/grades/<slug>.csv`, so a mark corrected here would be
+        # overwritten on the next run. The CSV is where a mark belongs.
+        grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
     if add_collaborator(cohort_org, repo, handle, permission="pull"):
         log_person(f"  [ok]   + @{handle} (read)")
         return "skipped" if existed else "ok"

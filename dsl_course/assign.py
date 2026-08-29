@@ -330,11 +330,17 @@ def provision_one(
     # have gone on granting nobody but the team. This repo used to grant no faculty at all,
     # so an instructor who was not an org OWNER could not open the work they had to mark.
     #
+    # AT CREATION ONLY. A team grant does not decay, and the nightly sweep
+    # (access.converge_faculty_access) owns the floor for every repo that already exists -
+    # so re-granting here bought nothing and cost two PUTs per student per assignment on
+    # every path that reaches this line.
+    #
     # READ, not write. Marking happens in `classroom-config/grades/<slug>.csv` (docs/10),
     # and by the time anyone marks, the deadline snapshot has already frozen this repo's
     # HEAD and the autograder has run off that snapshot - so a commit here would reach no
     # gradebook and form no part of the record. Faculty need to SEE the work, not edit it.
-    grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
+    if not existed:
+        grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
     if team is not None:
         # Group: materialise the team from its members and grant it on the repo, so
         # post-sync membership edits propagate to access (vs. one-off collaborator grants).
