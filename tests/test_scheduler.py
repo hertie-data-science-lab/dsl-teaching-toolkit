@@ -1554,6 +1554,30 @@ def test_withholding_the_stub_is_visible_without_failing_the_run(monkeypatch, ca
     assert "Write it for students, then release again." in captured.err
 
 
+def test_the_snapshot_pass_hands_autograde_what_it_froze(monkeypatch):
+    # Both passes walk the same passed deadlines, so asking the snapshot file's state
+    # twice was a read per passed deadline per tick for an answer the first pass had.
+    reads: list[str] = []
+    monkeypatch.setattr(
+        scheduler, "load_snapshots", lambda org, name: reads.append(name) or None
+    )
+    monkeypatch.setattr(scheduler, "template_is_group", lambda org, repo: None)
+    monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
+    monkeypatch.setattr(
+        scheduler,
+        "snapshot_assignment",
+        lambda org, name, deadline, **k: name != "assignment-2",
+    )
+    sched = _assignments(
+        **{"assignment-1": _due(13), "assignment-2": _due(14)},
+    )
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    errors, frozen = scheduler._snapshot_passed_deadlines("C", "K", sched, now, False)
+    assert errors == 1
+    assert frozen == frozenset({"assignment-1"}), "a failed freeze counted as frozen"
+    assert reads == ["assignment-1", "assignment-2"], "one read per passed deadline"
+
+
 def test_autograde_waits_for_a_completed_snapshot(monkeypatch):
     # Without a snapshot, collect pins on committer dates - and when no submission repo
     # exists at all it records a permanent write-once ZERO for every student and marks the
@@ -1562,13 +1586,22 @@ def test_autograde_waits_for_a_completed_snapshot(monkeypatch):
     monkeypatch.setattr(scheduler, "has_autograde_results", lambda org, slug: False)
     monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
     monkeypatch.setattr(scheduler, "collect", lambda *a, **k: graded.append(a) or 0)
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
     sched = _assignments(**{"assignment-1": _due(13)})
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
-    assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
-    assert graded == []
-    monkeypatch.setattr(
-        scheduler, "load_snapshots", lambda org, slug: {"assignment-1-ada": "abc"}
+    # `frozen` is what the snapshot pass just established for this same tick - read, not
+    # re-fetched, so a passed deadline costs one snapshot read per tick rather than two.
+    nothing_frozen = frozenset()
+    assert (
+        scheduler._autograde_passed_deadlines(
+            "C", "K", sched, now, False, nothing_frozen
+        )
+        == 0
     )
-    assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
+    assert graded == []
+    assert (
+        scheduler._autograde_passed_deadlines(
+            "C", "K", sched, now, False, frozenset({"assignment-1"})
+        )
+        == 0
+    )
     assert len(graded) == 1

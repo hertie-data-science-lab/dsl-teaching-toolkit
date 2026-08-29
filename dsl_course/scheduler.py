@@ -173,17 +173,25 @@ def _snapshot_passed_deadlines(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-) -> int:
+) -> tuple[int, frozenset[str]]:
     """Freeze every passed-deadline assignment that has no snapshot yet. Write-once: an
     assignment already frozen is skipped silently, so this is a no-op on every tick after
-    the first. Returns the error count."""
+    the first.
+
+    Returns `(error count, the cohort names that HAVE a snapshot afterwards)` - already
+    frozen or frozen by this pass. Autograding refuses to grade what was never frozen, and
+    asking again there was a second read of the same file for every passed deadline on
+    every tick; this pass has just established the answer."""
     errors = 0
+    frozen: set[str] = set()
     for slug, deadline in due_snapshots(sched, now):
         entry = sched.assignments[slug]
         # every cohort-side artefact keys on the assignment's cohort NAME, not its slug
         name = schedule.cohort_name(slug, entry)
         if load_snapshots(cohort_org, name) is not None:
-            continue  # already frozen - never re-snapshot, a late push must not move it
+            # already frozen - never re-snapshot, a late push must not move it
+            frozen.add(name)
+            continue
         if dry_run:
             log(f"    DRY-RUN  snapshot {snapshot_path(name)} (deadline {deadline})")
             continue
@@ -205,11 +213,13 @@ def _snapshot_passed_deadlines(
             force=False, schedule_type=entry.type, template_group=template_group
         )
         # `name` names the repos, `slug` (the schedule key) is what teams.csv is keyed on.
-        if not snapshot_assignment(
+        if snapshot_assignment(
             cohort_org, name, deadline, is_group=is_group, teams_key=slug
         ):
+            frozen.add(name)
+        else:
             errors += 1
-    return errors
+    return errors, frozenset(frozen)
 
 
 def _assignment_template(
@@ -234,9 +244,15 @@ def _autograde_passed_deadlines(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
+    frozen: frozenset[str],
 ) -> int:
     """Autograde every passed-deadline assignment exactly once - zero config. Returns the
     error count.
+
+    `frozen` is `_snapshot_passed_deadlines`' answer for this same tick: the cohort names
+    that have a snapshot. It is read rather than re-fetched, because the snapshot pass ran
+    immediately before over the same deadlines and is the only thing that could have
+    changed it.
 
     Fire-once: the `autograde/<slug>/_graded.json` sentinel (or the `_skipped.json` record) in
     classroom-config is the marker. Absent means never machine-graded, so grade now; present
@@ -263,7 +279,7 @@ def _autograde_passed_deadlines(
         # record a permanent write-once ZERO for every student and mark the assignment
         # graded - on a green run. A snapshot that failed this tick, or was skipped because
         # nothing was handed out yet, simply means: not now. The next tick looks again.
-        if load_snapshots(cohort_org, name) is None:
+        if name not in frozen:
             log(f"  [wait] autograde {slug} - no completed snapshot yet, not grading")
             continue
         if dry_run:
@@ -449,8 +465,13 @@ def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) 
     # snapshot. Then autograde those same assignments, once each. Both are independent of
     # the release plan - a cohort can pin due dates without scheduling a single release.
     errors = int(sched.unparseable)
-    errors += _snapshot_passed_deadlines(course_org, cohort_org, sched, now, dry_run)
-    errors += _autograde_passed_deadlines(course_org, cohort_org, sched, now, dry_run)
+    snapshot_errors, frozen = _snapshot_passed_deadlines(
+        course_org, cohort_org, sched, now, dry_run
+    )
+    errors += snapshot_errors
+    errors += _autograde_passed_deadlines(
+        course_org, cohort_org, sched, now, dry_run, frozen
+    )
     # Look AHEAD as well as at what is due: a deploy whose source was never staged fails
     # at its moment, which is far too late to write the thing. This is the only unattended
     # surface that notices - the commit-time validator only ever runs when someone edits
