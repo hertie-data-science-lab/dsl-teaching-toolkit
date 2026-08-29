@@ -45,6 +45,7 @@ from .ghcli import GIT_ENV, clone, git
 from .log import log, log_err, log_ok, log_step
 from .repos import create_repo
 from .schedule import Deploy
+from .schedule_plan import deploy_dest
 
 # Never copied, at any depth: a `.git` landing in the dest overwrites its git metadata and
 # redirects the release's own push into the SOURCE repo.
@@ -224,7 +225,10 @@ def deploy_many(
                 continue  # its source/dest failed to clone (already counted)
             # A root cohort_dest_path means the dest repo's root, exactly as a root
             # course_source_path means the source repo's - no mirror-the-source fallback.
-            dest_rel = (d.cohort_dest_path or d.course_source_path).strip("/")
+            # The rule is stated once (schedule_plan.deploy_dest) because the site reads
+            # the same rule to work out which schedule row a release lands in; two copies
+            # is how a release and its row come to disagree about where it went.
+            dest_rel = deploy_dest(d)
             src_root = src_dirs[d.course_source_repo].resolve()
             srcp = _resolve_within(src_root, d.course_source_path)
             if srcp is None:

@@ -56,7 +56,8 @@ from .collect import (
 from .deploy import deploy_many
 from .log import log, log_err, log_ok, log_step
 from .repos import repo_exists
-from .schedule import Deploy, Release
+from .schedule import Release
+from .schedule_plan import deploy_dest
 from .seed import discover_cohorts
 
 # --------------------------------------------------------------------------- pure core
@@ -101,10 +102,6 @@ def due_snapshots(sched: schedule.Schedule, now: datetime) -> list[tuple[str, st
     return [(slug, at.isoformat()) for slug, at in sorted(passed, key=lambda p: p[1])]
 
 
-def _dest(d: Deploy) -> str:
-    return d.cohort_dest_path or d.course_source_path
-
-
 def describe(release: Release, now: datetime | None = None) -> list[str]:
     """Human one-liners for a release's actions (for dry-run / 'what opens when'). With
     `now`, deploys not yet due (a deploy_datetime after the entry's event_datetime) are
@@ -122,7 +119,7 @@ def describe(release: Release, now: datetime | None = None) -> list[str]:
         )
         lines.append(
             f"deploy {d.course_source_repo}/{d.course_source_path} -> "
-            f"{d.cohort_dest_repo}/{_dest(d)}{suffix}"
+            f"{d.cohort_dest_repo}/{deploy_dest(d)}{suffix}"
         )
     actions_pending = now is not None and (release.when is None or release.when > now)
     actions_suffix = (
