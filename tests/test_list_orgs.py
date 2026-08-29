@@ -1,6 +1,6 @@
 """The inventory CLI is a pure reader: its failure modes are the discovery search and the
 per-org metadata read. Both have to reach the Actions log as a line, not a traceback, and
-neither may be written out as an inventory of zero (or mis-tiered) orgs.
+neither may be reported as an inventory of zero (or mis-tiered) orgs.
 """
 
 from __future__ import annotations
@@ -24,9 +24,7 @@ def test_main_reports_a_failed_search_and_exits_nonzero(monkeypatch, capsys):
     assert "HTTP 403" in capsys.readouterr().err
 
 
-def test_main_writes_the_inventory_when_discovery_succeeds(
-    monkeypatch, tmp_path, capsys
-):
+def test_main_prints_the_inventory_when_discovery_succeeds(monkeypatch, capsys):
     monkeypatch.setattr(
         list_orgs,
         "discover_course_orgs",
@@ -44,12 +42,10 @@ def test_main_writes_the_inventory_when_discovery_succeeds(
     )
     monkeypatch.setattr(list_orgs, "discover_cohort_orgs", list)
     monkeypatch.setattr(list_orgs, "discover_cohorts", lambda org: [])
-    page = tmp_path / "inventory.md"
-    monkeypatch.setattr("sys.argv", ["list_orgs", "--update-file", str(page)])
+    monkeypatch.setattr("sys.argv", ["list_orgs", "--format", "markdown"])
 
     assert list_orgs.main() == 0
-    assert "My-Course" in page.read_text()
-    assert "1 course orgs" in capsys.readouterr().out
+    assert "My-Course" in capsys.readouterr().out
 
 
 def test_the_tree_nests_each_cohort_under_its_own_course_org(monkeypatch):
@@ -237,19 +233,14 @@ def test_metadata_parses_the_yaml_body(monkeypatch):
     assert list_orgs.org_meta("Cohort-f2026") == {"course": "My-Course"}
 
 
-def test_a_failed_metadata_read_stops_the_inventory_being_rewritten(
-    monkeypatch, tmp_path, capsys
-):
-    # The page is fully generated and overwrites whatever is there: a wrong refresh is
-    # worse than no refresh, so the CLI must exit 1 with the file untouched.
+def test_a_failed_metadata_read_reds_the_run(monkeypatch, capsys):
+    # A partial inventory read as complete is worse than none, so the exit code carries
+    # the verdict and the log names what could not be read.
     monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Cohort-f2026"])
     monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 502"))
-    page = tmp_path / "inventory.md"
-    page.write_text("# the previous, good inventory\n")
-    monkeypatch.setattr("sys.argv", ["list_orgs", "--update-file", str(page)])
+    monkeypatch.setattr("sys.argv", ["list_orgs", "--format", "markdown"])
 
     assert list_orgs.main() == 1
-    assert page.read_text() == "# the previous, good inventory\n"
     assert "HTTP 502" in capsys.readouterr().err
 
 
@@ -320,25 +311,6 @@ def test_an_unreadable_org_is_shown_on_the_tree_not_dropped_from_it(monkeypatch)
     )
     assert "**dsl-course.yml unreadable**" in out
     assert "Loose-f2026" in out
-
-
-def test_an_unreadable_org_still_stops_the_inventory_being_rewritten(
-    monkeypatch, tmp_path
-):
-    # Localising the failure must not quietly downgrade the page's own guarantee: it is
-    # fully generated and merged unattended, so a partial listing is never written.
-    monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Bad"])
-    monkeypatch.setattr(
-        list_orgs,
-        "org_meta",
-        lambda org: (_ for _ in ()).throw(RuntimeError("nope")),
-    )
-    page = tmp_path / "inventory.md"
-    page.write_text("# the previous, good inventory\n")
-    monkeypatch.setattr("sys.argv", ["list_orgs", "--update-file", str(page)])
-
-    assert list_orgs.main() == 1
-    assert page.read_text() == "# the previous, good inventory\n"
 
 
 def test_the_json_form_still_prints_what_it_could_read(monkeypatch, capsys):

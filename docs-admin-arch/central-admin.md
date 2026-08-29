@@ -108,8 +108,8 @@ ref an org runs **is** that org's engine. Three tiers, three branches:
 
 `staging` and `release` never carry commits of their own: both are always fast-forwards of
 `main`. An org's tier is `central_ref:` in its **course** org's `.github/dsl-course.yml`;
-cohorts inherit it. The [inventory page](../bootstrapped-orgs-inventory.md) shows it per
-course org, and **Check cohort setup** shows it per cohort.
+cohorts inherit it. The [inventory report](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml) shows it per course org, and
+**Check cohort setup** shows it per cohort.
 
 Neither tier branch exists until someone makes it, and `central.CENTRAL_REF` is already
 `release`. **Order, on first setup:**
@@ -221,15 +221,13 @@ refresh would undo it.
 
 ## What orgs exist
 
-**[`bootstrapped-orgs-inventory.md`](../bootstrapped-orgs-inventory.md)** is the live list: one
-nested tree, each course org (topic `dsl-course-hub`) with the toolkit tier it runs and the
-cohort orgs (topic `dsl-cohort`) that point at it listed underneath. A cohort GitHub shows
-but the course's registry does not is marked **not registered**; a cohort pointing at no
-discovered course org is **orphaned** and listed at the end. It is auto-generated **Mondays
-06:00 UTC** (and on demand); when the list changed it opens a PR and merges it in the same run. Don't
-hand-edit it - a missing org means a failed or never-run bootstrap, not a forgotten edit. The
-refresh aborts rather than committing a net deletion (a truncated search page must not read as
-"these orgs are gone").
+**[Refresh Course Orgs Inventory](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml)** renders the live list into its own job
+summary: one nested tree, each course org (topic `dsl-course-hub`) with the toolkit tier it
+runs and the cohort orgs (topic `dsl-cohort`) that point at it listed underneath. A cohort
+GitHub shows but the course's registry does not is marked **not registered**; a cohort
+pointing at no discovered course org is **orphaned** and listed at the end. It runs
+**Mondays 06:00 UTC** and on demand, and goes red rather than reporting a partial estate as
+complete. A missing org means a failed or never-run bootstrap.
 
 ## Related
 

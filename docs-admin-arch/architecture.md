@@ -663,7 +663,7 @@ central repo and fanned out by Bootstrap/Refresh - see
 Self-contained - workflows and their Python implementation both live in this repo.
 
 - `.github/workflows/` - `bootstrap-org` (the one central button) + `refresh-inventory`
-  (weekly cron regenerating `bootstrapped-orgs-inventory.md`) + `ci`. The faculty workflows are
+  (weekly cron rendering the live estate into its job summary) + `ci`. The faculty workflows are
   *rendered* and seeded into the course/cohort orgs, not kept here.
 - `dsl_course/`:
   - `central` - the one definition of which repo/ref every seeded workflow checks out; imported

@@ -111,6 +111,7 @@ Each cohort further gets an auto-deployed `<cohort>.github.io` site whose materi
 | All available `.github` Actions tab workflows (course org) | [`actions reference`](docs/reference/actions-reference.md) |
 | Who may run those workflows, and which team grants it | [`access reference`](docs/reference/access-reference.md) |
 | **Deployment checklist** | [`DEPLOYMENT-CHECKLIST.md`](docs/DEPLOYMENT-CHECKLIST.md) |
+| Live inventory of every bootstrapped org | [Refresh Course Orgs Inventory](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml) - weekly job summary |
 
 
 ---
