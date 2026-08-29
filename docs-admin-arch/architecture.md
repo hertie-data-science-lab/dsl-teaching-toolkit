@@ -199,7 +199,7 @@ sequenceDiagram
   F->>A: workflow_dispatch (org, org_name, course_code, admin?)
   A->>A: check-team - faculty/instructors/admin in central org
   A->>Bot: bootstrap_course --propagate-secret
-  Bot->>Org: org settings (2FA) + role teams
+  Bot->>Org: org settings (base permissions; 2FA attempted) + role teams
   Bot->>Org: .github profile + seed the buttons + course_admins in dsl-course.yml
   Bot->>Org: grant instructors/course-admin on .github
   Bot->>Org: add --admins handles to course-admin (immediate) + SSOT (durable)

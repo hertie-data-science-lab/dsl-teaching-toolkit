@@ -14,7 +14,8 @@ or see it**: they trigger the Actions buttons, which run server-side under the o
 
 The bot is the shared service account **`hertie-dsl-bot`**: one GitHub account with its own email
 + 2FA, added as **Owner** of every course/cohort org; its classic PAT is `DSL_BOT_TOKEN`. Invite
-this account as Owner of each new org. Standing it up and rotating it:
+this account as Owner of each new org. Org-wide 2FA enforcement is **not** turned on: GitHub
+refuses it while any member has 2FA off, so each refresh reports the count instead. Standing it up and rotating it:
 [CENTRAL ADMIN → Bot lifecycle](central-admin.md#bot-lifecycle---setup--rotation).
 
 **Required permissions.** The bot must be an **Owner** of every course and cohort org, and its
@@ -23,7 +24,7 @@ token must carry:
 | Classic PAT scope | Covers |
 | --- | --- |
 | `repo` | create + read/write repos incl. **private**; contents; generate-from-template; topics; repo settings + repo secrets |
-| `admin:org` | org **membership** + **teams** (invite students, manage `students`/`auditors`/`instructors`/`course-admin`); org **settings** (2FA); **org secrets** |
+| `admin:org` | org **membership** + **teams** (invite students, manage `students`/`auditors`/`instructors`/`course-admin`); org **settings** (base permissions, the 2FA attempt); **org secrets** |
 | `workflow` | write the seeded workflow files (the buttons) |
 
 ## Who can run which action
