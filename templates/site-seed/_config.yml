@@ -4,6 +4,8 @@
 
 # --- Course identity ---
 course_name: "Course Name (Code)"
+# The same name under Jekyll's own key, which the theme and the feed fall back to.
+title: "Course Name (Code)"
 course_description: "One paragraph description of the course."
 course_semester: "Fall 2026"
 course_code: "GRAD-E1234"

@@ -949,19 +949,30 @@ def apply_plan(wd: Path, plan: SitePlan) -> None:
 
     # _config.yml, in two halves. The plan's own keys are course IDENTITY (course_name
     # / _semester / _code / _description, github_org) and are replace-only. The theme
-    # keys and the two blocks are the CONTRACT of the templates written below - a site
-    # that lacks them renders those templates wrong - so they go in whether the file
-    # has them or not.
+    # keys, `title` and the two blocks are the CONTRACT of the templates written below -
+    # a site that lacks them renders those templates wrong, or does not build at all -
+    # so they go in whether the file has them or not.
     cfg_path = wd / "_config.yml"
     if cfg_path.is_file():
         cfg = cfg_path.read_text()
         for key, value in plan.config.items():
             cfg = _replace_config_scalar(cfg, key, value)
+        owned = [*plan.config, *_THEME_CONFIG, "collections", "defaults"]
+        # `title` is the course name under Jekyll's OWN spelling, and is upserted rather
+        # than replaced: the theme reads it wherever a page has no `course_name` to show,
+        # jekyll-feed titles the feed with it, and a site that has neither sends
+        # jekyll-github-metadata off to synthesise one from the repository - where, given
+        # no repo to attribute the site to, it fails the build outright. Every site
+        # seeded before this has no `title:` line for a replace to find.
+        if "course_name" in plan.config:
+            cfg = _upsert_config(
+                cfg, "title", f'title: "{q(plan.config["course_name"])}"'
+            )
+            owned.append("title")
         for key, value in _THEME_CONFIG.items():
             cfg = _upsert_config(cfg, key, f'{key}: "{q(value)}"')
         cfg = _upsert_config(cfg, "collections", _COLLECTIONS_BLOCK)
         cfg = _upsert_config(cfg, "defaults", _DEFAULTS_BLOCK)
-        owned = [*plan.config, *_THEME_CONFIG, "collections", "defaults"]
         cfg_path.write_text(_stamp_config(cfg, sorted(owned)))
 
     # Regenerate the owned collections; leave everything else (layouts, pages) as the

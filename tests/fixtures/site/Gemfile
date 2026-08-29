@@ -1,9 +1,8 @@
 # The jekyll-contract jobs' gems (.github/workflows/ci.yml).
 #
-# Plain jekyll + kramdown, deliberately NOT the github-pages gem: this build proves the
-# course templates in templates/site/ compile against the front matter site.py writes, and
-# github-pages pins an old Jekyll and drags in a metadata plugin that refuses to build
-# without a repo to attribute the site to.
+# Plain jekyll + kramdown, deliberately NOT the github-pages gem: it pins an old Jekyll,
+# and this build is meant to prove that the course templates in templates/site/ compile
+# against the front matter site.py writes.
 #
 # The remote-theme and feed plugins are the ones a generated `_config.yml` names, and only
 # the THEMED job loads them: the offline job's `_config.offline.yml` sets `plugins: []`.
@@ -13,3 +12,12 @@ gem "jekyll", "~> 4.3"
 gem "kramdown-parser-gfm", "~> 1.1"
 gem "jekyll-remote-theme", "~> 0.4"
 gem "jekyll-feed", "~> 0.17"
+
+# What github-pages drags in, without the rest of github-pages. Live sites still carry the
+# instructor-owned Gemfile they were seeded with, which does bundle it, and Jekyll requires
+# the :jekyll_plugins group whatever `plugins:` says - so a site gets this plugin whether
+# or not its config asks for one. Leaving it out of the bundle is what let both CI jobs
+# stay green at theme v2.0.0 while every live deploy failed inside it.
+group :jekyll_plugins do
+  gem "jekyll-github-metadata", "~> 2.16"
+end
