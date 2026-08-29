@@ -27,8 +27,8 @@ import argparse
 import sys
 
 from . import roster
-from .course import AUDITORS_TEAM, STUDENTS_TEAM
-from .discovery import list_org_repos
+from .course import AUDITORS_TEAM, STUDENTS_TEAM, submission_suffix
+from .discovery import classify_repos, list_org_repos
 from .gh_teams import reconcile_team_members, set_org_membership
 from .log import log_err, log_ok, log_step, log_verbose
 from .repos import is_collaborator, remove_collaborator
@@ -66,26 +66,17 @@ def desired_ids(students: list[roster.Student]) -> dict[str, set[str]]:
 
 
 def submission_repo_suffixes(repos: list[dict]) -> list[tuple[str, str]]:
-    """`(repo, suffix)` for every `<template>-<suffix>` repo in a cohort org's listing.
+    """`(repo, suffix)` for every submission repo in a cohort org's listing.
 
-    The same rule `discovery.is_student_repo` uses: a submission repo is generated from one
-    of the org's cohort assignment templates, so its name is that template's name plus a
-    suffix. The suffix is a student's HANDLE for an individual assignment and a TEAM name
-    for a group one - which is exactly why nothing downstream acts on a suffix without
-    asking GitHub whether it is really a collaborator."""
-    templates = sorted(
-        (r["name"] for r in repos if r.get("isTemplate")), key=len, reverse=True
-    )
-    out = []
-    # Templates themselves are excluded: `assignment-4-project` is a repo in this listing
-    # AND starts with `assignment-4-`, so a cohort with both templates would otherwise
-    # read one of its own templates as a submission repo belonging to `project`.
-    for repo in sorted(r["name"] for r in repos if not r.get("isTemplate")):
-        for template in templates:  # longest first, so a nested slug wins
-            if repo.startswith(f"{template}-"):
-                out.append((repo, repo[len(template) + 1 :]))
-                break
-    return out
+    `discovery.classify_repos` names the template each one derives from; the suffix is
+    what is left. That suffix is a student's HANDLE for an individual assignment and a
+    TEAM name for a group one - which is exactly why nothing downstream acts on one
+    without first asking GitHub whether it is really a collaborator."""
+    return [
+        (repo, submission_suffix(repo, template))
+        for repo, template in sorted(classify_repos(repos).items())
+        if template
+    ]
 
 
 def revoke_offboarded_access(

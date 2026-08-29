@@ -13,6 +13,7 @@ from .course import (
     INSTRUCTORS_TEAM,
     STUDENTS_TEAM,
 )
+from .discovery import classify_repos
 from .gh_teams import create_team
 from .ghcli import gh, is_missing_resource
 from .log import log, log_err, log_ok
@@ -267,13 +268,13 @@ def converge_topics(org: str, repos: list[dict], cohort: bool) -> int:
     that reports failures can include it."""
     if not cohort:
         return 0
-    templates = sorted(r["name"] for r in repos if r.get("isTemplate"))
+    derived = classify_repos(repos)
     failures = 0
     for repo in repos:
         if repo.get("archived"):
             continue
         name = repo["name"]
-        template = next((t for t in templates if name.startswith(f"{t}-")), None)
+        template = derived[name]
         if template is not None:
             wanted = {template, "submission"}
         elif name.startswith(GRADEBOOK_PREFIX):

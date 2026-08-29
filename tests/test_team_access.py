@@ -483,6 +483,24 @@ def test_converging_topics_never_removes_one(monkeypatch):
     ]
 
 
+def test_a_nested_template_stamps_the_longest_match_and_skips_the_templates(
+    monkeypatch,
+):
+    # One classifier (discovery.classify_repos) for the sweep, the off-boarding revoke and
+    # the landing page. Keyed first-alphabetically, this stamped `assignment-4` +
+    # `submission` on the `assignment-4-project` TEMPLATE, and named the wrong template on
+    # a repo generated from the longer one.
+    repos = [
+        {"name": "assignment-4", "isTemplate": True, "topics": []},
+        {"name": "assignment-4-project", "isTemplate": True, "topics": []},
+        {"name": "assignment-4-project-ada", "topics": []},
+    ]
+    _, stamped = _converge(monkeypatch, repos)
+    assert stamped == {
+        "assignment-4-project-ada": ["assignment-4-project", "submission"]
+    }
+
+
 def test_an_archived_repo_and_a_course_org_are_left_alone(monkeypatch):
     repos = [{"name": "grades-ada", "topics": [], "archived": True}]
     assert _converge(monkeypatch, repos) == (0, {})

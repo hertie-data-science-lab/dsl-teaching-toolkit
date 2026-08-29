@@ -36,11 +36,12 @@ def test_a_gradebook_or_submission_repo_is_recognised_by_name_too():
         {"name": "grades-ada-l", "topics": []},
         {"name": "materials", "topics": []},
     ]
-    assert discovery.has_infra_topic({"name": "grades-ada-l", "topics": []})
-    assert discovery.is_student_repo(repos[1], repos)
-    assert discovery.is_student_repo(repos[2], repos)
-    assert not discovery.is_student_repo(repos[3], repos)
-    assert not discovery.is_student_repo(repos[0], repos)  # the template itself
+    derived = discovery.classify_repos(repos)
+    assert discovery._has_infra_topic({"name": "grades-ada-l", "topics": []})
+    assert discovery.is_student_repo(repos[1], derived)
+    assert discovery.is_student_repo(repos[2], derived)
+    assert not discovery.is_student_repo(repos[3], derived)
+    assert not discovery.is_student_repo(repos[0], derived)  # the template itself
 
 
 def test_is_infra_repo_excludes_by_name_and_by_topic():
@@ -337,6 +338,23 @@ def test_org_tier_reads_the_dotgithub_topic_then_the_cohort_only_repos_then_give
     assert discovery.org_tier([gh(), {"name": "classroom-config"}]) == "cohort"
     assert discovery.org_tier([gh(), {"name": "assignment-1-ada"}]) is None
     assert discovery.org_tier([{"name": "materials"}]) is None  # no .github at all
+
+
+def test_a_nested_template_classifies_on_the_longest_match():
+    # `assignment-4` and `assignment-4-project` both prefix the repo; only the longer one
+    # leaves a suffix that is a handle. The templates themselves derive from nothing.
+    repos = [
+        {"name": "assignment-4", "isTemplate": True},
+        {"name": "assignment-4-project", "isTemplate": True},
+        {"name": "assignment-4-project-ada-l"},
+        {"name": "materials"},
+    ]
+    assert discovery.classify_repos(repos) == {
+        "assignment-4": None,
+        "assignment-4-project": None,
+        "assignment-4-project-ada-l": "assignment-4-project",
+        "materials": None,
+    }
 
 
 def test_student_repo_names_by_topic_or_by_name():

@@ -69,14 +69,44 @@ def org_tier(repos: list[dict]) -> str | None:
     return None
 
 
-def student_repo_names(repos: list[dict]) -> frozenset[str]:
-    """The per-student and per-team repos in a listing, by topic OR by name.
+def classify_repos(repos: list[dict]) -> dict[str, str | None]:
+    """`{repo name: the cohort assignment template it derives from, or None}`.
 
-    Submission repos are `<slug>-<handle>` generated from the cohort template `<slug>` (the
-    one template repo in a cohort org); gradebooks are `grades-<handle>`. The topics that
-    mark them are stamped after the create and never converged, so a name rule backs them
-    up: whatever decides faculty write access must never depend on one PATCH."""
-    return frozenset(r["name"] for r in repos if is_student_repo(r, repos))
+    THE submission-repo rule, computed ONCE for a whole listing. A submission repo is
+    generated from one of the org's cohort assignment templates, so its name is that
+    template's name plus a `-<handle>` or `-<team>` suffix.
+
+    Longest template first: `assignment-4` and `assignment-4-project` both prefix
+    `assignment-4-project-ada-l`, and only the longer one leaves a suffix that is a handle
+    rather than `project-ada-l`. Templates themselves map to None - `assignment-4-project`
+    is a repo in this listing AND starts with `assignment-4-`, so a cohort holding both
+    would otherwise read one of its own templates as a submission belonging to `project`.
+    """
+    templates = sorted(
+        (r["name"] for r in repos if r.get("isTemplate")), key=len, reverse=True
+    )
+    return {
+        r["name"]: None
+        if r.get("isTemplate")
+        else next((t for t in templates if r["name"].startswith(f"{t}-")), None)
+        for r in repos
+    }
+
+
+def is_student_repo(repo: dict, derived: dict[str, str | None]) -> bool:
+    """Whether `repo` is a per-student/team repo, by topic OR by name.
+
+    `derived` is one `classify_repos` over the same listing. The topic that marks a
+    submission repo is stamped after the create and never converged, so a repo merely
+    NAMED off a template counts too: on a public page, and in the faculty-access floor,
+    the roster must not depend on one PATCH having landed."""
+    return _has_infra_topic(repo) or derived.get(repo["name"]) is not None
+
+
+def student_repo_names(repos: list[dict]) -> frozenset[str]:
+    """The per-student and per-team repos in a listing - submission repos and gradebooks."""
+    derived = classify_repos(repos)
+    return frozenset(r["name"] for r in repos if is_student_repo(r, derived))
 
 
 def _is_infra_repo(repo: dict) -> bool:
@@ -92,36 +122,17 @@ def _is_infra_repo(repo: dict) -> bool:
     name = repo["name"]
     if name in INFRA_REPOS or name.endswith(".github.io"):
         return True
-    return has_infra_topic(repo)
+    return _has_infra_topic(repo)
 
 
-def has_infra_topic(repo: dict) -> bool:
-    """Whether `repo`'s TOPICS mark it machinery - a per-student submission repo, a frozen
-    cohort assignment template, or a private gradebook.
-
-    Split out of _is_infra_repo because the org landing page needs this half and not the
-    other: it must drop those per-student repos (naming them exposes the roster and every
-    team's membership on a page students land on) while KEEPING `welcome`,
-    `classroom-config` and the site repo, which _is_infra_repo also excludes.
-
-    A gradebook is also recognised by NAME: the topic is stamped in a separate call after
-    the create, and a failed stamp must not put `grades-<handle>` on a public page."""
+def _has_infra_topic(repo: dict) -> bool:
+    """Whether `repo`'s TOPICS mark it machinery - a submission repo, a frozen cohort
+    assignment template, or a private gradebook. A gradebook is recognised by NAME too:
+    the topic is stamped in a separate call after the create, and a failed stamp must not
+    put `grades-<handle>` on a public page."""
     if repo["name"].startswith(GRADEBOOK_PREFIX):
         return True
     return bool(set(repo.get("topics") or []) & INFRA_TOPICS)
-
-
-def is_student_repo(repo: dict, repos: list[dict]) -> bool:
-    """Whether `repo` is a per-student/team repo, by topic OR by name.
-
-    Submission repos are `<slug>-<handle>` generated from the cohort template `<slug>`,
-    which is the one template repo in a cohort org. The topic that marks them is stamped
-    after the create and never converged, so a repo named off a template in the same
-    listing counts too - on a PUBLIC page the roster must not depend on one PATCH."""
-    if has_infra_topic(repo):
-        return True
-    templates = {r["name"] for r in repos if r.get("isTemplate")}
-    return any(repo["name"].startswith(f"{t}-") for t in templates)
 
 
 def list_org_repos(org: str) -> list[dict]:
