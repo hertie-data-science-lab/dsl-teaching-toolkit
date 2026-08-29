@@ -82,6 +82,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from datetime import datetime, timezone
+from enum import Enum
 from functools import cache
 from pathlib import Path
 
@@ -572,6 +573,16 @@ def load_snapshots(cohort_org: str, slug: str) -> dict[str, str] | None:
     return parse_snapshots(content) if content is not None else None
 
 
+class SnapshotResult(Enum):
+    """What `snapshot_assignment` did. Only WRITTEN and PRESENT mean a snapshot exists, so
+    only they make an assignment eligible to be graded."""
+
+    WRITTEN = "written"  # frozen by this call
+    PRESENT = "present"  # already frozen by an earlier call
+    NOTHING_TO_FREEZE = "nothing"  # no targets, or every target absent - wait and retry
+    FAILED = "failed"  # a lookup or the write failed - retry on the next tick
+
+
 def snapshot_assignment(
     cohort_org: str,
     slug: str,
@@ -579,11 +590,12 @@ def snapshot_assignment(
     *,
     is_group: bool,
     teams_key: str | None = None,
-) -> bool:
+) -> SnapshotResult:
     """Freeze, at a server-chosen MOMENT, the commit each of `slug`'s submission repos will
     be graded at. Write-once: an existing snapshot is never re-taken or overwritten, so a
-    late push can never move the pin. Returns False if the snapshot could not be completed
-    (nothing is written - the next cron tick tries again).
+    late push can never move the pin. The `SnapshotResult` distinguishes a snapshot that now
+    exists (WRITTEN/PRESENT) from one that was deliberately not taken (NOTHING_TO_FREEZE) and
+    from a failure (FAILED); the caller must not treat the last two as frozen.
 
     The moment is ours; the CHOICE of commit is still made on the student-supplied
     committer date (see `_snapshot_sha` and the module docstring). What this closes is the
@@ -598,7 +610,7 @@ def snapshot_assignment(
     from student-writable teams.csv."""
     if load_snapshots(cohort_org, slug) is not None:
         log_skip(f"snapshot {snapshot_path(slug)}")
-        return True
+        return SnapshotResult.PRESENT
     targets = submission_targets(cohort_org, slug, is_group, teams_key)
     if not targets:
         # Nobody onboarded, or no teams for a group assignment - which is also what an
@@ -611,7 +623,7 @@ def snapshot_assignment(
             f"  [skip] snapshot {snapshot_path(slug)} - nothing to freeze yet; "
             f"a later tick takes it"
         )
-        return True
+        return SnapshotResult.NOTHING_TO_FREEZE
     recorded_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     rows: list[tuple[str, str, str]] = []
     any_present = False
@@ -619,7 +631,7 @@ def snapshot_assignment(
         sha = _snapshot_sha(cohort_org, repo, deadline, recorded_at)
         if sha is None:
             log_err(f"  ! abandoning the {slug} snapshot - will retry on the next run")
-            return False
+            return SnapshotResult.FAILED
         if sha == _REPO_ABSENT:
             rows.append((repo, "", recorded_at))  # not there -> blank iff we freeze
         else:
@@ -636,7 +648,7 @@ def snapshot_assignment(
             f"  [skip] snapshot {snapshot_path(slug)} - every target repo is absent "
             f"(not generated yet); a later tick takes it"
         )
-        return True
+        return SnapshotResult.NOTHING_TO_FREEZE
     if not put_file(
         cohort_org,
         CONFIG_REPO,
@@ -644,13 +656,13 @@ def snapshot_assignment(
         dump_snapshots(rows).encode(),
         f"snapshot: {slug} pinned commits as of {deadline}",
     ):
-        return False
+        return SnapshotResult.FAILED
     pinned = sum(1 for _repo, sha, _at in rows if sha)
     log_ok(
         f"snapshot {snapshot_path(slug)}: {pinned}/{len(rows)} repo(s) with a commit "
         f"on/before {deadline}"
     )
-    return True
+    return SnapshotResult.WRITTEN
 
 
 def _pin_commit(
@@ -1039,9 +1051,13 @@ def collect(
     deadline: str | None = None,
     group: bool = False,
     dry_run: bool = False,
+    scheduled: bool = False,
 ) -> int:
     """Autograde every submission for `template` as of `deadline`, archiving result.json and
-    recording the machine score into the cohort's private grades CSV. Idempotent."""
+    recording the machine score into the cohort's private grades CSV. Idempotent.
+
+    `scheduled` marks the hourly cron: an assignment with no submission targets is then a
+    "not yet", never the permanent not-machine-graded record a button press writes."""
     if master_org == cohort_org:
         log_err("master-org and cohort-org must differ.")
         return 1
@@ -1137,11 +1153,14 @@ def collect(
         # are named after the cohort-side `slug`; teams.csv is keyed on the schedule `key`.
         targets = submission_targets(cohort_org, slug, is_group, key)
         if not targets:
-            # Nothing to grade at a passed deadline is a RESULT (the reason is logged
-            # above): a cohort with nobody onboarded, or a group assignment whose teams.csv
-            # has no teams. Left unrecorded, the cron came back every hour and went red
-            # every hour (live in the demo cohort for days). Record the skip; a deliberate
-            # re-grade is still a delete of autograde/<slug>/ away.
+            # Nothing to grade at a passed deadline: a cohort with nobody onboarded, or a
+            # group assignment whose teams.csv has no teams. On the cron path that is a "not
+            # yet" - the skip record is fire-once, so writing it would retire the assignment
+            # before anyone could submit. On a button press it is the operator's answer, and
+            # left unrecorded the cron came back every hour and went red every hour.
+            if scheduled:
+                log(f"  [wait] {slug} - no submission targets as of {deadline}")
+                return 0
             return _record_skip(
                 cohort_org, slug, f"no submission targets as of {deadline}", dry_run
             )

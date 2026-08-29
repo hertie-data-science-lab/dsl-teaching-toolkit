@@ -551,8 +551,11 @@ def test_snapshot_assignment_records_one_row_per_repo(monkeypatch):
     written = _stub_snapshot_write(
         monkeypatch, {"assignment-1-anna": SHA, "assignment-1-ben": ""}
     )
-    assert collect.snapshot_assignment(
-        "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+    assert (
+        collect.snapshot_assignment(
+            "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+        )
+        is collect.SnapshotResult.WRITTEN
     )
     ((path, text),) = written
     assert path == "snapshots/assignment-1.csv"
@@ -577,7 +580,7 @@ def test_snapshot_assignment_never_overwrites_an_existing_snapshot(monkeypatch):
         collect.snapshot_assignment(
             "Cohort", "assignment-1", "2026-10-15T23:59", is_group=False
         )
-        is True
+        is collect.SnapshotResult.PRESENT
     )
 
 
@@ -591,7 +594,7 @@ def test_snapshot_assignment_writes_nothing_when_a_lookup_fails(monkeypatch):
         collect.snapshot_assignment(
             "Cohort", "assignment-1", "2026-10-15T23:59", is_group=False
         )
-        is False
+        is collect.SnapshotResult.FAILED
     )
     assert written == []
 
@@ -613,7 +616,7 @@ def test_snapshot_assignment_with_no_targets_yet_writes_nothing_and_is_not_an_er
         collect.snapshot_assignment(
             "Cohort", "assignment-1", "2026-10-15T23:59", is_group=False
         )
-        is True
+        is collect.SnapshotResult.NOTHING_TO_FREEZE
     )
     assert "nothing to freeze yet" in capsys.readouterr().out
 
@@ -705,6 +708,28 @@ def test_collect_with_no_targets_at_all_records_the_skip(monkeypatch, capsys):
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
     assert [slug for slug, _why in marked] == ["assignment-1"]
     assert "no submission targets" in marked[0][1]
+
+
+def test_the_cron_path_waits_instead_of_recording_a_no_targets_skip(
+    monkeypatch, capsys
+):
+    # `_skipped.json` is fire-once. On the hourly cron an empty target list only means the
+    # cohort has not filled up yet, so recording it would retire the assignment for good.
+    _stub_collect(monkeypatch, None)
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group=None, teams_key=None: [],
+    )
+
+    def boom(*a, **k):
+        raise AssertionError("the cron must never record a permanent skip")
+
+    monkeypatch.setattr(collect, "mark_not_autograded", boom)
+    assert (
+        collect.collect("Course", "assignment-1-f2026", "Cohort", scheduled=True) == 0
+    )
+    assert "no submission targets" in capsys.readouterr().out
 
 
 def test_an_unwritten_no_targets_marker_goes_red(monkeypatch):
@@ -1184,7 +1209,7 @@ def test_snapshot_assignment_skips_when_every_repo_is_absent(monkeypatch, capsys
         collect.snapshot_assignment(
             "Cohort", "assignment-1", "2026-10-15T23:59", is_group=False
         )
-        is True
+        is collect.SnapshotResult.NOTHING_TO_FREEZE
     )
     assert "every target repo is absent" in capsys.readouterr().out
 
@@ -1200,7 +1225,7 @@ def test_snapshot_assignment_freezes_reachable_empty_repos_as_zero(monkeypatch):
         collect.snapshot_assignment(
             "Cohort", "assignment-1", "2026-10-15T23:59", is_group=False
         )
-        is True
+        is collect.SnapshotResult.WRITTEN
     )
     assert len(written) == 1  # the snapshot WAS frozen
     _path, text = written[0]

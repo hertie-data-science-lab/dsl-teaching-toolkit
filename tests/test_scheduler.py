@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
+from dsl_course import collect as collect_mod
 from dsl_course import course, deploy, ghcli, scheduler, seed
 from dsl_course.schedule import (
     AssignmentEntry,
@@ -690,7 +691,8 @@ def _stub_snapshots(monkeypatch, existing: set[str]):
         # `is_group` is REQUIRED (no default), so a scheduler that stopped passing it fails
         # these tests loudly instead of silently freezing every assignment as individual.
         lambda org, slug, deadline, *, is_group, teams_key=None: (
-            taken.append((org, slug, deadline, teams_key)) or True
+            taken.append((org, slug, deadline, teams_key))
+            or scheduler.SnapshotResult.WRITTEN
         ),
     )
     # The snapshot pass resolves group-ness from the template grading.yml when the schedule
@@ -804,7 +806,9 @@ def test_run_reports_a_failed_snapshot(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
-        lambda org, slug, deadline, *, is_group, teams_key=None: False,
+        lambda org, slug, deadline, *, is_group, teams_key=None: (
+            scheduler.SnapshotResult.FAILED
+        ),
     )
     _stub_autograde(monkeypatch)
     monkeypatch.setattr(
@@ -861,7 +865,7 @@ def test_a_course_source_repo_that_does_not_exist_says_so(monkeypatch, capsys):
 def _stub_collect(monkeypatch, marked: set[str], templates: set[str], rc: int = 0):
     """Record collect() calls. `marked` = slugs whose autograde/<slug>/ already exists;
     `templates` = the template repos that exist in the course org."""
-    graded: list[tuple[str, str, str, str, bool]] = []
+    graded: list[tuple[str, str, str, str, bool, bool]] = []
     monkeypatch.setattr(
         scheduler, "has_autograde_results", lambda org, slug: slug in marked
     )
@@ -872,8 +876,10 @@ def _stub_collect(monkeypatch, marked: set[str], templates: set[str], rc: int = 
     )
     monkeypatch.setattr(
         "dsl_course.scheduler.collect",
-        lambda m, t, c, deadline=None, group=False: (
-            graded.append((m, t, c, deadline, group)) or rc
+        # `scheduled=True` is the cron's contract with collect (an empty target list is a
+        # "not yet", not a permanent skip) - a scheduler that stopped passing it fails here.
+        lambda m, t, c, deadline=None, group=False, *, scheduled: (
+            graded.append((m, t, c, deadline, group, scheduled)) or rc
         ),
     )
     return graded
@@ -885,7 +891,9 @@ def _only_snapshots_taken(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
-        lambda org, slug, dl, *, is_group, teams_key=None: True,
+        lambda org, slug, dl, *, is_group, teams_key=None: (
+            scheduler.SnapshotResult.WRITTEN
+        ),
     )
 
 
@@ -899,7 +907,7 @@ def test_run_autogrades_a_passed_deadline_with_no_marker(monkeypatch):
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
     assert scheduler.run("Course-Org", "Cohort-f2026", now) == 0
-    ((course, template, cohort, deadline, group),) = graded
+    ((course, template, cohort, deadline, group, scheduled),) = graded
     assert (course, template, cohort) == (
         "Course-Org",
         "assignment-1-f2026",
@@ -907,6 +915,9 @@ def test_run_autogrades_a_passed_deadline_with_no_marker(monkeypatch):
     )
     # graded at exactly the instant the snapshot froze, and never guessed as a group run
     assert deadline.startswith("2026-10-13T23:59:59") and group is False
+    assert (
+        scheduled is True
+    )  # a cron run, so no-targets waits rather than being recorded
 
 
 def test_run_never_autogrades_twice_the_marker_is_the_state(monkeypatch):
@@ -1178,7 +1189,9 @@ def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
-        lambda org, slug, dl, *, is_group, teams_key=None: True,
+        lambda org, slug, dl, *, is_group, teams_key=None: (
+            scheduler.SnapshotResult.WRITTEN
+        ),
     )
     _stub_autograde(monkeypatch)
     monkeypatch.setattr(
@@ -1566,7 +1579,11 @@ def test_the_snapshot_pass_hands_autograde_what_it_froze(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
-        lambda org, name, deadline, **k: name != "assignment-2",
+        lambda org, name, deadline, **k: (
+            scheduler.SnapshotResult.WRITTEN
+            if name != "assignment-2"
+            else scheduler.SnapshotResult.FAILED
+        ),
     )
     sched = _assignments(
         **{"assignment-1": _due(13), "assignment-2": _due(14)},
@@ -1576,6 +1593,56 @@ def test_the_snapshot_pass_hands_autograde_what_it_froze(monkeypatch):
     assert errors == 1
     assert frozen == frozenset({"assignment-1"}), "a failed freeze counted as frozen"
     assert reads == ["assignment-1", "assignment-2"], "one read per passed deadline"
+
+
+def _real_snapshot_then_autograde(monkeypatch, targets):
+    """Both deadline phases over the REAL snapshot_assignment, with `targets` as the
+    assignment's submission units. Returns the (course_org, template, ...) collect got."""
+    graded: list[tuple] = []
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name: None)
+    monkeypatch.setattr(collect_mod, "load_snapshots", lambda org, name: None)
+    monkeypatch.setattr(
+        collect_mod,
+        "submission_targets",
+        lambda org, slug, is_group, teams_key=None: targets,
+    )
+    monkeypatch.setattr(
+        collect_mod,
+        "_snapshot_sha",
+        lambda org, repo, deadline, at="": collect_mod._REPO_ABSENT,
+    )
+
+    def no_write(*a, **k):
+        raise AssertionError("nothing may be written when there is nothing to freeze")
+
+    monkeypatch.setattr(collect_mod, "put_file", no_write)
+    monkeypatch.setattr(scheduler, "template_is_group", lambda org, repo: None)
+    monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
+    monkeypatch.setattr(scheduler, "has_autograde_results", lambda org, slug: False)
+    monkeypatch.setattr(scheduler, "collect", lambda *a, **k: graded.append(a) or 0)
+    sched = _assignments(**{"assignment-1": _due(13)})
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    errors, frozen = scheduler._snapshot_passed_deadlines("C", "K", sched, now, False)
+    errors += scheduler._autograde_passed_deadlines("C", "K", sched, now, False, frozen)
+    return errors, frozen, graded
+
+
+def test_a_snapshot_that_froze_nothing_does_not_licence_autograding(monkeypatch):
+    # Nobody onboarded yet: snapshot_assignment writes nothing and is green. Counting that
+    # as frozen let the same tick autograde, and collect then wrote write-once ZEROS for
+    # the whole cohort and marked the assignment graded - green, and unrecoverable.
+    errors, frozen, graded = _real_snapshot_then_autograde(monkeypatch, targets=[])
+    assert (errors, frozen, graded) == (0, frozenset(), [])
+
+
+def test_a_snapshot_whose_repos_are_all_absent_does_not_licence_autograding(
+    monkeypatch,
+):
+    # Same, one step later: the repos are declared but not generated yet (every target 404s).
+    errors, frozen, graded = _real_snapshot_then_autograde(
+        monkeypatch, targets=[("assignment-1-anna", "anna", ["anna"])]
+    )
+    assert (errors, frozen, graded) == (0, frozenset(), [])
 
 
 def test_autograde_waits_for_a_completed_snapshot(monkeypatch):

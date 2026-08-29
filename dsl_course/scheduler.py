@@ -45,6 +45,7 @@ from datetime import datetime, timezone
 from . import schedule, site, source_digest
 from .assign import provision_all, solution_released
 from .collect import (
+    SnapshotResult,
     collect,
     has_autograde_results,
     load_snapshots,
@@ -210,12 +211,16 @@ def _snapshot_passed_deadlines(
             force=False, schedule_type=entry.type, template_group=template_group
         )
         # `name` names the repos, `slug` (the schedule key) is what teams.csv is keyed on.
-        if snapshot_assignment(
+        result = snapshot_assignment(
             cohort_org, name, deadline, is_group=is_group, teams_key=slug
-        ):
-            frozen.add(name)
-        else:
+        )
+        if result is SnapshotResult.FAILED:
             errors += 1
+        elif result is not SnapshotResult.NOTHING_TO_FREEZE:
+            # NOTHING_TO_FREEZE wrote no snapshot, so the assignment is NOT frozen and must
+            # not be graded this tick - autograding it would write write-once zeros for a
+            # cohort that has not been handed out yet.
+            frozen.add(name)
     return errors, frozenset(frozen)
 
 
@@ -283,7 +288,7 @@ def _autograde_passed_deadlines(
             log(f"    DRY-RUN  autograde {slug} via {template} (deadline {deadline})")
             continue
         log_step(f"  autograde {slug} via {template} (deadline {deadline})")
-        if collect(course_org, template, cohort_org, deadline) != 0:
+        if collect(course_org, template, cohort_org, deadline, scheduled=True) != 0:
             errors += 1
     return errors
 
