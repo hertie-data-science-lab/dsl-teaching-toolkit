@@ -131,3 +131,59 @@ def test_another_failure_is_not_read_as_already_there(out):
     # A bare `"422" in out` swallowed an invalid-name or policy 422 as success, and the
     # caller went on writing into a repo or team that was never created.
     assert not ghcli.is_already_exists(out)
+
+
+# --------------------------------------- writes are paced under GitHub's secondary limit
+
+
+def _fake_clock(monkeypatch):
+    """Drive the governor with a clock a test controls: sleeping ADVANCES it, so a real
+    minute is never spent. Returns the list of slept-for durations."""
+    at = [0.0]
+    slept: list[float] = []
+
+    def sleep(seconds):
+        slept.append(seconds)
+        at[0] += seconds
+
+    monkeypatch.setattr(ghcli, "_now", lambda: at[0])
+    monkeypatch.setattr(ghcli, "_sleep", sleep)
+    return slept
+
+
+def test_a_burst_of_writes_waits_rather_than_tripping_the_secondary_limit(monkeypatch):
+    # The first handout tick issues several writes per student in one process. GitHub caps
+    # content-creating requests at ~80/min, and the retry ladder (30+60+120s) is spent
+    # before that clears - so past ~60 students the rest of the cohort simply failed.
+    slept = _fake_clock(monkeypatch)
+    write = ("api", "--method", "PUT", "repos/O/R/contents/f")
+    for _ in range(ghcli.WRITES_PER_MINUTE):
+        ghcli._pace_writes(write)
+    assert slept == [], "the first minute's budget must not be delayed"
+    ghcli._pace_writes(write)
+    assert slept == [60.0], "the write over the cap did not wait for the window to roll"
+    # the burst has aged out of the 60-second window; only the paced write is still in it
+    assert list(ghcli._write_times) == [60.0]
+
+
+def test_reads_are_never_paced(monkeypatch):
+    # Reads draw on the 5,000/hour budget, not the content-creation cap, and a listing
+    # slowed to 70/minute would make every discovery pass crawl.
+    slept = _fake_clock(monkeypatch)
+    for _ in range(ghcli.WRITES_PER_MINUTE * 2):
+        ghcli._pace_writes(("api", "repos/O/R"))
+    assert slept == [] and not ghcli._write_times
+
+
+@pytest.mark.parametrize(
+    "args,mutating",
+    [
+        (("api", "--method", "POST", "orgs/O/repos"), True),
+        (("api", "-X", "delete", "repos/O/R/collaborators/x"), True),
+        (("api", "--method", "PATCH", "repos/O/R"), True),
+        (("api", "--paginate", "repos/O/R/collaborators"), False),
+        (("repo", "clone", "O/R"), False),
+    ],
+)
+def test_which_argv_shapes_count_as_a_write(args, mutating):
+    assert ghcli._is_mutating(args) is mutating

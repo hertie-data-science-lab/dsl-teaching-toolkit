@@ -8,6 +8,8 @@ import json
 import os
 import subprocess
 import time
+from collections import deque
+from itertools import pairwise
 from pathlib import Path
 from typing import Any
 
@@ -75,12 +77,52 @@ def _run_gh(
     return 1, "", "gh: not run (retries < 0)"
 
 
+# GitHub caps CONTENT-CREATING requests at roughly 80 a minute per token, separately from
+# the 5,000/hour budget. A first handout tick issues several writes per student in one
+# process, so past ~60 students the burst trips the secondary limit and the retry ladder
+# (30 + 60 + 120 s) is spent before it clears - and the rest of the cohort fails in turn.
+# Pacing the writes to stay under the cap is cheaper than retrying through it.
+WRITES_PER_MINUTE = 70
+_MUTATING_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+_write_times: deque[float] = deque()
+
+# Named at module level so a test can drive the governor with a fake clock rather than
+# spending a real minute.
+_now = time.monotonic
+_sleep = time.sleep
+
+
+def _is_mutating(args: tuple[str, ...]) -> bool:
+    """Whether this argv is a write - `gh api --method`/`-X` naming a mutating verb."""
+    return any(
+        flag in ("--method", "-X") and value.upper() in _MUTATING_METHODS
+        for flag, value in pairwise(args)
+    )
+
+
+def _pace_writes(args: tuple[str, ...]) -> None:
+    """Hold a mutating call until fewer than WRITES_PER_MINUTE were issued in the last 60
+    seconds, then record it. Reads pass straight through."""
+    if not _is_mutating(args):
+        return
+    while True:
+        at = _now()
+        while _write_times and at - _write_times[0] >= 60:
+            _write_times.popleft()
+        if len(_write_times) < WRITES_PER_MINUTE:
+            _write_times.append(at)
+            return
+        _sleep(60 - (at - _write_times[0]))
+
+
 def gh(*args: str, stdin: str | None = None, retries: int = 3) -> tuple[int, str]:
     """Run a gh CLI command. Returns (returncode, stdout+stderr).
 
     Retries on GitHub secondary rate limits - and on a subprocess timeout - with
-    exponential backoff.
+    exponential backoff, and paces writes to stay under the secondary limit in the first
+    place (see _pace_writes).
     """
+    _pace_writes(args)
     code, out, err = _run_gh(args, stdin, retries)
     return code, (out + err).strip()
 

@@ -14,7 +14,7 @@ import subprocess
 import pytest
 import yaml
 
-from dsl_course import central, repos, roster, schedule, site, teams
+from dsl_course import central, ghcli, repos, roster, schedule, site, teams
 
 # students.csv's header row, DERIVED from the columns the engine declares rather than
 # re-typed. `roster.FIELDS` is a frozen public contract (the shipped JavaScript spells the
@@ -40,6 +40,13 @@ def repo_row(name: str, **extra) -> dict:
         "topics": [],
         **extra,
     }
+
+
+@pytest.fixture(autouse=True)
+def _empty_write_governor():
+    """`ghcli`'s write pacer keeps its timestamps at module level, so they would otherwise
+    accumulate across the session until an unrelated test slept for a real minute."""
+    ghcli._write_times.clear()
 
 
 @pytest.fixture(autouse=True)
