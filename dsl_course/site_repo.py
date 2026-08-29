@@ -41,10 +41,10 @@ PUBLISH_CONFIG = "_publish-config.yml"
 # stylesheet ship from `templates/site/` in THIS repo (see `site_templates`), where they
 # sit beside the renderers whose front matter they read.
 #
-# A commit, not a tag, because the theme carries no release tags yet; `remote_theme:`
-# takes either form, so this becomes `@v1.0.0` the day one is cut.
+# A commit, not a tag, because a tag can be moved off the code it was cut from; this SHA
+# is the theme's `v2.0.0`.
 THEME_REPO = "hertie-data-science-lab/dsl-jekyll-theme"
-THEME_REF = "9288394c5c6d78cf8e881bf4e22ab025a5da1888"
+THEME_REF = "e4b8fdc9e87b4729c9dcef142591551a2361d4b5"
 
 # `_config.yml` keys the sync owns because the templates it ships DEPEND on them, as
 # opposed to the course-identity keys, which are content. Written whether or not the
