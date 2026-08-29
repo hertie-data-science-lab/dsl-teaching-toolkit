@@ -26,7 +26,7 @@ import argparse
 import sys
 
 from . import schedule
-from .course import SYLLABUS_SESSIONS_FILE, session_number
+from .course import SYLLABUS_SESSIONS_FILE, session_dirs
 from .gh_contents import get_file_content, put_file, repo_tree
 from .log import log, log_err, log_ok, log_step
 from .readings import demote_headings, readings_block
@@ -46,13 +46,15 @@ def _readings_for(course_org: str, repo: str, paths: tuple[str, ...], n: int) ->
     only citation-extension files, which made a session whose readings are PDFs come out as a
     bare heading with nothing under it - the one destination where uploading a reading and
     writing no prose left NOTHING at all."""
+    # `paths` are FILES; the session folders they sit in are their first two components.
+    # Fed through `course.session_dirs` rather than re-spelling the ordinal-prefix rule
+    # here, so the syllabus recognises the same folders the two websites do.
+    folders = sorted({"/".join(p.split("/")[:2]) for p in paths if p.count("/") >= 2})
     prefix = next(
         (
-            f"{READINGS_SECTION}/{q.split('/')[1]}"
-            for q in paths
-            if q.startswith(f"{READINGS_SECTION}/")
-            and "/" in q[len(READINGS_SECTION) + 1 :]
-            and session_number(q.split("/")[1]) == n
+            f"{section}/{folder}"
+            for section, folder, num in session_dirs(folders)
+            if section == READINGS_SECTION and num == n
         ),
         None,
     )

@@ -800,7 +800,7 @@ def scaffold_site(org: str) -> int:
             continue
         conclusion = _await_run(org, site, run_id)
         if conclusion == "success":
-            log_ok(f"site deployed -> https://{org.lower()}.github.io/")
+            log_ok(f"site deployed -> https://{site}/")
             return 0
         log(
             f"  (deploy attempt {attempt} did not succeed: {conclusion or 'timed out'})"
@@ -810,7 +810,7 @@ def scaffold_site(org: str) -> int:
         "  (site not deployed yet - it will deploy on the next push to the site repo, "
         "e.g. your first Release materials)"
     )
-    log_ok(f"site scaffolded -> https://{org.lower()}.github.io/")
+    log_ok(f"site scaffolded -> https://{site}/")
     return 0
 
 
