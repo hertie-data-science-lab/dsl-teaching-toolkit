@@ -21,8 +21,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-      # To report the `pytest` result this job runs itself - main requires that check and
-      # a GITHUB_TOKEN-authored PR can never be sent one (see the merge step).
+      # To report the checks main requires on this PR - a GITHUB_TOKEN-authored PR can
+      # never be sent one, so this job stands in for them (see the merge step).
       statuses: write
     # Declared once, at the job: two steps prepare and push the SAME branch, and a drift
     # between two copies would prepare one branch and push another.
@@ -83,9 +83,9 @@ jobs:
         run: |
           set -eo pipefail
           # An OPEN PR whose branch already carries this exact inventory has nothing new
-          # to commit - but it still has to MERGE: its required `pytest` status was never
-          # posted (the PR predates this step, or the earlier run died before posting), so
-          # it sits blocked for ever. Skip the commit and push, run the check, merge.
+          # to commit - but it still has to MERGE: its required statuses were never posted
+          # (the PR predates this step, or the earlier run died before posting), so it
+          # sits blocked for ever. Skip the commit and push, run the checks, merge.
           pr_open=false
           if gh pr view "$BRANCH" --json state --jq '.state' 2>/dev/null | grep -q OPEN; then
             pr_open=true
@@ -126,22 +126,31 @@ jobs:
                 --base main --head "$BRANCH"
             fi
           fi
-          # main requires the `pytest` check, and this PR can never receive one: GitHub does
-          # not trigger workflows from events made with GITHUB_TOKEN, so ci.yml's
-          # `pull_request` never fires on a PR this workflow opened (`app/github-actions` is
-          # its author). This step used to wait for that check in a retry loop - twelve
-          # rounds of "no checks reported", then a `gh pr checks --fail-fast` that gh
-          # rejects outright without `--watch`. So the run went red, the PR stayed open, and
-          # the inventory drifted for weeks. It was read as a race with CI; it is not a
-          # race, it is a rule.
+          # main requires checks this PR can never receive: GitHub does not trigger
+          # workflows from events made with GITHUB_TOKEN, so ci.yml's `pull_request` never
+          # fires on a PR this workflow opened (`app/github-actions` is its author). This
+          # step used to wait for them in a retry loop - twelve rounds of "no checks
+          # reported", then a `gh pr checks --fail-fast` that gh rejects outright without
+          # `--watch`. So the run went red, the PR stayed open, and the inventory drifted
+          # for weeks. It was read as a race with CI; it is not a race, it is a rule.
           #
-          # So run the required check HERE and report it. The tests really do run - what
-          # GitHub withholds is the trigger, not the verification - and reporting the result
-          # under the `pytest` context is what lets branch protection see it. Never `|| true`
-          # on either: an inventory that cannot merge is a broken refresh, and the verdict
-          # belongs on this run.
+          # So report EVERY context main requires, here: one context missing blocks the
+          # merge exactly as completely as one that failed. The two are `pytest` and
+          # `jekyll-contract`, and a check added to main's list must be added here too or
+          # the next refresh sits open for ever.
+          #
+          # `pytest` really runs - what GitHub withholds is the trigger, not the
+          # verification - and never `|| true`: an inventory that cannot merge is a broken
+          # refresh, and the verdict belongs on this run. `jekyll-contract` builds a fixture
+          # cohort site out of templates/site/**, and this PR only ever changes
+          # bootstrapped-orgs-inventory.md, so there is nothing of its subject to check; it
+          # is reported as a stated not-applicable rather than as a run that happened.
           python3 -m pytest -q
-          gh api "repos/$GITHUB_REPOSITORY/statuses/$(git rev-parse HEAD)" \
+          head_sha=$(git rev-parse HEAD)
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$head_sha" \
             -f state=success -f context=pytest \
             -f description="run by the inventory refresh (see this workflow)" >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/statuses/$head_sha" \
+            -f state=success -f context=jekyll-contract \
+            -f description="not applicable: docs-only inventory change" >/dev/null
           gh pr merge "$BRANCH" --squash --delete-branch=false
