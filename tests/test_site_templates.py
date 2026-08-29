@@ -290,7 +290,6 @@ def public_plan(monkeypatch, tmp_path):
         "sync_site_repo",
         lambda org, build, **kw: captured.update(plan=build(tmp_path)) or 0,
     )
-    monkeypatch.setattr(public_site, "discover_sessions", lambda org, repo: [])
     monkeypatch.setattr(public_site, "discover_sections", lambda src: [])
     monkeypatch.setattr(public_site, "yaml_file", lambda *a: {})
     monkeypatch.setattr(public_site, "people_yaml", lambda *a, **k: "people: []\n")

@@ -1,10 +1,11 @@
 """public_site.sync_public_site over a real (temp-filesystem) source repo.
 
 The public open-courseware site must publish whatever sections the materials repo
-actually HAS - `discover_sessions` is generic across every top-level section, so a course
+actually HAS - session discovery is generic across every top-level section, so a course
 whose content lives in `labs/` used to get empty, useless session pages. Only the gh/git
 calls are faked (clone = populate a directory, commit/push = success); the copying, the
-served layout and the generated `_lectures/` entries are the real code.
+served layout and the generated `_lectures/` entries are the real code - including reading
+the source's sessions off the clone rather than out of a stub.
 """
 
 from __future__ import annotations
@@ -24,7 +25,8 @@ SERVED = f"public-materials/{SOURCE}"
 
 def _seed_source(root: Path) -> None:
     """A materials repo with NO `lectures/` at all: labs + readings + a faq section,
-    plus a session (3) that has no content in any section."""
+    plus a session (3) that exists only under `readings/`, so it has nothing to publish
+    whenever readings are off."""
     files = {
         "labs/01_first-lab/lab.ipynb": "notebook",
         "labs/01_first-lab/data/rows.csv": "a,b",  # nested - must still be published
@@ -32,6 +34,7 @@ def _seed_source(root: Path) -> None:
         "faq/02_second-lab/faq.md": "Q: why? A: because.",
         "readings/01_first-lab/READINGS.md": "- Smith 2020, ch.1",
         "readings/01_first-lab/paper.pdf": "%PDF-1.4 copyrighted",
+        "readings/03_third-session/READINGS.md": "- Jones 2021, ch.3",
         "README.md": "# materials",  # not a section
         # What a faculty member keeps beside the lab, and the public must never see.
         "labs/01_first-lab/solution/answers.ipynb": "the answers",
@@ -93,9 +96,6 @@ def _install_fakes(monkeypatch) -> dict[str, str]:
     # get_file_content in the UTILS namespace - stub it there too, or the real gh
     # runs (green on an authenticated dev box, red in tokenless CI).
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: "")
-    monkeypatch.setattr(
-        public_site, "discover_sessions", lambda org, repo: ["1", "2", "3"]
-    )
     return committed
 
 
@@ -144,7 +144,7 @@ def test_session_with_no_content_gets_no_page(published):
     files = published(readings_mode="none")
     assert "_lectures/lab-01.md" in files
     assert "_lectures/session-02.md" in files
-    assert "_lectures/session-03.md" not in files  # session 3 has nothing anywhere
+    assert "_lectures/session-03.md" not in files  # session 3 is readings-only
     assert "_lectures/lab-03.md" not in files
 
 

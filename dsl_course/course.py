@@ -216,6 +216,20 @@ def find_session_dir(section_dir: Path, session: str) -> Path | None:
     return None
 
 
+def discover_local_sessions(repo_root: Path) -> list[str]:
+    """The session numbers a CHECKOUT holds, across every discovered section.
+
+    The local-checkout twin of `discovery.discover_sessions`, which asks GitHub for a
+    recursive tree instead. A caller that has already cloned the repo to copy files out of
+    it has the answer on disk, and the API's copy of it can only be the same or staler."""
+    return [
+        str(n)
+        for n in sorted(
+            {n for parent, _, n in session_dirs(_local_dir_paths(repo_root)) if parent}
+        )
+    ]
+
+
 def discover_sections(repo_root: Path) -> list[str]:
     """Any top-level directory containing at least one ordinal-prefixed subdirectory is
     a releasable section - no declared config, the directory structure is the only

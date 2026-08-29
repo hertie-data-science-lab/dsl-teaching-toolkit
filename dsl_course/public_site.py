@@ -20,8 +20,12 @@ from urllib.parse import quote
 
 import yaml
 
-from .course import discover_sections, find_session_dir, pages_repo
-from .discovery import discover_sessions
+from .course import (
+    discover_local_sessions,
+    discover_sections,
+    find_session_dir,
+    pages_repo,
+)
 from .fs import copy_tree
 from .gh_contents import get_file_content
 from .ghcli import clone
@@ -175,12 +179,6 @@ def sync_public_site(
         return 1
 
     def build(site_wd: Path) -> SitePlan | None:
-        sessions = discover_sessions(course_org, source_repo)
-        log_step(
-            f"Publishing {course_org}/{pages_repo(course_org)} from {source_repo}: "
-            f"{len(sessions)} session(s), readings={readings_mode}, "
-            f"file sections={'on' if include_lectures else 'off'}"
-        )
         meta = yaml_file(course_org, ".github", "dsl-course.yml")
         # A course site spans years and has no per-cohort schedule.yml to read (that's
         # cohort-scoped), so the date is a neutral fallback that only orders the session
@@ -198,6 +196,16 @@ def sync_public_site(
             if not clone(course_org, source_repo, src):
                 log_err(f"could not clone {spec}")
                 return None
+
+            # Both readings of the source's structure come off THE CLONE - which every
+            # session below is copied out of anyway. The session list used to be a
+            # recursive git-tree fetch of a repo this function had just downloaded whole.
+            sessions = discover_local_sessions(src)
+            log_step(
+                f"Publishing {course_org}/{pages_repo(course_org)} from {source_repo}: "
+                f"{len(sessions)} session(s), readings={readings_mode}, "
+                f"file sections={'on' if include_lectures else 'off'}"
+            )
 
             # Sections are whatever THIS repo has (the same discovery the release workflows
             # use), not a hardcoded lectures/readings pair - a course whose content lives

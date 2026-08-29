@@ -167,25 +167,20 @@ def test_discover_release_sources_detects_root_and_nested_shapes(monkeypatch):
     }
 
 
-def test_sections_and_sessions_ignore_root_level_and_over_deep_folders(monkeypatch):
+def test_sections_and_sessions_ignore_root_level_and_over_deep_folders(tmp_path):
     # Only `section/NN_.../` makes a section: a bare `NN_.../` at the root has no
     # section name, and anything deeper is a session's own contents.
-    monkeypatch.setattr(
-        discovery,
-        "_repo_tree_dirs",
-        lambda org, repo: [
-            # Root-level session folder: excluded (no parent section). 07, not 01, so it
-            # can't hide behind lectures/01_intro's session number - if the root-level
-            # exclusion ever regressed, a spurious "7" would appear in the assert below.
-            "07_loose",
-            "lectures",
-            "lectures/01_intro",
-            "lectures/01_intro/data",  # too deep
-            "notes/appendix",  # no ordinal prefix
-            "labs/2_wrangling",
-        ],
-    )
-    assert discovery.discover_sessions("org", "r") == ["1", "2"]
+    for rel in (
+        # Root-level session folder: excluded (no parent section). 07, not 01, so it
+        # can't hide behind lectures/01_intro's session number - if the root-level
+        # exclusion ever regressed, a spurious "7" would appear in the assert below.
+        "07_loose",
+        "lectures/01_intro/data",  # the `data` level is too deep to be a session
+        "notes/appendix",  # no ordinal prefix
+        "labs/2_wrangling",
+    ):
+        (tmp_path / rel).mkdir(parents=True, exist_ok=True)
+    assert course.discover_local_sessions(tmp_path) == ["1", "2"]
 
 
 def test_api_and_filesystem_transports_share_one_session_folder_rule(tmp_path):

@@ -353,22 +353,6 @@ def _repo_tree_dirs(org: str, repo: str) -> tuple[str, ...]:
     return repo_tree(org, repo, default_branch(org, repo, fallback="main"), "tree")
 
 
-def _section_session_pairs(org: str, repo: str) -> list[tuple[str, int]]:
-    """(section, session_number) for every immediate child - across every top-level
-    directory - whose name has an ordinal prefix."""
-    return [
-        (section, n)
-        for section, _, n in session_dirs(_repo_tree_dirs(org, repo))
-        if section
-    ]
-
-
-def discover_sessions(org: str, repo: str) -> list[str]:
-    """Session numbers present in a content repo, across every discovered section.
-    Used by the public-site builder to walk a source repo session by session."""
-    return [str(n) for n in sorted({n for _, n in _section_session_pairs(org, repo)})]
-
-
 def discover_release_sources(
     org: str, content_repos: list[str]
 ) -> list[tuple[str, str, str, int]]:
