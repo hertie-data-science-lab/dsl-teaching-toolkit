@@ -73,6 +73,7 @@ import sys
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from enum import IntEnum
+from functools import cache
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -886,6 +887,20 @@ def grading_datetime_iso(sched: Schedule, slug: str) -> str | None:
 # ---------------------------------------------------------------------- gh/git wiring
 
 
+@cache
+def _schedule_text(cohort_org: str) -> str | None:
+    """schedule.yml's text, read ONCE per cohort per process.
+
+    An hourly tick reads the plan repeatedly - the scheduler itself, then again inside
+    every handout and collection it fires - for a file that changes only when a person
+    edits it or `record_handout` writes it. The TEXT is memoised rather than the parsed
+    `Schedule`, so every caller gets its own object (nothing shared to mutate) and the
+    loud "N entries DROPPED" report is still printed once per caller, exactly as before.
+    `record_handout` clears it after its write; tests/conftest.py clears it between
+    tests."""
+    return get_file_content(cohort_org, CONFIG_REPO, SCHEDULE_PATH)
+
+
 def load(cohort_org: str) -> Schedule:
     """Fetch + parse schedule.yml from the cohort's PRIVATE classroom-config repo. A
     pure loader: a missing file returns an empty Schedule silently (every field
@@ -895,7 +910,7 @@ def load(cohort_org: str) -> Schedule:
     is treated exactly as an absent one: the error is logged loudly, with the parser's own
     line/column, and an empty Schedule is returned. It must never raise: `load` sits under
     the hourly scheduler AND the site sync, and one cohort's typo froze both."""
-    content = get_file_content(cohort_org, CONFIG_REPO, SCHEDULE_PATH)
+    content = _schedule_text(cohort_org)
     unparseable = False
     try:
         meta = yaml.safe_load(content) if content else {}
@@ -1285,7 +1300,12 @@ def record_handout(cohort_org: str, slug: str, stamp: str | None = None) -> None
     handout_datetime (scheduled, or recorded by an earlier run) is never modified. Best
     effort - a failure here must never fail the release itself, but it is never silent
     either: a file this can't edit means the handout happened and is on record nowhere."""
-    text = get_file_content(cohort_org, CONFIG_REPO, SCHEDULE_PATH) or ""
+    text = _schedule_text(cohort_org) or ""
+    # This is the one writer of schedule.yml inside a run, so it is the one place the
+    # per-process read memo can go stale. Dropped up front: every path below either
+    # returns without writing or writes, and a memo cleared once too often only costs a
+    # read, where one held too long hands the next caller a plan missing this handout.
+    _schedule_text.cache_clear()
     if stamp is None:
         # the release moment, in the cohort's own timezone (naive, like every other
         # schedule datetime - the parser reads it back in that same zone)

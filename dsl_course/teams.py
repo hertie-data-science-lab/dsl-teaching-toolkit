@@ -18,6 +18,8 @@ authoritative - it can't drift out of sync the way a Classroom-managed team does
 
 from __future__ import annotations
 
+from functools import cache
+
 from .course import CONFIG_REPO
 from .gh_contents import get_file_content, read_csv
 
@@ -52,13 +54,24 @@ def parse(text: str) -> dict[str, dict[str, list[str]]]:
     return out
 
 
+@cache
+def _teams_text(cohort_org: str) -> str | None:
+    """teams.csv's text, read ONCE per cohort per process.
+
+    A single run asks for it repeatedly - the handout, the collection and the off-boarding
+    revoke each want the same file - and only the welcome workflow writes it, in a process
+    of its own. The TEXT is memoised rather than `load`'s map, so each caller still parses
+    its own copy and cannot mutate another's. Cleared between tests (tests/conftest.py)."""
+    return get_file_content(cohort_org, CONFIG_REPO, TEAMS_PATH)
+
+
 def load(cohort_org: str) -> dict[str, dict[str, list[str]]]:
     """Fetch + parse teams.csv from the cohort's PRIVATE classroom-config repo.
 
     A pure loader: a missing CSV returns {} silently. Whether that is benign (a
     cohort with no group assignments yet) or an error (group provisioning/grading
     asked for) is the caller's call - each contextualises it for itself."""
-    content = get_file_content(cohort_org, CONFIG_REPO, TEAMS_PATH)
+    content = _teams_text(cohort_org)
     return parse(content) if content is not None else {}
 
 

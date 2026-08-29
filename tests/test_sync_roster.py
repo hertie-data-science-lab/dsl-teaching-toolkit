@@ -103,11 +103,36 @@ def test_sync_fails_on_a_missing_roster_but_not_an_empty_one(monkeypatch):
 
 
 def test_load_distinguishes_missing_from_empty(monkeypatch):
+    # Two cohort names, not one: students.csv is read once per cohort per process, so
+    # re-answering for the same org would be served from that memo.
     monkeypatch.setattr(roster, "get_file_content", lambda *a, **kw: None)
-    assert roster.load("some-cohort") is None
+    assert roster.load("cohort-without-a-roster") is None
 
     monkeypatch.setattr(roster, "get_file_content", lambda *a, **kw: HEADER + "\n")
-    assert roster.load("some-cohort") == []
+    assert roster.load("cohort-with-an-empty-roster") == []
+
+
+def test_students_csv_is_read_once_per_cohort_but_each_caller_parses_its_own(
+    monkeypatch,
+):
+    # One run asks for the roster several times over (the handout, the collection, the
+    # gradebook sync). The TEXT is memoised, not the rows - so no caller can hand another
+    # a list it has since edited.
+    reads: list[str] = []
+    monkeypatch.setattr(
+        roster,
+        "get_file_content",
+        lambda org, repo, path: (
+            reads.append(org)
+            or (HEADER + "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n")
+        ),
+    )
+    first = roster.load("COHORT")
+    second = roster.load("COHORT")
+    assert reads == ["COHORT"]
+    assert first == second and first is not second
+    first.clear()
+    assert roster.load("COHORT") == second
 
 
 def test_a_role_change_moves_the_handle_between_teams():

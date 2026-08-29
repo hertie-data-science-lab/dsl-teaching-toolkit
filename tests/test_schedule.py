@@ -693,6 +693,29 @@ def test_record_handout_round_trips_through_the_parser(monkeypatch):
     assert len(writes) == 1
 
 
+def test_the_plan_is_read_once_per_cohort_and_a_handout_reopens_it(monkeypatch):
+    # An hourly tick reads the plan in the scheduler and again inside every handout and
+    # collection it fires - one GET each, for a file that only a person or record_handout
+    # changes. record_handout IS that writer, so it drops the memo.
+    reads: list[str] = []
+    monkeypatch.setattr(
+        schedule,
+        "get_file_content",
+        lambda org, repo, path: reads.append(org) or "timezone: Europe/Berlin\n",
+    )
+    schedule.load("Cohort-f2026")
+    schedule.load("Cohort-f2026")
+    assert reads == ["Cohort-f2026"], "the plan was re-read within one run"
+
+    schedule.load("Cohort-f2027")
+    assert len(reads) == 2, "one cohort's plan answered for another"
+
+    monkeypatch.setattr(schedule, "put_file", lambda *a, **k: True)
+    schedule.record_handout("Cohort-f2026", "assignment-1", "2026-09-22T14:05")
+    schedule.load("Cohort-f2026")
+    assert len(reads) == 3, "the memo survived a write to schedule.yml"
+
+
 # --------------------------------------------------------- a file that does not parse
 #
 # The incident: a faculty member left an unclosed flow mapping in schedule.yml, so

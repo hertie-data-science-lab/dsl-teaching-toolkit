@@ -24,6 +24,7 @@ means `enrolled` - never break onboarding for a deployed cohort's roster.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cache
 
 from .course import CONFIG_REPO
 from .gh_contents import get_file_content, read_csv
@@ -103,13 +104,26 @@ def enrolled(students: list[Student]) -> list[Student]:
     return [s for s in students if s.is_enrolled]
 
 
+@cache
+def _roster_text(cohort_org: str) -> str | None:
+    """students.csv's text, read ONCE per cohort per process.
+
+    A single CLI run asks for the roster several times over - `collect` reads it per
+    assignment, `assign` beside the schedule and teams.csv - and it cannot change under
+    one run: the only writer (`enrol_codes`) is its own workflow. The TEXT is memoised
+    rather than `load`'s rows, so every caller still gets its own parse (nobody can mutate
+    another's list) and the loud "roster missing" line is still printed where it happens.
+    Cleared between tests (tests/conftest.py)."""
+    return get_file_content(cohort_org, CONFIG_REPO, ROSTER_PATH)
+
+
 def load(cohort_org: str) -> list[Student] | None:
     """Fetch + parse students.csv from the cohort's PRIVATE classroom-config repo.
 
     Returns None (after logging why) when the file can't be fetched at all - callers
     can then distinguish "roster missing/unreadable" (an error) from a roster that
     exists but has no rows yet (a valid state for a freshly bootstrapped cohort)."""
-    content = get_file_content(cohort_org, CONFIG_REPO, ROSTER_PATH)
+    content = _roster_text(cohort_org)
     if content is None:
         log_err(
             f"Could not find {ROSTER_PATH} in {cohort_org}/{CONFIG_REPO} - "

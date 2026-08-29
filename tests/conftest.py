@@ -14,7 +14,7 @@ import subprocess
 import pytest
 import yaml
 
-from dsl_course import central, repos, site
+from dsl_course import central, repos, roster, schedule, site, teams
 
 
 @pytest.fixture(autouse=True)
@@ -60,11 +60,15 @@ def _the_central_ref_is_present(monkeypatch):
 @pytest.fixture(autouse=True)
 def _clear_process_memos():
     """The per-process memos a single CLI run is entitled to keep: a repo's tree, a repo's
-    metadata, whether a central ref exists. Tests reuse the same org/repo names with
-    different fakes, so clear them between tests."""
+    metadata, whether a central ref exists, and the three classroom-config files a run
+    re-reads (students.csv, teams.csv, schedule.yml). Tests reuse the same org/repo names
+    with different fakes, so clear them between tests."""
     site._repo_tree.cache_clear()
     central.central_ref_exists.cache_clear()
     repos._repo.cache_clear()
+    roster._roster_text.cache_clear()
+    teams._teams_text.cache_clear()
+    schedule._schedule_text.cache_clear()
 
 
 def workflow_inputs(rendered: str) -> dict:
