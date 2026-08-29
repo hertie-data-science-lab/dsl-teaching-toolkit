@@ -49,8 +49,7 @@ from .gh_contents import (
     get_file_content,
     get_file_with_sha,
     put_file,
-    require_csv_header,
-    strip_bom,
+    read_csv,
 )
 from .ghcli import GIT_ENV, gh, git, is_already_exists
 from .log import log, log_err, log_ok, log_step, log_verbose
@@ -165,11 +164,7 @@ def parse_grades(text: str) -> list[GradeRow]:
 
     Raises RetiredGradeHeader if the header uses the pre-rename names - see
     `_RETIRED_GRADE_FIELDS` for why that cannot be tolerated the way an unknown column is."""
-    # strip_bom: an Excel "CSV UTF-8" starts with a BOM, which glues itself to the first
-    # header name - `\ufeffgithub_handle` - so every handle read "" and merge_auto folded
-    # every student onto one row, destroying hand-entered marks. roster and teams already
-    # stripped it; this was the one hand-edited CSV that did not.
-    reader = csv.DictReader(io.StringIO(strip_bom(text)))
+    reader = read_csv(text, ("github_handle",), "grades CSV")
     stale = [f for f in (reader.fieldnames or []) if f.strip() in _RETIRED_GRADE_FIELDS]
     if stale:
         renames = ", ".join(f"{f} -> {_RETIRED_GRADE_FIELDS[f.strip()]}" for f in stale)
@@ -177,7 +172,6 @@ def parse_grades(text: str) -> list[GradeRow]:
             f"grades CSV uses retired column name(s): {renames}. Rename the header row and "
             f"re-run; reading it as-is would drop every mark in those columns."
         )
-    require_csv_header(reader.fieldnames, ("github_handle",), "grades CSV")
     return [
         GradeRow(**{f: (row.get(f) or "").strip() for f in GRADE_FIELDS})
         for row in reader

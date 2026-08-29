@@ -286,7 +286,10 @@ def dump_snapshots(rows: list[tuple[str, str, str]]) -> str:
 
 def parse_snapshots(text: str) -> dict[str, str]:
     """Parse snapshot CSV text into {repo: sha}. A blank sha is meaningful - it records
-    "nothing had been pushed to this repo by the deadline" - so it is kept, not dropped."""
+    "nothing had been pushed to this repo by the deadline" - so it is kept, not dropped.
+
+    A bare DictReader, not gh_contents.read_csv: `dump_snapshots` above wrote this file,
+    so it has no BOM and no `;` delimiter to guard against."""
     return {
         repo: (row.get("sha") or "").strip()
         for row in csv.DictReader(io.StringIO(text))

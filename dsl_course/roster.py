@@ -23,12 +23,10 @@ means `enrolled` - never break onboarding for a deployed cohort's roster.
 
 from __future__ import annotations
 
-import csv
-import io
 from dataclasses import dataclass
 
 from .course import CONFIG_REPO
-from .gh_contents import get_file_content, require_csv_header, strip_bom
+from .gh_contents import get_file_content, read_csv
 from .log import log_err
 
 ROSTER_PATH = "students.csv"
@@ -93,9 +91,7 @@ def parse(text: str) -> list[Student]:
     Tolerant of a roster written before a column existed: a missing `enrol_code` or
     `role` column is fine (blank / `enrolled` respectively)."""
     rows = []
-    reader = csv.DictReader(io.StringIO(strip_bom(text)))
-    require_csv_header(reader.fieldnames, REQUIRED_FIELDS, ROSTER_PATH)
-    for row in reader:
+    for row in read_csv(text, REQUIRED_FIELDS, ROSTER_PATH):
         values = {f: (row.get(f) or "").strip() for f in FIELDS}
         values["role"] = normalise_role(values["role"])
         rows.append(Student(**values))

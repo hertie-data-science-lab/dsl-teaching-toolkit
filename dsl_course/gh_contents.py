@@ -5,7 +5,9 @@ puts, whole-tree commits, the seeded-stub rules, and the CSV/YAML readers on top
 from __future__ import annotations
 
 import base64
+import csv
 import hashlib
+import io
 import json
 from collections.abc import Iterable
 from typing import Any
@@ -17,7 +19,7 @@ from .log import log_err, log_skip
 from .repos import default_branch
 
 
-def require_csv_header(
+def _require_csv_header(
     fieldnames: list[str] | None, required: tuple[str, ...], what: str
 ) -> None:
     """Refuse a CSV whose header lacks a column the caller cannot do without.
@@ -36,11 +38,24 @@ def require_csv_header(
         )
 
 
-def strip_bom(text: str) -> str:
+def _strip_bom(text: str) -> str:
     """Drop a leading UTF-8 BOM. Excel exports CSVs with one, and left in place
     `csv.DictReader` reads it into the first header name so every lookup on that column
     misses and rows are silently dropped."""
     return text.lstrip("﻿")
+
+
+def read_csv(text: str, required: tuple[str, ...], what: str) -> csv.DictReader:
+    """A DictReader over `text`, BOM stripped and the header checked for `required`.
+
+    The single door every HAND-EDITED CSV comes through - the roster, teams.csv, a grades
+    CSV, the enrol-code writers. Excel's two ways of handing back an unreadable file (a
+    leading BOM, a `;`-delimited export) each look like ordinary empty data to DictReader,
+    so neither is optional and neither is left to a caller to remember. `what` names the
+    file in the error."""
+    reader = csv.DictReader(io.StringIO(_strip_bom(text)))
+    _require_csv_header(reader.fieldnames, required, what)
+    return reader
 
 
 def blob_sha(content: bytes) -> str:

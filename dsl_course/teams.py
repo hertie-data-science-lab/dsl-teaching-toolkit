@@ -18,11 +18,8 @@ authoritative - it can't drift out of sync the way a Classroom-managed team does
 
 from __future__ import annotations
 
-import csv
-import io
-
 from .course import CONFIG_REPO
-from .gh_contents import get_file_content, require_csv_header, strip_bom
+from .gh_contents import get_file_content, read_csv
 
 TEAMS_PATH = "teams.csv"
 FIELDS = ("assignment", "team", "github_handle")
@@ -43,9 +40,7 @@ def parse(text: str) -> dict[str, dict[str, list[str]]]:
     two agree - keyed raw, such an assignment found no teams at all and every group
     handout, snapshot and grading pass for it silently had nothing to do."""
     out: dict[str, dict[str, list[str]]] = {}
-    reader = csv.DictReader(io.StringIO(strip_bom(text)))
-    require_csv_header(reader.fieldnames, FIELDS, "teams.csv")
-    for row in reader:
+    for row in read_csv(text, FIELDS, TEAMS_PATH):
         assignment = (row.get("assignment") or "").strip().casefold()
         team = (row.get("team") or "").strip().casefold()
         handle = (row.get("github_handle") or "").strip()
