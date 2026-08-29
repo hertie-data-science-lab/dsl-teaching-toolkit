@@ -35,7 +35,7 @@ from .course import (
     STUDENTS_TEAM,
 )
 from .discovery import COHORTS_PATH, central_ref_for, register_cohort
-from .gh_contents import put_file, seed_files_if_absent, seed_if_absent
+from .gh_contents import put_file, put_files, seed_if_absent
 from .gh_teams import create_team
 from .ghcli import bot_token, gh
 from .log import log, log_err, log_ok, log_step
@@ -628,7 +628,7 @@ def setup_cohort_extras(org: str, central_ref: str) -> int:
         # file by file put a burst of near-identical `init:`/`docs: seed` commits at the top
         # of a repo faculty then work in by hand. Create-only is unchanged and still per
         # file - a re-run that finds five of six present writes only the sixth.
-        if not seed_files_if_absent(
+        if not put_files(
             org,
             "classroom-config",
             {
@@ -639,6 +639,7 @@ def setup_cohort_extras(org: str, central_ref: str) -> int:
             }
             | {"grades/.gitkeep": b""},
             "init: classroom-config scaffolds (roster, teams, schedule, people, grades)",
+            create_only=True,
         ):
             failures += 1
         # SYSTEM-owned documentation, refreshed on every run so it never goes stale: a

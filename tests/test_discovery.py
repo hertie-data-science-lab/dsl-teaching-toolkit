@@ -229,7 +229,7 @@ def test_repo_tree_dirs_raises_rather_than_reporting_a_repo_with_no_sessions(
     monkeypatch.setattr(
         gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 502 Bad Gateway")
     )
-    with pytest.raises(RuntimeError, match="could not read the file tree"):
+    with pytest.raises(RuntimeError, match="could not read the tree"):
         discovery.discover_release_sources("Cohort-f2026", ["materials"])
 
 

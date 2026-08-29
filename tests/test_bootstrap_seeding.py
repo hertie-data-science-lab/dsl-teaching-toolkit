@@ -100,8 +100,8 @@ class FakeOrg:
 @pytest.fixture
 def fake(monkeypatch):
     f = FakeOrg()
-    # USER-owned files go through gh_contents.seed_if_absent / seed_files_if_absent
-    # (create-if-absent), which resolve get_file_content / put_file / put_files / log_skip
+    # USER-owned files go through gh_contents.seed_if_absent / put_files(create_only=True),
+    # which resolve get_file_content / put_file / put_files / log_skip
     # in the gh_contents namespace; SYSTEM-owned files are written by bc.put_file directly. Fake
     # every layer to the same recorder.
     monkeypatch.setattr(gh_contents, "get_file_content", f.get_file_content)
@@ -109,6 +109,7 @@ def fake(monkeypatch):
     monkeypatch.setattr(gh_contents, "put_files", f.put_files)
     monkeypatch.setattr(gh_contents, "log_skip", lambda msg: f.skips.append(msg))
     monkeypatch.setattr(bc, "put_file", f.put_file)
+    monkeypatch.setattr(bc, "put_files", f.put_files)
     # The welcome repo's SYSTEM-owned files are written by dsl_course.welcome (so that
     # seed.refresh can re-push them without importing bootstrap_course), in one commit per
     # set - so its put_files has to be faked too.
@@ -216,7 +217,7 @@ def test_the_scaffold_set_lands_as_one_commit_but_stays_create_only_per_file(
     # codes, onboarded handles) untouched.
     live = {"students.csv": "live-roster-sha"}
     monkeypatch.setattr(gh_contents, "log_skip", lambda msg: None)
-    monkeypatch.setattr(gh_contents, "default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(gh_contents, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "repo_blob_shas", lambda org, repo, branch: live)
     committed = []
     monkeypatch.setattr(
@@ -225,11 +226,12 @@ def test_the_scaffold_set_lands_as_one_commit_but_stays_create_only_per_file(
         lambda org, repo, branch, tree, message: committed.append(tree) or True,
     )
 
-    assert gh_contents.seed_files_if_absent(
+    assert gh_contents.put_files(
         "Cohort-f2026",
         "classroom-config",
         {"students.csv": b"header only\n", "teams.csv": b"t\n", "people.yml": b"p\n"},
         "init: scaffolds",
+        create_only=True,
     )
     assert len(committed) == 1
     assert {entry["path"] for entry in committed[0]} == {"teams.csv", "people.yml"}, (
@@ -237,20 +239,24 @@ def test_the_scaffold_set_lands_as_one_commit_but_stays_create_only_per_file(
     )
 
 
-def test_seed_files_if_absent_commits_nothing_when_every_file_is_already_there(
+def test_a_create_only_write_commits_nothing_when_every_file_is_already_there(
     monkeypatch,
 ):
     # The whole set present is the ordinary repair-re-run case, and it must cost no commit.
     monkeypatch.setattr(gh_contents, "log_skip", lambda msg: None)
-    monkeypatch.setattr(gh_contents, "default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(gh_contents, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(
         gh_contents, "repo_blob_shas", lambda org, repo, branch: {"students.csv": "sha"}
     )
     monkeypatch.setattr(
         gh_contents, "_commit_tree", lambda *a, **k: pytest.fail("wrote a no-op commit")
     )
-    assert gh_contents.seed_files_if_absent(
-        "Cohort-f2026", "classroom-config", {"students.csv": b"x\n"}, "init: scaffolds"
+    assert gh_contents.put_files(
+        "Cohort-f2026",
+        "classroom-config",
+        {"students.csv": b"x\n"},
+        "init: scaffolds",
+        create_only=True,
     )
 
 

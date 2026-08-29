@@ -174,29 +174,36 @@ def _untruncated(out: str, org: str, repo: str) -> list[str]:
     return lines[1:] if lines else []
 
 
+def _tree(org: str, repo: str, branch: str, jq: str) -> list[str]:
+    """The lines of ONE recursive git-tree fetch, `truncated` already checked.
+
+    `[]` means the tree is genuinely empty: a 404 (no such repo/branch) or a 409 (a repo
+    with no commits yet - the state every repo is in between create_repo and its first
+    seed). Any OTHER failure RAISES rather than reporting an empty tree, the same rule as
+    get_file_content: swallowed, an unreadable tree reads as "nothing is there", and the
+    caller then rewrites the files it could not see or drops the links it never found."""
+    code, out = gh(
+        "api", f"repos/{org}/{repo}/git/trees/{branch}?recursive=1", "--jq", jq
+    )
+    if code != 0:
+        if is_missing_resource(out) or "HTTP 409" in out:
+            return []
+        raise RuntimeError(f"could not read the tree of {org}/{repo}: {out[:200]}")
+    return _untruncated(out, org, repo)
+
+
 def repo_blob_shas(org: str, repo: str, branch: str) -> dict[str, str]:
     """`{path: blob sha}` for every file in `org/repo`'s `branch` - ONE recursive fetch.
 
     The sha-carrying twin of repo_tree (which answers "which paths exist" for discovery).
     One call answers "what is currently there" for a whole set of paths at once, which is
-    what lets put_files decide a no-op night for twenty files without twenty reads.
-
-    `{}` means the tree is genuinely empty: a 404 (no such repo/branch) or a 409 (a repo
-    with no commits yet - the state every repo is in between create_repo and its first
-    seed). Any OTHER failure RAISES rather than reporting an empty tree, on the same rule
-    as repo_tree and get_file_content: swallowed, an unreadable tree reads as "nothing is
-    there" and the caller rewrites files it should have left alone."""
-    code, out = gh(
-        "api",
-        f"repos/{org}/{repo}/git/trees/{branch}?recursive=1",
-        "--jq",
+    what lets put_files decide a no-op night for twenty files without twenty reads."""
+    lines = _tree(
+        org,
+        repo,
+        branch,
         r'"\(.truncated)", (.tree[] | select(.type=="blob") | [.path, .sha] | @tsv)',
     )
-    if code != 0:
-        if is_missing_resource(out) or "HTTP 409" in out:
-            return {}
-        raise RuntimeError(f"could not read the tree of {org}/{repo}: {out[:200]}")
-    lines = _untruncated(out, org, repo)
     entries = (line.split("\t") for line in lines if "\t" in line)
     return {path: sha for path, sha in entries}
 
@@ -223,9 +230,11 @@ def put_files(
     re-pushes every generated file at every org, stays both silent and cheap. The tree,
     commit and ref calls are paid only on a run that genuinely changes something.
 
-    `create_only` inverts the test for USER-owned files: a path that already exists is left
-    exactly as it is (and logged as a skip) instead of being overwritten. See
-    seed_files_if_absent, which is this flag with a name.
+    `create_only=True` is THE create-only write for a SET of files - `seed_if_absent`'s
+    twin, and the USER-owned rule: a path that already exists is left exactly as faculty
+    left it and logged as a skip, so a repair re-run's output still shows what it left
+    alone. Only the genuinely absent paths are written, and they still go together,
+    because a scaffold set is one act of seeding rather than six.
 
     `files` values are text (workflow YAML, markdown, CSV headers); they go into the tree
     as strings, which is what the trees API takes.
@@ -434,6 +443,20 @@ def is_untouched_stub(text: str) -> bool:
     return any(m in text for m in STUB_MARKS)
 
 
+# What one seeded path is right now. THEIRS is terminal: once faculty have written over a
+# stub it is theirs, and nothing here touches it again.
+_ABSENT, _STUB, _THEIRS = "absent", "stub", "theirs"
+
+
+def _stub_state(org: str, repo: str, path: str) -> str:
+    """One read, three answers: the path is ABSENT, still an untouched stub of ours, or
+    THEIRS."""
+    current = get_file_content(org, repo, path)
+    if current is None:
+        return _ABSENT
+    return _STUB if is_untouched_stub(current) else _THEIRS
+
+
 def refresh_stubs(
     org: str,
     repo: str,
@@ -448,7 +471,7 @@ def refresh_stubs(
     `put_file` (clobbers real work): a stub is written while it is absent or still carries a
     stub mark, and left exactly as faculty left it once they have written over it.
 
-    One commit, not one per file, for the same reason `seed_files_if_absent` batches - a set
+    One commit, not one per file, for the same reason a create-only seed batches - a set
     of stubs is one act of seeding, and writing them one at a time opens a repo faculty then
     author by hand with a column of identical commit lines.
 
@@ -466,43 +489,22 @@ def refresh_stubs(
     once faculty have written over it, it is theirs and is left exactly where it is."""
     write: dict[str, bytes] = {}
     for path, body in files.items():
-        current = get_file_content(org, repo, path)
-        if current is None:
-            if create:
-                write[path] = body
-            continue
-        if is_untouched_stub(current):
+        state = _stub_state(org, repo, path)
+        if state == _STUB or (state == _ABSENT and create):
             write[path] = body
-        else:
+        elif state == _THEIRS:
             log_skip(f"{repo}/{path}")
     drop = []
     for path in retire:
-        current = get_file_content(org, repo, path)
-        if current is None:
-            continue
-        if is_untouched_stub(current):
+        state = _stub_state(org, repo, path)
+        if state == _STUB:
             drop.append(path)
-        else:
+        elif state == _THEIRS:
             log_skip(f"{repo}/{path} (renamed, but yours - left in place)")
     if not write and not drop:
         return 0
     ok = put_files(org, repo, write, message, delete=tuple(drop))
     return 0 if ok else len(write) + len(drop)
-
-
-def seed_files_if_absent(
-    org: str, repo: str, files: dict[str, bytes], message: str
-) -> bool:
-    """seed_if_absent for a SET of files: whatever is genuinely missing, in one commit.
-
-    Same create-only rule, file by file - every path already present is left exactly as
-    faculty left it and logged as a skip, so a repair re-run's output still shows what it
-    left alone. Only the absent ones are written, and they go together, because a scaffold
-    set is one act of seeding rather than six.
-
-    Returns True whenever every path is now present as intended (written just now, or
-    already there), and False only when a write was attempted and failed."""
-    return put_files(org, repo, files, message, create_only=True)
 
 
 def get_file_content(org: str, repo: str, path: str, ref: str = "") -> str | None:
@@ -562,26 +564,14 @@ def repo_tree(org: str, repo: str, branch: str, kind: str = "") -> tuple[str, ..
     kind, for a caller that just asks "is this path in the repo" and does not care whether
     the answer is a file or a folder - one fetch rather than two of the same tree.
 
-    A genuinely absent or empty tree is `()`: a 404 (no such repo/branch) or a 409 (a repo
-    with no commits at all) really does hold no paths, and the caller correctly finds
-    nothing. Any OTHER failure - a rate limit, a network drop - RAISES rather than
-    reporting an empty tree: swallowed, it republished a cohort site with every material
-    link AND every session row deleted, silently and green. Same rule as get_file_content.
+    An absent or empty tree is `()` - see `_tree`, which also owns the fail-loud rule that
+    keeps an unreadable tree from republishing a cohort site with every material link and
+    every session row deleted, silently and green.
     """
     select = f' | select(.type=="{kind}")' if kind else ""
-    code, out = gh(
-        "api",
-        f"repos/{org}/{repo}/git/trees/{branch}?recursive=1",
-        "--jq",
-        f'"\\(.truncated)", (.tree[]{select} | .path)',
+    return tuple(
+        sorted(_tree(org, repo, branch, f'"\\(.truncated)", (.tree[]{select} | .path)'))
     )
-    if code != 0:
-        # 404 = no such tree; 409 = an empty repo (no commits) - a tree-specific signal on
-        # top of the shared 404-absence test.
-        if is_missing_resource(out) or "HTTP 409" in out:
-            return ()
-        raise RuntimeError(f"could not read the file tree of {org}/{repo}: {out[:200]}")
-    return tuple(sorted(_untruncated(out, org, repo)))
 
 
 def load_yaml_config(org: str, repo: str, path: str) -> dict | None:

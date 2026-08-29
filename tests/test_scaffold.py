@@ -59,8 +59,8 @@ class FakeRepo:
 @pytest.fixture
 def fake(monkeypatch):
     f = FakeRepo()
-    # USER-owned scaffolds go through gh_contents.seed_if_absent / seed_files_if_absent
-    # (create-if-absent), which resolve get_file_content / put_file / put_files / log_skip in
+    # USER-owned scaffolds go through gh_contents.seed_if_absent /
+    # put_files(create_only=True), which resolve get_file_content / put_file / put_files / log_skip in
     # the gh_contents namespace; the SYSTEM-owned pair goes through scaffold.put_files directly.
     # Fake every layer to the same recorder.
     monkeypatch.setattr(gh_contents, "get_file_content", f.get_file_content)

@@ -321,7 +321,7 @@ def test_session_files_real_failure_raises(monkeypatch):
     monkeypatch.setattr(
         gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 500 Server Error")
     )
-    with pytest.raises(RuntimeError, match="could not read the file tree"):
+    with pytest.raises(RuntimeError, match="could not read the tree"):
         site._session_files("Cohort-f2026", "materials", "lectures", "03_x")
 
 

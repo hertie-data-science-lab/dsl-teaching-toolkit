@@ -31,7 +31,7 @@ from .course import (
     pages_repo,
 )
 from .discovery import central_ref_for, discover_assignments, discover_cohorts
-from .gh_contents import put_files, refresh_stubs, seed_files_if_absent, seed_if_absent
+from .gh_contents import put_files, refresh_stubs, seed_if_absent
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
 from .log import log, log_err, log_ok, log_skip, log_step
 from .readings import READING_OVERLAY_FILE
@@ -498,7 +498,9 @@ def scaffold_materials(org: str, tag: str) -> int:
     # One commit for the skeleton: all five carried the same subject anyway, so writing
     # them one at a time opened a repo faculty then author by hand with five identical
     # `init: materials skeleton` lines.
-    if not seed_files_if_absent(org, repo, user_files, "init: materials skeleton"):
+    if not put_files(
+        org, repo, user_files, "init: materials skeleton", create_only=True
+    ):
         failures += 1
     # Equip the run-from-repo Release workflows (same as Refresh does for content repos).
     # push_content_workflows lands both in one commit, logs its own failure, and returns

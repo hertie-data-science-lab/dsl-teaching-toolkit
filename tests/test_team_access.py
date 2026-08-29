@@ -43,7 +43,6 @@ def scaffold_grants(monkeypatch):
     monkeypatch.setattr(gh_contents, "put_file", lambda *a, **k: True)
     monkeypatch.setattr(gh_contents, "put_files", lambda *a, **k: True)
     monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: None)
-    monkeypatch.setattr(scaffold, "seed_files_if_absent", lambda *a, **k: True)
     monkeypatch.setattr(scaffold, "seed_if_absent", lambda *a, **k: True)
     monkeypatch.setattr(scaffold, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(scaffold, "discover_assignments", lambda org: [])
