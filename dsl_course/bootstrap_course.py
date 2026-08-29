@@ -24,7 +24,7 @@ import sys
 
 from . import scaffold, seed, site, sync_faculty
 from .access import COHORT_WRITE_REPOS, COURSE_TEAM_ACCESS, grant_team_repo_access
-from .central import resolve_central_ref
+from .central import pin_central_ref, resolve_central_ref
 from .course import (
     AUDITORS_TEAM,
     COHORT_TOPIC,
@@ -580,7 +580,9 @@ def setup_cohort_extras(org: str, central_ref: str) -> int:
             org,
             "classroom-config",
             {
-                path: template(rel)
+                # Pinned first, formatted second: the scaffolds link the runbooks,
+                # and an org must be sent to the docs for the engine it actually runs.
+                path: pin_central_ref(template(rel), central_ref)
                 .format(tag=tag, year=year, year_next=year + 1)
                 .encode()
                 for path, rel in CLASSROOM_SCAFFOLDS.items()

@@ -159,6 +159,10 @@ def test_a_cohorts_schedule_validator_is_pinned_to_the_inherited_ref(monkeypatch
     raw = written[".github/workflows/validate-schedule.yml"].decode()
     assert CENTRAL_REF_PLACEHOLDER not in raw
     assert _central_checkout_refs(raw) == ["staging"]
+    # Its failure issue links the field reference too, and at the same ref.
+    assert f"{CENTRAL}/blob/staging/docs/07-schedule-releases.md" in raw.replace(
+        "%s", CENTRAL
+    )
 
 
 def test_the_faculty_landing_page_links_the_docs_at_the_orgs_ref():

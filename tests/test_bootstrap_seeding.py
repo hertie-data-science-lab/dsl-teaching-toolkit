@@ -38,6 +38,7 @@ from dsl_course import (
     teams,
     welcome,
 )
+from dsl_course.central import CENTRAL
 from dsl_course.repos import Converged
 from tests.conftest import repo_row
 
@@ -124,6 +125,16 @@ def fake(monkeypatch):
     monkeypatch.setattr(bc, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(bc.scaffold, "scaffold_site", lambda org: 0)
     return f
+
+
+def test_every_seeded_doc_link_names_the_orgs_own_tier(fake):
+    # The scaffolds link the runbooks by absolute URL. They named `main` whatever the org
+    # ran, so a release cohort read the schema of code nobody had promoted yet.
+    bc.setup_cohort_extras("Cohort-f2026", "staging")
+    for path in ("schedule.yml", "people.yml"):
+        body = fake.files[("classroom-config", path)]
+        assert f"{CENTRAL}/blob/staging/docs/" in body, path
+        assert f"{CENTRAL}/blob/main/docs/" not in body, path
 
 
 def test_fresh_cohort_seeds_every_file(fake):
