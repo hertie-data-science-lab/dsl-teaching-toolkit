@@ -75,9 +75,12 @@ jobs:
               //       max_team_size: 4        # (or inline: {due_datetime: ..., max_team_size: 4})
               // Line-scanned (github-script has no YAML lib) tolerant of comments and both
               // block and flow styles. Returns null when the slug is NOT under `assignments:`
-              // (or there is no schedule.yml): a team may only form for an assignment the
-              // teaching team has declared, or one student could mint any number of real GitHub
-              // teams under names of their choosing. A declared slug with no cap -> DEFAULT_TEAM_SIZE.
+              // (or there is no schedule.yml), and when the entry declares a `type:` that is
+              // not `group`: a team may only form for a group assignment the teaching team has
+              // declared, or one student could mint any number of real GitHub teams under names
+              // of their choosing. `type:` may instead live in the template's grading.yml, which
+              // this workflow cannot read, so an entry with no `type:` still forms a team.
+              // A declared slug with no cap -> DEFAULT_TEAM_SIZE.
               const DEFAULT_TEAM_SIZE = 5;
               const teamCap = async (slug) => {
                 let text;
@@ -92,6 +95,7 @@ jobs:
                 // 4-space file must not read as "no assignments declared" and refuse every team.
                 let known = false, slugIndent = null;
                 let inAssignments = false, inSlug = false;
+                let cap = null, declaredType = null;
                 for (const raw of text.split(/\r?\n/)) {
                   const line = raw.replace(/#.*$/, '').trimEnd();
                   if (!line.trim()) continue;
@@ -105,16 +109,21 @@ jobs:
                     known = known || inSlug;
                     if (inSlug && m && m[2]) {
                       const f = m[2].match(/max_team_size:\s*(\d+)/);
-                      if (f) return parseInt(f[1], 10);
+                      if (f) cap = parseInt(f[1], 10);
+                      const t = m[2].match(/type:\s*([\w-]+)/);
+                      if (t) declaredType = t[1].toLowerCase();
                     }
                     continue;
                   }
                   if (inSlug && indent > slugIndent) {
                     const f = line.trim().match(/^max_team_size:\s*(\d+)$/);
-                    if (f) return parseInt(f[1], 10);
+                    if (f) cap = parseInt(f[1], 10);
+                    const t = line.trim().match(/^type:\s*([\w-]+)$/);
+                    if (t) declaredType = t[1].toLowerCase();
                   }
                 }
-                return known ? DEFAULT_TEAM_SIZE : null;
+                if (!known || (declaredType !== null && declaredType !== 'group')) return null;
+                return cap === null ? DEFAULT_TEAM_SIZE : cap;
               };
 
               if (!aMatch || !tMatch) return fail(

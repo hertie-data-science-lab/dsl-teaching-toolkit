@@ -10,7 +10,10 @@ column they address by name really exists in roster.FIELDS / teams.FIELDS.
 
 from __future__ import annotations
 
+import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -340,6 +343,82 @@ def test_team_cap_is_read_from_schedule_yml_per_assignment():
     assert "MAX_TEAM_SIZE" not in script
     assert "max_team_size" in script and "schedule.yml" in script
     assert "DEFAULT_TEAM_SIZE = 5" in script
+
+
+_JSC = shutil.which("osascript")
+
+
+def _team_cap_answers(schedule_yml: str, slugs: list[str]) -> list[int | None]:
+    """Run the SHIPPED `teamCap` scanner over `schedule_yml` in JavaScriptCore, with its
+    one await stubbed out, and return its answer for each slug. Skipped where there is no
+    JS engine (Linux CI); the text guard below runs everywhere."""
+    script = script_of("team-formation.yml", "form-team")
+    start = script.index("const DEFAULT_TEAM_SIZE")
+    end = script.index("};", script.index("return cap === null")) + 2
+    block = (
+        script[start:end]
+        .replace("async (slug)", "(slug)")
+        .replace("await github", "github")
+    )
+    calls = ", ".join(f"teamCap({json.dumps(s)})" for s in slugs)
+    harness = (
+        f"const SCHEDULE = {json.dumps(schedule_yml)};\n"
+        "const org = 'O', CONFIG = 'c';\n"
+        "const Buffer = { from: (s, e) => ({ toString: () => SCHEDULE }) };\n"
+        "const github = { rest: { repos: { getContent: () => "
+        "({ data: { content: '' } }) } } };\n"
+        f"{block}\n"
+        f"JSON.stringify([{calls}]);\n"
+    )
+    run = subprocess.run(
+        [_JSC, "-l", "JavaScript", "-e", harness],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+def test_only_a_group_assignment_may_form_a_team():
+    # Any DECLARED assignment used to pass, so a student could open a Join-team issue
+    # against an individual assignment and mint a real GitHub team - with `maintain` on the
+    # repo it is granted - under a name of their choosing.
+    schedule_yml = (
+        "assignments:\n"
+        "  solo:\n"
+        "    type: individual\n"
+        "  project:\n"
+        "    type: group\n"
+        "    max_team_size: 3\n"
+        "  inline: {type: individual}\n"
+        "  untyped:\n"
+        "    due_datetime: 2026-10-01\n"
+    )
+    assert _team_cap_answers(
+        schedule_yml, ["solo", "project", "inline", "untyped", "invented"]
+    ) == [None, 3, None, 5, None]
+    # `untyped` is 5, not None: `type:` may live in the template's grading.yml instead, and
+    # this workflow cannot read it - refusing there would break real group assignments.
+
+
+def test_the_group_only_guard_is_in_the_shipped_script():
+    # The behavioural test above needs a JS engine; this one holds the line in CI.
+    code = code_of(script_of("team-formation.yml", "form-team"))
+    assert "declaredType !== 'group'" in code
+
+
+def test_every_code_in_the_body_is_redacted_not_only_the_one_that_binds():
+    # The redaction re-used the STRICT form match, so a code pasted anywhere the match
+    # could not bind from - the wrong field, an extra line - stayed live in a public issue.
+    code = code_of(script_of("onboard.yml", "onboard"))
+    m = re.search(r"\.replace\(/(.*?)/gi, 'dsl-\[redacted\]'\)", code)
+    assert m, "the loose redaction is gone"
+    pattern = re.compile(m.group(1), re.IGNORECASE)
+    body = "Enrolment code\n\nDSL-ABC234\n\nnote: my other one was dsl-zzz999\n"
+    assert pattern.sub("dsl-[redacted]", body).count("dsl-[redacted]") == 2
+    assert "abc234" not in pattern.sub("dsl-[redacted]", body).lower()
 
 
 def test_the_join_form_code_regex_matches_exactly_the_codes_we_mint():

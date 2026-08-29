@@ -71,16 +71,19 @@ jobs:
             try {
               // Read the enrolment code from the issue form, then REDACT it from the public
               // body before anything else can fail. This uses the ambient token's issues:write on
-              // THIS repo, so it works even when the bot token is unset. The shape is strict
+              // THIS repo, so it works even when the bot token is unset. The MATCH is strict
               // (dsl_course.enrol_codes.make_code): a stray character - a mail client's Unicode
-              // hyphen, say - must not turn `dsl` into the string we redact.
+              // hyphen, say - must not turn `dsl` into the string we bind on. The REDACTION is
+              // looser: any `dsl-xxxxxx` anywhere in the body is a live credential in a public
+              // issue, including one pasted where the form match cannot bind from.
               const m = (issue.body || '').match(/Enrolment code\s*[\r\n]+\s*(dsl-[a-z0-9]{6})\b/i);
               const code = m && m[1].trim();
-              if (code) {
+              const redacted = (issue.body || '').replace(/dsl-[a-z0-9]{6}/gi, 'dsl-[redacted]');
+              if (redacted !== issue.body) {
                 try {
                   await github.rest.issues.update({
                     owner: org, repo: context.repo.repo, issue_number: issue.number,
-                    body: issue.body.split(code).join('dsl-[redacted]') });
+                    body: redacted });
                 } catch (e) {
                   // A failed redaction must not become an uncaught throw (red run, no comment,
                   // no label - the student is dropped in silence). Carry on: the match below is
