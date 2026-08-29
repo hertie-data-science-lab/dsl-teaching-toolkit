@@ -375,18 +375,10 @@ def _converge_org_metadata(org: str, repos: list[dict]) -> int:
     Returns the failure count that must reach the refresh's exit code - the topic stamps.
     A failed description PATCH is documentation and logs a line; a failed access PUT
     self-heals on the next sweep and is likewise not fatal."""
-    # `tier` is None for an org the listing cannot place (a legacy cohort with no topics
-    # and no `welcome`). The description table and the topic sweep read that as "course";
-    # the ACCESS sweep must not, so it takes `cohort=tier != "course"` - only a listing
-    # that positively says "course" earns the write-everywhere floor, and `protected`
-    # holds every per-student repo to READ whatever the tier turns out to be.
     tier = org_tier(repos)
-    is_cohort = tier == "cohort"
-    converge_descriptions(org, repos, cohort=is_cohort)
-    converge_faculty_access(
-        org, repos, cohort=tier != "course", protected=student_repo_names(repos)
-    )
-    return converge_topics(org, repos, cohort=is_cohort)
+    converge_descriptions(org, repos, tier)
+    converge_faculty_access(org, repos, tier, protected=student_repo_names(repos))
+    return converge_topics(org, repos, tier)
 
 
 def _refresh_stubs(course_org: str, repo: str) -> int:

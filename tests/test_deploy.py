@@ -368,9 +368,9 @@ def test_the_dotgithub_description_says_the_opposite_thing_per_tier():
     repos.gh = fake
     try:
         cohort = [dict(r) for r in listing]
-        repos.converge_descriptions("Cohort-f2026", cohort, cohort=True)
+        repos.converge_descriptions("Cohort-f2026", cohort, "cohort")
         course = [dict(r) for r in listing]
-        repos.converge_descriptions("Course", course, cohort=False)
+        repos.converge_descriptions("Course", course, "course")
     finally:
         repos.gh = original
     assert cohort[0]["description"] == "[do not touch]: Org profile and configuration"

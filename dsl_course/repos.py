@@ -159,12 +159,14 @@ SUPERSEDED_COURSE_DESCRIPTIONS = {
 }
 
 
-def converge_descriptions(org: str, repos: list[dict], cohort: bool = False) -> int:
+def converge_descriptions(org: str, repos: list[dict], tier: str | None = None) -> int:
     """Update every repo in `repos` whose description we have since reworded.
 
-    `cohort` selects the tier-specific table on top of the shared one: the same old
-    `.github` wording becomes "[do not touch]" on a cohort org and "[control panel]" on a
-    course org, because they are opposite instructions to the same reader.
+    `tier` (`discovery.org_tier`) selects the tier-specific table on top of the shared
+    one: the same old `.github` wording becomes "[do not touch]" on a cohort org and
+    "[control panel]" on a course org, because they are opposite instructions to the same
+    reader. None - a listing that cannot place the org - reads as a cohort, the same way
+    the faculty floor does.
 
     A GitHub description is only ever set at repo CREATION, so a wording fix otherwise
     never reaches a repo that already exists - while being the "What it's for" column on
@@ -180,7 +182,9 @@ def converge_descriptions(org: str, repos: list[dict], cohort: bool = False) -> 
     a failed refresh. Returns the number changed.
     """
     superseded = SUPERSEDED_DESCRIPTIONS | (
-        SUPERSEDED_COHORT_DESCRIPTIONS if cohort else SUPERSEDED_COURSE_DESCRIPTIONS
+        SUPERSEDED_COURSE_DESCRIPTIONS
+        if tier == "course"
+        else SUPERSEDED_COHORT_DESCRIPTIONS
     )
     changed = 0
     for repo in repos:

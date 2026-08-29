@@ -159,11 +159,19 @@ def test_the_floor_is_write_where_faculty_author_and_read_elsewhere():
     # released content, submission repos and gradebooks each have their source of truth
     # elsewhere and are overwritten wholesale, so write there invites an edit that vanishes.
     for repo in (".github", "course-materials-f2026", "assignment-1"):
-        assert access.faculty_floor(repo, cohort=False) is access.COURSE_TEAM_ACCESS
+        assert access.faculty_floor(repo, "course") is access.COURSE_TEAM_ACCESS
     for repo in access.COHORT_WRITE_REPOS:
-        assert access.faculty_floor(repo, cohort=True) is access.COURSE_TEAM_ACCESS
+        assert access.faculty_floor(repo, "cohort") is access.COURSE_TEAM_ACCESS
     for repo in ("materials", "assignment-1-ada", "grades-ada", "x.github.io"):
-        assert access.faculty_floor(repo, cohort=True) is access.FACULTY_READ_ACCESS
+        assert access.faculty_floor(repo, "cohort") is access.FACULTY_READ_ACCESS
+    # An unplaceable listing reads as a cohort: only a listing that positively says
+    # "course" earns the write-everywhere floor.
+    assert access.faculty_floor("materials", None) is access.FACULTY_READ_ACCESS
+    # And a protected repo takes read whatever the tier says.
+    assert (
+        access.faculty_floor("grades-ada", "course", frozenset({"grades-ada"}))
+        is access.FACULTY_READ_ACCESS
+    )
 
 
 # The live shape of one row of GET /orgs/{org}/teams/{team}/repos. `role_name` is in the
@@ -186,7 +194,11 @@ def _listing(*rows: str) -> str:
 
 
 def _sweep(
-    monkeypatch, listings: dict[str, str], repos, cohort: bool, protected=frozenset()
+    monkeypatch,
+    listings: dict[str, str],
+    repos,
+    tier: str | None,
+    protected=frozenset(),
 ):
     granted = []
 
@@ -204,9 +216,7 @@ def _sweep(
         "grant_team_repo_access",
         lambda org, team, repo, perm: granted.append((team, repo, perm)) or True,
     )
-    changed = access.converge_faculty_access(
-        "Org", repos, cohort=cohort, protected=protected
-    )
+    changed = access.converge_faculty_access("Org", repos, tier, protected=protected)
     return changed, granted
 
 
@@ -252,7 +262,7 @@ def test_the_sweep_reads_the_permission_booleans_and_never_demotes_write(monkeyp
         ),
     }
     repos = [{"name": n} for n in (".github", "classroom-config", "materials")]
-    changed, granted = _sweep(monkeypatch, listings, repos, cohort=True)
+    changed, granted = _sweep(monkeypatch, listings, repos, "cohort")
     assert (changed, granted) == (0, [])
 
 
@@ -261,7 +271,7 @@ def test_the_sweep_grants_the_per_repo_floor_where_a_team_holds_nothing(monkeypa
     # course-admin at admin throughout. A course org converges at push everywhere.
     listings = {"instructors": _listing(), "course-admin": _listing()}
     repos = [{"name": n} for n in ("welcome", "assignment-1-ada", "grades-ada")]
-    changed, granted = _sweep(monkeypatch, listings, repos, cohort=True)
+    changed, granted = _sweep(monkeypatch, listings, repos, "cohort")
     assert changed == 6
     assert set(granted) == {
         ("instructors", "welcome", "push"),
@@ -272,7 +282,7 @@ def test_the_sweep_grants_the_per_repo_floor_where_a_team_holds_nothing(monkeypa
         ("course-admin", "grades-ada", "admin"),
     }
     repos = [{"name": n} for n in ("course-materials-f2026", "assignment-1")]
-    _, granted = _sweep(monkeypatch, listings, repos, cohort=False)
+    _, granted = _sweep(monkeypatch, listings, repos, "course")
     assert {(t, p) for t, _, p in granted} == {
         ("instructors", "push"),
         ("course-admin", "admin"),
@@ -302,7 +312,7 @@ def test_the_sweep_leaves_a_maintain_or_triage_grant_exactly_as_it_is(monkeypatc
         "course-admin": _listing(_admin_row(".github"), _admin_row("grades-ada")),
     }
     repos = [{"name": n} for n in (".github", "grades-ada")]
-    assert _sweep(monkeypatch, listings, repos, cohort=True) == (0, [])
+    assert _sweep(monkeypatch, listings, repos, "cohort") == (0, [])
 
 
 def test_the_sweep_raises_a_grant_below_its_floor_but_leaves_one_above(monkeypatch):
@@ -335,7 +345,7 @@ def test_the_sweep_raises_a_grant_below_its_floor_but_leaves_one_above(monkeypat
         ),
     }
     repos = [{"name": ".github"}, {"name": "assignment-1-ada"}]
-    changed, granted = _sweep(monkeypatch, listings, repos, cohort=True)
+    changed, granted = _sweep(monkeypatch, listings, repos, "cohort")
     assert (changed, granted) == (1, [("instructors", ".github", "push")])
 
 
@@ -349,7 +359,7 @@ def test_the_sweep_fails_closed_on_a_grant_it_cannot_rank(monkeypatch):
         ),
         "course-admin": _listing(json.dumps({"name": "odd", "permissions": {}})),
     }
-    changed, granted = _sweep(monkeypatch, listings, [{"name": "odd"}], cohort=True)
+    changed, granted = _sweep(monkeypatch, listings, [{"name": "odd"}], "cohort")
     assert (changed, granted) == (0, [])
 
 
@@ -358,7 +368,7 @@ def test_the_sweep_skips_archived_repos(monkeypatch):
     # would otherwise fail 2 writes per repo every night, forever.
     listings = {"instructors": _listing(), "course-admin": _listing()}
     repos = [{"name": "old", "archived": True}, {"name": "live", "archived": False}]
-    _, granted = _sweep(monkeypatch, listings, repos, cohort=True)
+    _, granted = _sweep(monkeypatch, listings, repos, "cohort")
     assert {r for _, r, _ in granted} == {"live"}
 
 
@@ -380,7 +390,7 @@ def test_an_absent_team_is_none_and_an_unreadable_one_raises(monkeypatch):
 
 def test_an_absent_team_stops_the_sweep_for_that_team_only(monkeypatch):
     listings = {"course-admin": _listing()}  # instructors -> 404 from the fake
-    _, granted = _sweep(monkeypatch, listings, [{"name": "welcome"}], cohort=True)
+    _, granted = _sweep(monkeypatch, listings, [{"name": "welcome"}], "cohort")
     assert granted == [("course-admin", "welcome", "admin")]
 
 
@@ -406,7 +416,7 @@ def test_a_protected_repo_takes_the_read_floor_whatever_the_tier_says(monkeypatc
         monkeypatch,
         listings,
         repos,
-        cohort=False,
+        "course",
         protected=frozenset({"assignment-1-ada", "grades-ada"}),
     )
     assert ("instructors", "assignment-1-ada", "pull") in granted
@@ -455,7 +465,7 @@ def _converge(monkeypatch, repos, ok=True):
         "set_repo_topics",
         lambda org, repo, topics: stamped.append((repo, topics)) or ok,
     )
-    failures = access.converge_topics("Cohort-f2026", repos, cohort=True)
+    failures = access.converge_topics("Cohort-f2026", repos, "cohort")
     return failures, dict(stamped)
 
 
@@ -510,7 +520,7 @@ def test_an_archived_repo_and_a_course_org_are_left_alone(monkeypatch):
         "set_repo_topics",
         lambda *a: pytest.fail("course orgs have no such repo"),
     )
-    assert access.converge_topics("Course-Org", _topic_repos(), cohort=False) == 0
+    assert access.converge_topics("Course-Org", _topic_repos(), "course") == 0
 
 
 def test_a_failed_stamp_is_counted(monkeypatch):

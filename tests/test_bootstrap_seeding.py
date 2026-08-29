@@ -1344,8 +1344,8 @@ def _spy_sweep(monkeypatch, repos):
     """Run the sweep over `repos` and return what converge_faculty_access was told."""
     seen: dict = {}
 
-    def spy(org, repos, cohort, protected):
-        seen.update(cohort=cohort, protected=set(protected))
+    def spy(org, repos, tier, protected):
+        seen.update(tier=tier, protected=set(protected))
         return 0
 
     monkeypatch.setattr(seed, "converge_faculty_access", spy)
@@ -1361,19 +1361,19 @@ def test_the_sweep_is_told_the_tier_and_the_student_repos(monkeypatch):
     # site passes.
     cohort = [_r(".github", topics=["dsl-cohort"]), _r("welcome"), _r("grades-ada")]
     assert _spy_sweep(monkeypatch, cohort) == {
-        "cohort": True,
+        "tier": "cohort",
         "protected": {"grades-ada"},
     }
 
     course = [_r(".github", topics=["dsl-course-hub"]), _r("course-materials-f2026")]
-    assert _spy_sweep(monkeypatch, course) == {"cohort": False, "protected": set()}
+    assert _spy_sweep(monkeypatch, course) == {"tier": "course", "protected": set()}
 
 
 def test_an_org_of_unknown_tier_gets_the_read_floor(monkeypatch):
     # A legacy cohort: `.github` without topics, student repos, no `welcome`. The landing
     # page renders it as a course org, but the sweep must NOT hand instructors push on
-    # every submission repo - so it is told "cohort" (read floor), and the student repos
-    # are protected by name as well.
+    # every submission repo - so it is told the tier is UNKNOWN, which faculty_floor reads
+    # as the read floor, and the student repos are protected by name as well.
     legacy = [
         _r(".github"),
         _r("assignment-1", isTemplate=True),
@@ -1381,7 +1381,7 @@ def test_an_org_of_unknown_tier_gets_the_read_floor(monkeypatch):
         _r("grades-ada"),
     ]
     assert _spy_sweep(monkeypatch, legacy) == {
-        "cohort": True,
+        "tier": None,
         "protected": {"assignment-1-ada", "grades-ada"},
     }
 

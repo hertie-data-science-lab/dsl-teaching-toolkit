@@ -85,10 +85,21 @@ COHORT_WRITE_REPOS = frozenset({".github", "welcome", "classroom-config"})
 _PERM_RANK = {"pull": 1, "triage": 2, "push": 3, "maintain": 4, "admin": 5}
 
 
-def faculty_floor(repo: str, cohort: bool) -> dict[str, str]:
-    """The faculty teams' MINIMUM grant on `repo`: write where faculty author (every repo of
-    a course org, the COHORT_WRITE_REPOS of a cohort), read everywhere else in a cohort."""
-    if not cohort or repo in COHORT_WRITE_REPOS:
+def faculty_floor(
+    repo: str, tier: str | None, protected: frozenset[str] = frozenset()
+) -> dict[str, str]:
+    """The faculty teams' MINIMUM grant on `repo`: write where faculty AUTHOR (every repo
+    of a course org, the COHORT_WRITE_REPOS of a cohort), read everywhere else.
+
+    `tier` is `discovery.org_tier`, and None - a listing that cannot place the org - reads
+    as a cohort: only a listing that positively says "course" earns the write-everywhere
+    floor. `protected` names the per-student repos (discovery.student_repo_names), which
+    take the READ floor whatever the tier says - so a mis-told tier can under-grant a
+    course org, but can never hand instructors push on a student's submission or
+    gradebook."""
+    if repo in protected:
+        return FACULTY_READ_ACCESS
+    if tier == "course" or repo in COHORT_WRITE_REPOS:
         return COURSE_TEAM_ACCESS
     return FACULTY_READ_ACCESS
 
@@ -192,7 +203,7 @@ def team_repo_access(org: str, team: str) -> dict[str, str | None] | None:
 def converge_faculty_access(
     org: str,
     repos: list[dict],
-    cohort: bool,
+    tier: str | None,
     protected: frozenset[str] = frozenset(),
 ) -> int:
     """Raise the faculty teams to their floor (`faculty_floor`) on every live repo of `org`.
@@ -205,10 +216,8 @@ def converge_faculty_access(
 
     A FLOOR, never a level: a repo already granted higher is left alone. Fail closed: a
     grant this sweep cannot rank is skipped, never read as "nothing" and overwritten.
-    `protected` names the per-student repos (discovery.student_repo_names): they take the
-    READ floor whatever `cohort` says, so a mis-told tier can under-grant a course org but
-    can never hand instructors push on a student's submission or gradebook. Archived repos
-    are skipped (GitHub refuses the PUT).
+    `tier` and `protected` are `faculty_floor`'s. Archived repos are skipped (GitHub
+    refuses the PUT).
 
     Cost: `2 * ceil(N/100)` GETs for a converged org; the FIRST sweep of an unconverged
     org is one PUT per missing grant (a 300-repo cohort: ~600 sequential PUTs, which may
@@ -226,27 +235,22 @@ def converge_faculty_access(
             log(f"  (no {team} team in {org} yet - faculty access not converged)")
             continue
         for name in live:
-            floor = (
-                FACULTY_READ_ACCESS
-                if name in protected
-                else faculty_floor(name, cohort)
-            )[team]
-            if name in have:
-                current = have[name]
-                if current is None:
-                    log(
-                        f"  ({team} holds {name} at a level this sweep cannot rank - left)"
-                    )
-                    continue
-                if _PERM_RANK[current] >= _PERM_RANK[floor]:
-                    continue
+            floor = faculty_floor(name, tier, protected)[team]
+            # "" is "the team does not hold this repo at all"; None is "it holds it at a
+            # level this sweep cannot rank", which is left exactly as it is.
+            current = have.get(name, "")
+            if current is None:
+                log(f"  ({team} holds {name} at a level this sweep cannot rank - left)")
+                continue
+            if current and _PERM_RANK[current] >= _PERM_RANK[floor]:
+                continue
             if grant_team_repo_access(org, team, name, floor):
                 log_ok(f"{team} -> {floor} on {name}")
                 changed += 1
     return changed
 
 
-def converge_topics(org: str, repos: list[dict], cohort: bool) -> int:
+def converge_topics(org: str, repos: list[dict], tier: str | None) -> int:
     """Stamp the machinery topics missing from a COHORT org's per-student repos.
 
     `submission` (plus the template's own name) on `<template>-<handle>`, `gradebook` on
@@ -260,13 +264,14 @@ def converge_topics(org: str, repos: list[dict], cohort: bool) -> int:
 
     ADDITIVE, and only where something is missing: the PUT replaces the whole topic list,
     so whatever else a repo carries is read off the listing and written back with it, and
-    a repo already carrying its topics costs no call at all. Course orgs are skipped -
-    they have neither repo kind.
+    a repo already carrying its topics costs no call at all. Only a listing that says
+    "cohort" is swept: a course org has neither repo kind, and an unplaceable one is not
+    worth a PATCH per repo on a guess.
 
     Costs no reads (the caller's listing carries `topics` and `isTemplate`) and is never
     fatal: set_repo_topics logs its own failure, and this returns the count so a caller
     that reports failures can include it."""
-    if not cohort:
+    if tier != "cohort":
         return 0
     derived = classify_repos(repos)
     failures = 0
