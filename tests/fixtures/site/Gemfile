@@ -1,0 +1,11 @@
+# The jekyll-contract job's gems (.github/workflows/ci.yml).
+#
+# Plain jekyll + kramdown, deliberately NOT the github-pages gem: this build proves the
+# course templates in templates/site/ compile against the front matter site.py writes, and
+# github-pages pins an old Jekyll and drags in a metadata plugin that refuses to build
+# without a repo to attribute the site to. The theme is not fetched either - the build is
+# offline (see the fixture's _config.offline.yml).
+source "https://rubygems.org"
+
+gem "jekyll", "~> 4.3"
+gem "kramdown-parser-gfm", "~> 1.1"

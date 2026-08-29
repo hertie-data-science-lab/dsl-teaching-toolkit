@@ -1,4 +1,4 @@
-"""Pure content transforms in site.py - the logic with real edge cases.
+"""Pure content transforms behind the two websites - the logic with real edge cases.
 
 The headline invariant: a PUBLIC course-site entry must never link into a private repo
 (github.com / raw.githubusercontent), only site-relative paths. reading-list mode must
@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
-from dsl_course import site, utils
+from dsl_course import gh_contents, public_site, repos, schedule_plan, site, site_repo
 
 
 def test_semester_label():
@@ -24,8 +24,8 @@ def test_semester_label():
 
 
 def test_slug():
-    assert site._slug("MidTerm Exam") == "midterm-exam"
-    assert site._slug("") == "exam"
+    assert site_repo.slug("MidTerm Exam") == "midterm-exam"
+    assert site_repo.slug("") == "exam"
 
 
 def test_exam_entry_date_only_keeps_the_nine_am_placeholder():
@@ -56,14 +56,14 @@ _PEOPLE_META = {
 
 def test_people_yaml_cohort_includes_tas():
     # The cohort site reads its own people.yml and renders instructors AND TAs.
-    out = site._people_yaml("Some-Cohort-f2026", _PEOPLE_META, edit_at="people.yml")
+    out = site_repo.people_yaml("Some-Cohort-f2026", _PEOPLE_META, edit_at="people.yml")
     assert "Prof. Jane" in out
     assert "Alex TA" in out
 
 
 def test_people_yaml_course_site_drops_tas():
     # The multi-year open-courseware site shows instructors only - TAs are cohort-only.
-    out = site._people_yaml(
+    out = site_repo.people_yaml(
         "Some-Course", _PEOPLE_META, edit_at="dsl-course.yml", include_tas=False
     )
     assert "Prof. Jane" in out
@@ -74,11 +74,11 @@ def test_people_yaml_course_site_drops_tas():
 def test_people_yaml_header_says_it_is_generated_and_where_to_edit(monkeypatch):
     # An instructor edited the generated file and the next sync overwrote him. Both modes
     # - declared block and team fallback - must say so and name the real source file.
-    declared = site._people_yaml(
+    declared = site_repo.people_yaml(
         "Some-Cohort-f2026", _PEOPLE_META, edit_at="Cohort/classroom-config/people.yml"
     )
-    monkeypatch.setattr(site, "_team_people", lambda org, team: [])
-    fallback = site._people_yaml(
+    monkeypatch.setattr(site_repo, "_team_people", lambda org, team: [])
+    fallback = site_repo.people_yaml(
         "Some-Course",
         {},
         edit_at="the `people:` block of Course/.github/dsl-course.yml",
@@ -111,7 +111,7 @@ def test_people_yaml_passes_every_declared_display_field_through():
             ]
         }
     }
-    out = site._people_yaml("Some-Cohort-f2026", meta, edit_at="people.yml")
+    out = site_repo.people_yaml("Some-Cohort-f2026", meta, edit_at="people.yml")
     assert 'title: "Professor of Things"' in out
     assert 'office_hours: "Tue 14:00, Room 3.21"' in out
     assert 'profile_pic: "j.jpg"' in out  # `photo` renamed to the theme's key
@@ -122,7 +122,7 @@ def test_people_yaml_passes_every_declared_display_field_through():
 
 def test_set_config_replaces_only_the_named_key():
     cfg = 'course_name: "old"\ncourse_code: "X"\n'
-    out = site._set_config(cfg, "course_name", "Deep Learning")
+    out = site_repo._set_config(cfg, "course_name", "Deep Learning")
     assert 'course_name: "Deep Learning"' in out
     assert 'course_code: "X"' in out  # untouched
 
@@ -132,7 +132,7 @@ def test_reading_list_md_inlines_text_lists_binaries_by_name(tmp_path):
     wk.mkdir()
     (wk / "READINGS.md").write_text("# Session 1\n- Smith 2020, ch.1")
     (wk / "paper.pdf").write_bytes(b"%PDF-1.4 copyrighted bytes")
-    md = site._reading_list_md(wk)
+    md = public_site._reading_list_md(wk)
     assert "Smith 2020" in md  # citation text is published
     assert "- paper.pdf" in md  # the PDF is named...
     assert "%PDF" not in md  # ...but its bytes are NOT
@@ -142,7 +142,7 @@ def test_public_links_are_site_relative(tmp_path):
     wk = tmp_path / "lectures"
     wk.mkdir()
     (wk / "01 intro.pdf").write_bytes(b"x")
-    links = site._public_links(
+    links = public_site._public_links(
         wk, "/public-materials/course-materials-f2026/session-1/lectures"
     )
     assert len(links) == 1
@@ -154,7 +154,7 @@ def test_public_links_are_site_relative(tmp_path):
 
 
 def test_public_lecture_entry_reading_list_mode_has_no_links():
-    e = site._public_lecture_entry("1", date(2025, 1, 1), [], "- Smith 2020")
+    e = public_site._public_lecture_entry("1", date(2025, 1, 1), [], "- Smith 2020")
     assert "links: []" in e
     # The citation text rides the front matter, not the body: both sites then feed the
     # theme's Materials layout from one field, and it needs no `{% raw %}` fence.
@@ -178,7 +178,7 @@ def test_lecture_entry_labels_links_by_repo_or_subpath():
         entry = site._lecture_entry(
             "Cohort-f2026",
             "1",
-            site._PlannedRow(when=date(2026, 9, 7)),
+            schedule_plan.PlannedRow(when=date(2026, 9, 7)),
             [("labs", "", "01_intro"), ("materials", "lectures", "01_intro")],
         )
     assert "https://x/1" in entry and "https://x/2" in entry
@@ -189,7 +189,7 @@ def test_lecture_entry_labels_links_by_repo_or_subpath():
 def test_public_lecture_entry_actual_readings_mode_links_are_local():
     lec = [("s.pdf", "/public-materials/m/session-1/lectures/s.pdf")]
     rds = [("r.pdf", "/public-materials/m/session-1/readings/r.pdf")]
-    e = site._public_lecture_entry(
+    e = public_site._public_lecture_entry(
         "1", date(2025, 1, 1), [("lectures", lec), ("readings", rds)], ""
     )
     assert "lecture - s.pdf" in e and "reading - r.pdf" in e
@@ -199,7 +199,7 @@ def test_public_lecture_entry_actual_readings_mode_links_are_local():
 def test_public_lecture_entry_renders_a_lab_row_as_its_own_type():
     # Same split as the cohort site: the labs section is its own row, so the theme's labs
     # page finds it and the session row doesn't list it twice.
-    e = site._public_lecture_entry(
+    e = public_site._public_lecture_entry(
         "2",
         date(2025, 1, 1),
         [("labs", [("lab.ipynb", "/public-materials/m/session-2/labs/lab.ipynb")])],
@@ -211,18 +211,15 @@ def test_public_lecture_entry_renders_a_lab_row_as_its_own_type():
     assert 'name: "lab - lab.ipynb"' in e
 
 
-def test_row_kind_and_file_split_labs_from_lectures():
-    assert site._row_kind("labs") == "lab"
-    for section in ("lectures", "readings", "faq", ""):
-        assert site._row_kind(section) == "lecture"
-    assert site._row_file("2", "lab") == "lab-02.md"
-    assert site._row_file("2", "lecture") == "session-02.md"
+def test_row_file_splits_labs_from_lectures():
+    assert site_repo.row_file("2", "lab") == "lab-02.md"
+    assert site_repo.row_file("2", "lecture") == "session-02.md"
 
 
 def test_public_lecture_entry_labels_any_discovered_section():
     # Sections are free-form directory names - a repo with labs/ and faq/ must get
     # labelled links, not silently nothing (the site used to look only at lectures/).
-    e = site._public_lecture_entry(
+    e = public_site._public_lecture_entry(
         "3",
         date(2025, 1, 1),
         [
@@ -236,10 +233,10 @@ def test_public_lecture_entry_labels_any_discovered_section():
 
 
 def test_singular_strips_only_a_real_trailing_s():
-    assert site._singular("lectures") == "lecture"
-    assert site._singular("labs") == "lab"
-    assert site._singular("faq") == "faq"  # was "fa"
-    assert site._singular("s") == "s"  # never empty
+    assert site_repo._singular("lectures") == "lecture"
+    assert site_repo._singular("labs") == "lab"
+    assert site_repo._singular("faq") == "faq"  # was "fa"
+    assert site_repo._singular("s") == "s"  # never empty
 
 
 _TREE = "\n".join(  # noqa: FLY002 - a list of paths reads better than one long f-string
@@ -265,7 +262,7 @@ def test_session_files_lists_nested_files_by_path(monkeypatch):
     # release.py copytrees a session folder wholesale, so nested files ARE released -
     # a non-recursive listing dropped them from the site entirely.
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", _tree_gh)
+    monkeypatch.setattr(gh_contents, "gh", _tree_gh)
     pairs = site._session_files("Cohort-f2026", "materials", "lectures", "03_week-3")
     assert [n for n, _ in pairs] == [
         "handouts/deep/further.md",  # sorted by path, so nested first
@@ -282,7 +279,7 @@ def test_session_files_lists_nested_files_by_path(monkeypatch):
 
 def test_session_files_root_shape_and_other_sessions_excluded(monkeypatch):
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", _tree_gh)
+    monkeypatch.setattr(gh_contents, "gh", _tree_gh)
     # subpath="" - the release landed at the repo root (default destination)
     assert site._session_files("Cohort-f2026", "lectures", "", "01_intro") == [
         (
@@ -302,7 +299,7 @@ def test_repo_tree_is_fetched_once_per_repo(monkeypatch):
         return (0, _TREE)
 
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", counting_gh)
+    monkeypatch.setattr(gh_contents, "gh", counting_gh)
     for folder in ("03_week-3", "04_week-4", "03_week-30"):
         assert site._session_files("Cohort-f2026", "materials", "lectures", folder)
     assert len(calls) == 1
@@ -311,7 +308,9 @@ def test_repo_tree_is_fetched_once_per_repo(monkeypatch):
 def test_session_files_absent_repo_is_empty(monkeypatch):
     # A genuine 404 (repo/tree absent) is empty - gh's real wording, case included.
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    monkeypatch.setattr(
+        gh_contents, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)")
+    )
     assert site._session_files("Cohort-f2026", "materials", "lectures", "03_x") == []
 
 
@@ -319,7 +318,9 @@ def test_session_files_real_failure_raises(monkeypatch):
     # A non-404 failure must NOT be read as "no files" (which republishes the site with
     # every material link stripped) - it raises instead.
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: HTTP 500 Server Error"))
+    monkeypatch.setattr(
+        gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 500 Server Error")
+    )
     with pytest.raises(RuntimeError, match="could not read the file tree"):
         site._session_files("Cohort-f2026", "materials", "lectures", "03_x")
 
@@ -436,7 +437,7 @@ def test_the_allowlist_never_leaves_a_public_file_unreachable(tmp_path):
     (tmp_path / "deck.html").write_text("x")
     (tmp_path / "notes.pdf").write_text("x")
     (tmp_path / "libs" / "style.css").write_text("x")
-    names = [n for n, _ in site._public_links(tmp_path, "/m/session-1")]
+    names = [n for n, _ in public_site._public_links(tmp_path, "/m/session-1")]
     assert names == [
         "deck.html",
         "notes.pdf",
@@ -451,7 +452,7 @@ def test_public_links_lists_nested_files_when_nothing_sits_at_the_root(tmp_path)
     (tmp_path / "handouts").mkdir()
     (tmp_path / "handouts" / "notes.pdf").write_text("x")
     (tmp_path / "handouts" / "extra.pdf").write_text("x")
-    names = [n for n, _ in site._public_links(tmp_path, "/m/session-1")]
+    names = [n for n, _ in public_site._public_links(tmp_path, "/m/session-1")]
     assert names == ["handouts/extra.pdf", "handouts/notes.pdf"]
 
 
@@ -473,7 +474,7 @@ def test_block_survives_an_indented_first_line():
     # Without the explicit `|2` indicator YAML would take the block's indentation from its
     # first line, and every following line would look like the end of the block - breaking
     # the whole file, not just this field.
-    out = site._block("reading_list", "   - indented\n- flush")
+    out = site_repo.block("reading_list", "   - indented\n- flush")
     assert yaml.safe_load(out)["reading_list"] == "   - indented\n- flush\n"
 
 
@@ -481,7 +482,7 @@ def test_block_keeps_liquid_verbatim_and_expands_tabs():
     # Front matter is data, not a template, so no `{% raw %}` fence is needed here.
     text = "a\tb\n{{ site.x }} {% if y %}"
     assert (
-        yaml.safe_load(site._block("k", text))["k"]
+        yaml.safe_load(site_repo.block("k", text))["k"]
         == "a   b\n{{ site.x }} {% if y %}\n"
     )
 
@@ -740,20 +741,20 @@ def test_index_gives_a_non_ordinal_directory_its_own_section(monkeypatch):
 
 
 def test_theme_pages_split_readings_out_only_where_there_is_an_index():
-    cohort = site._theme_pages(cohort=True)
+    cohort = site_repo.theme_pages(cohort=True)
     assert "layout: readings" in cohort["readings.md"]
     assert "layout: materials" in cohort["materials.md"]
     assert "All Materials" in cohort["materials.md"]
     # A public course site has no cohort repos to index, so /materials/ stays the readings
     # page it has always been rather than becoming an empty catch-all.
-    public = site._theme_pages(cohort=False)
+    public = site_repo.theme_pages(cohort=False)
     assert "readings.md" not in public
     assert "layout: readings" in public["materials.md"]
     assert "permalink: /materials/" in public["materials.md"]
 
 
 def test_every_page_states_its_own_access_rule():
-    cohort = site._theme_pages(cohort=True)
+    cohort = site_repo.theme_pages(cohort=True)
     # Each page's gate is its own sentence, because they genuinely differ: readings are a
     # public citation list over gated files, the rest are gated outright.
     # auditors read released materials but get no assignments, so the three materials
@@ -766,7 +767,7 @@ def test_every_page_states_its_own_access_rule():
     assert "auditors" not in cohort["assignments.md"]
     # The public open-courseware site publishes the same files on purpose, so it claims no
     # gate anywhere.
-    for page in site._theme_pages(cohort=False).values():
+    for page in site_repo.theme_pages(cohort=False).values():
         assert "enrolled" not in page
 
 
@@ -775,15 +776,17 @@ def test_no_nav_tab_can_point_at_a_page_this_site_does_not_get():
     # the public site cannot ship a Readings tab pointing at a page only cohort sites get.
     for cohort in (True, False):
         tabs = {
-            i["url"] for i in yaml.safe_load(site._nav_yaml(cohort=cohort))["items"]
+            i["url"] for i in yaml.safe_load(site_repo.nav_yaml(cohort=cohort))["items"]
         }
         generated = {
-            f"/{f.removesuffix('.md')}/" for f in site._theme_pages(cohort=cohort)
+            f"/{f.removesuffix('.md')}/" for f in site_repo.theme_pages(cohort=cohort)
         }
         assert generated <= tabs  # every generated page has a tab
         # ...and every remaining tab is one the theme provides rather than generates.
         assert tabs - generated == {"/", "/schedule/"}
-    public = {i["url"] for i in yaml.safe_load(site._nav_yaml(cohort=False))["items"]}
+    public = {
+        i["url"] for i in yaml.safe_load(site_repo.nav_yaml(cohort=False))["items"]
+    }
     assert "/readings/" not in public  # a cohort-only page, so a cohort-only tab
 
 
@@ -791,37 +794,13 @@ def test_nav_order_does_not_depend_on_a_string_tie_break():
     # Assignments used to be pinned to integer position 5, which tied with the fourth
     # generated page - so the tab order came down to comparing "/assignments/" against
     # "/materials/". It now follows the page it belongs behind.
-    names = [i["name"] for i in yaml.safe_load(site._nav_yaml(cohort=True))["items"]]
+    names = [
+        i["name"] for i in yaml.safe_load(site_repo.nav_yaml(cohort=True))["items"]
+    ]
     # Assignments is a generated page now, so its position comes from the page table like
     # every other - no integer slots, nothing to tie.
     assert names.index("Assignments") == names.index("Readings") + 1
     assert names.index("All Materials") == names.index("Assignments") + 1
-
-
-# ------------------------------------------------- the Hertie syllabus shape, rendered
-def test_demote_headings_nests_a_reading_list_under_the_session_heading():
-    # A reading file written in the Hertie syllabus shape: `# Session N readings`, then
-    # `## Required Readings` / `## Optional Readings`. At their written levels those
-    # outrank the page's own <h2>Session N, which is backwards.
-    src = "# Session 1 readings\n\n## Required Readings\n\n- Gill (2015)\n\n## Optional Readings\n"
-    out = site._demote_headings(src)
-    assert "### Session 1 readings" in out
-    assert "#### Required Readings" in out and "#### Optional Readings" in out
-
-
-def test_demote_headings_leaves_code_and_prose_alone():
-    # A `#` comment inside a fence is not a heading, and deepening it would rewrite the
-    # example the faculty member wrote.
-    src = "# Real heading\n\n```bash\n# install first\ncd x\n```\n\n#hashtag not a heading\n"
-    out = site._demote_headings(src)
-    assert "### Real heading" in out
-    assert "\n# install first\n" in out
-    assert "#hashtag not a heading" in out
-
-
-def test_demote_headings_clamps_at_six():
-    assert site._demote_headings("##### deep").startswith("###### deep")
-    assert site._demote_headings("###### deepest").startswith("###### deepest")
 
 
 def test_describe_keeps_the_paragraphs_of_a_multi_line_objective():
@@ -930,31 +909,31 @@ def test_a_renamed_org_fails_the_sync_instead_of_no_opping(monkeypatch):
     # Renaming an org leaves `<old>.github.io` behind, demoted to a project page. The
     # expected site repo is then absent, which used to read as "never opted into a site"
     # - green forever while the published site rotted.
-    monkeypatch.setattr(site, "repo_exists", lambda org, name: False)
+    monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: False)
     monkeypatch.setattr(
-        site, "list_org_repos", lambda org: _repos("welcome", "OLD-NAME.github.io")
+        site_repo, "list_org_repos", lambda org: _repos("welcome", "OLD-NAME.github.io")
     )
     built: list[object] = []
-    assert site._sync_site_repo("new-name", lambda wd: built.append(wd)) == 1
+    assert site_repo.sync_site_repo("new-name", lambda wd: built.append(wd)) == 1
     assert built == []
 
 
 def test_an_org_that_never_had_a_site_is_still_a_quiet_noop(monkeypatch):
-    monkeypatch.setattr(site, "repo_exists", lambda org, name: False)
+    monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: False)
     monkeypatch.setattr(
-        site, "list_org_repos", lambda org: _repos("welcome", ".github")
+        site_repo, "list_org_repos", lambda org: _repos("welcome", ".github")
     )
-    assert site._sync_site_repo("new-name", lambda wd: None) == 0
+    assert site_repo.sync_site_repo("new-name", lambda wd: None) == 0
 
 
 def test_a_failed_repo_listing_is_not_read_as_no_site(monkeypatch):
-    monkeypatch.setattr(site, "repo_exists", lambda org, name: False)
+    monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: False)
 
     def boom(org):
         raise RuntimeError(f"could not list repos in {org}")
 
-    monkeypatch.setattr(site, "list_org_repos", boom)
-    assert site._sync_site_repo("new-name", lambda wd: None) == 1
+    monkeypatch.setattr(site_repo, "list_org_repos", boom)
+    assert site_repo.sync_site_repo("new-name", lambda wd: None) == 1
 
 
 # ------------------------------------------------------- the publication denylist
@@ -985,14 +964,14 @@ def test_a_denylisted_file_is_never_linked_from_a_public_page(tmp_path):
     (tmp_path / "deck.html").write_text("slides")
     (tmp_path / "grading.yml").write_text("points: 10")
     (tmp_path / ".env").write_text("KEY=live")
-    links = site._public_links(tmp_path, "/m/session-1/lectures")
+    links = public_site._public_links(tmp_path, "/m/session-1/lectures")
     assert [name for name, _ in links] == ["deck.html"]
 
 
 def test_the_denylist_matches_by_name_at_any_depth_and_ignores_case():
-    assert utils.has_denied_component("labs/01_lab/Solution/answers.ipynb")
-    assert utils.has_denied_component("tests/test_x.py")
-    assert utils.has_denied_component("a/.env.local")
+    assert repos.has_denied_component("labs/01_lab/Solution/answers.ipynb")
+    assert repos.has_denied_component("tests/test_x.py")
+    assert repos.has_denied_component("a/.env.local")
     # ...and does not swallow a file that merely contains a denylisted word.
-    assert not utils.has_denied_component("labs/01_lab/solutions-discussion.md")
-    assert not utils.has_denied_component("labs/testing-guide.md")
+    assert not repos.has_denied_component("labs/01_lab/solutions-discussion.md")
+    assert not repos.has_denied_component("labs/testing-guide.md")

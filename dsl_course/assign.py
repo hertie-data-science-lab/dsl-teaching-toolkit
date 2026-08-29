@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import shutil
 import sys
 import tempfile
@@ -38,28 +37,21 @@ from pathlib import Path
 
 import yaml
 
-from . import roster, sync_teams, teams
+from . import roster, schedule, site, sync_teams, teams
+from .access import grant_faculty_read_access, grant_team_repo_access
+from .collect import assignment_is_group
+from .course import CONFIG_REPO, SOLUTION_BRANCH, assignment_slug
 from .discovery import ASSIGNMENT_TEMPLATE_TOPIC
-from .utils import (
-    GIT_ENV,
+from .gh_contents import put_file
+from .ghcli import GIT_ENV, gh, git
+from .log import log, log_err, log_ok, log_skip, log_step, log_verbose
+from .repos import (
     add_collaborator,
     generate_from_template,
-    gh,
-    git,
-    grant_faculty_read_access,
-    grant_team_repo_access,
-    log,
-    log_err,
-    log_ok,
-    log_skip,
-    log_step,
-    log_verbose,
-    put_file,
     repo_exists,
     set_repo_topics,
 )
 
-SOLUTION_BRANCH = "solution"
 # Fire-once sentinel for the SCHEDULED solution push, in classroom-config. Needed because
 # `due_releases` is cumulative by design - a handout release re-fires every tick so a late
 # onboarder still gets their repo - and while re-probing a repo is cheap, push_solution
@@ -71,12 +63,6 @@ SOLUTION_BRANCH = "solution"
 # at all, and nothing would ever notice. Deleting the file re-releases it.
 SOLUTION_RECORD_DIR = "solutions"
 SOLUTION_DIR = "solution"
-_GIT_ENV = GIT_ENV
-
-
-def assignment_slug(template: str) -> str:
-    """assignment-1-f2026 -> assignment-1 (drop a trailing cohort suffix)."""
-    return re.sub(r"-[fs]\d{4}$", "", template)
 
 
 def _wait_for_content(
@@ -197,11 +183,11 @@ def push_solution(cohort_org: str, repo: str, sol_dir: Path) -> bool:
         if gh("repo", "clone", f"{cohort_org}/{repo}", str(wd), "--", "-q")[0] != 0:
             return False
         shutil.copytree(sol_dir, wd / SOLUTION_DIR, dirs_exist_ok=True)
-        git("-C", str(wd), *_GIT_ENV, "add", "-A")
+        git("-C", str(wd), *GIT_ENV, "add", "-A")
         code, _ = git(
             "-C",
             str(wd),
-            *_GIT_ENV,
+            *GIT_ENV,
             "commit",
             "-q",
             "--no-verify",
@@ -210,7 +196,7 @@ def push_solution(cohort_org: str, repo: str, sol_dir: Path) -> bool:
         )
         if code != 0:
             return True  # already present, nothing new
-        return git("-C", str(wd), *_GIT_ENV, "push", "-q", "origin", "HEAD")[0] == 0
+        return git("-C", str(wd), *GIT_ENV, "push", "-q", "origin", "HEAD")[0] == 0
 
 
 def provision_one(
@@ -404,8 +390,6 @@ def solution_released(cohort_org: str, slug: str) -> bool:
     Read by the scheduler, so a passed `solution_datetime` fires exactly once. The manual
     Release assignment path does NOT consult it - an operator ticking include_solution is
     asking for it now, and push_solution is an idempotent overwrite anyway."""
-    from .roster import CONFIG_REPO
-
     code, _ = gh(
         "api",
         f"repos/{cohort_org}/{CONFIG_REPO}/contents/{solution_record_path(slug)}",
@@ -422,8 +406,6 @@ def record_solution_released(cohort_org: str, slug: str, repos: int) -> bool:
     re-run, or the students it missed would never receive the solution at all. Returns
     whether the record actually landed: a marker that did not is what makes every later
     tick re-clone every submission repo to re-push a solution they already have."""
-    from .roster import CONFIG_REPO
-
     return put_file(
         cohort_org,
         CONFIG_REPO,
@@ -456,8 +438,6 @@ def provision_all(
         log_err("master-org and cohort-org must differ.")
         return 1
     if group is None:
-        from .collect import assignment_is_group
-
         # schedule.yml's assignments.<slug>.type wins; grading.yml is the fallback.
         group = assignment_is_group(master_org, cohort_org, template)
         if group:
@@ -484,8 +464,6 @@ def provision_all(
     # They differ exactly when `cohort_dest_repo` is set. Keying the lookup or the team slug
     # on the name then meant no teams found at all, or a team granted on the repo under a
     # slug that Sync membership reconciles a DIFFERENT team for.
-    from . import schedule
-
     found = schedule.entry_for_repo(schedule.load(cohort_org), template)
     key = found[0] if found else assignment_slug(template)
     slug = schedule.cohort_name(*found) if found else key
@@ -591,10 +569,8 @@ def provision_all(
     # fills the field the dispatcher didn't. record_handout keys on the schedule KEY, not the
     # cohort-side name: when `cohort_dest_repo` is set the two differ, and passing the name
     # made it miss the real entry and append a bogus duplicate block (dropping its due date).
-    from . import schedule
 
     schedule.record_handout(cohort_org, key)
-    from . import site
 
     # site.sync_site now RAISES on a genuine tree/team read failure (post-PR2), and a config
     # file that doesn't parse raises yaml.YAMLError - which is NOT a RuntimeError. The repos

@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from dsl_course import schedule
+from dsl_course import course, schedule
 from dsl_course.schedule import (
     AssignmentEntry,
     Deploy,
@@ -676,7 +676,7 @@ def test_record_handout_round_trips_through_the_parser(monkeypatch):
     monkeypatch.setattr(S, "get_file_content", lambda org, repo, path: store["text"])
     writes = []
     monkeypatch.setattr(
-        "dsl_course.utils.put_file",
+        "dsl_course.schedule.put_file",
         lambda org, repo, path, content, msg: writes.append(content.decode()) or True,
     )
     S.record_handout("Cohort-f2026", "assignment-1", "2026-09-22T14:05")
@@ -1257,11 +1257,10 @@ def test_an_absent_optional_value_is_never_flagged():
     )
 
 
-def test_schedule_and_utils_share_one_date_coercion():
+def test_schedule_and_course_share_one_date_coercion():
     # The two implementations must not drift: schedule re-exports the canonical one.
-    from dsl_course import utils
 
-    assert schedule._coerce_date is utils.coerce_date
+    assert schedule._coerce_date is course.coerce_date
 
 
 # ------------------------------------------------ _insert_handout indentation robustness
@@ -1333,7 +1332,7 @@ def test_record_handout_says_so_loudly_when_the_file_shape_defeats_the_edit(
     flow = "assignments: {assignment-1: {due_datetime: 2026-10-13}}\n"
     monkeypatch.setattr(S, "get_file_content", lambda org, repo, path: flow)
     monkeypatch.setattr(
-        "dsl_course.utils.put_file",
+        "dsl_course.schedule.put_file",
         lambda *a, **k: pytest.fail("must not write into a shape it cannot parse"),
     )
 
@@ -1353,7 +1352,7 @@ def test_record_handout_says_so_loudly_when_the_write_itself_fails(monkeypatch, 
 
     good = "assignments:\n  assignment-1:\n    due_datetime: 2026-10-13\n"
     monkeypatch.setattr(S, "get_file_content", lambda org, repo, path: good)
-    monkeypatch.setattr("dsl_course.utils.put_file", lambda *a, **k: False)
+    monkeypatch.setattr("dsl_course.schedule.put_file", lambda *a, **k: False)
 
     S.record_handout("Cohort-f2026", "assignment-1", "2026-09-22T14:05")
 

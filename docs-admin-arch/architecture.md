@@ -176,7 +176,7 @@ faculty / instructors / admin teams`"] -->|"write/admin on"| cr["central repo"] 
   no merge across cohorts. Who-to-declare-where:
   [access-reference](../docs/reference/access-reference.md); the runbook for changing it:
   [05 Manage the teaching team](../docs/05-manage-teaching-team.md).
-- Each person entry takes optional `start`/`end` ISO dates (`utils.active_today`), applied by
+- Each person entry takes optional `start`/`end` ISO dates (`course.active_today`), applied by
   `desired_team_members` to **both** flows. Since every reconcile is a full add-and-remove, a
   lapsed `end` prunes the member with no manual step. An *edit* to `people.yml` /
   `students.csv` / `teams.csv` dispatches Sync membership on the push; a *date* rolling over
@@ -247,7 +247,7 @@ it. A path escaping the clone is refused before any file is touched.
 one private `<slug>-<handle>` repo per onboarded, **enrolled** student *from the frozen copy*.
 Solutions live on the course template's `solution` branch and are never shipped unless
 `include_solution` is ticked. Whether a release fans out per student or per team resolves
-through **one** precedence chain, `collect.resolve_is_group`: the workflow's `group` checkbox
+through **one** precedence chain, `course.resolve_is_group`: the workflow's `group` checkbox
 (force) → the cohort's `assignments.<slug>.type` in schedule.yml → the template's own
 `grading.yml` `type:` (the design-time default the scaffold wrote) → individual. Read-side only -
 the cohort setting never writes back into the course org. Group repos are granted to the
@@ -437,15 +437,19 @@ non-bot commit sits on it - a reviewer's correction is never clobbered.
 ## Convergence - the daily self-refresh
 
 Seeded workflow YAML is frozen in each org at seed time, while the engine it calls is always
-checked out from central `release` (`central.CENTRAL_REF`). A merge to `main` changes nothing
-in any live course: promoting it to `release` is a deliberate second act, and a rollback is a
-revert on `release`, which every org picks up on its next run with no re-seed. Engine changes
-therefore land on the first press after a promotion; *workflow shape* changes land because
-every course org re-seeds itself nightly.
+checked out from central at **that org's** ref - `central_ref:` in its course org's
+`.github/dsl-course.yml`, defaulting to `central.CENTRAL_REF` (`release`); cohorts inherit
+their course org's. A merge to `main` changes nothing in any live course: promoting it to
+`staging` (the demo org) and then `release` is a deliberate second act, and a rollback is a
+revert on `main` promoted forward, which every org picks up on its next run with no re-seed.
+Engine changes therefore land on the first press after a promotion; *workflow shape* changes
+land because every course org re-seeds itself nightly - and the Promote workflow dispatches
+that refresh rather than leaving it to the cron. See
+[central-admin.md](central-admin.md#deploying-the-toolkit).
 
 ```mermaid
 flowchart LR
-  c["`central release
+  c["`central, at the org's central_ref
 dsl-teaching-toolkit`"]
   c -->|"checked out by every run"| eng["engine - current on every press"]
   c -.->|"`Refresh actions
@@ -495,7 +499,7 @@ file · tree · team · repo list`"]
   d -->|"config present but empty"| ok["reconcile to empty · legitimate"]
 ```
 
-- One helper, `utils.is_missing_resource`, owns the 404-vs-failure split; `get_file_content`,
+- One helper, `ghcli.is_missing_resource`, owns the 404-vs-failure split; `get_file_content`,
   `repo_tree`, `load_yaml_config` and `delete_file` all go through it. A returned `None`/`[]`/`{}`
   therefore means *genuinely absent*, never *couldn't read*. Before this, a rate limit could
   republish a cohort site with every session row deleted, green.
@@ -623,7 +627,7 @@ failing the daily cron forever.
 ## Course website (open courseware)
 
 A course can **optionally** publish a **public** site at `<course-org>.github.io` via the
-**Publish course website** action (`site.sync_public_site`). It reuses the same
+**Publish course website** action (`public_site.sync_public_site`). It reuses the same
 `course-website-template` + `scaffold_site`, but differs from the cohort site in one decisive
 way: the cohort site *links* to files in private repos (404 for non-members, by design),
 whereas the course `course-materials-*` repos are private too, so the public site **hosts the
@@ -706,8 +710,9 @@ Self-contained - workflows and their Python implementation both live in this rep
   - `roster` / `teams` - read `students.csv` / `teams.csv`.
   - `status` - the **Check cohort setup** per-cohort checklist.
   - `list_orgs` - enumerate DSL course and cohort orgs by topic; drives `refresh-inventory.yml`.
-  - `utils` - shared `gh`/git helpers with rate-limit backoff, and the fail-loud read contract
-    (`is_missing_resource`) plus the prune guard (`reconcile_team_members`).
+  - `ghcli` - the shared `gh`/git subprocess wrappers, their timeouts and rate-limit
+    backoff, and the fail-loud read contract (`is_missing_resource`).
+  - `gh_teams` - team reads/writes, including the prune guard (`reconcile_team_members`).
 - `templates/` - the files bootstrap seeds into a fresh org, verbatim from disk
   (`welcome.template`), one subdirectory per destination:
   - `welcome/` - the cohort onboarding + team-formation workflows and their issue forms.
@@ -720,3 +725,8 @@ Self-contained - workflows and their Python implementation both live in this rep
   - `course/` - the course org's `.github/dsl-course.yml` (identity + the `people:` block,
     assembled from the `people-*.yml` fragments).
   - `cohort/` - a cohort org's `.github/dsl-course.yml` pointer back to its course org.
+  - `site/` - the course-specific Jekyll layouts, includes and `_sass/_course.scss` that
+    the sync writes into every `<org>.github.io` (`site_repo.site_templates`).
+    Not seeded once like the rest of this directory - converged, so a rendering change
+    reaches every live site. The generic chrome stays in `dsl-jekyll-theme`, pinned at
+    `site_repo.THEME_REF`.

@@ -39,6 +39,7 @@ This is setup once per course - it serves every future cohort. Per-semester setu
    | `course_code` | short code | e.g. `E1234` |
    | `set_secret` | `true` (default) | propagates `DSL_BOT_TOKEN` - **don't set the secret by hand** |
    | `admin` | *your handle* | adds you to `course-admin` so you can run the course workflows |
+   | `central_ref` | `release` (default) | which toolkit tier this course runs - leave it unless you are setting up the demo course |
 
    > This action is safe to re-run in case of need. 
    

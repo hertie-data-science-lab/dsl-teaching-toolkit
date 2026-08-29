@@ -1,0 +1,23 @@
+{%- comment -%}
+Stub for the shared theme's own `default` layout. The fixture build is offline (see
+_config.offline.yml), so the theme is not fetched; this is the minimum chrome the course
+layouts need to render inside. Enough of the site keys to catch a missing one.
+{%- endcomment -%}
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{{ page.title | default: site.course_name }}</title>
+  </head>
+  <body>
+    <header class="site-header">
+      <a href="{{ site.baseurl }}/">{{ site.course_name }}</a>
+      <span>{{ site.course_semester }}</span>
+      <ul class="menu">{% for item in site.data.nav.items %}
+        <li><a href="{{ item.url | prepend: site.baseurl }}">{{ item.name }}</a></li>
+      {% endfor %}</ul>
+    </header>
+    <div class="page-content"><div class="wrapper">{{ content }}</div></div>
+    <footer class="site-footer">{{ site.address | newline_to_br }}</footer>
+  </body>
+</html>

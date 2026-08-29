@@ -6,13 +6,14 @@ silently mis-dates the whole schedule page, or hides a lab inside a lecture row.
 from __future__ import annotations
 
 from datetime import date, datetime
+from functools import cache
 from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
 
+from dsl_course import gh_contents, schedule_plan, site, site_repo
 from dsl_course import schedule as schedule_mod
-from dsl_course import site, utils
 from dsl_course.schedule import AssignmentEntry, Deploy, Event, Release, Schedule
 
 UTC = ZoneInfo("UTC")
@@ -26,100 +27,11 @@ def _no_acting_login(monkeypatch):
     """_team_people asks who the sync is authenticated as, and the real lookup shells out
     to `gh` (green on an authenticated dev box, red in tokenless CI). None excludes
     nobody, which is what every test here but the bot-card one wants."""
-    monkeypatch.setattr(site, "_acting_login", lambda: None)
+    monkeypatch.setattr(site_repo, "_acting_login", lambda: None)
 
 
 def _sched(releases: list[Release]) -> Schedule:
     return Schedule(releases=releases)
-
-
-def _row_dates(sched: Schedule) -> dict[tuple[str, str], datetime]:
-    """The dating half of `_planned_sessions` - which row happens when."""
-    return {key: row.when for key, row in site._planned_sessions(sched).items()}
-
-
-def test_session_dates_maps_folder_ordinal_and_section_to_release_when():
-    s = _sched(
-        [
-            Release(
-                "week-2",
-                datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN),
-                deploy=[
-                    Deploy("cm", "lectures/02_intro", "lectures", None),
-                    Deploy("cm", "labs/02_x", "labs", None),
-                ],
-            ),
-            Release(
-                "week-1",
-                datetime(2026, 9, 8, 14, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "lectures/01_a", "lectures", "01_a")],
-            ),
-        ]
-    )
-    sw = _row_dates(s)
-    assert sw[("2", "lecture")] == datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN)
-    assert sw[("2", "lab")] == datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN)
-    # keyed off the cohort_dest_path ordinal; a bare dest folder takes its section from
-    # cohort_dest_repo
-    assert sw[("1", "lecture")] == datetime(2026, 9, 8, 14, 0, tzinfo=BERLIN)
-
-
-def test_session_dates_date_a_lab_row_from_its_own_release():
-    # Monday's lecture and Wednesday's lab are two entries; the lab row must carry its own
-    # time rather than inheriting the (earlier) lecture's.
-    s = _sched(
-        [
-            Release(
-                "lecture-3",
-                datetime(2026, 9, 15, 10, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "lectures/03_week-3", "materials", None)],
-            ),
-            Release(
-                "lab-3",
-                datetime(2026, 9, 17, 14, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "labs/03_week-3", "materials", None)],
-            ),
-        ]
-    )
-    sw = _row_dates(s)
-    assert sw[("3", "lecture")] == datetime(2026, 9, 15, 10, 0, tzinfo=BERLIN)
-    assert sw[("3", "lab")] == datetime(2026, 9, 17, 14, 0, tzinfo=BERLIN)
-
-
-def test_session_dates_earliest_release_wins_for_a_row():
-    s = _sched(
-        [
-            Release(
-                "late",
-                datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "lectures/02_x", "lectures", None)],
-            ),
-            Release(
-                "early",
-                datetime(2026, 9, 10, 9, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "readings/02_y", "materials", None)],
-            ),
-        ]
-    )
-    # readings are lecture material, so both land on the same row - earliest wins
-    assert _row_dates(s)[("2", "lecture")] == datetime(2026, 9, 10, 9, 0, tzinfo=BERLIN)
-
-
-def test_session_dates_ignores_non_ordinal_deploys():
-    s = _sched(
-        [
-            Release(
-                "ds",
-                datetime(2026, 10, 20, 9, 30, tzinfo=BERLIN),
-                deploy=[
-                    Deploy(
-                        "data", "week7/housing.csv", "materials", "datasets/housing.csv"
-                    )
-                ],
-            ),
-        ]
-    )
-    assert _row_dates(s) == {}  # not a numbered session folder
 
 
 # A RELEASED row - non-empty sources, so these pin the released branch rather than the
@@ -131,7 +43,7 @@ RELEASED = [("materials", "lectures", "02_week-2")]
 def _row(when, **kw):
     """The plan's view of a row - what `_lecture_entry` renders from. Built here so a test
     states only the plan fields it is actually about."""
-    return site._PlannedRow(when=when, **kw)
+    return schedule_plan.PlannedRow(when=when, **kw)
 
 
 def test_lecture_entry_shows_real_time_from_a_datetime(monkeypatch):
@@ -172,30 +84,6 @@ def test_only_the_unreleased_row_carries_the_theme_flag(monkeypatch):
     )
     assert "unreleased: true" in site._lecture_entry(
         "Cohort", "2", _row(date(2026, 9, 15)), []
-    )
-
-
-def test_session_dates_use_the_event_datetime_not_the_deploy_datetime():
-    # The site announces the class; the copies may ship on their own clocks.
-    s = Schedule(
-        releases=[
-            Release(
-                "week-2",
-                datetime(2026, 9, 15, 10, 0, tzinfo=BERLIN),
-                deploy=[
-                    Deploy(
-                        "cm",
-                        "lectures/02_intro",
-                        "materials",
-                        None,
-                        deploy_datetime=datetime(2026, 9, 15, 9, 0, tzinfo=BERLIN),
-                    )
-                ],
-            )
-        ]
-    )
-    assert _row_dates(s)[("2", "lecture")] == datetime(
-        2026, 9, 15, 10, 0, tzinfo=BERLIN
     )
 
 
@@ -576,22 +464,20 @@ def _plan(
     captured: dict = {}
     monkeypatch.setattr(
         site,
-        "_sync_site_repo",
+        "sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
-    monkeypatch.setattr(site.seed, "discover_cohort_repos", lambda orgs: [])
+    monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
     monkeypatch.setattr(
-        site.seed, "discover_release_sources", lambda org, repos: list(sources)
+        site, "discover_release_sources", lambda org, repos: list(sources)
     )
-    monkeypatch.setattr(
-        site.seed, "discover_assignments", lambda org: list(assignments)
-    )
+    monkeypatch.setattr(site, "discover_assignments", lambda org: list(assignments))
     monkeypatch.setattr(
         site, "discover_handed_out_assignments", lambda org: frozenset(handed_out)
     )
-    monkeypatch.setattr(site, "_yaml_file", lambda *a: {})
+    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
     monkeypatch.setattr(site.schedule, "load", lambda org: sched)
-    monkeypatch.setattr(site, "_people_yaml", lambda *a, **k: "people: []\n")
+    monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     monkeypatch.setattr(
         site, "_session_files", files or (lambda org, repo, subpath, folder: [])
     )
@@ -599,7 +485,7 @@ def _plan(
     # folder-link URLs. Stubbed even where `_session_files` is faked: without it the fake
     # covers the file list but the branch lookup still reaches GitHub, which passes on an
     # authenticated dev box and fails in CI.
-    monkeypatch.setattr(site, "_repo_tree", lambda org, repo: ("main", ()))
+    monkeypatch.setattr(site, "_repo_tree", cache(lambda org, repo: ("main", ())))
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
     assert site.sync_site("Course-Org", "Cohort-f2026") == 0
     return captured["plan"]
@@ -653,27 +539,27 @@ def test_course_description_flows_from_course_metadata_into_config(
     captured = {}
     monkeypatch.setattr(
         site,
-        "_sync_site_repo",
+        "sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
-    monkeypatch.setattr(site.seed, "discover_cohort_repos", lambda orgs: [])
-    monkeypatch.setattr(site.seed, "discover_release_sources", lambda org, repos: [])
-    monkeypatch.setattr(site.seed, "discover_assignments", lambda org: [])
+    monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
+    monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
+    monkeypatch.setattr(site, "discover_assignments", lambda org: [])
     monkeypatch.setattr(
         site, "discover_handed_out_assignments", lambda org: frozenset()
     )
     monkeypatch.setattr(site.schedule, "load", lambda org: Schedule())
-    monkeypatch.setattr(site, "_people_yaml", lambda *a, **k: "people: []\n")
+    monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
 
-    monkeypatch.setattr(site, "_yaml_file", lambda *a: {})
+    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
     assert site.sync_site("Course-Org", "Cohort-f2026") == 0
     assert "course_description" not in captured["plan"].config
 
     monkeypatch.setattr(
-        site, "_yaml_file", lambda *a: {"course_description": "Nets, from 0."}
+        site, "yaml_file", lambda *a: {"course_description": "Nets, from 0."}
     )
     assert site.sync_site("Course-Org", "Cohort-f2026") == 0
-    cfg = site._set_config(
+    cfg = site_repo._set_config(
         'course_name: "x"\ncourse_description: "old"\ncourse_code: "y"\n',
         "course_description",
         captured["plan"].config["course_description"],
@@ -685,7 +571,7 @@ def test_course_description_flows_from_course_metadata_into_config(
 def test_set_config_writes_one_line_over_a_block_scalar():
     # A faculty `>` block in dsl-course.yml, and/or one already in _config.yml: either way
     # the result must stay valid YAML on one line, its body not stranded as loose text.
-    cfg = site._set_config(
+    cfg = site_repo._set_config(
         "course_description: >\n  an old\n  folded blurb\ncourse_code: 'y'\n",
         "course_description",
         "line one\nline two\n",
@@ -708,17 +594,17 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
     captured = {}
     monkeypatch.setattr(
         site,
-        "_sync_site_repo",
+        "sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
-    monkeypatch.setattr(site.seed, "discover_cohort_repos", lambda orgs: [])
-    monkeypatch.setattr(site.seed, "discover_release_sources", lambda org, repos: [])
-    monkeypatch.setattr(site.seed, "discover_assignments", lambda org: [])
+    monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
+    monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
+    monkeypatch.setattr(site, "discover_assignments", lambda org: [])
     monkeypatch.setattr(
         site, "discover_handed_out_assignments", lambda org: frozenset()
     )
-    monkeypatch.setattr(site, "_yaml_file", lambda *a: {"course_name": "Deep Learning"})
-    monkeypatch.setattr(site, "_people_yaml", lambda *a, **k: "people: []\n")
+    monkeypatch.setattr(site, "yaml_file", lambda *a: {"course_name": "Deep Learning"})
+    monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     # the REAL schedule.load, fed the malformed file
     monkeypatch.setattr(
         site.schedule, "get_file_content", lambda org, repo, path: MALFORMED_SCHEDULE
@@ -1078,27 +964,27 @@ def test_two_plan_entries_citing_one_template_stay_two_assignments(
 
 def test_session_files_missing_tree_is_empty(monkeypatch):
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "HTTP 404: Not Found"))
+    monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "HTTP 404: Not Found"))
     assert site._session_files("Cohort-f2026", "materials", "lectures", "03_x") == []
 
 
 def test_session_files_fetch_failure_raises_rather_than_stripping_the_site(monkeypatch):
     # A swallowed failure returned (), the site republished with every material link gone.
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "HTTP 502: bad gateway"))
+    monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "HTTP 502: bad gateway"))
     with pytest.raises(RuntimeError):
         site._session_files("Cohort-f2026", "materials", "lectures", "03_x")
 
 
 def test_team_people_missing_team_is_empty(monkeypatch):
-    monkeypatch.setattr(site, "gh", lambda *a, **k: (1, "HTTP 404: Not Found"))
-    assert site._team_people("Course", "instructors") == []
+    monkeypatch.setattr(site_repo, "gh", lambda *a, **k: (1, "HTTP 404: Not Found"))
+    assert site_repo._team_people("Course", "instructors") == []
 
 
 def test_team_people_read_failure_raises_rather_than_wiping_the_team(monkeypatch):
-    monkeypatch.setattr(site, "gh", lambda *a, **k: (1, "HTTP 500: boom"))
+    monkeypatch.setattr(site_repo, "gh", lambda *a, **k: (1, "HTTP 500: boom"))
     with pytest.raises(RuntimeError):
-        site._team_people("Course", "instructors")
+        site_repo._team_people("Course", "instructors")
 
 
 def _member_gh(profile: tuple[int, str]):
@@ -1111,8 +997,8 @@ def _member_gh(profile: tuple[int, str]):
 
 
 def test_team_people_skips_a_deleted_account_but_says_so(monkeypatch, capsys):
-    monkeypatch.setattr(site, "gh", _member_gh((1, "gh: Not Found (HTTP 404)")))
-    assert site._team_people("Course", "instructors") == []
+    monkeypatch.setattr(site_repo, "gh", _member_gh((1, "gh: Not Found (HTTP 404)")))
+    assert site_repo._team_people("Course", "instructors") == []
     assert "jane" in capsys.readouterr().out  # one card fewer, not silently
 
 
@@ -1121,9 +1007,9 @@ def test_team_people_per_member_failure_raises_rather_than_dropping_one_card(
 ):
     # The team read is fail-loud; the per-MEMBER read used to swallow everything, so a
     # transient error republished the site one instructor short with nothing to show for it.
-    monkeypatch.setattr(site, "gh", _member_gh((1, "gh: HTTP 502 Bad Gateway")))
+    monkeypatch.setattr(site_repo, "gh", _member_gh((1, "gh: HTTP 502 Bad Gateway")))
     with pytest.raises(RuntimeError, match="could not read the GitHub profile of jane"):
-        site._team_people("Course", "instructors")
+        site_repo._team_people("Course", "instructors")
 
 
 def test_team_people_never_renders_the_syncs_own_bot_account(monkeypatch, capsys):
@@ -1135,11 +1021,11 @@ def test_team_people_never_renders_the_syncs_own_bot_account(monkeypatch, capsys
         assert "users/hertie-dsl-bot" not in args
         return (0, "Jane\thttps://a/j.png\thttps://gh/jane")
 
-    monkeypatch.setattr(site, "gh", fake)
+    monkeypatch.setattr(site_repo, "gh", fake)
     monkeypatch.setattr(
-        site, "_acting_login", lambda: "Hertie-DSL-Bot"
+        site_repo, "_acting_login", lambda: "Hertie-DSL-Bot"
     )  # logins fold case
-    assert site._team_people("Course", "instructors") == [
+    assert site_repo._team_people("Course", "instructors") == [
         ("Jane", "https://a/j.png", "https://gh/jane")
     ]
     assert "hertie-dsl-bot" in capsys.readouterr().out  # skipped out loud
@@ -1162,14 +1048,16 @@ def test_yaml_file_raises_on_a_malformed_file_rather_than_wiping_what_it_feeds(
     # A cohort's people.yml with one bad indent used to parse to `{}` - "nothing declared" -
     # and republish the site with every teaching-team card gone, green.
     err = _bad_indent_error()
-    monkeypatch.setattr(site, "load_yaml_config", lambda *a: (_ for _ in ()).throw(err))
+    monkeypatch.setattr(
+        site_repo, "load_yaml_config", lambda *a: (_ for _ in ()).throw(err)
+    )
     with pytest.raises(yaml.YAMLError):
-        site._yaml_file("Cohort-f2026", "classroom-config", "people.yml")
+        site_repo.yaml_file("Cohort-f2026", "classroom-config", "people.yml")
 
 
 def test_yaml_file_reads_an_absent_file_as_nothing_declared(monkeypatch):
-    monkeypatch.setattr(site, "load_yaml_config", lambda *a: None)
-    assert site._yaml_file("Cohort-f2026", "classroom-config", "people.yml") == {}
+    monkeypatch.setattr(site_repo, "load_yaml_config", lambda *a: None)
+    assert site_repo.yaml_file("Cohort-f2026", "classroom-config", "people.yml") == {}
 
 
 def test_main_reports_a_malformed_config_as_one_line_not_a_traceback(
@@ -1178,10 +1066,8 @@ def test_main_reports_a_malformed_config_as_one_line_not_a_traceback(
     # people.yml is web-editable, so faculty author bad indents directly. yaml.YAMLError
     # is not a RuntimeError, so it used to walk straight through main()'s guard and out as
     # a traceback in the Actions log.
-    from dsl_course import seed
-
     err = _bad_indent_error()
-    monkeypatch.setattr(seed, "discover_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-f2026"])
     monkeypatch.setattr(site, "sync_site", lambda *a: (_ for _ in ()).throw(err))
     monkeypatch.setattr(
         "sys.argv",
@@ -1196,9 +1082,8 @@ def test_main_refuses_a_cohort_this_course_org_never_registered(monkeypatch, cap
     # written by whoever holds a cohort's DSL_BOT_TOKEN - a lower trust tier than the
     # course org. Naming SOMEONE ELSE'S cohort would rebuild that cohort's site from this
     # dispatch, so the registry gets the last word.
-    from dsl_course import seed
 
-    monkeypatch.setattr(seed, "discover_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-f2026"])
     synced: list = []
     monkeypatch.setattr(site, "sync_site", lambda *a: synced.append(a) or 0)
     monkeypatch.setattr(
@@ -1214,9 +1099,8 @@ def test_main_refuses_every_cohort_when_the_registry_is_empty(monkeypatch, capsy
     # The check used to short-circuit on an empty registry, so a course org that had
     # registered nothing accepted any org a dispatch named. An empty registry authorises
     # nothing.
-    from dsl_course import seed
 
-    monkeypatch.setattr(seed, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(site, "discover_cohorts", lambda org: [])
     synced: list = []
     monkeypatch.setattr(site, "sync_site", lambda *a: synced.append(a) or 0)
     monkeypatch.setattr(
@@ -1231,9 +1115,8 @@ def test_main_refuses_every_cohort_when_the_registry_is_empty(monkeypatch, capsy
 def test_main_matches_a_registered_cohort_case_insensitively(monkeypatch):
     # GitHub org names are case-insensitive; a case difference must not read as a
     # cross-cohort dispatch.
-    from dsl_course import seed
 
-    monkeypatch.setattr(seed, "discover_cohorts", lambda org: ["Cohort-F2026"])
+    monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-F2026"])
     synced: list = []
     monkeypatch.setattr(site, "sync_site", lambda *a: synced.append(a) or 0)
     monkeypatch.setattr(
@@ -1248,9 +1131,8 @@ def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsy
     # The lesson PR #151/#146 applied to the nightly refresh: the single try used to wrap
     # the whole loop, so one cohort's raise skipped every LATER cohort's site on the 06:00
     # cron. main() imports discover_cohorts from .seed at call time - patch it at source.
-    from dsl_course import seed
 
-    monkeypatch.setattr(seed, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"])
+    monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"])
     seen: list[str] = []
 
     def fake_sync(course, cohort):
@@ -1295,7 +1177,7 @@ def test_front_matter_survives_a_backslash_in_a_title(monkeypatch):
 
 
 def test_links_block_survives_a_backslash_in_a_filename():
-    block = site._links_block([("lectures", [("notes \\x.pdf", "https://x/1")])])
+    block = site_repo.links_block([("lectures", [("notes \\x.pdf", "https://x/1")])])
     parsed = yaml.safe_load(block)  # must parse, no ScannerError
     assert "notes" in parsed["links"][0]["name"]
 
@@ -1323,10 +1205,10 @@ def test_iso_when_prints_the_datetime_it_is_given_offset_free():
     # The cohort-tz conversion happens ONCE, in schedule's parser (below), so every
     # datetime reaching the renderers is already cohort wall-clock: printing it is just
     # dropping the offset, with no zone for a renderer to forget to pass.
-    assert site._iso_when(datetime(2026, 9, 15, 12, 0, tzinfo=BERLIN)) == (
+    assert site_repo.iso_when(datetime(2026, 9, 15, 12, 0, tzinfo=BERLIN)) == (
         "2026-09-15T12:00:00"
     )
-    assert site._iso_when(datetime(2026, 9, 15, 10, 0, tzinfo=UTC)) == (
+    assert site_repo.iso_when(datetime(2026, 9, 15, 10, 0, tzinfo=UTC)) == (
         "2026-09-15T10:00:00"
     )
 
@@ -1415,173 +1297,18 @@ def test_an_unreleased_row_still_says_what_the_session_is_about():
     assert "will appear in `materials/lectures/03_week-3` when they are." in out
 
 
-def test_the_plan_carries_a_rows_title_description_and_readings(monkeypatch):
-    s = _sched(
-        [
-            Release(
-                "lecture-1",
-                datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN),
-                deploy=[
-                    Deploy("cm", "lectures/01_a", "materials", None),
-                    Deploy("cm", "readings/01_a", "materials", None),
-                ],
-                title="Probability Theory",
-                description="Sample spaces.",
-            )
-        ]
-    )
-    row = site._planned_sessions(s)[("1", "lecture")]
-    assert row.subtitle == "Probability Theory"
-    assert row.description == "Sample spaces."
-    # Readings are lecture material, so they land on this row - and the row knows a
-    # reading list is coming even before it ships.
-    assert row.readings_planned is True
-
-
-def test_the_earliest_entry_naming_a_row_is_the_one_that_titles_it():
-    # Same rule as the row's DATE: releases are sorted by event_datetime, so the entry the
-    # row takes its date from is the entry it takes its name from.
-    s = _sched(
-        [
-            Release(
-                "late",
-                datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "lectures/02_x", "materials", None)],
-                title="Second billing",
-            ),
-            Release(
-                "early",
-                datetime(2026, 9, 10, 9, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "readings/02_y", "materials", None)],
-                title="Random Variables",
-            ),
-        ]
-    )
-    assert site._planned_sessions(s)[("2", "lecture")].subtitle == "Random Variables"
-
-
-def test_a_silent_release_neither_dates_nor_names_the_row_but_does_fill_its_dests():
-    # The case the flag exists for: readings released a week ahead of the class. They land
-    # in session 2's row (readings are lecture material), and without the flag the row
-    # would take the EARLIEST entry's date and title - moving "Session 2" to the 10th and
-    # renaming it after a reading list.
-    s = _sched(
-        [
-            Release(
-                "lecture-2",
-                datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "lectures/02_x", "materials", None)],
-                title="Random Variables",
-            ),
-            Release(
-                "readings-2",
-                datetime(2026, 9, 10, 9, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "readings/02_x", "materials", None)],
-                title="Week 2 reading list",
-                show_on_site=False,
-            ),
-        ]
-    )
-    row = site._planned_sessions(s)[("2", "lecture")]
-    assert row.when == datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN)
-    assert row.subtitle == "Random Variables"
-    # What silence withholds is the DATE and the NAME, not the destinations: the row still
-    # learns readings are planned for it, so an unreleased session can say where they will
-    # appear. Note the silent entry is the EARLIER of the two, so it is reached first - the
-    # fold has to happen in a second pass or this is exactly the case that gets lost.
-    assert row.readings_planned is True
-    assert "materials/readings/02_x" in row.dests
-
-
-def test_only_known_session_heads_raise_a_row_from_a_label():
-    # The label is documented as never shown to students, and rows come from the ordinal
-    # session folder a deploy lands in - the label is only a fallback for an entry that has
-    # not shipped yet. `anything-N` used to read as a lecture, so a `bonus-1` entry both
-    # invented a phantom Session 1 row AND folded into the real one, dragging its date and
-    # title back. `readings-N` must not raise a lecture row either.
-    assert site._row_from_label("lecture-1") == ("1", "lecture")
-    assert site._row_from_label("lecture_01") == ("1", "lecture")
-    assert site._row_from_label("lab-01") == ("1", "lab")
-    assert site._row_from_label("labs-2") == ("2", "lab")
-    for no_row in (
-        "bonus-1",
-        "quiz-2",
-        "topic-3",
-        "readings-01",
-        "course-intro",
-        "seed-syllabus",
-        "01_lab",
-    ):
-        assert site._row_from_label(no_row) is None, no_row
-
-
-def test_a_bonus_entry_cannot_drag_a_real_sessions_date_and_title():
-    # The concrete damage the whitelist prevents: `row.when = min(...)`, so an August
-    # bonus entry folding into lecture-1 would publish Session 1 as August, under the
-    # bonus entry's name.
-    s = _sched(
-        [
-            Release(
-                "lecture-1",
-                datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "lectures/01_x", "materials", None)],
-                title="Perceptrons",
-            ),
-            Release(
-                "bonus-1",
-                datetime(2026, 8, 20, 9, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "extras/bonus", "materials", None)],
-                title="Optional extra reading",
-            ),
-        ]
-    )
-    rows = site._planned_sessions(s)
-    row = rows[("1", "lecture")]
-    assert row.when == datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN)
-    assert row.subtitle == "Perceptrons"
-    # and the bonus entry raised no row of its own
-    assert len(rows) == 1
-
-
 def test_the_site_readme_does_not_promise_the_tab_pages_are_safe():
     # It used to say "pages ... are never rewritten. Change them freely", while every sync
     # overwrites the tab pages - so following it lost the edit AND opened an
     # "edits overwritten" issue. Also: the public sync writes no materials index.
-    from dsl_course.site import _site_pages
+    from dsl_course.site_repo import _site_pages
 
-    cohort_readme = site._site_readme("org", cohort=True)
+    cohort_readme = site_repo.site_readme("org", cohort=True)
     for pg in _site_pages(cohort=True):
         assert f"`{pg.file}`" in cohort_readme, pg.file
     assert "pages, `Gemfile`" not in cohort_readme
     assert "`_data/materials.yml`" in cohort_readme
-    assert "`_data/materials.yml`" not in site._site_readme("org", cohort=False)
-
-
-def test_a_silent_readings_entry_reached_before_its_lecture_still_folds_in():
-    # The ordering trap: releases are sorted by datetime and readings ship AHEAD of the
-    # session, so the silent entry is always reached BEFORE the entry that raises its row.
-    # A single-pass fold loses precisely the common case, which is why there are two.
-    s = _sched(
-        [
-            Release(
-                "readings-2",
-                datetime(2026, 9, 1, 9, 0, tzinfo=BERLIN),  # a week EARLIER
-                deploy=[Deploy("cm", "readings/02_x", "materials", None)],
-                show_on_site=False,
-            ),
-            Release(
-                "lecture-2",
-                datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "lectures/02_x", "materials", None)],
-            ),
-        ]
-    )
-    rows = site._planned_sessions(s)
-    assert list(rows) == [("2", "lecture")], "the silent entry raised a row of its own"
-    row = rows[("2", "lecture")]
-    assert row.when == datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN)  # not dragged back
-    assert row.readings_planned is True
-    assert "materials/readings/02_x" in row.dests
+    assert "`_data/materials.yml`" not in site_repo.site_readme("org", cohort=False)
 
 
 def test_readings_pending_reaches_the_rendered_row():
@@ -1602,7 +1329,7 @@ def test_readings_pending_reaches_the_rendered_row():
             ),
         ]
     )
-    row = site._planned_sessions(s)[("2", "lecture")]
+    row = schedule_plan.planned_sessions(s)[("2", "lecture")]
     # live_repos empty -> _dest_link renders plain code and makes no tree call
     page = site._lecture_entry("COHORT", "2", row, sources=[], live_repos=frozenset())
     assert "readings_pending: true" in page
@@ -1610,119 +1337,18 @@ def test_readings_pending_reaches_the_rendered_row():
     assert "not yet released" in page
 
 
-def test_a_silent_release_raises_no_row_of_its_own():
-    # Nothing else touches session 3, so with the flag honoured the plan declares no row
-    # for it at all - the files still reach students, and discovery still links them into
-    # whatever row they land in once released.
-    s = _sched(
-        [
-            Release(
-                "errata-3",
-                datetime(2026, 9, 20, 9, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "lectures/03_x", "materials", None)],
-                show_on_site=False,
-            )
-        ]
-    )
-    assert site._planned_sessions(s) == {}
-
-
-def test_a_row_with_no_readings_in_the_plan_never_reports_them_pending():
-    s = _sched(
-        [
-            Release(
-                "lecture-1",
-                datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "lectures/01_a", "materials", None)],
-            )
-        ]
-    )
-    assert site._planned_sessions(s)[("1", "lecture")].readings_planned is False
-
-
 # --------------------------------------------------------------- rows from a bare label
 # docs/07: "a row appears as soon as you write it, not when it ships". An entry that stages
 # nothing yet has no deploy destination to key a row off, so its own label places it.
-
-
-def test_an_entry_with_no_deploy_still_raises_its_row_from_its_label():
-    s = _sched(
-        [
-            Release(
-                "lecture-12",
-                datetime(2026, 10, 20, 10, 0, tzinfo=BERLIN),
-                title="Tutorial presentations",
-                description="Students present their topic.",
-            )
-        ]
-    )
-    row = site._planned_sessions(s)[("12", "lecture")]
-    assert row.when == datetime(2026, 10, 20, 10, 0, tzinfo=BERLIN)
-    assert row.subtitle == "Tutorial presentations"
-    assert row.description == "Students present their topic."
-    # nothing staged, so nothing to name as a destination - the row says only that its
-    # materials are not released yet
-    assert row.dests == {}
-
-
-def test_a_deployless_lab_label_raises_a_lab_row_not_a_lecture_row():
-    s = _sched([Release("lab-04", datetime(2026, 10, 22, 14, 0, tzinfo=BERLIN))])
-    assert set(site._planned_sessions(s)) == {("4", "lab")}
-
-
-def test_a_deployless_entry_whose_label_names_no_session_raises_nothing():
-    # `course-intro` opens the course without being a numbered session
-    s = _sched([Release("course-intro", datetime(2026, 8, 31, 9, 0, tzinfo=BERLIN))])
-    assert site._planned_sessions(s) == {}
-
-
-def test_the_label_fallback_never_fires_when_a_deploy_already_placed_the_row():
-    # label says 12, the deploy lands in session 3 - the deploy wins and no phantom
-    # session-12 row appears beside it
-    s = _sched(
-        [
-            Release(
-                "lecture-12",
-                datetime(2026, 10, 20, 10, 0, tzinfo=BERLIN),
-                deploy=[Deploy("cm", "lectures/03_x", "materials", None)],
-            )
-        ]
-    )
-    assert set(site._planned_sessions(s)) == {("3", "lecture")}
-
-
-def test_an_assignment_entry_never_becomes_a_session_row_via_its_label():
-    # assignment out/due rows are built elsewhere; `assignment-1` must not claim session 1
-    s = _sched(
-        [
-            Release(
-                "assignment-1",
-                datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN),
-                assignment="assignment-1",
-            )
-        ]
-    )
-    assert site._planned_sessions(s) == {}
-
-
-def test_a_silent_deployless_entry_still_raises_nothing():
-    s = _sched(
-        [
-            Release(
-                "lecture-9",
-                datetime(2026, 9, 29, 10, 0, tzinfo=BERLIN),
-                show_on_site=False,
-            )
-        ]
-    )
-    assert site._planned_sessions(s) == {}
 
 
 # ------------------------------------------------- ownership notices on generated files
 
 
 def test_a_generated_page_states_its_ownership_inside_its_front_matter():
-    page = site._stamp_front_matter('---\ntype: lecture\ntitle: "Session 1"\n---\n')
+    page = site_repo._stamp_front_matter(
+        '---\ntype: lecture\ntitle: "Session 1"\n---\n'
+    )
     # Jekyll needs `---` on line 1, so the notice cannot go above it
     assert page.startswith("---\n# SYSTEM-OWNED - do not edit.")
     assert "type: lecture" in page and 'title: "Session 1"' in page
@@ -1732,11 +1358,11 @@ def test_a_generated_page_states_its_ownership_inside_its_front_matter():
 
 
 def test_stamping_a_page_with_no_front_matter_leaves_it_untouched():
-    assert site._stamp_front_matter("just text\n") == "just text\n"
+    assert site_repo._stamp_front_matter("just text\n") == "just text\n"
 
 
 def test_the_site_readme_names_what_the_sync_rewrites_and_what_it_does_not():
-    r = site._site_readme("hertie-x-f2026", cohort=True)
+    r = site_repo.site_readme("hertie-x-f2026", cohort=True)
     assert r.startswith("<!-- SYSTEM-OWNED - do not edit.")
     assert "Do not edit this repository." in r
     for owned in ("_lectures/", "_assignments/", "_events/", "_data/people.yml"):
@@ -1746,7 +1372,7 @@ def test_the_site_readme_names_what_the_sync_rewrites_and_what_it_does_not():
 
 
 def test_the_config_header_names_the_identity_keys_the_sync_overwrites():
-    cfg = site._stamp_config(
+    cfg = site_repo._stamp_config(
         "# Edit the fields below for your course.\ncourse_name: x\n",
         ["course_code", "course_name"],
     )
@@ -1756,4 +1382,7 @@ def test_the_config_header_names_the_identity_keys_the_sync_overwrites():
 
 
 def test_a_config_without_the_template_header_line_is_left_alone():
-    assert site._stamp_config("course_name: x\n", ["course_name"]) == "course_name: x\n"
+    assert (
+        site_repo._stamp_config("course_name: x\n", ["course_name"])
+        == "course_name: x\n"
+    )

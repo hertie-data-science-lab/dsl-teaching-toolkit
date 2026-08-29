@@ -23,36 +23,24 @@ import tempfile
 import time
 from pathlib import Path
 
-from . import seed
-from .utils import (
+from .access import grant_course_team_access, grant_tagged_team_access
+from .course import (
     FACULTY_ONLY_HEADING,
-    GIT_ENV,
     MATERIALS_REPO_PREFIX,
-    READING_OVERLAY_FILE,
     SYLLABUS_SAMPLE_FILE,
-    create_repo,
-    generate_from_template,
-    gh,
-    git,
-    grant_course_team_access,
-    grant_tagged_team_access,
-    log,
-    log_err,
-    log_ok,
-    log_skip,
-    log_step,
-    put_files,
-    refresh_stubs,
-    repo_exists,
-    seed_files_if_absent,
-    seed_if_absent,
-    set_repo_topics,
+    pages_repo,
 )
+from .discovery import central_ref_for, discover_assignments, discover_cohorts
+from .gh_contents import put_files, refresh_stubs, seed_files_if_absent, seed_if_absent
+from .ghcli import GIT_ENV, gh, git
+from .log import log, log_err, log_ok, log_skip, log_step
+from .readings import READING_OVERLAY_FILE
+from .repos import create_repo, generate_from_template, repo_exists, set_repo_topics
+from .workflows_place import push_content_workflows
 
 WEBSITE_TEMPLATE_ORG = "hertie-data-science-lab"
 WEBSITE_TEMPLATE = "course-website-template"
 
-_GIT_ENV = GIT_ENV
 
 _SYLLABUS_STUB = """\
 # {tag} syllabus
@@ -283,7 +271,7 @@ RETIRED_STUBS = ("readings/01_session-1/reading.md",)
 
 def refreshable_stubs(tag: str) -> dict[str, bytes]:
     """The seeded files that are stubs rather than skeletons - improvable later, while they
-    still carry the mark (see `utils.refresh_stubs`).
+    still carry the mark (see `gh_contents.refresh_stubs`).
 
     Named here, where they are written, and read by `seed.refresh` so the nightly
     convergence reaches repos scaffolded before a stub improved. One list rather than two
@@ -486,7 +474,7 @@ def scaffold_materials(org: str, tag: str) -> int:
     # USER-owned skeletons: create-only, so a re-run against a repo faculty have since
     # authored must not revert their README/SYLLABUS to the stub or resurrect a deleted
     # starter directory. A failed seed (an absent file whose write failed) reds the scaffold.
-    # Stubs that REFRESH while they are still ours (see utils.refresh_stubs): the
+    # Stubs that REFRESH while they are still ours (see gh_contents.refresh_stubs): the
     # improvement then reaches the courses already running, not just the next repo
     # scaffolded. Written before the create-only set below so a re-run's log reads in the
     # order the rules apply.
@@ -513,10 +501,12 @@ def scaffold_materials(org: str, tag: str) -> int:
     if not seed_files_if_absent(org, repo, user_files, "init: materials skeleton"):
         failures += 1
     # Equip the run-from-repo Release workflows (same as Refresh does for content repos).
-    # _push_workflows lands both in one commit, logs its own failure, and returns 1 - a
-    # materials repo with no Release workflows must not report success.
-    cohorts = seed.discover_cohorts(org)
-    failures += seed._push_workflows(org, repo, cohorts, seed.discover_assignments(org))
+    # push_content_workflows lands both in one commit, logs its own failure, and returns
+    # 1 - a materials repo with no Release workflows must not report success.
+    cohorts = discover_cohorts(org)
+    failures += push_content_workflows(
+        org, repo, cohorts, discover_assignments(org), central_ref_for(org)
+    )
     if failures:
         return 1
     log_ok(f"materials repo ready: {org}/{repo}")
@@ -604,7 +594,7 @@ def scaffold_assignment(
                 f"(delete {org}/{repo}'s solution branch first if you really want it rebuilt)"
             )
             return 1
-        if git("-C", str(wd), *_GIT_ENV, "checkout", "-q", "-b", "solution")[0] != 0:
+        if git("-C", str(wd), *GIT_ENV, "checkout", "-q", "-b", "solution")[0] != 0:
             # Any other local failure here must not be swallowed and then misreported as
             # a push failure below.
             log_err("  ! could not create the solution branch")
@@ -646,11 +636,11 @@ def scaffold_assignment(
         (tests / "test_solution.py").write_text(
             _HIDDEN_TEST_NOTEBOOK if fmt == "notebook" else _HIDDEN_TEST_PY
         )
-        git("-C", str(wd), *_GIT_ENV, "add", "-A")
+        git("-C", str(wd), *GIT_ENV, "add", "-A")
         git(
             "-C",
             str(wd),
-            *_GIT_ENV,
+            *GIT_ENV,
             "commit",
             "-q",
             "--no-verify",
@@ -658,7 +648,7 @@ def scaffold_assignment(
             f"solution: assignment {number} (model + grading.yml + hidden tests)",
         )
         if (
-            git("-C", str(wd), *_GIT_ENV, "push", "-q", "-u", "origin", "solution")[0]
+            git("-C", str(wd), *GIT_ENV, "push", "-q", "-u", "origin", "solution")[0]
             != 0
         ):
             log_err("  ! could not push the solution branch")
@@ -731,7 +721,7 @@ def scaffold_site(org: str) -> int:
     The repo is named `<org>.github.io` so it serves at the org root. It must be PUBLIC
     on the Free plan (Pages requires it); on GitHub Enterprise Cloud / Campus it can be
     made private with Pages access control. The site redeploys on every push."""
-    site = f"{org.lower()}.github.io"
+    site = pages_repo(org)
     log_step(f"Scaffolding website {org}/{site}")
     if repo_exists(org, site):
         log_skip(f"repo {org}/{site}")

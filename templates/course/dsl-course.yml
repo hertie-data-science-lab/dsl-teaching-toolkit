@@ -4,6 +4,10 @@ org: {org}
 org_name: {org_name}
 course_name: {course_name}
 course_code: {course_code}
+# central_ref: staging   # OPTIONAL: which tier of the central toolkit this course's
+#   # workflows run - `release` (the default, and where every real course belongs),
+#   # `staging` (the soak tier), `main`, or a full 40-character commit SHA. Cohorts
+#   # inherit this; setting it in a cohort's own file does nothing.
 # course_description: One or two sentences, on ONE line - the blurb on every cohort site.
 # site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the COHORT sites, link ONLY
 #   # these file types. Default (unset): each session's root files, plus one link per

@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from dsl_course import discovery, seed, utils
+from dsl_course import course, discovery, gh_contents
 
 INFRA_AND_CONTENT = [
     {"name": ".github", "topics": []},
@@ -189,9 +189,9 @@ def test_sections_and_sessions_ignore_root_level_and_over_deep_folders(monkeypat
 
 
 def test_api_and_filesystem_transports_share_one_session_folder_rule(tmp_path):
-    # utils.discover_sections (local checkout, used by the public-site builder) and the API-side
+    # course.discover_sections (local checkout, used by the public-site builder) and the API-side
     # discovery must never drift: both feed their directory listing through
-    # utils.session_dirs, so the same tree yields the same sections either way.
+    # course.session_dirs, so the same tree yields the same sections either way.
     tree = [
         "lectures",
         "lectures/01_intro",
@@ -204,9 +204,9 @@ def test_api_and_filesystem_transports_share_one_session_folder_rule(tmp_path):
     for rel in tree:
         (tmp_path / rel).mkdir(parents=True, exist_ok=True)
     api_sections = sorted(
-        {section for section, _, _ in utils.session_dirs(tree) if section}
+        {section for section, _, _ in course.session_dirs(tree) if section}
     )
-    assert utils.discover_sections(tmp_path) == api_sections == ["labs", "lectures"]
+    assert course.discover_sections(tmp_path) == api_sections == ["labs", "lectures"]
 
 
 def test_repo_tree_dirs_reads_an_absent_or_empty_repo_as_no_directories(monkeypatch):
@@ -214,7 +214,7 @@ def test_repo_tree_dirs_reads_an_absent_or_empty_repo_as_no_directories(monkeypa
     # "no session folders" - a brand-new cohort repo is not a failure.
     monkeypatch.setattr(discovery, "get_default_branch", lambda org, repo: "main")
     for out in ("gh: Not Found (HTTP 404)", "gh: Conflict (HTTP 409)"):
-        monkeypatch.setattr(utils, "gh", lambda *a, out=out, **k: (1, out))
+        monkeypatch.setattr(gh_contents, "gh", lambda *a, out=out, **k: (1, out))
         assert discovery._repo_tree_dirs("Cohort-f2026", "materials") == ()
 
 
@@ -225,7 +225,9 @@ def test_repo_tree_dirs_raises_rather_than_reporting_a_repo_with_no_sessions(
     # and rewrites the collections from them - so a rate-limited tree fetch swallowed as
     # `[]` republished the site with every session row deleted, silently and green.
     monkeypatch.setattr(discovery, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: HTTP 502 Bad Gateway"))
+    monkeypatch.setattr(
+        gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 502 Bad Gateway")
+    )
     with pytest.raises(RuntimeError, match="could not read the file tree"):
         discovery.discover_release_sources("Cohort-f2026", ["materials"])
 
@@ -243,7 +245,7 @@ def test_both_transports_share_one_tree_fetch(monkeypatch):
 
     monkeypatch.setattr(discovery, "get_default_branch", lambda org, repo: "main")
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(utils, "gh", fake_gh)
+    monkeypatch.setattr(gh_contents, "gh", fake_gh)
     discovery._repo_tree_dirs("Cohort-f2026", "materials")
     site._repo_tree("Cohort-f2026", "materials")
     assert [a[-1] for a in calls] == [
@@ -322,13 +324,6 @@ def test_register_cohort_is_idempotent_when_already_registered(monkeypatch):
         discovery, "put_file", lambda *a, **k: pytest.fail("should not write")
     )
     assert discovery.register_cohort("Course", "Course-f2026") is True
-
-
-def test_seed_facade_still_exposes_discovery(monkeypatch):
-    # site/scaffold/sync_* call these as seed.<name> - the split must be invisible.
-    monkeypatch.setattr(discovery, "list_org_repos", lambda org: INFRA_AND_CONTENT)
-    assert seed.discover_content_repos("Org") == ["course-materials-f2026", "labs"]
-    assert seed.COHORTS_PATH == discovery.COHORTS_PATH
 
 
 def test_org_tier_reads_the_dotgithub_topic_then_the_cohort_only_repos_then_gives_up():

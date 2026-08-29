@@ -16,33 +16,26 @@ Two documents per org:
   generated, and stamped as such.
 
 Rendering is pure (render_profile_readme / render_dotgithub_readme take the repo list);
-update_profile_readme is the one function that touches the network.
+update_profile_readme is the one function that touches the network, and all it does with
+it is read the org and write the two files. The description/access/topic convergence that
+used to ride along here belongs to the nightly sweep, not to a README renderer - see
+seed._converge_org_metadata.
 """
 
 from __future__ import annotations
 
 import re
 
-from .central import CENTRAL, CENTRAL_REF
+from .central import CENTRAL
 from .discovery import (
     course_name_of,
     discover_cohorts,
     is_student_repo,
     list_org_repos,
     org_tier,
-    student_repo_names,
 )
-from .utils import (
-    converge_descriptions,
-    converge_faculty_access,
-    converge_topics,
-    get_file_content,
-    load_yaml_config,
-    log,
-    log_err,
-    log_ok,
-    put_files,
-)
+from .gh_contents import get_file_content, load_yaml_config, put_files
+from .log import log, log_err, log_ok
 
 # Per-org identity/people/schedule config, lives at the root of each org's `.github` repo.
 COURSE_CONFIG = "dsl-course.yml"
@@ -191,8 +184,14 @@ def render_profile_readme(
     repos: list[dict],
     is_cohort: bool,
     cohorts: list[str] | None = None,
+    *,
+    central_ref: str,
 ) -> str:
-    """Org overview. Cohort orgs get a student-facing page; course orgs a faculty & instructors one."""
+    """Org overview. Cohort orgs get a student-facing page; course orgs a faculty & instructors one.
+
+    `central_ref` is the ref of the central toolkit this org runs (discovery.central_ref_for);
+    the faculty page links into the docs at it, so an org on `staging` reads the staging docs
+    rather than a runbook for engine code it is not running."""
     if is_cohort:
         return f"""<!-- INSTRUCTOR-OWNED - this is the page students land on, so it is yours to word.
      It is seeded ONCE and every edit you make survives the nightly refresh. The one
@@ -241,7 +240,7 @@ The substantive repos of this org are private (not accessible to enrolled studen
 
 > **Faculty & instructors - start here:** New to the platform?
 > Follow the step-by-step
-> **[workflow runbooks](https://github.com/{CENTRAL}/blob/{CENTRAL_REF}/docs/README.md)**.
+> **[workflow runbooks](https://github.com/{CENTRAL}/blob/{central_ref}/docs/README.md)**.
 > The sections below are a live index of this org's cohorts, repositories, and actions.
 
 ## Cohorts
@@ -278,8 +277,8 @@ _(automatically bootstrapped from the central
 | [**Generate syllabus**](https://github.com/{org}/.github/actions/workflows/generate-syllabus.yml) | Writes the "Course sessions and readings" section of a syllabus - one block per session, with its title, learning objectives and reading list - from a cohort's `classroom-config/schedule.yml` and this repo's `readings/` folders. It lands in `SYLLABUS.sessions.md` beside your syllabus (never released to students) and never edits `SYLLABUS.md` itself. | Run by instructor |
 | [**Check cohort setup**](https://github.com/{org}/.github/actions/workflows/check-cohort-setup.yml) | A per-cohort checklist of everything configured (identity, people, schedule + release plan, roster, teams, grades) with direct edit links for anything missing. Read-only. | Run by instructor |
 | [**Publish course website**](https://github.com/{org}/.github/actions/workflows/publish-site.yml) | **[OPTIONAL]** **[DEFERRED]** Build/refresh a public openware site for the course `{org}.github.io`. This will share this course's lecture materials and (limited) readings with the open internet. Opt-in (the first run scaffolds the site); afterwards a daily cron re-syncs it from the settings that run chose, so later materials edits appear without another click. Pick a materials repo and choose for readings: `reading-list` (citations only) or `actual-readings` (also host the files). Because the materials repos are private, the site **hosts** the shared files itself. This is separate from each cohort's student-facing site. | Run by instructor |
-| [**Release materials**](https://github.com/{org}/.github/actions/workflows/release-materials.yml) | Manually release materials to student-facing cohort orgs *(NB: it is recommended to instead use the [scheduling function](https://github.com/{CENTRAL}/blob/{CENTRAL_REF}/docs/07-schedule-releases.md) for regular releases)*. Select path(s) for any folder or file, one or several at a time. | Run by instructor |
-| [**Release assignment**](https://github.com/{org}/.github/actions/workflows/release-assignment.yml) | Generate one private repo per student from a chosen `assignment-*` template repo. *(NB: it is recommended to instead use the [scheduling function](https://github.com/{CENTRAL}/blob/{CENTRAL_REF}/docs/07-schedule-releases.md) for regular releases)* | Run by instructor |
+| [**Release materials**](https://github.com/{org}/.github/actions/workflows/release-materials.yml) | Manually release materials to student-facing cohort orgs *(NB: it is recommended to instead use the [scheduling function](https://github.com/{CENTRAL}/blob/{central_ref}/docs/07-schedule-releases.md) for regular releases)*. Select path(s) for any folder or file, one or several at a time. | Run by instructor |
+| [**Release assignment**](https://github.com/{org}/.github/actions/workflows/release-assignment.yml) | Generate one private repo per student from a chosen `assignment-*` template repo. *(NB: it is recommended to instead use the [scheduling function](https://github.com/{CENTRAL}/blob/{central_ref}/docs/07-schedule-releases.md) for regular releases)* | Run by instructor |
 | [**Grade assignment**](https://github.com/{org}/.github/actions/workflows/grade-assignment.yml) | Faculty-side autograder: after the deadline, run the HIDDEN tests (from the template's `solution` branch) against each submission and record the machine score into `classroom-config/grades/<assignment>.csv`. Nothing is written to student repos; faculty & instructors then add manual marks. Optional per assignment (skipped if `grading.yml` sets `autograde: false`). | Run by instructor |
 | [**Sync gradebooks**](https://github.com/{org}/.github/actions/workflows/sync-gradebooks.yml) | Ensure every onboarded student has a PRIVATE `grades-<handle>` repo (the single home for all their grades). | Run by instructor |
 | [**Render grades (preview)**](https://github.com/{org}/.github/actions/workflows/render-grades.yml) | Build per-student `gradebook/<handle>.yml` from `classroom-config/grades/<assignment>.csv` and open ONE pull request. **That PR is the preview** - review every student's grades in the diff before sending. | Run by instructor |
@@ -379,12 +378,21 @@ Maintained by the [Hertie Data Science Lab](https://github.com/hertie-data-scien
 
 
 def update_profile_readme(
-    org: str, org_name: str | None = None, course_name: str | None = None
+    org: str,
+    org_name: str | None = None,
+    course_name: str | None = None,
+    *,
+    central_ref: str,
+    repos: list[dict] | None = None,
 ) -> int:
     """(Re)generate the org's profile/README.md from its metadata + live repo list.
 
     A cohort org (one with a `welcome` repo) gets a student-facing page; a course org
     gets the faculty-facing one.
+
+    `repos` is the caller's listing when it already holds one (seed.refresh does, and has
+    just swept it), so an org's nightly run pays for `list_org_repos` once rather than
+    once per consumer. Fetched here when it is not given.
 
     Returns the number of failed writes (0 or 1), so the nightly refresh can count it:
     the commit's return used to be discarded under an unconditional "refreshed" line, and
@@ -409,33 +417,15 @@ def update_profile_readme(
             or course_name_of(str(cfg.get("course") or ""))
             or org_name
         )
-    repos = list_org_repos(org)
-    # Read off the same listing, and BEFORE the convergence below, which needs the tier:
-    # one old description becomes "[do not touch]" on a cohort org and "[control panel]"
-    # on a course org. `tier` is None for an org the listing cannot place (a legacy cohort
-    # with no topics and no `welcome`); the page renders it as a course org, as before.
-    tier = org_tier(repos)
-    is_cohort = tier == "cohort"
-    # The listing carries every repo's description, and the table below is rendered
-    # from it - so this is the one place that can fix a reworded description without
-    # paying a read for it, and the corrected text reaches the page in the same run.
-    converge_descriptions(org, repos, cohort=is_cohort)
-    # And the faculty teams' standing access, off the same listing and for the same reason:
-    # a team grant is set at repo creation and never revisited, so every repo kind added
-    # since a grant existed keeps whatever it started with. In a cohort org that is the
-    # whole of a non-owner instructor's access (default_repository_permission=none).
-    # The sweep fails SAFE where the page merely guesses: only a listing that positively
-    # says "course" gets the write-everywhere floor, and a student repo never gets push.
-    converge_faculty_access(
-        org, repos, cohort=tier != "course", protected=student_repo_names(repos)
-    )
-    # And the machinery topics, off the same listing: assign/grades stamp them in a
-    # separate PATCH after the create, so a repo whose stamp failed stays untagged
-    # forever - and the topics are what keep a student's submission repo and a private
-    # gradebook off this very page.
-    failures = converge_topics(org, repos, cohort=is_cohort)
+    if repos is None:
+        repos = list_org_repos(org)
+    # `tier` is None for an org the listing cannot place (a legacy cohort with no topics
+    # and no `welcome`); the page renders it as a course org, as before.
+    is_cohort = org_tier(repos) == "cohort"
     cohorts = None if is_cohort else discover_cohorts(org)
-    body = render_profile_readme(org, org_name, course_name, repos, is_cohort, cohorts)
+    body = render_profile_readme(
+        org, org_name, course_name, repos, is_cohort, cohorts, central_ref=central_ref
+    )
     if is_cohort:
         body = _cohort_profile_body(org, repos, body)
     files = {"README.md": render_dotgithub_readme(org, course_name, is_cohort).encode()}
@@ -448,13 +438,13 @@ def update_profile_readme(
         org, ".github", files, "docs: refresh org READMEs (profile + .github)"
     ):
         log_err(f"could not write {org}/.github READMEs")
-        return failures + 1
+        return 1
     log_ok(
         "profile + .github READMEs refreshed"
         if "profile/README.md" in files
         else ".github README refreshed (landing page left as the instructor has it)"
     )
-    return failures
+    return 0
 
 
 def _cohort_profile_body(org: str, repos: list[dict], seeded: str) -> str | None:

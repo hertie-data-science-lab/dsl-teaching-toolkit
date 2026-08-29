@@ -75,13 +75,14 @@ def test_schedule_yml_seed_is_commented_and_covers_every_field():
         assert key in schedule
 
 
-def test_classroom_readme_points_to_course_org_for_people():
-    # There is no cohort dsl-course.yml any more - the README is the one place that
-    # still tells faculty where people/instructors are actually managed.
+def test_classroom_readme_documents_the_cohort_files_it_holds():
+    # Instructors configure a cohort HERE (people.yml, schedule.yml, the roster); the README
+    # must document those files and never send them back up to the course org.
     readme = welcome.template("classroom-config/README.md")
-    assert "course org" in readme
+    assert "people.yml" in readme
     assert "schedule.yml" in readme
     assert "schedule.csv" not in readme
+    assert "course org's" not in readme
 
 
 def test_starter_roster_seeds_the_full_column_set():
@@ -197,3 +198,25 @@ def test_inventory_skips_cohort_pointer_orgs(monkeypatch):
     monkeypatch.setattr(list_orgs, "org_exists", lambda org: True)
     orgs = list_orgs.discover_course_orgs()
     assert [o["org"] for o in orgs] == ["Course-Org"]
+
+
+def test_a_cohort_cannot_be_bootstrapped_onto_its_own_tier(monkeypatch, capsys):
+    # A cohort has no tier of its own: central_ref_for follows its `course:` pointer, and
+    # tonight's refresh re-renders it at whatever the COURSE org declares. The pair looks
+    # like a pin and lasts one night at most, so it is refused rather than silently undone
+    # hours later, in an org nobody is watching.
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "bootstrap_course",
+            "--org",
+            "Cohort-f2026",
+            "--cohort",
+            "--course",
+            "Course-Org",
+            "--central-ref",
+            "staging",
+        ],
+    )
+    assert bc.main() == 1
+    assert "Course-Org/.github/dsl-course.yml" in capsys.readouterr().err

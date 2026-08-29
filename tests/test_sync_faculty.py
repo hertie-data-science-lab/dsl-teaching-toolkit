@@ -88,7 +88,7 @@ def test_sync_cohort_instructors_counts_failed_grants(monkeypatch):
     # was invisible to the exit code. Now each failure is counted.
     monkeypatch.setattr(sync_faculty, "load_cohort_faculty", lambda org: {})
     monkeypatch.setattr(sync_faculty, "reconcile_team_members", lambda *a, **k: 0)
-    monkeypatch.setattr(sync_faculty.site, "_cohort_tag", lambda org: "f2026")
+    monkeypatch.setattr(sync_faculty, "term_tag", lambda org: "f2026")
     monkeypatch.setattr(sync_faculty, "create_team", lambda *a, **k: True)
     monkeypatch.setattr(
         sync_faculty, "grant_team_repo_access", lambda *a, **k: False
@@ -104,7 +104,7 @@ def test_sync_cohort_instructors_skips_wiring_when_team_creation_fails(monkeypat
     # A failed create_team must not then grant access + reconcile against a nonexistent
     # team (which would triple-count the one failure and fire doomed API calls).
     monkeypatch.setattr(sync_faculty, "load_cohort_faculty", lambda org: {})
-    monkeypatch.setattr(sync_faculty.site, "_cohort_tag", lambda org: "f2026")
+    monkeypatch.setattr(sync_faculty, "term_tag", lambda org: "f2026")
     monkeypatch.setattr(sync_faculty, "create_team", lambda *a, **k: False)
     grants = []
     monkeypatch.setattr(

@@ -35,26 +35,22 @@ import argparse
 import sys
 from datetime import date
 
-from . import seed, site
-from .utils import (
-    active_today,
-    create_team,
-    grant_team_repo_access,
-    is_valid_github_username,
-    load_yaml_config,
-    log,
-    log_err,
-    log_ok,
-    log_step,
-    reconcile_team_members,
+from .access import grant_team_repo_access
+from .course import CONFIG_REPO, active_today, term_tag
+from .discovery import (
+    discover_assignments,
+    discover_cohorts,
+    discover_content_repos,
 )
+from .gh_contents import load_yaml_config
+from .gh_teams import create_team, is_valid_github_username, reconcile_team_members
+from .log import log, log_err, log_ok, log_step
 
 ROLE_TEAM = {
     "instructors": "instructors",
     "teaching_assistants": "instructors",
     "course_admins": "course-admin",
 }
-COHORT_CONFIG_REPO = "classroom-config"
 COHORT_PEOPLE_PATH = "people.yml"
 
 
@@ -168,7 +164,7 @@ def load_cohort_faculty(cohort_org: str) -> dict[str, list[dict]] | None:
 
     Returns None when people.yml is genuinely ABSENT (do not prune); a present-but-empty
     people block parses to {} and legitimately empties the team."""
-    meta = load_yaml_config(cohort_org, COHORT_CONFIG_REPO, COHORT_PEOPLE_PATH)
+    meta = load_yaml_config(cohort_org, CONFIG_REPO, COHORT_PEOPLE_PATH)
     if meta is None:
         return None
     return _cohort_roles_only(parse_faculty_from_meta(meta))
@@ -216,7 +212,7 @@ def sync_cohort_instructors(
         # ABSENT people.yml: reconciling an empty desired set with prune=True would strip
         # this cohort's instructors team (and its course-org tag team). Refuse to prune.
         log_err(
-            f"cohort people config {cohort_org}/{COHORT_CONFIG_REPO}/"
+            f"cohort people config {cohort_org}/{CONFIG_REPO}/"
             f"{COHORT_PEOPLE_PATH} is absent - refusing to reconcile instructors (an "
             f"absent config would prune every instructor); skipping"
         )
@@ -226,7 +222,7 @@ def sync_cohort_instructors(
         cohort_org, "instructors", desired, prune=True, dry_run=dry_run
     )
 
-    tag = site._cohort_tag(cohort_org)
+    tag = term_tag(cohort_org)
     if tag is None:
         return errors
     team = f"instructors-{tag}"
@@ -255,7 +251,7 @@ def sync(
     instructors/TAs (its own team + its course-org tag team). Pass an explicit
     single-item list to scope to just one cohort, e.g. a freshly bootstrapped one,
     without re-touching every other cohort."""
-    targets = seed.discover_cohorts(course_org) if cohorts is None else cohorts
+    targets = discover_cohorts(course_org) if cohorts is None else cohorts
     log_step(
         f"Materialising faculty access: course-admin across {1 + len(targets)} "
         f"org(s), instructors across {len(targets)} cohort(s)"
@@ -263,8 +259,8 @@ def sync(
     errors = sync_course_admins(course_org, targets, dry_run=dry_run)
     # Fetched once, not once per cohort - discover_content_repos/discover_assignments
     # depend only on course_org, not on which cohort is being processed.
-    content_repos = seed.discover_content_repos(course_org)
-    assignments = seed.discover_assignments(course_org)
+    content_repos = discover_content_repos(course_org)
+    assignments = discover_assignments(course_org)
     for cohort_org in targets:
         errors += sync_cohort_instructors(
             course_org, cohort_org, content_repos, assignments, dry_run=dry_run

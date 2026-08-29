@@ -32,26 +32,18 @@ import sys
 import tempfile
 from pathlib import Path
 
-from .schedule import Deploy
-from .utils import (
+from . import site
+from .access import grant_faculty_read_access, grant_read_teams
+from .course import (
     FACULTY_ONLY_HEADING,
-    GIT_ENV,
     SYLLABUS_SAMPLE_FILE,
     SYLLABUS_SESSIONS_FILE,
-    create_repo,
-    gh,
-    git,
-    grant_faculty_read_access,
-    grant_read_teams,
-    is_untouched_stub,
-    log,
-    log_err,
-    log_ok,
-    log_step,
 )
-
-_GIT_ENV = GIT_ENV
-
+from .gh_contents import is_untouched_stub
+from .ghcli import GIT_ENV, gh, git
+from .log import log, log_err, log_ok, log_step
+from .repos import create_repo
+from .schedule import Deploy
 
 # Never copied, at any depth: a `.git` landing in the dest overwrites its git metadata and
 # redirects the release's own push into the SOURCE repo.
@@ -62,7 +54,7 @@ NEVER_COPIED = frozenset({".git"})
 # MAINTAINING.md is the maintainer guide, the syllabus sample is the filled example faculty
 # copy from, and the sessions block is what the Generate syllabus workflow builds for them to
 # paste. Each is written by this toolkit describing itself as never released, so each is
-# named here - and named FROM `utils`, not re-spelled, so the exclusion cannot lapse the
+# named here - and named FROM `course`, not re-spelled, so the exclusion cannot lapse the
 # next time one is renamed. Naming any of these paths explicitly still releases it: that is
 # what "give me everything" means, not a ban.
 ROOT_RELEASE_EXCLUDED = frozenset(
@@ -324,7 +316,7 @@ def deploy_many(
             # own `.gitignore` along, and without -f `git add` would then silently drop any
             # file the source force-added past it (lecture PDFs under a `*.pdf` rule are the
             # usual case) - reporting the release as shipped while those files never left.
-            git("-C", str(dd), *_GIT_ENV, "add", "-A", "-f")
+            git("-C", str(dd), *GIT_ENV, "add", "-A", "-f")
             # Distinguish "nothing staged" (genuinely nothing new to release - the
             # idempotent no-op) from a real commit failure (disk, lock, hook): git commit
             # exits non-zero for BOTH, so a failed commit would otherwise be reported as
@@ -335,7 +327,7 @@ def deploy_many(
             code, out = git(
                 "-C",
                 str(dd),
-                *_GIT_ENV,
+                *GIT_ENV,
                 "commit",
                 "-q",
                 "--no-verify",
@@ -346,7 +338,7 @@ def deploy_many(
                 log_err(f"  {repo}: commit failed - {out[:200]}")
                 errors += 1
                 continue
-            if git("-C", str(dd), *_GIT_ENV, "push", "-q", "origin", "HEAD")[0] != 0:
+            if git("-C", str(dd), *GIT_ENV, "push", "-q", "origin", "HEAD")[0] != 0:
                 log_err(f"  {repo}: push failed")
                 errors += 1
                 continue
@@ -354,8 +346,6 @@ def deploy_many(
             changed = True
 
     if sync and changed:
-        from . import site
-
         # site.sync_site RAISES on a genuine tree/team read failure - one cohort's
         # site-sync failure must be logged and counted (making the release non-zero), not
         # an unhandled traceback that aborts the batch.

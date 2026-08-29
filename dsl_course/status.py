@@ -27,9 +27,12 @@ from datetime import date
 import yaml
 
 from . import grades, roster, schedule, sync_faculty, teams
-from .utils import get_default_branch, load_yaml_config, log_err
+from .central import CENTRAL_REF, resolve_central_ref
+from .gh_contents import load_yaml_config
+from .log import log_err
+from .repos import get_default_branch
 
-ITEMS = ("B1", "B6", "C2", "C3", "C4", "C5", "C6", "C7")
+ITEMS = ("B1", "B6", "B7", "C2", "C3", "C4", "C5", "C6", "C7")
 # Rows whose input is marked `[required]` in docs/DEPLOYMENT-CHECKLIST.md;
 # everything else is optional
 # (synthesised/skipped when absent), so an absent optional item is "optional", not
@@ -117,7 +120,7 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
     )
 
     # Access is granted by github_handle alone (sync_faculty's actual criterion) -
-    # site._people_from_meta requires a display `name` too (it's for website cards),
+    # site_repo._people_from_meta requires a display `name` too (it's for website cards),
     # so it undercounts here. Reuse the already-fetched course_raw. course-admin only
     # - a course-level `instructors`/`teaching_assistants` entry is a legitimate,
     # display-only website card (see the People section in
@@ -143,6 +146,23 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         f"{n_admins} active"
         if has_people_block
         else "no people: block - Sync empties course-admin",
+    )
+
+    # Which toolkit tier this cohort's workflows run. Declared on the COURSE org and
+    # inherited here, so it belongs in the B (course-org) block even though the checklist
+    # is per-cohort - and an org whose tier is the default should read as such rather than
+    # as an unset input someone forgot.
+    declared = course_meta.get("central_ref")
+    ref = resolve_central_ref(declared, source=f"{course_org}/.github/dsl-course.yml")
+    data["B7"] = _row(
+        "B7",
+        "Toolkit tier",
+        course_org,
+        ".github",
+        "dsl-course.yml",
+        course_branch,
+        declared is not None,
+        ref if declared is not None else f"{CENTRAL_REF} (default)",
     )
 
     students = roster.load(cohort_org) or []

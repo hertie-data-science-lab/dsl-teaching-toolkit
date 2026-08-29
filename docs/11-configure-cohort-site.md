@@ -30,18 +30,24 @@ repo linking the overwritten commit and naming the file to edit instead.
 |---|---|
 | `_lectures/`, `_assignments/`, `_events/` | each directory is **deleted and rebuilt** every sync - a file you drop in here vanishes |
 | `_data/people.yml` | overwritten from `classroom-config/people.yml` |
-| `lectures.md`, `labs.md`, `readings.md`, `materials.md`, `assignments.md` | front-matter stubs pointing at the shared theme layouts, so a change to how sessions render reaches every site at once |
+| `lectures.md`, `labs.md`, `readings.md`, `materials.md`, `assignments.md` | front-matter stubs pointing at the layouts below - generated wrappers, so put your own words in `index.md` |
 | `_data/nav.yml` | the tab bar - generated, so a new tab reaches sites that already exist. Add a page of your own as a file and link it from `index.md` |
 | `_data/materials.yml` | the All Materials index, rebuilt from what each cohort repo actually holds |
+| `_layouts/`, `_includes/`, `_sass/_course.scss` | how every page renders - shipped from `templates/site/` in the toolkit, so a rendering change reaches every course site at once |
 | `_config.yml` keys `course_name`, `course_code`, `course_semester`, `course_description`, `github_org` | overwritten from the sources in the table above |
+| `_config.yml` keys `remote_theme`, `dateformat`, `collections`, `defaults` | the pinned theme and the settings the layouts above depend on |
 | `README.md` | rewritten every sync - it is the repo's own "do not edit this repository" notice |
 
 **Faculty are not expected to hand-edit the cohort site at all.** Everything it shows comes
 from the files in the table at the top of this page; edit those. What is left over -
 `index.md` and any other page of your own, `_announcements/`, further `_data/*.yml`, assets,
-`_images/` - is yours and survives. `_layouts/`, `_includes/` and `_sass/_course.scss` are
-**reserved for the toolkit**: they come from the shared theme and will be converged like the
-surfaces above, so a change made there will not last.
+`_images/`, `Gemfile` - is yours and survives.
+
+To change how a page *renders*, open a PR against
+[`templates/site/`](../templates/site) in this toolkit rather than the site repo; the rest
+of the styling lives in the shared
+[`dsl-jekyll-theme`](https://github.com/hertie-data-science-lab/dsl-jekyll-theme), which
+every site pins at a fixed ref.
 
 ## When it redeploys
 

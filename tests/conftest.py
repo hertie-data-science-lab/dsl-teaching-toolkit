@@ -27,8 +27,8 @@ def _no_live_gh(monkeypatch):
     test that stubbed `site._session_files` but not `site._repo_tree` passed locally for a
     whole branch and failed only on the PR.
 
-    Guards the `gh` BINARY rather than `utils.gh`, so the retry ladder and return-pair
-    contract of `utils.gh` itself stay testable, and `git` against a tmp repo still runs. A
+    Guards the `gh` BINARY rather than `ghcli.gh`, so the retry ladder and return-pair
+    contract of `ghcli.gh` itself stay testable, and `git` against a tmp repo still runs. A
     test that legitimately fakes `gh` or `git` sets its own after this fixture and wins."""
     real_run = subprocess.run
 
@@ -38,7 +38,7 @@ def _no_live_gh(monkeypatch):
         if cmd and cmd[0] == "gh" and "--help" not in cmd:
             raise AssertionError(
                 f"live `{' '.join(map(str, cmd[:3]))}` from a test - stub what the code "
-                "under test reads (site._repo_tree, utils.get_file_content, ...) instead."
+                "under test reads (site._repo_tree, gh_contents.get_file_content, ...) instead."
             )
         return real_run(cmd, *args, **kwargs)
 

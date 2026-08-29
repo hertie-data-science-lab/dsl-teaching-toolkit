@@ -41,29 +41,20 @@ from pathlib import Path
 import yaml
 
 from . import mailer, roster
-from .discovery import GRADEBOOK_PREFIX, course_name_for_cohort
-from .utils import (
-    GIT_ENV,
+from .access import grant_faculty_read_access
+from .course import CONFIG_REPO, GRADEBOOK_PREFIX
+from .discovery import course_name_for_cohort
+from .gh_contents import get_file_content, put_file, require_csv_header, strip_bom
+from .ghcli import GIT_ENV, gh, git
+from .log import log, log_err, log_ok, log_step, log_verbose
+from .repos import (
     add_collaborator,
     create_repo,
     get_default_branch,
-    get_file_content,
-    gh,
-    git,
-    grant_faculty_read_access,
-    log,
-    log_err,
-    log_ok,
-    log_step,
-    log_verbose,
-    put_file,
     repo_exists,
-    require_csv_header,
     set_repo_topics,
-    strip_bom,
 )
 
-CONFIG_REPO = roster.CONFIG_REPO  # classroom-config
 GRADES_DIR = "grades"  # faculty-edited source tables, one CSV per assignment
 GRADEBOOK_DIR = "gradebook"  # rendered per-student YAML staged for the preview PR
 RENDER_BRANCH = "grades-update"

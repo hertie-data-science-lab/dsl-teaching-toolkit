@@ -78,16 +78,11 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
-from .utils import (
-    coerce_date,
-    default_branch,
-    get_file_content,
-    log_err,
-    repo_exists,
-    repo_tree,
-)
+from .course import CONFIG_REPO, coerce_date
+from .gh_contents import get_file_content, put_file, repo_tree
+from .log import log, log_err
+from .repos import default_branch, repo_exists
 
-CONFIG_REPO = "classroom-config"
 SCHEDULE_PATH = "schedule.yml"
 DEFAULT_TZ = "Europe/Berlin"
 
@@ -104,7 +99,7 @@ def _tz(name: str | None) -> ZoneInfo:
 
 
 # The date-level coercion (semester bounds, whole-day events) is the shared canonical one
-# in utils - `active_today` uses the same, so the two can never drift. Aliased under the
+# in `course` - `active_today` uses the same, so the two can never drift. Aliased under the
 # module's historical private name for its internal callers (and the tests that pin it).
 _coerce_date = coerce_date
 
@@ -1290,8 +1285,6 @@ def record_handout(cohort_org: str, slug: str, stamp: str | None = None) -> None
     handout_datetime (scheduled, or recorded by an earlier run) is never modified. Best
     effort - a failure here must never fail the release itself, but it is never silent
     either: a file this can't edit means the handout happened and is on record nowhere."""
-    from .utils import log, put_file
-
     text = get_file_content(cohort_org, CONFIG_REPO, SCHEDULE_PATH) or ""
     if stamp is None:
         # the release moment, in the cohort's own timezone (naive, like every other

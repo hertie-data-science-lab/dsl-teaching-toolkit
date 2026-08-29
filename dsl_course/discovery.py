@@ -10,8 +10,8 @@ can't be found by naming convention (they're arbitrary), so they're listed expli
 the course org's .github/cohort-courses-pages.yml (register_cohort appends; faculty &
 instructors can edit it by hand).
 
-The session-folder rule itself lives in utils.session_dirs - this module is only the API
-transport for it (a recursive git-tree fetch); utils.discover_sections is the local
+The session-folder rule itself lives in course.session_dirs - this module is only the API
+transport for it (a recursive git-tree fetch); course.discover_sections is the local
 filesystem transport of the same rule.
 """
 
@@ -21,17 +21,17 @@ import json
 
 import yaml
 
-from .utils import (
-    get_default_branch,
-    get_file_content,
-    gh,
-    load_yaml_config,
-    log_err,
-    log_ok,
-    put_file,
-    repo_tree,
+from .central import resolve_central_ref
+from .course import (
+    COHORT_TOPIC,
+    COURSE_HUB_TOPIC,
+    GRADEBOOK_PREFIX,
     session_dirs,
 )
+from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
+from .ghcli import gh
+from .log import log_err, log_ok
+from .repos import get_default_branch
 
 COHORTS_PATH = (
     "cohort-courses-pages.yml"  # standalone registry in the course org's .github repo
@@ -46,14 +46,6 @@ ASSIGNMENT_TEMPLATE_TOPIC = "assignment-template"
 # submission repos and the frozen cohort-side assignment templates (assign.py), and the
 # private per-student gradebooks (grades.py).
 INFRA_TOPICS = {"submission", ASSIGNMENT_TEMPLATE_TOPIC, "gradebook"}
-# The per-student gradebook repo: grades-<handle> (grades.py creates them). Named here so
-# the reader below and the writer cannot drift.
-GRADEBOOK_PREFIX = "grades-"
-# Topics on an org's `.github` repo that say which TIER the org is (bootstrap_course stamps
-# them; list_orgs enumerates orgs by them). The repo listing carries them, so a sweep can
-# tell a course org from a cohort without another read.
-COURSE_HUB_TOPIC = "dsl-course-hub"
-COHORT_TOPIC = "dsl-cohort"
 # The repos only a cohort org has - the fallback tier signal for an org bootstrapped
 # before the topics existed, or whose topic stamp never landed.
 COHORT_ONLY_REPOS = {"welcome", "classroom-config"}
@@ -224,6 +216,26 @@ def course_name_of(course_org: str) -> str:
     return str(meta.get("course_name") or meta.get("org_name") or "")
 
 
+def central_ref_for(org: str) -> str:
+    """Which ref of the central toolkit this org's seeded workflows run the engine from.
+
+    Declared as `central_ref:` in the COURSE org's `.github/dsl-course.yml`, so one edit
+    moves a course and every cohort under it between tiers together. A cohort org's own
+    file is only a pointer (`course:`), so this follows it - a `central_ref:` written into
+    a cohort's file is ignored, because a cohort running a different engine from the course
+    org that releases into it is not a state anyone wants to debug.
+
+    Absent, or unreadable as a tier, means `central.CENTRAL_REF` - see resolve_central_ref
+    for why junk falls back rather than failing the run."""
+    meta = load_yaml_config(org, ".github", "dsl-course.yml") or {}
+    course = str(meta.get("course") or "")
+    if course:
+        org, meta = course, load_yaml_config(course, ".github", "dsl-course.yml") or {}
+    return resolve_central_ref(
+        meta.get("central_ref"), source=f"{org}/.github/dsl-course.yml"
+    )
+
+
 def discover_cohorts(course_org: str) -> list[str]:
     """Cohort orgs are listed explicitly in the course's .github/cohort-courses-pages.yml
     (naming-independent). `bootstrap --cohort --course X` appends; faculty & instructors can edit it."""
@@ -283,7 +295,7 @@ def unregister_cohort(course_org: str, cohort_org: str) -> bool:
     Removing on anything weaker than that would be the worse bug. A cohort dropped from
     here is invisible to every nightly sync - membership, faculty, site, scheduler - which
     is a SILENT no-op, where a stale entry merely fails loudly once a night. So the
-    liveness verdict belongs to the caller (`utils.org_exists`, which raises rather than
+    liveness verdict belongs to the caller (`repos.org_exists`, which raises rather than
     guessing), and this function only writes down what it was told.
 
     Returns True if the cohort is absent from the registry afterwards."""
@@ -318,7 +330,7 @@ def _repo_tree_dirs(org: str, repo: str) -> tuple[str, ...]:
     shared by every discovery helper that needs a repo's directory structure (rather
     than listing each top-level directory individually - N+1 API calls).
 
-    The fetch itself (and its absent-vs-failed discrimination) is utils.repo_tree, shared
+    The fetch itself (and its absent-vs-failed discrimination) is gh_contents.repo_tree, shared
     with the site builder's blob-side twin: an absent/empty tree is genuinely no
     directories, any other failure RAISES. It must never come back as "no sessions" - the
     site clears and rewrites its collections from these rows, so one rate-limited fetch

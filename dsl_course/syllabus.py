@@ -26,24 +26,12 @@ import argparse
 import sys
 
 from . import schedule
-from .site import (
-    READINGS_SECTION,
-    _demote_headings,
-    _planned_sessions,
-    _readings_block,
-)
-from .utils import (
-    SYLLABUS_SESSIONS_FILE,
-    default_branch,
-    get_file_content,
-    log,
-    log_err,
-    log_ok,
-    log_step,
-    put_file,
-    repo_tree,
-    session_number,
-)
+from .course import SYLLABUS_SESSIONS_FILE, session_number
+from .gh_contents import get_file_content, put_file, repo_tree
+from .log import log, log_err, log_ok, log_step
+from .readings import demote_headings, readings_block
+from .repos import default_branch
+from .schedule_plan import READINGS_SECTION, planned_sessions
 
 # How far a reading list's own headings are pushed down here: the syllabus puts a session at
 # `###`, so its `# Session N readings` has to land below that.
@@ -54,7 +42,7 @@ def _readings_for(course_org: str, repo: str, paths: tuple[str, ...], n: int) ->
     """Session `n`'s reading list from its `readings/NN_.../` folder, or "" when it has none.
     The folder is matched on its ordinal prefix, since faculty choose the rest.
 
-    `_readings_block`'s rule, so the syllabus says what the two websites say. It used to keep
+    `readings_block`'s rule, so the syllabus says what the two websites say. It used to keep
     only citation-extension files, which made a session whose readings are PDFs come out as a
     bare heading with nothing under it - the one destination where uploading a reading and
     writing no prose left NOTHING at all."""
@@ -70,7 +58,7 @@ def _readings_for(course_org: str, repo: str, paths: tuple[str, ...], n: int) ->
     )
     if prefix is None:
         return ""
-    return _readings_block(
+    return readings_block(
         [p[len(prefix) + 1 :] for p in paths if p.startswith(f"{prefix}/")],
         lambda name: get_file_content(course_org, repo, f"{prefix}/{name}"),
     )
@@ -84,11 +72,11 @@ def build(course_org: str, cohort_org: str, source_repo: str) -> tuple[str, int]
     was always zero and the CLI always reported "no dated sessions" - state the builder
     already had, thrown away and re-derived wrongly.
 
-    Sessions come from `site._planned_sessions`, the same function the website reads, so the
-    two cannot disagree about what session 3 is called. Re-deriving it here did: it took the
-    title from the earliest deploy touching a session whether or not that entry declared
-    one, so a readings-only or "Course opens" entry silently blanked a session the site
-    names."""
+    Sessions come from `schedule_plan.planned_sessions`, the same function the website
+    reads, so the two cannot disagree about what session 3 is called. Re-deriving it here
+    did: it took the title from the earliest deploy touching a session whether or not that
+    entry declared one, so a readings-only or "Course opens" entry silently blanked a
+    session the site names."""
     sched = schedule.load(cohort_org)
     branch = default_branch(course_org, source_repo)
     paths = repo_tree(course_org, source_repo, branch, "blob")
@@ -97,7 +85,7 @@ def build(course_org: str, cohort_org: str, source_repo: str) -> tuple[str, int]
     # the session once.
     rows = {
         int(ordinal): row
-        for (ordinal, kind), row in _planned_sessions(sched).items()
+        for (ordinal, kind), row in planned_sessions(sched).items()
         if kind == "lecture"
     }
 
@@ -114,7 +102,7 @@ def build(course_org: str, cohort_org: str, source_repo: str) -> tuple[str, int]
             # The teaching team's own headings and ordering kept verbatim - a syllabus's
             # `Required Readings` / `Optional Readings` split is theirs to make - but pushed
             # below the session heading above them.
-            out.append(_demote_headings(readings, _READINGS_SHIFT))
+            out.append(demote_headings(readings, _READINGS_SHIFT))
             out.append("")
     return "\n".join(out).rstrip() + "\n", len(rows)
 

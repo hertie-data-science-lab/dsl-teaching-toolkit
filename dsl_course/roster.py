@@ -27,9 +27,10 @@ import csv
 import io
 from dataclasses import dataclass
 
-from .utils import get_file_content, log_err, require_csv_header, strip_bom
+from .course import CONFIG_REPO
+from .gh_contents import get_file_content, require_csv_header, strip_bom
+from .log import log_err
 
-CONFIG_REPO = "classroom-config"
 ROSTER_PATH = "students.csv"
 ROLE_ENROLLED = "enrolled"
 ROLE_AUDITOR = "auditor"

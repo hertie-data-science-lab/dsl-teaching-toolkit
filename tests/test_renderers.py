@@ -14,9 +14,9 @@ import yaml
 from conftest import workflow_inputs, workflow_jobs
 
 from dsl_course import (
-    discovery,
     profile_readme,
     seed,
+    workflows_place,
     workflows_render,
 )
 
@@ -432,10 +432,14 @@ def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
         commits.append((files, list(delete), message))
         return True
 
-    monkeypatch.setattr(seed, "put_files", fake_put_files)
+    monkeypatch.setattr(workflows_place, "put_files", fake_put_files)
     assert (
-        seed._push_workflows(
-            "Course", "course-materials-f2026", ["Cohort-f2026"], ["assignment-1-f2026"]
+        workflows_place.push_content_workflows(
+            "Course",
+            "course-materials-f2026",
+            ["Cohort-f2026"],
+            ["assignment-1-f2026"],
+            "release",
         )
         == 0
     )
@@ -444,7 +448,7 @@ def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
     pushed = {path: content.decode() for path, content in files.items()}
     assert (
         set(pushed)
-        == set(seed.WORKFLOWS)
+        == set(workflows_place.WORKFLOWS)
         == {
             ".github/workflows/release-materials.yml",
             ".github/workflows/release-assignment.yml",
@@ -479,7 +483,7 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
         return True
 
     monkeypatch.setattr(seed, "put_files", fake_put_files)
-    assert seed.seed_github_workflows("Course") == 0
+    assert seed.seed_github_workflows("Course", "release") == 0
     assert len(commits) == 1
     repo, files, deleted = commits[0]
     assert repo == ".github"
@@ -490,30 +494,6 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
         ".github/workflows/sync-teams.yml",
         ".github/workflows/status.yml",
     ]
-
-
-def test_seed_exports_exactly_what_its_callers_reach_for():
-    # seed.__all__ IS the contract now: the names other modules use as `seed.<name>`
-    # (site, scaffold, bootstrap_course, sync_faculty, sync_membership). Pinned here, so
-    # trimming one that a caller still uses fails loudly instead of at runtime.
-    assert set(seed.__all__) == {
-        "seed_github_workflows",
-        "_push_workflows",
-        "COHORTS_PATH",
-        "discover_assignments",
-        "discover_cohort_repos",
-        "discover_cohorts",
-        "discover_content_repos",
-        "discover_release_sources",
-        "discover_sessions",
-        "register_cohort",
-        "update_profile_readme",
-    }
-    for name in seed.__all__:
-        assert getattr(seed, name, None) is not None, f"seed.{name} does not resolve"
-    # ...and they are the real thing, not a stale copy.
-    assert seed.discover_release_sources is discovery.discover_release_sources
-    assert seed.update_profile_readme is profile_readme.update_profile_readme
 
 
 def test_scaffold_buttons_route_inputs_through_env_not_the_shell():
@@ -596,7 +576,7 @@ def test_new_assignment_button_exposes_format_and_type():
 
 @pytest.mark.parametrize("name", sorted(ALL_RENDERED))
 def test_no_rendered_workflow_turns_on_dsl_verbose(name):
-    # DSL_VERBOSE un-suppresses the per-student log lines (utils.log_verbose) - who is
+    # DSL_VERBOSE un-suppresses the per-student log lines (log.log_verbose) - who is
     # enrolled, who is in which team, which `<slug>-<handle>` repo exists. Every one of
     # these workflows runs in the course org's PUBLIC `.github`, whose Actions log anyone
     # can read, so the variable is for a local CLI run only and no workflow may set it.
@@ -624,7 +604,7 @@ def test_validate_schedule_workflow_is_seeded_with_the_central_repo_pinned():
     from dsl_course.central import CENTRAL, CENTRAL_REF
     from dsl_course.welcome import _validate_schedule_workflow
 
-    raw = _validate_schedule_workflow()
+    raw = _validate_schedule_workflow(CENTRAL_REF)
     assert "__CENTRAL__" not in raw and "__CENTRAL_REF__" not in raw
     doc = yaml.safe_load(raw)
     trigger = doc.get("on", doc.get(True))
@@ -652,17 +632,16 @@ def test_validate_schedule_workflow_is_seeded_with_the_central_repo_pinned():
 # -------------------------------------- update_profile_readme guards its config load
 # A malformed dsl-course.yml used to raise a bare yaml traceback from mid-refresh (after
 # workflows were pushed, before the welcome/sample refresh), half-converging the nightly
-# run. It now loads through utils.load_yaml_config: absent -> fall back to the org name;
+# run. It now loads through gh_contents.load_yaml_config: absent -> fall back to the org name;
 # malformed/non-mapping -> raise with a clear, logged message.
 
 
 def test_update_profile_readme_absent_config_falls_back_without_crashing(monkeypatch):
     from dsl_course import profile_readme as P
 
-    monkeypatch.setattr("dsl_course.utils.get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.gh_contents.get_file_content", lambda *a, **k: None)
     # profile_readme imported the name, so the module binding is what the splice reads.
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
-    monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
     monkeypatch.setattr(
         P,
         "list_org_repos",
@@ -677,7 +656,7 @@ def test_update_profile_readme_absent_config_falls_back_without_crashing(monkeyp
     )
     monkeypatch.setattr(P, "log_ok", lambda *a, **k: None)
 
-    P.update_profile_readme("Cohort-f2026")  # must not raise
+    P.update_profile_readme("Cohort-f2026", central_ref="release")  # must not raise
     # Both READMEs, using the org name as the fallback - and in ONE commit, since they are
     # rendered from the same org snapshot and always move together.
     assert len(commits) == 1
@@ -755,9 +734,6 @@ def _readme_run(monkeypatch, put_ok):
 
     monkeypatch.setattr(P, "load_yaml_config", lambda org, repo, path: {})
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
-    monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
-    monkeypatch.setattr(P, "converge_descriptions", lambda *a, **k: 0)
-    monkeypatch.setattr(P, "converge_topics", lambda *a, **k: 0)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(P, "log", lambda *a, **k: None)
@@ -765,7 +741,7 @@ def _readme_run(monkeypatch, put_ok):
     monkeypatch.setattr(P, "log_ok", lambda msg: said_ok.append(msg))
     monkeypatch.setattr(P, "log_err", lambda *a, **k: None)
     monkeypatch.setattr(P, "put_files", lambda *a, **k: put_ok)
-    return P.update_profile_readme("Cohort-f2026"), said_ok
+    return P.update_profile_readme("Cohort-f2026", central_ref="release"), said_ok
 
 
 def test_a_failed_readme_commit_is_counted_not_announced(monkeypatch):
@@ -792,7 +768,6 @@ def test_cohort_page_title_follows_the_course_pointer(monkeypatch):
     )
     monkeypatch.setattr(P, "course_name_of", lambda org: "Deep Learning")
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
-    monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(P, "log", lambda *a, **k: None)
@@ -801,7 +776,7 @@ def test_cohort_page_title_follows_the_course_pointer(monkeypatch):
     monkeypatch.setattr(
         P, "put_files", lambda org, repo, files, msg, **k: written.update(files) or True
     )
-    P.update_profile_readme("Cohort-f2026")
+    P.update_profile_readme("Cohort-f2026", central_ref="release")
     page = written["profile/README.md"].decode()
     assert "# Deep Learning" in page
     assert "# Cohort-f2026" not in page
@@ -811,7 +786,6 @@ def _cohort_readme(monkeypatch, existing):
     from dsl_course import profile_readme as P
 
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: existing)
-    monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(P, "log", lambda *a, **k: None)
@@ -820,7 +794,9 @@ def _cohort_readme(monkeypatch, existing):
     monkeypatch.setattr(
         P, "put_files", lambda org, repo, files, msg, **k: written.update(files) or True
     )
-    P.update_profile_readme("Cohort-f2026", "Org", "Deep Learning")
+    P.update_profile_readme(
+        "Cohort-f2026", "Org", "Deep Learning", central_ref="release"
+    )
     return written
 
 
@@ -937,8 +913,15 @@ def test_every_cron_files_and_closes_its_own_failure_issue(name):
     assert "cc @%s/course-admin" in opener["run"]
     assert '"${REPO%%/*}"' in opener["run"]
     assert opener["env"]["REPO"] == "${{ github.repository }}"
-    # One $body serves both branches, so create and comment carry the same mention.
-    assert opener["run"].count('--body "$body"') == 2
+    # ...on the FIRST report only. A repeat comment posts $note, the same text without
+    # the mention: whoever it reached the first time is already subscribed to the thread.
+    assert opener["run"].count('--body "$body"') == 1
+    assert '--body "$note"' in opener["run"]
+    # And a repeat waits for the thread to have been quiet for six hours. The hourly
+    # scheduler fails every hour while a fault stands, so an unthrottled comment buried
+    # the issue and mentioned course-admin 24 times a day about the one fault.
+    assert "updatedAt" in opener["run"]
+    assert "21600" in opener["run"]
     # A job killed by its own `timeout-minutes` is CANCELLED, not failed - and a cron that
     # reliably runs out of time is exactly the silent failure this exists to surface.
     assert "cancelled()" in opener["if"]
@@ -1047,11 +1030,11 @@ def test_update_profile_readme_raises_clearly_on_a_malformed_config(
     from dsl_course import profile_readme as P
 
     monkeypatch.setattr(
-        "dsl_course.utils.get_file_content",
+        "dsl_course.gh_contents.get_file_content",
         lambda *a, **k: "course_name: [unclosed\n",
     )
     with pytest.raises(yaml.YAMLError):
-        P.update_profile_readme("Course-Org")
+        P.update_profile_readme("Course-Org", central_ref="release")
     assert "malformed YAML" in capsys.readouterr().err
 
 
@@ -1101,62 +1084,3 @@ def test_a_renamed_org_is_corrected_even_with_no_repo_table_markers():
         profile_readme.get_file_content = original
     assert out is not None, "a rename must still be written even with no markers"
     assert "old-org-f2026" not in out
-
-
-def _spy_sweep(monkeypatch, repos):
-    """Run update_profile_readme over `repos` and return the sweep's kwargs."""
-    from dsl_course import profile_readme as P
-
-    seen = {}
-
-    def spy(org, repos, cohort, protected):
-        seen.update(cohort=cohort, protected=set(protected))
-        return 0
-
-    monkeypatch.setattr(P, "converge_faculty_access", spy)
-    monkeypatch.setattr(P, "converge_descriptions", lambda *a, **k: 0)
-    monkeypatch.setattr(P, "converge_topics", lambda *a, **k: 0)
-    monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
-    monkeypatch.setattr(P, "list_org_repos", lambda org: repos)
-    monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
-    monkeypatch.setattr(P, "log", lambda *a, **k: None)
-    monkeypatch.setattr(P, "log_ok", lambda *a, **k: None)
-    monkeypatch.setattr(P, "put_files", lambda *a, **k: True)
-    P.update_profile_readme("Org", "Org", "Course")
-    return seen
-
-
-def _r(name, **extra):
-    return {
-        "name": name,
-        "url": "u",
-        "visibility": "private",
-        "description": "",
-        **extra,
-    }
-
-
-def test_the_sweep_is_told_the_tier_and_the_student_repos(monkeypatch):
-    # Deleting the call, or passing cohort=False for a cohort, used to be invisible: every
-    # test stubbed the sweep to a no-op. This pins what the one call site passes.
-    cohort = [_r(".github", topics=["dsl-cohort"]), _r("welcome"), _r("grades-ada")]
-    seen = _spy_sweep(monkeypatch, cohort)
-    assert seen == {"cohort": True, "protected": {"grades-ada"}}
-
-    course = [_r(".github", topics=["dsl-course-hub"]), _r("course-materials-f2026")]
-    assert _spy_sweep(monkeypatch, course) == {"cohort": False, "protected": set()}
-
-
-def test_an_org_of_unknown_tier_gets_the_read_floor(monkeypatch):
-    # A legacy cohort: `.github` without topics, student repos, no `welcome`. The page
-    # renders it as a course org (as before), but the sweep must NOT hand instructors push
-    # on every submission repo - so it is told "cohort" (read floor), and the student
-    # repos are protected by name as well.
-    legacy = [
-        _r(".github"),
-        _r("assignment-1", isTemplate=True),
-        _r("assignment-1-ada"),
-        _r("grades-ada"),
-    ]
-    seen = _spy_sweep(monkeypatch, legacy)
-    assert seen == {"cohort": True, "protected": {"assignment-1-ada", "grades-ada"}}

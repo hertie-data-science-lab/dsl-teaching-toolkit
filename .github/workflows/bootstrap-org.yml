@@ -24,6 +24,15 @@ on:
         description: "Course admin GitHub handle(s), comma-separated"
         required: false
         default: ""
+      central_ref:
+        description: "Toolkit tier the new org runs (and that this run bootstraps it with)"
+        required: true
+        type: choice
+        default: "release"
+        options:
+          - release
+          - staging
+          - main
 
 # Every step here authenticates with DSL_BOT_TOKEN (org creation and team lookups are far
 # beyond anything the ambient token could do); the bootstrap job re-declares contents: read
@@ -56,7 +65,14 @@ jobs:
     permissions:
       contents: read
     steps:
+      # THAT tier's code, not main's. The org's own workflows are rendered at
+      # `central_ref` and every one of them checks the toolkit out there at run time, so
+      # bootstrapping from main would provision the org with dev code and then hand it
+      # release workflows - two different engines, and only one of them ever tested
+      # against the files this run writes.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          ref: ${{ inputs.central_ref }}
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
@@ -75,10 +91,14 @@ jobs:
           ORG: ${{ inputs.org }}
           ORG_NAME: ${{ inputs.org_name }}
           COURSE_CODE: ${{ inputs.course_code }}
+          CENTRAL_REF: ${{ inputs.central_ref }}
         run: |
+          # Recorded in the org's own dsl-course.yml, so the tier this run checked out is
+          # the tier the org keeps running once the nightly refresh takes over.
           args=(--org "$ORG"
                 --org-name "$ORG_NAME"
-                --course-code "$COURSE_CODE")
+                --course-code "$COURSE_CODE"
+                --central-ref "$CENTRAL_REF")
           [ "$SET_SECRET" = "true" ] && args+=(--propagate-secret)
           [ -n "$ADMIN" ] && args+=(--admins "$ADMIN")
           python3 -m dsl_course.bootstrap_course "${args[@]}"
