@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import gh_contents, public_site, site, site_repo
+from dsl_course import gh_contents, ghcli, public_site, site, site_repo
 
 COURSE = "Course-Org"
 SOURCE = "course-materials-f2026"
@@ -81,7 +81,7 @@ def _install_fakes(monkeypatch) -> dict[str, str]:
     # `gh` and `repo_exists` are read from both namespaces: `public_site` clones the SOURCE
     # repo and `resync_public_site` looks the site repo up, while the site-repo mechanics
     # next door do the rest.
-    monkeypatch.setattr(public_site, "gh", fake_gh)
+    monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(site_repo, "gh", fake_gh)
     monkeypatch.setattr(site_repo, "git", fake_git)
     monkeypatch.setattr(public_site, "repo_exists", lambda org, name: True)

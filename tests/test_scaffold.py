@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import gh_contents, scaffold, seed
+from dsl_course import gh_contents, ghcli, scaffold, seed
 
 
 class FakeRepo:
@@ -177,6 +177,7 @@ def _clone_ok(monkeypatch, git_fake):
         return (0, "")
 
     monkeypatch.setattr(scaffold, "gh", fake_gh)
+    monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(scaffold, "git", git_fake)
 
 
@@ -501,6 +502,7 @@ def _site_gh(monkeypatch, pages_post, pages_put, env_put=(0, "")):
         return (1, "")
 
     monkeypatch.setattr(scaffold, "gh", fake_gh)
+    monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(scaffold, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(scaffold, "_dispatch_deploy", lambda org, site: None)
 

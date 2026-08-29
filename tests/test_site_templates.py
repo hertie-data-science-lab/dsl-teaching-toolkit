@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import public_site, site, site_repo
+from dsl_course import ghcli, public_site, site, site_repo
 
 FIXTURE_DIR = Path(__file__).resolve().parent / "fixtures" / "site"
 
@@ -297,7 +297,7 @@ def public_plan(monkeypatch, tmp_path):
     monkeypatch.setattr(public_site, "discover_sections", lambda src: [])
     monkeypatch.setattr(public_site, "yaml_file", lambda *a: {})
     monkeypatch.setattr(public_site, "people_yaml", lambda *a, **k: "people: []\n")
-    monkeypatch.setattr(public_site, "gh", lambda *a, **k: (0, ""))
+    monkeypatch.setattr(ghcli, "gh", lambda *a, **k: (0, ""))
     assert public_site.sync_public_site("Course-Org", "course-materials-f2026") == 0
     return captured["plan"]
 
@@ -331,7 +331,7 @@ def test_a_retired_path_leaves_the_site_repo_and_the_rest_stays(monkeypatch):
     monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(site_repo, "repo_is_archived", lambda org, name: False)
     monkeypatch.setattr(
-        site_repo,
+        ghcli,
         "gh",
         _clone_with({"_layouts/class.html": "old\n", "_layouts/page.html": "keep\n"}),
     )

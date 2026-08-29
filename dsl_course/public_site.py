@@ -23,7 +23,7 @@ import yaml
 from .course import discover_sections, find_session_dir, pages_repo
 from .discovery import discover_sessions
 from .gh_contents import get_file_content
-from .ghcli import gh
+from .ghcli import clone
 from .log import log, log_err, log_step
 from .readings import readings_block
 from .repos import has_denied_component, is_denied_publication, repo_exists
@@ -195,7 +195,7 @@ def sync_public_site(
         lecture_entries: dict[str, str] = {}
         with tempfile.TemporaryDirectory() as work:
             src, spec = Path(work) / "src", f"{course_org}/{source_repo}"
-            if gh("repo", "clone", spec, str(src), "--", "-q")[0] != 0:
+            if not clone(course_org, source_repo, src):
                 log_err(f"could not clone {spec}")
                 return None
 

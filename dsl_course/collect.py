@@ -102,7 +102,7 @@ from .course import (
     submission_repo,
 )
 from .gh_contents import get_file_content, put_file
-from .ghcli import GIT_ENV, gh, git, is_missing_resource
+from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
 from .log import log, log_err, log_ok, log_skip, log_step
 from .repos import repo_missing
 
@@ -997,7 +997,7 @@ def _grade_target(
     failures), or None if unclonable."""
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "sub"
-        if gh("repo", "clone", f"{cohort_org}/{repo}", str(wd), "--", "-q")[0] != 0:
+        if not clone(cohort_org, repo, wd):
             if repo_missing(cohort_org, repo):
                 # GitHub SAYS the repo does not exist (deleted, or never provisioned) - a
                 # recorded zero, NOT a transient failure. Returning None ('unreachable') would

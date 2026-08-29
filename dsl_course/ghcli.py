@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import subprocess
 import time
+from pathlib import Path
 from typing import Any
 
 RATE_LIMIT_MARKERS = (
@@ -79,6 +80,16 @@ def gh(*args: str, stdin: str | None = None, retries: int = 3) -> tuple[int, str
     """
     code, out, err = _run_gh(args, stdin, retries)
     return code, (out + err).strip()
+
+
+def clone(org: str, repo: str, dest: str | Path) -> bool:
+    """Clone `org/repo` into `dest`. True on success.
+
+    `-- -q` hands git its own quiet flag: a clone's progress output is hundreds of lines
+    nobody reads in an Actions log. Every clone in the toolkit goes through here, so the
+    argv shape is written once."""
+    code, _ = gh("repo", "clone", f"{org}/{repo}", str(dest), "--", "-q")
+    return code == 0
 
 
 def gh_json(*args: str) -> Any:

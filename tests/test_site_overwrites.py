@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import site_repo
+from dsl_course import ghcli, site_repo
 
 ORG = "Cohort-f2026"
 SITE = "cohort-f2026.github.io"
@@ -82,6 +82,7 @@ class _Fakes:
 
 def _run(monkeypatch, fakes: _Fakes) -> int:
     monkeypatch.setattr(site_repo, "gh", fakes.gh)
+    monkeypatch.setattr(ghcli, "gh", fakes.gh)
     monkeypatch.setattr(site_repo, "git", fakes.git)
     monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(site_repo, "repo_is_archived", lambda org, name: False)

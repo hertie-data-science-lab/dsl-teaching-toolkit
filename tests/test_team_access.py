@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import access, bootstrap_course, gh_contents, scaffold
+from dsl_course import access, bootstrap_course, gh_contents, ghcli, scaffold
 
 
 def test_course_team_access_policy():
@@ -55,6 +55,7 @@ def scaffold_grants(monkeypatch):
         return 0, ""
 
     monkeypatch.setattr(scaffold, "gh", fake_gh)
+    monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(scaffold, "git", lambda *a, **k: (0, ""))
     return granted
 

@@ -48,7 +48,7 @@ from .course import (
 )
 from .discovery import ASSIGNMENT_TEMPLATE_TOPIC
 from .gh_contents import put_file
-from .ghcli import GIT_ENV, gh, git
+from .ghcli import GIT_ENV, clone, gh, git
 from .log import log, log_err, log_ok, log_skip, log_step, log_verbose
 from .repos import (
     add_collaborator,
@@ -185,7 +185,7 @@ def push_solution(cohort_org: str, repo: str, sol_dir: Path) -> bool:
     """Push the solution/ folder into an existing student repo (idempotent overwrite)."""
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "r"
-        if gh("repo", "clone", f"{cohort_org}/{repo}", str(wd), "--", "-q")[0] != 0:
+        if not clone(cohort_org, repo, wd):
             return False
         shutil.copytree(sol_dir, wd / SOLUTION_DIR, dirs_exist_ok=True)
         git("-C", str(wd), *GIT_ENV, "add", "-A")

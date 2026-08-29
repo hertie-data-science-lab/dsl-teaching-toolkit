@@ -32,7 +32,7 @@ from .course import (
 )
 from .discovery import central_ref_for, discover_assignments, discover_cohorts
 from .gh_contents import put_files, refresh_stubs, seed_files_if_absent, seed_if_absent
-from .ghcli import GIT_ENV, gh, git, is_already_exists
+from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
 from .log import log, log_err, log_ok, log_skip, log_step
 from .readings import READING_OVERLAY_FILE
 from .repos import create_repo, generate_from_template, repo_exists, set_repo_topics
@@ -567,7 +567,7 @@ def scaffold_assignment(
     # main so generate never copies them into student repos.
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "r"
-        if gh("repo", "clone", f"{org}/{repo}", str(wd), "--", "-q")[0] != 0:
+        if not clone(org, repo, wd):
             log_err("  ! could not clone to add the solution branch")
             return 1
         # A solution branch left by a prior run holds a real model solution and hidden

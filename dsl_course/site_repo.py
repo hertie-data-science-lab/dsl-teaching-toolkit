@@ -24,7 +24,7 @@ from .course import INSTRUCTORS_TEAM, active_today, pages_repo
 from .discovery import list_org_repos
 from .gh_contents import load_yaml_config
 from .gh_teams import _acting_login
-from .ghcli import GIT_ENV, gh, git, is_missing_resource
+from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
 from .log import log, log_err, log_ok, log_step
 from .repos import repo_exists, repo_is_archived
 
@@ -942,7 +942,7 @@ def sync_site_repo(
         # an existing site repo either clones now or is a real failure.
         attempts = 6 if just_scaffolded else 1
         for attempt in range(attempts):
-            if gh("repo", "clone", f"{org}/{site}", str(wd), "--", "-q")[0] == 0:
+            if clone(org, site, wd):
                 break
             if attempt + 1 < attempts:
                 time.sleep(5)

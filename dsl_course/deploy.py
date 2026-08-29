@@ -40,7 +40,7 @@ from .course import (
     SYLLABUS_SESSIONS_FILE,
 )
 from .gh_contents import is_untouched_stub
-from .ghcli import GIT_ENV, gh, git
+from .ghcli import GIT_ENV, clone, git
 from .log import log, log_err, log_ok, log_step
 from .repos import create_repo
 from .schedule import Deploy
@@ -179,7 +179,7 @@ def deploy_many(
         src_dirs: dict[str, Path] = {}
         for repo in sorted({d.course_source_repo for d in deploys}):
             sd = root / "src" / repo
-            if gh("repo", "clone", f"{source_org}/{repo}", str(sd), "--", "-q")[0] != 0:
+            if not clone(source_org, repo, sd):
                 log_err(f"could not clone source {source_org}/{repo}")
             else:
                 src_dirs[repo] = sd
@@ -199,7 +199,7 @@ def deploy_many(
             # correction belongs in the course org's materials repo, then re-release.
             grant_faculty_read_access(cohort_org, repo)
             dd = root / "out" / repo
-            if gh("repo", "clone", f"{cohort_org}/{repo}", str(dd), "--", "-q")[0] != 0:
+            if not clone(cohort_org, repo, dd):
                 log_err(f"could not clone dest {cohort_org}/{repo}")
             else:
                 dest_dirs[repo] = dd

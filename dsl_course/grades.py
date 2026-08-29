@@ -51,7 +51,7 @@ from .gh_contents import (
     put_file,
     read_csv,
 )
-from .ghcli import GIT_ENV, gh, git, is_already_exists
+from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
 from .log import log, log_err, log_ok, log_step, log_verbose
 from .repos import (
     add_collaborator,
@@ -468,10 +468,7 @@ def render(cohort_org: str) -> int:
     base = get_default_branch(cohort_org, CONFIG_REPO)
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "cfg"
-        if (
-            gh("repo", "clone", f"{cohort_org}/{CONFIG_REPO}", str(wd), "--", "-q")[0]
-            != 0
-        ):
+        if not clone(cohort_org, CONFIG_REPO, wd):
             log_err(f"could not clone {cohort_org}/{CONFIG_REPO}")
             return 1
         # A prior render's branch may carry a reviewer's OWN commit (a grade fixed on the open
@@ -594,10 +591,7 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
     themselves were already previewed in the render PR)."""
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "cfg"
-        if (
-            gh("repo", "clone", f"{cohort_org}/{CONFIG_REPO}", str(wd), "--", "-q")[0]
-            != 0
-        ):
+        if not clone(cohort_org, CONFIG_REPO, wd):
             log_err(f"could not clone {cohort_org}/{CONFIG_REPO}")
             return 1
         gbdir = wd / GRADEBOOK_DIR

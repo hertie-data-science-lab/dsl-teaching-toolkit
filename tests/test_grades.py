@@ -11,7 +11,7 @@ import io
 import pytest
 import yaml
 
-from dsl_course import grades, roster
+from dsl_course import ghcli, grades, roster
 
 
 def test_parse_grades_tolerates_blank_and_missing_columns():
@@ -558,6 +558,7 @@ def _distribute_with(
     (cfg / grades.GRADEBOOK_DIR).mkdir(parents=True)
     (cfg / grades.GRADEBOOK_DIR / "ada-l.yml").write_text("student: ada-l\n")
     monkeypatch.setattr(grades, "gh", fake_gh)
+    monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
     monkeypatch.setattr(
         grades,
@@ -643,6 +644,7 @@ def _render_with(monkeypatch, tmp_path, *, staged, commit_ok=True):
         return 0, ""
 
     monkeypatch.setattr(grades, "gh", fake_gh)
+    monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(grades, "git", fake_git)
     return grades.render("COHORT")
 

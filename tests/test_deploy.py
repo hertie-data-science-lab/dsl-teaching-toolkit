@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import access, course, deploy, repos
+from dsl_course import access, course, deploy, ghcli, repos
 
 
 def test_a_single_path_with_no_comma_still_works():
@@ -547,7 +547,7 @@ def _stub_deploy_many(monkeypatch, build_source, real_grants=False):
             snapshots[root.name] = snap
         return 0, ""
 
-    monkeypatch.setattr(deploy, "gh", fake_gh)
+    monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     if not real_grants:
         monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
