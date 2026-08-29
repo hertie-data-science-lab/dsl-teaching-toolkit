@@ -284,6 +284,12 @@ def provision_one(
     `team`, so each member is added as a collaborator. Group assignments also pass the
     GitHub Team slug: the team is materialised from `handles` and granted on the repo, so
     membership changes propagate to access (and members get @mentions + a team space)."""
+    if team is not None and not handles:
+        # Every member was rejected by the roster allowlist upstream (typo'd handles, a
+        # stranger's login), so this team can be granted nothing. Checked BEFORE anything is
+        # created: a private repo nobody can open is left behind for the term otherwise.
+        log_err(f"  ! team {team} has no vetted members - no repo created for it")
+        return "failed-no-members"
     existed = (
         repo in existing if existing is not None else repo_exists(cohort_org, repo)
     )
@@ -317,7 +323,16 @@ def provision_one(
 
     solution_failed = False
     if sol_dir is not None:
-        if push_solution(cohort_org, repo, sol_dir):
+        # template-generate is async, so a repo THIS run created can still be empty. A
+        # clone of an empty repo has no branch, and the solution then lands on whatever the
+        # runner's `init.defaultBranch` is - invisible to the student and to grading.
+        if not existed and not _wait_for_content(cohort_org, repo):
+            log_err(
+                f"  ! {cohort_org}/{repo} has not populated yet - no solution pushed; "
+                f"the next run retries"
+            )
+            solution_failed = True
+        elif push_solution(cohort_org, repo, sol_dir):
             log_person("  [ok]   + solution pushed")
         else:
             # Reported in the RETURN value, not just the log: provision_all writes a
@@ -354,12 +369,6 @@ def provision_one(
             log_person(f"  [ok]   + team {team} (maintain)")
         if not team_ok:
             log_err(f"  ! team {team} is missing member(s) - they cannot see {repo}")
-        if not handles:
-            # Every member of this team was rejected by the roster allowlist upstream, so
-            # the team is empty and the repo is granted to nobody. The individual arm calls
-            # that failed-no-collaborator; a group of nobody is the same handout failure,
-            # and reporting "ok" left a repo no student could open looking successful.
-            log_err(f"  ! team {team} has no vetted members - nobody can open {repo}")
         # A failed solution push WINS over every other fault here. provision_all writes the
         # FIRE-ONCE solution marker off these statuses, so a repo that reported any other
         # failure had its missing solution forgotten - and the marker guaranteed no later
@@ -371,8 +380,6 @@ def provision_one(
             return "failed-no-access"
         if not team_ok:
             return "failed-team-members"
-        if not handles:
-            return "failed-no-members"
         return "skipped" if existed else "ok"
 
     # Ordering hazard (individual path): granting a repo collaborator BEFORE the student has

@@ -852,21 +852,48 @@ def test_a_failed_solution_wins_over_a_team_missing_members(tmp_path, monkeypatc
     assert status == "failed-solution"
 
 
-def test_a_group_whose_members_were_all_rejected_is_a_failed_unit(monkeypatch, capsys):
+def test_a_team_of_rejected_handles_gets_no_repo_at_all(monkeypatch, capsys):
     # Every handle in the teams.csv row failed the roster allowlist, so the team is empty
-    # and the repo is granted to nobody. Reported "ok", that left a repo no student could
-    # open looking like a successful handout.
+    # and the repo can be granted to nobody. The check ran AFTER creation, so a typo'd team
+    # left a private repo behind that no student could open, for the term.
     monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: False)
-    monkeypatch.setattr(assign, "generate_from_template", lambda **k: True)
-    monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
-    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
-    monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
-    monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
+
+    def boom(*a, **k):
+        raise AssertionError("a team with no vetted members must create nothing")
+
+    monkeypatch.setattr(assign, "generate_from_template", boom)
+    monkeypatch.setattr(assign.sync_teams, "ensure_team", boom)
     status = assign.provision_one(
         "C", "t", "COHORT", "a1-team-1", [], "assignment-1", team="assignment-1-team-1"
     )
     assert status == "failed-no-members"
-    assert "nobody can open a1-team-1" in capsys.readouterr().err
+    assert "no vetted members" in capsys.readouterr().err
+
+
+def test_a_solution_waits_for_the_repo_this_run_created_to_populate(
+    tmp_path, monkeypatch, capsys
+):
+    # template-generate is async. Pushing into a repo that is still empty clones a repo with
+    # no branch, so the solution landed on the runner's own default branch - invisible to
+    # the student and to grading, on a green run.
+    monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: False)
+    monkeypatch.setattr(assign, "generate_from_template", lambda **k: True)
+    monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "_wait_for_content", lambda org, repo: False)
+
+    def boom(*a, **k):
+        raise AssertionError("the solution must not be pushed into an empty repo")
+
+    monkeypatch.setattr(assign, "push_solution", boom)
+    status = assign.provision_one(
+        "C", "t", "COHORT", "a1-ada", ["ada"], "assignment-1", sol_dir=tmp_path
+    )
+    assert (
+        status == "failed-solution"
+    )  # withholds the fire-once marker, so a tick retries
+    assert "has not populated yet" in capsys.readouterr().err
 
 
 # ------------------------------------------- ONE listing instead of a probe per repo
