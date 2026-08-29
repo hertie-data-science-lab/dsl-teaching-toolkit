@@ -57,3 +57,23 @@ def test_render_markdown_missing_status_uses_add_link_text():
         "Course", "Cohort-f2026", _data(C7={**_ROW, "status": "missing"})
     )
     assert "[add](https://x/edit)" in md
+
+
+def test_markdown_mode_keeps_loader_chatter_off_stdout(monkeypatch, capsys):
+    # The workflow appends stdout to $GITHUB_STEP_SUMMARY of a PUBLIC repo, and the
+    # loaders log lines that can name people.yml entries. Only the rendered table may
+    # reach stdout, in both formats.
+    from dsl_course import status
+
+    def chatty_collect(course, cohort):
+        print("  (instructor entry 'Jane Doe' has no github_handle)")
+        return {}
+
+    monkeypatch.setattr(status, "collect", chatty_collect)
+    monkeypatch.setattr(status, "render_markdown", lambda *a: "# table")
+    monkeypatch.setattr(
+        "sys.argv", ["status", "--course-org", "C", "--cohort-org", "K"]
+    )
+    assert status.main() == 0
+    out = capsys.readouterr().out
+    assert "Jane Doe" not in out and "# table" in out

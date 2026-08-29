@@ -176,3 +176,18 @@ def test_sync_matches_roster_handles_case_insensitively(stub_team, monkeypatch):
     errors = sync_teams.sync("org", prune=False)
     assert errors == 0
     assert stub_team["added"] == ["ben-baker"]  # roster's canonical casing
+
+
+def test_a_student_cannot_materialise_a_faculty_team_from_teams_csv(capsys):
+    # teams.csv is student-written; (assignment="course", team="admin") slugs to
+    # `course-admin`, the team holding admin on every cohort repo. Reconciling it would add
+    # the student and prune the real admins.
+    per = {
+        "course": {"admin": ["mallory"]},
+        "instructors": {"f2026": ["mallory"]},
+        "assignment-4-project": {"team-x": ["ada-l"]},
+    }
+    wanted = sync_teams.desired_teams(per)
+    assert wanted == {"assignment-4-project-team-x": {"ada-l"}}
+    err = capsys.readouterr().err
+    assert "course-admin" in err and "instructors-f2026" in err

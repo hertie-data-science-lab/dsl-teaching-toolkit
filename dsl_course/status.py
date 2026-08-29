@@ -252,15 +252,15 @@ def main() -> int:
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
+        # collect()'s dependencies (schedule.load, roster.load, sync_faculty...) log
+        # informational lines to stdout, some naming people.yml entries. Both modes keep
+        # them off stdout: --format json promises parseable output, and the workflow
+        # appends the markdown to $GITHUB_STEP_SUMMARY of a PUBLIC repo.
+        with contextlib.redirect_stdout(io.StringIO()):
+            data = collect(args.course_org, args.cohort_org)
         if args.format == "json":
-            # collect()'s dependencies (schedule.load, roster.load, ...) log informational
-            # lines to stdout - fine for the human-facing markdown mode, but --format json
-            # promises clean, parseable output, so keep those off stdout here.
-            with contextlib.redirect_stdout(io.StringIO()):
-                data = collect(args.course_org, args.cohort_org)
             print(json.dumps(data, indent=2))
         else:
-            data = collect(args.course_org, args.cohort_org)
             print(render_markdown(args.course_org, args.cohort_org, data))
     except (RuntimeError, yaml.YAMLError) as exc:
         # A read helper that couldn't reach the API raises RuntimeError; a malformed

@@ -67,10 +67,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import io
 import json
 import os
 import resource
+import secrets
 import shutil
 import signal
 import subprocess
@@ -259,13 +261,21 @@ def score_from_junit(xml_text: str) -> dict:
     }
 
 
-def summary_lines(result: dict) -> list[str]:
-    """Human-readable per-target summary (plain tick/cross glyphs, never emoji)."""
-    lines = [f"  Score: {result['score']}/{result['max']}"]
-    if result.get("note"):
-        lines.append(f"  ({result['note']})")
-    lines += [f"    {'✓' if c['passed'] else '✗'} {c['name']}" for c in result["tests"]]
-    return lines
+# Salted per RUN. Without the salt the tag is sha1("<slug>-<handle>") and both halves are
+# public (the slug on the cohort site, the handle in the welcome repo's Join issue titles),
+# so anyone could recompute the tag and read the student back off the log.
+_REF_SALT = secrets.token_hex(8)
+
+
+def target_ref(repo: str) -> str:
+    """A short tag standing in for a submission repo in the run log - stable within a run,
+    unrecoverable from outside it.
+
+    The log is PUBLIC (every workflow runs in the course org's public `.github`) and a
+    submission repo is named `<slug>-<handle>`, so naming it beside a score or a
+    non-submission publishes a student's result. The private per-target archive under
+    autograde/<slug>/ records the tag next to the repo, which is where a marker looks it up."""
+    return "#" + hashlib.sha1((_REF_SALT + repo).encode()).hexdigest()[:7]
 
 
 def _zero_result(note: str) -> dict:
@@ -405,7 +415,7 @@ def _snapshot_sha(cohort_org: str, repo: str, deadline: str) -> str | None:
     # "nobody submitted" for ever. A precise marker match, not a loose `"empty" in out`.
     if is_missing_resource(out):
         return _REPO_ABSENT
-    log_err(f"  ! could not read commits for {cohort_org}/{repo}: {out[:160]}")
+    log_err(f"  ! could not read commits for {target_ref(repo)}: {out[:160]}")
     return None
 
 
@@ -427,7 +437,7 @@ def _warn_if_late_commits_only(cohort_org: str, repo: str, deadline: str) -> Non
     )
     if code == 0 and out.strip():
         log(
-            f"    ({repo} has commit(s), but none on/before {deadline} - an empty freeze "
+            f"    ({target_ref(repo)} has commit(s), but none on/before {deadline} - an empty freeze "
             f"here can also be a client clock skewed past the deadline; check if unexpected)"
         )
 
@@ -813,7 +823,7 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
             timeout=RUN_TIMEOUT,
         ):
             log_err(
-                f"  ! converting {nb.name} timed out after {RUN_TIMEOUT}s "
+                f"  ! converting a notebook timed out after {RUN_TIMEOUT}s "
                 f"(process group killed) - abandoning this submission"
             )
             return None
@@ -821,8 +831,7 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
         if not script.exists() and (stray := _stray_conversion(nb)):
             stray.rename(script)
             log(
-                f"    ({nb.name} declares no python file_extension - "
-                f"{stray.name} -> {script.name})"
+                "    (a notebook declares no python file_extension - renamed the stray output)"
             )
     with tempfile.TemporaryDirectory() as run:
         tests_dir = Path(run) / "tests"
@@ -895,10 +904,10 @@ def _grade_target(
                 # hold the fire-once marker and re-clone + re-grade every OTHER repo hourly,
                 # for ever, on an assignment that can never complete.
                 log_err(
-                    f"  ! {cohort_org}/{repo} does not exist - scoring 0 (no submission)"
+                    f"  ! {target_ref(repo)} does not exist - scoring 0 (no submission)"
                 )
                 return _zero_result("submission repo does not exist")
-            log_err(f"  ! could not clone {cohort_org}/{repo} (transient - will retry)")
+            log_err(f"  ! could not clone {target_ref(repo)} (transient - will retry)")
             return None
         sha = _pin_commit(wd, deadline, snapshot)
         if sha is None:
@@ -1054,7 +1063,7 @@ def collect(
         # cohort - see the systemic-failure guard below.
         failed_to_run: list[str] = []
         for repo, target_key, members in targets:
-            log_step(repo)
+            log_step(target_ref(repo))
             if dry_run:
                 if snapshots is None:
                     pin = f"<= {deadline}"
@@ -1062,14 +1071,14 @@ def collect(
                     pin = f"snapshot {(snapshots[repo] or 'none')[:8]}"
                 else:
                     pin = "no snapshot row -> zero"
-                log(f"    DRY-RUN would grade {cohort_org}/{repo} (pin {pin})")
+                log(f"    DRY-RUN would grade {target_ref(repo)} (pin {pin})")
                 continue
             if snapshots is not None and repo not in snapshots:
                 # The snapshot file exists but never recorded THIS repo (provisioned after the
                 # freeze?). Distinct from a missing file: do NOT silently drop to the
                 # student-datable committer-date pin - score zero with a loud per-repo warning.
                 log_err(
-                    f"  ! {repo} has no row in {snapshot_path(slug)} - it was not part of "
+                    f"  ! {target_ref(repo)} has no row in {snapshot_path(slug)} - it was not part of "
                     f"the deadline freeze; scoring 0 rather than pinning on student-"
                     f"controlled commit dates"
                 )
@@ -1088,8 +1097,9 @@ def collect(
                 continue
             if result.get("note") == GRADE_FAILED_NOTE:
                 failed_to_run.append(repo)
-            for line in summary_lines(result):
-                log(line)
+            # The score and per-test detail go ONLY to the private archive: this log is
+            # public, and the tag above is the only thing that may stand for the student here.
+            result = {"repo": repo, "ref": target_ref(repo), **result}
             archives.append(
                 (
                     f"{autograde_path(slug)}/{target_key}.json",
@@ -1121,7 +1131,7 @@ def collect(
             # one outage must never mark an assignment as permanently not-machine-graded.
             log_err(
                 f"{slug}: none of the {len(unreachable)} submission repo(s) could be read "
-                f"(named above) - nothing graded, and nothing recorded; the next run retries"
+                f"(tagged above) - nothing graded, and nothing recorded; the next run retries"
             )
             return 1
         if not updates:
@@ -1173,7 +1183,7 @@ def collect(
         if unreachable:
             log_err(
                 f"{slug}: recorded {len(updates)} score(s), but {len(unreachable)} "
-                f"submission repo(s) could not be read (named above) - NOT marking {slug} "
+                f"submission repo(s) could not be read (tagged above) - NOT marking {slug} "
                 f"machine-graded; the next run retries the missing one(s)"
             )
             return 1
@@ -1193,7 +1203,9 @@ def collect(
             )
             return 1
     log_ok(
-        f"recorded {len(updates)} auto score(s) -> {path} (faculty & instructors add manual marks, then render)"
+        f"recorded {len(updates)} auto score(s) -> {path}; "
+        f"{len(failed_to_run)} failed to run, {len(unreachable)} unreachable "
+        f"(per-target detail in {autograde_path(slug)}/) - faculty add manual marks, then render"
     )
     return 0
 

@@ -52,6 +52,15 @@ The same workflow releases **code**, because code is just another path. Keep a g
 - Copies are additive, so each release extends what students already have 
 - release the package base early (e.g. `mlpkg/core`) so partial releases still import. The [example schedule](../example-course/cohort-org/schedule.yml) shows the scheduled version of the same pattern (weeks 1, 3 and 5 each unlock an `mlpkg` subpackage).
 
+## Fixing something you have already released
+
+Edit it in the **course org** and release again. A release overwrites the file at that path,
+so the correction lands; a copy is only additive in that it never *deletes* anything.
+
+Do not edit the cohort's released copy directly - instructors have read on it for that
+reason. An edit there survives only until the next release of that path, then vanishes with
+no warning.
+
 ## The README is withheld until you write it
 
 Releasing the repo root (`/`), or naming `README.md` outright, copies the materials repo's

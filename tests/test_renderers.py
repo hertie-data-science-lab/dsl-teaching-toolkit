@@ -653,6 +653,7 @@ def test_update_profile_readme_absent_config_falls_back_without_crashing(monkeyp
     monkeypatch.setattr("dsl_course.utils.get_file_content", lambda *a, **k: None)
     # profile_readme imported the name, so the module binding is what the splice reads.
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
     monkeypatch.setattr(
         P,
         "list_org_repos",
@@ -750,6 +751,7 @@ def test_cohort_page_title_follows_the_course_pointer(monkeypatch):
     )
     monkeypatch.setattr(P, "course_name_of", lambda org: "Deep Learning")
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(P, "log", lambda *a, **k: None)
@@ -768,6 +770,7 @@ def _cohort_readme(monkeypatch, existing):
     from dsl_course import profile_readme as P
 
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: existing)
+    monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(P, "log", lambda *a, **k: None)
@@ -1017,3 +1020,61 @@ def test_a_renamed_org_is_corrected_even_with_no_repo_table_markers():
         profile_readme.get_file_content = original
     assert out is not None, "a rename must still be written even with no markers"
     assert "old-org-f2026" not in out
+
+
+def _spy_sweep(monkeypatch, repos):
+    """Run update_profile_readme over `repos` and return the sweep's kwargs."""
+    from dsl_course import profile_readme as P
+
+    seen = {}
+
+    def spy(org, repos, cohort, protected):
+        seen.update(cohort=cohort, protected=set(protected))
+        return 0
+
+    monkeypatch.setattr(P, "converge_faculty_access", spy)
+    monkeypatch.setattr(P, "converge_descriptions", lambda *a, **k: 0)
+    monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(P, "list_org_repos", lambda org: repos)
+    monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(P, "log", lambda *a, **k: None)
+    monkeypatch.setattr(P, "log_ok", lambda *a, **k: None)
+    monkeypatch.setattr(P, "put_files", lambda *a, **k: True)
+    P.update_profile_readme("Org", "Org", "Course")
+    return seen
+
+
+def _r(name, **extra):
+    return {
+        "name": name,
+        "url": "u",
+        "visibility": "private",
+        "description": "",
+        **extra,
+    }
+
+
+def test_the_sweep_is_told_the_tier_and_the_student_repos(monkeypatch):
+    # Deleting the call, or passing cohort=False for a cohort, used to be invisible: every
+    # test stubbed the sweep to a no-op. This pins what the one call site passes.
+    cohort = [_r(".github", topics=["dsl-cohort"]), _r("welcome"), _r("grades-ada")]
+    seen = _spy_sweep(monkeypatch, cohort)
+    assert seen == {"cohort": True, "protected": {"grades-ada"}}
+
+    course = [_r(".github", topics=["dsl-course-hub"]), _r("course-materials-f2026")]
+    assert _spy_sweep(monkeypatch, course) == {"cohort": False, "protected": set()}
+
+
+def test_an_org_of_unknown_tier_gets_the_read_floor(monkeypatch):
+    # A legacy cohort: `.github` without topics, student repos, no `welcome`. The page
+    # renders it as a course org (as before), but the sweep must NOT hand instructors push
+    # on every submission repo - so it is told "cohort" (read floor), and the student
+    # repos are protected by name as well.
+    legacy = [
+        _r(".github"),
+        _r("assignment-1", isTemplate=True),
+        _r("assignment-1-ada"),
+        _r("grades-ada"),
+    ]
+    seen = _spy_sweep(monkeypatch, legacy)
+    assert seen == {"cohort": True, "protected": {"assignment-1-ada", "grades-ada"}}

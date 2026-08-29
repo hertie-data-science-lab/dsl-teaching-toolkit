@@ -25,7 +25,9 @@ import re
 import sys
 
 from . import scaffold, seed, site, sync_faculty
+from .discovery import COHORT_TOPIC, COURSE_HUB_TOPIC
 from .utils import (
+    COHORT_WRITE_REPOS,
     COURSE_TEAM_ACCESS,
     create_repo,
     create_team,
@@ -49,9 +51,6 @@ from .welcome import (
     refresh_welcome_workflows,
     template,
 )
-
-COURSE_HUB_TOPIC = "dsl-course-hub"
-COHORT_TOPIC = "dsl-cohort"
 
 
 def _profile_topics(is_cohort: bool, course_code: str = "") -> list[str]:
@@ -231,8 +230,9 @@ def grant_button_access(org: str) -> None:
 # only org OWNERS can touch either repo - yet the whole faculty workflow lives in them:
 # `classroom-config` is what instructors edit (schedule.yml, students.csv, teams.csv,
 # people.yml) and read (grades/), and `welcome` is where they triage `needs-review`
-# onboarding issues. Course orgs have neither repo, so this is cohort-only.
-COHORT_FACULTY_REPOS = ["welcome", "classroom-config"]
+# onboarding issues. Course orgs have neither repo, so this is cohort-only. Single-sourced
+# with the nightly sweep's floor (utils.COHORT_WRITE_REPOS), so the two cannot disagree.
+COHORT_FACULTY_REPOS = sorted(COHORT_WRITE_REPOS - {".github"})
 
 
 def grant_cohort_faculty_access(org: str) -> None:

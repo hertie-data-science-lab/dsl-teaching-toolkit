@@ -41,7 +41,7 @@ from pathlib import Path
 import yaml
 
 from . import mailer, roster
-from .discovery import course_name_for_cohort
+from .discovery import GRADEBOOK_PREFIX, course_name_for_cohort
 from .utils import (
     GIT_ENV,
     add_collaborator,
@@ -50,6 +50,7 @@ from .utils import (
     get_file_content,
     gh,
     git,
+    grant_faculty_read_access,
     log,
     log_err,
     log_ok,
@@ -63,7 +64,6 @@ from .utils import (
 CONFIG_REPO = roster.CONFIG_REPO  # classroom-config
 GRADES_DIR = "grades"  # faculty-edited source tables, one CSV per assignment
 GRADEBOOK_DIR = "gradebook"  # rendered per-student YAML staged for the preview PR
-GRADEBOOK_PREFIX = "grades-"  # per-student repo: grades-<handle>
 RENDER_BRANCH = "grades-update"
 COHORT_CSV_NAME = "cohort-gradebook.csv"  # generated wide faculty-only glance view
 
@@ -391,6 +391,10 @@ def provision_one(cohort_org: str, handle: str) -> str:
         )
         set_repo_topics(cohort_org, repo, ["gradebook"])
 
+    # Read, not write: `distribute` rewrites grades.yml from
+    # `classroom-config/grades/<slug>.csv`, so a mark corrected here would be overwritten
+    # on the next run. The CSV is where a mark belongs.
+    grant_faculty_read_access(cohort_org, repo)
     if add_collaborator(cohort_org, repo, handle, permission="pull"):
         log_ok(f"  + @{handle} (read)")
         return "skipped" if existed else "ok"

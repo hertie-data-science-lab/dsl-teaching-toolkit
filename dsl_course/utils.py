@@ -562,8 +562,15 @@ def discover_sections(repo_root: Path) -> list[str]:
     )
 
 
-def grant_team_repo_access(org: str, team: str, repo: str, permission: str) -> bool:
-    """Grant a team a permission level on one repo (idempotent)."""
+def grant_team_repo_access(
+    org: str, team: str, repo: str, permission: str, *, missing_is_note: bool = False
+) -> bool:
+    """Grant a team a permission level on one repo (idempotent).
+
+    `missing_is_note`: a team that does not exist yet is logged as a note, not an error -
+    an org can be released into before its teams exist, and the next release or sync
+    fixes it. Any OTHER failure (a 5xx, a rate limit) stays an error either way; it used
+    to read as "team not found" on the read-teams path, which hid real outages."""
     code, out = gh(
         "api",
         "-X",
@@ -574,6 +581,9 @@ def grant_team_repo_access(org: str, team: str, repo: str, permission: str) -> b
     )
     if code == 0:
         return True
+    if missing_is_note and is_missing_resource(out):
+        log(f"  ({team} team not found - create it first)")
+        return False
     log_err(f"  ! could not grant {team} {permission} on {org}/{repo}: {out[:120]}")
     return False
 
@@ -584,11 +594,60 @@ def grant_team_repo_access(org: str, team: str, repo: str, permission: str) -> b
 # owner hand-granting each new repo.
 COURSE_TEAM_ACCESS = {"instructors": "push", "course-admin": "admin"}
 
+# Faculty access to a repo they should READ but not edit: the RELEASED copy of materials,
+# and a student's gradebook. Both have a source of truth elsewhere, so a hand edit here is
+# not durable and looks like one that stuck:
+#   - a re-release copies over the released copy (`copytree(dirs_exist_ok=True)`), so a
+#     correction belongs in the course org's materials repo, then re-release
+#   - `distribute` rewrites a gradebook's grades.yml from
+#     `classroom-config/grades/<slug>.csv`, so a mark belongs in that CSV
+# A submission repo is read for the same reason: marking happens in
+# `classroom-config/grades/<slug>.csv`, and by then the deadline snapshot has frozen its
+# HEAD and the autograder has run off that snapshot, so a commit there would reach no
+# gradebook and form no part of the record.
+#
+# What keeps WRITE is where faculty actually author: `classroom-config` (the grading CSVs,
+# schedule.yml, people.yml, the roster), `welcome/README.md` (the students' front door,
+# seeded create-only so faculty may reword it), and `.github` - that one because GitHub
+# requires write on a repo to trigger a workflow_dispatch at all, which is what every
+# faculty button is.
+#
+# `course-admin` stays admin throughout - it is the cohort's owner of last resort, and read
+# access cannot fix a broken repo.
+FACULTY_READ_ACCESS = {"instructors": "pull", "course-admin": "admin"}
+
+# The cohort repos faculty AUTHOR in - the only cohort repos that get write. Everything else
+# in a cohort org has its source of truth elsewhere and takes FACULTY_READ_ACCESS. `.github`
+# is here because GitHub requires write on a repo to trigger a workflow_dispatch at all.
+COHORT_WRITE_REPOS = frozenset({".github", "welcome", "classroom-config"})
+
+# GitHub's repo permissions, weakest first, in the vocabulary a PUT takes (`permission=`).
+# A team-repos LISTING answers in a different one (`role_name`: read/write/...) - which is
+# why the sweep reads the listing's `permissions` booleans instead; their keys are these.
+_PERM_RANK = {"pull": 1, "triage": 2, "push": 3, "maintain": 4, "admin": 5}
+
+
+def faculty_floor(repo: str, cohort: bool) -> dict[str, str]:
+    """The faculty teams' MINIMUM grant on `repo`: write where faculty author (every repo of
+    a course org, the COHORT_WRITE_REPOS of a cohort), read everywhere else in a cohort."""
+    if not cohort or repo in COHORT_WRITE_REPOS:
+        return COURSE_TEAM_ACCESS
+    return FACULTY_READ_ACCESS
+
 
 def grant_course_team_access(org: str, repo: str) -> None:
     """Give the course-org faculty teams their standing access to `repo` (COURSE_TEAM_ACCESS)."""
     for team, perm in COURSE_TEAM_ACCESS.items():
         grant_team_repo_access(org, team, repo, perm)
+
+
+def grant_faculty_read_access(org: str, repo: str) -> None:
+    """Give the faculty teams read on `repo` (FACULTY_READ_ACCESS) - for a repo whose source
+    of truth is elsewhere, so an edit made here would be overwritten."""
+    for team, perm in FACULTY_READ_ACCESS.items():
+        # Per-student hot path (every gradebook, every submission repo): a cohort whose
+        # faculty teams are not there yet must not print two errors per student.
+        grant_team_repo_access(org, team, repo, perm, missing_is_note=True)
 
 
 def grant_tagged_team_access(course_org: str, repo: str, tag: str) -> None:
@@ -617,18 +676,8 @@ def grant_read_teams(cohort_org: str, repo: str) -> None:
     missing team is a note, not an error: an org can be released into before its teams
     exist, and the next release (or Sync membership) fixes it."""
     for team in READ_TEAMS:
-        code, _ = gh(
-            "api",
-            "--method",
-            "PUT",
-            f"orgs/{cohort_org}/teams/{team}/repos/{cohort_org}/{repo}",
-            "--field",
-            "permission=pull",
-        )
-        if code == 0:
+        if grant_team_repo_access(cohort_org, team, repo, "pull", missing_is_note=True):
             log_ok(f"{team} team -> read")
-        else:
-            log(f"  ({team} team not found - create it first)")
 
 
 # Descriptions this toolkit wrote in a wording it has since REPLACED, mapped to the
@@ -693,6 +742,102 @@ SUPERSEDED_COURSE_DESCRIPTIONS = {
 }
 
 
+def _strongest_permission(permissions: dict) -> str | None:
+    """The strongest TRUE flag of a listing's cumulative `permissions` object, in the PUT
+    vocabulary. None when no flag we rank is set - the caller leaves that repo alone."""
+    held = [p for p, on in permissions.items() if on and p in _PERM_RANK]
+    return max(held, key=_PERM_RANK.__getitem__) if held else None
+
+
+def team_repo_access(org: str, team: str) -> dict[str, str | None] | None:
+    """`{repo: permission}` for every repo `team` holds - ONE paginated read, PUT vocabulary.
+
+    None when the team does not exist (a 404): an org can be swept before its teams are
+    created, and the next sweep picks it up. Not `{}` - that reads as "holds nothing", and
+    the caller would then PUT on every repo in the org and 404 on each. Any other failure
+    RAISES, on the same rule as every other listing here.
+
+    Read from the `permissions` booleans, never `.role_name`: the listing's role names
+    (`read`/`write`) are not the PUT vocabulary (`pull`/`push`), and ranking one in the
+    other's table once read every instructor's write as "below read" and demoted them. A
+    repo maps to None when its object sets no flag we rank; the caller must skip it."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"orgs/{org}/teams/{team}/repos?per_page=100",
+        "--jq",
+        ".[] | {name, permissions: (.permissions // {})}",
+    )
+    if code != 0:
+        if is_missing_resource(out):
+            return None
+        raise RuntimeError(f"could not read {org}/{team}'s repos: {out[:200]}")
+    try:
+        rows = [json.loads(line) for line in out.splitlines() if line.strip()]
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"unparseable repo listing for {org}/{team}: {out[:200]}"
+        ) from exc
+    return {r["name"]: _strongest_permission(r["permissions"]) for r in rows}
+
+
+def converge_faculty_access(
+    org: str,
+    repos: list[dict],
+    cohort: bool,
+    protected: frozenset[str] = frozenset(),
+) -> int:
+    """Raise the faculty teams to their floor (`faculty_floor`) on every live repo of `org`.
+
+    A team grant is set when a repo is created and never revisited, so a repo kind that
+    predates its grant, or an org bootstrapped before one existed, keeps whatever it
+    started with. In a cohort org (default_repository_permission=none) that is the WHOLE
+    of a non-owner's access; every live faculty member being an org owner is the only
+    reason it went unnoticed. This is the convergence path.
+
+    A FLOOR, never a level: a repo already granted higher is left alone. Fail closed: a
+    grant this sweep cannot rank is skipped, never read as "nothing" and overwritten.
+    `protected` names the per-student repos (discovery.student_repo_names): they take the
+    READ floor whatever `cohort` says, so a mis-told tier can under-grant a course org but
+    can never hand instructors push on a student's submission or gradebook. Archived repos
+    are skipped (GitHub refuses the PUT).
+
+    Cost: `2 * ceil(N/100)` GETs for a converged org; the FIRST sweep of an unconverged
+    org is one PUT per missing grant (a 300-repo cohort: ~600 sequential PUTs, which may
+    trip the secondary rate limit and crawl through gh()'s backoff - it self-heals, the
+    next night finishes). Never fatal: a failed PUT is a line, not a red refresh."""
+    changed = 0
+    live = [r["name"] for r in repos if not r.get("archived")]
+    for team in COURSE_TEAM_ACCESS:
+        try:
+            have = team_repo_access(org, team)
+        except RuntimeError as exc:
+            log(f"  ({exc})")
+            continue
+        if have is None:
+            log(f"  (no {team} team in {org} yet - faculty access not converged)")
+            continue
+        for name in live:
+            floor = (
+                FACULTY_READ_ACCESS
+                if name in protected
+                else faculty_floor(name, cohort)
+            )[team]
+            if name in have:
+                current = have[name]
+                if current is None:
+                    log(
+                        f"  ({team} holds {name} at a level this sweep cannot rank - left)"
+                    )
+                    continue
+                if _PERM_RANK[current] >= _PERM_RANK[floor]:
+                    continue
+            if grant_team_repo_access(org, team, name, floor):
+                log_ok(f"{team} -> {floor} on {name}")
+                changed += 1
+    return changed
+
+
 def converge_descriptions(org: str, repos: list[dict], cohort: bool = False) -> int:
     """Update every repo in `repos` whose description we have since reworded.
 
@@ -718,6 +863,8 @@ def converge_descriptions(org: str, repos: list[dict], cohort: bool = False) -> 
     )
     changed = 0
     for repo in repos:
+        if repo.get("archived"):
+            continue  # GitHub refuses the PATCH; a frozen cohort logged one failure a night
         want = superseded.get((repo.get("description") or "").strip())
         if not want:
             continue

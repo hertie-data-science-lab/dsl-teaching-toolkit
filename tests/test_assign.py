@@ -147,6 +147,7 @@ def test_a_failed_solution_push_reaches_the_returned_status(tmp_path, monkeypatc
     # provision_all could not tell. Both the group and individual paths must report it.
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
     monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
@@ -290,6 +291,7 @@ def test_a_repo_no_student_can_open_is_a_failed_handout(_provisioned, monkeypatc
     # The old "created-no-collaborator" status doesn't start with "failed", so a repo
     # nobody can see never reached provision_all's exit predicate: the release went green
     # while the student had nothing to submit into.
+    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: False)
     status = assign.provision_one(
         "COURSE",
@@ -306,6 +308,7 @@ def test_a_group_repo_reports_the_teams_own_failures(_provisioned, monkeypatch):
     # ensure_team's result used to be discarded, so a team that couldn't take its members
     # (they see nothing - access is via the team) still reported "ok".
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: False)
     status = assign.provision_one(
         "COURSE",
@@ -494,3 +497,29 @@ def test_provision_all_records_handout_under_schedule_key_and_survives_site_fail
     )
     assert captured["key"] == "project"  # the schedule key, not "group-project"
     assert rc == 1  # the site failure was counted, not raised as a traceback
+
+
+def test_both_assignment_arms_grant_faculty_read(_provisioned, monkeypatch):
+    # A cohort org is default_repository_permission=none, so a team grant is the WHOLE of
+    # a non-owner instructor's access - and submission repos granted only the student. The
+    # group arm RETURNS inside itself, so the grant must sit before the split or every team
+    # project repo would go on granting nobody but the team. READ, not write: marking
+    # happens in classroom-config/grades/<slug>.csv, after the snapshot froze HEAD.
+    faculty = []
+    monkeypatch.setattr(
+        assign, "grant_faculty_read_access", lambda *a: faculty.append(a)
+    )
+    monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
+    monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
+    assign.provision_one("COURSE", "a1", "COHORT", "a1-ada-l", ["ada-l"], "a1")
+    assign.provision_one(
+        "COURSE",
+        "a1",
+        "COHORT",
+        "a1-wizards",
+        ["ada-l", "bob-b"],
+        "a1",
+        team="a1-wizards",
+    )
+    assert faculty == [("COHORT", "a1-ada-l"), ("COHORT", "a1-wizards")]

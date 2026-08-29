@@ -27,11 +27,14 @@ from .central import CENTRAL, CENTRAL_REF
 from .discovery import (
     course_name_of,
     discover_cohorts,
-    has_infra_topic,
+    is_student_repo,
     list_org_repos,
+    org_tier,
+    student_repo_names,
 )
 from .utils import (
     converge_descriptions,
+    converge_faculty_access,
     get_file_content,
     load_yaml_config,
     log,
@@ -53,7 +56,9 @@ def _repo_table(repos: list[dict]) -> str:
     the thing this pipeline keeps out of public view. The site repo stays: it is public
     anyway, and faculty need the "do not touch" row.
     """
-    visible = [r for r in repos if r["name"] != ".github" and not has_infra_topic(r)]
+    visible = [
+        r for r in repos if r["name"] != ".github" and not is_student_repo(r, repos)
+    ]
     visible.sort(key=lambda r: (r["name"].lower() != "welcome", r["name"].lower()))
     rows = []
     for r in visible:
@@ -400,12 +405,23 @@ def update_profile_readme(
     repos = list_org_repos(org)
     # Read off the same listing, and BEFORE the convergence below, which needs the tier:
     # one old description becomes "[do not touch]" on a cohort org and "[control panel]"
-    # on a course org.
-    is_cohort = any(r["name"] == "welcome" for r in repos)
+    # on a course org. `tier` is None for an org the listing cannot place (a legacy cohort
+    # with no topics and no `welcome`); the page renders it as a course org, as before.
+    tier = org_tier(repos)
+    is_cohort = tier == "cohort"
     # The listing carries every repo's description, and the table below is rendered
     # from it - so this is the one place that can fix a reworded description without
     # paying a read for it, and the corrected text reaches the page in the same run.
     converge_descriptions(org, repos, cohort=is_cohort)
+    # And the faculty teams' standing access, off the same listing and for the same reason:
+    # a team grant is set at repo creation and never revisited, so every repo kind added
+    # since a grant existed keeps whatever it started with. In a cohort org that is the
+    # whole of a non-owner instructor's access (default_repository_permission=none).
+    # The sweep fails SAFE where the page merely guesses: only a listing that positively
+    # says "course" gets the write-everywhere floor, and a student repo never gets push.
+    converge_faculty_access(
+        org, repos, cohort=tier != "course", protected=student_repo_names(repos)
+    )
     cohorts = None if is_cohort else discover_cohorts(org)
     body = render_profile_readme(org, org_name, course_name, repos, is_cohort, cohorts)
     if is_cohort:

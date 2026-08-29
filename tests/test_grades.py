@@ -357,8 +357,22 @@ def test_a_gradebook_the_student_cannot_open_is_a_failure(monkeypatch):
     # The old "created-no-collaborator" status doesn't start with "failed", so sync's exit
     # predicate ignored it: a student with no read on their own gradebook, reported green.
     monkeypatch.setattr(grades, "repo_exists", lambda org, repo: True)
+    monkeypatch.setattr(grades, "grant_faculty_read_access", lambda *a, **k: None)
     monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: False)
     assert grades.provision_one("COHORT", "ada-l").startswith("failed")
+
+
+def test_a_gradebook_grants_faculty_read(monkeypatch):
+    # Read, not write: `distribute` rewrites grades.yml from grades/<slug>.csv, so a mark
+    # corrected in the gradebook itself would be overwritten on the next run.
+    faculty = []
+    monkeypatch.setattr(grades, "repo_exists", lambda org, repo: True)
+    monkeypatch.setattr(
+        grades, "grant_faculty_read_access", lambda *a: faculty.append(a)
+    )
+    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
+    grades.provision_one("COHORT", "ada-l")
+    assert faculty == [("COHORT", "grades-ada-l")]
 
 
 def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):

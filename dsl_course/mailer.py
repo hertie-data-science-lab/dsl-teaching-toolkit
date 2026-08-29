@@ -60,6 +60,13 @@ def graph_config_from_env() -> GraphConfig | None:
     return GraphConfig(tenant, client_id, secret, sender)
 
 
+def mask_email(addr: str) -> str:
+    """`a***@domain` - enough to tell two recipients apart in a run log, not enough to
+    identify either. Every workflow runs in a PUBLIC repo, so its log is world-readable."""
+    local, _, domain = addr.partition("@")
+    return f"{local[:1]}***@{domain}" if domain else f"{local[:1]}***"
+
+
 def _post(url: str, data: bytes, headers: dict[str, str]) -> tuple[int, bytes]:
     """POST and return (status, body); network/HTTP errors come back as a status + body."""
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
@@ -109,14 +116,15 @@ def _graph_send_one(
             "saveToSentItems": False,
         }
     ).encode()
-    status, raw = _post(
+    status, _raw = _post(
         url,
         payload,
         {"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
     )
     if status in (200, 202):
         return True
-    log_err(f"send to {to} failed ({status}): {raw[:200].decode(errors='replace')}")
+    # Status only: a Graph error body echoes the request, recipient included.
+    log_err(f"send to {mask_email(to)} failed ({status})")
     return False
 
 
@@ -134,7 +142,7 @@ def _send_via_graph(cfg: GraphConfig, messages: list[Message]) -> int:
     sent = 0
     for to, subject, body in messages:
         if _graph_send_one(cfg, token, to, subject, body):
-            log_ok(f"sent -> {to}")
+            log_ok(f"sent -> {mask_email(to)}")
             sent += 1
     return sent
 
@@ -180,10 +188,10 @@ def _send_via_smtp(cfg: SMTPConfig, messages: list[Message]) -> int:
                 msg.set_content(body)
                 try:
                     server.send_message(msg)
-                    log_ok(f"sent -> {to}")
+                    log_ok(f"sent -> {mask_email(to)}")
                     sent += 1
                 except smtplib.SMTPException as exc:
-                    log_err(f"send to {to} failed: {exc}")
+                    log_err(f"send to {mask_email(to)} failed: {type(exc).__name__}")
     except (smtplib.SMTPException, OSError) as exc:
         log_err(f"SMTP connection failed: {exc}")
     return sent
@@ -195,12 +203,13 @@ def _send_via_smtp(cfg: SMTPConfig, messages: list[Message]) -> int:
 def send_bulk(messages: list[Message], dry_run: bool = False) -> int:
     """Preview (dry_run) or send a batch. Returns the count previewed/sent.
 
-    dry_run prints every message in full - the all-recipients-at-once preview the Power
-    Automate flow never gave - and sends nothing. Otherwise the transport is chosen by
-    whichever secrets are configured (Graph preferred, SMTP fallback)."""
+    dry_run lists masked recipients + subjects and sends nothing. Never the body: the
+    enrolment-code email carries the student's name and a live credential, and this runs
+    in a public repo whose Actions log anyone can read. Otherwise the transport is chosen
+    by whichever secrets are configured (Graph preferred, SMTP fallback)."""
     if dry_run:
-        for to, subject, body in messages:
-            log(f"\n--- to: {to}\n--- subject: {subject}\n{body}")
+        for to, subject, _body in messages:
+            log(f"  would send -> {mask_email(to)}: {subject}")
         log_ok(f"DRY-RUN previewed {len(messages)} message(s) - nothing sent")
         return len(messages)
 

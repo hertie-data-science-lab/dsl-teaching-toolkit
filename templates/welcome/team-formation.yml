@@ -93,200 +93,242 @@ jobs:
               core.setFailed(msg.replace(/\*\*/g, ''));
             };
 
-            if (!process.env.HAS_BOT) {
-              return fail(
-                `Thanks @${handle} - team formation is **not yet armed**: the \`DSL_BOT_TOKEN\` secret ` +
-                `is unset, so I can't read the roster or record your team. A maintainer will action this.`,
-                'needs-review');
-            }
-
-            // Parse the assignment slug + team name from the issue form.
-            const aMatch = (issue.body || '').match(/Assignment\s*[\r\n]+\s*([A-Za-z0-9][\w.-]*)/i);
-            const tMatch = (issue.body || '').match(/Team\s*[\r\n]+\s*([A-Za-z0-9][\w-]*)/i);
-            const assignment = aMatch && aMatch[1];
-            const team = tMatch && tMatch[1];
-
-            // Per-assignment team-size cap, set by the teaching team in the PRIVATE
-            // classroom-config/schedule.yml:
-            //   assignments:
-            //     assignment-4-project:
-            //       max_team_size: 4        # (or inline: {due_datetime: ..., max_team_size: 4})
-            // Line-scanned (github-script has no YAML lib) tolerant of comments and both
-            // block and flow styles. No file / no key -> DEFAULT_TEAM_SIZE.
-            const DEFAULT_TEAM_SIZE = 5;
-            const teamCap = async (slug) => {
-              let text;
-              try {
-                const got = await github.rest.repos.getContent({ owner: org, repo: CONFIG, path: 'schedule.yml' });
-                text = Buffer.from(got.data.content, 'base64').toString('utf8');
-              } catch (e) {
-                if (e.status !== 404) throw e;
-                return DEFAULT_TEAM_SIZE;
+            try {
+              if (!process.env.HAS_BOT) {
+                return fail(
+                  `Thanks @${handle} - team formation is **not yet armed**: the \`DSL_BOT_TOKEN\` secret ` +
+                  `is unset, so I can't read the roster or record your team. A maintainer will action this.`,
+                  'needs-review');
               }
-              let inAssignments = false, inSlug = false;
-              for (const raw of text.split(/\r?\n/)) {
-                const line = raw.replace(/#.*$/, '').trimEnd();
-                if (!line.trim()) continue;
-                const indent = line.length - line.trimStart().length;
-                if (indent === 0) { inAssignments = line.trim() === 'assignments:'; inSlug = false; continue; }
-                if (!inAssignments) continue;
-                if (indent === 2) {
-                  const m = line.trim().match(/^([\w.-]+):\s*(\{.*\})?$/);
-                  inSlug = !!m && m[1] === slug;
-                  if (inSlug && m && m[2]) {
-                    const f = m[2].match(/max_team_size:\s*(\d+)/);
+
+              // Parse the assignment slug + team name from the issue form.
+              const aMatch = (issue.body || '').match(/Assignment\s*[\r\n]+\s*([A-Za-z0-9][\w.-]*)/i);
+              const tMatch = (issue.body || '').match(/Team\s*[\r\n]+\s*([A-Za-z0-9][\w-]*)/i);
+
+              // Per-assignment team-size cap, set by the teaching team in the PRIVATE
+              // classroom-config/schedule.yml:
+              //   assignments:
+              //     assignment-4-project:
+              //       max_team_size: 4        # (or inline: {due_datetime: ..., max_team_size: 4})
+              // Line-scanned (github-script has no YAML lib) tolerant of comments and both
+              // block and flow styles. Returns null when the slug is NOT under `assignments:`
+              // (or there is no schedule.yml): a team may only form for an assignment the
+              // teaching team has declared, or one student could mint any number of real GitHub
+              // teams under names of their choosing. A declared slug with no cap -> DEFAULT_TEAM_SIZE.
+              const DEFAULT_TEAM_SIZE = 5;
+              const teamCap = async (slug) => {
+                let text;
+                try {
+                  const got = await github.rest.repos.getContent({ owner: org, repo: CONFIG, path: 'schedule.yml' });
+                  text = Buffer.from(got.data.content, 'base64').toString('utf8');
+                } catch (e) {
+                  if (e.status !== 404) throw e;
+                  return null;
+                }
+                // The slug indent is whatever the FIRST key under `assignments:` uses - a
+                // 4-space file must not read as "no assignments declared" and refuse every team.
+                let known = false, slugIndent = null;
+                let inAssignments = false, inSlug = false;
+                for (const raw of text.split(/\r?\n/)) {
+                  const line = raw.replace(/#.*$/, '').trimEnd();
+                  if (!line.trim()) continue;
+                  const indent = line.length - line.trimStart().length;
+                  if (indent === 0) { inAssignments = line.trim() === 'assignments:'; inSlug = false; slugIndent = null; continue; }
+                  if (!inAssignments) continue;
+                  if (slugIndent === null) slugIndent = indent;
+                  if (indent === slugIndent) {
+                    const m = line.trim().match(/^([\w.-]+):\s*(\{.*\})?$/);
+                    inSlug = !!m && m[1].toLowerCase() === slug;
+                    known = known || inSlug;
+                    if (inSlug && m && m[2]) {
+                      const f = m[2].match(/max_team_size:\s*(\d+)/);
+                      if (f) return parseInt(f[1], 10);
+                    }
+                    continue;
+                  }
+                  if (inSlug && indent > slugIndent) {
+                    const f = line.trim().match(/^max_team_size:\s*(\d+)$/);
                     if (f) return parseInt(f[1], 10);
                   }
-                  continue;
                 }
-                if (inSlug) {
-                  const f = line.trim().match(/^max_team_size:\s*(\d+)$/);
-                  if (f) return parseInt(f[1], 10);
+                return known ? DEFAULT_TEAM_SIZE : null;
+              };
+
+              if (!aMatch || !tMatch) return fail(
+                `Thanks @${handle} - I couldn't read both an **Assignment** and a **Team** from the form. ` +
+                `Team names use letters, numbers and dashes only. Please open a new issue.`,
+                'needs-review');
+              // Compared and stored lower-case: dsl_course.sync_teams lower-cases the slug it
+              // materialises, so `Team-X` and `team-x` ARE the same team - the size cap and the
+              // one-team-per-assignment rule below must see them that way too.
+              const assignment = aMatch[1].toLowerCase();
+              const team = tMatch[1].toLowerCase();
+              // The GitHub team this row becomes is `<assignment>-<team>` (sync_teams.team_slug).
+              // `course` + `admin` is `course-admin` - the faculty team with admin on every repo
+              // in this org. Never let a form submission name a faculty team.
+              const RESERVED = new Set(['course-admin', 'instructors', 'students', 'auditors']);
+              const slug = `${assignment}-${team}`;
+              if (RESERVED.has(slug) || slug.startsWith('instructors-')) return fail(
+                `Thanks @${handle} - that assignment + team combination is reserved. Pick another team name.`,
+                'needs-review');
+
+              // Verify the author is an onboarded student (handle recorded in the roster).
+              // Columns (dsl_course.roster.FIELDS) are addressed BY NAME, never by position.
+              const rosterRaw = await github.rest.repos.getContent({ owner: org, repo: CONFIG, path: ROSTER });
+              const rosterTable = parseCsv(Buffer.from(rosterRaw.data.content, 'base64').toString('utf8'));
+              const rosterHeader = (rosterTable[0] || []).map(h => h.trim());
+              const iRosterHandle = rosterHeader.indexOf('github_handle');
+              // `role` is OPTIONAL - a roster seeded before the column existed has none, and a
+              // missing/blank cell means `enrolled` (dsl_course.roster.normalise_role). Never
+              // required, so an older cohort's students keep forming teams.
+              const iRole = rosterHeader.indexOf('role');
+              if (iRosterHandle < 0) return fail(
+                `Thanks @${handle} - the roster's header is missing a \`github_handle\` column. ` +
+                `A maintainer will action this.`,
+                'needs-review');
+              const myRow = rosterTable.slice(1)
+                .find(r => (r[iRosterHandle] || '').trim().toLowerCase() === handle.toLowerCase());
+              if (!myRow) return fail(
+                `Thanks @${handle} - I can't find you on the roster yet. Please open a **Join** issue first ` +
+                `to onboard, then come back to join a team.`,
+                'needs-review');
+              // Auditors are read-only: assignment release is roster-driven (enrolled rows only),
+              // so they never receive an assignment repo - and a group assignment's repo goes to
+              // the whole team. Refuse politely rather than recording a membership that would
+              // hand an auditor a group repo.
+              // Neutral wording: this issue is public, and the roster role is not.
+              if (iRole >= 0 && (myRow[iRole] || '').trim().toLowerCase() === 'auditor') return fail(
+                `Thanks @${handle} - your enrolment doesn't include project work, so you can't join a project team. ` +
+                `Contact the teaching team if you think this is a mistake.`,
+                'needs-review');
+              // A team may not be named after a roster handle: submission repos are
+              // `<slug>-<handle>` and a group repo is `<slug>-<team>`, so a team called after a
+              // classmate would be granted that classmate's repo if the assignment were ever
+              // provisioned as a group.
+              const handles = new Set(rosterTable.slice(1).map(r => (r[iRosterHandle] || '').trim().toLowerCase()).filter(Boolean));
+              if (handles.has(team)) return fail(
+                `Thanks @${handle} - a team can't be named after a GitHub handle. Pick another team name.`,
+                'needs-review');
+
+              // Read teams.csv (create it on first use). Columns: dsl_course.teams.FIELDS.
+              const FIELDS = ['assignment', 'team', 'github_handle'];
+              const readTeams = async () => {
+                let sha = null, header = FIELDS, rows = [];
+                try {
+                  const got = await github.rest.repos.getContent({ owner: org, repo: CONFIG, path: TEAMS });
+                  sha = got.data.sha;
+                  const table = parseCsv(Buffer.from(got.data.content, 'base64').toString('utf8'));
+                  if (table.length) { header = table[0].map(h => h.trim()); rows = table.slice(1); }
+                } catch (e) {
+                  if (e.status !== 404) throw e;
                 }
-              }
-              return DEFAULT_TEAM_SIZE;
-            };
-
-            if (!assignment || !team) return fail(
-              `Thanks @${handle} - I couldn't read both an **Assignment** and a **Team** from the form. ` +
-              `Team names use letters, numbers and dashes only. Please edit the issue.`,
-              'needs-review');
-
-            // Verify the author is an onboarded student (handle recorded in the roster).
-            // Columns (dsl_course.roster.FIELDS) are addressed BY NAME, never by position.
-            const rosterRaw = await github.rest.repos.getContent({ owner: org, repo: CONFIG, path: ROSTER });
-            const rosterTable = parseCsv(Buffer.from(rosterRaw.data.content, 'base64').toString('utf8'));
-            const rosterHeader = (rosterTable[0] || []).map(h => h.trim());
-            const iRosterHandle = rosterHeader.indexOf('github_handle');
-            // `role` is OPTIONAL - a roster seeded before the column existed has none, and a
-            // missing/blank cell means `enrolled` (dsl_course.roster.normalise_role). Never
-            // required, so an older cohort's students keep forming teams.
-            const iRole = rosterHeader.indexOf('role');
-            if (iRosterHandle < 0) return fail(
-              `Thanks @${handle} - the roster's header is missing a \`github_handle\` column. ` +
-              `A maintainer will action this.`,
-              'needs-review');
-            const myRow = rosterTable.slice(1)
-              .find(r => (r[iRosterHandle] || '').trim().toLowerCase() === handle.toLowerCase());
-            if (!myRow) return fail(
-              `Thanks @${handle} - I can't find you on the roster yet. Please open a **Join** issue first ` +
-              `to onboard, then come back to join a team.`,
-              'needs-review');
-            // Auditors are read-only: assignment release is roster-driven (enrolled rows only),
-            // so they never receive an assignment repo - and a group assignment's repo goes to
-            // the whole team. Refuse politely rather than recording a membership that would
-            // hand an auditor a group repo.
-            if (iRole >= 0 && (myRow[iRole] || '').trim().toLowerCase() === 'auditor') return fail(
-              `Thanks @${handle} - you're on the roster as an **auditor** (read-only: the released ` +
-              `materials, but no assignment repos and no grades), so you can't join a project team. ` +
-              `Contact the teaching team if you should be enrolled instead.`,
-              'needs-review');
-
-            // Read teams.csv (create it on first use). Columns: dsl_course.teams.FIELDS.
-            const FIELDS = ['assignment', 'team', 'github_handle'];
-            const readTeams = async () => {
-              let sha = null, header = FIELDS, rows = [];
-              try {
-                const got = await github.rest.repos.getContent({ owner: org, repo: CONFIG, path: TEAMS });
-                sha = got.data.sha;
-                const table = parseCsv(Buffer.from(got.data.content, 'base64').toString('utf8'));
-                if (table.length) { header = table[0].map(h => h.trim()); rows = table.slice(1); }
-              } catch (e) {
-                if (e.status !== 404) throw e;
-              }
-              return { sha, header, rows };
-            };
-            const cell = (r, i) => (r[i] || '').trim();
-            // The cap is per-assignment config in schedule.yml, not a property of teams.csv,
-            // so it is read once rather than on every retry below.
-            const cap = await teamCap(assignment);
-
-            // Read-modify-write, retried on a 409. Many Join-team issues are in flight at
-            // once near a project deadline, and each appends to the SAME file; the `sha`
-            // makes a lost update impossible (a stale one is a 409). The WHOLE decision is
-            // re-taken on each attempt, not just the append: the duplicate-membership and
-            // team-size checks are read off the file we are actually writing on top of, so a
-            // team can't go over its cap by two students committing at the same moment.
-            //
-            // 409 = stale sha. 422 = the create-on-first-use race (our request carried no sha
-            // because the file did not exist when we read it, but it does now). A 403 naming
-            // GitHub's SECONDARY rate limit / abuse detection is GitHub asking us to back off -
-            // a deadline-eve burst hits it - and is equally worth another attempt.
-            const retryable = (e) => e.status === 409 || e.status === 422 ||
-              (e.status === 403 && /secondary rate limit|abuse detection/i.test(String(e.message || '')));
-            const ATTEMPTS = 8;
-            for (let attempt = 1; ; attempt++) {
-              const { sha, header, rows } = await readTeams();
-              const iAssign = header.indexOf('assignment');
-              const iTeam = header.indexOf('team');
-              const iHandle = header.indexOf('github_handle');
-              if (iAssign < 0 || iTeam < 0 || iHandle < 0) return fail(
-                `Thanks @${handle} - \`teams.csv\` is missing a required column ` +
-                `(\`assignment\`, \`team\`, \`github_handle\`). A maintainer will action this.`,
+                return { sha, header, rows };
+              };
+              const cell = (r, i) => (r[i] || '').trim();
+              // The cap is per-assignment config in schedule.yml, not a property of teams.csv,
+              // so it is read once rather than on every retry below.
+              const cap = await teamCap(assignment);
+              if (cap === null) return fail(
+                `Thanks @${handle} - \`${assignment}\` isn't an assignment in this cohort's schedule yet. ` +
+                `Check the slug with the teaching team, or ask them to add it to classroom-config/schedule.yml.`,
                 'needs-review');
 
-              // One team per student per assignment; respect the size cap; idempotent re-open.
-              const mine = rows.find(r =>
-                cell(r, iAssign) === assignment && cell(r, iHandle).toLowerCase() === handle.toLowerCase());
-              if (mine && cell(mine, iTeam) === team) {
-                await github.rest.issues.createComment({
-                  owner: org, repo: context.repo.repo, issue_number: issue.number,
-                  body: `You're already in **${team}** for \`${assignment}\` @${handle} - nothing to do.` });
-                await github.rest.issues.update({
-                  owner: org, repo: context.repo.repo, issue_number: issue.number, state: 'closed' });
-                return;
-              }
-              if (mine) return fail(
-                `You're already in team **${cell(mine, iTeam)}** for \`${assignment}\` @${handle}. ` +
-                `Contact the teaching team to switch teams.`,
-                'needs-review');
-              const size = rows.filter(r =>
-                cell(r, iAssign) === assignment && cell(r, iTeam) === team).length;
-              if (size >= cap) return fail(
-                `Team **${team}** for \`${assignment}\` is full (${cap} member${cap === 1 ? '' : 's'} - ` +
-                `the cap the teaching team set via \`max_team_size\` in classroom-config/schedule.yml). ` +
-                `Pick another team name.`,
-                'needs-review');
-
-              // Append + write back (in the existing header's column order).
-              const fresh = header.map(() => '');
-              fresh[iAssign] = assignment; fresh[iTeam] = team; fresh[iHandle] = handle;
-              rows.push(fresh);
-              const body = serialiseCsv([header, ...rows]);
-              try {
-                await github.rest.repos.createOrUpdateFileContents({
-                  owner: org, repo: CONFIG, path: TEAMS, ...(sha ? { sha } : {}),
-                  message: `teams: ${handle} -> ${team} (${assignment})`,
-                  content: Buffer.from(body, 'utf8').toString('base64'),
-                });
-                break;
-              } catch (e) {
-                // Giving up is a RESULT, not a crash: an uncaught throw leaves a red run with
-                // no comment and no label, so the student is dropped in silence and nobody
-                // triages it. Every terminal path goes through fail() instead.
-                if (!retryable(e) || attempt === ATTEMPTS) return fail(
-                  `Thanks @${handle} - I couldn't record your team after ${attempt} attempt(s) ` +
-                  `(\`${e.status}\`). A maintainer will action this.`,
+              // Read-modify-write, retried on a 409. Many Join-team issues are in flight at
+              // once near a project deadline, and each appends to the SAME file; the `sha`
+              // makes a lost update impossible (a stale one is a 409). The WHOLE decision is
+              // re-taken on each attempt, not just the append: the duplicate-membership and
+              // team-size checks are read off the file we are actually writing on top of, so a
+              // team can't go over its cap by two students committing at the same moment.
+              //
+              // 409 = stale sha. 422 = the create-on-first-use race (our request carried no sha
+              // because the file did not exist when we read it, but it does now). A 403 naming
+              // GitHub's SECONDARY rate limit / abuse detection is GitHub asking us to back off -
+              // a deadline-eve burst hits it - and is equally worth another attempt.
+              const retryable = (e) => e.status === 409 || e.status === 422 ||
+                (e.status === 403 && /secondary rate limit|abuse detection/i.test(String(e.message || '')));
+              const ATTEMPTS = 8;
+              for (let attempt = 1; ; attempt++) {
+                const { sha, header, rows } = await readTeams();
+                const iAssign = header.indexOf('assignment');
+                const iTeam = header.indexOf('team');
+                const iHandle = header.indexOf('github_handle');
+                if (iAssign < 0 || iTeam < 0 || iHandle < 0) return fail(
+                  `Thanks @${handle} - \`teams.csv\` is missing a required column ` +
+                  `(\`assignment\`, \`team\`, \`github_handle\`). A maintainer will action this.`,
                   'needs-review');
-                // Jittered backoff: a burst that retries in lockstep just collides again on
-                // the same schedule, so each waiter spreads itself across ~400ms of its own.
-                await new Promise(r => setTimeout(r, 500 * attempt + Math.random() * 400));
-              }
-            }
 
-            // Confirm.
-            await github.rest.issues.createComment({
-              owner: org, repo: context.repo.repo, issue_number: issue.number, body: [
-                `Done **@${handle}** - you're in team **${team}** for \`${assignment}\`.`,
-                ``,
-                `- Membership is recorded; your team's repo appears once the teaching team provisions this assignment.`,
-                `- Need to change teams? Contact the teaching team.`,
-              ].join('\n') });
-            await github.rest.issues.addLabels({
-              owner: org, repo: context.repo.repo, issue_number: issue.number, labels: ['team-recorded'] });
-            // Title is auto-derived - the form's fixed default plus author + form fields.
-            await github.rest.issues.update({
-              owner: org, repo: context.repo.repo, issue_number: issue.number,
-              title: `Join team: ${team} (${assignment}) - ${handle}`, state: 'closed' });
+                // One team per student per assignment; respect the size cap; idempotent re-open.
+                const mine = rows.find(r =>
+                  cell(r, iAssign).toLowerCase() === assignment && cell(r, iHandle).toLowerCase() === handle.toLowerCase());
+                if (mine && cell(mine, iTeam).toLowerCase() === team) {
+                  await github.rest.issues.createComment({
+                    owner: org, repo: context.repo.repo, issue_number: issue.number,
+                    body: `You're already in **${team}** for \`${assignment}\` @${handle} - nothing to do.` });
+                  await github.rest.issues.update({
+                    owner: org, repo: context.repo.repo, issue_number: issue.number, state: 'closed' });
+                  return;
+                }
+                if (mine) return fail(
+                  `You're already in team **${cell(mine, iTeam)}** for \`${assignment}\` @${handle}. ` +
+                  `Contact the teaching team to switch teams.`,
+                  'needs-review');
+                const size = rows.filter(r =>
+                  cell(r, iAssign).toLowerCase() === assignment && cell(r, iTeam).toLowerCase() === team).length;
+                if (size >= cap) return fail(
+                  `Team **${team}** for \`${assignment}\` is full (${cap} member${cap === 1 ? '' : 's'} - ` +
+                  `the cap the teaching team set via \`max_team_size\` in classroom-config/schedule.yml). ` +
+                  `Pick another team name.`,
+                  'needs-review');
+
+                // Append + write back (in the existing header's column order).
+                const fresh = header.map(() => '');
+                fresh[iAssign] = assignment; fresh[iTeam] = team; fresh[iHandle] = handle;
+                rows.push(fresh);
+                const body = serialiseCsv([header, ...rows]);
+                try {
+                  await github.rest.repos.createOrUpdateFileContents({
+                    owner: org, repo: CONFIG, path: TEAMS, ...(sha ? { sha } : {}),
+                    message: `teams: ${handle} -> ${team} (${assignment})`,
+                    content: Buffer.from(body, 'utf8').toString('base64'),
+                  });
+                  break;
+                } catch (e) {
+                  // Giving up is a RESULT, not a crash: an uncaught throw leaves a red run with
+                  // no comment and no label, so the student is dropped in silence and nobody
+                  // triages it. Every terminal path goes through fail() instead.
+                  if (!retryable(e) || attempt === ATTEMPTS) return fail(
+                    `Thanks @${handle} - I couldn't record your team after ${attempt} attempt(s) ` +
+                    `(\`${e.status}\`). A maintainer will action this.`,
+                    'needs-review');
+                  // Jittered backoff: a burst that retries in lockstep just collides again on
+                  // the same schedule, so each waiter spreads itself across ~400ms of its own.
+                  await new Promise(r => setTimeout(r, 500 * attempt + Math.random() * 400));
+                }
+              }
+
+              // Confirm.
+              await github.rest.issues.createComment({
+                owner: org, repo: context.repo.repo, issue_number: issue.number, body: [
+                  `Done **@${handle}** - you're in team **${team}** for \`${assignment}\`.`,
+                  ``,
+                  `- Membership is recorded; your team's repo appears once the teaching team provisions this assignment.`,
+                  `- Need to change teams? Contact the teaching team.`,
+                ].join('\n') });
+              await github.rest.issues.addLabels({
+                owner: org, repo: context.repo.repo, issue_number: issue.number, labels: ['team-recorded'] });
+              // Title is auto-derived - the form's fixed default plus author + form fields.
+              await github.rest.issues.update({
+                owner: org, repo: context.repo.repo, issue_number: issue.number,
+                title: `Join team: ${handle}`, state: 'closed' });
+            } catch (e) {
+              // Giving up is a RESULT, not a crash: an uncaught throw leaves a red run with no
+              // comment and no label, so the student is dropped in silence and nobody triages
+              // it. Every terminal path goes through fail() - this is the one for the paths
+              // that did not expect to fail.
+              await fail(
+                `Thanks @${handle} - something went wrong on my side (\`${e.status || e.name}\`). ` +
+                `A maintainer will action this; there is nothing you need to do.`,
+                'needs-review');
+            }
         env:
           HAS_BOT: ${{ secrets.DSL_BOT_TOKEN != '' || '' }}

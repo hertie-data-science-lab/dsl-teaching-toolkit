@@ -46,6 +46,45 @@ ASSIGNMENT_TEMPLATE_TOPIC = "assignment-template"
 # submission repos and the frozen cohort-side assignment templates (assign.py), and the
 # private per-student gradebooks (grades.py).
 INFRA_TOPICS = {"submission", ASSIGNMENT_TEMPLATE_TOPIC, "gradebook"}
+# The per-student gradebook repo: grades-<handle> (grades.py creates them). Named here so
+# the reader below and the writer cannot drift.
+GRADEBOOK_PREFIX = "grades-"
+# Topics on an org's `.github` repo that say which TIER the org is (bootstrap_course stamps
+# them; list_orgs enumerates orgs by them). The repo listing carries them, so a sweep can
+# tell a course org from a cohort without another read.
+COURSE_HUB_TOPIC = "dsl-course-hub"
+COHORT_TOPIC = "dsl-cohort"
+# The repos only a cohort org has - the fallback tier signal for an org bootstrapped
+# before the topics existed, or whose topic stamp never landed.
+COHORT_ONLY_REPOS = {"welcome", "classroom-config"}
+
+
+def org_tier(repos: list[dict]) -> str | None:
+    """`"cohort"`, `"course"`, or None when the listing cannot say.
+
+    The `.github` repo's topic is authoritative; the cohort-only infra repos are the
+    fallback. None is a real answer, not "course": a legacy cohort (`hertie-dl-f2025`:
+    `.github` + student repos, no `welcome`, no topics) looks exactly like a course org by
+    elimination, and the faculty-access sweep treats "course" as "push everywhere"."""
+    dotgithub = next((r for r in repos if r["name"] == ".github"), None)
+    topics = set((dotgithub or {}).get("topics") or [])
+    if COHORT_TOPIC in topics:
+        return "cohort"
+    if COURSE_HUB_TOPIC in topics:
+        return "course"
+    if any(r["name"] in COHORT_ONLY_REPOS for r in repos):
+        return "cohort"
+    return None
+
+
+def student_repo_names(repos: list[dict]) -> frozenset[str]:
+    """The per-student and per-team repos in a listing, by topic OR by name.
+
+    Submission repos are `<slug>-<handle>` generated from the cohort template `<slug>` (the
+    one template repo in a cohort org); gradebooks are `grades-<handle>`. The topics that
+    mark them are stamped after the create and never converged, so a name rule backs them
+    up: whatever decides faculty write access must never depend on one PATCH."""
+    return frozenset(r["name"] for r in repos if is_student_repo(r, repos))
 
 
 def _is_infra_repo(repo: dict) -> bool:
@@ -71,8 +110,26 @@ def has_infra_topic(repo: dict) -> bool:
     Split out of _is_infra_repo because the org landing page needs this half and not the
     other: it must drop those per-student repos (naming them exposes the roster and every
     team's membership on a page students land on) while KEEPING `welcome`,
-    `classroom-config` and the site repo, which _is_infra_repo also excludes."""
+    `classroom-config` and the site repo, which _is_infra_repo also excludes.
+
+    A gradebook is also recognised by NAME: the topic is stamped in a separate call after
+    the create, and a failed stamp must not put `grades-<handle>` on a public page."""
+    if repo["name"].startswith(GRADEBOOK_PREFIX):
+        return True
     return bool(set(repo.get("topics") or []) & INFRA_TOPICS)
+
+
+def is_student_repo(repo: dict, repos: list[dict]) -> bool:
+    """Whether `repo` is a per-student/team repo, by topic OR by name.
+
+    Submission repos are `<slug>-<handle>` generated from the cohort template `<slug>`,
+    which is the one template repo in a cohort org. The topic that marks them is stamped
+    after the create and never converged, so a repo named off a template in the same
+    listing counts too - on a PUBLIC page the roster must not depend on one PATCH."""
+    if has_infra_topic(repo):
+        return True
+    templates = {r["name"] for r in repos if r.get("isTemplate")}
+    return any(repo["name"].startswith(f"{t}-") for t in templates)
 
 
 def list_org_repos(org: str) -> list[dict]:
@@ -97,7 +154,7 @@ def list_org_repos(org: str) -> list[dict]:
         f"orgs/{org}/repos?per_page=100",
         "--jq",
         ".[] | {name, description, visibility, url: .html_url, "
-        "isTemplate: .is_template, topics: (.topics // [])}",
+        "isTemplate: .is_template, archived, topics: (.topics // [])}",
     )
     if code != 0:
         raise RuntimeError(f"could not list repos in {org}: {out[:200]}")
