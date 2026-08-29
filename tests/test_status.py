@@ -1,9 +1,12 @@
-"""status.render_markdown pure core - collect()'s gh/git wiring is left live per the
-testing strategy; this only pins the table-rendering given already-collected data."""
+"""status's table-rendering given already-collected data, plus one walk of the real
+`collect()` with every loader it reads stubbed - the row-building code between them is
+where a constant that moved modules goes unnoticed."""
 
 from __future__ import annotations
 
-from dsl_course import status
+import json
+
+from dsl_course import grades, roster, schedule, status, sync_faculty, teams
 
 _ROW = {
     "label": "x",
@@ -77,3 +80,32 @@ def test_markdown_mode_keeps_loader_chatter_off_stdout(monkeypatch, capsys):
     assert status.main() == 0
     out = capsys.readouterr().out
     assert "Jane Doe" not in out and "# table" in out
+
+
+def _stub_every_read(monkeypatch):
+    """Answer each loader `collect()` reads with "this cohort is empty", so the real
+    row-building runs end to end with no gh. `conftest._no_live_gh` catches any read
+    this misses."""
+    monkeypatch.setattr(status, "org_meta", lambda org: {"course_name": "Course"})
+    monkeypatch.setattr(status, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(roster, "load", lambda org: [])
+    monkeypatch.setattr(grades, "load_grade_sources", lambda org: {})
+    monkeypatch.setattr(teams, "load", lambda org: {})
+    monkeypatch.setattr(schedule, "load", lambda org: schedule.Schedule())
+    monkeypatch.setattr(sync_faculty, "load_cohort_faculty", lambda org: None)
+
+
+def test_main_walks_every_row_and_points_c7_at_classroom_config(monkeypatch, capsys):
+    # Every row is built on the way to the table, so this is the only test that would
+    # have caught `sync_faculty.COHORT_CONFIG_REPO` going stale in the module split -
+    # an AttributeError that reached the demo org, not CI.
+    _stub_every_read(monkeypatch)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["status", "--course-org", "C", "--cohort-org", "K", "--format", "json"],
+    )
+    assert status.main() == 0
+    data = json.loads(capsys.readouterr().out)
+    assert set(data) == set(status.ITEMS)
+    assert data["C7"]["repo"] == "classroom-config"
+    assert data["C7"]["path"] == "people.yml"

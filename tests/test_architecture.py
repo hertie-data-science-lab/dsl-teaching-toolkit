@@ -88,3 +88,53 @@ def test_the_import_graph_is_acyclic():
 
     for node in sorted(graph):
         visit(node, [node])
+
+
+def _sibling_module_names(tree: ast.AST) -> set[str]:
+    """Names this module binds to another module OF THE PACKAGE - `from . import x`,
+    `from dsl_course import x`. A name bound to anything else has no module whose
+    attributes we could check."""
+    bound = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if (node.level == 1 and node.module is None) or (
+            node.level == 0 and node.module == "dsl_course"
+        ):
+            bound |= {a.asname or a.name for a in node.names if a.name in set(MODULES)}
+    return bound
+
+
+def _rebound_names(tree: ast.AST) -> set[str]:
+    """Every name the module binds to something else somewhere: an assignment, a
+    parameter, a loop or `with` target. A local `schedule = ...` shadows the import, so
+    `schedule.anything` says nothing about the module any more."""
+    rebound = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            rebound.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            a = node.args
+            rebound |= {x.arg for x in (*a.posonlyargs, *a.args, *a.kwonlyargs)}
+            rebound |= {x.arg for x in (a.vararg, a.kwarg) if x}
+    return rebound
+
+
+@pytest.mark.parametrize("name", MODULES)
+def test_every_sibling_module_attribute_exists(name):
+    """`status.py` read `sync_faculty.COHORT_CONFIG_REPO` for months after the constant
+    moved to `course`: a name that survives the move only in the *referencing* module
+    stays invisible until someone runs the line. Nothing but the module itself knows
+    what it exports, so ask it."""
+    tree = ast.parse((PACKAGE / f"{name}.py").read_text())
+    siblings = _sibling_module_names(tree) - _rebound_names(tree)
+    missing = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute) or not isinstance(node.value, ast.Name):
+            continue
+        if node.value.id not in siblings or not isinstance(node.ctx, ast.Load):
+            continue
+        module = importlib.import_module(f"dsl_course.{node.value.id}")
+        if not hasattr(module, node.attr):
+            missing.append(f"{name}.py:{node.lineno} {node.value.id}.{node.attr}")
+    assert missing == []

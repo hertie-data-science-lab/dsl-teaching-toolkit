@@ -55,9 +55,37 @@ INSTRUCTORS_TEAM = "instructors"
 COURSE_ADMIN_TEAM = "course-admin"
 STUDENTS_TEAM = "students"
 AUDITORS_TEAM = "auditors"
-ROLE_TEAMS = frozenset(
-    {INSTRUCTORS_TEAM, COURSE_ADMIN_TEAM, STUDENTS_TEAM, AUDITORS_TEAM}
+
+# Each role team as `(slug, description, privacy)` - what bootstrap creates and what the
+# nightly refresh converges a cohort's existing teams back to. One table, because a
+# privacy asserted only at creation is a privacy every org bootstrapped before the
+# decision never gets.
+#
+# Faculty teams are created in EVERY org (course + cohort): instructors run the workflows
+# and push content (write); course-admin manage the org (admin).
+FACULTY_TEAMS = (
+    (INSTRUCTORS_TEAM, "Instructors and TAs", "closed"),
+    (COURSE_ADMIN_TEAM, "Course administrators - DSL team", "closed"),
 )
+# Cohort-only role teams: enrolled students + read-only auditors. The persistent course org
+# never gets these - it holds unreleased materials, model solutions, and hidden tests, so
+# students/auditors must not be near it. Auditors are read-only: assignment release is
+# roster-driven (onboarded students only), so auditors never receive assignment repos.
+#
+# `secret`, not `closed`: a closed team's membership is visible to every member of the org,
+# so any student could open the `auditors` team page and read off exactly who is auditing
+# rather than enrolled - a classmate's academic status, published to the class by the
+# scaffolding. A secret team is visible only to its own members and to org owners, which
+# costs the students nothing (nobody needs to browse the roster to do the course).
+COHORT_TEAMS = (
+    (STUDENTS_TEAM, "Enrolled students", "secret"),
+    (
+        AUDITORS_TEAM,
+        "Auditors - read-only (released materials only, no assignments)",
+        "secret",
+    ),
+)
+ROLE_TEAMS = frozenset(slug for slug, _, _ in (*FACULTY_TEAMS, *COHORT_TEAMS))
 
 
 def submission_repo(slug: str, suffix: str) -> str:

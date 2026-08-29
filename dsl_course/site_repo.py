@@ -615,7 +615,7 @@ def people_yaml(
     `include_tas=False` (the course site) drops TA cards entirely - TAs are cohort-only,
     so the multi-year open-courseware site shows instructors only. Instructors and TAs
     share one GitHub team (there's no separate `teaching-assistants` team - see
-    bootstrap_course.FACULTY_TEAMS), so the fallback can't distinguish TAs from
+    course.FACULTY_TEAMS), so the fallback can't distinguish TAs from
     instructors; declare a `people:` block to get separate TA cards."""
     override = _people_from_meta(meta or {})
     if override is not None:
