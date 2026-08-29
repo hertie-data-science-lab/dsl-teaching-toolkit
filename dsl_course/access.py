@@ -17,7 +17,7 @@ from .discovery import classify_repos
 from .gh_teams import create_team
 from .ghcli import gh, is_missing_resource
 from .log import log, log_err, log_ok
-from .repos import Converged, set_repo_topics
+from .repos import Converged, set_repo_topics, topic_name
 
 
 def grant_team_repo_access(
@@ -256,7 +256,10 @@ def converge_topics(org: str, repos: list[dict], tier: str | None) -> Converged:
         name = repo["name"]
         template = derived[name]
         if template is not None:
-            wanted = {template, "submission"}
+            # The template's own NAME as a topic: GitHub lowercases and kebabs what
+            # set_repo_topics writes, so comparing the raw name against a live topic list
+            # never matched and an `Assignment_1` template was PATCHed every night.
+            wanted = {topic_name(template), "submission"}
         elif name.startswith(GRADEBOOK_PREFIX):
             wanted = {"gradebook"}
         else:

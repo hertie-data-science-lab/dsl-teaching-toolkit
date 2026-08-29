@@ -511,6 +511,17 @@ def test_a_nested_template_stamps_the_longest_match_and_skips_the_templates(
     }
 
 
+def test_a_template_named_in_mixed_case_converges_once(monkeypatch):
+    # GitHub stores a topic lowercase-kebab, which is what set_repo_topics writes. Comparing
+    # the raw template NAME against that list never matched, so the nightly sweep PATCHed
+    # every repo of an `Assignment_1` template for ever and reported it converged each time.
+    repos = [
+        {"name": "Assignment_1", "isTemplate": True, "topics": []},
+        {"name": "Assignment_1-ada", "topics": ["assignment-1", "submission"]},
+    ]
+    assert _converge(monkeypatch, repos) == (0, {})
+
+
 def test_an_archived_repo_and_a_course_org_are_left_alone(monkeypatch):
     repos = [{"name": "grades-ada", "topics": [], "archived": True}]
     assert _converge(monkeypatch, repos) == (0, {})

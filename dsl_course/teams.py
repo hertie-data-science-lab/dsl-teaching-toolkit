@@ -30,8 +30,10 @@ FIELDS = ("assignment", "team", "github_handle")
 def parse(text: str) -> dict[str, dict[str, list[str]]]:
     """Parse teams.csv into {assignment: {team: [handles]}}.
 
-    Blank rows are skipped; a handle listed twice in a team is de-duplicated; member
-    order follows first appearance so provisioning is deterministic.
+    Blank rows are skipped; a handle listed twice in a team is de-duplicated, CASEFOLDED
+    (GitHub logins are case-insensitive, so `ALICE` and `alice` are one account and were
+    two members here - two collaborator adds, two grade rows); member order follows first
+    appearance so provisioning is deterministic.
 
     Assignment keys and team names are both CASEFOLDED. The GitHub team they materialise
     into is lower-cased (`sync_teams.team_slug`) and so is the repo named after them, so
@@ -45,7 +47,7 @@ def parse(text: str) -> dict[str, dict[str, list[str]]]:
     for row in read_csv(text, FIELDS, TEAMS_PATH):
         assignment = (row.get("assignment") or "").strip().casefold()
         team = (row.get("team") or "").strip().casefold()
-        handle = (row.get("github_handle") or "").strip()
+        handle = (row.get("github_handle") or "").strip().casefold()
         if not (assignment and team and handle):
             continue
         members = out.setdefault(assignment, {}).setdefault(team, [])

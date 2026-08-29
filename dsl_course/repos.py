@@ -317,9 +317,15 @@ def has_denied_component(path: str) -> bool:
     return any(is_denied_publication(part) for part in path.split("/") if part)
 
 
+def topic_name(text: str) -> str:
+    """`text` as GitHub stores a topic: lowercase kebab. Shared by the write and by every
+    comparison against a live topic list, which must agree or a repo converges nightly."""
+    return text.lower().replace("_", "-")
+
+
 def set_repo_topics(org: str, repo: str, topics: list[str]) -> bool:
     """Replace the full topic list on a repo (GitHub limit: 20 topics, lowercase kebab)."""
-    normalised = sorted({t.lower().replace("_", "-") for t in topics if t})
+    normalised = sorted({topic_name(t) for t in topics if t})
     args = [
         "api",
         "--method",

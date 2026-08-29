@@ -78,3 +78,16 @@ def test_team_names_are_casefolded():
     assert teams.parse(text) == {
         "assignment-4-project": {"wizards": ["ada-l", "ben-b"]}
     }
+
+
+def test_one_account_typed_two_ways_is_one_member():
+    # GitHub logins are case-insensitive, and teams.csv is student-written. `ALICE` and
+    # `alice` are the same account, so they earned two collaborator adds and - once
+    # vet_handles folded them back to one canonical handle - two rows in the grades CSV.
+    per = teams.parse(
+        "assignment,team,github_handle\n"
+        "project,team-x,ALICE\n"
+        "project,team-x,alice\n"
+        "project,team-x,bob\n"
+    )
+    assert per["project"]["team-x"] == ["alice", "bob"]
