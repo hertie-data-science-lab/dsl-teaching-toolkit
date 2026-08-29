@@ -263,7 +263,7 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         "C7",
         f"Instructors/TAs ({sync_faculty.COHORT_PEOPLE_PATH})",
         cohort_org,
-        sync_faculty.COHORT_CONFIG_REPO,
+        sync_faculty.CONFIG_REPO,
         sync_faculty.COHORT_PEOPLE_PATH,
         cohort_branch,
         bool(n_instructors),
