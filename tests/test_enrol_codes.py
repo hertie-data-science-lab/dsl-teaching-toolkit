@@ -229,7 +229,7 @@ def test_a_refused_write_is_retried_against_the_fresh_roster(monkeypatch):
     monkeypatch.setattr(
         enrol_codes, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
     )
-    assert enrol_codes.write_codes("COHORT", STALE, "stale", _codes()) is True
+    assert enrol_codes.write_codes("COHORT", STALE, "stale", _codes()) == written[-1]
     assert attempts["n"] == 2
     # The retry carries Ada's handle - it was never this run's to remove - and both codes.
     assert "ada-l" in written[-1]
@@ -241,7 +241,7 @@ def test_the_retry_gives_up_after_a_bounded_number_of_attempts(monkeypatch):
     monkeypatch.setattr(
         enrol_codes, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
     )
-    assert enrol_codes.write_codes("COHORT", STALE, "stale", _codes()) is False
+    assert enrol_codes.write_codes("COHORT", STALE, "stale", _codes()) is None
 
 
 def test_a_code_that_arrived_in_between_is_left_alone(monkeypatch):
@@ -261,6 +261,38 @@ def test_a_code_that_arrived_in_between_is_left_alone(monkeypatch):
     )
     assert enrol_codes.write_codes("COHORT", STALE, "stale", _codes())
     assert "dsl-theirs" in written[-1] and "dsl-aaa111" not in written[-1]
+
+
+def test_the_emails_carry_the_code_the_roster_actually_holds(monkeypatch):
+    # Another run filled Ada's cell first, so our write was refused and the retry left
+    # `dsl-theirs` in place. Emailing the code THIS run generated in memory gave Ada one
+    # that enrols nobody: the Join issue rejected her, with no sign anything went wrong.
+    theirs = (
+        HEADER + "ada@uni.edu,Ada,,,dsl-theirs,enrolled\nbob@uni.edu,Bob,,,,enrolled\n"
+    )
+    reads = iter([(STALE, "stale"), (theirs, "fresh")])
+    monkeypatch.setattr(
+        enrol_codes, "get_file_with_sha", lambda org, repo, path: next(reads)
+    )
+    monkeypatch.setattr(
+        enrol_codes,
+        "put_file",
+        lambda org, repo, path, content, msg, expected_sha=None: (
+            expected_sha == "fresh"
+        ),
+    )
+    monkeypatch.setattr(enrol_codes, "course_name_for_cohort", lambda org: "Test")
+    sent: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        enrol_codes.mailer,
+        "send_bulk",
+        lambda messages, dry_run=False, sample=None: (
+            sent.extend(messages) or len(messages)
+        ),
+    )
+    assert enrol_codes.run("COHORT") == 0
+    ada = next(body for to, _subject, body in sent if to == "ada@uni.edu")
+    assert "dsl-theirs" in ada  # not the code this run generated for her in memory
 
 
 def test_rows_are_relocated_by_email_not_by_their_original_index():

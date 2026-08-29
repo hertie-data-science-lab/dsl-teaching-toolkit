@@ -751,6 +751,7 @@ on:
         type: boolean
         default: true
 
+{_concurrency("send-codes")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   send-codes:
 {_run_preamble()}      - name: Send enrolment codes

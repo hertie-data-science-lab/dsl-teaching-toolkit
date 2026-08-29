@@ -105,8 +105,9 @@ WRITE_ATTEMPTS = 3
 
 def write_codes(
     cohort_org: str, raw: str, sha: str, codes: list[tuple[int, str, str]]
-) -> bool:
+) -> str | None:
     """Commit the generated codes into students.csv without clobbering a concurrent edit.
+    Returns the roster text AS COMMITTED, or None if no attempt was accepted.
 
     `put_file`'s ordinary path re-reads the sha immediately before writing, so the write
     succeeds however stale its content is: a Join binding committed while Send codes was
@@ -114,7 +115,11 @@ def write_codes(
     roster was READ at is sent instead, so GitHub refuses a write onto a file that has
     moved on. We then re-read, re-apply only the codes THIS run generated onto the fresh
     text - `fill_enrol_codes_in_csv` fills blank cells only, so a code that arrived in
-    between is left exactly as it is - and try again."""
+    between is left exactly as it is - and try again.
+
+    Which is exactly why the committed TEXT is returned rather than a bare success: after
+    a retry the roster can hold a different code from the one this run generated, and the
+    caller must email what the roster holds."""
     for attempt in range(1, WRITE_ATTEMPTS + 1):
         body = fill_enrol_codes_in_csv(raw, rows_for_codes(raw, codes))
         if put_file(
@@ -125,7 +130,7 @@ def write_codes(
             f"roster: assign {len(codes)} enrolment code(s)",
             expected_sha=sha,
         ):
-            return True
+            return body
         if attempt == WRITE_ATTEMPTS:
             break
         log_err(
@@ -136,7 +141,7 @@ def write_codes(
         if fresh is None:
             break
         raw, sha = fresh
-    return False
+    return None
 
 
 def assign_codes(students: list[roster.Student], gen=make_code) -> int:
@@ -229,13 +234,18 @@ def run(cohort_org: str, dry_run: bool = False) -> int:
             for i, s in enumerate(students)
             if not before[i] and s.enrol_code
         ]
-        if not write_codes(cohort_org, raw, raw_sha, new_codes):
+        written = write_codes(cohort_org, raw, raw_sha, new_codes)
+        if written is None:
             log_err(
                 f"could not write the enrolment codes to {roster.ROSTER_PATH} in "
                 f"{cohort_org} - nothing emailed, so re-running is safe."
             )
             return 1
         log_ok(f"wrote {added} code(s) to {roster.ROSTER_PATH}")
+        # Email what the ROSTER holds, never the codes generated in memory: a refused write
+        # is re-applied onto a fresh read, and a code that landed in between is left as it
+        # is - so the in-memory code for that student is one nobody can enrol with.
+        students = roster.parse(written)
 
     welcome_url = f"https://github.com/{cohort_org}/welcome/issues/new/choose"
     targets = [

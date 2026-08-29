@@ -1009,6 +1009,9 @@ SERIALISED_WRITERS = {
     "grade_assignment": "grade-assignment",
     "render_grades": "render-grades",
     "distribute_grades": "distribute-grades",
+    # Two overlapping Send-codes runs generate two codes for the same blank cell: one is
+    # written and the other is emailed, so that student's code enrols nobody.
+    "send_codes": "send-codes",
     "sync_membership": "sync-membership",
     "sync_site": "sync-site",
     "publish_site": "publish-course-website",
