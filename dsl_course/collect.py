@@ -536,6 +536,21 @@ def mark_not_autograded(cohort_org: str, slug: str, why: str) -> bool:
     )
 
 
+def _record_skip(cohort_org: str, slug: str, reason: str, dry_run: bool) -> int:
+    """Record `slug`'s "not machine-graded" marker, and return the exit code for it.
+
+    A skip DECIDED but not RECORDED is not a skip: `has_autograde_results` reads the
+    marker, so without it the next hourly tick re-clones the template and re-decides the
+    identical skip, for ever - which ran live in the demo cohort for days. A failed write
+    is therefore red; a dry run writes nothing and is green."""
+    if dry_run:
+        return 0
+    if mark_not_autograded(cohort_org, slug, reason):
+        return 0
+    log_err(f"{slug}: could not record the skip - the next run re-decides it")
+    return 1
+
+
 def mark_graded(cohort_org: str, slug: str) -> bool:
     """Write the fire-once sentinel `autograde/<slug>/_graded.json` - the LAST action of a
     fully successful run, once every per-target archive is durably written.
@@ -1088,34 +1103,23 @@ def collect(
                 f"no `{SOLUTION_BRANCH}` branch on {master_org}/{template} - no hidden "
                 f"tests to run; nothing to collect."
             )
-            # Hand-marked, then: say so once in the archive rather than re-deciding it on
-            # every hourly tick (see FIRE-ONCE above). A marker that could not be written
-            # is not a skip at all - the next tick re-clones the template and re-decides
-            # the identical skip - so it goes red rather than reporting a quiet success.
-            if not dry_run and not mark_not_autograded(
+            # Hand-marked, then: say so once in the archive rather than re-deciding it
+            # on every hourly tick (see FIRE-ONCE above).
+            return _record_skip(
                 cohort_org,
                 slug,
                 f"no `{SOLUTION_BRANCH}` branch on {master_org}/{template}",
-            ):
-                log_err(
-                    f"{slug}: could not record the skip - the next run re-decides it"
-                )
-                return 1
-            return 0
+                dry_run,
+            )
         spec_path = soldir / GRADING_FILE
         spec = parse_grading_spec(spec_path.read_text() if spec_path.is_file() else "")
         if not spec["autograde"]:
             log_ok(
                 f"{slug}: autograde disabled in {GRADING_FILE} - all-manual, nothing to collect."
             )
-            if not dry_run and not mark_not_autograded(
-                cohort_org, slug, f"`autograde: false` in {GRADING_FILE}"
-            ):
-                log_err(
-                    f"{slug}: could not record the skip - the next run re-decides it"
-                )
-                return 1
-            return 0
+            return _record_skip(
+                cohort_org, slug, f"`autograde: false` in {GRADING_FILE}", dry_run
+            )
         # group-vs-individual via the single `resolve_is_group` precedence (force -> cohort
         # schedule `type:` -> template grading.yml -> individual). The entry is the one found
         # above by course_source_repo - `slug` is the cohort-side NAME, which is
@@ -1142,16 +1146,9 @@ def collect(
             # has no teams. Left unrecorded, the cron came back every hour and went red
             # every hour (live in the demo cohort for days). Record the skip; a deliberate
             # re-grade is still a delete of autograde/<slug>/ away.
-            if dry_run:
-                return 0
-            if not mark_not_autograded(
-                cohort_org, slug, f"no submission targets as of {deadline}"
-            ):
-                log_err(
-                    f"{slug}: could not record the skip - the next run re-decides it"
-                )
-                return 1
-            return 0
+            return _record_skip(
+                cohort_org, slug, f"no submission targets as of {deadline}", dry_run
+            )
 
         # Which commit each repo is graded at was frozen just after the deadline, at a
         # moment the server chose (see the module docstring). Without that file the pin
@@ -1265,16 +1262,12 @@ def collect(
                 f"{slug}: nothing gradable across {len(targets)} target(s) - recording "
                 f"the skip rather than retrying every hour."
             )
-            if not mark_not_autograded(
+            return _record_skip(
                 cohort_org,
                 slug,
                 f"nothing gradable across {len(targets)} target(s) as of {deadline}",
-            ):
-                log_err(
-                    f"{slug}: could not record the skip - the next run re-decides it"
-                )
-                return 1
-            return 0
+                dry_run,
+            )
         if failed_to_run and len(failed_to_run) == len(archives):
             # EVERY target that was examined failed to grade for the same class of reason -
             # a broken image, a missing dependency, an rlimit the runner can't satisfy. That
