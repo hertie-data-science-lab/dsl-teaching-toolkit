@@ -490,8 +490,13 @@ def test_a_readings_file_faculty_wrote_is_never_retired(fake):
 # ------------------------------------------------------------------- site scaffold
 
 
-def _site_gh(monkeypatch, pages_post, pages_put, env_put=(0, "")):
+def _site_gh(monkeypatch, pages_post, pages_put, env_put=(0, ""), seeded=None):
     """Drive scaffold_site's three org-level calls; the deploy dispatch never fires."""
+
+    def fake_put_files(org, repo, files, message, **k):
+        if seeded is not None:
+            seeded.update(files)
+        return True
 
     def fake_gh(*args, **k):
         path = next((a for a in args if a.startswith("repos/")), "")
@@ -503,6 +508,7 @@ def _site_gh(monkeypatch, pages_post, pages_put, env_put=(0, "")):
 
     monkeypatch.setattr(scaffold, "gh", fake_gh)
     monkeypatch.setattr(ghcli, "gh", fake_gh)
+    monkeypatch.setattr(scaffold, "put_files", fake_put_files)
     monkeypatch.setattr(scaffold, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(scaffold, "_dispatch_deploy", lambda org, site: None)
 
@@ -525,6 +531,39 @@ def test_site_scaffold_accepts_the_put_fallback(monkeypatch):
 def test_an_already_enabled_pages_site_is_not_a_failure(monkeypatch):
     _site_gh(monkeypatch, pages_post=(1, "HTTP 409"), pages_put=(1, "never called"))
     assert scaffold.scaffold_site("Org") == 0
+
+
+def test_a_new_site_repo_is_created_empty_and_seeded_with_its_pages_build(monkeypatch):
+    # There is no template repo any more: the site is created empty and the first sync
+    # writes it. Only the Pages build has to land first - the two calls after it enable
+    # Pages on that workflow and dispatch it, and neither works on a repo with no branch.
+    seeded: dict = {}
+    created: list = []
+    _site_gh(monkeypatch, pages_post=(0, ""), pages_put=(0, ""), seeded=seeded)
+    monkeypatch.setattr(scaffold, "repo_exists", lambda org, name: False)
+    monkeypatch.setattr(
+        scaffold,
+        "create_repo",
+        lambda org, name, **k: created.append((org, name, k)) or True,
+    )
+
+    assert scaffold.scaffold_site("Org") == 0
+    assert created[0][:2] == ("Org", "org.github.io")
+    assert created[0][2]["private"] is False
+    assert list(seeded) == [".github/workflows/deploy.yml"]
+    assert b"actions/deploy-pages@" in seeded[".github/workflows/deploy.yml"]
+
+
+def test_site_scaffold_reds_when_the_pages_build_could_not_be_seeded(
+    monkeypatch, capsys
+):
+    # An empty repo is not a site. Going on to enable Pages on it would report a scaffold
+    # that serves nothing and has no workflow for the sync's first push to run.
+    _site_gh(monkeypatch, pages_post=(0, ""), pages_put=(0, ""))
+    monkeypatch.setattr(scaffold, "put_files", lambda *a, **k: False)
+
+    assert scaffold.scaffold_site("Org") == 1
+    assert "could not seed the Pages build" in capsys.readouterr().err
 
 
 def test_a_failed_branch_policy_clear_is_reported(monkeypatch, capsys):
