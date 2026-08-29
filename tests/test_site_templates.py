@@ -135,11 +135,12 @@ def documents(generated) -> list[dict]:
 
 @pytest.fixture(scope="module")
 def site_data(generated) -> dict:
-    """`site.data` as Jekyll would see it: the generated `_data/*.yml` plus the ones a
-    site brings with it (late_policy, previous_offering)."""
+    """`site.data` as Jekyll would see it: the generated `_data/*.yml` plus the seeded ones
+    (late_policy, previous_offering)."""
     data = {
-        path.stem: yaml.safe_load(path.read_text(encoding="utf-8"))
-        for path in sorted((FIXTURE_DIR / "base" / "_data").glob("*.yml"))
+        Path(rel).stem: yaml.safe_load(text)
+        for rel, text in site_repo.seed_templates().items()
+        if rel.startswith("_data/")
     }
     for rel, text in generated["files"].items():
         if rel.startswith("_data/"):
@@ -227,6 +228,36 @@ def test_the_shipped_stylesheet_defines_the_schedule_tables_own_classes(cls):
         f".{cls} is used by the schedule table but no rule in _sass/_course.scss "
         f"defines it"
     )
+
+
+def test_an_empty_site_checkout_is_seeded_with_everything_a_site_needs(tmp_path):
+    # A site repo is created EMPTY, so the first sync is what puts `_config.yml`, the
+    # landing page and the Gemfile there - and the config half writes nothing at all
+    # until the file exists.
+    site_repo.apply_plan(
+        tmp_path,
+        site_repo.SitePlan(
+            config={"course_name": "Deep Learning"},
+            collections={},
+            commit="site: sync",
+        ),
+    )
+    cfg = (tmp_path / "_config.yml").read_text(encoding="utf-8")
+    assert 'course_name: "Deep Learning"' in cfg
+    assert f"{site_repo.THEME_REPO}@{site_repo.THEME_REF}" in cfg
+    assert "collections:" in cfg
+    for rel in ("index.md", "schedule.md", "Gemfile", "_data/late_policy.yml"):
+        assert (tmp_path / rel).is_file(), rel
+
+
+def test_a_seeded_file_the_site_already_has_is_left_alone(tmp_path):
+    # Seed-once: everything under templates/site-seed/ is the faculty's once written.
+    mine = "---\nlayout: home\n---\n\nmy own words\n"
+    (tmp_path / "index.md").write_text(mine, encoding="utf-8")
+    site_repo.apply_plan(
+        tmp_path, site_repo.SitePlan(config={}, collections={}, commit="site: sync")
+    )
+    assert (tmp_path / "index.md").read_text(encoding="utf-8") == mine
 
 
 def test_the_fixture_config_pins_the_theme_the_toolkit_ships(tmp_path):

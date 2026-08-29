@@ -1,0 +1,40 @@
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten. Seeded once by
+# the DSL course sync; the keys it owns are named below and rewritten on every run.
+# Edit the fields below for your course.
+
+# --- Course identity ---
+course_name: "Course Name (Code)"
+course_description: "One paragraph description of the course."
+course_semester: "Fall 2026"
+course_code: "GRAD-E1234"
+github_org: "your-cohort-org"
+
+# --- Institution ---
+schoolname: "Hertie School"
+schoolurl: "https://hertie-school.org/en/datasciencelab"
+dsl_org_url: "https://github.com/hertie-data-science-lab"
+address: |
+    Data Science Lab
+    Hertie School
+    Friedrichstraße 180
+    10117 Berlin, Germany
+
+plugins:
+  - jekyll-remote-theme
+  - jekyll-feed
+
+baseurl: ""
+url: ""
+
+markdown: kramdown
+permalink: blog/:year/:month/:title
+excerpt_separator: "<!--more-->"
+
+include: ['_images']
+exclude:
+  - vendor
+  - Gemfile
+  - Gemfile.lock
+  - .bundle
+
+future: true

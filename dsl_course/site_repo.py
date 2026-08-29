@@ -135,10 +135,8 @@ def _stamp_front_matter(text: str) -> str:
     return "---\n" + _FRONT_MATTER_STAMP + text[len("---\n") :]
 
 
-# The site repo's own README. It is generated from `course-website-template`, whose README
-# describes the TEMPLATE - so a deployed site repo used to carry no notice at all that it
-# is machine-written and redeployed on every push. Written through `plan.files`, so it
-# converges on every sync exactly like `_data/people.yml`.
+# The site repo's own README. Written through `plan.files`, so it converges on every sync
+# exactly like `_data/people.yml`.
 def site_readme(org: str, cohort: bool) -> str:
     # Named from the same page table the sync writes them from, so the list cannot claim a
     # page this site does not have - or omit one it rewrites.
@@ -168,6 +166,7 @@ def site_readme(org: str, cohort: bool) -> str:
         + ("| `_data/materials.yml` | the All Materials index |\n" if cohort else "")
         + f"| the tab pages - {tab_pages} | the wrappers the tabs point at |\n"
         + "| `_layouts/`, `_includes/`, `_sass/_course.scss` | how every page renders |\n"
+        + "| `.github/workflows/deploy.yml` | the Pages build |\n"
         + "| `_config.yml` | the course identity keys, the pinned theme, and the "
         "`collections:`/`defaults:` the layouts need |\n\n"
         "Each collection is CLEARED and rewritten on every sync, so a file you add to one "
@@ -175,8 +174,10 @@ def site_readme(org: str, cohort: bool) -> str:
         "wrappers, so put your own words in `index.md`, or in a page of your own linked "
         "from there.\n\n"
         "## Everything else is yours\n\n"
-        "`index.md`, any page you add yourself, `_announcements/`, `_images/`, `Gemfile`, "
-        "further `_data/*.yml` - never rewritten. Change them freely.\n\n"
+        "`index.md`, `schedule.md`, any page you add yourself, `_announcements/`, "
+        "`_images/`, `Gemfile`, `.gitignore`, `_data/late_policy.yml`, "
+        "`_data/previous_offering.yml`, further `_data/*.yml` - seeded once when the site "
+        "is created, then never rewritten. Change them freely.\n\n"
         "The rendering is not yours to change here: `_layouts/`, `_includes/` and "
         "`_sass/_course.scss` are shipped from `templates/site/` in the DSL teaching "
         "toolkit, and the rest of the styling from the shared `dsl-jekyll-theme`. An edit "
@@ -425,6 +426,23 @@ def site_templates() -> dict[str, str]:
     `welcome.template`: faculty (and the theme's maintainer) can read and PR the thing a
     site will actually receive."""
     root = welcome.TEMPLATES / "site"
+    return {
+        path.relative_to(root).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
+@cache
+def seed_templates() -> dict[str, str]:
+    """`{repo-relative path: content}` for everything under `templates/site-seed/` - what a
+    site repo NEEDS but has nothing generating it: `_config.yml`, `index.md`, `schedule.md`,
+    the `Gemfile`, `_data/late_policy.yml`.
+
+    INSTRUCTOR-OWNED and seeded ONCE (`apply_plan` writes only the paths a site lacks), so
+    a course's own words survive every sync. The `_config.yml` keys the templates depend on
+    are the exception and are upserted over whatever the file holds."""
+    root = welcome.TEMPLATES / "site-seed"
     return {
         path.relative_to(root).as_posix(): path.read_text(encoding="utf-8")
         for path in sorted(root.rglob("*"))
@@ -920,6 +938,15 @@ def apply_plan(wd: Path, plan: SitePlan) -> None:
 
     Removals (`plan.retire`) stay with the caller: they are `git rm` against a checkout,
     not a write."""
+    # Seed-once, first: a site repo is created EMPTY, so this is where the half a site
+    # brings with it arrives (see `seed_templates`). Only the paths it lacks - everything
+    # under templates/site-seed/ is the faculty's once written.
+    for rel, content in seed_templates().items():
+        path = wd / rel
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+
     # _config.yml, in two halves. The plan's own keys are course IDENTITY (course_name
     # / _semester / _code / _description, github_org) and are replace-only. The theme
     # keys and the two blocks are the CONTRACT of the templates written below - a site
@@ -1020,7 +1047,7 @@ def sync_site_repo(
 
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "site"
-        # A repo THIS run just created can lag its template-generate, so retry the clone;
+        # A repo THIS run just created can lag its first commit, so retry the clone;
         # an existing site repo either clones now or is a real failure.
         attempts = 6 if just_scaffolded else 1
         for attempt in range(attempts):

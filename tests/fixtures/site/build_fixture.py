@@ -6,11 +6,11 @@ tests/test_site_templates.py cross-checks the templates' Liquid keys against. Bo
 the SAME site, so the offline key check and the real Jekyll build cannot disagree about
 what the sync writes.
 
-Generated, never hand-written: every collection page, `_data/people.yml`, `_data/nav.yml`
-and `_data/materials.yml` come out of `dsl_course.site`'s own functions, so the fixture
-cannot drift into a shape the toolkit never produces. Only the half a site brings with it
-- `_config.yml`, the theme's `default`/`page`/`post` layouts, `_data/late_policy.yml`,
-`index.md`, `schedule.md` - is vendored, under `base/`.
+Generated, never hand-written: the whole site comes out of `dsl_course`'s own functions -
+the collection pages and `_data/*.yml` from `site`, and `_config.yml`, `index.md` and the
+rest of the seed-once half from `templates/site-seed/`. Only the THEME's stand-ins - its
+`default`/`page`/`post` layouts and stylesheet entrypoint, which the offline build does
+not fetch - are vendored, under `base/`.
 
 The states it covers are the ones that render DIFFERENTLY, one of each: a released
 session, an unreleased one, a lab, a session whose readings are still to come, a
