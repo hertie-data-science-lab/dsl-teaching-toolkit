@@ -76,17 +76,21 @@ seeds only its Pages build, then every sync writes `templates/site/` (SYSTEM-OWN
 ## Module layers
 
 `dsl_course` is layered, and the import graph is acyclic (`tests/test_architecture.py`
-enforces both that and the absence of function-local imports):
+enforces both that and the absence of function-local imports). A module imports only
+layers above its own:
 
-- **L0, no dependencies** - `log` (console prefixes), `ghcli` (`gh`/`git`, timeouts, the
-  404 test), `course` (the course vocabulary: config repo, term tag, session-folder rule,
-  syllabus filenames, org topics), `readings`, `central`.
-- **L1, GitHub primitives** - `gh_teams` (org/team membership), `repos` (repo existence,
-  creation, topics, descriptions, the publication denylist), `gh_contents` (file reads and
-  writes, seeded stubs), `access` (team permissions and the faculty floor).
-- **L2 and up** - `discovery`, `roster`/`teams`/`schedule`, `schedule_plan` (the session
-  rows a plan declares), `site_repo` (the Jekyll site repo both websites publish into),
-  then the CLIs.
+| Layer | Modules |
+|---|---|
+| 0, nothing | `log`, `course` (the course vocabulary: config repo, term tag, session-folder rule, syllabus filenames, org topics), `readings`, `fs` |
+| 1, the shell | `ghcli` (`gh`/`git`, timeouts, the 404 test) |
+| 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams) |
+| 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
+| 4 | `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
+| 5 and up | `access` (team permissions and the faculty floor), `schedule_plan` (the session rows a plan declares), `welcome`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
+
+Two placements are not where they read: `access` sits above `discovery`, because the
+faculty floor is computed from what discovery finds, and `site_repo` above `scaffold` and
+`welcome`, whose seeding it reuses.
 
 Add a name to the layer that owns the subject, not to whichever module already imports it.
 
