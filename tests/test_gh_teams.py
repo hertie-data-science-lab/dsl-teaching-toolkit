@@ -277,20 +277,54 @@ def _patched(monkeypatch, answer=(0, "")) -> list[tuple[str, ...]]:
     return calls
 
 
+def _duplicate_then(monkeypatch, current_privacy: str | None) -> list[tuple[str, ...]]:
+    """Record every gh call for a create_team whose POST hits the duplicate-name 422,
+    answering the privacy read with `current_privacy` (None: the read fails)."""
+    calls: list[tuple[str, ...]] = []
+
+    def fake_gh(*a, **k):
+        calls.append(a)
+        if a[:2] == ("api", "orgs/Org/teams/students"):
+            return (0, current_privacy) if current_privacy else (1, "gh: HTTP 502")
+        return 1, "HTTP 422: name already_exists"
+
+    monkeypatch.setattr(gh_teams, "gh", fake_gh)
+    return calls
+
+
+_PATCH_PRIVACY = (
+    "api",
+    "--method",
+    "PATCH",
+    "orgs/Org/teams/students",
+    "--field",
+    "privacy=secret",
+)
+
+
 def test_an_existing_team_has_its_privacy_corrected(monkeypatch):
     # create_team treated a duplicate as success and left the team as it was, so every
     # cohort made before students/auditors became `secret` still published the class list
     # to every student in it.
-    calls = _patched(monkeypatch, (1, "HTTP 422: name already_exists"))
+    calls = _duplicate_then(monkeypatch, "closed")
     assert gh_teams.create_team("Org", "students", privacy="secret") is True
-    assert (
-        "api",
-        "--method",
-        "PATCH",
-        "orgs/Org/teams/students",
-        "--field",
-        "privacy=secret",
-    ) in calls
+    assert _PATCH_PRIVACY in calls
+
+
+def test_a_team_already_at_the_wanted_privacy_is_not_patched(monkeypatch):
+    # sync_teams calls create_team once per team per hourly sync. Patching privacy that
+    # was already right spent that whole allowance of the write governor on no-ops.
+    calls = _duplicate_then(monkeypatch, "secret")
+    assert gh_teams.create_team("Org", "students", privacy="secret") is True
+    assert _PATCH_PRIVACY not in calls
+
+
+def test_an_existing_team_keeps_its_privacy_when_none_is_asked_for(monkeypatch):
+    # A caller that names no privacy is asking only that the team exist, so there is
+    # nothing to read and nothing to correct.
+    calls = _duplicate_then(monkeypatch, "closed")
+    assert gh_teams.create_team("Org", "students") is True
+    assert len(calls) == 1  # the POST, and nothing after it
 
 
 def test_a_course_org_is_tightened_like_a_cohort(monkeypatch):

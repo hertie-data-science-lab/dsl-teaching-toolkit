@@ -25,10 +25,13 @@ def is_valid_github_username(handle: str) -> bool:
 
 
 def create_team(
-    org: str, name: str, description: str = "", privacy: str = "closed"
+    org: str, name: str, description: str = "", privacy: str | None = None
 ) -> bool:
     """Create a team. Idempotent - treats a duplicate-name 422 as success.
     Returns True if a team with this name now exists.
+
+    `privacy` is what the team must have; None asks only that it exist, and leaves an
+    existing team's privacy as it is.
     """
     code, out = gh(
         "api",
@@ -40,33 +43,48 @@ def create_team(
         "--field",
         f"description={description}",
         "--field",
-        f"privacy={privacy}",
+        f"privacy={privacy or 'closed'}",
     )
     if code == 0:
         log_ok(f"team created: {name}")
         return True
     if is_already_exists(out):
-        # A team keeps the privacy it was made with, and nothing else revisits it -
-        # `students` and `auditors` are `secret` so a student cannot read the class list
-        # off the team page, and every cohort created before that decision still has them
-        # `closed`. Converged here, at the one place a duplicate is seen.
-        code, out = gh(
-            "api",
-            "--method",
-            "PATCH",
-            f"orgs/{org}/teams/{name}",
-            "--field",
-            f"privacy={privacy}",
-        )
-        if code == 0:
-            log_skip(f"team {name}")
-        else:
-            # The team exists either way, which is what this returns; only its privacy
-            # could not be corrected.
-            log_err(f"team {name}: privacy not set to {privacy}: {out[:120]}")
+        _converge_team_privacy(org, name, privacy)
         return True
     log_err(f"failed to create team {name}: {out[:200]}")
     return False
+
+
+def _converge_team_privacy(org: str, name: str, privacy: str | None) -> None:
+    """Correct an existing team's privacy, but only when it is actually wrong.
+
+    A team keeps the privacy it was made with, and nothing else revisits it - `students`
+    and `auditors` are `secret` so a student cannot read the class list off the team page,
+    and every cohort created before that decision still has them `closed`. Converged here,
+    at the one place a duplicate is seen. The read comes first because create_team runs
+    once per team per sync, every hour: an unconditional PATCH spent that whole allowance
+    of the write governor re-setting privacy that was already right."""
+    if privacy is None:
+        log_skip(f"team {name}")
+        return
+    code, current = gh("api", f"orgs/{org}/teams/{name}", "--jq", ".privacy")
+    if code == 0 and current.strip() == privacy:
+        log_skip(f"team {name}")
+        return
+    code, out = gh(
+        "api",
+        "--method",
+        "PATCH",
+        f"orgs/{org}/teams/{name}",
+        "--field",
+        f"privacy={privacy}",
+    )
+    if code == 0:
+        log_skip(f"team {name}")
+    else:
+        # The team exists either way, which is what create_team returns; only its privacy
+        # could not be corrected.
+        log_err(f"team {name}: privacy not set to {privacy}: {out[:120]}")
 
 
 def members_without_2fa(org: str) -> int | None:
