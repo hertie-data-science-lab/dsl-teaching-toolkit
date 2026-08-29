@@ -82,8 +82,7 @@ def test_handed_out_assignments_are_the_topic_stamped_cohort_templates(monkeypat
     # The site withholds an assignment's brief until this says the cohort has it, so it
     # must name the frozen cohort template (assign.py stage 1) and nothing else - not the
     # per-student submission repos beside it, not the gradebooks.
-    monkeypatch.setattr(discovery, "list_org_repos", lambda org: INFRA_AND_CONTENT)
-    assert discovery.discover_handed_out_assignments("Cohort-f2026") == frozenset(
+    assert discovery.handed_out_assignments(INFRA_AND_CONTENT) == frozenset(
         {"assignment-1-f2026-template"}
     )
 
@@ -94,7 +93,7 @@ def test_both_discover_functions_apply_the_same_infra_exclusions(monkeypatch):
     # repo secret), and gradebooks/submissions must never appear as release targets.
     monkeypatch.setattr(discovery, "list_org_repos", lambda org: INFRA_AND_CONTENT)
     expected = ["course-materials-f2026", "labs"]
-    assert discovery.discover_cohort_repos(["Cohort-f2026"]) == expected
+    assert discovery.cohort_content_repos(INFRA_AND_CONTENT) == expected
     assert discovery.discover_content_repos("My-Course-E1234") == expected
 
 

@@ -467,14 +467,19 @@ def _plan(
         "sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
-    monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
+    # ONE cohort listing answers both of the build's questions of the org. Everything in
+    # it carries the handed-out topic, so it names the templates and no content repos.
+    monkeypatch.setattr(
+        site,
+        "list_org_repos",
+        lambda org: [
+            {"name": n, "topics": ["assignment-template"]} for n in handed_out
+        ],
+    )
     monkeypatch.setattr(
         site, "discover_release_sources", lambda org, repos: list(sources)
     )
     monkeypatch.setattr(site, "discover_assignments", lambda org: list(assignments))
-    monkeypatch.setattr(
-        site, "discover_handed_out_assignments", lambda org: frozenset(handed_out)
-    )
     monkeypatch.setattr(site, "yaml_file", lambda *a: {})
     monkeypatch.setattr(site.schedule, "load", lambda org: sched)
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
@@ -489,6 +494,47 @@ def _plan(
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
     assert site.sync_site("Course-Org", "Cohort-f2026") == 0
     return captured["plan"]
+
+
+def test_the_build_lists_the_cohort_once_for_both_of_its_questions(
+    monkeypatch, tmp_path
+):
+    # "Which repos hold released content" and "which assignments have gone out" are two
+    # questions about one listing; each paid for its own full paginated walk of the org.
+    listed: list[str] = []
+    captured: dict = {}
+    monkeypatch.setattr(
+        site,
+        "sync_site_repo",
+        lambda org, build: captured.update(plan=build(tmp_path)) or 0,
+    )
+    monkeypatch.setattr(
+        site,
+        "list_org_repos",
+        lambda org: (
+            listed.append(org)
+            or [
+                {"name": "materials", "topics": []},
+                {"name": "assignment-1", "topics": ["assignment-template"]},
+            ]
+        ),
+    )
+    seen_content: list[list[str]] = []
+    monkeypatch.setattr(
+        site,
+        "discover_release_sources",
+        lambda org, repos: seen_content.append(repos) or [],
+    )
+    monkeypatch.setattr(site, "discover_assignments", lambda org: [])
+    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
+    monkeypatch.setattr(site.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
+
+    assert site.sync_site("Course-Org", "Cohort-f2026") == 0
+    assert listed == ["Cohort-f2026"], "the cohort was listed twice for one build"
+    # The same listing, read two ways: the templated repo is a hand-out, not content.
+    assert seen_content == [["materials"]]
 
 
 def test_cohort_site_links_back_to_the_cohort_org(monkeypatch, tmp_path):
@@ -542,12 +588,9 @@ def test_course_description_flows_from_course_metadata_into_config(
         "sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
-    monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
+    monkeypatch.setattr(site, "list_org_repos", lambda org: [])
     monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
     monkeypatch.setattr(site, "discover_assignments", lambda org: [])
-    monkeypatch.setattr(
-        site, "discover_handed_out_assignments", lambda org: frozenset()
-    )
     monkeypatch.setattr(site.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
 
@@ -597,12 +640,9 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
         "sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
-    monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
+    monkeypatch.setattr(site, "list_org_repos", lambda org: [])
     monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
     monkeypatch.setattr(site, "discover_assignments", lambda org: [])
-    monkeypatch.setattr(
-        site, "discover_handed_out_assignments", lambda org: frozenset()
-    )
     monkeypatch.setattr(site, "yaml_file", lambda *a: {"course_name": "Deep Learning"})
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     # the REAL schedule.load, fed the malformed file

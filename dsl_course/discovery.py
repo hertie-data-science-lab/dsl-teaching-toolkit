@@ -329,15 +329,15 @@ def unregister_cohort(course_org: str, cohort_org: str) -> bool:
     )
 
 
-def discover_cohort_repos(cohort_orgs: list[str]) -> list[str]:
-    """Candidate target repos: real cohort content repos, excluding everything
-    _is_infra_repo covers (infra, the website, submission repos, assignment templates,
-    gradebooks). Only what genuinely exists - no placeholder default, so an org with
-    nothing registered yet correctly shows an empty (not phantom) dropdown."""
-    repos: set[str] = set()
-    for org in cohort_orgs:
-        repos |= {r["name"] for r in list_org_repos(org) if not _is_infra_repo(r)}
-    return sorted(repos)
+def cohort_content_repos(repos: list[dict]) -> list[str]:
+    """Candidate target repos in a cohort LISTING: real content repos, excluding
+    everything _is_infra_repo covers (infra, the website, submission repos, assignment
+    templates, gradebooks). Only what genuinely exists - no placeholder default, so an org
+    with nothing registered yet correctly shows an empty (not phantom) dropdown.
+
+    Takes the listing rather than the org, because its one caller (the cohort site build)
+    asks two questions of the same org and paid for two full paginated listings to do it."""
+    return sorted(r["name"] for r in repos if not _is_infra_repo(r))
 
 
 def _repo_tree_dirs(org: str, repo: str) -> tuple[str, ...]:
@@ -395,7 +395,7 @@ def discover_assignments(course_org: str) -> list[str]:
     )
 
 
-def discover_handed_out_assignments(cohort_org: str) -> frozenset[str]:
+def handed_out_assignments(repos: list[dict]) -> frozenset[str]:
     """The cohort-side name of every assignment this cohort has ACTUALLY been given.
 
     assign.py's stage 1 freezes a cohort-level template repo named exactly the cohort-side
@@ -410,13 +410,12 @@ def discover_handed_out_assignments(cohort_org: str) -> frozenset[str]:
     `handout_datetime` pinned - the manual workflow's documented mode - is invisible to the
     plan, and gating on the plan alone published those briefs on sight.
 
-    This is a second listing of an org `sync_site` already listed, and it must stay one:
-    memoising `list_org_repos` would serve assign.py a listing taken BEFORE it created the
-    template repo it then syncs the site for, withholding the brief it just handed out."""
+    Takes the LISTING, shared with `cohort_content_repos` by the site build that asks both
+    of the same org. SHARED, never memoised: a process-wide memo of `list_org_repos` would
+    serve the site a listing taken BEFORE assign.py created the template repo it then syncs
+    the site for, withholding the brief it had just handed out."""
     return frozenset(
-        r["name"]
-        for r in list_org_repos(cohort_org)
-        if ASSIGNMENT_TEMPLATE_TOPIC in (r.get("topics") or [])
+        r["name"] for r in repos if ASSIGNMENT_TEMPLATE_TOPIC in (r.get("topics") or [])
     )
 
 

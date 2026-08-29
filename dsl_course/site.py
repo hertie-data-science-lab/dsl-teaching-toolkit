@@ -44,11 +44,12 @@ from .course import (
 )
 from .discovery import (
     COHORTS_PATH,
+    cohort_content_repos,
     discover_assignments,
-    discover_cohort_repos,
     discover_cohorts,
-    discover_handed_out_assignments,
     discover_release_sources,
+    handed_out_assignments,
+    list_org_repos,
 )
 from .gh_contents import get_file_content, repo_tree
 from .log import log_err, log_step
@@ -988,7 +989,12 @@ def sync_site(course_org: str, cohort_org: str) -> int:
     the schedule (exams, special events, term dates)."""
 
     def build(_wd: Path) -> SitePlan:
-        content_repos = discover_cohort_repos([cohort_org])
+        # ONE listing of the cohort answers both questions this build asks of it: which
+        # repos hold released content, and which assignments have actually gone out.
+        # Taken here rather than memoised in `discovery`, because a memo would serve a
+        # listing from before assign.py created the template it is syncing the site for.
+        cohort_repos = list_org_repos(cohort_org)
+        content_repos = cohort_content_repos(cohort_repos)
         release_sources = discover_release_sources(cohort_org, content_repos)
         # One row per (ordinal, kind): a week's lecture materials and its lab are separate
         # rows on the schedule, so a lab released into `labs/` never folds into the
@@ -1006,7 +1012,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # Which of them this cohort has actually been given - what gates their briefs. Read
         # from the cohort org rather than inferred from the plan, since the manual workflow
         # hands out with no `handout_datetime` pinned at all.
-        handed_out = discover_handed_out_assignments(cohort_org)
+        handed_out = handed_out_assignments(cohort_repos)
 
         # Course identity comes from the course org metadata, semester from the cohort tag.
         meta = yaml_file(course_org, ".github", "dsl-course.yml")
