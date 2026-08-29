@@ -102,6 +102,21 @@ def test_the_sha_agreement_sweep_actually_sees_the_estate():
     assert {"actions/checkout", "actions/setup-python"} <= set(actions)
 
 
+def _promote_job() -> dict:
+    return SHIPPED_WORKFLOWS[".github/workflows/promote.yml"]["jobs"]["promote"]
+
+
+def test_promote_pushes_the_tiers_with_a_deploy_key_not_the_bot():
+    # The tier branches carry a ruleset whose only bypass actor is "deploy keys", which no
+    # account and no Actions token can be - so a bot token in this job is both the account
+    # push that ruleset exists to refuse and a far wider credential than a push needs.
+    job = _promote_job()
+    assert "DSL_BOT_TOKEN" not in yaml.safe_dump(job)
+    step = next(s for s in job["steps"] if s.get("name", "").startswith("Fast-forward"))
+    assert step["env"]["PROMOTE_DEPLOY_KEY"] == "${{ secrets.PROMOTE_DEPLOY_KEY }}"
+    assert 'git remote set-url origin "git@github.com:' in step["run"]
+
+
 def _promote_refresh_job() -> dict:
     return SHIPPED_WORKFLOWS[".github/workflows/promote.yml"]["jobs"]["refresh-orgs"]
 

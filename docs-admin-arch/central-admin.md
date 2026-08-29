@@ -186,15 +186,19 @@ Promote's checks are worth nothing on their own: `faculty` and `instructors` bot
 here, so without this any of them can `git push origin whatever:release` and put unreviewed
 code straight into every live org. Three settings, none of them in code:
 
-1. **Give the DSL bot `write` on this repo.** Promote pushes as the bot, not as
-   `GITHUB_TOKEN` - branch protection can restrict pushes to a named account, and the
-   Actions token cannot be one.
-2. **Classic branch protection on `staging` and `release`** (Settings -> Branches -> Add
-   rule, one per branch): *restrict who can push* to the `hertie-dsl-bot` user, *include
-   administrators*, *require linear history*, and allow neither force pushes nor deletions.
-   It has to be classic: a repo ruleset cannot restrict pushes to a user, and an org-level
-   ruleset needs a paid plan. Promote passes `--force-with-lease` purely as a concurrency
-   guard; every push it makes is a fast-forward, so blocking force pushes never blocks it.
+1. **A repo deploy key with write, as `PROMOTE_DEPLOY_KEY`.** Promote pushes as that key,
+   not as `GITHUB_TOKEN` or the bot: a deploy key is scoped to this repo alone, and it is
+   the one actor a ruleset bypass can name that no person and no Actions token can be.
+   `ssh-keygen -t ed25519 -N "" -C promote@dsl-teaching-toolkit -f promote_key`; the public
+   half goes to Settings -> Deploy keys -> Add deploy key, **Allow write access**; the
+   private half to Settings -> Secrets and variables -> Actions -> `PROMOTE_DEPLOY_KEY`.
+   **The DSL bot holds `read` here** - it reads across orgs for Promote's refresh fan-out
+   and never pushes.
+2. **A repository ruleset on `staging` and `release`** (Settings -> Rules -> New branch
+   ruleset): target both branches, *Restrict updates*, *Restrict deletions*, *Block force
+   pushes*, *Require linear history*, and set the bypass list to **Deploy keys** only.
+   Promote passes `--force-with-lease` purely as a concurrency guard; every push it makes
+   is a fast-forward, so blocking force pushes never blocks it.
 3. **Create the `release` environment** (Settings -> Environments) with the maintainer as
    **required reviewer** (self-approval allowed) and its deployment branch policy set to
    `main` only. Promote's job runs in the environment named by its `to:` input, so a release

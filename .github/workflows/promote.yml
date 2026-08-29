@@ -37,8 +37,8 @@ on:
         default: true
         type: boolean
 
-# Both jobs authenticate as the bot, so neither needs anything from the ambient token
-# beyond reading this repo for the checkout.
+# The push authenticates as a repo-scoped deploy key and the fan-out as the bot, so
+# neither job needs anything from the ambient token beyond reading this repo.
 permissions: {}
 
 jobs:
@@ -59,26 +59,33 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
-          # The push below is the BOT's, not GITHUB_TOKEN's: classic branch protection can
-          # restrict the tier branches to one account, and GITHUB_TOKEN cannot be that account -
-          # which left the tiers pushable by every write-holder on this repo. Checkout's
-          # own credentials would win over the bot's (it writes an auth header into the
-          # repo config), so they are not persisted.
+          # The push below is the DEPLOY KEY's, not GITHUB_TOKEN's: the tier branches carry
+          # a ruleset whose only bypass actor is "deploy keys", which no account and no
+          # Actions token can be - so this workflow is the one way a tier moves. Checkout's
+          # own credentials would win over the key (it writes an auth header into the repo
+          # config, and https beats the ssh remote set below), so they are not persisted.
           persist-credentials: false
 
       - name: Fast-forward the tier, or refuse
         id: fast-forward
         env:
-          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          PROMOTE_DEPLOY_KEY: ${{ secrets.PROMOTE_DEPLOY_KEY }}
           TIER: ${{ inputs.to }}
           SOURCE_INPUT: ${{ inputs.ref }}
         run: |
           set -eo pipefail
           git config user.name "DSL Bot"
           git config user.email "dsl-bot@hertie-school.org"
-          # Via gh's credential helper, so the token is never in a remote URL or in argv,
-          # where a failed push would echo it back into the log.
-          gh auth setup-git
+          # The key lives in the agent for this step only - never on disk, and never in a
+          # remote URL or in argv where a failed push would echo it into the log. The host
+          # key is scanned rather than trusted on first use, so a substituted github.com
+          # fails the push instead of receiving it.
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> ~/.ssh/known_hosts
+          eval "$(ssh-agent -s)"
+          printf '%s\n' "$PROMOTE_DEPLOY_KEY" | ssh-add -
+          git remote set-url origin "git@github.com:$GITHUB_REPOSITORY.git"
           # fetch-depth: 0 already brings every branch and tag, so origin/main and both
           # tier tips are here before this runs. Re-fetched anyway: one cheap call, and it
           # narrows the window between the tip read below and the lease it becomes.
