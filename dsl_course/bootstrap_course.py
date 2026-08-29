@@ -20,7 +20,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sys
 
@@ -38,7 +37,7 @@ from .course import (
 from .discovery import COHORTS_PATH, central_ref_for, register_cohort
 from .gh_contents import put_file, seed_files_if_absent, seed_if_absent
 from .gh_teams import create_team
-from .ghcli import gh
+from .ghcli import bot_token, gh
 from .log import log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
 from .repos import create_repo, repo_exists, repo_is_private, set_repo_topics
@@ -977,26 +976,12 @@ def _run(args: argparse.Namespace) -> int:
             log_err(f"could not read secret file: {e}")
             return 1
     elif args.propagate_secret:
-        # Copy the bot token onto this org so its seeded workflows can run. Lets the
-        # central bootstrap auto-provision the secret - no per-course manual step.
-        #
-        # Only DSL_BOT_TOKEN is published. A maintainer running this by hand usually has
-        # their PERSONAL GH_TOKEN exported; publishing that as the org secret would hand
-        # their PAT to every workflow in the infra repos - a wider blast radius than the
-        # repo secret seed.py already refuses to leak - so if only GH_TOKEN is set we
-        # refuse, and the refusal counts as a failed step rather than a silent no-op.
-        token = os.environ.get("DSL_BOT_TOKEN")
-        if token:
-            if not set_org_secret(args.org, "DSL_BOT_TOKEN", token):
-                secret_failures += 1
-        elif os.environ.get("GH_TOKEN"):
-            log_err(
-                "DSL_BOT_TOKEN not set (only GH_TOKEN is) - refusing to publish a personal "
-                "token as the DSL_BOT_TOKEN org secret; set DSL_BOT_TOKEN to propagate it."
-            )
-            secret_failures += 1
-        else:
-            log_err("--propagate-secret set but no DSL_BOT_TOKEN in env")
+        # Copy the bot token onto this org so its seeded workflows can run - the central
+        # bootstrap auto-provisions the secret, with no per-course manual step. The ORG
+        # secret has a wider blast radius than the repo secret seed.py sets, so the same
+        # `bot_token` guard applies and its refusal counts as a failed step.
+        token = bot_token("the DSL_BOT_TOKEN org secret")
+        if not token or not set_org_secret(args.org, "DSL_BOT_TOKEN", token):
             secret_failures += 1
     else:
         # Validate the secret exists (it should have been set manually or by another

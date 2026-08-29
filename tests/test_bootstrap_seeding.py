@@ -928,7 +928,7 @@ def test_propagate_repo_secret_reds_when_no_token_at_all_is_set(monkeypatch, cap
     monkeypatch.setattr(seed, "gh", lambda *a, **k: (0, ""))
 
     assert seed._propagate_repo_secret("Course-Org", ["cm-f2026"]) == 1
-    assert "cannot propagate the repo secret" in capsys.readouterr().err
+    assert "cannot set the DSL_BOT_TOKEN repo secret" in capsys.readouterr().err
 
 
 def test_propagate_repo_secret_uses_stdin_and_counts_failures(monkeypatch, capsys):

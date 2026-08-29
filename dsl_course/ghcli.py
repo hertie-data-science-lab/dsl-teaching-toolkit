@@ -5,10 +5,13 @@ with their timeouts, the rate-limit retry ladder, and the shared 404 test.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import time
 from pathlib import Path
 from typing import Any
+
+from .log import log_err
 
 RATE_LIMIT_MARKERS = (
     "secondary rate limit",
@@ -176,3 +179,25 @@ def is_already_exists(out: str) -> bool:
     reason: every create-if-absent site must agree on what "already there" looks like."""
     lower = out.lower()
     return any(m in lower for m in _ALREADY_EXISTS_MARKERS)
+
+
+def bot_token(what: str) -> str | None:
+    """The bot token to publish as `what`, or None once it has said why.
+
+    ONLY `DSL_BOT_TOKEN` is ever published. A maintainer running a bootstrap or a refresh
+    by hand usually has their PERSONAL `GH_TOKEN` exported, and publishing that would hand
+    their PAT to every workflow in the org - so GH_TOKEN alone is refused rather than
+    quietly used. Both refusals are LOUD and the caller counts them as failures: a green
+    skip leaves an org whose seeded workflows fail with no auth, weeks later, with a
+    successful run behind them."""
+    token = os.environ.get("DSL_BOT_TOKEN")
+    if token:
+        return token
+    if os.environ.get("GH_TOKEN"):
+        log_err(
+            f"DSL_BOT_TOKEN not set (only GH_TOKEN is) - refusing to publish a personal "
+            f"token as {what}; set DSL_BOT_TOKEN to propagate it."
+        )
+    else:
+        log_err(f"DSL_BOT_TOKEN not set - cannot set {what}.")
+    return None

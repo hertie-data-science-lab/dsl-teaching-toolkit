@@ -34,7 +34,6 @@ CLI:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -53,7 +52,7 @@ from .discovery import (
     unregister_cohort,
 )
 from .gh_contents import get_file_content, put_file, put_files, refresh_stubs
-from .ghcli import gh
+from .ghcli import bot_token, gh
 from .log import log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
 from .repos import converge_descriptions, org_exists, repo_is_archived
@@ -330,26 +329,13 @@ def _propagate_repo_secret(course_org: str, repos: list[str]) -> int:
     with no auth and fails weeks later when faculty run them, so a failure here must
     count into refresh's exit code rather than pass silently.
 
-    Only DSL_BOT_TOKEN is published. A maintainer running `seed refresh` by hand usually
-    has their PERSONAL GH_TOKEN exported; publishing that as the shared repo secret would
-    leak their PAT into every content repo, so if only GH_TOKEN is set we refuse. The
-    refusal counts every repo as unpropagated rather than passing green: until the nightly
-    refresh self-heals an org, its content repos still run the pre-fix new-assignment.yml
-    (no DSL_BOT_TOKEN in env), so a green refusal is a live workflow path left with no auth.
-    The value goes over stdin - `gh secret set` reads it from there whenever `--body` is
-    omitted - never argv, so it is not visible in `ps`."""
-    token = os.environ.get("DSL_BOT_TOKEN")
+    `ghcli.bot_token` owns the "never a personal GH_TOKEN" refusal; its failure counts
+    every repo as unpropagated rather than passing green, because until the nightly
+    refresh self-heals an org its content repos still run the pre-fix new-assignment.yml
+    (no DSL_BOT_TOKEN in env). The value goes over stdin - `gh secret set` reads it from
+    there whenever `--body` is omitted - never argv, so it is not visible in `ps`."""
+    token = bot_token("the DSL_BOT_TOKEN repo secret")
     if not token:
-        if os.environ.get("GH_TOKEN"):
-            log_err(
-                "DSL_BOT_TOKEN not set (only GH_TOKEN is) - refusing to publish a personal "
-                "token as the DSL_BOT_TOKEN repo secret; set DSL_BOT_TOKEN to propagate it."
-            )
-        else:
-            log_err(
-                "DSL_BOT_TOKEN not set - cannot propagate the repo secret to "
-                f"{len(repos)} content repo(s)."
-            )
         return len(repos)
     failures = 0
     for repo in repos:
