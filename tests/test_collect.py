@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from dsl_course import collect, ghcli, grades
+from dsl_course import collect, gh_contents, ghcli, grades
 from dsl_course.roster import Student
 from dsl_course.schedule import Schedule
 
@@ -1354,14 +1354,16 @@ def test_has_autograde_results_checks_the_records_not_bare_directory(monkeypatch
     # The marker is the _graded.json sentinel OR the _skipped.json record - NEVER bare
     # autograde/<slug>/ existence, which an aborted run can leave populated but un-sentineled.
     def only(record: str):
-        return lambda *args: (0, "") if args[-1].endswith(record) else (1, "not found")
+        return lambda *args: (
+            (0, "") if any(a.endswith(record) for a in args) else (1, "not found")
+        )
 
-    monkeypatch.setattr(collect, "gh", only("_graded.json"))
+    monkeypatch.setattr(gh_contents, "gh", only("_graded.json"))
     assert collect.has_autograde_results("Cohort", "assignment-1")  # a completed run
-    monkeypatch.setattr(collect, "gh", only("_skipped.json"))
+    monkeypatch.setattr(gh_contents, "gh", only("_skipped.json"))
     assert collect.has_autograde_results("Cohort", "assignment-1")  # a recorded skip
     # a populated directory with neither record present is NOT graded (the old bug)
-    monkeypatch.setattr(collect, "gh", lambda *a: (1, "not found"))
+    monkeypatch.setattr(gh_contents, "gh", lambda *a: (1, "not found"))
     assert not collect.has_autograde_results("Cohort", "assignment-1")
 
 

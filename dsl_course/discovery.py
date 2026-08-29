@@ -24,6 +24,7 @@ import yaml
 from .central import resolve_central_ref
 from .course import (
     COHORT_TOPIC,
+    COURSE_CONFIG,
     COURSE_HUB_TOPIC,
     GRADEBOOK_PREFIX,
     session_dirs,
@@ -199,6 +200,18 @@ def _read_cohorts(course_org: str) -> list[str]:
     return [c for c in cohorts if c]
 
 
+def org_meta(org: str) -> dict:
+    """An org's `.github/dsl-course.yml`, or `{}` when it declares none.
+
+    THE read for an org's declared identity - the course name, the faculty SSOT, a
+    cohort's `course:` pointer, the `central_ref:` its workflows run. `{}` for a genuine
+    404 or an empty file; a MALFORMED one still raises, because reading a typo as "this
+    org declares nothing" files a cohort under the course orgs and rewrites the inventory
+    around it. The one caller that must tell ABSENT from EMPTY - sync_faculty, which
+    would otherwise prune every admin - reads load_yaml_config directly."""
+    return load_yaml_config(org, ".github", COURSE_CONFIG) or {}
+
+
 def course_name_for_cohort(cohort_org: str) -> str:
     """This cohort's course name, for student-facing prose ("your grades for X").
 
@@ -210,7 +223,7 @@ def course_name_for_cohort(cohort_org: str) -> str:
     generic wording. A student must never be emailed a blank or a literal placeholder
     where the course name belongs.
     """
-    pointer = load_yaml_config(cohort_org, ".github", "dsl-course.yml") or {}
+    pointer = org_meta(cohort_org)
     return course_name_of(str(pointer.get("course") or ""))
 
 
@@ -223,7 +236,7 @@ def course_name_of(course_org: str) -> str:
     course org needs no guard of its own."""
     if not course_org:
         return ""
-    meta = load_yaml_config(course_org, ".github", "dsl-course.yml") or {}
+    meta = org_meta(course_org)
     return str(meta.get("course_name") or meta.get("org_name") or "")
 
 
@@ -238,12 +251,12 @@ def central_ref_for(org: str) -> str:
 
     Absent, or unreadable as a tier, means `central.CENTRAL_REF` - see resolve_central_ref
     for why junk falls back rather than failing the run."""
-    meta = load_yaml_config(org, ".github", "dsl-course.yml") or {}
+    meta = org_meta(org)
     course = str(meta.get("course") or "")
     if course:
-        org, meta = course, load_yaml_config(course, ".github", "dsl-course.yml") or {}
+        org, meta = course, org_meta(course)
     return resolve_central_ref(
-        meta.get("central_ref"), source=f"{org}/.github/dsl-course.yml"
+        meta.get("central_ref"), source=f"{org}/.github/{COURSE_CONFIG}"
     )
 
 

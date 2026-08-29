@@ -28,7 +28,7 @@ import yaml
 
 from . import grades, roster, schedule, sync_faculty, teams
 from .central import CENTRAL_REF, resolve_central_ref
-from .gh_contents import load_yaml_config
+from .discovery import org_meta
 from .log import log_err
 from .repos import get_default_branch
 
@@ -98,7 +98,7 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
     """One status row per faculty & instructors input location for `cohort_org`. Read-only."""
     # load_yaml_config raises a clear error on malformed YAML (caught in main()) instead
     # of handing a traceback to the operator who runs status to find the broken input.
-    course_meta = load_yaml_config(course_org, ".github", "dsl-course.yml") or {}
+    course_meta = org_meta(course_org)
 
     # Every course-org row lives in .github; every cohort row lives in
     # classroom-config - resolve each default branch once, not once per row.

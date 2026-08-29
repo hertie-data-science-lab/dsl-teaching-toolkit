@@ -732,7 +732,7 @@ def test_repo_table_drops_submission_and_gradebook_repos():
 def _readme_run(monkeypatch, put_ok):
     from dsl_course import profile_readme as P
 
-    monkeypatch.setattr(P, "load_yaml_config", lambda org, repo, path: {})
+    monkeypatch.setattr(P, "org_meta", lambda org: {})
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
@@ -763,9 +763,7 @@ def test_cohort_page_title_follows_the_course_pointer(monkeypatch):
 
     # A cohort's dsl-course.yml is a pointer with no course_name, so this used to title
     # the students' landing page with the org slug.
-    monkeypatch.setattr(
-        P, "load_yaml_config", lambda org, repo, path: {"course": "Course-Org"}
-    )
+    monkeypatch.setattr(P, "org_meta", lambda org: {"course": "Course-Org"})
     monkeypatch.setattr(P, "course_name_of", lambda org: "Deep Learning")
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)

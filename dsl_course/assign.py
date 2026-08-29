@@ -47,7 +47,7 @@ from .course import (
     submission_repo,
 )
 from .discovery import ASSIGNMENT_TEMPLATE_TOPIC
-from .gh_contents import put_file
+from .gh_contents import file_exists, put_file
 from .ghcli import GIT_ENV, clone, gh, git
 from .log import log, log_err, log_ok, log_skip, log_step, log_verbose
 from .repos import (
@@ -396,13 +396,7 @@ def solution_released(cohort_org: str, slug: str) -> bool:
     Read by the scheduler, so a passed `solution_datetime` fires exactly once. The manual
     Release assignment path does NOT consult it - an operator ticking include_solution is
     asking for it now, and push_solution is an idempotent overwrite anyway."""
-    code, _ = gh(
-        "api",
-        f"repos/{cohort_org}/{CONFIG_REPO}/contents/{solution_record_path(slug)}",
-        "--jq",
-        ".sha",
-    )
-    return code == 0
+    return file_exists(cohort_org, CONFIG_REPO, solution_record_path(slug))
 
 
 def record_solution_released(cohort_org: str, slug: str, repos: int) -> bool:

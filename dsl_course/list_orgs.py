@@ -24,8 +24,7 @@ import yaml
 
 from .central import resolve_central_ref
 from .course import COHORT_TOPIC, COURSE_HUB_TOPIC
-from .discovery import discover_cohorts
-from .gh_contents import load_yaml_config
+from .discovery import discover_cohorts, org_meta
 from .ghcli import gh_json
 from .log import log_err
 from .repos import org_exists
@@ -177,12 +176,12 @@ def _fetch_metadata(org: str) -> dict:
     cohort - so a transient failure would file a cohort org under Course orgs, and the
     inventory is fully generated: a wrong refresh is worse than no refresh.
 
-    Through `load_yaml_config`, so there is one reader for this file. Its own copy of the
+    Through `discovery.org_meta`, so there is one reader for this file. Its own copy of the
     404 test drifted from `ghcli.is_missing_resource`, and its `except Exception: return
     {}` turned a MALFORMED dsl-course.yml into "this org declares nothing" - which files a
     cohort under Course orgs and rewrites the inventory around it, exactly the wrong
     refresh this docstring warns about."""
-    return load_yaml_config(org, ".github", "dsl-course.yml") or {}
+    return org_meta(org)
 
 
 def _metadata_or_none(org: str) -> dict | None:

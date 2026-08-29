@@ -13,6 +13,9 @@ from collections.abc import Iterable
 from datetime import date, datetime
 from pathlib import Path
 
+# The per-org identity/config file, at the root of every org's `.github` repo: a course
+# org's declares its name and its faculty SSOT, a cohort org's is a pointer back to it.
+COURSE_CONFIG = "dsl-course.yml"
 # The private per-cohort config repo: roster, teams, schedule, grades, autograde records.
 # Every cohort org has exactly one, under exactly this name.
 CONFIG_REPO = "classroom-config"

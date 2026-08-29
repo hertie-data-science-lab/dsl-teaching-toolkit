@@ -30,8 +30,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import csv
-import io
 import json
 import sys
 import tempfile
@@ -46,6 +44,7 @@ from .course import CONFIG_REPO, GRADEBOOK_PREFIX
 from .discovery import course_name_for_cohort
 from .gh_contents import (
     blob_sha,
+    dump_csv,
     get_file_content,
     get_file_with_sha,
     put_file,
@@ -229,12 +228,7 @@ def render_yaml(book: dict) -> str:
 
 def dump_grades(rows: list[GradeRow]) -> str:
     """Serialise grade rows back to CSV text (header + one row per GradeRow)."""
-    out = io.StringIO()
-    writer = csv.writer(out)
-    writer.writerow(GRADE_FIELDS)
-    for r in rows:
-        writer.writerow([getattr(r, f) for f in GRADE_FIELDS])
-    return out.getvalue()
+    return dump_csv(GRADE_FIELDS, ([getattr(r, f) for f in GRADE_FIELDS] for r in rows))
 
 
 def render_cohort_csv(per: dict[str, list[GradeRow]]) -> str:
@@ -253,18 +247,17 @@ def render_cohort_csv(per: dict[str, list[GradeRow]]) -> str:
         handle_set.update(by_assignment[a])
     handles = sorted(handle_set)
 
-    out = io.StringIO()
-    writer = csv.writer(out)
-    writer.writerow(
-        ["github_handle"] + [f"{a}_{f}" for a in assignments for f in fields]
-    )
-    for handle in handles:
+    def wide_row(handle: str) -> list[str]:
         row = [handle]
         for a in assignments:
             r = by_assignment[a].get(handle)
             row.extend(getattr(r, f) if r else "" for f in fields)
-        writer.writerow(row)
-    return out.getvalue()
+        return row
+
+    return dump_csv(
+        ["github_handle"] + [f"{a}_{f}" for a in assignments for f in fields],
+        (wide_row(h) for h in handles),
+    )
 
 
 def merge_auto(text: str, updates: list[tuple[str, dict[str, str]]]) -> str:

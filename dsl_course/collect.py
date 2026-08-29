@@ -101,7 +101,7 @@ from .course import (
     resolve_is_group,
     submission_repo,
 )
-from .gh_contents import get_file_content, put_file
+from .gh_contents import dump_csv, file_exists, get_file_content, put_file
 from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
 from .log import log, log_err, log_ok, log_skip, log_step
 from .repos import repo_missing
@@ -282,12 +282,7 @@ def autograde_path(slug: str) -> str:
 def dump_snapshots(rows: list[tuple[str, str, str]]) -> str:
     """Serialise (repo, sha, recorded_at) rows to snapshot CSV text, repo-sorted so the
     file is stable and diffable."""
-    out = io.StringIO()
-    writer = csv.writer(out)
-    writer.writerow(SNAPSHOT_FIELDS)
-    for row in sorted(rows):
-        writer.writerow(row)
-    return out.getvalue()
+    return dump_csv(SNAPSHOT_FIELDS, sorted(rows))
 
 
 def parse_snapshots(text: str) -> dict[str, str]:
@@ -512,14 +507,10 @@ def has_autograde_results(cohort_org: str, slug: str) -> bool:
     is written once and never silently refreshed under a marker's hand-edits. A deliberate
     re-grade means deleting `autograde/<slug>/` (the next tick then regrades) or running the
     Grade assignment workflow."""
-    for record in (GRADED_RECORD, SKIP_RECORD):
-        code, _ = gh(
-            "api",
-            f"repos/{cohort_org}/{CONFIG_REPO}/contents/{autograde_path(slug)}/{record}",
-        )
-        if code == 0:
-            return True
-    return False
+    return any(
+        file_exists(cohort_org, CONFIG_REPO, f"{autograde_path(slug)}/{record}")
+        for record in (GRADED_RECORD, SKIP_RECORD)
+    )
 
 
 def mark_not_autograded(cohort_org: str, slug: str, why: str) -> bool:

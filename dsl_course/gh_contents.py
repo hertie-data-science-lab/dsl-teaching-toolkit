@@ -58,6 +58,27 @@ def read_csv(text: str, required: tuple[str, ...], what: str) -> csv.DictReader:
     return reader
 
 
+def dump_csv(header: Iterable[str], rows: Iterable[Iterable[object]]) -> str:
+    """`header` plus `rows` as CSV text - the write half of read_csv, so every CSV this
+    toolkit generates is written by one serialiser."""
+    out = io.StringIO()
+    writer = csv.writer(out)
+    writer.writerow(header)
+    writer.writerows(rows)
+    return out.getvalue()
+
+
+def file_exists(org: str, repo: str, path: str) -> bool:
+    """Whether `path` is present in `org/repo`, in one Contents probe.
+
+    For a FIRE-ONCE marker, where the only question is "has this already happened". Any
+    failure to read reads as absent, which costs a re-run rather than a missed one -
+    unlike get_file_content, whose callers act on the CONTENT and must never take a rate
+    limit for an empty file."""
+    code, _ = gh("api", f"repos/{org}/{repo}/contents/{path}", "--jq", ".sha")
+    return code == 0
+
+
 def blob_sha(content: bytes) -> str:
     """Git's blob hash of `content` - what the Contents API reports as a file's `.sha`.
 
