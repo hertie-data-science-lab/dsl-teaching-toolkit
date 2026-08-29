@@ -268,31 +268,26 @@ def build(dest: Path) -> None:
     shutil.copytree(HERE / "base", dest)
 
     out = generated()
-    for coll, entries in out["collections"].items():
-        (dest / coll).mkdir(parents=True, exist_ok=True)
-        for name, body in entries.items():
-            (dest / coll / name).write_text(
-                site_repo._stamp_front_matter(body), encoding="utf-8"
-            )
-    for rel, body in {**out["files"], **site_repo.site_templates()}.items():
-        path = dest / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(body, encoding="utf-8")
-
-    cfg = (dest / "_config.yml").read_text(encoding="utf-8")
-    for key, value in {
-        "course_name": "Deep Learning (Fixture)",
-        "course_description": "A fixture course. Nothing here is a real offering.",
-        "course_semester": "Fall 2026",
-        "course_code": "E1234",
-        "github_org": COHORT_ORG,
-    }.items():
-        cfg = site_repo._replace_config_scalar(cfg, key, value)
-    for key, value in site_repo._THEME_CONFIG.items():
-        cfg = site_repo._upsert_config(cfg, key, f'{key}: "{site_repo.q(value)}"')
-    cfg = site_repo._upsert_config(cfg, "collections", site_repo._COLLECTIONS_BLOCK)
-    cfg = site_repo._upsert_config(cfg, "defaults", site_repo._DEFAULTS_BLOCK)
-    (dest / "_config.yml").write_text(cfg, encoding="utf-8")
+    # Written through the sync's OWN apply step, so the site CI builds is assembled the
+    # way a real one is - config upsert, collection regeneration, front-matter stamp and
+    # all - rather than by a second copy of it here that can drift out of step.
+    site_repo.apply_plan(
+        dest,
+        site_repo.SitePlan(
+            config={
+                "course_name": "Deep Learning (Fixture)",
+                "course_description": (
+                    "A fixture course. Nothing here is a real offering."
+                ),
+                "course_semester": "Fall 2026",
+                "course_code": "E1234",
+                "github_org": COHORT_ORG,
+            },
+            collections=out["collections"],
+            files={**out["files"], **site_repo.site_templates()},
+            commit="fixture: build the CI site",
+        ),
+    )
     (dest / "_config.offline.yml").write_text(OFFLINE_CONFIG, encoding="utf-8")
 
 

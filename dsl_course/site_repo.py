@@ -909,6 +909,50 @@ def _stale_site_repo(org: str, site: str) -> str | None:
     return None
 
 
+def apply_plan(wd: Path, plan: SitePlan) -> None:
+    """Write a `SitePlan` into a site checkout at `wd`: everything but the git operations.
+
+    Separated from `sync_site_repo` so the CI fixture builder
+    (tests/fixtures/site/build_fixture.py) writes its site through THIS code rather than a
+    second copy of the config upsert and the collection regeneration - the fixture is what
+    the `jekyll-contract` job builds to prove the shipped templates render, and a fixture
+    assembled slightly differently from a real site proves it about the wrong site.
+
+    Removals (`plan.retire`) stay with the caller: they are `git rm` against a checkout,
+    not a write."""
+    # _config.yml, in two halves. The plan's own keys are course IDENTITY (course_name
+    # / _semester / _code / _description, github_org) and are replace-only. The theme
+    # keys and the two blocks are the CONTRACT of the templates written below - a site
+    # that lacks them renders those templates wrong - so they go in whether the file
+    # has them or not.
+    cfg_path = wd / "_config.yml"
+    if cfg_path.is_file():
+        cfg = cfg_path.read_text()
+        for key, value in plan.config.items():
+            cfg = _replace_config_scalar(cfg, key, value)
+        for key, value in _THEME_CONFIG.items():
+            cfg = _upsert_config(cfg, key, f'{key}: "{q(value)}"')
+        cfg = _upsert_config(cfg, "collections", _COLLECTIONS_BLOCK)
+        cfg = _upsert_config(cfg, "defaults", _DEFAULTS_BLOCK)
+        owned = [*plan.config, *_THEME_CONFIG, "collections", "defaults"]
+        cfg_path.write_text(_stamp_config(cfg, sorted(owned)))
+
+    # Regenerate the owned collections; leave everything else (layouts, pages) as the
+    # template provides.
+    for coll, entries in plan.collections.items():
+        d = wd / coll
+        if d.is_dir():
+            shutil.rmtree(d)
+        d.mkdir(parents=True)
+        (d / ".gitkeep").write_text("")
+        for fname, content in entries.items():
+            (d / fname).write_text(_stamp_front_matter(content))
+
+    for rel, content in plan.files.items():
+        (wd / rel).parent.mkdir(parents=True, exist_ok=True)
+        (wd / rel).write_text(content)
+
+
 _GIT_FAILURE_TAIL_LINES = 5
 
 
@@ -992,37 +1036,7 @@ def sync_site_repo(
         if plan is None:
             return 1
 
-        # _config.yml, in two halves. The plan's own keys are course IDENTITY (course_name
-        # / _semester / _code / _description, github_org) and are replace-only. The theme
-        # keys and the two blocks are the CONTRACT of the templates written below - a site
-        # that lacks them renders those templates wrong - so they go in whether the file
-        # has them or not.
-        cfg_path = wd / "_config.yml"
-        if cfg_path.is_file():
-            cfg = cfg_path.read_text()
-            for key, value in plan.config.items():
-                cfg = _replace_config_scalar(cfg, key, value)
-            for key, value in _THEME_CONFIG.items():
-                cfg = _upsert_config(cfg, key, f'{key}: "{q(value)}"')
-            cfg = _upsert_config(cfg, "collections", _COLLECTIONS_BLOCK)
-            cfg = _upsert_config(cfg, "defaults", _DEFAULTS_BLOCK)
-            owned = [*plan.config, *_THEME_CONFIG, "collections", "defaults"]
-            cfg_path.write_text(_stamp_config(cfg, sorted(owned)))
-
-        # Regenerate the owned collections; leave everything else (layouts, pages) as the
-        # template provides.
-        for coll, entries in plan.collections.items():
-            d = wd / coll
-            if d.is_dir():
-                shutil.rmtree(d)
-            d.mkdir(parents=True)
-            (d / ".gitkeep").write_text("")
-            for fname, content in entries.items():
-                (d / fname).write_text(_stamp_front_matter(content))
-
-        for rel, content in plan.files.items():
-            (wd / rel).parent.mkdir(parents=True, exist_ok=True)
-            (wd / rel).write_text(content)
+        apply_plan(wd, plan)
 
         # Removals. `git add -A` below stages everything the working tree holds, so a file
         # the toolkit no longer ships would otherwise live on in the site repo untouched.
