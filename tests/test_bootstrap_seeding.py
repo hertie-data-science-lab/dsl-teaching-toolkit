@@ -744,9 +744,15 @@ def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
     assert "refresh incomplete" not in out.err
 
 
+# Read ONCE, not per call: a ledger line is stamped to the second, and a test that builds
+# the expected line separately from the one it fed in flaked whenever the two calls
+# straddled a second boundary. Only the relative ages matter to the rule under test.
+_RUN_START = datetime.now(timezone.utc)
+
+
 def _missed_at(cohort: str, hours_ago: float) -> str:
     """A miss-ledger line for `cohort`, first missed `hours_ago` hours ago."""
-    when = datetime.now(timezone.utc) - timedelta(hours=hours_ago)
+    when = _RUN_START - timedelta(hours=hours_ago)
     return f"{cohort.casefold()} {when.isoformat(timespec='seconds')}"
 
 
