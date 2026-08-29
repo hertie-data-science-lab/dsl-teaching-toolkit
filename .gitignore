@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Tool caches
+.pytest_cache/
+.ruff_cache/
+
+# Virtualenvs
+.venv/
+venv/
+
+# uv writes this on `uv run`, but this project resolves deps from
+# requirements*.txt - pyproject.toml declares no [project] to lock.
+uv.lock
+
+# macOS Finder metadata; packaging residue
+.DS_Store
+*.egg-info/
