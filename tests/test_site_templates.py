@@ -324,6 +324,41 @@ def _clone_with(files: dict[str, str]):
     return clone
 
 
+def test_a_failed_push_reports_what_git_said(monkeypatch, capsys):
+    # A push-protection block or a 403 surfaced as a bare "<label> push failed": git had
+    # already printed the one actionable line and it was thrown away, so the daily site
+    # cron reported a failure nobody could act on.
+    monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr(site_repo, "repo_is_archived", lambda org, name: False)
+    monkeypatch.setattr(ghcli, "gh", _clone_with({"README.md": "old\n"}))
+    blocked = (
+        "Enumerating objects: 5, done.\n"
+        "remote: error: GH013: Repository rule violations found\n"
+        "remote: - GITHUB PUSH PROTECTION\n"
+        "! [remote rejected] HEAD -> main (push declined)\n"
+    )
+    real_git = site_repo.git
+    monkeypatch.setattr(
+        site_repo,
+        "git",
+        lambda *a: (1, blocked) if "push" in a else real_git(*a),
+    )
+
+    def build(_wd: Path) -> site_repo.SitePlan:
+        return site_repo.SitePlan(
+            config={},
+            collections={},
+            files={"README.md": "new\n"},
+            retire=(),
+            commit="site: sync",
+        )
+
+    assert site_repo.sync_site_repo(ORG, build) == 1
+    err = capsys.readouterr().err
+    assert "GITHUB PUSH PROTECTION" in err
+    assert "push declined" in err
+
+
 def test_a_retired_path_leaves_the_site_repo_and_the_rest_stays(monkeypatch):
     # `files` cannot express a removal - the apply step is `git add -A` - so without
     # `retire` a template the toolkit stops shipping stays on every live site forever.

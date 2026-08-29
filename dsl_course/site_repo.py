@@ -882,6 +882,25 @@ def _stale_site_repo(org: str, site: str) -> str | None:
     return None
 
 
+_GIT_FAILURE_TAIL_LINES = 5
+
+
+def _git_failure_tail(out: str, lines: int = _GIT_FAILURE_TAIL_LINES) -> str:
+    """The last few lines of a failed git command, indented for the log.
+
+    A push fails for reasons nobody can guess from "push failed": GitHub's push
+    protection blocking a committed secret, a repository rule violation, a 403 on a repo
+    whose permissions changed. `ghcli.git` already hands back git's combined output and
+    it was being thrown away, so the daily site cron reported a bare failure and the
+    actual message - the only thing that says what to fix - reached nobody.
+
+    Only the tail, because a push prints progress before it prints the reason. No
+    credential can appear in it: the clone's remote is a plain https URL and gh keeps the
+    token in the credential helper."""
+    tail = [ln for ln in out.strip().splitlines() if ln.strip()][-lines:]
+    return "\n".join(f"    {ln}" for ln in tail) or "    (git said nothing)"
+
+
 def sync_site_repo(
     org: str,
     build: Callable[[Path], SitePlan | None],
@@ -1000,8 +1019,9 @@ def sync_site_repo(
         if code != 0:
             log_ok(f"{plan.label} already up to date")
             return 0
-        if git("-C", str(wd), *GIT_ENV, "push", "-q", "origin", "HEAD")[0] != 0:
-            log_err(f"{plan.label} push failed")
+        code, out = git("-C", str(wd), *GIT_ENV, "push", "-q", "origin", "HEAD")
+        if code != 0:
+            log_err(f"{plan.label} push failed:\n{_git_failure_tail(out)}")
             return 1
         # Only now is anything actually overwritten on the remote: a run that committed
         # nothing replaced nothing, and a failed push left the remote as it was. Whatever
