@@ -24,6 +24,7 @@ from .roster import CONFIG_REPO
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = ROOT / "templates"
 EXAMPLE_COHORT = ROOT / "example-course" / "cohort-org"
+EXAMPLE_COURSE = ROOT / "example-course" / "course-org"
 
 # Every user-editable file in classroom-config ships as a PAIR under one rule: `<file>` is
 # a minimal commented scaffold, seeded once and never rewritten; `<file>.sample` is a
@@ -104,6 +105,19 @@ def example_cohort_file(rel: str) -> str:
     Seeded verbatim as a `.sample`: never str.format-rendered, because a worked example is
     a real cohort's file (hertie-dsl-demo-f2026), not a scaffold to fill in."""
     return (EXAMPLE_COHORT / rel).read_text(encoding="utf-8")
+
+
+@cache
+def example_course_file(rel: str) -> str:
+    """Read a file from the worked example COURSE org (example-course/course-org/<rel>).
+
+    The course tier of the same rule, for the one file that is a seeded scaffold/sample
+    pair rather than pure reference material: `scaffold` derives SYLLABUS.md.sample from
+    this tree's SYLLABUS.md, so the syllabus faculty receive IS the one the docs link to.
+    The rest of course-org/ is documentation - linked from docs/, never seeded - but it is
+    parsed by the real readers in tests/test_bootstrap_seeding.py all the same, so it
+    cannot go schema-stale in silence either."""
+    return (EXAMPLE_COURSE / rel).read_text(encoding="utf-8")
 
 
 def refresh_welcome_workflows(org: str) -> int:

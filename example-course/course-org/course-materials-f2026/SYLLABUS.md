@@ -1,4 +1,62 @@
-# Deep Learning (Demo) - syllabus
+# Deep Learning (Demo) - E1234 - syllabus
 
-A dummy syllabus for the example course. 5 weeks of materials, three assignments
-(two individual, one group project), weekly readings.
+## 1. General information
+
+| | |
+| --- | --- |
+| Instructor | Prof. Jane Doe |
+| E-mail | doe@hertie-school.org |
+| Office hours | Tuesdays 14:00-15:00, or by appointment |
+| Term | Fall 2026 (7 September - 18 December) |
+| Sessions | Tuesdays 10:00-12:00; lab Thursdays 14:00-16:00 |
+| Language of instruction | English |
+
+## 2. Course contents and learning objectives
+
+### Course contents
+
+An applied introduction to deep learning for public policy. We build up from linear
+models to neural networks, and spend as much time on what a model cannot tell you as on
+what it can.
+
+### Main learning objectives
+
+By the end of the course students can:
+
+- state what a supervised learning problem is, and recognise when a question is not one;
+- fit, tune and honestly evaluate a model, distinguishing training from test error;
+- read a published ML result critically, including its choice of baseline.
+
+### Target group
+
+MDS students in their second year. Prior ML experience required.
+
+### Prerequisites
+
+Machine Learning or equivalent; comfort writing a function and reading a data frame in
+Python or R.
+
+## 3. Grading and assignments
+
+| Component | Weight | Due |
+| --- | --- | --- |
+| Problem set 1 | 20% | 13 October |
+| Problem set 2 | 20% | 27 October |
+| Group project | 40% | 15 November |
+| Participation | 20% | continuous |
+
+Late work loses one grade step per 24 hours. Extensions are granted before the deadline,
+not after it.
+
+## 4. General readings
+
+No required textbook. Both of these are free and used throughout:
+
+- James, Witten, Hastie & Tibshirani, *An Introduction to Statistical Learning*.
+  <https://www.statlearning.com/>
+- Goodfellow, Bengio & Courville, *Deep Learning*. <https://www.deeplearningbook.org/>
+
+## 5. Course sessions and readings
+
+Published on the course website, generated from `classroom-config/schedule.yml` and each
+session's `readings/` folder.
