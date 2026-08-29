@@ -244,22 +244,48 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.scheduler.provision_all",
-        lambda master_org, template, cohort_org, solution=False, touch_existing=True: (
-            calls.append((master_org, template, cohort_org, solution, touch_existing)),
-            (0, True),
-        )[1],
+        lambda master_org, template, cohort_org, solution=False, touch_existing=True, scheduled=False: (
+            (
+                calls.append(
+                    (
+                        master_org,
+                        template,
+                        cohort_org,
+                        solution,
+                        touch_existing,
+                        scheduled,
+                    )
+                ),
+                (0, True),
+            )[1]
+        ),
     )
     r = _r("s", WHEN, assignment="assignment-2-f2026")
     assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == (0, True)
-    # The hourly path never re-touches an existing repo (the manual button does).
-    assert calls[0] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", False, False)
+    # The hourly path never re-touches an existing repo (the manual button does), and says
+    # it is the cron - a group handout with no teams yet then waits instead of going red.
+    assert calls[0] == (
+        "Course-Org",
+        "assignment-2-f2026",
+        "Cohort-Org",
+        False,
+        False,
+        True,
+    )
 
     # The solution release is the SAME call, asked to push the solution too - so a
     # scheduled solution can never diverge from what include_solution does by hand.
     r = _r("s", WHEN, assignment="assignment-2-f2026")
     r.assignment_solution = True
     assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == (0, True)
-    assert calls[1] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", True, False)
+    assert calls[1] == (
+        "Course-Org",
+        "assignment-2-f2026",
+        "Cohort-Org",
+        True,
+        False,
+        True,
+    )
 
 
 def _git_with_staged_changes(*args):

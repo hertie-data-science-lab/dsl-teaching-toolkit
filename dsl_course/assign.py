@@ -501,6 +501,7 @@ def provision_all(
     group: bool | None = None,
     dry_run: bool = False,
     touch_existing: bool = True,
+    scheduled: bool = False,
 ) -> tuple[int, bool]:
     """Freeze the cohort template, then provision a repo per unit (student, or team).
 
@@ -515,7 +516,10 @@ def provision_all(
     Callable directly (e.g. by the scheduler) as well as from the CLI. `group=None`
     (the default) reads the template's own declaration - `type: group` in the
     grading.yml on its solution branch; pass True to force per-team for a template
-    that doesn't declare it."""
+    that doesn't declare it.
+
+    `scheduled` marks the hourly cron: a group assignment with no teams yet is then a
+    green wait, not the error a button press gets."""
     if master_org == cohort_org:
         log_err("master-org and cohort-org must differ.")
         return 1, False
@@ -555,6 +559,15 @@ def provision_all(
     if group:
         groups = teams.teams_for(teams.load(cohort_org), key)
         if not groups:
+            if scheduled:
+                # Teams form when students click 'Join team', which can be days after the
+                # handout datetime - and the cron re-fires every hour until they do. Wait,
+                # exactly as an individual handout waits for its first onboarded student.
+                log(
+                    f"  [wait] no teams for `{key}` in {cohort_org} yet - the handout "
+                    f"fires on the tick after the first team forms"
+                )
+                return 0, False
             log_err(
                 f"no teams for `{key}` in {cohort_org}/classroom-config/teams.csv - "
                 f"students self-select via the welcome 'Join team' issue, or seed the CSV."

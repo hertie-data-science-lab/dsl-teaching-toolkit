@@ -159,6 +159,7 @@ def _execute_nondeploy(
             solution=release.assignment_solution,
             # Hourly: leave existing repos alone (the manual button still repairs access).
             touch_existing=False,
+            scheduled=True,
         )
         if failed != 0:
             errors += 1

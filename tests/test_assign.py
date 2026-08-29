@@ -787,6 +787,32 @@ def test_the_granted_team_slug_matches_the_one_sync_teams_reconciles(
     }
 
 
+def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_fails_on_the_button(
+    tmp_path, monkeypatch, capsys
+):
+    # Teams form when students click 'Join team', days after the handout datetime. The
+    # hourly cron counted the empty CSV as a failure and went red every tick until the
+    # first team formed; an operator pressing the button still needs to be told.
+    monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {})
+    monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
+
+    def boom(*a, **k):
+        raise AssertionError("nothing may be provisioned without a team")
+
+    monkeypatch.setattr(assign, "ensure_cohort_template", boom)
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+
+    def run(**kw):
+        return assign.provision_all(
+            "COURSE", "project-f2026", "COHORT", roster_path=path, group=True, **kw
+        )
+
+    assert run(scheduled=True) == (0, False)
+    assert "[wait] no teams" in capsys.readouterr().out
+    assert run() == (1, False)
+    assert "no teams for" in capsys.readouterr().err
+
+
 # --------------- a failed solution push outranks every other fault (the marker depends on it)
 
 
