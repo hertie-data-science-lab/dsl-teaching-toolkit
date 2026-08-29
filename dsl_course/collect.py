@@ -375,9 +375,9 @@ def submission_targets(
     return targets
 
 
-def local_deadline(deadline: str, tz: str | None = None) -> str:
-    """`deadline` (ISO date or datetime) as an OFFSET-CARRYING ISO string in the COHORT's
-    own timezone. Raises ValueError on anything that is not ISO.
+def local_deadline(deadline: str, tz: str | None = None) -> datetime:
+    """`deadline` (ISO date or datetime) as an OFFSET-CARRYING datetime in the COHORT's own
+    timezone. Raises ValueError on anything that is not ISO.
 
     A bare date means the END of that day, and a naive datetime is a local time, because
     the deadline a student was given ("submit by the 15th") is a local one - the site shows
@@ -391,13 +391,13 @@ def local_deadline(deadline: str, tz: str | None = None) -> str:
     raw = deadline if ("T" in deadline or ":" in deadline) else f"{deadline}T23:59:59"
     dt = datetime.fromisoformat(raw)
     zone = schedule._tz(tz)
-    return (dt.replace(tzinfo=zone) if dt.tzinfo is None else dt).isoformat()
+    return dt.replace(tzinfo=zone) if dt.tzinfo is None else dt
 
 
 def _until_param(deadline: str, tz: str | None = None) -> str:
     """`deadline` as a UTC `...Z` stamp - the form the commits API's `until=` takes."""
     return (
-        datetime.fromisoformat(local_deadline(deadline, tz))
+        local_deadline(deadline, tz)
         .astimezone(timezone.utc)
         .strftime("%Y-%m-%dT%H:%M:%SZ")
     )
@@ -793,30 +793,36 @@ def _apply_rlimits() -> None:
 
 
 @cache
+def _grader_dep_present(module: str) -> bool:
+    """Whether `module` is importable by the interpreter the graded subprocess runs under.
+
+    Checked in-process: the subprocess runs `sys.executable`, and neither PYTHONSAFEPATH
+    nor the runspace PYTHONPATH takes site-packages away from it."""
+    try:
+        return importlib.util.find_spec(module) is not None
+    except (ImportError, ValueError):
+        return False
+
+
+@cache
 def _grader_dep_missing(module: str) -> bool:
-    """Whether `module` is absent from the interpreter the graded subprocess runs under -
-    logged, loudly, ONCE per run.
+    """`_grader_dep_present` inverted, saying so LOUDLY - and, because it is cached too,
+    exactly once per run.
 
     `_run_limited` sends the child's output to DEVNULL and reports ANY exit code as a
     completed run, so a `python -m pytest` that died on "No module named pytest" was
     indistinguishable from a submission that failed its tests: every target came back a
     grading-failed zero, the systemic guard reddened the cron, no sentinel was written, and
     the next hourly tick did it all again. A missing INTERPRETER dependency is a runner
-    fault with one fix, so it says so in words rather than through a cohort of zeros.
-
-    Checked in-process: the subprocess runs `sys.executable`, and neither PYTHONSAFEPATH
-    nor the runspace PYTHONPATH takes site-packages away from it."""
-    try:
-        present = importlib.util.find_spec(module) is not None
-    except (ImportError, ValueError):
-        present = False
-    if not present:
-        log_err(
-            f"  ! `{module}` is not installed in the grading environment - NOTHING can be "
-            f"graded until the workflow installs it (it is pinned in requirements.txt, "
-            f"which every seeded workflow's preamble installs)"
-        )
-    return not present
+    fault with one fix, so it says so in words rather than through a cohort of zeros."""
+    if _grader_dep_present(module):
+        return False
+    log_err(
+        f"  ! `{module}` is not installed in the grading environment - NOTHING can be "
+        f"graded until the workflow installs it (it is pinned in requirements.txt, "
+        f"which every seeded workflow's preamble installs)"
+    )
+    return True
 
 
 def _run_limited(argv: list[str], *, cwd: str, env: dict, timeout: int) -> bool:
@@ -1076,7 +1082,7 @@ def collect(
     # otherwise take an unparseable `--deadline` as an approxidate that silently matches
     # NOTHING, zeroing every submission in the cohort without a word.
     try:
-        deadline = local_deadline(deadline, sched.timezone)
+        deadline = local_deadline(deadline, sched.timezone).isoformat()
     except ValueError:
         log_err(
             f"--deadline '{deadline}' is not an ISO date/datetime - refusing to grade "

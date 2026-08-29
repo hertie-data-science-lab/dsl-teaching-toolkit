@@ -559,7 +559,7 @@ def test_course_description_flows_from_course_metadata_into_config(
         site, "yaml_file", lambda *a: {"course_description": "Nets, from 0."}
     )
     assert site.sync_site("Course-Org", "Cohort-f2026") == 0
-    cfg = site_repo._set_config(
+    cfg = site_repo._replace_config_scalar(
         'course_name: "x"\ncourse_description: "old"\ncourse_code: "y"\n',
         "course_description",
         captured["plan"].config["course_description"],
@@ -571,7 +571,7 @@ def test_course_description_flows_from_course_metadata_into_config(
 def test_set_config_writes_one_line_over_a_block_scalar():
     # A faculty `>` block in dsl-course.yml, and/or one already in _config.yml: either way
     # the result must stay valid YAML on one line, its body not stranded as loose text.
-    cfg = site_repo._set_config(
+    cfg = site_repo._replace_config_scalar(
         "course_description: >\n  an old\n  folded blurb\ncourse_code: 'y'\n",
         "course_description",
         "line one\nline two\n",

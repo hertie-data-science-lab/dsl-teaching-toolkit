@@ -58,7 +58,7 @@ _THEME_CONFIG = {
 
 # The collections the shipped templates read (`site.lectures`, `site.assignments`,
 # `site.events`, `site.announcements`) and the layout an assignment page gets. Both are
-# multi-line blocks rather than scalars, so `_ensure_config_block` writes them; both are
+# multi-line blocks rather than scalars, so `_upsert_config` writes them whole; both are
 # a CONTRACT of templates/site/ rather than a preference, and a site missing either
 # builds green into empty pages - the worst way for this to be wrong.
 _COLLECTIONS_BLOCK = """collections:
@@ -213,57 +213,49 @@ def _stamp_config(text: str, keys: list[str]) -> str:
 _MANAGED_MARKER = "# managed by the DSL course sync - rewritten on every run"
 
 
-def _set_config(text: str, key: str, value: str, *, insert: bool = False) -> str:
+def _replace_config_scalar(text: str, key: str, value: str) -> str:
     """Replace a top-level `key: ...` line in _config.yml, preserving the rest.
 
-    The value is always written as a one-line double-quoted scalar (see `q`). Any
-    indented continuation lines are consumed with it, so replacing a key someone left as
-    a `>`/`|` block scalar doesn't strand its body as invalid YAML.
+    The value is written as a one-line double-quoted scalar (see `q`). Any indented
+    continuation lines are consumed with it, so replacing a key someone left as a `>`/`|`
+    block scalar doesn't strand its body as invalid YAML.
 
-    A key the template's `_config.yml` doesn't have is a no-op - logged, so template drift
-    (a key the code sets that the site theme dropped) is visible rather than silent. That
-    is right for the course-IDENTITY keys, which are content: a site that dropped
-    `course_code:` chose to. `insert=True` appends the key instead, for the handful the
-    shipped templates DEPEND on (`_THEME_CONFIG`): there a missing key is not a choice, it
-    is a site generated before the key existed, and leaving it out renders a broken page."""
+    REPLACE-ONLY: a key the site's `_config.yml` doesn't have is a no-op, logged so
+    template drift is visible rather than silent. That is right for the course-IDENTITY
+    keys, which are content - a site that dropped `course_code:` chose to. What the
+    templates DEPEND on goes through `_upsert_config` instead."""
     new, n = re.subn(
         rf"(?m)^({re.escape(key)}:[ \t]*).*(?:\n[ \t]+\S.*)*$",
         lambda m: f'{m.group(1)}"{q(value)}"',
         text,
         count=1,
     )
-    if n:
-        return new
-    if not insert:
+    if not n:
         log(f"  (_config.yml has no `{key}:` key - not written; template drift?)")
-        return new
-    added = f'{_MANAGED_MARKER}\n{key}: "{q(value)}"\n'
-    return text.rstrip("\n") + "\n\n" + added
+    return new
 
 
-def _ensure_config_block(text: str, key: str, block: str) -> str:
-    """Write a verbatim MULTI-LINE `_config.yml` block (`collections:`, `defaults:`),
-    replacing whatever the site had under that key and appending it when it had none.
+def _upsert_config(text: str, key: str, body: str) -> str:
+    """Write `body` - a complete `key: ...` line, or a whole multi-line block - over
+    whatever `_config.yml` holds under `key`, appending it when the file holds none.
 
-    Not `_set_config`, which folds a value onto one quoted line - right for a course name,
-    impossible for a nested mapping. These two are a contract of the templates this sync
-    ships rather than anything faculty choose, so the block goes in whole: a site whose
-    `collections:` lost `lectures` renders an empty Lectures page and builds green, which
-    is the failure nobody notices.
+    For the keys the shipped templates DEPEND on: the theme settings, and the
+    `collections:`/`defaults:` blocks that no one-line scalar could express. A missing one
+    of those is not a faculty choice, it is a site generated before the key existed, and
+    leaving it out renders a broken page - a site whose `collections:` lost `lectures`
+    builds GREEN into an empty Lectures page, which is the failure nobody notices.
 
-    The block is matched with or without the marker line above it, so a second sync
-    replaces what the first wrote rather than stacking another copy."""
-    body = _MANAGED_MARKER + "\n" + block.rstrip("\n") + "\n"
+    Indented continuation lines go with the key, and the marker line above it is matched
+    too, so a second sync replaces what the first wrote rather than stacking a copy."""
+    written = _MANAGED_MARKER + "\n" + body.rstrip("\n") + "\n"
     new, n = re.subn(
         rf"(?m)^(?:{re.escape(_MANAGED_MARKER)}\n)?{re.escape(key)}:[ \t]*.*$"
         r"(?:\n[ \t]+.*)*\n?",
-        lambda _m: body,
+        lambda _m: written,
         text,
         count=1,
     )
-    if n:
-        return new
-    return text.rstrip("\n") + "\n\n" + body
+    return new if n else text.rstrip("\n") + "\n\n" + written
 
 
 # The session pages. Their CONTENT is a theme layout (dsl-jekyll-theme's
@@ -963,11 +955,11 @@ def sync_site_repo(
         if cfg_path.is_file():
             cfg = cfg_path.read_text()
             for key, value in plan.config.items():
-                cfg = _set_config(cfg, key, value)
+                cfg = _replace_config_scalar(cfg, key, value)
             for key, value in _THEME_CONFIG.items():
-                cfg = _set_config(cfg, key, value, insert=True)
-            cfg = _ensure_config_block(cfg, "collections", _COLLECTIONS_BLOCK)
-            cfg = _ensure_config_block(cfg, "defaults", _DEFAULTS_BLOCK)
+                cfg = _upsert_config(cfg, key, f'{key}: "{q(value)}"')
+            cfg = _upsert_config(cfg, "collections", _COLLECTIONS_BLOCK)
+            cfg = _upsert_config(cfg, "defaults", _DEFAULTS_BLOCK)
             owned = [*plan.config, *_THEME_CONFIG, "collections", "defaults"]
             cfg_path.write_text(_stamp_config(cfg, sorted(owned)))
 

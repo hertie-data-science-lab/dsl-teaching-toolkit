@@ -122,7 +122,7 @@ def test_people_yaml_passes_every_declared_display_field_through():
 
 def test_set_config_replaces_only_the_named_key():
     cfg = 'course_name: "old"\ncourse_code: "X"\n'
-    out = site_repo._set_config(cfg, "course_name", "Deep Learning")
+    out = site_repo._replace_config_scalar(cfg, "course_name", "Deep Learning")
     assert 'course_name: "Deep Learning"' in out
     assert 'course_code: "X"' in out  # untouched
 

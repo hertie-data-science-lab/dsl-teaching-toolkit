@@ -35,10 +35,16 @@ def _grading_deps_present(monkeypatch):
     stub the subprocess boundary rather than really running one - so a dev box without
     `nbconvert` on it must not read as a broken runner. A test about the probe itself
     re-patches `find_spec` in its own body and wins. The verdict is cached for the life of
-    a grading run, so it is cleared either side."""
-    collect._grader_dep_missing.cache_clear()
+    a grading run - both the probe and the once-per-run log guard - so both are cleared
+    either side."""
+    _clear_dep_caches()
     monkeypatch.setattr(collect.importlib.util, "find_spec", lambda name: object())
     yield
+    _clear_dep_caches()
+
+
+def _clear_dep_caches() -> None:
+    collect._grader_dep_present.cache_clear()
     collect._grader_dep_missing.cache_clear()
 
 
