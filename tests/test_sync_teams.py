@@ -119,6 +119,22 @@ def test_vet_handles_canonicalises_accepts_and_rejects():
     ]  # not on the roster -> excluded, raw handle returned
 
 
+def test_vet_groups_applies_one_allowlist_across_a_whole_map():
+    # The team sync, the handout and the collection each built this allowlist for
+    # themselves. A handle good enough to be handed a repo but not good enough to earn a
+    # grade row is what a second copy of the rule costs a student.
+    students = _students(
+        "ada@uni.edu,Ada,Ada-L,42,,enrolled",
+        "ben@uni.edu,Ben,ben-b,43,,enrolled",
+    )
+    assert sync_teams.vet_groups(
+        {"wizards": ["ADA-L", "m-stranger"], "alchemists": ["ben-b"]}, students
+    ) == [
+        ("alchemists", ["ben-b"], []),  # name-sorted, member order preserved
+        ("wizards", ["Ada-L"], ["m-stranger"]),
+    ]
+
+
 def test_known_handles_are_the_onboarded_roster_handles():
     students = _students(
         "ada@uni.edu,Ada,ada-l,42,,enrolled",

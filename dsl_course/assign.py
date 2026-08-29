@@ -562,13 +562,9 @@ def provision_all(
         # handles must pass the SAME roster allowlist sync_teams applies: only enrolled,
         # onboarded roster handles - never a typo or a stranger's login that would be INVITED
         # into the private cohort org (and granted `maintain` on a repo) by ensure_team.
-        # Compared casefold (GitHub logins are case-insensitive); the roster's casing wins.
-        allowed_by_fold = {
-            h.casefold(): h for h in sync_teams.known_handles(participants)
-        }
+        # `vet_groups` is that one allowlist; the reporting below is this path's own.
         units = []
-        for team, members in sorted(groups.items()):
-            vetted, rejected = sync_teams.vet_handles(members, allowed_by_fold)
+        for team, vetted, rejected in sync_teams.vet_groups(groups, participants):
             for m in rejected:
                 # Names a handle a STUDENT typed into teams.csv, and this workflow's log is
                 # world-readable - so the handle is verbose-only and the actionable line

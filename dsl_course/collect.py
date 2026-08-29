@@ -334,18 +334,14 @@ def submission_targets(
             return []
         # teams.csv is student-writable (the welcome "Join team" issue appends rows), so its
         # handles pass the SAME roster allowlist `assign.provision_all` vets them through
-        # before they are handed out. Unvetted, a typo'd or invented handle earned a row of
-        # its OWN in the grades CSV - the file faculty mark from and `render` fans out into
-        # per-student gradebooks - for an account with no place in the cohort at all.
-        allowed_by_fold = {
-            h.casefold(): h
-            for h in sync_teams.known_handles(
-                roster.enrolled(roster.load(cohort_org) or [])
-            )
-        }
+        # before they are handed out - `sync_teams.vet_groups` is that one allowlist.
+        # Unvetted, a typo'd or invented handle earned a row of its OWN in the grades CSV -
+        # the file faculty mark from and `render` fans out into per-student gradebooks -
+        # for an account with no place in the cohort at all.
         out = []
-        for team, members in sorted(groups.items()):
-            vetted, rejected = sync_teams.vet_handles(members, allowed_by_fold)
+        for team, vetted, rejected in sync_teams.vet_groups(
+            groups, roster.enrolled(roster.load(cohort_org) or [])
+        ):
             if rejected:
                 # A count, not the handles: this log is public, and the handles are a
                 # student's own typing.

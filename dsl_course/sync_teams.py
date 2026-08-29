@@ -115,6 +115,28 @@ def vet_handles(
     return accepted, rejected
 
 
+def vet_groups(
+    groups: dict[str, list[str]], students: list[roster.Student] | None
+) -> list[tuple[str, list[str], list[str]]]:
+    """`(group name, accepted, rejected)` for every group, name-sorted.
+
+    The fold-keyed allowlist is built ONCE for the whole map and applied by `vet_handles`,
+    so the three readers of teams.csv - this module's team sync, the assignment handout and
+    the collection that grades it - cannot vet a row differently. They used to build the
+    same allowlist three times, and a handle good enough to be handed a repo but not good
+    enough to earn a grade row is the failure that costs a student marks.
+
+    `students` is the caller's own view of the roster (the team sync allows every onboarded
+    row; the handout and the collection allow enrolled rows only), and every caller reports
+    its rejections in its own words - all three logs are world-readable, and what each may
+    name differs."""
+    allowed_by_fold = {h.casefold(): h for h in known_handles(students)}
+    return [
+        (name, *vet_handles(members, allowed_by_fold))
+        for name, members in sorted(groups.items())
+    ]
+
+
 def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
     wanted = desired_teams(teams.load(cohort_org))
     if not wanted:
@@ -133,12 +155,10 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
         )
         return 1
     log_step(f"Materialising {len(wanted)} project team(s) in {cohort_org}")
-    # Fold-keyed so a teams.csv handle that differs only in case from its roster entry
-    # (same GitHub account) matches; the roster's canonical casing is what gets added.
-    allowed_by_fold = {h.casefold(): h for h in known_handles(students)}
     errors = 0
-    for slug in sorted(wanted):
-        accepted, rejected = vet_handles(sorted(wanted[slug]), allowed_by_fold)
+    for slug, accepted, rejected in vet_groups(
+        {s: sorted(members) for s, members in wanted.items()}, students
+    ):
         for member in rejected:
             # Names a handle a STUDENT typed into teams.csv, so the detail is verbose-only
             # (this workflow's log is world-readable). The count below is what a faculty
