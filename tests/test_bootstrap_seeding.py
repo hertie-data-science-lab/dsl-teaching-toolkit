@@ -626,12 +626,11 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "refresh_classroom_system_files", system_failures)
     monkeypatch.setattr(seed, "refresh_cohort_pointer", pointer_failures)
     # The per-cohort loop probes the cohort ORG once: gone = unregister + skip. A live org
-    # then checks repo_is_archived (archived = skip frozen). org_exists True +
-    # repo_is_archived False = present and live, proceed.
+    # then reads the archived flag off its own listing (empty above = nothing archived),
+    # so org_exists True + an unarchived classroom-config = present and live, proceed.
     monkeypatch.setattr(seed, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(seed, "org_exists", lambda org: True)
     monkeypatch.setattr(seed, "unregister_cohort", lambda course, cohort: True)
-    monkeypatch.setattr(seed, "repo_is_archived", lambda org, repo: False)
     store = {seed.MISSES_PATH: "".join(f"{m}\n" for m in prior_misses)}
     monkeypatch.setattr(
         seed, "get_file_content", lambda org, repo, path: store.get(path)
@@ -717,9 +716,18 @@ def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
         system_failures=refresh_one,
     )
     # Both orgs live (org probe healthy); Cohort-f2026 is a finished, archived semester.
+    # Read off the cohort's own listing, which the convergence sweep below needs anyway.
     monkeypatch.setattr(seed, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(
-        seed, "repo_is_archived", lambda org, repo: org == "Cohort-f2026"
+        seed,
+        "list_org_repos",
+        lambda org: [
+            {
+                "name": seed.CONFIG_REPO,
+                "topics": [],
+                "archived": org == "Cohort-f2026",
+            }
+        ],
     )
 
     rendered: list[str] = []

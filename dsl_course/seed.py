@@ -56,7 +56,7 @@ from .gh_contents import get_file_content, put_file, put_files, refresh_stubs
 from .ghcli import bot_token, gh
 from .log import log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
-from .repos import converge_descriptions, org_exists, repo_is_archived
+from .repos import converge_descriptions, org_exists
 from .welcome import (
     refresh_classroom_samples,
     refresh_classroom_system_files,
@@ -370,7 +370,7 @@ def _converge_org_metadata(org: str, repos: list[dict]) -> int:
     return topics.failures
 
 
-def _converge_org(org: str, central_ref: str) -> int:
+def _converge_org(org: str, central_ref: str, listing: list[dict] | None = None) -> int:
     """Sweep one org's repo listing and re-render its landing pages from that SAME
     snapshot. Failure count.
 
@@ -383,8 +383,12 @@ def _converge_org(org: str, central_ref: str) -> int:
     and no cohort. The `.github` README is SYSTEM-owned and rewritten outright; the
     student-facing landing page is INSTRUCTOR-owned, so only its marked repo table is
     refreshed (see profile_readme.splice_repo_table) - which is what keeps that table
-    honest as repos are added, without flattening an instructor's wording around it."""
-    listing = list_org_repos(org)
+    honest as repos are added, without flattening an instructor's wording around it.
+
+    `listing` is that snapshot when the caller already holds one - a cohort's refresh reads
+    its archived flag off the same listing rather than probing classroom-config for it."""
+    if listing is None:
+        listing = list_org_repos(org)
     return _converge_org_metadata(org, listing) + update_profile_readme(
         org, central_ref=central_ref, repos=listing
     )
@@ -501,13 +505,19 @@ def refresh(course_org: str) -> int:
         f"in {len(cohorts)} cohort org(s)"
     )
     for cohort in cohorts:
+        # ONE listing of the cohort: the archived flag below, and the convergence sweep +
+        # profile rebuild at the end of the loop, are all read off this same snapshot. The
+        # flag used to be its own GET of classroom-config, a night after night probe for a
+        # field the listing already carries.
+        listing = list_org_repos(cohort)
+        config_repo = next((r for r in listing if r["name"] == CONFIG_REPO), None)
         # A finished semester's cohort is archived, and an archived repo is read-only:
         # every write 403s, and the samples are new files so put_file's sha no-op can't
         # absorb it. A past cohort is meant to stay frozen anyway, so skip it whole rather
         # than turn the nightly cron red in every org that has ever finished a semester.
-        # repo_is_archived assumes LIVE on a transient read failure, so a live cohort's
-        # refresh is never silently skipped.
-        if repo_is_archived(cohort, CONFIG_REPO):
+        # A cohort with no classroom-config at all is not archived, it is unfinished, and
+        # the writes below are what give it one.
+        if config_repo is not None and config_repo.get("archived"):
             log(f"  [skip] {cohort} (archived cohort - left frozen)")
             continue
         failures += refresh_welcome_workflows(cohort)
@@ -522,7 +532,7 @@ def refresh(course_org: str) -> int:
         # The pointer its dispatchers read to find this course org. Also SYSTEM-owned and
         # also only ever written by Bootstrap cohort until now - same bug class.
         failures += refresh_cohort_pointer(cohort, course_org)
-        failures += _converge_org(cohort, central_ref)
+        failures += _converge_org(cohort, central_ref, listing)
     if failures:
         log_err(f"refresh incomplete: {failures} file(s) could not be written")
         return 1
