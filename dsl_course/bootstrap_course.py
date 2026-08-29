@@ -3,7 +3,7 @@
 Sets up org-level infrastructure that persists across semesters:
 - DSL_BOT_TOKEN secret (required for all workflows)
 - Faculty teams (instructors, course-admin); cohort bootstrap adds students + auditors
-- Org settings (2FA enforcement, Pages default branch)
+- Org settings (base permissions, member repo creation, 2FA where every member has it)
 - Profile README (.github repo with description)
 - Org-level workflows in .github (sync-membership, bootstrap-cohort, refresh-actions)
 - Central faculty & instructors workflows seeded into .github (Release materials/assignment +
@@ -36,7 +36,7 @@ from .course import (
 )
 from .discovery import COHORTS_PATH, central_ref_for, register_cohort
 from .gh_contents import put_file, put_files, seed_if_absent
-from .gh_teams import create_team
+from .gh_teams import converge_org_settings, create_team
 from .ghcli import bot_token, gh
 from .log import log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
@@ -467,58 +467,6 @@ def create_profile_repo(
     return failures
 
 
-def set_org_settings(org: str) -> int:
-    """Set org-level settings: 2FA and base permissions. Returns the number of PATCHes
-    that failed - an org whose members may skip 2FA, or that hands every member read on
-    every repo, is a real misconfiguration, not a cosmetic one."""
-    log_step("Configuring org settings")
-    failures = 0
-
-    # Require 2FA for all members (best practice for course orgs)
-    code, out = gh(
-        "api",
-        "--method",
-        "PATCH",
-        f"orgs/{org}",
-        "--field",
-        "two_factor_requirement_enabled=true",
-    )
-    # Set default Pages branch to main (if not present, Pages will use default on first enable)
-    # Note: pages_build_type is set per-repo, not org-wide
-    if code == 0:
-        log_ok("org settings configured (2FA enforced)")
-    else:
-        failures += 1
-        log_err(f"could not enable 2FA: {out[:100]}")
-
-    # Base permissions, in BOTH org kinds. This used to be cohort-only, on the reasoning
-    # that a cohort holds students - but a COURSE org holds the unreleased materials, the
-    # model solutions and the assignment `solution` branches, and at GitHub's default of
-    # `read` every member of it (every TA, every visiting instructor, anyone ever added
-    # for one semester) could read all of them. Faculty access to a course org comes from
-    # the instructors/course-admin team grants (COURSE_TEAM_ACCESS, converged nightly by
-    # access.converge_faculty_access), not from being a member, so nobody who should have
-    # access loses it.
-    code, out = gh(
-        "api",
-        "--method",
-        "PATCH",
-        f"orgs/{org}",
-        "--field",
-        "default_repository_permission=none",
-        "--field",
-        "members_can_create_repositories=false",
-    )
-    if code == 0:
-        log_ok(
-            "org tightened (default_repository_permission=none, no member repo creation)"
-        )
-    else:
-        failures += 1
-        log_err(f"could not tighten org settings: {out[:120]}")
-    return failures
-
-
 def validate_secret_presence(org: str, secret_name: str) -> bool:
     """Check if an org secret exists (non-destructive check)."""
     # gh api doesn't expose secret listing without auth headers, so we check by trying
@@ -536,7 +484,7 @@ def setup_cohort_extras(org: str, central_ref: str) -> int:
     """Cohort-only: seed the student-facing repos.
 
     Layered on top of the common bootstrap when --cohort is passed (the safe-by-default
-    org permissions both org kinds get are in set_org_settings):
+    org permissions both org kinds get are in gh_teams.converge_org_settings):
     - public `welcome` repo with the Join issue form + onboard workflow;
     - private `classroom-config` repo with a starter students.csv;
     - the faculty teams' standing grant on both of those repos.
@@ -813,9 +761,9 @@ def _outcome_lines(steps: list[tuple[int, str]]) -> str:
     """The bootstrap's closing summary, rendered from what each step actually returned.
 
     It used to be a fixed block asserting every line, printed whatever happened - so a run
-    that failed to enforce 2FA, or never seeded dsl-course.yml, still handed the operator
-    "DONE (automated): ... 2FA enforcement enabled". The failure count at the very bottom
-    was the only hint, and it named no step.
+    that failed to tighten the org, or never seeded dsl-course.yml, still handed the
+    operator "DONE (automated): ...". The failure count at the very bottom was the only
+    hint, and it named no step.
 
     A step with an empty summary (the cohort pointer, the registry write, the faculty
     sync, the README) still counts towards the exit code; it just has nothing to say
@@ -856,11 +804,13 @@ def _run(args: argparse.Namespace) -> int:
     if not preflight(args.org):
         return 1
 
-    # 1. Org settings
+    # 1. Org settings - converged, not set once: the nightly refresh runs the same call
+    # (seed._converge_org), so a tightening added later reaches orgs bootstrapped before it.
+    log_step("Configuring org settings")
     steps.append(
         (
-            set_org_settings(args.org),
-            "Org settings: 2FA enforced, base permission none, no member repo creation",
+            converge_org_settings(args.org),
+            "Org settings: base permission none, no member repo creation",
         )
     )
 

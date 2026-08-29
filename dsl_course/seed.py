@@ -53,6 +53,7 @@ from .discovery import (
     unregister_cohort,
 )
 from .gh_contents import get_file_content, put_file, put_files, refresh_stubs
+from .gh_teams import converge_org_settings
 from .ghcli import bot_token, gh
 from .log import log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
@@ -386,11 +387,17 @@ def _converge_org(org: str, central_ref: str, listing: list[dict] | None = None)
     honest as repos are added, without flattening an instructor's wording around it.
 
     `listing` is that snapshot when the caller already holds one - a cohort's refresh reads
-    its archived flag off the same listing rather than probing classroom-config for it."""
+    its archived flag off the same listing rather than probing classroom-config for it.
+
+    The org's own settings are converged here too (gh_teams.converge_org_settings). They
+    used to be written only at bootstrap, so every org tightened after its own bootstrap
+    kept GitHub's default of `read` for every member on every repo."""
     if listing is None:
         listing = list_org_repos(org)
-    return _converge_org_metadata(org, listing) + update_profile_readme(
-        org, central_ref=central_ref, repos=listing
+    return (
+        converge_org_settings(org)
+        + _converge_org_metadata(org, listing)
+        + update_profile_readme(org, central_ref=central_ref, repos=listing)
     )
 
 

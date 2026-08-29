@@ -1,5 +1,6 @@
-"""Org membership and team membership: creating a team, inviting a person into the org,
-and reconciling one team's roster against what a config file says it should be.
+"""The org itself and the teams in it: converging an org's settings, creating a team,
+inviting a person into the org, and reconciling one team's roster against what a config
+file says it should be.
 """
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ import re
 from functools import cache, lru_cache
 
 from .ghcli import gh, is_already_exists
-from .log import log_err, log_ok, log_person, log_skip
+from .log import log, log_err, log_ok, log_person, log_skip
 
 # GitHub usernames: 1-39 chars, ASCII alphanumerics or single hyphens, no leading/
 # trailing hyphen and no consecutive hyphens. Used to reject a typo'd faculty handle
@@ -45,10 +46,98 @@ def create_team(
         log_ok(f"team created: {name}")
         return True
     if is_already_exists(out):
-        log_skip(f"team {name}")
+        # A team keeps the privacy it was made with, and nothing else revisits it -
+        # `students` and `auditors` are `secret` so a student cannot read the class list
+        # off the team page, and every cohort created before that decision still has them
+        # `closed`. Converged here, at the one place a duplicate is seen.
+        code, out = gh(
+            "api",
+            "--method",
+            "PATCH",
+            f"orgs/{org}/teams/{name}",
+            "--field",
+            f"privacy={privacy}",
+        )
+        if code == 0:
+            log_skip(f"team {name}")
+        else:
+            # The team exists either way, which is what this returns; only its privacy
+            # could not be corrected.
+            log_err(f"team {name}: privacy not set to {privacy}: {out[:120]}")
         return True
     log_err(f"failed to create team {name}: {out[:200]}")
     return False
+
+
+def members_without_2fa(org: str) -> int | None:
+    """How many of `org`'s members have two-factor auth off. None if it could not be read."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"orgs/{org}/members?filter=2fa_disabled",
+        "--jq",
+        ".[].login",
+    )
+    return len(out.split()) if code == 0 else None
+
+
+def converge_org_settings(org: str) -> int:
+    """Tighten one org: base permissions, member repo creation, and 2FA where possible.
+
+    Idempotent, and run on every nightly refresh as well as at bootstrap. These were set
+    once, at bootstrap, and never revisited, so every org bootstrapped before the
+    tightening still handed each member `read` on the unreleased materials, the model
+    solutions and the `solution` branches.
+
+    Base permissions matter in BOTH org kinds. A cohort holds students; a COURSE org holds
+    the materials students must not see, and at GitHub's default of `read` every member of
+    it (every TA, every visiting instructor, anyone ever added for one semester) could read
+    all of it. Faculty access comes from the team grants (access.converge_faculty_access),
+    not from being a member, so nobody who should have access loses it.
+
+    Returns the number of PATCHes that FAILED - the 2FA one excluded. GitHub refuses
+    `two_factor_requirement_enabled` while any member still has 2FA off, which is a fact
+    about people rather than a broken convergence: counting it would red this cron in every
+    org every night for something no re-run can fix. It is named and counted in the log
+    instead."""
+    failures = 0
+    code, out = gh(
+        "api",
+        "--method",
+        "PATCH",
+        f"orgs/{org}",
+        "--field",
+        "default_repository_permission=none",
+        "--field",
+        "members_can_create_repositories=false",
+    )
+    if code == 0:
+        log_ok(f"{org} tightened (base permission none, no member repo creation)")
+    else:
+        failures += 1
+        log_err(f"could not tighten {org}: {out[:120]}")
+
+    code, out = gh(
+        "api",
+        "--method",
+        "PATCH",
+        f"orgs/{org}",
+        "--field",
+        "two_factor_requirement_enabled=true",
+    )
+    if code == 0:
+        log_ok(f"{org}: 2FA required of every member")
+    else:
+        without = members_without_2fa(org)
+        log(
+            f"  [warn] {org}: 2FA not enforced: "
+            + (
+                f"{without} members without 2FA"
+                if without is not None
+                else f"could not count the members without it ({out[:80]})"
+            )
+        )
+    return failures
 
 
 def org_membership_state(org: str, login: str) -> str | None:

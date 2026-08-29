@@ -1,6 +1,6 @@
-"""Org and team membership: creating a team, reconciling one team's roster against
-what a config file declares, and the guards that stop a sweep pruning the wrong
-person."""
+"""The org and the teams in it: converging an org's settings, creating a team,
+reconciling one team's roster against what a config file declares, and the guards that
+stop a sweep pruning the wrong person."""
 
 from __future__ import annotations
 
@@ -266,3 +266,62 @@ def test_reconcile_keeps_the_handles_it_adds_and_removes_out_of_a_public_log(
     )
     captured = capsys.readouterr()
     assert "ada-l" not in captured.out and "zoe-zed" not in captured.out
+
+
+# ------------------------------------------------------------- converging org settings
+
+
+def _patched(monkeypatch, answer=(0, "")) -> list[tuple[str, ...]]:
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: calls.append(a) or answer)
+    return calls
+
+
+def test_an_existing_team_has_its_privacy_corrected(monkeypatch):
+    # create_team treated a duplicate as success and left the team as it was, so every
+    # cohort made before students/auditors became `secret` still published the class list
+    # to every student in it.
+    calls = _patched(monkeypatch, (1, "HTTP 422: name already_exists"))
+    assert gh_teams.create_team("Org", "students", privacy="secret") is True
+    assert (
+        "api",
+        "--method",
+        "PATCH",
+        "orgs/Org/teams/students",
+        "--field",
+        "privacy=secret",
+    ) in calls
+
+
+def test_a_course_org_is_tightened_like_a_cohort(monkeypatch):
+    # It used to be cohort-only, so every member of a COURSE org - every TA, every
+    # visiting instructor - could read the unreleased materials, the model solutions and
+    # the assignment `solution` branches. Faculty access comes from the team grants.
+    calls = _patched(monkeypatch)
+    assert gh_teams.converge_org_settings("Course-Org") == 0
+    fields = [f for call in calls for f in call]
+    assert "default_repository_permission=none" in fields
+    assert "members_can_create_repositories=false" in fields
+
+
+def test_a_failed_tighten_reds_the_run(monkeypatch):
+    # An org left at GitHub's default (every member reads every repo) is a real
+    # misconfiguration - it must red the caller, not just log and pass.
+    _patched(monkeypatch, (1, "gh: HTTP 403"))
+    assert gh_teams.converge_org_settings("Cohort-f2026") == 1
+
+
+def test_2fa_that_cannot_be_enforced_is_named_and_counted_not_red(monkeypatch, capsys):
+    # GitHub refuses the 2FA PATCH while any member still has 2FA off. That is a fact
+    # about people, so counting it would red this convergence in every org every night
+    # for something no re-run can fix.
+    def fake_gh(*args, **k):
+        if "two_factor_requirement_enabled=true" in args:
+            return (1, "gh: HTTP 422 members without 2FA")
+        if "--paginate" in args:
+            return (0, "anna\nbeat\ncarl\n")
+        return (0, "")
+
+    monkeypatch.setattr(gh_teams, "gh", fake_gh)
+    assert gh_teams.converge_org_settings("Course-Org") == 0
+    assert "2FA not enforced: 3 members without 2FA" in capsys.readouterr().out

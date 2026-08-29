@@ -29,6 +29,7 @@ import yaml
 from dsl_course import bootstrap_course as bc
 from dsl_course import (
     gh_contents,
+    gh_teams,
     grades,
     roster,
     schedule,
@@ -447,29 +448,12 @@ def test_cohort_extras_reds_when_a_repo_cannot_be_created(fake, monkeypatch):
     assert fake.writes == []
 
 
-def test_org_settings_red_when_the_tighten_patch_fails(monkeypatch):
-    # An org left at GitHub's default (every member reads every repo) is a real
-    # misconfiguration - a non-zero there must red the bootstrap, not just log and pass.
-    monkeypatch.setattr(bc, "gh", lambda *a, **k: (1, "gh: HTTP 403"))
-    assert bc.set_org_settings("Cohort-f2026") == 2  # 2FA + base permissions
-
-
-def test_a_course_org_is_tightened_like_a_cohort(monkeypatch):
-    # It used to be cohort-only, so every member of a COURSE org - every TA, every
-    # visiting instructor - could read the unreleased materials, the model solutions and
-    # the assignment `solution` branches. Faculty access comes from the team grants.
-    patched: list[tuple[str, ...]] = []
-    monkeypatch.setattr(bc, "gh", lambda *a, **k: patched.append(a) or (0, ""))
-    assert bc.set_org_settings("Course-Org") == 0
-    fields = [f for call in patched for f in call]
-    assert "default_repository_permission=none" in fields
-    assert "members_can_create_repositories=false" in fields
-
-
 def test_cohort_extras_no_longer_repeat_the_org_tighten(fake, monkeypatch):
-    # One home for the PATCH (set_org_settings), so the two org kinds cannot drift.
+    # One home for the PATCH (gh_teams.converge_org_settings), so the two org kinds
+    # cannot drift.
     patched: list[tuple[str, ...]] = []
     monkeypatch.setattr(bc, "gh", lambda *a, **k: patched.append(a) or (0, ""))
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: patched.append(a) or (0, ""))
     bc.setup_cohort_extras("Cohort-f2026", "release")
     fields = [f for call in patched for f in call]
     assert "default_repository_permission=none" not in fields
@@ -502,7 +486,7 @@ def _stub_bootstrap(monkeypatch) -> None:
     # Every configuration step reports a failure count that _run threads into its exit
     # code and into the closing summary - a clean stub reports zero failures.
     for name in (
-        "set_org_settings",
+        "converge_org_settings",
         "create_default_teams",
         "grant_button_access",
         "setup_cohort_extras",
@@ -618,6 +602,7 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "discover_assignments", lambda org: [])
     monkeypatch.setattr(seed, "_propagate_repo_secret", lambda org, repos: 0)
     monkeypatch.setattr(seed, "list_org_repos", lambda org: [])
+    monkeypatch.setattr(seed, "converge_org_settings", lambda org: 0)
     monkeypatch.setattr(seed, "_converge_org_metadata", lambda org, repos: 0)
     monkeypatch.setattr(seed, "seed_github_workflows", lambda org, ref: seed_failures)
     monkeypatch.setattr(seed, "_write_heartbeat", lambda org: heartbeat_failures)
@@ -1237,32 +1222,8 @@ def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypat
     assert len(written) == len(set(written))
 
 
-def test_org_settings_ok_line_only_prints_when_2fa_was_set(monkeypatch, capsys):
-    # The summary line claims "(2FA enforced)" - it must not print when the PATCH failed.
-    monkeypatch.setattr(bc, "gh", lambda *a, **k: (1, "gh: HTTP 403"))
-    bc.set_org_settings("Course-Org")
-    out = capsys.readouterr()
-    assert "2FA enforced" not in out.out
-    assert "could not enable 2FA" in out.err
-
-    monkeypatch.setattr(bc, "gh", lambda *a, **k: (0, ""))
-    bc.set_org_settings("Course-Org")
-    assert "2FA enforced" in capsys.readouterr().out
-
-
 # ------------------------------------ every claimed step is counted, and the summary
 # ------------------------------------ is rendered from what actually happened
-
-
-def test_a_failed_2fa_patch_is_counted_not_just_logged(monkeypatch):
-    def fake_gh(*args, **k):
-        two_fa = "two_factor_requirement_enabled=true" in args
-        return (1, "gh: HTTP 403") if two_fa else (0, "")
-
-    monkeypatch.setattr(bc, "gh", fake_gh)
-    assert bc.set_org_settings("Course-Org") == 1
-    monkeypatch.setattr(bc, "gh", lambda *a, **k: (0, ""))
-    assert bc.set_org_settings("Course-Org") == 0
 
 
 def test_a_team_that_could_not_be_created_is_counted(monkeypatch):
@@ -1310,14 +1271,14 @@ def test_a_missing_bot_token_reds_the_bootstrap(monkeypatch, capsys):
 
 def test_the_summary_names_the_step_that_failed(monkeypatch, capsys):
     # The closing block used to assert every line whatever happened, so an operator read
-    # "2FA enforcement enabled" off a run that never enforced it.
+    # a configured org off a run that configured nothing.
     _stub_bootstrap(monkeypatch)
-    monkeypatch.setattr(bc, "set_org_settings", lambda org: 1)
+    monkeypatch.setattr(bc, "converge_org_settings", lambda org: 1)
     monkeypatch.setattr("sys.argv", ["bootstrap_course", "--org", "Course-Org"])
 
     assert bc.main() == 1
     out = capsys.readouterr().out
-    assert "- [FAILED] Org settings: 2FA enforced" in out
+    assert "- [FAILED] Org settings: base permission none" in out
     assert "- Faculty teams:" in out
     assert "bootstrap INCOMPLETE" in out
 
@@ -1417,8 +1378,12 @@ def test_refresh_sweeps_every_org_off_one_listing(monkeypatch):
     # landing page so the page renders the descriptions this run just corrected.
     listings: list[str] = []
     swept: list[str] = []
+    tightened: list[str] = []
     rendered: list[tuple[str, int]] = []
     _stub_refresh(monkeypatch)
+    monkeypatch.setattr(
+        seed, "converge_org_settings", lambda org: tightened.append(org) or 0
+    )
     monkeypatch.setattr(
         seed, "list_org_repos", lambda org: listings.append(org) or [_r(".github")]
     )
@@ -1433,5 +1398,9 @@ def test_refresh_sweeps_every_org_off_one_listing(monkeypatch):
 
     assert seed.refresh("Course-Org") == 0
     assert swept == ["Course-Org", "Cohort-f2026", "Cohort-s2027"]
+    # The org's own settings converge on the same sweep. They were written only at
+    # bootstrap, so every org tightened after its own bootstrap kept GitHub's default of
+    # `read` for every member on every repo.
+    assert tightened == swept
     assert listings == swept
     assert rendered == [("Course-Org", 1), ("Cohort-f2026", 1), ("Cohort-s2027", 1)]
