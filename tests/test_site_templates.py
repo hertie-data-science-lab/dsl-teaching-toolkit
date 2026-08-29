@@ -250,6 +250,42 @@ def test_an_empty_site_checkout_is_seeded_with_everything_a_site_needs(tmp_path)
         assert (tmp_path / rel).is_file(), rel
 
 
+def test_the_sync_writes_the_course_name_as_jekylls_own_title(tmp_path):
+    # The theme falls back to `site.title` where a page has no `course_name`, and
+    # jekyll-feed titles the feed with it. Left unset, jekyll-github-metadata tries to
+    # synthesise one from the repository and fails the build when it cannot name it.
+    # UPSERTED, not replaced: a site seeded before this has no `title:` line at all.
+    (tmp_path / "_config.yml").write_text('course_name: "old"\n', encoding="utf-8")
+    site_repo.apply_plan(
+        tmp_path,
+        site_repo.SitePlan(
+            config={"course_name": "Deep Learning"},
+            collections={},
+            commit="site: sync",
+        ),
+    )
+    cfg = (tmp_path / "_config.yml").read_text(encoding="utf-8")
+    assert 'title: "Deep Learning"' in cfg
+
+
+def test_a_plan_that_declares_no_course_name_leaves_the_title_alone(tmp_path):
+    # The identity keys are only written when the course declares them, and `title` is
+    # one of them - a sync with nothing to say must not blank the site's own heading.
+    (tmp_path / "_config.yml").write_text('title: "Mine"\n', encoding="utf-8")
+    site_repo.apply_plan(
+        tmp_path, site_repo.SitePlan(config={}, collections={}, commit="site: sync")
+    )
+    assert 'title: "Mine"' in (tmp_path / "_config.yml").read_text(encoding="utf-8")
+
+
+def test_the_seeded_config_carries_a_title_of_its_own(tmp_path):
+    # The seed is what a site has before any course identity reaches it, and the build
+    # has to survive that window.
+    assert re.search(r"(?m)^title:", site_repo.seed_templates()["_config.yml"]), (
+        "templates/site-seed/_config.yml has no title: key"
+    )
+
+
 def test_a_seeded_file_the_site_already_has_is_left_alone(tmp_path):
     # Seed-once: everything under templates/site-seed/ is the faculty's once written.
     mine = "---\nlayout: home\n---\n\nmy own words\n"
