@@ -974,3 +974,13 @@ def test_a_half_created_cohort_template_is_still_repaired_from_the_listing(
     assert stamped == [
         ("COHORT", "assignment-1", ["assignment-1", "assignment-template"])
     ]
+
+
+def test_wait_for_content_does_not_sleep_after_its_last_poll(monkeypatch):
+    # The delay is there to space the polls out. Sleeping after the final failed one only
+    # adds `delay` to a wait that has already given up.
+    slept: list[float] = []
+    monkeypatch.setattr(assign.time, "sleep", lambda d: slept.append(d))
+    monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, "0"))
+    assert assign._wait_for_content("COHORT", "a1", attempts=3, delay=1.5) is False
+    assert slept == [1.5, 1.5]

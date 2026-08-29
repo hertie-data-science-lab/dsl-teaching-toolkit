@@ -78,11 +78,13 @@ def _wait_for_content(
     GitHub's template-generate is asynchronous: a just-created repo can briefly be empty,
     and using it as a generate *source* (the next stage) then fails with `... is empty`.
     Returns True once the repo's root has files."""
-    for _ in range(attempts):
+    for attempt in range(attempts):
         code, out = gh("api", f"repos/{org}/{repo}/contents", "--jq", "length")
         if code == 0 and out.strip().isdigit() and int(out.strip()) > 0:
             return True
-        time.sleep(delay)
+        # The delay SPACES the polls; after the last one there is nothing to space.
+        if attempt + 1 < attempts:
+            time.sleep(delay)
     return False
 
 
