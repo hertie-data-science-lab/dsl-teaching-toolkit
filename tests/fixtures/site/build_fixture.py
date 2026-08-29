@@ -287,13 +287,11 @@ def build(dest: Path) -> None:
         "course_code": "E1234",
         "github_org": COHORT_ORG,
     }.items():
-        cfg = site_repo._set_config(cfg, key, value)
+        cfg = site_repo._replace_config_scalar(cfg, key, value)
     for key, value in site_repo._THEME_CONFIG.items():
-        cfg = site_repo._set_config(cfg, key, value, insert=True)
-    cfg = site_repo._ensure_config_block(
-        cfg, "collections", site_repo._COLLECTIONS_BLOCK
-    )
-    cfg = site_repo._ensure_config_block(cfg, "defaults", site_repo._DEFAULTS_BLOCK)
+        cfg = site_repo._upsert_config(cfg, key, f'{key}: "{site_repo.q(value)}"')
+    cfg = site_repo._upsert_config(cfg, "collections", site_repo._COLLECTIONS_BLOCK)
+    cfg = site_repo._upsert_config(cfg, "defaults", site_repo._DEFAULTS_BLOCK)
     (dest / "_config.yml").write_text(cfg, encoding="utf-8")
     (dest / "_config.offline.yml").write_text(OFFLINE_CONFIG, encoding="utf-8")
 

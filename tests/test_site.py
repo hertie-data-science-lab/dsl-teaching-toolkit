@@ -568,7 +568,7 @@ def test_course_description_flows_from_course_metadata_into_config(
     assert yaml.safe_load(cfg)["course_code"] == "y"  # neighbours untouched
 
 
-def test_set_config_writes_one_line_over_a_block_scalar():
+def test_replacing_a_config_scalar_writes_one_line_over_a_block_scalar():
     # A faculty `>` block in dsl-course.yml, and/or one already in _config.yml: either way
     # the result must stay valid YAML on one line, its body not stranded as loose text.
     cfg = site_repo._replace_config_scalar(
