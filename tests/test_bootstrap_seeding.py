@@ -188,7 +188,7 @@ def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
         welcome.example_cohort_file("teams.csv")
     )
     assert fake.files[("welcome", ".github/workflows/onboard.yml")] == (
-        welcome.template("welcome/onboard.yml")
+        welcome.welcome_workflow("welcome/onboard.yml")
     )
     assert fake.written("welcome") == WELCOME_SYSTEM_OWNED | {"README.md"}
 

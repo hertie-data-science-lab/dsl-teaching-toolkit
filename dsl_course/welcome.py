@@ -67,6 +67,36 @@ def template(rel: str) -> str:
     return (TEMPLATES / rel).read_text(encoding="utf-8")
 
 
+# The JavaScript both onboarding workflows run is github-script with no npm deps, so the
+# CSV reader/writer and the "fail visibly" helper are hand-rolled - and were hand-rolled
+# TWICE, once per workflow file, against one file format, with a test comparing the copies
+# byte for byte to catch the day they stopped agreeing. One copy now lives beside them and
+# is spliced in at this marker, which is a JS comment so an un-spliced template is still
+# valid YAML and still valid JavaScript.
+SHARED_SCRIPT_MARK = "// {shared_script}"
+SHARED_SCRIPT = "welcome/_shared-script.js"
+
+
+def welcome_workflow(rel: str) -> str:
+    """A welcome-repo workflow template, with the shared github-script helpers spliced in.
+
+    THE reader for these two files: seeding, refreshing and the tests all go through here,
+    so nothing can ship (or assert about) a workflow whose script is only half written.
+    Indentation comes from the marker's own line, because the script is a YAML block scalar
+    and a helper at the wrong column is a parse error in every cohort at once."""
+    out = []
+    for line in template(rel).splitlines(keepends=True):
+        if line.strip() != SHARED_SCRIPT_MARK:
+            out.append(line)
+            continue
+        pad = line[: len(line) - len(line.lstrip())]
+        out += [
+            f"{pad}{shared}\n" if shared.strip() else "\n"
+            for shared in template(SHARED_SCRIPT).rstrip("\n").split("\n")
+        ]
+    return "".join(out)
+
+
 @cache
 def example_cohort_file(rel: str) -> str:
     """Read a file from the worked example cohort (example-course/cohort-org/<rel>).
@@ -95,11 +125,13 @@ def refresh_welcome_workflows(org: str) -> int:
         org,
         "welcome",
         {
-            ".github/workflows/onboard.yml": template("welcome/onboard.yml").encode(),
+            ".github/workflows/onboard.yml": welcome_workflow(
+                "welcome/onboard.yml"
+            ).encode(),
             ".github/ISSUE_TEMPLATE/01-join-course.yml": template(
                 "welcome/ISSUE_TEMPLATE/01-join-course.yml"
             ).encode(),
-            ".github/workflows/team-formation.yml": template(
+            ".github/workflows/team-formation.yml": welcome_workflow(
                 "welcome/team-formation.yml"
             ).encode(),
             ".github/ISSUE_TEMPLATE/02-join-team.yml": template(

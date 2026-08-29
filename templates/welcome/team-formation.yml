@@ -54,44 +54,7 @@ jobs:
             const CONFIG = 'classroom-config';
             const TEAMS  = 'teams.csv', ROSTER = 'students.csv';
 
-            // --- CSV, RFC-4180-ish (github-script has no npm deps, so hand-rolled).
-            // Both CSVs are written by Python's csv module, so a field containing a comma (a
-            // roster name like "Doe, Jane") arrives QUOTED. A naive line.split(',') shifts every
-            // column right of it, so we'd miss an enrolled student's handle and could rewrite
-            // teams.csv with mangled rows. Quoted fields may contain commas, newlines and
-            // "" -escaped quotes; serialiseCsv re-quotes on the same rule as csv.QUOTE_MINIMAL.
-            const parseCsv = (text) => {
-              const rows = [];
-              let row = [], field = '', quoted = false;
-              for (let i = 0; i < text.length; i++) {
-                const c = text[i];
-                if (quoted) {
-                  if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
-                  else if (c === '"') { quoted = false; }
-                  else { field += c; }
-                  continue;
-                }
-                if (c === '"') { quoted = true; }
-                else if (c === ',') { row.push(field); field = ''; }
-                else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-                else if (c !== '\r') { field += c; }
-              }
-              if (field !== '' || row.length) { row.push(field); rows.push(row); }
-              return rows.filter(r => r.some(v => v !== ''));  // drop blank lines
-            };
-            const csvCell = (v) => {
-              const s = (v === undefined || v === null) ? '' : String(v);
-              return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-            };
-            const serialiseCsv = (rows) => rows.map(r => r.map(csvCell).join(',')).join('\n') + '\n';
-
-            const fail = async (msg, label) => {
-              await github.rest.issues.createComment({
-                owner: org, repo: context.repo.repo, issue_number: issue.number, body: msg });
-              await github.rest.issues.addLabels({
-                owner: org, repo: context.repo.repo, issue_number: issue.number, labels: [label] });
-              core.setFailed(msg.replace(/\*\*/g, ''));
-            };
+            // {shared_script}
 
             try {
               if (!process.env.HAS_BOT) {

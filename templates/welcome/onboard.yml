@@ -66,44 +66,7 @@ jobs:
             const userId = issue.user.id;                 // immutable - key on this
             const CONFIG = 'classroom-config', FILE = 'students.csv';
 
-            // --- CSV, RFC-4180-ish (github-script has no npm deps, so hand-rolled).
-            // The Python side writes this file with csv.writer, so a field containing a comma
-            // (a name like "Doe, Jane") arrives QUOTED. A naive line.split(',') shifts every
-            // column right of it, so we'd read the wrong enrol_code and write github_handle /
-            // github_id into the wrong cells. Quoted fields may contain commas, newlines and
-            // "" -escaped quotes; serialiseCsv re-quotes on the same rule as csv.QUOTE_MINIMAL.
-            const parseCsv = (text) => {
-              const rows = [];
-              let row = [], field = '', quoted = false;
-              for (let i = 0; i < text.length; i++) {
-                const c = text[i];
-                if (quoted) {
-                  if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
-                  else if (c === '"') { quoted = false; }
-                  else { field += c; }
-                  continue;
-                }
-                if (c === '"') { quoted = true; }
-                else if (c === ',') { row.push(field); field = ''; }
-                else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-                else if (c !== '\r') { field += c; }
-              }
-              if (field !== '' || row.length) { row.push(field); rows.push(row); }
-              return rows.filter(r => r.some(v => v !== ''));  // drop blank lines
-            };
-            const csvCell = (v) => {
-              const s = (v === undefined || v === null) ? '' : String(v);
-              return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-            };
-            const serialiseCsv = (rows) => rows.map(r => r.map(csvCell).join(',')).join('\n') + '\n';
-
-            const fail = async (msg, label) => {
-              await github.rest.issues.createComment({
-                owner: org, repo: context.repo.repo, issue_number: issue.number, body: msg });
-              await github.rest.issues.addLabels({
-                owner: org, repo: context.repo.repo, issue_number: issue.number, labels: [label] });
-              core.setFailed(msg.replace(/\*\*/g, ''));
-            };
+            // {shared_script}
 
             try {
               // Read the enrolment code from the issue form, then REDACT it from the public

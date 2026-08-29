@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import course, roster, sync_teams, teams
+from dsl_course import course, roster, sync_teams, teams, welcome
 
 WELCOME = Path(__file__).resolve().parents[1] / "templates" / "welcome"
 TEMPLATES = [
@@ -30,8 +30,10 @@ CSV_WORKFLOWS = {"onboard.yml": "onboard", "team-formation.yml": "form-team"}
 
 
 def script_of(rel: str, job: str) -> str:
-    """The github-script body of a workflow's single step."""
-    doc = yaml.safe_load((WELCOME / rel).read_text())
+    """The github-script body of a workflow's single step, AS SEEDED - through the same
+    reader the seeding uses, so the shared helper block is spliced in the way a cohort
+    receives it rather than left as its marker."""
+    doc = yaml.safe_load(welcome.welcome_workflow(f"welcome/{rel}"))
     (step,) = doc["jobs"][job]["steps"]
     return step["with"]["script"]
 
@@ -104,12 +106,25 @@ def test_csv_is_parsed_with_quote_aware_helpers_not_split(rel, job):
 
 
 def test_csv_helpers_do_not_drift_between_workflows():
-    # Both workflows write the same roster/teams CSVs, so the two hand-rolled copies
-    # (no shared module - these files ship verbatim) must stay byte-identical.
+    # Both workflows write the same roster/teams CSVs, and both get their reader/writer
+    # from ONE file spliced in at seeding time - so they cannot drift. Asserted on the
+    # SEEDED text, because the splice (and its indentation) is what a cohort receives.
     onboard, formation = (
         csv_helpers(script_of(rel, job)) for rel, job in sorted(CSV_WORKFLOWS.items())
     )
     assert onboard == formation
+    assert onboard.strip() in welcome.template(welcome.SHARED_SCRIPT)
+
+
+@pytest.mark.parametrize("rel,job", sorted(CSV_WORKFLOWS.items()))
+def test_an_unspliced_workflow_is_still_valid_yaml(rel, job):
+    # The marker is a JS comment inside the block scalar, so the file on disk parses (and
+    # reads as JavaScript) whether or not anything has spliced into it - a template that
+    # only becomes well-formed at seeding time is one nobody can review.
+    doc = yaml.safe_load((WELCOME / rel).read_text())
+    script = doc["jobs"][job]["steps"][0]["with"]["script"]
+    assert welcome.SHARED_SCRIPT_MARK in script
+    assert "const parseCsv" not in script  # the copy is gone, not duplicated
 
 
 def test_onboard_addresses_roster_columns_declared_in_python():
