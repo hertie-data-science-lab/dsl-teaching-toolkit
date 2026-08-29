@@ -267,12 +267,15 @@ def _choice_input(
 # index (see deploy.parse_path_pairs); a blank cohort_dest_path mirrors every
 # course_source_path, exactly as an omitted `cohort_dest_path:` does in the schedule.
 #
-# Only cohort_dest_path is optional, and it ships EMPTY rather than pre-filled - a
-# `default:` on a free-text box is submitted verbatim, so pre-filling one reads as a value
-# the faculty member chose. cohort_dest_repo is REQUIRED on the workflow (the schedule's
-# `deploy:` may still omit it and take deploy's `materials` fallback): naming the repo a
-# release lands in is the one decision worth forcing, since a typo'd or defaulted target
-# quietly creates a second materials repo the cohort never sees.
+# cohort_dest_path ships EMPTY rather than pre-filled - a `default:` on a free-text box is
+# submitted verbatim, so pre-filling a PATH reads as a value the faculty member chose.
+# cohort_dest_repo is the opposite case and carries `materials`, the same default an omitted
+# `cohort_dest_repo:` takes in the schedule: `materials` is not a guess at intent, it is the
+# answer the system supplies either way, so showing it teaches the default instead of hiding
+# it. This box used to be required-and-blank on the theory that naming the destination was
+# worth forcing - but a mandatory free-text field IS the typo surface that theory feared, and
+# it made the button contradict the schedule for no gain. A cleared box is still safe:
+# deploy.main resolves `cohort_dest_repo.strip() or "materials"`.
 _COURSE_SOURCE_REPO_DESC = "1. repo to release from in the course org"
 
 _COURSE_SOURCE_PATH_INPUT = """\
@@ -283,6 +286,7 @@ _COURSE_SOURCE_PATH_INPUT = """\
 _COHORT_DEST_INPUTS = """\
       cohort_dest_repo:
         description: "4. repo to release to in the cohort org; created if missing"
+        default: "materials"
         required: true
       cohort_dest_path:
         description: "5. within-repo destination path (blank mirrors box 2's path(s)); created if missing"
