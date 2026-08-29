@@ -28,7 +28,7 @@ import sys
 from . import roster, teams
 from .course import INSTRUCTORS_TEAM, ROLE_TEAMS
 from .gh_teams import create_team, reconcile_team_members
-from .log import log_err, log_ok, log_step, log_verbose
+from .log import log_err, log_ok, log_person, log_step
 
 
 def team_slug(assignment: str, team: str) -> str:
@@ -143,7 +143,7 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
             # Names a handle a STUDENT typed into teams.csv, so the detail is verbose-only
             # (this workflow's log is world-readable). The count below is what a faculty
             # member acts on, and it names nobody.
-            log_verbose(
+            log_person(
                 f"    {member} in teams.csv is not an onboarded roster handle - "
                 f"not adding to {slug} (would invite an arbitrary GitHub account)"
             )
@@ -156,7 +156,7 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
             )
         members = set(accepted)
         if dry_run:
-            log_verbose(
+            log_person(
                 f"    DRY-RUN team {slug}: {', '.join('@' + m for m in sorted(members))}"
             )
         elif not ensure_team(cohort_org, slug, members, prune):

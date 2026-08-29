@@ -49,7 +49,7 @@ from .course import (
 from .discovery import ASSIGNMENT_TEMPLATE_TOPIC
 from .gh_contents import file_exists, put_file
 from .ghcli import GIT_ENV, clone, gh, git
-from .log import log, log_err, log_ok, log_skip, log_step, log_verbose
+from .log import log, log_err, log_ok, log_person, log_skip, log_step
 from .repos import (
     add_collaborator,
     generate_from_template,
@@ -228,7 +228,7 @@ def provision_one(
     membership changes propagate to access (and members get @mentions + a team space)."""
     existed = repo_exists(cohort_org, repo)
     if existed:
-        log_verbose(f"  [skip] repo {cohort_org}/{repo}")
+        log_person(f"  [skip] repo {cohort_org}/{repo}")
         if sol_dir is None and not touch_existing:
             # Nothing is due for this repo. The scheduler re-runs every handed-out release
             # on every hourly tick, so re-granting access here cost 2-4 API calls per
@@ -248,7 +248,7 @@ def provision_one(
     ):
         return "failed-create"
     else:
-        log_verbose(f"  [ok] created {cohort_org}/{repo}")
+        log_person(f"  [ok] created {cohort_org}/{repo}")
         if not set_repo_topics(cohort_org, repo, [slug, "submission"]):
             # Not named: this log is public. The nightly sweep converges the topic.
             log_err(
@@ -258,7 +258,7 @@ def provision_one(
     solution_failed = False
     if sol_dir is not None:
         if push_solution(cohort_org, repo, sol_dir):
-            log_verbose("  [ok]   + solution pushed")
+            log_person("  [ok]   + solution pushed")
         else:
             # Reported in the RETURN value, not just the log: provision_all writes a
             # fire-once marker off these statuses, so a push that only logged its failure
@@ -285,7 +285,7 @@ def provision_one(
         team_ok = sync_teams.ensure_team(cohort_org, team, set(handles), prune=False)
         access_ok = grant_team_repo_access(cohort_org, team, repo, "maintain")
         if access_ok:
-            log_verbose(f"  [ok]   + team {team} (maintain)")
+            log_person(f"  [ok]   + team {team} (maintain)")
         if not team_ok:
             log_err(f"  ! team {team} is missing member(s) - they cannot see {repo}")
         if not handles:
@@ -318,7 +318,7 @@ def provision_one(
     added = 0
     for handle in handles:
         if add_collaborator(cohort_org, repo, handle, permission="maintain"):
-            log_verbose(f"  [ok]   + @{handle} (maintain)")
+            log_person(f"  [ok]   + @{handle} (maintain)")
             added += 1
         else:
             log_err(f"  ! could not add @{handle} (not a real account?)")
@@ -509,7 +509,7 @@ def provision_all(
                 # Names a handle a STUDENT typed into teams.csv, and this workflow's log is
                 # world-readable - so the handle is verbose-only and the actionable line
                 # below names nobody. Same split as sync_teams' own rejection log.
-                log_verbose(
+                log_person(
                     f"    {m} in teams.csv ({key}/{team}) is not an enrolled, onboarded "
                     f"roster handle - excluding it (would invite an arbitrary account "
                     f"into {cohort_org})"
@@ -545,7 +545,7 @@ def provision_all(
         log(f"    DRY-RUN  cohort template {cohort_org}/{slug}")
         for repo, handles, team in units:
             via = f" (team {team})" if team else ""
-            log_verbose(
+            log_person(
                 f"    DRY-RUN  {cohort_org}/{repo}{via}  <- {', '.join('@' + h for h in handles)}"
             )
         return 0, False
@@ -577,7 +577,7 @@ def provision_all(
         # Stage 2: fan out one repo per unit (student, or team) FROM the cohort template.
         results: dict[str, int] = {}
         for repo, handles, team in units:
-            log_verbose(f"-> {repo}")
+            log_person(f"-> {repo}")
             status = provision_one(
                 cohort_org,
                 cohort_template,

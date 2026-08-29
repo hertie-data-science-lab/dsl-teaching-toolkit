@@ -30,7 +30,7 @@ from . import roster
 from .course import AUDITORS_TEAM, STUDENTS_TEAM, submission_suffix
 from .discovery import classify_repos, list_org_repos
 from .gh_teams import reconcile_team_members, set_org_membership
-from .log import log_err, log_ok, log_step, log_verbose
+from .log import log_err, log_ok, log_person, log_step
 from .repos import is_collaborator, remove_collaborator
 
 TEAM = STUDENTS_TEAM  # enrolled rows
@@ -104,10 +104,10 @@ def revoke_offboarded_access(
         if not present:
             continue  # a team name, or already revoked
         if dry_run:
-            log_verbose(f"    DRY-RUN revoke {suffix} <- {cohort_org}/{repo}")
+            log_person(f"    DRY-RUN revoke {suffix} <- {cohort_org}/{repo}")
             revoked += 1
         elif remove_collaborator(cohort_org, repo, suffix):
-            log_verbose(f"  [ok] revoked {suffix} from {cohort_org}/{repo}")
+            log_person(f"  [ok] revoked {suffix} from {cohort_org}/{repo}")
             revoked += 1
         else:
             errors += 1
@@ -139,7 +139,7 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
         handles = {s.github_handle for s in rows}
         for handle in sorted(handles):
             if dry_run:
-                log_verbose(f"    DRY-RUN enroll: {handle} -> org member")
+                log_person(f"    DRY-RUN enroll: {handle} -> org member")
             elif not set_org_membership(cohort_org, handle, role="member"):
                 errors += 1
         # Team membership via the shared reconcile so pruning inherits its guard:

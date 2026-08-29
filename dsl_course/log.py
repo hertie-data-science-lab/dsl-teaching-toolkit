@@ -1,5 +1,5 @@
 """Console output for every CLI in the package: the five prefixes the Actions logs are
-read through, plus the verbose channel that keeps per-person lines out of a public log.
+read through, plus the channel that keeps per-person lines out of a public log.
 """
 
 from __future__ import annotations
@@ -28,16 +28,17 @@ def log_err(msg: str) -> None:
     print(f"  [err] {msg}", file=sys.stderr, flush=True)
 
 
-def log_verbose(msg: str) -> None:
-    """Print `msg` only when `DSL_VERBOSE` is set in the environment.
+def log_person(msg: str) -> None:
+    """A line that NAMES SOMEBODY - printed only when `DSL_VERBOSE` is set.
 
-    Every faculty workflow runs in the course org's PUBLIC `.github`, so its Actions log is
-    world-readable - and a line naming one student's handle, their `<slug>-<handle>` repo,
-    or a team's roster publishes who is in the cohort and who is grouped with whom. Those
-    lines are INFORMATIONAL; what a faculty member actually reads is the aggregate
-    `Done - {...}` summary, which stays. So they are routed through here: printed when
-    someone runs the CLI locally with `DSL_VERBOSE=1`, absent from every workflow, because
-    no rendered workflow sets the variable (a test enforces that).
+    Named for the rule rather than for the mechanism, so a reviewer can see at the call
+    site that the line is a per-person one. Every faculty workflow runs in the course org's
+    PUBLIC `.github`, so its Actions log is world-readable, and a line naming one student's
+    handle, their `<slug>-<handle>` repo, or a team's roster publishes who is in the cohort
+    and who is grouped with whom. Those lines are INFORMATIONAL; what a faculty member
+    actually reads is the aggregate `Done - {...}` summary, which stays. So they go here:
+    printed when someone runs the CLI locally with `DSL_VERBOSE=1`, absent from every
+    workflow, because no rendered workflow sets the variable (a test enforces that).
 
     An ERROR a faculty member must act on keeps its handle and stays on `log_err` - those
     are rare, and unactionable without saying who."""

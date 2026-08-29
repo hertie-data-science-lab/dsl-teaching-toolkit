@@ -9,7 +9,7 @@ import re
 from functools import cache, lru_cache
 
 from .ghcli import gh, is_already_exists
-from .log import log_err, log_ok, log_skip, log_verbose
+from .log import log_err, log_ok, log_person, log_skip
 
 # GitHub usernames: 1-39 chars, ASCII alphanumerics or single hyphens, no leading/
 # trailing hyphen and no consecutive hyphens. Used to reject a typo'd faculty handle
@@ -67,7 +67,7 @@ def set_org_membership(org: str, login: str, role: str = "member") -> bool:
     """
     current = org_membership_state(org, login)
     if current:
-        log_verbose(f"  [skip] org membership {login} ({current})")
+        log_person(f"  [skip] org membership {login} ({current})")
         return True
     code, out = gh(
         "api",
@@ -78,7 +78,7 @@ def set_org_membership(org: str, login: str, role: str = "member") -> bool:
         f"role={role}",
     )
     if code == 0:
-        log_verbose(f"  [ok] invited {login} to {org}")
+        log_person(f"  [ok] invited {login} to {org}")
         return True
     log_err(f"could not invite {login} (not a real account?): {out[:120]}")
     return False
@@ -223,9 +223,9 @@ def reconcile_team_members(
     current_by_fold = {h.casefold(): h for h in current}
     for handle in sorted(_fold_diff(wanted_by_fold, current_by_fold)):
         if dry_run:
-            log_verbose(f"    DRY-RUN add {handle} -> {org}/{team}")
+            log_person(f"    DRY-RUN add {handle} -> {org}/{team}")
         elif add_team_member(org, team, handle):
-            log_verbose(f"  [ok] {handle} -> {org}/{team}")
+            log_person(f"  [ok] {handle} -> {org}/{team}")
         else:
             errors += 1
     if prune:
@@ -255,14 +255,14 @@ def reconcile_team_members(
                 # Same person, new login: the config still names the old one. Leave them
                 # in; the roster's handle cell is re-linked when they next open a Join
                 # issue (templates/welcome/onboard.yml matches on the id too).
-                log_verbose(
+                log_person(
                     f"  [keep] {handle} in {org}/{team} - renamed, same GitHub id"
                 )
                 continue
             if dry_run:
-                log_verbose(f"    DRY-RUN remove {handle} <- {org}/{team}")
+                log_person(f"    DRY-RUN remove {handle} <- {org}/{team}")
             elif remove_team_member(org, team, handle):
-                log_verbose(f"  [ok] removed {handle} from {org}/{team}")
+                log_person(f"  [ok] removed {handle} from {org}/{team}")
             else:
                 errors += 1
     return errors

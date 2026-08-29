@@ -51,7 +51,7 @@ from .gh_contents import (
     read_csv,
 )
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
-from .log import log, log_err, log_ok, log_step, log_verbose
+from .log import log, log_err, log_ok, log_person, log_step
 from .repos import (
     add_collaborator,
     create_repo,
@@ -303,7 +303,7 @@ def merge_auto(text: str, updates: list[tuple[str, dict[str, str]]]) -> str:
             setattr(row, field, value)
         if kept:
             preserved += kept
-            log_verbose(f"  [keep] {handle}: {kept} existing cell(s) left as they are")
+            log_person(f"  [keep] {handle}: {kept} existing cell(s) left as they are")
     if preserved:
         log_ok(
             f"{preserved} existing machine-written cell(s) preserved - "
@@ -380,7 +380,7 @@ def provision_one(cohort_org: str, handle: str) -> str:
     repo = f"{GRADEBOOK_PREFIX}{handle}"
     existed = repo_exists(cohort_org, repo)
     if existed:
-        log_verbose(f"  [skip] gradebook {cohort_org}/{repo}")
+        log_person(f"  [skip] gradebook {cohort_org}/{repo}")
     else:
         if not create_repo(
             cohort_org,
@@ -401,7 +401,7 @@ def provision_one(cohort_org: str, handle: str) -> str:
     # on the next run. The CSV is where a mark belongs.
     grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
     if add_collaborator(cohort_org, repo, handle, permission="pull"):
-        log_verbose(f"  [ok]   + @{handle} (read)")
+        log_person(f"  [ok]   + @{handle} (read)")
         return "skipped" if existed else "ok"
     # A gradebook the student can't open is a failure, not a partial success - the status
     # starts with "failed" so it reaches the exit code (see sync).
@@ -432,9 +432,7 @@ def sync(cohort_org: str, dry_run: bool = False) -> int:
     results: dict[str, int] = {}
     for s in onboarded:
         if dry_run:
-            log_verbose(
-                f"    DRY-RUN  {cohort_org}/{GRADEBOOK_PREFIX}{s.github_handle}"
-            )
+            log_person(f"    DRY-RUN  {cohort_org}/{GRADEBOOK_PREFIX}{s.github_handle}")
             continue
         status = provision_one(cohort_org, s.github_handle)
         results[status] = results.get(status, 0) + 1
@@ -510,7 +508,7 @@ def render(cohort_org: str) -> int:
         gbdir.mkdir(exist_ok=True)
         for handle in sorted(books):
             (gbdir / f"{handle}.yml").write_text(render_yaml(books[handle]))
-            log_verbose(f"  [ok] + {GRADEBOOK_DIR}/{handle}.yml")
+            log_person(f"  [ok] + {GRADEBOOK_DIR}/{handle}.yml")
         (wd / COHORT_CSV_NAME).write_text(render_cohort_csv(per))
         log_ok(f"+ {COHORT_CSV_NAME}")
 
@@ -600,7 +598,7 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
         pushed: list[str] = []
         for f in files:
             if dry_run:
-                log_verbose(
+                log_person(
                     f"    DRY-RUN  would update {GRADEBOOK_PREFIX}{f.stem}/grades.yml"
                 )
                 pushed.append(f.stem)
@@ -644,14 +642,14 @@ def _push_gradebook(cohort_org: str, handle: str, content: str) -> str:
         log_err(f"could not read {repo}/grades.yml: {exc}")
         return "failed-push"
     if current is not None and current[1] == blob_sha(body):
-        log_verbose(f"  [skip] {repo}/grades.yml unchanged")
+        log_person(f"  [skip] {repo}/grades.yml unchanged")
         return "unchanged"
     sha = current[1] if current is not None else ""
     if not put_file(
         cohort_org, repo, "grades.yml", body, "grades: update", expected_sha=sha
     ):
         return "failed-push"
-    log_verbose(f"  [ok] + {repo}/grades.yml")
+    log_person(f"  [ok] + {repo}/grades.yml")
     return "ok"
 
 
