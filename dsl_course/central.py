@@ -43,28 +43,31 @@ CENTRAL_REF_PLACEHOLDER = "__CENTRAL_REF__"
 _SHA = re.compile(r"[0-9a-f]{40}")
 
 
+class MissingCentralRef(RuntimeError):
+    """A workflow was about to be pinned to a ref the toolkit cannot be checked out at."""
+
+
 def resolve_central_ref(value: object, *, source: str) -> str:
     """The ref a declared `central_ref:` means, or the default when it declares nothing.
 
-    Junk is refused LOUDLY and falls back to `CENTRAL_REF`: this value is rendered into
-    the checkout step of every workflow in the org, so a typo would take the whole org's
-    Actions tab down at the first run - hours or days after the edit, with nothing pointing
-    at the cause. `source` names the file (or flag) the value came from, so the log line
-    says where to go and fix it."""
+    Junk RAISES. It used to log `[err]` and fall back to `CENTRAL_REF`, which is silent
+    where it counts: the fallback rendered a full set of working workflows and the refresh
+    reported success, so an org ran a tier nobody had chosen - `stagign` reading as
+    `release` for as long as nobody read the log. Refusing leaves the PREVIOUS rendering in
+    place (stale workflows that run beat workflows pinned to a guess) and reds the run,
+    which is the contract `pin_central_ref` already has for a ref that is not there.
+
+    `source` names the file (or flag) the value came from, so the message says where to go
+    and fix it."""
     if value is None:
         return CENTRAL_REF
     ref = str(value).strip()
     if ref in TIERS or _SHA.fullmatch(ref):
         return ref
-    log_err(
+    raise MissingCentralRef(
         f"{source}: central_ref '{ref}' is not one of {', '.join(TIERS)} or a full "
-        f"40-character commit SHA - falling back to '{CENTRAL_REF}'"
+        f"40-character commit SHA - fix it, or remove the key to run '{CENTRAL_REF}'"
     )
-    return CENTRAL_REF
-
-
-class MissingCentralRef(RuntimeError):
-    """A workflow was about to be pinned to a ref the central repo does not have."""
 
 
 @cache

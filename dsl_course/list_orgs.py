@@ -23,7 +23,7 @@ import sys
 
 import yaml
 
-from .central import resolve_central_ref
+from .central import MissingCentralRef, resolve_central_ref
 from .course import COHORT_TOPIC, COURSE_CONFIG, COURSE_HUB_TOPIC
 from .discovery import discover_cohorts, org_meta
 from .ghcli import gh_json
@@ -71,6 +71,17 @@ def _tagged_orgs(topic: str) -> list[str]:
     return owners
 
 
+def _tier_or_none(org: str, declared: dict) -> str | None:
+    """The tier `org` declares, or None when it declares something that is not one."""
+    try:
+        return resolve_central_ref(
+            declared.get("central_ref"), source=f"{org}/.github/{COURSE_CONFIG}"
+        )
+    except MissingCentralRef as exc:
+        log_err(str(exc))
+        return None
+
+
 def discover_course_orgs() -> list[dict]:
     """Find every `.github` repo tagged `dsl-course-hub` and fetch its metadata.
 
@@ -101,11 +112,10 @@ def discover_course_orgs() -> list[dict]:
                 "course_code": declared.get("course_code", ""),
                 # The deployment tier this course (and every cohort under it) runs. Read
                 # off the metadata already fetched, so the page costs no extra call to say
-                # which orgs a promotion would move.
-                "central_ref": resolve_central_ref(
-                    declared.get("central_ref"),
-                    source=f"{owner}/.github/{COURSE_CONFIG}",
-                )
+                # which orgs a promotion would move. A tier that does not resolve is null,
+                # like an unreadable one: it matches no tier, so Promote's fan-out names
+                # the org and skips it rather than refreshing it at a guessed ref.
+                "central_ref": _tier_or_none(owner, declared)
                 if meta is not None
                 else None,
                 "url": f"https://github.com/{owner}",
@@ -198,6 +208,8 @@ def render_tree(orgs: list[dict], cohorts: list[dict]) -> str:
                 f" - **{COURSE_CONFIG} unreadable**"
                 if not o["readable"]
                 else f" - toolkit `{o['central_ref']}`"
+                if o["central_ref"]
+                else " - **`central_ref:` is not a tier**"
             )
         )
         # Straight through discovery, so there is ONE parser for that file: it raises on

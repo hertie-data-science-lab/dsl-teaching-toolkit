@@ -8,6 +8,7 @@ resolved value reaches every file the toolkit writes into an org.
 
 from __future__ import annotations
 
+import pytest
 import yaml
 
 from dsl_course import (
@@ -67,22 +68,23 @@ def test_a_full_sha_pins_an_org_to_one_build(monkeypatch):
     assert discovery.central_ref_for("Course") == SHA
 
 
-def test_junk_falls_back_to_the_default_and_names_the_file(monkeypatch, capsys):
-    # Rendered into the checkout step of every workflow in the org, so a typo would take
-    # the whole Actions tab down at the first run, hours later, with nothing pointing at
-    # the cause. Falling back keeps the org running; the [err] line says where to fix it.
+def test_junk_is_refused_and_names_the_file(monkeypatch):
+    # It used to fall back to `release` with an [err] line, which is silent where it
+    # counts: the fallback rendered a full set of working workflows and the refresh
+    # reported success, so `stagign` ran `release` for as long as nobody read the log.
     _configs(monkeypatch, {"Course": {"central_ref": "stagign"}})
-    assert discovery.central_ref_for("Course") == CENTRAL_REF
-    err = capsys.readouterr().err
-    assert "stagign" in err
-    assert "Course/.github/dsl-course.yml" in err
+    with pytest.raises(central.MissingCentralRef) as exc:
+        discovery.central_ref_for("Course")
+    assert "stagign" in str(exc.value)
+    assert "Course/.github/dsl-course.yml" in str(exc.value)
 
 
-def test_an_abbreviated_sha_is_junk(monkeypatch, capsys):
-    # actions/checkout resolves short SHAs inconsistently, so only the full 40 count.
+def test_an_abbreviated_sha_is_junk(monkeypatch):
+    # A short SHA resolves inconsistently where the workflows use it, so only the full
+    # 40 count.
     _configs(monkeypatch, {"Course": {"central_ref": "0" * 7}})
-    assert discovery.central_ref_for("Course") == CENTRAL_REF
-    assert "not one of" in capsys.readouterr().err
+    with pytest.raises(central.MissingCentralRef, match="not one of"):
+        discovery.central_ref_for("Course")
 
 
 # ------------------------------------------- and that the resolved value reaches the org
@@ -288,3 +290,20 @@ def test_refresh_refuses_to_render_workflows_at_a_ref_that_does_not_exist(
     assert rendered == []
     err = capsys.readouterr().err
     assert "release" in err and "Course-Org" in err
+
+
+def test_a_mistyped_central_ref_reds_the_refresh_instead_of_running_release(
+    monkeypatch, capsys
+):
+    # seed.refresh reads the tier before it renders anything, so a refusal there
+    # re-renders nothing and leaves last night's workflows exactly where they are - and
+    # the CLI turns the cron red rather than converging the org onto a tier nobody chose.
+    monkeypatch.setattr(
+        discovery,
+        "load_yaml_config",
+        lambda org, repo, path: {"central_ref": "stagign"},
+    )
+    monkeypatch.setattr("sys.argv", ["seed", "refresh", "--course-org", "Course-Org"])
+
+    assert seed.main() == 1
+    assert "stagign" in capsys.readouterr().err

@@ -27,7 +27,7 @@ from datetime import date
 import yaml
 
 from . import grades, roster, schedule, sync_faculty, teams
-from .central import CENTRAL_REF, resolve_central_ref
+from .central import CENTRAL_REF, MissingCentralRef, resolve_central_ref
 from .discovery import org_meta
 from .log import log_err
 from .repos import default_branch
@@ -153,7 +153,17 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
     # is per-cohort - and an org whose tier is the default should read as such rather than
     # as an unset input someone forgot.
     declared = course_meta.get("central_ref")
-    ref = resolve_central_ref(declared, source=f"{course_org}/.github/dsl-course.yml")
+    try:
+        ref = resolve_central_ref(
+            declared, source=f"{course_org}/.github/dsl-course.yml"
+        )
+        tier_ok = declared is not None
+        tier = ref if declared is not None else f"{CENTRAL_REF} (default)"
+    except MissingCentralRef:
+        # Declared, but not a tier or a full SHA. Nothing renders at it, so this reads as
+        # a fault rather than as the silent fallback it used to be.
+        tier_ok = False
+        tier = f"'{declared}' is not a tier or a commit SHA - nothing re-renders"
     data["B7"] = _row(
         "B7",
         "Toolkit tier",
@@ -161,8 +171,8 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         ".github",
         "dsl-course.yml",
         course_branch,
-        declared is not None,
-        ref if declared is not None else f"{CENTRAL_REF} (default)",
+        tier_ok,
+        tier,
     )
 
     students = roster.load(cohort_org) or []

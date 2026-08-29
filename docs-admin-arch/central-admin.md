@@ -213,7 +213,8 @@ has reported on `main` at least once, so land a new CI job first and require it 
 To put the demo course on staging, set **`central_ref: staging`** in
 `hertie-dsl-demo-course-e1234/.github/dsl-course.yml` and run **Refresh actions** in that org;
 its cohorts follow. Valid values are `main`, `staging`, `release`, or a full 40-character
-commit SHA - anything else is refused in the log and the org falls back to `release`.
+commit SHA on `main`'s history; anything else is refused, and the org keeps the workflows it
+already has until someone fixes the key.
 
 A new org is bootstrapped straight onto a tier by **Bootstrap Course Org**'s `central_ref`
 input (default `release`). It does two things at once: the run checks the toolkit out at

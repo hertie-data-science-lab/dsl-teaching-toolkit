@@ -249,8 +249,8 @@ def central_ref_for(org: str) -> str:
     a cohort's file is ignored, because a cohort running a different engine from the course
     org that releases into it is not a state anyone wants to debug.
 
-    Absent, or unreadable as a tier, means `central.CENTRAL_REF` - see resolve_central_ref
-    for why junk falls back rather than failing the run."""
+    Absent means `central.CENTRAL_REF`; a value that is neither a tier nor a full SHA
+    raises `central.MissingCentralRef` - see resolve_central_ref."""
     meta = org_meta(org)
     course = str(meta.get("course") or "")
     if course:
