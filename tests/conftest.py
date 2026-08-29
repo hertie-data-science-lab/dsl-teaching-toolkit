@@ -14,7 +14,39 @@ import subprocess
 import pytest
 import yaml
 
-from dsl_course import site
+from dsl_course import central, ghcli, repos, roster, schedule, site, teams
+
+# students.csv's header row, DERIVED from the columns the engine declares rather than
+# re-typed. `roster.FIELDS` is a frozen public contract (the shipped JavaScript spells the
+# same columns out by hand), and five test files each carried their own copy of it - so a
+# column added to FIELDS left five fixtures describing a roster that no longer exists.
+ROSTER_HEADER = ",".join(roster.FIELDS)
+
+
+def repo_row(name: str, **extra) -> dict:
+    """One row of a `discovery.list_org_repos` listing, carrying every field it really has.
+
+    Three test files kept their own partial builder, each missing a different key, so code
+    that reads `archived` or `topics` off a listing was tested against rows that have
+    neither. Defaults are the uninteresting answer; `extra` overrides what a test is about.
+    """
+    return {
+        "name": name,
+        "description": "",
+        "visibility": "private",
+        "url": f"https://github.com/org/{name}",
+        "isTemplate": False,
+        "archived": False,
+        "topics": [],
+        **extra,
+    }
+
+
+@pytest.fixture(autouse=True)
+def _empty_write_governor():
+    """`ghcli`'s write pacer keeps its timestamps at module level, so they would otherwise
+    accumulate across the session until an unrelated test slept for a real minute."""
+    ghcli._write_times.clear()
 
 
 @pytest.fixture(autouse=True)
@@ -46,10 +78,32 @@ def _no_live_gh(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _clear_repo_tree_memo():
-    """`site._repo_tree` memoises a repo's tree for the whole process (one CLI run); tests
-    reuse the same org/repo names with different fakes, so clear it between them."""
+def _the_central_ref_is_present(monkeypatch):
+    """Answer `central.central_ref_exists`'s probe with "yes" by default.
+
+    Every workflow write goes through `central.pin_central_ref`, which asks GitHub whether
+    the org's ref is on the central repo before pinning a workflow to it. Nothing here is
+    meant to reach GitHub (see the module docstring), and "it is there" is the
+    uninteresting answer for every test but the ones about the check itself - which set
+    their own `central.gh` after this fixture and win.
+
+    `identical` is what the SHA path reads off `compare/main...{sha}`; the branch path
+    only looks at the exit code."""
+    monkeypatch.setattr(central, "gh", lambda *a, **k: (0, "identical"))
+
+
+@pytest.fixture(autouse=True)
+def _clear_process_memos():
+    """The per-process memos a single CLI run is entitled to keep: a repo's tree, a repo's
+    metadata, whether a central ref exists, and the three classroom-config files a run
+    re-reads (students.csv, teams.csv, schedule.yml). Tests reuse the same org/repo names
+    with different fakes, so clear them between tests."""
     site._repo_tree.cache_clear()
+    central.central_ref_exists.cache_clear()
+    repos._repo.cache_clear()
+    roster._roster_text.cache_clear()
+    teams._teams_text.cache_clear()
+    schedule._schedule_text.cache_clear()
 
 
 def workflow_inputs(rendered: str) -> dict:

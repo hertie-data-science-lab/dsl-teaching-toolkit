@@ -8,6 +8,7 @@ both sides must name the same repo/ref. One definition, imported by both.
 from __future__ import annotations
 
 import re
+from functools import cache
 
 from .ghcli import gh, is_missing_resource
 from .log import log_err
@@ -42,50 +43,81 @@ CENTRAL_REF_PLACEHOLDER = "__CENTRAL_REF__"
 _SHA = re.compile(r"[0-9a-f]{40}")
 
 
+class MissingCentralRef(RuntimeError):
+    """A workflow was about to be pinned to a ref the toolkit cannot be checked out at."""
+
+
 def resolve_central_ref(value: object, *, source: str) -> str:
     """The ref a declared `central_ref:` means, or the default when it declares nothing.
 
-    Junk is refused LOUDLY and falls back to `CENTRAL_REF`: this value is rendered into
-    the checkout step of every workflow in the org, so a typo would take the whole org's
-    Actions tab down at the first run - hours or days after the edit, with nothing pointing
-    at the cause. `source` names the file (or flag) the value came from, so the log line
-    says where to go and fix it."""
+    Junk RAISES. It used to log `[err]` and fall back to `CENTRAL_REF`, which is silent
+    where it counts: the fallback rendered a full set of working workflows and the refresh
+    reported success, so an org ran a tier nobody had chosen - `stagign` reading as
+    `release` for as long as nobody read the log. Refusing leaves the PREVIOUS rendering in
+    place (stale workflows that run beat workflows pinned to a guess) and reds the run,
+    which is the contract `pin_central_ref` already has for a ref that is not there.
+
+    `source` names the file (or flag) the value came from, so the message says where to go
+    and fix it."""
     if value is None:
         return CENTRAL_REF
     ref = str(value).strip()
     if ref in TIERS or _SHA.fullmatch(ref):
         return ref
-    log_err(
+    raise MissingCentralRef(
         f"{source}: central_ref '{ref}' is not one of {', '.join(TIERS)} or a full "
-        f"40-character commit SHA - falling back to '{CENTRAL_REF}'"
+        f"40-character commit SHA - fix it, or remove the key to run '{CENTRAL_REF}'"
     )
-    return CENTRAL_REF
 
 
+@cache
 def central_ref_exists(ref: str) -> bool:
-    """Whether `ref` is actually present on the central repo right now.
+    """Whether `ref` is on the central repo right now.
 
-    Every seeded workflow in the org checks the central repo out at this ref, INCLUDING
-    the Refresh that re-renders them - so rendering a ref that does not exist bricks the
-    org's whole Actions tab with no way back in from inside the org. A tier branch nobody
-    has created yet is exactly that case, and `release` is the default: the check has to
-    happen before the render, not after the first red run.
+    A pinned SHA must be on `main`'s HISTORY, not merely fetchable: `repos/.../commits/{sha}`
+    answers for the whole fork network, so it accepted a commit from anybody's fork of this
+    repo - code main, and therefore CI and review, had never seen - and pinned an org to it.
+    `compare/main...{sha}` says how the two relate; `behind` (an ancestor of main) and
+    `identical` are the two answers that mean "on main's history".
 
     "Could not tell" reads as PRESENT: a rate limit or a 502 must not stall every org's
     convergence, and proceeding is only ever the behaviour that stood before this check.
-    Only a definite 404 - the one answer that proves the ref is not there - stops a
-    render."""
-    endpoint = (
-        f"repos/{CENTRAL}/commits/{ref}"
-        if _SHA.fullmatch(ref)
-        else f"repos/{CENTRAL}/branches/{ref}"
-    )
-    code, out = gh("api", endpoint, "--silent")
-    if code == 0:
-        return True
+    Only a definite 404 - the one answer that proves the ref is not there - is False.
+
+    Cached per ref: a whole convergence pins the same one or two refs into dozens of
+    workflows, and the answer cannot change under a single run."""
+    if _SHA.fullmatch(ref):
+        code, out = gh(
+            "api", f"repos/{CENTRAL}/compare/main...{ref}", "--jq", ".status"
+        )
+        if code == 0:
+            return out.strip() in ("behind", "identical")
+    else:
+        code, out = gh("api", f"repos/{CENTRAL}/branches/{ref}", "--silent")
+        if code == 0:
+            return True
     if is_missing_resource(out):
         return False
     log_err(
         f"could not check whether {CENTRAL}@{ref} exists ({out[:120]}) - assuming it does"
     )
     return True
+
+
+def pin_central_ref(text: str, ref: str) -> str:
+    """Substitute `ref` for the placeholder in a rendered workflow - refusing a ref the
+    central repo does not have.
+
+    THE chokepoint, so no writer can place a workflow without the check. Every seeded
+    workflow checks the central repo out at this ref, the Refresh that re-renders them
+    included: pin one that does not exist and the org's entire Actions tab goes down at
+    once, taking with it the one button that would have healed it. A tier branch nobody
+    has created yet is exactly that case, and `release` is the default."""
+    if not central_ref_exists(ref):
+        raise MissingCentralRef(
+            f"{CENTRAL}@{ref} is not a tier branch or a commit on main's history - "
+            f"refusing to render workflows that would every one of them fail at checkout. "
+            f"Create the ref (Promote), or fix `central_ref:` in the course org's "
+            f".github/dsl-course.yml."
+        )
+    return text.replace(CENTRAL_REF_PLACEHOLDER, ref)

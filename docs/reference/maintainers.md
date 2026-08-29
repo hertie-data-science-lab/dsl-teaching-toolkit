@@ -13,8 +13,9 @@ runs - `central_ref:` in its course org's `.github/dsl-course.yml`, defaulting t
 Deploying is promoting: `main` -> `staging` (the demo org) -> `release` (everything else), via
 the **Promote** workflow, which can only fast-forward a tier along main's history. Engine
 changes are then live on the next press in each org; workflow *shapes* (inputs, jobs, crons)
-are re-rendered by each org's nightly **Refresh actions**, which Promote also dispatches so
-they land at once. Rollback is a `git revert` on `main`, promoted forward - never a force-push.
+are re-rendered by each org's nightly **Refresh actions**, and Promote runs that refresh itself
+out of the promoted checkout so they land at once. Rollback is a `git revert` on `main`,
+promoted forward - never a force-push.
 Tiers, soak checklist and the full rollback procedure:
 [central-admin.md](../../docs-admin-arch/central-admin.md#deploying-the-toolkit).
 
@@ -67,20 +68,29 @@ Seeded files carry their owner on the first line, and the write site enforces it
 
 The full rule is the ownership note at the top of `bootstrap_course.py`.
 
+A course website is wholly the toolkit's: `scaffold_site` creates `<org>.github.io` EMPTY and
+seeds only its Pages build, then every sync writes `templates/site/` (SYSTEM-OWNED) and seeds
+`templates/site-seed/` into any path the site lacks (INSTRUCTOR-OWNED). There is no
+`course-website-template` repo any more.
+
 ## Module layers
 
 `dsl_course` is layered, and the import graph is acyclic (`tests/test_architecture.py`
-enforces both that and the absence of function-local imports):
+enforces both that and the absence of function-local imports). A module imports only
+layers above its own:
 
-- **L0, no dependencies** - `log` (console prefixes), `ghcli` (`gh`/`git`, timeouts, the
-  404 test), `course` (the course vocabulary: config repo, term tag, session-folder rule,
-  syllabus filenames, org topics), `readings`, `central`.
-- **L1, GitHub primitives** - `gh_teams` (org/team membership), `repos` (repo existence,
-  creation, topics, descriptions, the publication denylist), `gh_contents` (file reads and
-  writes, seeded stubs), `access` (team permissions and the faculty floor).
-- **L2 and up** - `discovery`, `roster`/`teams`/`schedule`, `schedule_plan` (the session
-  rows a plan declares), `site_repo` (the Jekyll site repo both websites publish into),
-  then the CLIs.
+| Layer | Modules |
+|---|---|
+| 0, nothing | `log`, `course` (the course vocabulary: config repo, term tag, session-folder rule, syllabus filenames, org topics), `readings`, `fs` |
+| 1, the shell | `ghcli` (`gh`/`git`, timeouts, the 404 test) |
+| 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams) |
+| 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
+| 4 | `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
+| 5 and up | `access` (team permissions and the faculty floor), `schedule_plan` (the session rows a plan declares), `welcome`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |
+
+Two placements are not where they read: `access` sits above `discovery`, because the
+faculty floor is computed from what discovery finds, and `site_repo` above `scaffold` and
+`welcome`, whose seeding it reuses.
 
 Add a name to the layer that owns the subject, not to whichever module already imports it.
 
@@ -112,7 +122,9 @@ silently do nothing.
 
 ## Tests
 
-`python3 -m pytest -q` (CI runs the same). Conventions:
+`python3 -m pytest -q` (CI runs the same). `pytest` and `jekyll-contract`, `ci.yml`'s two
+jobs, are both required checks on `main`. Python 3.10 is the floor (ruff's `target-version`);
+CI and every seeded workflow run 3.12. Conventions:
 
 - `conftest._no_live_gh` refuses any live `gh` from a test, guarding the **binary** rather than
   `ghcli.gh`, so the retry ladder stays testable and `git` against a tmp repo still runs.

@@ -13,8 +13,9 @@ import yaml
 
 from dsl_course import assign
 from dsl_course.schedule import Schedule
+from tests.conftest import ROSTER_HEADER
 
-HEADER = "hertie_email,name,github_handle,github_id,enrol_code,role"
+HEADER = ROSTER_HEADER
 
 
 def _roster_file(tmp_path, *rows: str):
@@ -28,6 +29,14 @@ def _no_cohort_schedule(monkeypatch):
     """provision_all resolves the cohort-side name from schedule.yml; these tests exercise
     the provisioning mechanics, not the lookup, and must never reach for the network."""
     monkeypatch.setattr("dsl_course.schedule.load", lambda org: Schedule())
+
+
+@pytest.fixture(autouse=True)
+def _empty_cohort_listing(monkeypatch):
+    """provision_all takes ONE repo listing of the cohort and answers "does this repo
+    exist?" out of it. An empty org is the uninteresting answer for the tests below; the
+    ones about the listing itself set their own after this fixture and win."""
+    monkeypatch.setattr(assign, "list_org_repos", lambda org: [])
 
 
 def test_assignment_slug_drops_the_cohort_suffix():
@@ -61,7 +70,7 @@ def test_an_unusable_solution_branch_does_not_block_provisioning(
         assign, "record_solution_released", lambda *a, **k: recorded.append(a)
     )
 
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE",
         "assignment-1-f2026",
         "COHORT",
@@ -76,6 +85,36 @@ def test_an_unusable_solution_branch_does_not_block_provisioning(
     assert rc == 1, "an unusable solution must still redden the run"
     assert "provisioning continues without it" in err
     assert recorded == [], "a failed solution must not be recorded as released"
+
+
+def test_a_handout_that_skipped_every_repo_syncs_no_site(tmp_path, monkeypatch):
+    # The scheduler re-fires every handed-out release on every hourly tick (that is what
+    # gets a late onboarder their repo), so nearly every tick provisions nothing at all.
+    # Syncing anyway re-rendered a whole cohort website once an hour for the rest of the
+    # term - and the `changed` half of the answer is what lets the SCHEDULER decide the
+    # same thing for the tick as a whole.
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: None)
+    monkeypatch.setattr("dsl_course.schedule.entry_for_repo", lambda *a, **k: None)
+    synced: list[tuple] = []
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a: synced.append(a))
+
+    def run():
+        return assign.provision_all(
+            "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
+        )
+
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: "skipped")
+    assert run() == (0, False)
+    assert synced == [], "a pass that changed nothing re-rendered the site"
+
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: "ok")
+    assert run() == (0, True)
+    assert synced == [("COURSE", "COHORT")]
 
 
 def _marker_run(
@@ -110,7 +149,7 @@ def _marker_run(
         "record_solution_released",
         lambda *a, **k: recorded.append(a) or record_ok,
     )
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE",
         "assignment-1-f2026",
         "COHORT",
@@ -137,6 +176,17 @@ def test_the_marker_IS_written_when_the_site_sync_fails(tmp_path, monkeypatch):
     rc, recorded = _marker_run(tmp_path, monkeypatch, site_raises=True)
     assert recorded == [("COHORT", "assignment-1", 1)]
     assert rc == 1  # the run still goes red for the site
+
+
+def test_the_marker_is_not_written_when_a_repo_could_not_be_created(
+    tmp_path, monkeypatch
+):
+    # `failed-create` is returned BEFORE the solution push is even attempted, so the unit
+    # never received it - but the marker is fire-once, so writing it here meant that
+    # student never got the solution and no later tick retried. Only the failures that
+    # happen after a successful push may be written over.
+    _rc, recorded = _marker_run(tmp_path, monkeypatch, status="failed-create")
+    assert recorded == []
 
 
 def test_the_marker_IS_written_when_a_handle_is_dead(tmp_path, monkeypatch):
@@ -174,7 +224,7 @@ def test_a_failed_solution_push_reaches_the_returned_status(tmp_path, monkeypatc
     # provision_all could not tell. Both the group and individual paths must report it.
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
     monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
-    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
@@ -196,7 +246,7 @@ def test_provisioning_skips_auditors(tmp_path, capsys, monkeypatch):
         "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor",
         "bob@uni.edu,Bob,bob-b,44,dsl-def,",  # blank role -> enrolled
     )
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE",
         "assignment-1-f2026",
         "COHORT",
@@ -221,7 +271,7 @@ def test_provisioning_still_works_for_a_roster_without_a_role_column(
         "student_id,hertie_email,name,github_handle,github_id,section\n"
         "1,ada@uni.edu,Ada,ada-l,42,A\n"
     )
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE",
         "assignment-1-f2026",
         "COHORT",
@@ -244,7 +294,7 @@ def test_a_dry_run_names_no_student_in_a_public_log(tmp_path, capsys, monkeypatc
         "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
         "bob@uni.edu,Bob,bob-b,43,dsl-def,enrolled",
     )
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE",
         "assignment-1-f2026",
         "COHORT",
@@ -299,7 +349,7 @@ def test_group_none_infers_per_team_from_the_templates_grading_yml(
         "bob@uni.edu,Bob,bob-b,43,dsl-def,enrolled",
         "cid@uni.edu,Cid,cid-c,44,dsl-ghi,enrolled",
     )
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path, dry_run=True
     )
     out = capsys.readouterr().out
@@ -322,7 +372,7 @@ def test_group_false_forces_individual_even_for_a_group_template(
         ),
     )
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE",
         "assignment-4-project-f2026",
         "COHORT",
@@ -350,7 +400,7 @@ def test_a_repo_no_student_can_open_is_a_failed_handout(_provisioned, monkeypatc
     # The old "created-no-collaborator" status doesn't start with "failed", so a repo
     # nobody can see never reached provision_all's exit predicate: the release went green
     # while the student had nothing to submit into.
-    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: False)
     status = assign.provision_one(
         "COURSE",
@@ -367,7 +417,7 @@ def test_a_group_repo_reports_the_teams_own_failures(_provisioned, monkeypatch):
     # ensure_team's result used to be discarded, so a team that couldn't take its members
     # (they see nothing - access is via the team) still reported "ok".
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
-    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: False)
     status = assign.provision_one(
         "COURSE",
@@ -417,15 +467,44 @@ def test_group_provisioning_filters_teams_csv_through_the_roster_allowlist(
         "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
         "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor",  # an auditor, not a team member
     )
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path, dry_run=True
     )
     captured = capsys.readouterr()
     assert rc == 0
+    # The DRY-RUN provisioning lines name their members as `@handle`.
     assert "@ada-l" in captured.out  # the one valid, enrolled, onboarded handle
-    assert "stranger-x" not in captured.out  # never provisioned
-    assert "eve-e" not in captured.out  # the auditor's handle is not a team member
-    assert "stranger-x" in captured.err and "Eve-E" in captured.err  # both warned
+    assert "@stranger-x" not in captured.out  # never provisioned
+    assert "@eve-e" not in captured.out  # the auditor's handle is not a team member
+    # Both rejections are reported - but the HANDLES a student typed go to the verbose
+    # channel (this workflow's log is world-readable) and the actionable error is a count.
+    assert "stranger-x" in captured.out and "Eve-E" in captured.out
+    assert "2 handle(s) in teams.csv" in captured.err
+    assert "stranger-x" not in captured.err and "Eve-E" not in captured.err
+
+
+def test_a_rejected_teams_csv_handle_is_not_published_in_the_workflow_log(
+    tmp_path, capsys, monkeypatch
+):
+    # No rendered workflow sets DSL_VERBOSE, so this is what a course org's PUBLIC Actions
+    # log actually shows: a count a faculty member can act on, and no student's typing.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    monkeypatch.setattr(
+        "dsl_course.assign.assignment_is_group", lambda org, cohort, template: True
+    )
+    monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {"unused": {}})
+    monkeypatch.setattr(
+        assign.teams,
+        "teams_for",
+        lambda rows, slug: {"team-1": ["ada-l", "stranger-x"]},
+    )
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    assign.provision_all(
+        "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path, dry_run=True
+    )
+    captured = capsys.readouterr()
+    assert "1 handle(s) in teams.csv" in captured.err
+    assert "stranger-x" not in captured.err + captured.out
 
 
 # ------------------------------------------------ half-created cohort template healing
@@ -552,7 +631,7 @@ def test_provision_all_records_handout_under_schedule_key_and_survives_site_fail
 
     monkeypatch.setattr(site, "sync_site", boom_site)
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path, group=False
     )
     assert captured["key"] == "project"  # the schedule key, not "group-project"
@@ -566,9 +645,7 @@ def test_both_assignment_arms_grant_faculty_read(_provisioned, monkeypatch):
     # project repo would go on granting nobody but the team. READ, not write: marking
     # happens in classroom-config/grades/<slug>.csv, after the snapshot froze HEAD.
     faculty = []
-    monkeypatch.setattr(
-        assign, "grant_faculty_read_access", lambda *a: faculty.append(a)
-    )
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: faculty.append(a))
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
@@ -582,7 +659,8 @@ def test_both_assignment_arms_grant_faculty_read(_provisioned, monkeypatch):
         "a1",
         team="a1-wizards",
     )
-    assert faculty == [("COHORT", "a1-ada-l"), ("COHORT", "a1-wizards")]
+    read = assign.FACULTY_READ_ACCESS
+    assert faculty == [("COHORT", "a1-ada-l", read), ("COHORT", "a1-wizards", read)]
 
 
 def test_the_scheduler_leaves_an_existing_repo_alone_but_the_button_repairs_it(
@@ -591,14 +669,15 @@ def test_the_scheduler_leaves_an_existing_repo_alone_but_the_button_repairs_it(
     # The scheduler re-runs every handed-out release hourly. Re-granting access to an
     # existing repo on every tick cost 2-4 API calls per student per assignment for the
     # rest of term. The hourly path (touch_existing=False) skips it; the manual Release
-    # assignment button keeps re-granting, so re-running it still repairs a student's
-    # access. With a solution to push, the push happens either way.
+    # assignment button keeps re-granting the STUDENT, so re-running it still repairs a
+    # student's access. The faculty grant is not re-run on either path - the nightly sweep
+    # owns that floor. With a solution to push, the push happens either way.
     calls = []
     monkeypatch.setattr(assign, "repo_exists", lambda org, repo: True)
     for name in (
         "add_collaborator",
         "grant_team_repo_access",
-        "grant_faculty_read_access",
+        "grant_faculty",
     ):
         monkeypatch.setattr(
             assign, name, lambda *a, _n=name, **k: calls.append(_n) or True
@@ -614,9 +693,9 @@ def test_the_scheduler_leaves_an_existing_repo_alone_but_the_button_repairs_it(
         "C", "t", "K", "a1-w", ["ada"], "a1", team="a1-w", **hourly
     ) == ("skipped")
     assert calls == []
-    # the button (default) re-grants
+    # the button (default) re-grants the student, and only the student
     assert assign.provision_one("C", "t", "K", "a1-ada", ["ada"], "a1") == "skipped"
-    assert calls == ["grant_faculty_read_access", "add_collaborator"]
+    assert calls == ["add_collaborator"]
     pushed = []
     monkeypatch.setattr(assign, "push_solution", lambda *a: pushed.append(a) or True)
     assert assign.provision_one(
@@ -665,7 +744,7 @@ def test_group_handout_looks_teams_up_by_key_and_names_repos_by_dest(
         ),
     )
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
-    rc = assign.provision_all(
+    rc, _changed = assign.provision_all(
         "COURSE", "wk3-regression-f2026", "COHORT", roster_path=path, dry_run=True
     )
     out = capsys.readouterr().out
@@ -708,6 +787,32 @@ def test_the_granted_team_slug_matches_the_one_sync_teams_reconciles(
     }
 
 
+def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_fails_on_the_button(
+    tmp_path, monkeypatch, capsys
+):
+    # Teams form when students click 'Join team', days after the handout datetime. The
+    # hourly cron counted the empty CSV as a failure and went red every tick until the
+    # first team formed; an operator pressing the button still needs to be told.
+    monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {})
+    monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
+
+    def boom(*a, **k):
+        raise AssertionError("nothing may be provisioned without a team")
+
+    monkeypatch.setattr(assign, "ensure_cohort_template", boom)
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+
+    def run(**kw):
+        return assign.provision_all(
+            "COURSE", "project-f2026", "COHORT", roster_path=path, group=True, **kw
+        )
+
+    assert run(scheduled=True) == (0, False)
+    assert "[wait] no teams" in capsys.readouterr().out
+    assert run() == (1, False)
+    assert "no teams for" in capsys.readouterr().err
+
+
 # --------------- a failed solution push outranks every other fault (the marker depends on it)
 
 
@@ -723,7 +828,7 @@ def test_a_failed_solution_wins_over_a_failed_access_grant(
     # forgotten - and the marker guaranteed no later tick would ever retry it.
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
     monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
-    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
@@ -738,7 +843,7 @@ def test_a_failed_solution_wins_over_a_failed_access_grant(
 def test_a_failed_solution_wins_over_a_team_missing_members(tmp_path, monkeypatch):
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
     monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
-    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: False)
     status = assign.provision_one(
@@ -747,18 +852,204 @@ def test_a_failed_solution_wins_over_a_team_missing_members(tmp_path, monkeypatc
     assert status == "failed-solution"
 
 
-def test_a_group_whose_members_were_all_rejected_is_a_failed_unit(monkeypatch, capsys):
+def test_a_team_of_rejected_handles_gets_no_repo_at_all(monkeypatch, capsys):
     # Every handle in the teams.csv row failed the roster allowlist, so the team is empty
-    # and the repo is granted to nobody. Reported "ok", that left a repo no student could
-    # open looking like a successful handout.
+    # and the repo can be granted to nobody. The check ran AFTER creation, so a typo'd team
+    # left a private repo behind that no student could open, for the term.
     monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: False)
-    monkeypatch.setattr(assign, "generate_from_template", lambda **k: True)
-    monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
-    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
-    monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
-    monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
+
+    def boom(*a, **k):
+        raise AssertionError("a team with no vetted members must create nothing")
+
+    monkeypatch.setattr(assign, "generate_from_template", boom)
+    monkeypatch.setattr(assign.sync_teams, "ensure_team", boom)
     status = assign.provision_one(
         "C", "t", "COHORT", "a1-team-1", [], "assignment-1", team="assignment-1-team-1"
     )
     assert status == "failed-no-members"
-    assert "nobody can open a1-team-1" in capsys.readouterr().err
+    assert "no vetted members" in capsys.readouterr().err
+
+
+def test_a_solution_waits_for_the_repo_this_run_created_to_populate(
+    tmp_path, monkeypatch, capsys
+):
+    # template-generate is async. Pushing into a repo that is still empty clones a repo with
+    # no branch, so the solution landed on the runner's own default branch - invisible to
+    # the student and to grading, on a green run.
+    monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: False)
+    monkeypatch.setattr(assign, "generate_from_template", lambda **k: True)
+    monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "_wait_for_content", lambda org, repo: False)
+
+    def boom(*a, **k):
+        raise AssertionError("the solution must not be pushed into an empty repo")
+
+    monkeypatch.setattr(assign, "push_solution", boom)
+    status = assign.provision_one(
+        "C", "t", "COHORT", "a1-ada", ["ada"], "assignment-1", sol_dir=tmp_path
+    )
+    assert (
+        status == "failed-solution"
+    )  # withholds the fire-once marker, so a tick retries
+    assert "has not populated yet" in capsys.readouterr().err
+
+
+# ------------------------------------------- ONE listing instead of a probe per repo
+
+
+def _ready_template(name="assignment-1"):
+    return {"name": name, "isTemplate": True, "topics": [name, "assignment-template"]}
+
+
+def _listing_run(tmp_path, monkeypatch, listing):
+    """provision_all over two students, with `listing` standing in for the org listing.
+    Returns (the orgs listed, the repos generate_from_template was asked to create)."""
+    path = _roster_file(
+        tmp_path,
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
+        "bob@uni.edu,Bob,bob-b,43,dsl-def,enrolled",
+    )
+    listed: list[str] = []
+
+    def fake_listing(org):
+        listed.append(org)
+        if isinstance(listing, Exception):
+            raise listing
+        return listing
+
+    created: list[str] = []
+    monkeypatch.setattr(assign, "list_org_repos", fake_listing)
+    monkeypatch.setattr(
+        assign, "generate_from_template", lambda **k: created.append(k["name"]) or True
+    )
+    monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
+    monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+    assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
+    )
+    return listed, created
+
+
+def test_provision_all_lists_the_org_once_and_probes_no_repo(tmp_path, monkeypatch):
+    # A `repo_exists` per unit cost a GET per student per assignment on EVERY hourly tick
+    # (~1,200 an hour for a large cohort) where one paginated listing costs three.
+    monkeypatch.setattr(
+        assign,
+        "repo_exists",
+        lambda *a, **k: pytest.fail("a per-repo probe is back in the hot path"),
+    )
+    listed, created = _listing_run(
+        tmp_path,
+        monkeypatch,
+        [_ready_template(), {"name": "assignment-1-ada-l", "topics": []}],
+    )
+    assert listed == ["COHORT"], "one listing per run, not one per repo"
+    assert created == ["assignment-1-bob-b"], "a listed repo was regenerated"
+
+
+def test_a_failed_listing_falls_back_to_probing_each_repo(tmp_path, monkeypatch):
+    # The listing is an optimisation. A rate limit on it must not stop the students who
+    # onboarded this hour from getting their repos.
+    probed: list[str] = []
+    monkeypatch.setattr(
+        assign, "repo_exists", lambda org, name: probed.append(name) or False
+    )
+    listed, created = _listing_run(
+        tmp_path, monkeypatch, RuntimeError("could not list repos in COHORT: 502")
+    )
+    assert listed == ["COHORT"]
+    assert created == ["assignment-1", "assignment-1-ada-l", "assignment-1-bob-b"]
+    assert probed == ["assignment-1", "assignment-1-ada-l", "assignment-1-bob-b"]
+
+
+def test_a_cohort_template_the_listing_shows_ready_is_left_alone(monkeypatch):
+    # The repair is three writes per handed-out assignment; running it on a template the
+    # listing already shows as frozen, flagged and topiced re-wrote correct state hourly.
+    monkeypatch.setattr(
+        assign,
+        "_wait_for_content",
+        lambda *a: pytest.fail("the hourly re-probe is back"),
+    )
+    monkeypatch.setattr(
+        assign,
+        "gh",
+        lambda *a, **k: pytest.fail("the hourly is_template PATCH is back"),
+    )
+    monkeypatch.setattr(
+        assign,
+        "set_repo_topics",
+        lambda *a: pytest.fail("the hourly topics PUT is back"),
+    )
+    assert (
+        assign.ensure_cohort_template(
+            "COURSE",
+            "assignment-1-f2026",
+            "COHORT",
+            "assignment-1",
+            [_ready_template()],
+        )
+        == "assignment-1"
+    )
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"name": "assignment-1", "isTemplate": False, "topics": ["assignment-1"]},
+        {"name": "assignment-1", "isTemplate": True, "topics": []},
+    ],
+)
+def test_a_half_created_cohort_template_is_still_repaired_from_the_listing(
+    monkeypatch, entry
+):
+    # A run that timed out in _wait_for_content leaves the repo existing but unflagged or
+    # untopiced. The listing must not read that as "ready" - every later handout would
+    # fail with a misleading "not a template", or the site would withhold the brief.
+    monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
+    patched: list[tuple] = []
+    monkeypatch.setattr(assign, "gh", lambda *a, **k: patched.append(a) or (0, ""))
+    stamped: list[tuple] = []
+    monkeypatch.setattr(assign, "set_repo_topics", lambda *a: stamped.append(a) or True)
+    assert (
+        assign.ensure_cohort_template(
+            "COURSE", "assignment-1-f2026", "COHORT", "assignment-1", [entry]
+        )
+        == "assignment-1"
+    )
+    assert any("is_template=true" in a for a in patched)
+    assert stamped == [
+        ("COHORT", "assignment-1", ["assignment-1", "assignment-template"])
+    ]
+
+
+def test_wait_for_content_does_not_sleep_after_its_last_poll(monkeypatch):
+    # The delay is there to space the polls out. Sleeping after the final failed one only
+    # adds `delay` to a wait that has already given up.
+    slept: list[float] = []
+    monkeypatch.setattr(assign.time, "sleep", lambda d: slept.append(d))
+    monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, "0"))
+    assert assign._wait_for_content("COHORT", "a1", attempts=3, delay=1.5) is False
+    assert slept == [1.5, 1.5]
+
+
+def test_a_solution_holding_a_symlink_still_pushes(tmp_path, monkeypatch):
+    # A plain copytree FOLLOWS links: one pointing at nothing raises and one pointing at
+    # its own parent recurses, so a single such file aborted the handout - hourly.
+    sol = tmp_path / "solution"
+    sol.mkdir()
+    (sol / "answers.md").write_text("the answers")
+    (sol / "stale.md").symlink_to("nowhere.md")
+    monkeypatch.setattr(
+        assign,
+        "clone",
+        lambda org, repo, dest, branch=None: Path(dest).mkdir(parents=True) or True,
+    )
+    monkeypatch.setattr(assign, "git", lambda *a, **k: (0, ""))
+    assert assign.push_solution("COHORT", "a1-ada", sol) is True

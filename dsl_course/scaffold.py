@@ -23,7 +23,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from .access import grant_course_team_access, grant_tagged_team_access
+from .access import COURSE_TEAM_ACCESS, grant_faculty, grant_tagged_team_access
 from .course import (
     FACULTY_ONLY_HEADING,
     MATERIALS_REPO_PREFIX,
@@ -31,15 +31,18 @@ from .course import (
     pages_repo,
 )
 from .discovery import central_ref_for, discover_assignments, discover_cohorts
-from .gh_contents import put_files, refresh_stubs, seed_files_if_absent, seed_if_absent
-from .ghcli import GIT_ENV, gh, git
+from .gh_contents import put_files, refresh_stubs, seed_if_absent
+from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
 from .log import log, log_err, log_ok, log_skip, log_step
 from .readings import READING_OVERLAY_FILE
-from .repos import create_repo, generate_from_template, repo_exists, set_repo_topics
+from .repos import create_repo, repo_exists, set_repo_topics
+from .welcome import TEMPLATES
 from .workflows_place import push_content_workflows
 
-WEBSITE_TEMPLATE_ORG = "hertie-data-science-lab"
-WEBSITE_TEMPLATE = "course-website-template"
+# The site repo's Pages build, seeded as its FIRST commit. `create_repo` does not auto-init,
+# and Pages cannot be enabled - nor the first deploy dispatched - on a repo with no branch.
+# Everything else a site holds arrives with the first `site sync`.
+SITE_DEPLOY_WORKFLOW = ".github/workflows/deploy.yml"
 
 
 _SYLLABUS_STUB = """\
@@ -466,7 +469,7 @@ def scaffold_materials(org: str, tag: str) -> int:
         ),
     ):
         return 1
-    grant_course_team_access(org, repo)
+    grant_faculty(org, repo, COURSE_TEAM_ACCESS)
     grant_tagged_team_access(org, repo, tag)
     readme = materials_readme(org)
     failures = 0
@@ -498,7 +501,9 @@ def scaffold_materials(org: str, tag: str) -> int:
     # One commit for the skeleton: all five carried the same subject anyway, so writing
     # them one at a time opened a repo faculty then author by hand with five identical
     # `init: materials skeleton` lines.
-    if not seed_files_if_absent(org, repo, user_files, "init: materials skeleton"):
+    if not put_files(
+        org, repo, user_files, "init: materials skeleton", create_only=True
+    ):
         failures += 1
     # Equip the run-from-repo Release workflows (same as Refresh does for content repos).
     # push_content_workflows lands both in one commit, logs its own failure, and returns
@@ -532,7 +537,7 @@ def scaffold_assignment(
         description=f"Assignment {number} template",
     ):
         return 1
-    grant_course_team_access(org, repo)
+    grant_faculty(org, repo, COURSE_TEAM_ACCESS)
     grant_tagged_team_access(org, repo, tag)
     starter_name = "starter.ipynb" if fmt == "notebook" else "starter.py"
     brief = "group assignment" if kind == "group" else "assignment"
@@ -567,7 +572,7 @@ def scaffold_assignment(
     # main so generate never copies them into student repos.
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "r"
-        if gh("repo", "clone", f"{org}/{repo}", str(wd), "--", "-q")[0] != 0:
+        if not clone(org, repo, wd):
             log_err("  ! could not clone to add the solution branch")
             return 1
         # A solution branch left by a prior run holds a real model solution and hidden
@@ -696,7 +701,7 @@ def _await_run(org: str, site: str, run_id: str, timeout: int = 180) -> str | No
 
 def _dispatch_deploy(org: str, site: str) -> str | None:
     """Dispatch deploy.yml and return the id of the run it triggers, or None. The
-    workflow takes a few seconds to index after template-generate, so retry the
+    workflow takes a few seconds to index after it is seeded, so retry the
     dispatch; then wait for a new run (distinct from any prior one) to appear."""
     before = _latest_deploy_run_id(org, site)
     for _ in range(6):
@@ -714,9 +719,13 @@ def _dispatch_deploy(org: str, site: str) -> str | None:
 
 
 def scaffold_site(org: str) -> int:
-    """Generate an org's public website (from course-website-template) and enable GitHub
-    Pages with the template's deploy-on-push workflow. Used for both the per-cohort
-    student-facing site and the opt-in public course site - the org is whatever's passed.
+    """Create an org's public website repo, seed its Pages build and enable GitHub Pages.
+    Used for both the per-cohort student-facing site and the opt-in public course site -
+    the org is whatever's passed.
+
+    The repo is created EMPTY and the first `site sync` writes the site into it: the whole
+    of a cohort site ships from `templates/site/` and `templates/site-seed/` in this repo,
+    so there is no template repo to fall behind them.
 
     The repo is named `<org>.github.io` so it serves at the org root. It must be PUBLIC
     on the Free plan (Pages requires it); on GitHub Enterprise Cloud / Campus it can be
@@ -725,23 +734,35 @@ def scaffold_site(org: str) -> int:
     log_step(f"Scaffolding website {org}/{site}")
     if repo_exists(org, site):
         log_skip(f"repo {org}/{site}")
-    elif not generate_from_template(
-        template_org=WEBSITE_TEMPLATE_ORG,
-        template_name=WEBSITE_TEMPLATE,
-        owner=org,
-        name=site,
+    elif not create_repo(
+        org,
+        site,
         private=False,
         # Generated and rewritten on every sync, which is what the reader needs to know
         # from the org's landing page.
         description="[do not touch]: Course website (auto-deployed)",
     ):
-        log_err(
-            f"  ! could not generate the site from {WEBSITE_TEMPLATE_ORG}/{WEBSITE_TEMPLATE}"
-        )
         return 1
 
-    # Enable Pages with the GitHub Actions ("workflow") build, so the template's
-    # deploy.yml publishes the site. Ignore "already enabled".
+    # The first commit, through the Contents API - the only one that will create it in a
+    # repo that has none (see gh_contents._commit_tree). It has to be the deploy workflow:
+    # the two calls below enable Pages on it and dispatch it.
+    if not put_files(
+        org,
+        site,
+        {
+            SITE_DEPLOY_WORKFLOW: (
+                TEMPLATES / "site" / SITE_DEPLOY_WORKFLOW
+            ).read_bytes()
+        },
+        "site: seed the Pages build",
+        create_only=True,
+    ):
+        log_err(f"  ! could not seed the Pages build into {org}/{site}")
+        return 1
+
+    # Enable Pages with the GitHub Actions ("workflow") build, so deploy.yml publishes the
+    # site. Ignore "already enabled".
     code, out = gh(
         "api",
         "--method",
@@ -750,7 +771,7 @@ def scaffold_site(org: str) -> int:
         "-f",
         "build_type=workflow",
     )
-    if code != 0 and "409" not in out and "already" not in out.lower():
+    if code != 0 and not is_already_exists(out):
         # POST creates; PUT updates a site that already has a different build type. Its
         # return used to be dropped, so a repo where BOTH calls failed - no Pages at all -
         # went on to "site scaffolded -> https://...", a URL that has never served
@@ -768,7 +789,7 @@ def scaffold_site(org: str) -> int:
             return 1
 
     # The auto-created github-pages environment restricts which branches may deploy -
-    # clear the policy so any branch (the template's default, plus sync-site's pushes)
+    # clear the policy so any branch (the default, plus sync-site's pushes)
     # can deploy. Not fatal: Pages IS on, the default branch usually deploys anyway, and
     # the environment can lag its repo - but a silent failure here is what makes a
     # sync-site push deploy nothing, so say it.
@@ -786,7 +807,7 @@ def scaffold_site(org: str) -> int:
             f"{out[:160]} - pushes from a non-default branch will not deploy"
         )
 
-    # template-generate doesn't fire workflows, so kick the first deploy by hand AND
+    # Seeding a workflow through the API doesn't fire it, so kick the first deploy by hand AND
     # confirm it lands. Enabling Pages with build_type=workflow races the platform's
     # provisioning, so the first deploy often fails transiently ("Deployment failed, try
     # again later"); re-dispatch a couple of times, waiting for each run to finish. A
@@ -798,7 +819,7 @@ def scaffold_site(org: str) -> int:
             continue
         conclusion = _await_run(org, site, run_id)
         if conclusion == "success":
-            log_ok(f"site deployed -> https://{org.lower()}.github.io/")
+            log_ok(f"site deployed -> https://{site}/")
             return 0
         log(
             f"  (deploy attempt {attempt} did not succeed: {conclusion or 'timed out'})"
@@ -808,7 +829,7 @@ def scaffold_site(org: str) -> int:
         "  (site not deployed yet - it will deploy on the next push to the site repo, "
         "e.g. your first Release materials)"
     )
-    log_ok(f"site scaffolded -> https://{org.lower()}.github.io/")
+    log_ok(f"site scaffolded -> https://{site}/")
     return 0
 
 

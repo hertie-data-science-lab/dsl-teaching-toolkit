@@ -180,6 +180,30 @@ def test_publish_site_inputs():
     assert inp["include_lectures"]["type"] == "boolean"
 
 
+def test_publish_site_defaults_to_the_newest_materials_repo():
+    # Publishing REPLACES what the site serves. The dropdown's default used to be the
+    # alphabetically last option of the newest year, so a faculty member clicking Run with
+    # the defaults republished from a code repo and wiped a live site's materials.
+    inp = workflow_inputs(
+        workflows_render.render_publish_site(
+            [
+                "course-materials-f2025",
+                "course-materials-f2026",
+                "course-materials-s2026",
+                "lecture-code-f2026",
+            ]
+        )
+    )
+    assert inp["source_repo"]["default"] == "course-materials-f2026"
+
+
+def test_publish_site_without_a_materials_repo_defaults_to_the_first_option():
+    inp = workflow_inputs(
+        workflows_render.render_publish_site(["lecture-code", "slides-f2026"])
+    )
+    assert inp["source_repo"]["default"] == "lecture-code"
+
+
 def test_publish_site_has_publish_job_running_public_sync():
     rendered = workflows_render.render_publish_site(["course-materials-f2026"])
     assert "publish" in workflow_jobs(rendered)
@@ -576,7 +600,7 @@ def test_new_assignment_button_exposes_format_and_type():
 
 @pytest.mark.parametrize("name", sorted(ALL_RENDERED))
 def test_no_rendered_workflow_turns_on_dsl_verbose(name):
-    # DSL_VERBOSE un-suppresses the per-student log lines (log.log_verbose) - who is
+    # DSL_VERBOSE un-suppresses the per-student log lines (log.log_person) - who is
     # enrolled, who is in which team, which `<slug>-<handle>` repo exists. Every one of
     # these workflows runs in the course org's PUBLIC `.github`, whose Actions log anyone
     # can read, so the variable is for a local CLI run only and no workflow may set it.
@@ -602,9 +626,11 @@ def test_validate_schedule_workflow_is_seeded_with_the_central_repo_pinned():
     # Seeded into a cohort's classroom-config, so it must carry the central repo and ref
     # baked in - the cohort repo has no other way to reach the parser.
     from dsl_course.central import CENTRAL, CENTRAL_REF
-    from dsl_course.welcome import _validate_schedule_workflow
+    from dsl_course.welcome import classroom_system_files
 
-    raw = _validate_schedule_workflow(CENTRAL_REF)
+    raw = classroom_system_files(CENTRAL_REF)[
+        ".github/workflows/validate-schedule.yml"
+    ].decode()
     assert "__CENTRAL__" not in raw and "__CENTRAL_REF__" not in raw
     doc = yaml.safe_load(raw)
     trigger = doc.get("on", doc.get(True))
@@ -732,7 +758,7 @@ def test_repo_table_drops_submission_and_gradebook_repos():
 def _readme_run(monkeypatch, put_ok):
     from dsl_course import profile_readme as P
 
-    monkeypatch.setattr(P, "load_yaml_config", lambda org, repo, path: {})
+    monkeypatch.setattr(P, "org_meta", lambda org: {})
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
@@ -763,9 +789,7 @@ def test_cohort_page_title_follows_the_course_pointer(monkeypatch):
 
     # A cohort's dsl-course.yml is a pointer with no course_name, so this used to title
     # the students' landing page with the org slug.
-    monkeypatch.setattr(
-        P, "load_yaml_config", lambda org, repo, path: {"course": "Course-Org"}
-    )
+    monkeypatch.setattr(P, "org_meta", lambda org: {"course": "Course-Org"})
     monkeypatch.setattr(P, "course_name_of", lambda org: "Deep Learning")
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
@@ -985,6 +1009,9 @@ SERIALISED_WRITERS = {
     "grade_assignment": "grade-assignment",
     "render_grades": "render-grades",
     "distribute_grades": "distribute-grades",
+    # Two overlapping Send-codes runs generate two codes for the same blank cell: one is
+    # written and the other is emailed, so that student's code enrols nobody.
+    "send_codes": "send-codes",
     "sync_membership": "sync-membership",
     "sync_site": "sync-site",
     "publish_site": "publish-course-website",
@@ -1022,6 +1049,28 @@ def test_the_hourly_scheduler_serialises_against_itself():
         "group": "scheduled-release",
         "cancel-in-progress": False,
     }
+
+
+def test_the_scheduler_installs_the_autograder_it_runs():
+    # The hourly cron autogrades at every passed deadline through the SAME preamble as
+    # every other workflow, which installs requirements.txt and nothing else. When pytest
+    # lived only in the manual Grade assignment step, `python -m pytest` was "No module
+    # named pytest" on the cron: silent zeros for the whole cohort, no sentinel, and the
+    # same red run every hour for the rest of the term.
+    steps = yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]["scheduled-release"][
+        "steps"
+    ]
+    installs = [s["run"] for s in steps if "pip install -r " in str(s.get("run", ""))]
+    assert installs, "the scheduler job installs nothing - it cannot grade"
+    for run in installs:
+        req = ROOT / run.split("pip install -r ")[1].split()[0]
+        pinned = req.read_text()
+        assert re.search(r"^pytest==", pinned, re.MULTILINE), (
+            f"{req.name} does not pin pytest"
+        )
+        assert re.search(r"^nbconvert==", pinned, re.MULTILINE), (
+            f"{req.name} does not pin nbconvert - a notebook submission cannot be graded"
+        )
 
 
 def test_update_profile_readme_raises_clearly_on_a_malformed_config(

@@ -25,6 +25,8 @@ on:
         required: false
         default: ""
       central_ref:
+        # `main` is not offered: it is the dev tier, and an org bootstrapped onto it would
+        # run every merge as production from the moment it landed. A soak goes on staging.
         description: "Toolkit tier the new org runs (and that this run bootstraps it with)"
         required: true
         type: choice
@@ -32,7 +34,6 @@ on:
         options:
           - release
           - staging
-          - main
 
 # Every step here authenticates with DSL_BOT_TOKEN (org creation and team lookups are far
 # beyond anything the ambient token could do); the bootstrap job re-declares contents: read

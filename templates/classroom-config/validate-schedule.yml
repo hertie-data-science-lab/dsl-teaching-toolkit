@@ -132,7 +132,7 @@ jobs:
         run: |
           title="schedule.yml has entries the scheduler cannot read"
           existing=$(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number --jq '.[0].number')
-          body=$(printf '%s\n\n```\n%s\n```\n\nCommit: %s\nRun: %s\n\nA dropped entry is silently absent from the term plan - no release, or no deadline, snapshot or autograding. Fix `schedule.yml` on `main` and this issue closes itself.\n\nField reference: https://github.com/%s/blob/main/docs/07-schedule-releases.md' \
+          body=$(printf '%s\n\n```\n%s\n```\n\nCommit: %s\nRun: %s\n\nA dropped entry is silently absent from the term plan - no release, or no deadline, snapshot or autograding. Fix `schedule.yml` on `main` and this issue closes itself.\n\nField reference: https://github.com/%s/blob/__CENTRAL_REF__/docs/07-schedule-releases.md' \
             "Validation of \`schedule.yml\` failed." "$REPORT" "$SHA" "$RUN_URL" "__CENTRAL__")
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "$REPO" --body "$body"

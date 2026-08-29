@@ -11,7 +11,8 @@ import io
 import pytest
 import yaml
 
-from dsl_course import grades, roster
+from dsl_course import ghcli, grades, roster
+from tests.conftest import ROSTER_HEADER
 
 
 def test_parse_grades_tolerates_blank_and_missing_columns():
@@ -341,7 +342,7 @@ def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
     # this pure - the roster is the only input, and nothing is provisioned.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-student lines are verbose-only
     students = roster.parse(
-        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+        ROSTER_HEADER + "\n"
         "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
         "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor\n"
         "bob@uni.edu,Bob,bob-b,44,dsl-def,\n"  # blank role -> enrolled
@@ -358,8 +359,7 @@ def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
 def test_gradebook_sync_names_no_student_in_a_public_log(monkeypatch, capsys):
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     students = roster.parse(
-        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+        ROSTER_HEADER + "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     assert grades.sync("COHORT", dry_run=True) == 0
@@ -372,29 +372,39 @@ def test_a_gradebook_the_student_cannot_open_is_a_failure(monkeypatch):
     # The old "created-no-collaborator" status doesn't start with "failed", so sync's exit
     # predicate ignored it: a student with no read on their own gradebook, reported green.
     monkeypatch.setattr(grades, "repo_exists", lambda org, repo: True)
-    monkeypatch.setattr(grades, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(grades, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: False)
     assert grades.provision_one("COHORT", "ada-l").startswith("failed")
 
 
-def test_a_gradebook_grants_faculty_read(monkeypatch):
+def test_a_new_gradebook_grants_faculty_read_and_an_existing_one_is_left_alone(
+    monkeypatch,
+):
     # Read, not write: `distribute` rewrites grades.yml from grades/<slug>.csv, so a mark
     # corrected in the gradebook itself would be overwritten on the next run.
+    #
+    # At CREATION only. A team grant does not decay and the nightly sweep
+    # (access.converge_faculty_access) owns the floor, so re-granting on every Sync
+    # membership cost two PUTs per student a night for nothing.
     faculty = []
-    monkeypatch.setattr(grades, "repo_exists", lambda org, repo: True)
-    monkeypatch.setattr(
-        grades, "grant_faculty_read_access", lambda *a: faculty.append(a)
-    )
+    exists = {"grades-ada-l"}
+    monkeypatch.setattr(grades, "repo_exists", lambda org, repo: repo in exists)
+    monkeypatch.setattr(grades, "grant_faculty", lambda *a, **k: faculty.append(a))
     monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
+    monkeypatch.setattr(grades, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
+    monkeypatch.setattr(grades, "set_repo_topics", lambda *a, **k: True)
     grades.provision_one("COHORT", "ada-l")
-    assert faculty == [("COHORT", "grades-ada-l")]
+    assert faculty == [], "the existing gradebook was re-granted"
+    grades.provision_one("COHORT", "bob-b")
+    assert faculty == [("COHORT", "grades-bob-b", grades.FACULTY_READ_ACCESS)]
 
 
 def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
     # The send count used to be discarded, so a student who never got the "your grades are
     # updated" mail left no trace in the log at all.
     students = roster.parse(
-        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+        ROSTER_HEADER + "\n"
         "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
         "bob@uni.edu,Bob,bob-b,43,dsl-def,enrolled\n"
     )
@@ -412,8 +422,7 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
     # updated" from another, so the body names the course - but a course org that carries
     # no name yet must produce the generic sentence, never a blank or a placeholder.
     students = roster.parse(
-        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+        ROSTER_HEADER + "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     sent: list[list] = []
@@ -439,8 +448,7 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
 
 def test_grade_notification_dry_run_carries_a_placeholder_sample(monkeypatch):
     students = roster.parse(
-        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+        ROSTER_HEADER + "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "Deep Learning")
@@ -520,8 +528,7 @@ def test_build_gradebooks_folds_one_student_written_two_ways():
 
 def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
     students = roster.parse(
-        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
-        "ada@uni.edu,Ada,Ada-L,42,dsl-abc,enrolled\n"
+        ROSTER_HEADER + "\nada@uni.edu,Ada,Ada-L,42,dsl-abc,enrolled\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
@@ -538,8 +545,13 @@ def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
 # ---------------- an unsent notification reddens the run (the count is no longer dropped)
 
 
-def _distribute_with(monkeypatch, tmp_path, *, sent):
-    """`distribute` against a local classroom-config clone, pushing to nothing."""
+def _distribute_with(
+    monkeypatch, tmp_path, *, sent, live: str | None = None, outbox: list | None = None
+):
+    """`distribute` against a local classroom-config clone, pushing to nothing.
+
+    `live` is what each student's gradebook repo already holds (None = no file yet);
+    `outbox` collects every batch handed to the mailer."""
     cfg = tmp_path / "cfg"
 
     def fake_gh(*args, **kwargs):
@@ -553,15 +565,27 @@ def _distribute_with(monkeypatch, tmp_path, *, sent):
     (cfg / grades.GRADEBOOK_DIR).mkdir(parents=True)
     (cfg / grades.GRADEBOOK_DIR / "ada-l.yml").write_text("student: ada-l\n")
     monkeypatch.setattr(grades, "gh", fake_gh)
+    monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
+    monkeypatch.setattr(
+        grades,
+        "get_file_with_sha",
+        lambda *a, **k: (
+            None if live is None else (live, grades.blob_sha(live.encode()))
+        ),
+    )
     students = roster.parse(
-        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+        ROSTER_HEADER + "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
     monkeypatch.setattr(
-        grades.mailer, "send_bulk", lambda msgs, dry_run=False, sample=None: sent
+        grades.mailer,
+        "send_bulk",
+        lambda msgs, dry_run=False, sample=None: (
+            outbox.append(msgs) if outbox is not None else None,
+            sent,
+        )[1],
     )
     return grades.distribute("COHORT")
 
@@ -580,6 +604,24 @@ def test_distribute_stays_green_when_every_notification_lands(tmp_path, monkeypa
     assert _distribute_with(monkeypatch, tmp_path, sent=1) == 0
 
 
+def test_distribute_emails_nobody_whose_gradebook_did_not_change(tmp_path, monkeypatch):
+    # put_file returns True for a no-op write (it compares blob shas and skips), so
+    # "pushed" was true for every student whose file already held exactly this. A re-run
+    # after one marker's correction then told the WHOLE cohort their grades had been
+    # updated. Only a gradebook that actually changed is notified.
+    outbox: list = []
+    rc = _distribute_with(
+        monkeypatch, tmp_path, sent=1, live="student: ada-l\n", outbox=outbox
+    )
+    assert rc == 0
+    assert outbox == [], "an unchanged gradebook still emailed its student"
+
+    # ... and a gradebook that DID change is still notified.
+    outbox.clear()
+    assert _distribute_with(monkeypatch, tmp_path / "next", sent=1, outbox=outbox) == 0
+    assert [m[0] for batch in outbox for m in batch] == ["ada@uni.edu"]
+
+
 # ---------------- "nothing new to render" must mean nothing new, not a failed commit
 
 
@@ -587,7 +629,7 @@ def _render_with(monkeypatch, tmp_path, *, staged, commit_ok=True):
     """`render` against a local clone; `staged` is what `git diff --cached --quiet` says."""
     per = {"assignment-1": [grades.GradeRow(github_handle="ada-l", final_grade="88")]}
     monkeypatch.setattr(grades, "load_grade_sources", lambda org: per)
-    monkeypatch.setattr(grades, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(grades, "default_branch", lambda org, repo, **k: "main")
 
     def fake_gh(*args, **kwargs):
         if args[:2] == ("repo", "clone"):
@@ -608,6 +650,7 @@ def _render_with(monkeypatch, tmp_path, *, staged, commit_ok=True):
         return 0, ""
 
     monkeypatch.setattr(grades, "gh", fake_gh)
+    monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(grades, "git", fake_git)
     return grades.render("COHORT")
 
@@ -627,3 +670,79 @@ def test_genuinely_nothing_staged_is_still_the_green_no_op(
 ):
     assert _render_with(monkeypatch, tmp_path, staged=False) == 0
     assert "nothing new to render" in capsys.readouterr().out
+
+
+# ------------------------------------------- ONE listing instead of a probe per gradebook
+
+
+def _sync_run(monkeypatch, listing, handles=("ada-l", "bob-b")):
+    """grades.sync over `handles`, with `listing` (or an Exception) standing in for the
+    org listing. Returns (the orgs listed, the gradebooks created)."""
+    students = roster.parse(
+        ROSTER_HEADER
+        + "\n"
+        + "".join(
+            f"{h}@uni.edu,{h},{h},4{i},dsl-{h},enrolled\n"
+            for i, h in enumerate(handles)
+        )
+    )
+    listed: list[str] = []
+
+    def fake_listing(org):
+        listed.append(org)
+        if isinstance(listing, Exception):
+            raise listing
+        return listing
+
+    created: list[str] = []
+    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    monkeypatch.setattr(grades, "list_org_repos", fake_listing)
+    monkeypatch.setattr(
+        grades, "create_repo", lambda org, repo, **k: created.append(repo) or True
+    )
+    monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
+    monkeypatch.setattr(grades, "set_repo_topics", lambda *a, **k: True)
+    monkeypatch.setattr(grades, "grant_faculty", lambda *a, **k: None)
+    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
+    assert grades.sync("COHORT") == 0
+    return listed, created
+
+
+def test_sync_lists_the_org_once_and_probes_no_gradebook(monkeypatch):
+    # A repo_exists per student cost a GET per student on every nightly sync, to ask what
+    # one paginated listing already answers for the whole cohort.
+    monkeypatch.setattr(
+        grades,
+        "repo_exists",
+        lambda *a, **k: pytest.fail("a per-repo probe is back in the hot path"),
+    )
+    listed, created = _sync_run(monkeypatch, [{"name": "grades-ada-l", "topics": []}])
+    assert listed == ["COHORT"], "one listing per run, not one per student"
+    assert created == ["grades-bob-b"], "a listed gradebook was recreated"
+
+
+def test_a_failed_listing_falls_back_to_probing_each_gradebook(monkeypatch):
+    # The listing is an optimisation. A rate limit on it must not leave a student who
+    # onboarded today without a gradebook.
+    probed: list[str] = []
+    monkeypatch.setattr(
+        grades, "repo_exists", lambda org, repo: probed.append(repo) or False
+    )
+    listed, created = _sync_run(
+        monkeypatch, RuntimeError("could not list repos in COHORT: 502")
+    )
+    assert listed == ["COHORT"]
+    assert probed == ["grades-ada-l", "grades-bob-b"]
+    assert created == ["grades-ada-l", "grades-bob-b"]
+
+
+def test_a_dry_run_lists_nothing(monkeypatch):
+    # Nothing is created, so nothing needs to know what exists.
+    students = roster.parse(
+        ROSTER_HEADER + "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+    )
+    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    monkeypatch.setattr(
+        grades, "list_org_repos", lambda org: pytest.fail("a dry run listed the org")
+    )
+    assert grades.sync("COHORT", dry_run=True) == 0

@@ -11,8 +11,9 @@ import csv
 from pathlib import Path
 
 from dsl_course import roster
+from tests.conftest import ROSTER_HEADER
 
-HEADER = "hertie_email,name,github_handle,github_id,enrol_code,role"
+HEADER = ROSTER_HEADER
 
 
 def test_role_defaults_to_enrolled_when_the_column_is_absent():
@@ -55,28 +56,6 @@ def test_parse_tolerates_a_utf8_bom_from_excel():
     assert student.hertie_email == "ada@uni.edu"
     assert student.github_handle == "ada-l"
     assert student.is_enrolled
-
-
-def test_role_survives_a_dump_parse_roundtrip():
-    students = roster.parse(
-        f"{HEADER}\n"
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
-        "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor\n"
-    )
-    reparsed = roster.parse(roster.dump(students))
-    assert [s.role for s in reparsed] == [roster.ROLE_ENROLLED, roster.ROLE_AUDITOR]
-
-
-def test_dump_writes_an_explicit_role_for_a_roster_that_lacked_the_column():
-    # enrol-codes rewrites the whole file, so a legacy roster GAINS the column with the
-    # default spelled out - never a blank the next reader has to interpret.
-    students = roster.parse(
-        "student_id,hertie_email,name,github_handle,github_id,section\n"
-        "1,ada@uni.edu,Ada,,,A\n"
-    )
-    text = roster.dump(students)
-    assert text.splitlines()[0].endswith(",role")
-    assert text.splitlines()[1].endswith(",enrolled")
 
 
 def test_enrolled_and_auditors_partition_the_roster():

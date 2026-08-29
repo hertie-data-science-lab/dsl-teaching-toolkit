@@ -1,32 +1,27 @@
 name: Refresh Course Orgs Inventory
 
+# The live estate - every course org, the toolkit tier it runs, and the cohort orgs under
+# it - rendered into this run's job summary. It is a REPORT, not a committed page: the
+# self-merging PR it used to open needed write on `main` and left the page stale for weeks
+# whenever the merge was refused.
+
 on:
   schedule:
     - cron: "0 6 * * 1"  # Mondays at 06:00 UTC
   workflow_dispatch:
-    inputs:
-      allow_net_deletion:
-        description: "Let the refresh land even though it removes more rows than it adds (an org really was deleted)"
-        type: boolean
-        default: false
 
-# The PR steps need contents + pull-requests write; nothing else does. Declared at the job
-# below, so the workflow default is nothing at all.
 permissions: {}
 
 jobs:
-  refresh:
+  inventory:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      contents: write
-      pull-requests: write
-    # Declared once, at the job: two steps prepare and push the SAME branch, and a drift
-    # between two copies would prepare one branch and push another.
-    env:
-      BRANCH: chore/refresh-inventory
+      contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
@@ -36,99 +31,16 @@ jobs:
       - name: Install Python dependencies
         run: pip install -r requirements.txt
 
-      # The branch is prepared BEFORE the inventory is generated, so the file is written on
-      # top of whatever the branch already holds rather than on top of main.
-      - name: Prepare the inventory branch
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -eo pipefail
-          git config user.name "DSL Bot"
-          git config user.email "dsl-bot@hertie-school.org"
-          # Fetch the shared branch if it exists, so the push below has a lease to check
-          # against - and so a reuse starts from its real tip.
-          git fetch origin "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" 2>/dev/null || true
-          # Build ON the branch only while a PR is open on it: that PR may carry a reviewer's
-          # commit, and rebuilding from main would discard it with no trace (the old
-          # `checkout -B` + `push -f` did exactly that). With no open PR the branch is spent -
-          # it is kept after the squash-merge - so start again from main rather than
-          # re-proposing an already-merged commit.
-          if gh pr view "$BRANCH" --json state --jq '.state' 2>/dev/null | grep -q OPEN; then
-            git checkout -B "$BRANCH" "origin/$BRANCH"
-          else
-            git checkout -B "$BRANCH"
-          fi
-
       # Reading ACROSS orgs is the bot's job - it is a member of every course org, and
-      # GITHUB_TOKEN sees only this repo.
-      - name: Regenerate bootstrapped-orgs-inventory.md
+      # GITHUB_TOKEN sees only this repo. list_orgs exits non-zero when it could not read
+      # some org's metadata, which reds the run while still printing what it did see.
+      - name: Render the inventory into the job summary
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
         run: |
-          python3 -m dsl_course.list_orgs \
-            --update-file bootstrapped-orgs-inventory.md
-
-      # Writing to THIS repo is the reverse: the bot holds only `read` here, so it can
-      # neither merge nor (reliably) open a PR. GITHUB_TOKEN carries the contents +
-      # pull-requests write granted above, which is exactly the scope this step needs.
-      - name: Open PR if the inventory changed
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          ALLOW_NET_DELETION: ${{ inputs.allow_net_deletion }}
-        run: |
           set -eo pipefail
-          if git diff --quiet bootstrapped-orgs-inventory.md; then
-            echo "No changes to inventory - nothing to do."
-            exit 0
-          fi
-
-          # This page is fully generated and merged unattended, so a refresh that DROPS more
-          # rows than it adds must not land on its own: that is the signature of a partial
-          # discovery pass (a rate-limited search, a token that lost an org) rather than of
-          # orgs genuinely going away. Stop red and let a human look - then let them say so,
-          # via the allow_net_deletion dispatch input, rather than editing the page by hand.
-          added=$(git diff --numstat -- bootstrapped-orgs-inventory.md | cut -f1)
-          removed=$(git diff --numstat -- bootstrapped-orgs-inventory.md | cut -f2)
-          if [ "${removed:-0}" -gt "${added:-0}" ] && [ "$ALLOW_NET_DELETION" != "true" ]; then
-            echo "::error::inventory refresh would remove $removed line(s) and add only $added. Either an org really was deleted - re-run this workflow manually with allow_net_deletion=true to let it land - or DSL_BOT_TOKEN lost access to an org it used to see (check its org memberships/grants), in which case the missing rows are still real and must NOT be merged away."
-            git --no-pager diff -- bootstrapped-orgs-inventory.md
-            exit 1
-          fi
-
-          git add bootstrapped-orgs-inventory.md
-          git commit -m "chore: refresh course-orgs inventory"
-          # --force-with-lease, never a bare -f: the lease is the tip fetched above (empty
-          # when the branch does not exist yet, which asserts exactly that), so a commit
-          # pushed to the branch since then aborts the run instead of being overwritten.
-          lease=$(git rev-parse --verify --quiet "refs/remotes/origin/$BRANCH" || true)
-          git push --force-with-lease="$BRANCH:$lease" origin "HEAD:$BRANCH"
-
-          if ! gh pr view "$BRANCH" --json state --jq '.state' 2>/dev/null | grep -q OPEN; then
-            gh pr create \
-              --title "chore: refresh course-orgs inventory" \
-              --body "Automated refresh by \`refresh-inventory\`. Course orgs discovered via topic \`dsl-course-hub\`, cohort orgs via \`dsl-cohort\`." \
-              --base main --head "$BRANCH"
-          fi
-          # main requires the `pytest` and `jekyll-contract` checks (both set by hand on
-          # GitHub - see docs-admin-arch/central-admin.md), so the merge has to WAIT for
-          # them - merging outright raced CI and failed with `Required status check
-          # "pytest" is expected`,
-          # which is how this silently stopped landing (the run went red, the PR stayed
-          # open, and the inventory drifted for weeks).
-          #
-          # Waited on here rather than handed to `--auto`: auto-merge would let this run
-          # report success while the merge may never happen, and an inventory that cannot
-          # merge is a broken refresh. Watching keeps the verdict on the run - red if the
-          # checks fail, red if the merge is refused. No `|| true` for the same reason.
-          # `--watch` exits non-zero when NO check has registered on the branch yet, which
-          # is the same race one step earlier: the push and the PR both land before the
-          # workflow they trigger appears. Retry until a check shows up, then watch it.
-          for _ in $(seq 12); do
-            gh pr checks "$BRANCH" --watch --fail-fast && break
-            echo "no checks registered yet - waiting"
-            sleep 10
-          done
-          # Re-asserted, not assumed: the loop above exits on the last retry whether or not
-          # a check ever appeared, and a merge is not something to attempt on a maybe.
-          gh pr checks "$BRANCH" --fail-fast
-          gh pr merge "$BRANCH" --squash --delete-branch=false
+          {
+            echo "## Bootstrapped orgs"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          python3 -m dsl_course.list_orgs --format markdown >> "$GITHUB_STEP_SUMMARY"

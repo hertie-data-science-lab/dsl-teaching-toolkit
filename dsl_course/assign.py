@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
 import tempfile
 import time
@@ -38,13 +37,19 @@ from pathlib import Path
 import yaml
 
 from . import roster, schedule, site, sync_teams, teams
-from .access import grant_faculty_read_access, grant_team_repo_access
+from .access import FACULTY_READ_ACCESS, grant_faculty, grant_team_repo_access
 from .collect import assignment_is_group
-from .course import CONFIG_REPO, SOLUTION_BRANCH, assignment_slug
-from .discovery import ASSIGNMENT_TEMPLATE_TOPIC
-from .gh_contents import put_file
-from .ghcli import GIT_ENV, gh, git
-from .log import log, log_err, log_ok, log_skip, log_step, log_verbose
+from .course import (
+    CONFIG_REPO,
+    SOLUTION_BRANCH,
+    assignment_slug,
+    submission_repo,
+)
+from .discovery import ASSIGNMENT_TEMPLATE_TOPIC, list_org_repos
+from .fs import copy_tree
+from .gh_contents import file_exists, put_file
+from .ghcli import GIT_ENV, clone, gh, git
+from .log import log, log_err, log_ok, log_person, log_skip, log_step
 from .repos import (
     add_collaborator,
     generate_from_template,
@@ -73,23 +78,77 @@ def _wait_for_content(
     GitHub's template-generate is asynchronous: a just-created repo can briefly be empty,
     and using it as a generate *source* (the next stage) then fails with `... is empty`.
     Returns True once the repo's root has files."""
-    for _ in range(attempts):
+    for attempt in range(attempts):
         code, out = gh("api", f"repos/{org}/{repo}/contents", "--jq", "length")
         if code == 0 and out.strip().isdigit() and int(out.strip()) > 0:
             return True
-        time.sleep(delay)
+        # The delay SPACES the polls; after the last one there is nothing to space.
+        if attempt + 1 < attempts:
+            time.sleep(delay)
     return False
 
 
+def _org_listing(cohort_org: str) -> list[dict] | None:
+    """One paginated listing of the cohort org, or None when it could not be read.
+
+    Both stages below ask the same question of it - "is this repo already there, and is it
+    already in the state we would otherwise write?" - and asking GitHub repo by repo cost a
+    GET per student per assignment on every hourly tick (a 400-student cohort carrying
+    three assignments: ~1,200 reads an hour, where one listing costs three).
+
+    None means the listing itself failed, and each caller falls back to its own per-repo
+    probe. The listing is an optimisation, not a new way for a handout to fail: a rate
+    limit here must not stop the students who onboarded this hour from getting their repos.
+    """
+    try:
+        return list_org_repos(cohort_org)
+    except RuntimeError as exc:
+        log_err(
+            f"could not list {cohort_org}'s repos - falling back to a probe per repo: {exc}"
+        )
+        return None
+
+
+def _template_is_ready(entry: dict | None, slug: str) -> bool:
+    """Whether an existing cohort template already carries everything the repair in
+    `ensure_cohort_template` would write.
+
+    `entry` is that repo's row in `_org_listing`'s listing (None when there is no listing,
+    or no such repo). The topics are the LAST thing the repair writes and the flag the
+    second, so a repo carrying both has been through a complete repair - which is also why
+    this needs no content check of its own: `_wait_for_content` gates both writes."""
+    if entry is None:
+        return False
+    wanted = {slug.lower().replace("_", "-"), ASSIGNMENT_TEMPLATE_TOPIC}
+    return bool(entry.get("isTemplate")) and wanted <= set(entry.get("topics") or [])
+
+
 def ensure_cohort_template(
-    master_org: str, template: str, cohort_org: str, slug: str
+    master_org: str,
+    template: str,
+    cohort_org: str,
+    slug: str,
+    listing: list[dict] | None = None,
 ) -> str | None:
     """Stage 1: freeze a cohort-level template repo (named `<slug>`) from the course
     template, so the cohort has its own copy and per-student repos generate from it
     (the role Classroom 50's classroom template used to play). Returns the cohort
     template name, or None on failure. Idempotent."""
-    if repo_exists(cohort_org, slug):
+    entry = (
+        next((r for r in listing if r["name"] == slug), None)
+        if listing is not None
+        else None
+    )
+    exists = entry is not None if listing is not None else repo_exists(cohort_org, slug)
+    if exists:
         log_skip(f"cohort template {cohort_org}/{slug}")
+        if _template_is_ready(entry, slug):
+            # Already frozen, flagged and topiced. The repair below is what HEALS a
+            # half-created template, and it has to stay reachable - but running it
+            # unconditionally meant a probe, a PATCH and a topics PUT per handed-out
+            # assignment on every hourly tick, re-writing state the listing just showed us
+            # is already correct.
+            return slug
     elif not generate_from_template(
         template_org=master_org,
         template_name=template,
@@ -101,13 +160,12 @@ def ensure_cohort_template(
         return None
     else:
         log_ok(f"created cohort template {cohort_org}/{slug}")
-    # Whether just created OR pre-existing, ENSURE it is both populated and flagged as a
-    # template - not only on the create path. A prior run that timed out in
-    # `_wait_for_content` left the repo existing but with `is_template` never set; the old
+    # Reached on the create path AND by a pre-existing template the listing did not show as
+    # ready - never only on the create path. A prior run that timed out in
+    # `_wait_for_content` left the repo existing but with `is_template` never set; an
     # exists-short-circuit then returned the slug without re-checking, so every later handout
     # failed with a misleading "<slug> is not a template" error. Both steps are idempotent,
-    # so a retry HEALS a half-created template rather than being wedged by it. For a healthy
-    # template `_wait_for_content` returns on its first poll, so the cost is one API call.
+    # so a retry HEALS a half-created template rather than being wedged by it.
     if not _wait_for_content(cohort_org, slug):
         log_err(
             f"  ! cohort template {cohort_org}/{slug} did not populate in time "
@@ -147,17 +205,7 @@ def fetch_solution(master_org: str, template: str, dest: Path) -> Path | None:
 
     Solutions live on a non-default branch so native template-generate (default branch
     only) never copies them into student repos - they're pushed separately, on demand."""
-    code, _ = gh(
-        "repo",
-        "clone",
-        f"{master_org}/{template}",
-        str(dest),
-        "--",
-        "-q",
-        "-b",
-        SOLUTION_BRANCH,
-    )
-    if code != 0:
+    if not clone(master_org, template, dest, branch=SOLUTION_BRANCH):
         log_err(
             f"  ! no `{SOLUTION_BRANCH}` branch on {master_org}/{template} - "
             f"nothing to push (add the solution there first)"
@@ -180,9 +228,9 @@ def push_solution(cohort_org: str, repo: str, sol_dir: Path) -> bool:
     """Push the solution/ folder into an existing student repo (idempotent overwrite)."""
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "r"
-        if gh("repo", "clone", f"{cohort_org}/{repo}", str(wd), "--", "-q")[0] != 0:
+        if not clone(cohort_org, repo, wd):
             return False
-        shutil.copytree(sol_dir, wd / SOLUTION_DIR, dirs_exist_ok=True)
+        copy_tree(sol_dir, wd / SOLUTION_DIR)
         git("-C", str(wd), *GIT_ENV, "add", "-A")
         code, _ = git(
             "-C",
@@ -209,8 +257,13 @@ def provision_one(
     sol_dir: Path | None = None,
     team: str | None = None,
     touch_existing: bool = True,
+    existing: frozenset[str] | None = None,
 ) -> str:
     """Generate one submission repo and grant its members access.
+
+    `existing` is the cohort's repo names off ONE listing (`_org_listing`); membership in
+    it answers "does this repo already exist?" without a GET per student. None - no listing
+    to hand - falls back to probing this one repo.
 
     `touch_existing=False` (the hourly scheduler): a repo that already exists, with no
     solution due, is left exactly as it is - no access re-grant, no team reconcile. The
@@ -221,9 +274,17 @@ def provision_one(
     `team`, so each member is added as a collaborator. Group assignments also pass the
     GitHub Team slug: the team is materialised from `handles` and granted on the repo, so
     membership changes propagate to access (and members get @mentions + a team space)."""
-    existed = repo_exists(cohort_org, repo)
+    if team is not None and not handles:
+        # Every member was rejected by the roster allowlist upstream (typo'd handles, a
+        # stranger's login), so this team can be granted nothing. Checked BEFORE anything is
+        # created: a private repo nobody can open is left behind for the term otherwise.
+        log_err(f"  ! team {team} has no vetted members - no repo created for it")
+        return "failed-no-members"
+    existed = (
+        repo in existing if existing is not None else repo_exists(cohort_org, repo)
+    )
     if existed:
-        log_verbose(f"  [skip] repo {cohort_org}/{repo}")
+        log_person(f"  [skip] repo {cohort_org}/{repo}")
         if sol_dir is None and not touch_existing:
             # Nothing is due for this repo. The scheduler re-runs every handed-out release
             # on every hourly tick, so re-granting access here cost 2-4 API calls per
@@ -243,7 +304,7 @@ def provision_one(
     ):
         return "failed-create"
     else:
-        log_verbose(f"  [ok] created {cohort_org}/{repo}")
+        log_person(f"  [ok] created {cohort_org}/{repo}")
         if not set_repo_topics(cohort_org, repo, [slug, "submission"]):
             # Not named: this log is public. The nightly sweep converges the topic.
             log_err(
@@ -252,8 +313,17 @@ def provision_one(
 
     solution_failed = False
     if sol_dir is not None:
-        if push_solution(cohort_org, repo, sol_dir):
-            log_verbose("  [ok]   + solution pushed")
+        # template-generate is async, so a repo THIS run created can still be empty. A
+        # clone of an empty repo has no branch, and the solution then lands on whatever the
+        # runner's `init.defaultBranch` is - invisible to the student and to grading.
+        if not existed and not _wait_for_content(cohort_org, repo):
+            log_err(
+                f"  ! {cohort_org}/{repo} has not populated yet - no solution pushed; "
+                f"the next run retries"
+            )
+            solution_failed = True
+        elif push_solution(cohort_org, repo, sol_dir):
+            log_person("  [ok]   + solution pushed")
         else:
             # Reported in the RETURN value, not just the log: provision_all writes a
             # fire-once marker off these statuses, so a push that only logged its failure
@@ -267,11 +337,17 @@ def provision_one(
     # have gone on granting nobody but the team. This repo used to grant no faculty at all,
     # so an instructor who was not an org OWNER could not open the work they had to mark.
     #
+    # AT CREATION ONLY. A team grant does not decay, and the nightly sweep
+    # (access.converge_faculty_access) owns the floor for every repo that already exists -
+    # so re-granting here bought nothing and cost two PUTs per student per assignment on
+    # every path that reaches this line.
+    #
     # READ, not write. Marking happens in `classroom-config/grades/<slug>.csv` (docs/10),
     # and by the time anyone marks, the deadline snapshot has already frozen this repo's
     # HEAD and the autograder has run off that snapshot - so a commit here would reach no
     # gradebook and form no part of the record. Faculty need to SEE the work, not edit it.
-    grant_faculty_read_access(cohort_org, repo)
+    if not existed:
+        grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
     if team is not None:
         # Group: materialise the team from its members and grant it on the repo, so
         # post-sync membership edits propagate to access (vs. one-off collaborator grants).
@@ -280,15 +356,9 @@ def provision_one(
         team_ok = sync_teams.ensure_team(cohort_org, team, set(handles), prune=False)
         access_ok = grant_team_repo_access(cohort_org, team, repo, "maintain")
         if access_ok:
-            log_verbose(f"  [ok]   + team {team} (maintain)")
+            log_person(f"  [ok]   + team {team} (maintain)")
         if not team_ok:
             log_err(f"  ! team {team} is missing member(s) - they cannot see {repo}")
-        if not handles:
-            # Every member of this team was rejected by the roster allowlist upstream, so
-            # the team is empty and the repo is granted to nobody. The individual arm calls
-            # that failed-no-collaborator; a group of nobody is the same handout failure,
-            # and reporting "ok" left a repo no student could open looking successful.
-            log_err(f"  ! team {team} has no vetted members - nobody can open {repo}")
         # A failed solution push WINS over every other fault here. provision_all writes the
         # FIRE-ONCE solution marker off these statuses, so a repo that reported any other
         # failure had its missing solution forgotten - and the marker guaranteed no later
@@ -300,8 +370,6 @@ def provision_one(
             return "failed-no-access"
         if not team_ok:
             return "failed-team-members"
-        if not handles:
-            return "failed-no-members"
         return "skipped" if existed else "ok"
 
     # Ordering hazard (individual path): granting a repo collaborator BEFORE the student has
@@ -313,7 +381,7 @@ def provision_one(
     added = 0
     for handle in handles:
         if add_collaborator(cohort_org, repo, handle, permission="maintain"):
-            log_verbose(f"  [ok]   + @{handle} (maintain)")
+            log_person(f"  [ok]   + @{handle} (maintain)")
             added += 1
         else:
             log_err(f"  ! could not add @{handle} (not a real account?)")
@@ -365,7 +433,7 @@ def main() -> int:
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
-        return provision_all(
+        rc, _changed = provision_all(
             args.master_org,
             args.template,
             args.cohort_org,
@@ -374,6 +442,7 @@ def main() -> int:
             group={"auto": None, "individual": False, "group": True}[kind],
             dry_run=args.dry_run,
         )
+        return rc
     except RuntimeError as exc:
         log_err(str(exc))
         return 1
@@ -390,13 +459,7 @@ def solution_released(cohort_org: str, slug: str) -> bool:
     Read by the scheduler, so a passed `solution_datetime` fires exactly once. The manual
     Release assignment path does NOT consult it - an operator ticking include_solution is
     asking for it now, and push_solution is an idempotent overwrite anyway."""
-    code, _ = gh(
-        "api",
-        f"repos/{cohort_org}/{CONFIG_REPO}/contents/{solution_record_path(slug)}",
-        "--jq",
-        ".sha",
-    )
-    return code == 0
+    return file_exists(cohort_org, CONFIG_REPO, solution_record_path(slug))
 
 
 def record_solution_released(cohort_org: str, slug: str, repos: int) -> bool:
@@ -418,6 +481,14 @@ def record_solution_released(cohort_org: str, slug: str, repos: int) -> bool:
     )
 
 
+# provision_one statuses that mean the model solution did NOT reach that unit's repo, and
+# so must withhold the fire-once release marker. Every OTHER `failed-*` happens AFTER the
+# push (a dead handle, an unreachable team) and is persistent, so withholding the marker
+# for one would re-clone every submission repo every hour for the rest of the term - the
+# exact cost the marker exists to prevent.
+_SOLUTION_NOT_PUSHED = ("failed-solution", "failed-create")
+
+
 def provision_all(
     master_org: str,
     template: str,
@@ -427,16 +498,28 @@ def provision_all(
     group: bool | None = None,
     dry_run: bool = False,
     touch_existing: bool = True,
-) -> int:
+    scheduled: bool = False,
+) -> tuple[int, bool]:
     """Freeze the cohort template, then provision a repo per unit (student, or team).
+
+    Returns `(exit code, whether anything changed)` - the shape `deploy.deploy_many`
+    already uses. The scheduler re-fires every handed-out release on every hourly tick
+    (that is what gets a late onboarder their repo), so almost every tick provisions
+    nothing at all; without the second half of the answer the caller could only assume it
+    had, and re-rendered the whole cohort website once an hour for the rest of the term.
+    `changed` is the same predicate this function's own site sync uses: at least one unit
+    was not `skipped`.
 
     Callable directly (e.g. by the scheduler) as well as from the CLI. `group=None`
     (the default) reads the template's own declaration - `type: group` in the
     grading.yml on its solution branch; pass True to force per-team for a template
-    that doesn't declare it."""
+    that doesn't declare it.
+
+    `scheduled` marks the hourly cron: a group assignment with no teams yet is then a
+    green wait, not the error a button press gets."""
     if master_org == cohort_org:
         log_err("master-org and cohort-org must differ.")
-        return 1
+        return 1, False
     if group is None:
         # schedule.yml's assignments.<slug>.type wins; grading.yml is the fallback.
         group = assignment_is_group(master_org, cohort_org, template)
@@ -445,10 +528,10 @@ def provision_all(
 
     students = roster.load_path(roster_path) if roster_path else roster.load(cohort_org)
     if students is None:  # missing/unreadable roster - load() already logged why
-        return 1
+        return 1, False
     if not students:
         log_err(f"roster in {cohort_org} has no rows yet - nobody to provision for.")
-        return 1
+        return 1, False
     # Auditors are read-only - they see released materials, never an assignment repo.
     participants = roster.enrolled(students)
     auditing = len(students) - len(participants)
@@ -473,33 +556,51 @@ def provision_all(
     if group:
         groups = teams.teams_for(teams.load(cohort_org), key)
         if not groups:
+            if scheduled:
+                # Teams form when students click 'Join team', which can be days after the
+                # handout datetime - and the cron re-fires every hour until they do. Wait,
+                # exactly as an individual handout waits for its first onboarded student.
+                log(
+                    f"  [wait] no teams for `{key}` in {cohort_org} yet - the handout "
+                    f"fires on the tick after the first team forms"
+                )
+                return 0, False
             log_err(
                 f"no teams for `{key}` in {cohort_org}/classroom-config/teams.csv - "
                 f"students self-select via the welcome 'Join team' issue, or seed the CSV."
             )
-            return 1
+            return 1, False
         # teams.csv is student-writable (the welcome "Join team" issue appends rows), so its
         # handles must pass the SAME roster allowlist sync_teams applies: only enrolled,
         # onboarded roster handles - never a typo or a stranger's login that would be INVITED
         # into the private cohort org (and granted `maintain` on a repo) by ensure_team.
-        # Compared casefold (GitHub logins are case-insensitive); the roster's casing wins.
-        allowed_by_fold = {
-            h.casefold(): h for h in sync_teams.known_handles(participants)
-        }
+        # `vet_groups` is that one allowlist; the reporting below is this path's own.
         units = []
-        for team, members in sorted(groups.items()):
-            vetted, rejected = sync_teams.vet_handles(members, allowed_by_fold)
+        for team, vetted, rejected in sync_teams.vet_groups(groups, participants):
             for m in rejected:
-                log_err(
-                    f"{m} in teams.csv ({key}/{team}) is not an enrolled, onboarded "
+                # Names a handle a STUDENT typed into teams.csv, and this workflow's log is
+                # world-readable - so the handle is verbose-only and the actionable line
+                # below names nobody. Same split as sync_teams' own rejection log.
+                log_person(
+                    f"    {m} in teams.csv ({key}/{team}) is not an enrolled, onboarded "
                     f"roster handle - excluding it (would invite an arbitrary account "
                     f"into {cohort_org})"
                 )
-            units.append((f"{slug}-{team}", vetted, sync_teams.team_slug(key, team)))
+            if rejected:
+                log_err(
+                    f"{len(rejected)} handle(s) in teams.csv ({key}/{team}) are not "
+                    f"enrolled, onboarded roster handles - excluded (they would invite "
+                    f"arbitrary accounts into {cohort_org}). Re-run the CLI locally with "
+                    f"DSL_VERBOSE=1 to see which."
+                )
+            units.append(
+                (submission_repo(slug, team), vetted, sync_teams.team_slug(key, team))
+            )
         what = f"{len(units)} team(s)"
     else:
         units = [
-            (f"{slug}-{s.github_handle}", [s.github_handle], None) for s in onboarded
+            (submission_repo(slug, s.github_handle), [s.github_handle], None)
+            for s in onboarded
         ]
         what = f"{len(units)} student(s)"
 
@@ -516,16 +617,23 @@ def provision_all(
         log(f"    DRY-RUN  cohort template {cohort_org}/{slug}")
         for repo, handles, team in units:
             via = f" (team {team})" if team else ""
-            log_verbose(
+            log_person(
                 f"    DRY-RUN  {cohort_org}/{repo}{via}  <- {', '.join('@' + h for h in handles)}"
             )
-        return 0
+        return 0, False
+
+    # ONE listing of the cohort, taken before anything is created, answers "is it already
+    # there?" for the template below and for every unit in stage 2.
+    listing = _org_listing(cohort_org)
+    existing = frozenset(r["name"] for r in listing) if listing is not None else None
 
     # Stage 1: freeze the cohort-level template.
-    cohort_template = ensure_cohort_template(master_org, template, cohort_org, slug)
+    cohort_template = ensure_cohort_template(
+        master_org, template, cohort_org, slug, listing
+    )
     if cohort_template is None:
         log_err("could not create the cohort assignment template.")
-        return 1
+        return 1, False
 
     with tempfile.TemporaryDirectory() as soldir:
         # Solution still comes from the COURSE template's solution branch.
@@ -548,7 +656,7 @@ def provision_all(
         # Stage 2: fan out one repo per unit (student, or team) FROM the cohort template.
         results: dict[str, int] = {}
         for repo, handles, team in units:
-            log_verbose(f"-> {repo}")
+            log_person(f"-> {repo}")
             status = provision_one(
                 cohort_org,
                 cohort_template,
@@ -559,6 +667,7 @@ def provision_all(
                 sol_dir,
                 team=team,
                 touch_existing=touch_existing,
+                existing=existing,
             )
             results[status] = results.get(status, 0) + 1
 
@@ -578,10 +687,11 @@ def provision_all(
     # traceback and misreport the whole handout as failed: log it, count it (so the run goes
     # red and the next Sync site / tick refreshes the site), and return normally.
     site_failed = False
+    changed = any(k != "skipped" for k in results)
     try:
         # A tick that created or changed nothing has nothing to show the site: skipping the
         # sync here is what stops every handed-out assignment re-rendering the site hourly.
-        if any(k != "skipped" for k in results):
+        if changed:
             site.sync_site(master_org, cohort_org)
     except (RuntimeError, yaml.YAMLError) as exc:
         log_err(
@@ -598,12 +708,15 @@ def provision_all(
     #     the exact cost this marker exists to prevent;
     #   - `units == []` (nobody onboarded yet) means nothing was pushed at all, so
     #     recording it would mean everyone who onboards later never gets the solution.
-    # `failed-solution` is what a failed push reports, so it is read here directly.
+    # The statuses that mean this unit never received the solution are read here directly:
+    # `failed-solution` is a push that was attempted and failed, and `failed-create` is a
+    # repo that never existed to push INTO - provision_one returns it before the push, so
+    # the marker used to be written over it and no later tick ever retried.
     solution_pushed = (
         solution
         and not solution_unavailable
         and bool(units)
-        and not results.get("failed-solution")
+        and not any(results.get(s) for s in _SOLUTION_NOT_PUSHED)
     )
     if solution_pushed and not record_solution_released(cohort_org, slug, len(units)):
         log_err(
@@ -612,7 +725,7 @@ def provision_all(
             f"re-clones every submission repo to push a solution they already have"
         )
         failed = True
-    return 1 if failed or solution_unavailable else 0
+    return (1 if failed or solution_unavailable else 0), changed
 
 
 if __name__ == "__main__":

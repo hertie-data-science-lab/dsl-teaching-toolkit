@@ -25,7 +25,8 @@ from __future__ import annotations
 
 import re
 
-from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER
+from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER, pin_central_ref
+from .course import MATERIALS_REPO_PREFIX, term_tag
 
 # Third-party actions pinned to full commit SHAs. Every job below runs with an org-owner
 # PAT in its env, so a mutable tag (`@v4`) is a standing invitation: whoever can move the
@@ -52,8 +53,9 @@ def for_placement(rendered: str, central_ref: str) -> str:
     Both happen at the write site rather than inside each renderer, for the same reason: a
     new renderer cannot ship without either, and `central_ref` is a required argument, so
     a caller that places a workflow cannot forget to say which ref it is placing it at.
-    `discovery.central_ref_for` is where that ref comes from."""
-    return SYSTEM_OWNED_BANNER + rendered.replace(CENTRAL_REF_PLACEHOLDER, central_ref)
+    `discovery.central_ref_for` is where that ref comes from; `central.pin_central_ref`
+    refuses a ref the central repo does not have."""
+    return SYSTEM_OWNED_BANNER + pin_central_ref(rendered, central_ref)
 
 
 # Workflow-level permissions for every rendered workflow. Each one authenticates with
@@ -287,6 +289,18 @@ def _newest(options: list[str]) -> str | None:
     are sorted alphabetically, so without this the oldest cohort is pre-selected."""
     dated = [(m.group(1), o) for o in options if (m := _TERM_YEAR.search(o))]
     return max(dated)[1] if dated else None
+
+
+def _newest_materials(options: list[str]) -> str | None:
+    """The `course-materials-*` option carrying the latest term tag, or None when the
+    dropdown holds none. Spring precedes autumn within a year, so the tag is ordered as
+    (year, autumn?) rather than alphabetically."""
+    dated = [
+        (tag[1:], tag[0] == "f", o)
+        for o in options
+        if o.startswith(MATERIALS_REPO_PREFIX) and (tag := term_tag(o))
+    ]
+    return max(dated)[2] if dated else None
 
 
 def _choice_input(
@@ -737,6 +751,7 @@ on:
         type: boolean
         default: true
 
+{_concurrency("send-codes")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   send-codes:
 {_run_preamble()}      - name: Send enrolment codes
@@ -1081,6 +1096,13 @@ def render_publish_site(source_repos: list[str]) -> str:
     text-only list or hosted files. The cron is a no-op for the (many) course orgs that
     never publish. Separate from the per-cohort student-gated sites; releases never touch
     it."""
+    # A run REPLACES what the site serves, so the default must be the repo the site was
+    # published from - the latest `course-materials-*`. `_newest` alone picked the
+    # alphabetically last option of the newest year (`lecture-code-f2026`), and a faculty
+    # member clicking Run with the defaults wiped a live site's materials.
+    default = _newest_materials(source_repos) or (
+        source_repos[0] if source_repos else None
+    )
     return f"""name: Publish course website
 
 # Build/refresh the PUBLIC course site <course-org>.github.io (open courseware). The
@@ -1096,7 +1118,7 @@ on:
     - cron: "30 5 * * *"
   workflow_dispatch:
     inputs:
-{_choice_input("source_repo", "Source materials repo (in this course org) to publish", source_repos)}
+{_choice_input("source_repo", "Materials repo to publish - the site is REBUILT from it; defaults to the latest course-materials-* repo", source_repos, default)}
       readings_mode:
         description: "Readings: reading-list (citations) / actual-readings (files) / none"
         required: true

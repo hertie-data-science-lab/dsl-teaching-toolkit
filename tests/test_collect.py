@@ -7,6 +7,7 @@ answer, so the pin's every branch is pinned down here with git/gh stubbed.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import signal
 import subprocess
@@ -18,12 +19,34 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from dsl_course import collect, grades
+from dsl_course import collect, gh_contents, ghcli, grades
 from dsl_course.roster import Student
 from dsl_course.schedule import Schedule
+from tests.conftest import ROSTER_HEADER
 
 SHA = "a" * 40
 OTHER_SHA = "b" * 40
+
+
+@pytest.fixture(autouse=True)
+def _grading_deps_present(monkeypatch):
+    """Report every grading dependency as installed, by default.
+
+    `_run_tests` refuses to spawn a grader it knows is not importable, and most tests here
+    stub the subprocess boundary rather than really running one - so a dev box without
+    `nbconvert` on it must not read as a broken runner. A test about the probe itself
+    re-patches `find_spec` in its own body and wins. The verdict is cached for the life of
+    a grading run - both the probe and the once-per-run log guard - so both are cleared
+    either side."""
+    _clear_dep_caches()
+    monkeypatch.setattr(collect.importlib.util, "find_spec", lambda name: object())
+    yield
+    _clear_dep_caches()
+
+
+def _clear_dep_caches() -> None:
+    collect._grader_dep_present.cache_clear()
+    collect._grader_dep_missing.cache_clear()
 
 
 def test_parse_grading_spec_defaults_and_overrides():
@@ -68,7 +91,7 @@ def test_the_public_log_never_names_a_submission_repo(monkeypatch, capsys):
     assert ref.startswith("#") and len(ref) == 8
     assert "ada" not in ref
     # The clone-failure paths log the tag, not the repo.
-    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "clone failed"))
+    monkeypatch.setattr(ghcli, "gh", lambda *a, **k: (1, "clone failed"))
     monkeypatch.setattr(collect, "repo_missing", lambda *a: True)
     collect._grade_target("COHORT", "assignment-1-ada-l", {}, None, "2026-09-08")
     captured = capsys.readouterr()
@@ -289,6 +312,20 @@ def test_run_tests_renames_a_non_py_nbconvert_output(
     assert "renamed the stray output" in out and "starter" not in out
 
 
+def test_run_tests_copies_a_symlinked_fixture_as_a_link(monkeypatch, tmp_path):
+    # The hidden tests are copied out of the solution branch with a plain copytree, which
+    # FOLLOWS links - so one dangling fixture symlink raised and zeroed the whole cohort.
+    _fake_nbconvert(monkeypatch, None)
+    work = tmp_path / "sub"
+    work.mkdir()
+    tests = tmp_path / "hidden"
+    tests.mkdir()
+    (tests / "test_x.py").write_text("def test_solve(): pass\n")
+    (tests / "fixture.csv").symlink_to("nowhere.csv")
+
+    assert collect._run_tests(work, tests)["score"] == 1
+
+
 def test_run_tests_leaves_a_correct_py_conversion_alone(monkeypatch, tmp_path):
     # The happy path must not be disturbed: a notebook declaring `file_extension: ".py"`
     # already converts to starter.py, and a stray same-stem .txt is not the script.
@@ -360,6 +397,35 @@ def test_run_tests_abandons_the_submission_on_the_first_convert_timeout(
     assert collect._run_tests(work, tests) is None
     assert len(calls) == 1  # bailed on the FIRST timeout, not once per notebook
     assert "abandoning this submission" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "submission, module",
+    [("starter.py", "pytest"), ("starter.ipynb", "nbconvert")],
+)
+def test_run_tests_names_a_grading_dependency_the_runner_does_not_have(
+    monkeypatch, tmp_path, capsys, submission, module
+):
+    # `_run_limited` sends the child's output to DEVNULL and calls ANY exit code a completed
+    # run, so `python -m pytest` dying on "No module named pytest" was indistinguishable
+    # from a failing submission: a grading-failed zero for every target, a red cron with no
+    # sentinel, and the same again every hour for the rest of the term. Name the fault.
+    monkeypatch.setattr(collect.importlib.util, "find_spec", lambda name: None)
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(
+        collect,
+        "_run_limited",
+        lambda argv, **kw: spawned.append(argv) or True,
+    )
+    work = tmp_path / "sub"
+    work.mkdir()
+    (work / submission).write_text("{}")
+    tests = tmp_path / "hidden"
+    tests.mkdir()
+
+    assert collect._run_tests(work, tests) is None
+    assert spawned == [], f"{module} was invoked although it is not importable"
+    assert f"`{module}` is not installed" in capsys.readouterr().err
 
 
 def test_stray_conversion_ignores_a_same_stem_directory(tmp_path):
@@ -439,6 +505,38 @@ def test_snapshot_sha_asks_the_api_for_one_commit_before_a_utc_cutoff(monkeypatc
     assert "until=2026-10-15T21:59:59Z" in args and "per_page=1" in args
 
 
+def test_snapshot_sha_flags_a_commit_dated_after_the_freeze(monkeypatch, capsys):
+    # Only the MOMENT of the freeze is server-timed; WHICH commit it picks is still judged
+    # on the committer date, which the student sets. A chosen commit dated after we looked
+    # cannot have existed then - a skewed or doctored clock - and a marker has to be told,
+    # because everything downstream treats the pinned sha as settled.
+    monkeypatch.setattr(
+        collect, "gh", lambda *a, **k: (0, f"{SHA} 2026-10-16T10:00:00Z")
+    )
+    assert (
+        collect._snapshot_sha(
+            "Cohort",
+            "assignment-1-anna",
+            "2026-10-16",
+            "2026-10-16T09:00:00+00:00",
+        )
+        == SHA
+    )
+    out = capsys.readouterr().out
+    assert "dated after this freeze was taken" in out
+    assert "anna" not in out, "the public log must carry the tag, not the handle"
+
+
+def test_snapshot_sha_says_nothing_about_an_ordinary_commit(monkeypatch, capsys):
+    monkeypatch.setattr(
+        collect, "gh", lambda *a, **k: (0, f"{SHA} 2026-10-15T10:00:00Z")
+    )
+    collect._snapshot_sha(
+        "Cohort", "assignment-1-anna", "2026-10-16", "2026-10-16T09:00:00+00:00"
+    )
+    assert "dated after" not in capsys.readouterr().out
+
+
 def _stub_snapshot_write(monkeypatch, shas: dict[str, str | None], existing=None):
     """Wire snapshot_assignment onto stubs; returns the (path, text) writes it makes."""
     written: list[tuple[str, str]] = []
@@ -451,7 +549,7 @@ def _stub_snapshot_write(monkeypatch, shas: dict[str, str | None], existing=None
         ],
     )
     monkeypatch.setattr(
-        collect, "_snapshot_sha", lambda org, repo, deadline: shas[repo]
+        collect, "_snapshot_sha", lambda org, repo, deadline, at="": shas[repo]
     )
     monkeypatch.setattr(
         collect,
@@ -467,8 +565,11 @@ def test_snapshot_assignment_records_one_row_per_repo(monkeypatch):
     written = _stub_snapshot_write(
         monkeypatch, {"assignment-1-anna": SHA, "assignment-1-ben": ""}
     )
-    assert collect.snapshot_assignment(
-        "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+    assert (
+        collect.snapshot_assignment(
+            "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+        )
+        is collect.SnapshotResult.WRITTEN
     )
     ((path, text),) = written
     assert path == "snapshots/assignment-1.csv"
@@ -493,7 +594,7 @@ def test_snapshot_assignment_never_overwrites_an_existing_snapshot(monkeypatch):
         collect.snapshot_assignment(
             "Cohort", "assignment-1", "2026-10-15T23:59", is_group=False
         )
-        is True
+        is collect.SnapshotResult.PRESENT
     )
 
 
@@ -507,7 +608,7 @@ def test_snapshot_assignment_writes_nothing_when_a_lookup_fails(monkeypatch):
         collect.snapshot_assignment(
             "Cohort", "assignment-1", "2026-10-15T23:59", is_group=False
         )
-        is False
+        is collect.SnapshotResult.FAILED
     )
     assert written == []
 
@@ -529,7 +630,7 @@ def test_snapshot_assignment_with_no_targets_yet_writes_nothing_and_is_not_an_er
         collect.snapshot_assignment(
             "Cohort", "assignment-1", "2026-10-15T23:59", is_group=False
         )
-        is True
+        is collect.SnapshotResult.NOTHING_TO_FREEZE
     )
     assert "nothing to freeze yet" in capsys.readouterr().out
 
@@ -549,21 +650,23 @@ def test_load_snapshots_distinguishes_a_missing_file_from_blank_shas(monkeypatch
 
 
 def _clone_writing(grading: str):
-    """A `gh` whose `repo clone` of the template's solution branch is faked into a real
+    """A `ghcli.clone` double that fakes the template's solution branch into a real
     directory carrying `grading`."""
 
-    def fake_gh(*args, **kwargs):
-        if args[:2] == ("repo", "clone"):
-            dest = Path(args[3])
-            dest.mkdir(parents=True, exist_ok=True)
-            (dest / "grading.yml").write_text(grading)
-            (dest / "tests").mkdir(exist_ok=True)
-        return (0, "")
+    def fake_clone(org, repo, dest, branch=None):
+        dest = Path(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "grading.yml").write_text(grading)
+        (dest / "tests").mkdir(exist_ok=True)
+        return True
 
-    return fake_gh
+    return fake_clone
 
 
-_fake_solution_clone = _clone_writing("autograde: true\nmax_auto: 2\n")
+def _stub_solution_clone(monkeypatch, grading: str = "autograde: true\nmax_auto: 2\n"):
+    """Fake the solution-branch clone, and answer every other `gh` blandly."""
+    monkeypatch.setattr(collect, "clone", _clone_writing(grading))
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, ""))
 
 
 def _captured_writes(monkeypatch) -> list[tuple[str, str]]:
@@ -580,7 +683,7 @@ def _captured_writes(monkeypatch) -> list[tuple[str, str]]:
 
 
 def _stub_collect(monkeypatch, snapshots):
-    monkeypatch.setattr(collect, "gh", _fake_solution_clone)
+    _stub_solution_clone(monkeypatch)
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(
         collect,
@@ -600,6 +703,102 @@ def _stub_collect(monkeypatch, snapshots):
 
     monkeypatch.setattr(collect, "_grade_target", fake_grade)
     return seen
+
+
+def test_collect_with_no_targets_at_all_records_the_skip(monkeypatch, capsys):
+    # Nothing to grade at a passed deadline is a RESULT (nobody onboarded yet; a group
+    # assignment with no teams), not a failure. Left unrecorded, the cron came back every
+    # hour and went red every hour - it ran that way in the demo cohort for days.
+    _stub_collect(monkeypatch, None)
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group=None, teams_key=None: [],
+    )
+    marked: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        collect,
+        "mark_not_autograded",
+        lambda org, slug, why: marked.append((slug, why)) or True,
+    )
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
+    assert [slug for slug, _why in marked] == ["assignment-1"]
+    assert "no submission targets" in marked[0][1]
+
+
+def test_the_cron_path_waits_instead_of_recording_a_no_targets_skip(
+    monkeypatch, capsys
+):
+    # `_skipped.json` is fire-once. On the hourly cron an empty target list only means the
+    # cohort has not filled up yet, so recording it would retire the assignment for good.
+    _stub_collect(monkeypatch, None)
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group=None, teams_key=None: [],
+    )
+
+    def boom(*a, **k):
+        raise AssertionError("the cron must never record a permanent skip")
+
+    monkeypatch.setattr(collect, "mark_not_autograded", boom)
+    assert (
+        collect.collect("Course", "assignment-1-f2026", "Cohort", scheduled=True) == 0
+    )
+    assert "no submission targets" in capsys.readouterr().out
+
+
+def test_an_unwritten_no_targets_marker_goes_red(monkeypatch):
+    # The `_skipped.json` record IS the skip. A write that failed and was discarded left
+    # the next tick to re-clone the template and re-decide the identical skip, for ever.
+    _stub_collect(monkeypatch, None)
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group=None, teams_key=None: [],
+    )
+    monkeypatch.setattr(collect, "mark_not_autograded", lambda *a, **k: False)
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
+
+
+def test_collect_looks_teams_up_by_the_schedule_key_not_the_cohort_name(monkeypatch):
+    # `cohort_dest_repo` makes the two differ. Repos are named after the cohort NAME;
+    # teams.csv is keyed on the SCHEDULE KEY (the Join-team form writes what schedule.yml
+    # declares). Passing the name found no teams, so a group assignment silently had
+    # nothing to grade while the repos it should have graded existed.
+    entry = collect.schedule.AssignmentEntry(
+        course_source_repo="assignment-4-project-f2026",
+        cohort_dest_repo="group-project",
+        due_datetime=datetime(2026, 11, 15, tzinfo=ZoneInfo("Europe/Berlin")),
+        type="group",
+    )
+    _stub_collect(monkeypatch, None)
+    monkeypatch.setattr(
+        collect.schedule, "load", lambda org: Schedule(assignments={"project": entry})
+    )
+    asked: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group=None, teams_key=None: (
+            asked.append((slug, teams_key)) or []
+        ),
+    )
+    monkeypatch.setattr(collect, "mark_not_autograded", lambda *a, **k: True)
+    collect.collect("Course", "assignment-4-project-f2026", "Cohort")
+    assert asked == [("group-project", "project")]
+
+
+def test_the_log_tag_cannot_be_recomputed_from_outside_the_run(monkeypatch):
+    # The salt is what stops anyone recomputing the tag: both halves of a submission repo
+    # name are public (the slug on the cohort site, the handle in the welcome repo's Join
+    # issue titles), so an unsalted sha1 would read the student straight back off the log.
+    repo = "assignment-1-ada-l"
+    unsalted = hashlib.sha1(repo.encode()).hexdigest()[:7]
+    first = collect.target_ref(repo)
+    assert not first.endswith(unsalted)
+    monkeypatch.setattr(collect, "_REF_SALT", "a-different-run")
+    assert collect.target_ref(repo) != first, "the tag is stable across RUNS"
 
 
 def test_collect_passes_each_repos_own_snapshot_entry_to_grading(monkeypatch):
@@ -674,7 +873,7 @@ def test_collect_resolves_the_cohort_type_from_the_entry_not_the_cohort_name(
 def test_collect_records_a_skip_when_the_template_has_no_solution_branch(monkeypatch):
     # Fire-once: no marker means the scheduler re-clones this template and re-decides the
     # same skip on every hourly tick, for ever. Hand-marked assignments are common.
-    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "no such branch"))
+    monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
@@ -684,7 +883,7 @@ def test_collect_records_a_skip_when_the_template_has_no_solution_branch(monkeyp
 
 
 def test_collect_records_a_skip_when_autograde_is_disabled(monkeypatch):
-    monkeypatch.setattr(collect, "gh", _clone_writing("autograde: false\n"))
+    _stub_solution_clone(monkeypatch, "autograde: false\n")
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
@@ -695,7 +894,7 @@ def test_collect_records_a_skip_when_autograde_is_disabled(monkeypatch):
 
 def test_collect_dry_run_records_no_skip(monkeypatch):
     # A dry run must not fire the marker - that would silence the real run that follows.
-    monkeypatch.setattr(collect, "gh", _clone_writing("autograde: false\n"))
+    _stub_solution_clone(monkeypatch, "autograde: false\n")
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort", dry_run=True) == 0
@@ -707,7 +906,7 @@ def test_collect_with_nothing_gradable_records_a_skip_and_succeeds(monkeypatch, 
     # whose team has no members). The snapshot is frozen, so an hourly retry would see
     # exactly this and go red every hour - record the skip and stay green.
     _stub_collect(monkeypatch, {"assignment-1-team-x": ""})
-    monkeypatch.setattr(collect, "gh", _clone_writing("type: group\nautograde: true\n"))
+    _stub_solution_clone(monkeypatch, "type: group\nautograde: true\n")
     monkeypatch.setattr(
         collect,
         "submission_targets",
@@ -1026,7 +1225,7 @@ def test_snapshot_assignment_skips_when_every_repo_is_absent(monkeypatch, capsys
         collect.snapshot_assignment(
             "Cohort", "assignment-1", "2026-10-15T23:59", is_group=False
         )
-        is True
+        is collect.SnapshotResult.NOTHING_TO_FREEZE
     )
     assert "every target repo is absent" in capsys.readouterr().out
 
@@ -1042,7 +1241,7 @@ def test_snapshot_assignment_freezes_reachable_empty_repos_as_zero(monkeypatch):
         collect.snapshot_assignment(
             "Cohort", "assignment-1", "2026-10-15T23:59", is_group=False
         )
-        is True
+        is collect.SnapshotResult.WRITTEN
     )
     assert len(written) == 1  # the snapshot WAS frozen
     _path, text = written[0]
@@ -1203,14 +1402,16 @@ def test_has_autograde_results_checks_the_records_not_bare_directory(monkeypatch
     # The marker is the _graded.json sentinel OR the _skipped.json record - NEVER bare
     # autograde/<slug>/ existence, which an aborted run can leave populated but un-sentineled.
     def only(record: str):
-        return lambda *args: (0, "") if args[-1].endswith(record) else (1, "not found")
+        return lambda *args: (
+            (0, "") if any(a.endswith(record) for a in args) else (1, "not found")
+        )
 
-    monkeypatch.setattr(collect, "gh", only("_graded.json"))
+    monkeypatch.setattr(gh_contents, "gh", only("_graded.json"))
     assert collect.has_autograde_results("Cohort", "assignment-1")  # a completed run
-    monkeypatch.setattr(collect, "gh", only("_skipped.json"))
+    monkeypatch.setattr(gh_contents, "gh", only("_skipped.json"))
     assert collect.has_autograde_results("Cohort", "assignment-1")  # a recorded skip
     # a populated directory with neither record present is NOT graded (the old bug)
-    monkeypatch.setattr(collect, "gh", lambda *a: (1, "not found"))
+    monkeypatch.setattr(gh_contents, "gh", lambda *a: (1, "not found"))
     assert not collect.has_autograde_results("Cohort", "assignment-1")
 
 
@@ -1248,7 +1449,7 @@ def test_collect_withholds_the_sentinel_when_an_archive_write_fails(monkeypatch)
 def test_a_zero_is_recorded_only_when_github_says_the_repo_is_gone(monkeypatch):
     # `repo_exists` reads ANY failure as absent. A clone hiccup followed by one 5xx on the
     # probe used to write a permanent, write-once zero for a student who had submitted.
-    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "clone failed"))
+    monkeypatch.setattr(ghcli, "gh", lambda *a, **k: (1, "clone failed"))
     monkeypatch.setattr(collect, "repo_missing", lambda *a: False)  # a 5xx: cannot tell
     assert collect._grade_target("K", "a1-ada", {}, None, "2026-09-08") is None
     monkeypatch.setattr(collect, "repo_missing", lambda *a: True)  # GitHub says 404
@@ -1259,12 +1460,49 @@ def test_a_zero_is_recorded_only_when_github_says_the_repo_is_gone(monkeypatch):
 # ---------- teams.csv is keyed on the SCHEDULE KEY, submission repos on the cohort name
 
 
+def _roster_of(monkeypatch, *rows: str):
+    """The cohort roster `submission_targets` vets teams.csv against."""
+    monkeypatch.setattr(
+        collect.roster,
+        "load",
+        lambda org: collect.roster.parse(
+            ROSTER_HEADER + "\n" + "".join(r + "\n" for r in rows)
+        ),
+    )
+
+
+def test_submission_targets_vets_teams_csv_against_the_roster(monkeypatch, capsys):
+    # teams.csv is student-writable, and a handle in it earned a row of its OWN in the
+    # grades CSV - the file faculty mark from and `render` fans out into gradebooks. A
+    # typo, an invented name or an auditor must not appear there at all. Same allowlist
+    # `assign.provision_all` vets a group handout through.
+    _roster_of(
+        monkeypatch,
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
+        "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor",
+        "cy@uni.edu,Cy,,,dsl-ghi,enrolled",  # not onboarded
+    )
+    monkeypatch.setattr(collect.teams, "load", lambda org: {})
+    monkeypatch.setattr(
+        collect.teams,
+        "teams_for",
+        lambda rows, slug: {"team-1": ["Ada-L", "stranger-x", "eve-e", "cy"]},
+    )
+    targets = collect.submission_targets("Cohort", "assignment-4", True)
+    # the roster's casing wins; everyone else is dropped
+    assert targets == [("assignment-4-team-1", "team-1", ["ada-l"])]
+    err = capsys.readouterr().err
+    assert "3 handle(s) in teams.csv" in err
+    assert "stranger-x" not in err, "a student's typing must not reach a public log"
+
+
 def test_submission_targets_looks_teams_up_by_the_schedule_key(monkeypatch):
     # `cohort_dest_repo` makes the cohort-side name differ from the schedule key. teams.csv
     # carries the key (the Join-team form writes what schedule.yml declares), so looking up
     # by the name found no teams and the whole group assignment silently had nothing to
     # grade - while the repos it should have graded existed under the name.
     asked: list[str] = []
+    _roster_of(monkeypatch, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
     monkeypatch.setattr(collect.teams, "load", lambda org: {})
     monkeypatch.setattr(
         collect.teams,
@@ -1282,6 +1520,7 @@ def test_submission_targets_looks_teams_up_by_the_schedule_key(monkeypatch):
 
 
 def test_submission_targets_defaults_the_teams_key_to_the_name(monkeypatch):
+    _roster_of(monkeypatch, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
     monkeypatch.setattr(collect.teams, "load", lambda org: {})
     monkeypatch.setattr(
         collect.teams,
@@ -1306,7 +1545,7 @@ def test_an_unwritten_autograde_false_marker_goes_red_rather_than_green(
     # The `_skipped.json` record IS the skip: without it the cron re-clones the template
     # and re-decides the identical skip on every hourly tick, for ever. Returning 0 on a
     # failed write reported that as done.
-    monkeypatch.setattr(collect, "gh", _clone_writing("autograde: false\n"))
+    _stub_solution_clone(monkeypatch, "autograde: false\n")
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     _failing_put_file(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
@@ -1316,7 +1555,7 @@ def test_an_unwritten_autograde_false_marker_goes_red_rather_than_green(
 def test_an_unwritten_no_solution_branch_marker_goes_red(monkeypatch, capsys):
     # No `solution` branch means hand-marked, recorded once. A failed record means the
     # same clone attempt, and the same decision, every hour.
-    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "no such branch"))
+    monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     _failing_put_file(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
@@ -1325,7 +1564,7 @@ def test_an_unwritten_no_solution_branch_marker_goes_red(monkeypatch, capsys):
 
 def test_an_unwritten_nothing_gradable_marker_goes_red(monkeypatch, capsys):
     _stub_collect(monkeypatch, {"assignment-1-team-x": ""})
-    monkeypatch.setattr(collect, "gh", _clone_writing("type: group\nautograde: true\n"))
+    _stub_solution_clone(monkeypatch, "type: group\nautograde: true\n")
     monkeypatch.setattr(
         collect,
         "submission_targets",

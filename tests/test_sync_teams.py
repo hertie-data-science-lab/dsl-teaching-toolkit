@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from dsl_course import gh_teams, roster, sync_teams
+from tests.conftest import ROSTER_HEADER
 
 
 def test_team_slug_is_assignment_prefixed_and_lowercased():
@@ -60,7 +61,7 @@ def stub_team(monkeypatch):
         "get_team_members",
         lambda org, team: {"anna-adams", "hertie-dsl-bot", "henrycgbaker", "zoe-zed"},
     )
-    monkeypatch.setattr(gh_teams, "_acting_login", lambda: "hertie-dsl-bot")
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: "hertie-dsl-bot")
     monkeypatch.setattr(
         gh_teams, "get_org_owners", lambda org: frozenset({"henrycgbaker"})
     )
@@ -98,7 +99,7 @@ def test_ensure_team_without_prune_only_adds(stub_team):
     assert stub_team["removed"] == []
 
 
-HEADER = "hertie_email,name,github_handle,github_id,enrol_code,role"
+HEADER = ROSTER_HEADER
 
 
 def _students(*rows: str) -> list[roster.Student]:
@@ -117,6 +118,22 @@ def test_vet_handles_canonicalises_accepts_and_rejects():
     assert rejected == [
         "m-stranger"
     ]  # not on the roster -> excluded, raw handle returned
+
+
+def test_vet_groups_applies_one_allowlist_across_a_whole_map():
+    # The team sync, the handout and the collection each built this allowlist for
+    # themselves. A handle good enough to be handed a repo but not good enough to earn a
+    # grade row is what a second copy of the rule costs a student.
+    students = _students(
+        "ada@uni.edu,Ada,Ada-L,42,,enrolled",
+        "ben@uni.edu,Ben,ben-b,43,,enrolled",
+    )
+    assert sync_teams.vet_groups(
+        {"wizards": ["ADA-L", "m-stranger"], "alchemists": ["ben-b"]}, students
+    ) == [
+        ("alchemists", ["ben-b"], []),  # name-sorted, member order preserved
+        ("wizards", ["Ada-L"], ["m-stranger"]),
+    ]
 
 
 def test_known_handles_are_the_onboarded_roster_handles():

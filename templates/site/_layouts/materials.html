@@ -25,7 +25,7 @@ keying them by the repo they sit in listed each of them once per content repo.
 {% if docs and docs.size > 0 %}
 <ul class="course-documents">
 {% for doc in docs %}
-  <li class="raw_li"><a href="{{ doc.url }}">{{ doc.name }}</a></li>
+  <li><a href="{{ doc.url }}">{{ doc.name }}</a></li>
 {% endfor %}
 </ul>
 {% endif %}

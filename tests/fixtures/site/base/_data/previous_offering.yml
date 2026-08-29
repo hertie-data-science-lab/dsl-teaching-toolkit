@@ -1,5 +1,0 @@
-# course-website-template's file, with one entry so the home page's Previous Offerings
-# block actually renders (the template ships it as `offerings: []`).
-offerings:
-  - title: "Fall 2025"
-    url: "https://example.invalid/f2025"

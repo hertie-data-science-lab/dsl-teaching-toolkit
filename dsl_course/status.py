@@ -27,10 +27,10 @@ from datetime import date
 import yaml
 
 from . import grades, roster, schedule, sync_faculty, teams
-from .central import CENTRAL_REF, resolve_central_ref
-from .gh_contents import load_yaml_config
+from .central import CENTRAL_REF, MissingCentralRef, resolve_central_ref
+from .discovery import org_meta
 from .log import log_err
-from .repos import get_default_branch
+from .repos import default_branch
 
 ITEMS = ("B1", "B6", "B7", "C2", "C3", "C4", "C5", "C6", "C7")
 # Rows whose input is marked `[required]` in docs/DEPLOYMENT-CHECKLIST.md;
@@ -98,12 +98,12 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
     """One status row per faculty & instructors input location for `cohort_org`. Read-only."""
     # load_yaml_config raises a clear error on malformed YAML (caught in main()) instead
     # of handing a traceback to the operator who runs status to find the broken input.
-    course_meta = load_yaml_config(course_org, ".github", "dsl-course.yml") or {}
+    course_meta = org_meta(course_org)
 
     # Every course-org row lives in .github; every cohort row lives in
     # classroom-config - resolve each default branch once, not once per row.
-    course_branch = get_default_branch(course_org, ".github")
-    cohort_branch = get_default_branch(cohort_org, schedule.CONFIG_REPO)
+    course_branch = default_branch(course_org, ".github", fallback="main")
+    cohort_branch = default_branch(cohort_org, schedule.CONFIG_REPO, fallback="main")
 
     data: dict[str, dict] = {}
 
@@ -153,7 +153,17 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
     # is per-cohort - and an org whose tier is the default should read as such rather than
     # as an unset input someone forgot.
     declared = course_meta.get("central_ref")
-    ref = resolve_central_ref(declared, source=f"{course_org}/.github/dsl-course.yml")
+    try:
+        ref = resolve_central_ref(
+            declared, source=f"{course_org}/.github/dsl-course.yml"
+        )
+        tier_ok = declared is not None
+        tier = ref if declared is not None else f"{CENTRAL_REF} (default)"
+    except MissingCentralRef:
+        # Declared, but not a tier or a full SHA. Nothing renders at it, so this reads as
+        # a fault rather than as the silent fallback it used to be.
+        tier_ok = False
+        tier = f"'{declared}' is not a tier or a commit SHA - nothing re-renders"
     data["B7"] = _row(
         "B7",
         "Toolkit tier",
@@ -161,8 +171,8 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         ".github",
         "dsl-course.yml",
         course_branch,
-        declared is not None,
-        ref if declared is not None else f"{CENTRAL_REF} (default)",
+        tier_ok,
+        tier,
     )
 
     students = roster.load(cohort_org) or []

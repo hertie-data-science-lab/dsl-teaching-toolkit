@@ -1,6 +1,6 @@
-"""Org and team membership: creating a team, reconciling one team's roster against
-what a config file declares, and the guards that stop a sweep pruning the wrong
-person."""
+"""The org and the teams in it: converging an org's settings, creating a team,
+reconciling one team's roster against what a config file declares, and the guards that
+stop a sweep pruning the wrong person."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def test_reconcile_team_members_adds_missing_and_removes_extra(monkeypatch):
     monkeypatch.setattr(
         gh_teams, "get_team_members", lambda org, team: {"alice", "bob"}
     )
-    monkeypatch.setattr(gh_teams, "_acting_login", lambda: None)
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: None)
     monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
     added, removed = [], []
     monkeypatch.setattr(
@@ -40,11 +40,60 @@ def test_reconcile_team_members_adds_missing_and_removes_extra(monkeypatch):
     assert removed == ["bob"]
 
 
-def test_reconcile_team_members_never_prunes_the_acting_login(monkeypatch):
+def test_reconcile_team_members_never_prunes_a_renamed_account(monkeypatch):
+    # A GitHub login is renameable and its id is not. `ada-new` is not in `wanted` (the
+    # roster still spells the old name), but it carries the id of a roster row - so it is
+    # the same student, and pruning it was the second half of an unrecoverable break: the
+    # add of `ada-old` 404s and the eviction repeats every night. `stranger` has no roster
+    # id and still goes.
+    monkeypatch.setattr(
+        gh_teams, "get_team_members", lambda org, team: {"ada-new", "stranger"}
+    )
+    monkeypatch.setattr(
+        gh_teams,
+        "get_team_member_ids",
+        lambda org, team: {"ada-new": "42", "stranger": "99"},
+    )
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: None)
+    monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
+    removed = []
+    monkeypatch.setattr(gh_teams, "add_team_member", lambda *a, **k: True)
+    monkeypatch.setattr(
+        gh_teams, "remove_team_member", lambda org, team, h: removed.append(h) or True
+    )
+    errors = gh_teams.reconcile_team_members(
+        "org", "students", {"ada-old"}, keep_ids={"42"}
+    )
+    assert errors == 0
+    assert removed == ["stranger"]
+
+
+def test_reconcile_team_members_skips_the_prune_when_ids_are_unreadable(monkeypatch):
+    # Pruning without the ids is exactly how a renamed student is evicted, so an
+    # unreadable id listing skips the prune whole - the same rule the owner list follows.
+    monkeypatch.setattr(
+        gh_teams, "get_team_members", lambda org, team: {"ada-new", "stranger"}
+    )
+    monkeypatch.setattr(gh_teams, "get_team_member_ids", lambda org, team: None)
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: None)
+    monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
+    removed = []
+    monkeypatch.setattr(gh_teams, "add_team_member", lambda *a, **k: True)
+    monkeypatch.setattr(
+        gh_teams, "remove_team_member", lambda org, team, h: removed.append(h) or True
+    )
+    assert (
+        gh_teams.reconcile_team_members("org", "students", {"ada-old"}, keep_ids={"42"})
+        == 0
+    )
+    assert removed == []
+
+
+def test_reconcile_team_members_never_prunes_theacting_login(monkeypatch):
     monkeypatch.setattr(
         gh_teams, "get_team_members", lambda org, team: {"alice", "hertie-dsl-bot"}
     )
-    monkeypatch.setattr(gh_teams, "_acting_login", lambda: "hertie-dsl-bot")
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: "hertie-dsl-bot")
     monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
     removed = []
     monkeypatch.setattr(gh_teams, "add_team_member", lambda *a, **k: True)
@@ -65,7 +114,7 @@ def test_reconcile_team_members_never_prunes_any_org_owner(monkeypatch):
         lambda org, team: {"alice", "hertie-dsl-bot", "henrycgbaker"},
     )
     monkeypatch.setattr(
-        gh_teams, "_acting_login", lambda: "henrycgbaker"
+        gh_teams, "acting_login", lambda: "henrycgbaker"
     )  # a human, running locally
     monkeypatch.setattr(
         gh_teams,
@@ -87,7 +136,7 @@ def test_reconcile_team_members_compares_case_insensitively(monkeypatch, capsys)
     # `anna-adams` are the same account. Comparing raw casing added-then-pruned it every
     # run, oscillating that person's access nightly.
     monkeypatch.setattr(gh_teams, "get_team_members", lambda org, team: {"anna-adams"})
-    monkeypatch.setattr(gh_teams, "_acting_login", lambda: None)
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: None)
     monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
     added, removed = [], []
     monkeypatch.setattr(
@@ -133,8 +182,12 @@ def test_get_team_members_returns_none_on_failure_not_an_empty_set(monkeypatch):
     assert gh_teams.get_team_members("Org", "students") is None
     monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (0, "not json"))
     assert gh_teams.get_team_members("Org", "students") is None
-    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (0, '[{"login": "alice"}]'))
-    assert gh_teams.get_team_members("Org", "students") == {"alice"}
+    # One listing behind both readers, so it asks for the id as well - which is what lets
+    # a reconcile tell a stranger from somebody who has renamed their account.
+    row = '[{"login": "Alice", "id": 7}]'
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (0, row))
+    assert gh_teams.get_team_members("Org", "students") == {"Alice"}
+    assert gh_teams.get_team_member_ids("Org", "students") == {"alice": "7"}
 
 
 def test_create_team_only_treats_an_already_exists_422_as_success(monkeypatch):
@@ -181,7 +234,7 @@ def test_reconcile_team_members_skips_the_prune_when_the_owners_are_unreadable(
     # Without the owner list there is no way to tell an Owner from a stray member, and a
     # blind prune could evict one. Adds still happen; the prune pass is skipped, loudly.
     monkeypatch.setattr(gh_teams, "get_team_members", lambda org, team: {"alice"})
-    monkeypatch.setattr(gh_teams, "_acting_login", lambda: None)
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: None)
     monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: None)
     added, removed = [], []
     monkeypatch.setattr(
@@ -204,7 +257,7 @@ def test_reconcile_keeps_the_handles_it_adds_and_removes_out_of_a_public_log(
 ):
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     monkeypatch.setattr(gh_teams, "get_team_members", lambda org, team: {"zoe-zed"})
-    monkeypatch.setattr(gh_teams, "_acting_login", lambda: "bot")
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: "bot")
     monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
     monkeypatch.setattr(gh_teams, "add_team_member", lambda *a, **k: True)
     monkeypatch.setattr(gh_teams, "remove_team_member", lambda *a, **k: True)
@@ -213,3 +266,96 @@ def test_reconcile_keeps_the_handles_it_adds_and_removes_out_of_a_public_log(
     )
     captured = capsys.readouterr()
     assert "ada-l" not in captured.out and "zoe-zed" not in captured.out
+
+
+# ------------------------------------------------------------- converging org settings
+
+
+def _patched(monkeypatch, answer=(0, "")) -> list[tuple[str, ...]]:
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: calls.append(a) or answer)
+    return calls
+
+
+def _duplicate_then(monkeypatch, current_privacy: str | None) -> list[tuple[str, ...]]:
+    """Record every gh call for a create_team whose POST hits the duplicate-name 422,
+    answering the privacy read with `current_privacy` (None: the read fails)."""
+    calls: list[tuple[str, ...]] = []
+
+    def fake_gh(*a, **k):
+        calls.append(a)
+        if a[:2] == ("api", "orgs/Org/teams/students"):
+            return (0, current_privacy) if current_privacy else (1, "gh: HTTP 502")
+        return 1, "HTTP 422: name already_exists"
+
+    monkeypatch.setattr(gh_teams, "gh", fake_gh)
+    return calls
+
+
+_PATCH_PRIVACY = (
+    "api",
+    "--method",
+    "PATCH",
+    "orgs/Org/teams/students",
+    "--field",
+    "privacy=secret",
+)
+
+
+def test_an_existing_team_has_its_privacy_corrected(monkeypatch):
+    # create_team treated a duplicate as success and left the team as it was, so every
+    # cohort made before students/auditors became `secret` still published the class list
+    # to every student in it.
+    calls = _duplicate_then(monkeypatch, "closed")
+    assert gh_teams.create_team("Org", "students", privacy="secret") is True
+    assert _PATCH_PRIVACY in calls
+
+
+def test_a_team_already_at_the_wanted_privacy_is_not_patched(monkeypatch):
+    # sync_teams calls create_team once per team per hourly sync. Patching privacy that
+    # was already right spent that whole allowance of the write governor on no-ops.
+    calls = _duplicate_then(monkeypatch, "secret")
+    assert gh_teams.create_team("Org", "students", privacy="secret") is True
+    assert _PATCH_PRIVACY not in calls
+
+
+def test_an_existing_team_keeps_its_privacy_when_none_is_asked_for(monkeypatch):
+    # A caller that names no privacy is asking only that the team exist, so there is
+    # nothing to read and nothing to correct.
+    calls = _duplicate_then(monkeypatch, "closed")
+    assert gh_teams.create_team("Org", "students") is True
+    assert len(calls) == 1  # the POST, and nothing after it
+
+
+def test_a_course_org_is_tightened_like_a_cohort(monkeypatch):
+    # It used to be cohort-only, so every member of a COURSE org - every TA, every
+    # visiting instructor - could read the unreleased materials, the model solutions and
+    # the assignment `solution` branches. Faculty access comes from the team grants.
+    calls = _patched(monkeypatch)
+    assert gh_teams.converge_org_settings("Course-Org") == 0
+    fields = [f for call in calls for f in call]
+    assert "default_repository_permission=none" in fields
+    assert "members_can_create_repositories=false" in fields
+
+
+def test_a_failed_tighten_reds_the_run(monkeypatch):
+    # An org left at GitHub's default (every member reads every repo) is a real
+    # misconfiguration - it must red the caller, not just log and pass.
+    _patched(monkeypatch, (1, "gh: HTTP 403"))
+    assert gh_teams.converge_org_settings("Cohort-f2026") == 1
+
+
+def test_2fa_that_cannot_be_enforced_is_named_and_counted_not_red(monkeypatch, capsys):
+    # GitHub refuses the 2FA PATCH while any member still has 2FA off. That is a fact
+    # about people, so counting it would red this convergence in every org every night
+    # for something no re-run can fix.
+    def fake_gh(*args, **k):
+        if "two_factor_requirement_enabled=true" in args:
+            return (1, "gh: HTTP 422 members without 2FA")
+        if "--paginate" in args:
+            return (0, "anna\nbeat\ncarl\n")
+        return (0, "")
+
+    monkeypatch.setattr(gh_teams, "gh", fake_gh)
+    assert gh_teams.converge_org_settings("Course-Org") == 0
+    assert "2FA not enforced: 3 members without 2FA" in capsys.readouterr().out

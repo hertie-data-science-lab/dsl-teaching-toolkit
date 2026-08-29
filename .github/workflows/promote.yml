@@ -32,49 +32,62 @@ on:
         default: ""
         type: string
       refresh_orgs:
-        description: "Run 'Refresh actions' on every org at that tier now, rather than waiting for tonight's cron"
+        description: "Refresh every org at that tier now, rather than waiting for tonight's cron"
         required: false
         default: true
         type: boolean
 
-# Both jobs authenticate as the bot, so neither needs anything from the ambient token
-# beyond reading this repo for the checkout.
+# The push authenticates as a repo-scoped deploy key and the fan-out as the bot, so
+# neither job needs anything from the ambient token beyond reading this repo.
 permissions: {}
 
 jobs:
   promote:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # The tier being promoted to, as a deployment environment: `release` carries the admin
-    # team as required reviewers, so a release promotion pauses for a human, while a
+    # The tier being promoted to, as a deployment environment: `release` carries the
+    # maintainer as a required reviewer, so a release promotion pauses for a human, while a
     # staging soak stays one click. GitHub creates a named environment on first use, so an
     # environment with no rules is simply no extra gate.
     environment: ${{ inputs.to }}
     permissions:
       contents: read
+    outputs:
+      # The commit the tier now points at - what the fan-out below must run.
+      sha: ${{ steps.fast-forward.outputs.sha }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
-          # The push below is the BOT's, not GITHUB_TOKEN's: a branch ruleset can restrict
-          # the tier branches to one account, and GITHUB_TOKEN cannot be that account -
-          # which left the tiers pushable by every write-holder on this repo. Checkout's
-          # own credentials would win over the bot's (it writes an auth header into the
-          # repo config), so they are not persisted.
+          # The push below is the DEPLOY KEY's, not GITHUB_TOKEN's: the tier branches carry
+          # a ruleset whose only bypass actor is "deploy keys", which no account and no
+          # Actions token can be - so this workflow is the one way a tier moves. Checkout's
+          # own credentials would win over the key (it writes an auth header into the repo
+          # config, and https beats the ssh remote set below), so they are not persisted.
           persist-credentials: false
 
       - name: Fast-forward the tier, or refuse
+        id: fast-forward
         env:
-          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          PROMOTE_DEPLOY_KEY: ${{ secrets.PROMOTE_DEPLOY_KEY }}
+          # `gh api meta` is a public, unauthenticated endpoint; gh just wants a token.
+          GH_TOKEN: ${{ github.token }}
           TIER: ${{ inputs.to }}
           SOURCE_INPUT: ${{ inputs.ref }}
         run: |
           set -eo pipefail
           git config user.name "DSL Bot"
           git config user.email "dsl-bot@hertie-school.org"
-          # Via gh's credential helper, so the token is never in a remote URL or in argv,
-          # where a failed push would echo it back into the log.
-          gh auth setup-git
+          # The key lives in the agent for this step only - never on disk, and never in a
+          # remote URL or in argv where a failed push would echo it into the log. The host
+          # keys are GitHub's own published set, not whatever answers on the night, so a
+          # substituted github.com fails the push instead of receiving it.
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          gh api meta --jq '.ssh_keys[]' | sed 's/^/github.com /' >> ~/.ssh/known_hosts
+          eval "$(ssh-agent -s)"
+          printf '%s\n' "$PROMOTE_DEPLOY_KEY" | ssh-add -
+          git remote set-url origin "git@github.com:$GITHUB_REPOSITORY.git"
           # fetch-depth: 0 already brings every branch and tag, so origin/main and both
           # tier tips are here before this runs. Re-fetched anyway: one cheap call, and it
           # narrows the window between the tip read below and the lease it becomes.
@@ -118,6 +131,7 @@ jobs:
           # a fast-forward either way - the lease only closes the gap between the check and
           # the push.
           git push --force-with-lease="refs/heads/$TIER:$tip" origin "$new:refs/heads/$TIER"
+          echo "sha=$new" >> "$GITHUB_OUTPUT"
 
           {
             echo "## Promoted \`$source\` to \`$TIER\`"
@@ -138,16 +152,26 @@ jobs:
 
   # A promotion changes nothing in an org until that org next re-renders its workflows,
   # which the nightly "Refresh actions" cron does within 24h. This runs it now, so a
-  # promotion is a deploy rather than a deploy that happens overnight. The bot is an owner
-  # of every course org, so it can dispatch their workflows from here; GITHUB_TOKEN sees
-  # only this repo and could not.
+  # promotion is a deploy rather than a deploy that happens overnight.
+  #
+  # It runs the refresh HERE, from the commit just promoted, rather than dispatching each
+  # org's own "Refresh actions": that workflow checks the toolkit out at the ref frozen in
+  # the org's own workflow file, so an org whose `central_ref:` has just moved between tiers
+  # would be re-rendered by the tier it is leaving and never converge. The bot is an owner
+  # of every course org; GITHUB_TOKEN sees only this repo and could not.
   refresh-orgs:
     needs: promote
     if: ${{ inputs.refresh_orgs }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          # The promoted commit, not whatever ref the run was dispatched from.
+          ref: ${{ needs.promote.outputs.sha }}
+          persist-credentials: false
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
@@ -157,6 +181,9 @@ jobs:
       - name: Refresh every org on this tier
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          # seed refresh propagates the bot token as a repo secret, and ghcli.bot_token
+          # refuses to publish one that is only GH_TOKEN.
+          DSL_BOT_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           TIER: ${{ inputs.to }}
         run: |
           set -eo pipefail
@@ -166,8 +193,8 @@ jobs:
           # actually came back; an empty capture fails the jq below, as it should.
           inventory=$(python3 -m dsl_course.list_orgs) \
             || echo "::warning::list_orgs could not read every org - see the log; refreshing the ones it could"
-          # Cohort orgs are not dispatched: "Refresh actions" lives in the COURSE org and
-          # converges every cohort registered under it in the same run.
+          # Cohort orgs are not listed: a course org's refresh converges every cohort
+          # registered under it in the same run.
           orgs=$(jq -r --arg tier "$TIER" '.course_orgs[] | select(.central_ref == $tier) | .org' <<<"$inventory")
           # A null tier is an org whose metadata could not be read, so nothing can say
           # which tier it is on. Named in the summary rather than passed over in silence:
@@ -180,12 +207,13 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           failed=0
           for org in $orgs; do
-            if gh workflow run refresh-actions.yml -R "$org/.github"; then
-              echo "- $org - dispatched" >> "$GITHUB_STEP_SUMMARY"
+            # Every org is attempted: one org's refresh failing must not strand the rest.
+            if python3 -m dsl_course.seed refresh --course-org "$org"; then
+              echo "- $org - refreshed" >> "$GITHUB_STEP_SUMMARY"
             else
               # Not fatal to the promotion - it has already landed, and the org's own
               # nightly cron converges it within 24h - but it must not read as green.
-              echo "- $org - **dispatch failed**, it converges on tonight's cron" >> "$GITHUB_STEP_SUMMARY"
+              echo "- $org - **refresh failed**, it converges on tonight's cron" >> "$GITHUB_STEP_SUMMARY"
               failed=1
             fi
           done

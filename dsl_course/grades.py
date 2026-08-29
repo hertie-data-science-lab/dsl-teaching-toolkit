@@ -30,8 +30,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import csv
-import io
 import json
 import sys
 import tempfile
@@ -41,16 +39,23 @@ from pathlib import Path
 import yaml
 
 from . import mailer, roster
-from .access import grant_faculty_read_access
+from .access import FACULTY_READ_ACCESS, grant_faculty
 from .course import CONFIG_REPO, GRADEBOOK_PREFIX
-from .discovery import course_name_for_cohort
-from .gh_contents import get_file_content, put_file, require_csv_header, strip_bom
-from .ghcli import GIT_ENV, gh, git
-from .log import log, log_err, log_ok, log_step, log_verbose
+from .discovery import course_name_for_cohort, list_org_repos
+from .gh_contents import (
+    blob_sha,
+    dump_csv,
+    get_file_content,
+    get_file_with_sha,
+    put_file,
+    read_csv,
+)
+from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
+from .log import log, log_err, log_ok, log_person, log_step
 from .repos import (
     add_collaborator,
     create_repo,
-    get_default_branch,
+    default_branch,
     repo_exists,
     set_repo_topics,
 )
@@ -158,11 +163,7 @@ def parse_grades(text: str) -> list[GradeRow]:
 
     Raises RetiredGradeHeader if the header uses the pre-rename names - see
     `_RETIRED_GRADE_FIELDS` for why that cannot be tolerated the way an unknown column is."""
-    # strip_bom: an Excel "CSV UTF-8" starts with a BOM, which glues itself to the first
-    # header name - `\ufeffgithub_handle` - so every handle read "" and merge_auto folded
-    # every student onto one row, destroying hand-entered marks. roster and teams already
-    # stripped it; this was the one hand-edited CSV that did not.
-    reader = csv.DictReader(io.StringIO(strip_bom(text)))
+    reader = read_csv(text, ("github_handle",), "grades CSV")
     stale = [f for f in (reader.fieldnames or []) if f.strip() in _RETIRED_GRADE_FIELDS]
     if stale:
         renames = ", ".join(f"{f} -> {_RETIRED_GRADE_FIELDS[f.strip()]}" for f in stale)
@@ -170,7 +171,6 @@ def parse_grades(text: str) -> list[GradeRow]:
             f"grades CSV uses retired column name(s): {renames}. Rename the header row and "
             f"re-run; reading it as-is would drop every mark in those columns."
         )
-    require_csv_header(reader.fieldnames, ("github_handle",), "grades CSV")
     return [
         GradeRow(**{f: (row.get(f) or "").strip() for f in GRADE_FIELDS})
         for row in reader
@@ -228,12 +228,7 @@ def render_yaml(book: dict) -> str:
 
 def dump_grades(rows: list[GradeRow]) -> str:
     """Serialise grade rows back to CSV text (header + one row per GradeRow)."""
-    out = io.StringIO()
-    writer = csv.writer(out)
-    writer.writerow(GRADE_FIELDS)
-    for r in rows:
-        writer.writerow([getattr(r, f) for f in GRADE_FIELDS])
-    return out.getvalue()
+    return dump_csv(GRADE_FIELDS, ([getattr(r, f) for f in GRADE_FIELDS] for r in rows))
 
 
 def render_cohort_csv(per: dict[str, list[GradeRow]]) -> str:
@@ -252,18 +247,17 @@ def render_cohort_csv(per: dict[str, list[GradeRow]]) -> str:
         handle_set.update(by_assignment[a])
     handles = sorted(handle_set)
 
-    out = io.StringIO()
-    writer = csv.writer(out)
-    writer.writerow(
-        ["github_handle"] + [f"{a}_{f}" for a in assignments for f in fields]
-    )
-    for handle in handles:
+    def wide_row(handle: str) -> list[str]:
         row = [handle]
         for a in assignments:
             r = by_assignment[a].get(handle)
             row.extend(getattr(r, f) if r else "" for f in fields)
-        writer.writerow(row)
-    return out.getvalue()
+        return row
+
+    return dump_csv(
+        ["github_handle"] + [f"{a}_{f}" for a in assignments for f in fields],
+        (wide_row(h) for h in handles),
+    )
 
 
 def merge_auto(text: str, updates: list[tuple[str, dict[str, str]]]) -> str:
@@ -302,14 +296,14 @@ def merge_auto(text: str, updates: list[tuple[str, dict[str, str]]]) -> str:
             by_handle[key] = row
             order.append(key)
         kept = 0
-        for key, value in fields.items():
-            if key in MACHINE_FIELDS and getattr(row, key, ""):
+        for field, value in fields.items():
+            if field in MACHINE_FIELDS and getattr(row, field, ""):
                 kept += 1  # already filled (hand-edited or graded before) - leave it
                 continue
-            setattr(row, key, value)
+            setattr(row, field, value)
         if kept:
             preserved += kept
-            log_verbose(f"  [keep] {handle}: {kept} existing cell(s) left as they are")
+            log_person(f"  [keep] {handle}: {kept} existing cell(s) left as they are")
     if preserved:
         log_ok(
             f"{preserved} existing machine-written cell(s) preserved - "
@@ -381,12 +375,35 @@ def load_grade_sources(cohort_org: str) -> dict[str, list[GradeRow]]:
     return per
 
 
-def provision_one(cohort_org: str, handle: str) -> str:
-    """Ensure a private grades-<handle> repo exists with the student as read collaborator."""
+def _existing_repos(cohort_org: str) -> frozenset[str] | None:
+    """The cohort's repo names off ONE paginated listing, or None when it could not be read.
+
+    Asking `repo_exists` per student cost a GET per student on every nightly sync, for a
+    question one listing answers for the whole cohort. None falls the caller back to that
+    probe: the listing is an optimisation, not a new way for a sync to fail."""
+    try:
+        return frozenset(r["name"] for r in list_org_repos(cohort_org))
+    except RuntimeError as exc:
+        log_err(
+            f"could not list {cohort_org}'s repos - falling back to a probe per repo: {exc}"
+        )
+        return None
+
+
+def provision_one(
+    cohort_org: str, handle: str, existing: frozenset[str] | None = None
+) -> str:
+    """Ensure a private grades-<handle> repo exists with the student as read collaborator.
+
+    `existing` is the cohort's repo names off ONE listing (`_existing_repos`); membership
+    in it answers "is this gradebook already there?" without a GET per student. None - no
+    listing to hand - falls back to probing this one repo."""
     repo = f"{GRADEBOOK_PREFIX}{handle}"
-    existed = repo_exists(cohort_org, repo)
+    existed = (
+        repo in existing if existing is not None else repo_exists(cohort_org, repo)
+    )
     if existed:
-        log_verbose(f"  [skip] gradebook {cohort_org}/{repo}")
+        log_person(f"  [skip] gradebook {cohort_org}/{repo}")
     else:
         if not create_repo(
             cohort_org,
@@ -402,12 +419,16 @@ def provision_one(cohort_org: str, handle: str) -> str:
             # Not named: this log is public. The nightly sweep converges the topic.
             log_err("  ! a gradebook is untagged - the nightly sweep converges it")
 
-    # Read, not write: `distribute` rewrites grades.yml from
-    # `classroom-config/grades/<slug>.csv`, so a mark corrected here would be overwritten
-    # on the next run. The CSV is where a mark belongs.
-    grant_faculty_read_access(cohort_org, repo)
+        # At creation only: a team grant does not decay, and the nightly sweep
+        # (access.converge_faculty_access) owns the floor for every gradebook that already
+        # exists - so re-granting on every sync cost two PUTs per student for nothing.
+        #
+        # Read, not write: `distribute` rewrites grades.yml from
+        # `classroom-config/grades/<slug>.csv`, so a mark corrected here would be
+        # overwritten on the next run. The CSV is where a mark belongs.
+        grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
     if add_collaborator(cohort_org, repo, handle, permission="pull"):
-        log_verbose(f"  [ok]   + @{handle} (read)")
+        log_person(f"  [ok]   + @{handle} (read)")
         return "skipped" if existed else "ok"
     # A gradebook the student can't open is a failure, not a partial success - the status
     # starts with "failed" so it reaches the exit code (see sync).
@@ -435,14 +456,15 @@ def sync(cohort_org: str, dry_run: bool = False) -> int:
     if auditing:
         log(f"  ({auditing} auditor row(s) skipped - read-only, never assessed)")
 
+    # ONE listing of the cohort answers "is it already there?" for every student below.
+    # A dry run creates nothing, so it needs no answer.
+    existing = None if dry_run else _existing_repos(cohort_org)
     results: dict[str, int] = {}
     for s in onboarded:
         if dry_run:
-            log_verbose(
-                f"    DRY-RUN  {cohort_org}/{GRADEBOOK_PREFIX}{s.github_handle}"
-            )
+            log_person(f"    DRY-RUN  {cohort_org}/{GRADEBOOK_PREFIX}{s.github_handle}")
             continue
-        status = provision_one(cohort_org, s.github_handle)
+        status = provision_one(cohort_org, s.github_handle, existing)
         results[status] = results.get(status, 0) + 1
     if dry_run:
         return 0
@@ -464,13 +486,10 @@ def render(cohort_org: str) -> int:
         f"-> preview PR on {cohort_org}/{CONFIG_REPO}"
     )
 
-    base = get_default_branch(cohort_org, CONFIG_REPO)
+    base = default_branch(cohort_org, CONFIG_REPO, fallback="main")
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "cfg"
-        if (
-            gh("repo", "clone", f"{cohort_org}/{CONFIG_REPO}", str(wd), "--", "-q")[0]
-            != 0
-        ):
+        if not clone(cohort_org, CONFIG_REPO, wd):
             log_err(f"could not clone {cohort_org}/{CONFIG_REPO}")
             return 1
         # A prior render's branch may carry a reviewer's OWN commit (a grade fixed on the open
@@ -519,7 +538,7 @@ def render(cohort_org: str) -> int:
         gbdir.mkdir(exist_ok=True)
         for handle in sorted(books):
             (gbdir / f"{handle}.yml").write_text(render_yaml(books[handle]))
-            log_verbose(f"  [ok] + {GRADEBOOK_DIR}/{handle}.yml")
+            log_person(f"  [ok] + {GRADEBOOK_DIR}/{handle}.yml")
         (wd / COHORT_CSV_NAME).write_text(render_cohort_csv(per))
         log_ok(f"+ {COHORT_CSV_NAME}")
 
@@ -574,7 +593,7 @@ def render(cohort_org: str) -> int:
     )
     if code == 0:
         log_ok(f"preview PR opened: {out.strip().splitlines()[-1]}")
-    elif "already exists" in out.lower():
+    elif is_already_exists(out):
         log_ok("preview PR already open for this branch (updated).")
     else:
         log_err(f"could not open PR: {out[:200]}")
@@ -593,10 +612,7 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
     themselves were already previewed in the render PR)."""
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "cfg"
-        if (
-            gh("repo", "clone", f"{cohort_org}/{CONFIG_REPO}", str(wd), "--", "-q")[0]
-            != 0
-        ):
+        if not clone(cohort_org, CONFIG_REPO, wd):
             log_err(f"could not clone {cohort_org}/{CONFIG_REPO}")
             return 1
         gbdir = wd / GRADEBOOK_DIR
@@ -612,13 +628,15 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
         pushed: list[str] = []
         for f in files:
             if dry_run:
-                log_verbose(
+                log_person(
                     f"    DRY-RUN  would update {GRADEBOOK_PREFIX}{f.stem}/grades.yml"
                 )
                 pushed.append(f.stem)
                 continue
             status = _push_gradebook(cohort_org, f.stem, f.read_text())
             results[status] = results.get(status, 0) + 1
+            # `unchanged` deliberately does NOT notify: a re-run after one correction used
+            # to email "your grades have been updated" to every student in the cohort.
             if status == "ok":
                 pushed.append(f.stem)
     if dry_run:
@@ -636,11 +654,32 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
 
 
 def _push_gradebook(cohort_org: str, handle: str, content: str) -> str:
-    """Write grades.yml into grades-<handle>. A missing repo (sync not run) -> failed-push."""
+    """Write grades.yml into grades-<handle>. One of `ok` (the file changed), `unchanged`
+    (it already held exactly this) or `failed-push` (a missing repo - sync not run - or an
+    unreadable one).
+
+    The tri-state is what `distribute` notifies off. `put_file` compares blob shas and
+    skips an identical write, but it returns True either way, so a re-run of Distribute
+    told the WHOLE cohort their grades had been updated whenever a marker had corrected
+    one row. Read the sha here instead - the same single GET put_file would have made -
+    and hand it back as `expected_sha`, which also makes this a safe read-modify-write:
+    a gradebook that moved on between the read and the write is refused, not clobbered."""
     repo = f"{GRADEBOOK_PREFIX}{handle}"
-    if not put_file(cohort_org, repo, "grades.yml", content.encode(), "grades: update"):
+    body = content.encode()
+    try:
+        current = get_file_with_sha(cohort_org, repo, "grades.yml")
+    except RuntimeError as exc:
+        log_err(f"could not read {repo}/grades.yml: {exc}")
         return "failed-push"
-    log_verbose(f"  [ok] + {repo}/grades.yml")
+    if current is not None and current[1] == blob_sha(body):
+        log_person(f"  [skip] {repo}/grades.yml unchanged")
+        return "unchanged"
+    sha = current[1] if current is not None else ""
+    if not put_file(
+        cohort_org, repo, "grades.yml", body, "grades: update", expected_sha=sha
+    ):
+        return "failed-push"
+    log_person(f"  [ok] + {repo}/grades.yml")
     return "ok"
 
 
@@ -672,16 +711,11 @@ def update_message(
 def sample_body(cohort_org: str, course_name: str = "") -> str:
     """The notification rendered with PLACEHOLDERS, for the dry-run preview.
 
-    Same reason as `enrol_codes.sample_body`: a dry run masks every recipient and prints no
-    real body, so the wording - the only thing left to review - would never be seen. No
-    student's name or handle appears, so this is safe in a world-readable Actions log."""
-    placeholder = roster.Student(
-        hertie_email="<email>",
-        name="<name>",
+    `update_message` with a placeholder in place of a student - see `mailer.sample_of`."""
+    return mailer.sample_of(
+        lambda student: update_message(student, cohort_org, course_name),
         github_handle="<handle>",
-        github_id="",
     )
-    return update_message(placeholder, cohort_org, course_name)[2]
 
 
 def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -> int:

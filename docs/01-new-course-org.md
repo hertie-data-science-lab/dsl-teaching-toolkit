@@ -43,10 +43,10 @@ This is setup once per course - it serves every future cohort. Per-semester setu
 
    > This action is safe to re-run in case of need. 
    
-   This seeds the `.github` repo with every workflow you'll need ([actions reference](reference/actions-reference.md)), the `course-admin` team, and  `.github/dsl-course.yml` (the course's identity card).
+   This seeds the `.github` repo with every workflow you'll need ([actions reference](reference/actions-reference.md)), the `course-admin` team, and `dsl-course.yml` at that repo's root (the course's identity card).
 
 4. **Add any other admins.** 
-   - Edit `people.course_admins` in `.github/dsl-course.yml` and commit to `main` 
+   - Edit `people.course_admins` in course org → `.github` → `dsl-course.yml` and commit to `main` 
    - **Sync membership** runs on the push automatically (no need for additional input).
 
    > Each admin handle gets an org invite that stays `pending` until that person accepts, and GitHub's member list only shows accepted members. Check *People → Pending invitations* if someone looks missing.

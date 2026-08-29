@@ -37,9 +37,10 @@ SHIPPED_WORKFLOWS = _shipped_workflows()
 
 
 def test_the_shipped_workflow_sweep_sees_them_all():
-    # ci, bootstrap-org, refresh-inventory, both dispatchers, validate-schedule, onboard,
-    # team-formation - a broken glob would make the tests below vacuous.
-    assert len(SHIPPED_WORKFLOWS) >= 8
+    # ci, bootstrap-org, promote, refresh-inventory, token-canary, both dispatchers,
+    # validate-schedule, onboard, team-formation - a broken glob would make the tests
+    # below vacuous.
+    assert len(SHIPPED_WORKFLOWS) >= 10
 
 
 @pytest.mark.parametrize("rel", sorted(SHIPPED_WORKFLOWS))
@@ -100,3 +101,65 @@ def test_the_sha_agreement_sweep_actually_sees_the_estate():
     # A regex that stopped matching would make the test above pass on an empty dict.
     actions = _action_shas()
     assert {"actions/checkout", "actions/setup-python"} <= set(actions)
+
+
+def _promote_job() -> dict:
+    return SHIPPED_WORKFLOWS[".github/workflows/promote.yml"]["jobs"]["promote"]
+
+
+def test_promote_pushes_the_tiers_with_a_deploy_key_not_the_bot():
+    # The tier branches carry a ruleset whose only bypass actor is "deploy keys", which no
+    # account and no Actions token can be - so a bot token in this job is both the account
+    # push that ruleset exists to refuse and a far wider credential than a push needs.
+    job = _promote_job()
+    assert "DSL_BOT_TOKEN" not in yaml.safe_dump(job)
+    step = next(s for s in job["steps"] if s.get("name", "").startswith("Fast-forward"))
+    assert step["env"]["PROMOTE_DEPLOY_KEY"] == "${{ secrets.PROMOTE_DEPLOY_KEY }}"
+    assert 'git remote set-url origin "git@github.com:' in step["run"]
+    # ssh-keyscan trusts whatever answers, so it would have written a substituted
+    # github.com's key into known_hosts and pushed the deploy key straight at it.
+    assert "ssh-keyscan" not in step["run"]
+    assert "gh api meta --jq '.ssh_keys[]'" in step["run"]
+
+
+def _promote_refresh_job() -> dict:
+    return SHIPPED_WORKFLOWS[".github/workflows/promote.yml"]["jobs"]["refresh-orgs"]
+
+
+def _refresh_step() -> dict:
+    return next(
+        s
+        for s in _promote_refresh_job()["steps"]
+        if s.get("name") == "Refresh every org on this tier"
+    )
+
+
+def test_promote_refreshes_orgs_from_the_promoted_checkout():
+    # The fan-out must run the refresh IN PROCESS, from the code that was just promoted.
+    # Dispatching each org's own "Refresh actions" instead runs the toolkit at the ref
+    # already baked into that org's workflow file, so an org whose central_ref has just
+    # changed tier is re-rendered by the OLD tier's code and never converges.
+    job = _promote_refresh_job()
+    checkout = next(s for s in job["steps"] if "checkout" in s.get("uses", ""))
+    assert checkout["with"]["ref"] == "${{ needs.promote.outputs.sha }}"
+    run = _refresh_step()["run"]
+    assert "python3 -m dsl_course.seed refresh --course-org" in run
+    assert "gh workflow run refresh-actions.yml" not in run
+
+
+def test_promote_refresh_carries_both_bot_tokens():
+    # seed refresh reads GH_TOKEN for the API and DSL_BOT_TOKEN to propagate the repo
+    # secret (ghcli.bot_token refuses to publish a token that is only GH_TOKEN).
+    env = _refresh_step()["env"]
+    assert env["GH_TOKEN"] == "${{ secrets.DSL_BOT_TOKEN }}"
+    assert env["DSL_BOT_TOKEN"] == "${{ secrets.DSL_BOT_TOKEN }}"
+
+
+def test_bootstrap_org_offers_no_dev_tier():
+    # `main` is the dev tier - nobody live. An org bootstrapped onto it runs every merge
+    # as production the moment it lands, with no promotion in between; a soak goes on
+    # staging, which is what that tier is for.
+    doc = SHIPPED_WORKFLOWS[".github/workflows/bootstrap-org.yml"]
+    trigger = doc.get("on", doc.get(True))
+    options = trigger["workflow_dispatch"]["inputs"]["central_ref"]["options"]
+    assert options == ["release", "staging"]

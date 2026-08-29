@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import site_repo
+from dsl_course import ghcli, site_repo
 
 ORG = "Cohort-f2026"
 SITE = "cohort-f2026.github.io"
@@ -49,8 +49,15 @@ class _Fakes:
             # `--format=` leaves a leading blank line - the parser must survive it.
             return (0, "\n" + "\n".join(self.changed))
         if "log" in args:
-            row = self.last_touch.get(args[-1])
-            return (0, "\t".join(row)) if row else (0, "")
+            # ONE walk of the history for every path, in `git log --name-only` shape: a
+            # NUL-prefixed author header, then the paths that commit touched.
+            return (
+                0,
+                "\n".join(
+                    f"\0{sha}\t{name}\t{email}\n\n{path}"
+                    for path, (sha, name, email) in self.last_touch.items()
+                ),
+            )
         return (0, "")
 
     def gh(self, *args, **kwargs):
@@ -82,10 +89,11 @@ class _Fakes:
 
 def _run(monkeypatch, fakes: _Fakes) -> int:
     monkeypatch.setattr(site_repo, "gh", fakes.gh)
+    monkeypatch.setattr(ghcli, "gh", fakes.gh)
     monkeypatch.setattr(site_repo, "git", fakes.git)
     monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(site_repo, "repo_is_archived", lambda org, name: False)
-    monkeypatch.setattr(site_repo, "_acting_login", lambda: "dsl-bot-account")
+    monkeypatch.setattr(site_repo, "acting_login", lambda: "dsl-bot-account")
 
     def build(_wd: Path) -> site_repo.SitePlan:
         return site_repo.SitePlan(config={}, collections={}, commit="site: sync")
@@ -111,6 +119,17 @@ def test_an_overwritten_human_edit_files_an_issue(human_edit):
     create = next(c for c in fakes.gh_calls if c[:2] == ("issue", "create"))
     assert create[create.index("--repo") + 1] == f"{ORG}/{SITE}"
     assert create[create.index("--title") + 1] == site_repo.OVERWRITE_ISSUE_TITLE
+
+
+def test_the_history_is_walked_once_however_many_files_changed(monkeypatch):
+    # A sync rewrites every generated page and collection entry, so a `git log -1 -- <path>`
+    # each meant a hundred-odd subprocesses per site per sync to read one history.
+    paths = [f"_lectures/{n:02d}-session.md" for n in range(20)]
+    fakes = _Fakes(paths, dict.fromkeys(paths, HUMAN))
+    assert _run(monkeypatch, fakes) == 0
+    assert sum(1 for c in fakes.git_calls if "log" in c) == 1
+    body = fakes.created_body()
+    assert all(f"`{p}`" in body for p in paths), "a path was lost in the single walk"
 
 
 @pytest.mark.parametrize("author", [BOT, TOKEN_ACCOUNT, APP])

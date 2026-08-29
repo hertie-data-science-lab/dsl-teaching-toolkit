@@ -20,11 +20,11 @@ from functools import cache
 from pathlib import Path
 
 from . import scaffold, welcome
-from .course import active_today, pages_repo
+from .course import INSTRUCTORS_TEAM, active_today, pages_repo
 from .discovery import list_org_repos
 from .gh_contents import load_yaml_config
-from .gh_teams import _acting_login
-from .ghcli import GIT_ENV, gh, git, is_missing_resource
+from .gh_teams import acting_login
+from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
 from .log import log, log_err, log_ok, log_step
 from .repos import repo_exists, repo_is_archived
 
@@ -58,7 +58,7 @@ _THEME_CONFIG = {
 
 # The collections the shipped templates read (`site.lectures`, `site.assignments`,
 # `site.events`, `site.announcements`) and the layout an assignment page gets. Both are
-# multi-line blocks rather than scalars, so `_ensure_config_block` writes them; both are
+# multi-line blocks rather than scalars, so `_upsert_config` writes them whole; both are
 # a CONTRACT of templates/site/ rather than a preference, and a site missing either
 # builds green into empty pages - the worst way for this to be wrong.
 _COLLECTIONS_BLOCK = """collections:
@@ -135,10 +135,8 @@ def _stamp_front_matter(text: str) -> str:
     return "---\n" + _FRONT_MATTER_STAMP + text[len("---\n") :]
 
 
-# The site repo's own README. It is generated from `course-website-template`, whose README
-# describes the TEMPLATE - so a deployed site repo used to carry no notice at all that it
-# is machine-written and redeployed on every push. Written through `plan.files`, so it
-# converges on every sync exactly like `_data/people.yml`.
+# The site repo's own README. Written through `plan.files`, so it converges on every sync
+# exactly like `_data/people.yml`.
 def site_readme(org: str, cohort: bool) -> str:
     # Named from the same page table the sync writes them from, so the list cannot claim a
     # page this site does not have - or omit one it rewrites.
@@ -168,6 +166,7 @@ def site_readme(org: str, cohort: bool) -> str:
         + ("| `_data/materials.yml` | the All Materials index |\n" if cohort else "")
         + f"| the tab pages - {tab_pages} | the wrappers the tabs point at |\n"
         + "| `_layouts/`, `_includes/`, `_sass/_course.scss` | how every page renders |\n"
+        + "| `.github/workflows/deploy.yml` | the Pages build |\n"
         + "| `_config.yml` | the course identity keys, the pinned theme, and the "
         "`collections:`/`defaults:` the layouts need |\n\n"
         "Each collection is CLEARED and rewritten on every sync, so a file you add to one "
@@ -175,8 +174,10 @@ def site_readme(org: str, cohort: bool) -> str:
         "wrappers, so put your own words in `index.md`, or in a page of your own linked "
         "from there.\n\n"
         "## Everything else is yours\n\n"
-        "`index.md`, any page you add yourself, `_announcements/`, `_images/`, `Gemfile`, "
-        "further `_data/*.yml` - never rewritten. Change them freely.\n\n"
+        "`index.md`, `schedule.md`, any page you add yourself, `_announcements/`, "
+        "`_images/`, `Gemfile`, `.gitignore`, `_data/late_policy.yml`, "
+        "`_data/previous_offering.yml`, further `_data/*.yml` - seeded once when the site "
+        "is created, then never rewritten. Change them freely.\n\n"
         "The rendering is not yours to change here: `_layouts/`, `_includes/` and "
         "`_sass/_course.scss` are shipped from `templates/site/` in the DSL teaching "
         "toolkit, and the rest of the styling from the shared `dsl-jekyll-theme`. An edit "
@@ -213,57 +214,49 @@ def _stamp_config(text: str, keys: list[str]) -> str:
 _MANAGED_MARKER = "# managed by the DSL course sync - rewritten on every run"
 
 
-def _set_config(text: str, key: str, value: str, *, insert: bool = False) -> str:
+def _replace_config_scalar(text: str, key: str, value: str) -> str:
     """Replace a top-level `key: ...` line in _config.yml, preserving the rest.
 
-    The value is always written as a one-line double-quoted scalar (see `q`). Any
-    indented continuation lines are consumed with it, so replacing a key someone left as
-    a `>`/`|` block scalar doesn't strand its body as invalid YAML.
+    The value is written as a one-line double-quoted scalar (see `q`). Any indented
+    continuation lines are consumed with it, so replacing a key someone left as a `>`/`|`
+    block scalar doesn't strand its body as invalid YAML.
 
-    A key the template's `_config.yml` doesn't have is a no-op - logged, so template drift
-    (a key the code sets that the site theme dropped) is visible rather than silent. That
-    is right for the course-IDENTITY keys, which are content: a site that dropped
-    `course_code:` chose to. `insert=True` appends the key instead, for the handful the
-    shipped templates DEPEND on (`_THEME_CONFIG`): there a missing key is not a choice, it
-    is a site generated before the key existed, and leaving it out renders a broken page."""
+    REPLACE-ONLY: a key the site's `_config.yml` doesn't have is a no-op, logged so
+    template drift is visible rather than silent. That is right for the course-IDENTITY
+    keys, which are content - a site that dropped `course_code:` chose to. What the
+    templates DEPEND on goes through `_upsert_config` instead."""
     new, n = re.subn(
         rf"(?m)^({re.escape(key)}:[ \t]*).*(?:\n[ \t]+\S.*)*$",
         lambda m: f'{m.group(1)}"{q(value)}"',
         text,
         count=1,
     )
-    if n:
-        return new
-    if not insert:
+    if not n:
         log(f"  (_config.yml has no `{key}:` key - not written; template drift?)")
-        return new
-    added = f'{_MANAGED_MARKER}\n{key}: "{q(value)}"\n'
-    return text.rstrip("\n") + "\n\n" + added
+    return new
 
 
-def _ensure_config_block(text: str, key: str, block: str) -> str:
-    """Write a verbatim MULTI-LINE `_config.yml` block (`collections:`, `defaults:`),
-    replacing whatever the site had under that key and appending it when it had none.
+def _upsert_config(text: str, key: str, body: str) -> str:
+    """Write `body` - a complete `key: ...` line, or a whole multi-line block - over
+    whatever `_config.yml` holds under `key`, appending it when the file holds none.
 
-    Not `_set_config`, which folds a value onto one quoted line - right for a course name,
-    impossible for a nested mapping. These two are a contract of the templates this sync
-    ships rather than anything faculty choose, so the block goes in whole: a site whose
-    `collections:` lost `lectures` renders an empty Lectures page and builds green, which
-    is the failure nobody notices.
+    For the keys the shipped templates DEPEND on: the theme settings, and the
+    `collections:`/`defaults:` blocks that no one-line scalar could express. A missing one
+    of those is not a faculty choice, it is a site generated before the key existed, and
+    leaving it out renders a broken page - a site whose `collections:` lost `lectures`
+    builds GREEN into an empty Lectures page, which is the failure nobody notices.
 
-    The block is matched with or without the marker line above it, so a second sync
-    replaces what the first wrote rather than stacking another copy."""
-    body = _MANAGED_MARKER + "\n" + block.rstrip("\n") + "\n"
+    Indented continuation lines go with the key, and the marker line above it is matched
+    too, so a second sync replaces what the first wrote rather than stacking a copy."""
+    written = _MANAGED_MARKER + "\n" + body.rstrip("\n") + "\n"
     new, n = re.subn(
         rf"(?m)^(?:{re.escape(_MANAGED_MARKER)}\n)?{re.escape(key)}:[ \t]*.*$"
         r"(?:\n[ \t]+.*)*\n?",
-        lambda _m: body,
+        lambda _m: written,
         text,
         count=1,
     )
-    if n:
-        return new
-    return text.rstrip("\n") + "\n\n" + body
+    return new if n else text.rstrip("\n") + "\n\n" + written
 
 
 # The session pages. Their CONTENT is a theme layout (dsl-jekyll-theme's
@@ -440,6 +433,23 @@ def site_templates() -> dict[str, str]:
     }
 
 
+@cache
+def seed_templates() -> dict[str, str]:
+    """`{repo-relative path: content}` for everything under `templates/site-seed/` - what a
+    site repo NEEDS but has nothing generating it: `_config.yml`, `index.md`, `schedule.md`,
+    the `Gemfile`, `_data/late_policy.yml`.
+
+    INSTRUCTOR-OWNED and seeded ONCE (`apply_plan` writes only the paths a site lacks), so
+    a course's own words survive every sync. The `_config.yml` keys the templates depend on
+    are the exception and are upserted over whatever the file holds."""
+    root = welcome.TEMPLATES / "site-seed"
+    return {
+        path.relative_to(root).as_posix(): path.read_text(encoding="utf-8")
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    }
+
+
 def yaml_file(org: str, repo: str, path: str) -> dict:
     """A YAML config file from a repo as a mapping - `{}` when it is genuinely absent or
     empty (nothing declared: the site renders its defaults, which is correct).
@@ -480,7 +490,7 @@ def _team_people(course_org: str, team: str) -> list[tuple[str, str, str]]:
     people = []
     # None means the login could not be read; the gh-auth fail-fast guard has already run,
     # so that is not this function's problem - it just excludes nobody.
-    acting = _acting_login()
+    acting = acting_login()
     for login in out.splitlines():
         login = login.strip()
         if not login:
@@ -614,7 +624,7 @@ def people_yaml(
     else:
         instructors = [
             {"name": n, "profile_pic": p, "webpage": w}
-            for n, p, w in _team_people(org, "instructors")
+            for n, p, w in _team_people(org, INSTRUCTORS_TEAM)
         ]
         tas = []
         note = "auto-generated from the org's instructors team"
@@ -737,13 +747,42 @@ def _is_machine_author(name: str, email: str) -> bool:
     scaffold's "Initial commit"), or any GitHub App. An unreadable acting login is None
     and matches nobody, which errs towards calling a commit human - the wrong guess there
     is one unnecessary issue, the other way round is a silently discarded edit."""
-    acting = _acting_login()
+    acting = acting_login()
     return (
         name == _git_identity("user.name")
         or email == _git_identity("user.email")
         or (acting is not None and name.casefold() == acting.casefold())
         or name.endswith("[bot]")
     )
+
+
+def _last_touched_before_head(wd: Path) -> dict[str, tuple[str, str, str]]:
+    """`{path: (sha, author name, author email)}` for the last commit BEFORE HEAD to touch
+    each path in the history.
+
+    ONE walk. This was a `git log -1 -- <path>` per path, and a sync rewrites every
+    generated page and collection entry, so an ordinary cohort site paid a hundred-odd
+    subprocesses per sync to read one history. `--name-only` lists each commit's paths
+    under its own header line (NUL-prefixed, so no filename can be mistaken for one), and
+    the FIRST header a path appears under is the most recent commit to touch it.
+
+    A path absent from the result was touched by no commit before HEAD: this sync created
+    it. An unreadable history is `{}` - the same "say nothing" the per-path read gave."""
+    code, out = git(
+        "-C", str(wd), "log", "--name-only", "--format=%x00%H%x09%an%x09%ae", "HEAD^"
+    )
+    if code != 0:
+        return {}
+    touched: dict[str, tuple[str, str, str]] = {}
+    author = ("", "", "")
+    for line in out.splitlines():
+        if line.startswith("\0"):
+            sha, _, rest = line[1:].partition("\t")
+            name, _, email = rest.partition("\t")
+            author = (sha, name, email)
+        elif line.strip():
+            touched.setdefault(line.strip(), author)
+    return touched
 
 
 def _overwritten_edits(wd: Path) -> dict[str, tuple[str, list[str]]]:
@@ -756,17 +795,15 @@ def _overwritten_edits(wd: Path) -> dict[str, tuple[str, list[str]]]:
     code, out = git("-C", str(wd), "show", "--name-only", "--format=", "HEAD")
     if code != 0:
         raise RuntimeError(f"could not list the files the sync commit changed: {out}")
+    touched = _last_touched_before_head(wd)
     overwritten: dict[str, tuple[str, list[str]]] = {}
     for path in (ln.strip() for ln in out.splitlines()):
         if not path:
             continue
-        code, out = git(
-            "-C", str(wd), "log", "-1", "--format=%H%x09%an%x09%ae", "HEAD^", "--", path
-        )
-        if code != 0 or not out.strip():
+        previous = touched.get(path)
+        if previous is None:
             continue
-        sha, _, rest = out.strip().partition("\t")
-        name, _, email = rest.partition("\t")
+        sha, name, email = previous
         if _is_machine_author(name, email):
             continue
         overwritten.setdefault(sha, (name, []))[1].append(path)
@@ -890,6 +927,78 @@ def _stale_site_repo(org: str, site: str) -> str | None:
     return None
 
 
+def apply_plan(wd: Path, plan: SitePlan) -> None:
+    """Write a `SitePlan` into a site checkout at `wd`: everything but the git operations.
+
+    Separated from `sync_site_repo` so the CI fixture builder
+    (tests/fixtures/site/build_fixture.py) writes its site through THIS code rather than a
+    second copy of the config upsert and the collection regeneration - the fixture is what
+    the `jekyll-contract` job builds to prove the shipped templates render, and a fixture
+    assembled slightly differently from a real site proves it about the wrong site.
+
+    Removals (`plan.retire`) stay with the caller: they are `git rm` against a checkout,
+    not a write."""
+    # Seed-once, first: a site repo is created EMPTY, so this is where the half a site
+    # brings with it arrives (see `seed_templates`). Only the paths it lacks - everything
+    # under templates/site-seed/ is the faculty's once written.
+    for rel, content in seed_templates().items():
+        path = wd / rel
+        if not path.exists():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content)
+
+    # _config.yml, in two halves. The plan's own keys are course IDENTITY (course_name
+    # / _semester / _code / _description, github_org) and are replace-only. The theme
+    # keys and the two blocks are the CONTRACT of the templates written below - a site
+    # that lacks them renders those templates wrong - so they go in whether the file
+    # has them or not.
+    cfg_path = wd / "_config.yml"
+    if cfg_path.is_file():
+        cfg = cfg_path.read_text()
+        for key, value in plan.config.items():
+            cfg = _replace_config_scalar(cfg, key, value)
+        for key, value in _THEME_CONFIG.items():
+            cfg = _upsert_config(cfg, key, f'{key}: "{q(value)}"')
+        cfg = _upsert_config(cfg, "collections", _COLLECTIONS_BLOCK)
+        cfg = _upsert_config(cfg, "defaults", _DEFAULTS_BLOCK)
+        owned = [*plan.config, *_THEME_CONFIG, "collections", "defaults"]
+        cfg_path.write_text(_stamp_config(cfg, sorted(owned)))
+
+    # Regenerate the owned collections; leave everything else (layouts, pages) as the
+    # template provides.
+    for coll, entries in plan.collections.items():
+        d = wd / coll
+        if d.is_dir():
+            shutil.rmtree(d)
+        d.mkdir(parents=True)
+        (d / ".gitkeep").write_text("")
+        for fname, content in entries.items():
+            (d / fname).write_text(_stamp_front_matter(content))
+
+    for rel, content in plan.files.items():
+        (wd / rel).parent.mkdir(parents=True, exist_ok=True)
+        (wd / rel).write_text(content)
+
+
+_GIT_FAILURE_TAIL_LINES = 5
+
+
+def _git_failure_tail(out: str, lines: int = _GIT_FAILURE_TAIL_LINES) -> str:
+    """The last few lines of a failed git command, indented for the log.
+
+    A push fails for reasons nobody can guess from "push failed": GitHub's push
+    protection blocking a committed secret, a repository rule violation, a 403 on a repo
+    whose permissions changed. `ghcli.git` already hands back git's combined output and
+    it was being thrown away, so the daily site cron reported a bare failure and the
+    actual message - the only thing that says what to fix - reached nobody.
+
+    Only the tail, because a push prints progress before it prints the reason. No
+    credential can appear in it: the clone's remote is a plain https URL and gh keeps the
+    token in the credential helper."""
+    tail = [ln for ln in out.strip().splitlines() if ln.strip()][-lines:]
+    return "\n".join(f"    {ln}" for ln in tail) or "    (git said nothing)"
+
+
 def sync_site_repo(
     org: str,
     build: Callable[[Path], SitePlan | None],
@@ -938,11 +1047,11 @@ def sync_site_repo(
 
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "site"
-        # A repo THIS run just created can lag its template-generate, so retry the clone;
+        # A repo THIS run just created can lag its first commit, so retry the clone;
         # an existing site repo either clones now or is a real failure.
         attempts = 6 if just_scaffolded else 1
         for attempt in range(attempts):
-            if gh("repo", "clone", f"{org}/{site}", str(wd), "--", "-q")[0] == 0:
+            if clone(org, site, wd):
                 break
             if attempt + 1 < attempts:
                 time.sleep(5)
@@ -954,37 +1063,7 @@ def sync_site_repo(
         if plan is None:
             return 1
 
-        # _config.yml, in two halves. The plan's own keys are course IDENTITY (course_name
-        # / _semester / _code / _description, github_org) and are replace-only. The theme
-        # keys and the two blocks are the CONTRACT of the templates written below - a site
-        # that lacks them renders those templates wrong - so they go in whether the file
-        # has them or not.
-        cfg_path = wd / "_config.yml"
-        if cfg_path.is_file():
-            cfg = cfg_path.read_text()
-            for key, value in plan.config.items():
-                cfg = _set_config(cfg, key, value)
-            for key, value in _THEME_CONFIG.items():
-                cfg = _set_config(cfg, key, value, insert=True)
-            cfg = _ensure_config_block(cfg, "collections", _COLLECTIONS_BLOCK)
-            cfg = _ensure_config_block(cfg, "defaults", _DEFAULTS_BLOCK)
-            owned = [*plan.config, *_THEME_CONFIG, "collections", "defaults"]
-            cfg_path.write_text(_stamp_config(cfg, sorted(owned)))
-
-        # Regenerate the owned collections; leave everything else (layouts, pages) as the
-        # template provides.
-        for coll, entries in plan.collections.items():
-            d = wd / coll
-            if d.is_dir():
-                shutil.rmtree(d)
-            d.mkdir(parents=True)
-            (d / ".gitkeep").write_text("")
-            for fname, content in entries.items():
-                (d / fname).write_text(_stamp_front_matter(content))
-
-        for rel, content in plan.files.items():
-            (wd / rel).parent.mkdir(parents=True, exist_ok=True)
-            (wd / rel).write_text(content)
+        apply_plan(wd, plan)
 
         # Removals. `git add -A` below stages everything the working tree holds, so a file
         # the toolkit no longer ships would otherwise live on in the site repo untouched.
@@ -1008,8 +1087,9 @@ def sync_site_repo(
         if code != 0:
             log_ok(f"{plan.label} already up to date")
             return 0
-        if git("-C", str(wd), *GIT_ENV, "push", "-q", "origin", "HEAD")[0] != 0:
-            log_err(f"{plan.label} push failed")
+        code, out = git("-C", str(wd), *GIT_ENV, "push", "-q", "origin", "HEAD")
+        if code != 0:
+            log_err(f"{plan.label} push failed:\n{_git_failure_tail(out)}")
             return 1
         # Only now is anything actually overwritten on the remote: a run that committed
         # nothing replaced nothing, and a failed push left the remote as it was. Whatever

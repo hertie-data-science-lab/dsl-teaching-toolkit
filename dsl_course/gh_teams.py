@@ -1,5 +1,6 @@
-"""Org membership and team membership: creating a team, inviting a person into the org,
-and reconciling one team's roster against what a config file says it should be.
+"""The org itself and the teams in it: converging an org's settings, creating a team,
+inviting a person into the org, and reconciling one team's roster against what a config
+file says it should be.
 """
 
 from __future__ import annotations
@@ -8,8 +9,8 @@ import json
 import re
 from functools import cache, lru_cache
 
-from .ghcli import gh
-from .log import log_err, log_ok, log_skip, log_verbose
+from .ghcli import gh, is_already_exists
+from .log import log, log_err, log_ok, log_person, log_skip
 
 # GitHub usernames: 1-39 chars, ASCII alphanumerics or single hyphens, no leading/
 # trailing hyphen and no consecutive hyphens. Used to reject a typo'd faculty handle
@@ -24,10 +25,13 @@ def is_valid_github_username(handle: str) -> bool:
 
 
 def create_team(
-    org: str, name: str, description: str = "", privacy: str = "closed"
+    org: str, name: str, description: str = "", privacy: str | None = None
 ) -> bool:
     """Create a team. Idempotent - treats a duplicate-name 422 as success.
     Returns True if a team with this name now exists.
+
+    `privacy` is what the team must have; None asks only that it exist, and leaves an
+    existing team's privacy as it is.
     """
     code, out = gh(
         "api",
@@ -39,26 +43,119 @@ def create_team(
         "--field",
         f"description={description}",
         "--field",
-        f"privacy={privacy}",
+        f"privacy={privacy or 'closed'}",
     )
     if code == 0:
         log_ok(f"team created: {name}")
         return True
-    # Only a genuine duplicate-name 422 is success. A bare `"422" in out` also swallowed
-    # an invalid-name or policy/plan 422 as success, so a caller would then write into a
-    # team that was never created. Key on the message text, and on all three spellings
-    # GitHub uses: "already exists", the JSON `already_exists` error code, and - what the
-    # teams endpoint actually returns - "Name must be unique for this org". Missing that
-    # last one hard-failed every membership sync after a team's first creation.
-    lower = out.lower()
-    if any(
-        phrase in lower
-        for phrase in ("already exists", "already_exists", "must be unique")
-    ):
-        log_skip(f"team {name}")
+    if is_already_exists(out):
+        _converge_team_privacy(org, name, privacy)
         return True
     log_err(f"failed to create team {name}: {out[:200]}")
     return False
+
+
+def _converge_team_privacy(org: str, name: str, privacy: str | None) -> None:
+    """Correct an existing team's privacy, but only when it is actually wrong.
+
+    A team keeps the privacy it was made with, and nothing else revisits it - `students`
+    and `auditors` are `secret` so a student cannot read the class list off the team page,
+    and every cohort created before that decision still has them `closed`. Converged here,
+    at the one place a duplicate is seen. The read comes first because create_team runs
+    once per team per sync, every hour: an unconditional PATCH spent that whole allowance
+    of the write governor re-setting privacy that was already right."""
+    if privacy is None:
+        log_skip(f"team {name}")
+        return
+    code, current = gh("api", f"orgs/{org}/teams/{name}", "--jq", ".privacy")
+    if code == 0 and current.strip() == privacy:
+        log_skip(f"team {name}")
+        return
+    code, out = gh(
+        "api",
+        "--method",
+        "PATCH",
+        f"orgs/{org}/teams/{name}",
+        "--field",
+        f"privacy={privacy}",
+    )
+    if code == 0:
+        log_skip(f"team {name}")
+    else:
+        # The team exists either way, which is what create_team returns; only its privacy
+        # could not be corrected.
+        log_err(f"team {name}: privacy not set to {privacy}: {out[:120]}")
+
+
+def members_without_2fa(org: str) -> int | None:
+    """How many of `org`'s members have two-factor auth off. None if it could not be read."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"orgs/{org}/members?filter=2fa_disabled",
+        "--jq",
+        ".[].login",
+    )
+    return len(out.split()) if code == 0 else None
+
+
+def converge_org_settings(org: str) -> int:
+    """Tighten one org: base permissions, member repo creation, and 2FA where possible.
+
+    Idempotent, and run on every nightly refresh as well as at bootstrap. These were set
+    once, at bootstrap, and never revisited, so every org bootstrapped before the
+    tightening still handed each member `read` on the unreleased materials, the model
+    solutions and the `solution` branches.
+
+    Base permissions matter in BOTH org kinds. A cohort holds students; a COURSE org holds
+    the materials students must not see, and at GitHub's default of `read` every member of
+    it (every TA, every visiting instructor, anyone ever added for one semester) could read
+    all of it. Faculty access comes from the team grants (access.converge_faculty_access),
+    not from being a member, so nobody who should have access loses it.
+
+    Returns the number of PATCHes that FAILED - the 2FA one excluded. GitHub refuses
+    `two_factor_requirement_enabled` while any member still has 2FA off, which is a fact
+    about people rather than a broken convergence: counting it would red this cron in every
+    org every night for something no re-run can fix. It is named and counted in the log
+    instead."""
+    failures = 0
+    code, out = gh(
+        "api",
+        "--method",
+        "PATCH",
+        f"orgs/{org}",
+        "--field",
+        "default_repository_permission=none",
+        "--field",
+        "members_can_create_repositories=false",
+    )
+    if code == 0:
+        log_ok(f"{org} tightened (base permission none, no member repo creation)")
+    else:
+        failures += 1
+        log_err(f"could not tighten {org}: {out[:120]}")
+
+    code, out = gh(
+        "api",
+        "--method",
+        "PATCH",
+        f"orgs/{org}",
+        "--field",
+        "two_factor_requirement_enabled=true",
+    )
+    if code == 0:
+        log_ok(f"{org}: 2FA required of every member")
+    else:
+        without = members_without_2fa(org)
+        log(
+            f"  [warn] {org}: 2FA not enforced: "
+            + (
+                f"{without} members without 2FA"
+                if without is not None
+                else f"could not count the members without it ({out[:80]})"
+            )
+        )
+    return failures
 
 
 def org_membership_state(org: str, login: str) -> str | None:
@@ -77,7 +174,7 @@ def set_org_membership(org: str, login: str, role: str = "member") -> bool:
     """
     current = org_membership_state(org, login)
     if current:
-        log_verbose(f"  [skip] org membership {login} ({current})")
+        log_person(f"  [skip] org membership {login} ({current})")
         return True
     code, out = gh(
         "api",
@@ -88,7 +185,7 @@ def set_org_membership(org: str, login: str, role: str = "member") -> bool:
         f"role={role}",
     )
     if code == 0:
-        log_verbose(f"  [ok] invited {login} to {org}")
+        log_person(f"  [ok] invited {login} to {org}")
         return True
     log_err(f"could not invite {login} (not a real account?): {out[:120]}")
     return False
@@ -109,12 +206,13 @@ def add_team_member(org: str, team_slug: str, login: str, role: str = "member") 
     return False
 
 
-def get_team_members(org: str, team_slug: str) -> set[str] | None:
-    """Current members of a team, or None if the listing could not be read.
+def _team_member_rows(org: str, team_slug: str) -> dict[str, str] | None:
+    """`{login: GitHub id}` for a team's current members - the ONE listing behind both
+    public readers - or None if it could not be READ.
 
-    None (non-zero exit OR unparseable JSON) means "couldn't read" and must never be
-    conflated with an empty team: reconciling against an unreadable team would add or
-    prune blind. Mirrors get_org_owners."""
+    None (a non-zero exit OR unparseable JSON) must never be conflated with an empty team:
+    reconciling against an unreadable team would add or prune blind. Mirrors
+    get_org_owners."""
     code, out = gh(
         "api", f"orgs/{org}/teams/{team_slug}/members?per_page=100", "--paginate"
     )
@@ -122,10 +220,27 @@ def get_team_members(org: str, team_slug: str) -> set[str] | None:
         log_err(f"could not read the members of {org}/{team_slug}: {out[:200]}")
         return None
     try:
-        return {m["login"] for m in json.loads(out)}
+        return {m["login"]: str(m["id"]) for m in json.loads(out)}
     except (json.JSONDecodeError, KeyError, TypeError):
         log_err(f"unparseable member listing for {org}/{team_slug}: {out[:200]}")
         return None
+
+
+def get_team_members(org: str, team_slug: str) -> set[str] | None:
+    """The logins currently in a team, as GitHub spells them. None if unreadable."""
+    rows = _team_member_rows(org, team_slug)
+    return None if rows is None else set(rows)
+
+
+def get_team_member_ids(org: str, team_slug: str) -> dict[str, str] | None:
+    """`{login.casefold(): GitHub id}` for a team's current members. None if unreadable.
+
+    The IMMUTABLE half of the same listing. A login is renameable; an id is not, so this
+    is the only way a reconcile can tell "somebody who does not belong here" from "the
+    same person under a new name" - see the `keep_ids` guard in
+    `reconcile_team_members`."""
+    rows = _team_member_rows(org, team_slug)
+    return None if rows is None else {log.casefold(): gid for log, gid in rows.items()}
 
 
 def remove_team_member(org: str, team_slug: str, login: str) -> bool:
@@ -136,7 +251,7 @@ def remove_team_member(org: str, team_slug: str, login: str) -> bool:
 
 
 @lru_cache(maxsize=1)
-def _acting_login() -> str | None:
+def acting_login() -> str | None:
     """Login of the token `gh` is currently authenticated as (the bot, in CI)."""
     code, out = gh("api", "user", "--jq", ".login")
     return out.strip() if code == 0 and out.strip() else None
@@ -167,7 +282,12 @@ def _fold_diff(a: dict[str, str], b: dict[str, str]) -> list[str]:
 
 
 def reconcile_team_members(
-    org: str, team: str, wanted: set[str], prune: bool = True, dry_run: bool = False
+    org: str,
+    team: str,
+    wanted: set[str],
+    prune: bool = True,
+    dry_run: bool = False,
+    keep_ids: set[str] = frozenset(),
 ) -> int:
     """Full add(+remove) reconcile of one team's membership to exactly `wanted`.
 
@@ -188,6 +308,14 @@ def reconcile_team_members(
     Membership is compared case-insensitively (`.casefold()`): GitHub logins are
     case-insensitive, so a hand-typed `Anna-Adams` and the API's `anna-adams` are the same
     account - comparing raw casing would add-then-prune it on every run, oscillating access.
+
+    `keep_ids` are GitHub ids that belong in this team however they are currently spelt: a
+    member holding one is never pruned. A login is renameable and an id is not, so a
+    student who renames their account is otherwise indistinguishable from a stranger - the
+    config still names the OLD login, the add 404s and the prune evicts the new one, every
+    night, until someone hand-edits the CSV. The ids cost one extra listing, paid only when
+    a caller supplies some AND there is something to prune; if they cannot be read the
+    prune is skipped whole, on the same rule as the owner list above.
     """
     current = get_team_members(org, team)
     if current is None:
@@ -202,9 +330,9 @@ def reconcile_team_members(
     current_by_fold = {h.casefold(): h for h in current}
     for handle in sorted(_fold_diff(wanted_by_fold, current_by_fold)):
         if dry_run:
-            log_verbose(f"    DRY-RUN add {handle} -> {org}/{team}")
+            log_person(f"    DRY-RUN add {handle} -> {org}/{team}")
         elif add_team_member(org, team, handle):
-            log_verbose(f"  [ok] {handle} -> {org}/{team}")
+            log_person(f"  [ok] {handle} -> {org}/{team}")
         else:
             errors += 1
     if prune:
@@ -215,14 +343,33 @@ def reconcile_team_members(
                 f"read, and pruning without it risks evicting an Owner"
             )
             return errors
-        acting = _acting_login()
-        for handle in sorted(_fold_diff(current_by_fold, wanted_by_fold)):
+        acting = acting_login()
+        stale = sorted(_fold_diff(current_by_fold, wanted_by_fold))
+        protected: set[str] = set()
+        if stale and keep_ids:
+            by_fold = get_team_member_ids(org, team)
+            if by_fold is None:
+                log_err(
+                    f"pruning skipped for {org}/{team}: the member ids could not be read, "
+                    f"and pruning without them evicts anyone who has renamed their account"
+                )
+                return errors
+            protected = {f for f, gid in by_fold.items() if gid in keep_ids}
+        for handle in stale:
             if handle == acting or handle in owners:
                 continue
+            if handle.casefold() in protected:
+                # Same person, new login: the config still names the old one. Leave them
+                # in; the roster's handle cell is re-linked when they next open a Join
+                # issue (templates/welcome/onboard.yml matches on the id too).
+                log_person(
+                    f"  [keep] {handle} in {org}/{team} - renamed, same GitHub id"
+                )
+                continue
             if dry_run:
-                log_verbose(f"    DRY-RUN remove {handle} <- {org}/{team}")
+                log_person(f"    DRY-RUN remove {handle} <- {org}/{team}")
             elif remove_team_member(org, team, handle):
-                log_verbose(f"  [ok] removed {handle} from {org}/{team}")
+                log_person(f"  [ok] removed {handle} from {org}/{team}")
             else:
                 errors += 1
     return errors

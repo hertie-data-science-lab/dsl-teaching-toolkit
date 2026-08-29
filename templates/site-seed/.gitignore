@@ -1,0 +1,6 @@
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+.sass-cache
+.jekyll-cache
+_site
+Gemfile.lock
+vendor

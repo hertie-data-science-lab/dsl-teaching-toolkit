@@ -20,10 +20,15 @@ from urllib.parse import quote
 
 import yaml
 
-from .course import discover_sections, find_session_dir, pages_repo
-from .discovery import discover_sessions
+from .course import (
+    discover_local_sessions,
+    discover_sections,
+    find_session_dir,
+    pages_repo,
+)
+from .fs import copy_tree
 from .gh_contents import get_file_content
-from .ghcli import gh
+from .ghcli import clone
 from .log import log, log_err, log_step
 from .readings import readings_block
 from .repos import has_denied_component, is_denied_publication, repo_exists
@@ -58,10 +63,9 @@ def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:
     thing this exists to stop - a `solution/` beside the lab it answers - is precisely a
     nested folder.
 
-    It filters NAMES, so every copytree it guards passes `symlinks=True` (as deploy.py
-    does). Following links would copy a `notes.pdf -> ../solution/answers.pdf` in as the
-    answers themselves, under a name this filter has no reason to deny - publishing the
-    exact content the denylist exists to withhold, to a public site."""
+    It filters NAMES, which is why `fs.copy_tree` never follows a symlink: a
+    `notes.pdf -> ../solution/answers.pdf` would otherwise be copied in as the answers
+    themselves, under a name this filter has no reason to deny."""
     return {n for n in names if is_denied_publication(n)}
 
 
@@ -175,12 +179,6 @@ def sync_public_site(
         return 1
 
     def build(site_wd: Path) -> SitePlan | None:
-        sessions = discover_sessions(course_org, source_repo)
-        log_step(
-            f"Publishing {course_org}/{pages_repo(course_org)} from {source_repo}: "
-            f"{len(sessions)} session(s), readings={readings_mode}, "
-            f"file sections={'on' if include_lectures else 'off'}"
-        )
         meta = yaml_file(course_org, ".github", "dsl-course.yml")
         # A course site spans years and has no per-cohort schedule.yml to read (that's
         # cohort-scoped), so the date is a neutral fallback that only orders the session
@@ -195,9 +193,19 @@ def sync_public_site(
         lecture_entries: dict[str, str] = {}
         with tempfile.TemporaryDirectory() as work:
             src, spec = Path(work) / "src", f"{course_org}/{source_repo}"
-            if gh("repo", "clone", spec, str(src), "--", "-q")[0] != 0:
+            if not clone(course_org, source_repo, src):
                 log_err(f"could not clone {spec}")
                 return None
+
+            # Both readings of the source's structure come off THE CLONE - which every
+            # session below is copied out of anyway. The session list used to be a
+            # recursive git-tree fetch of a repo this function had just downloaded whole.
+            sessions = discover_local_sessions(src)
+            log_step(
+                f"Publishing {course_org}/{pages_repo(course_org)} from {source_repo}: "
+                f"{len(sessions)} session(s), readings={readings_mode}, "
+                f"file sections={'on' if include_lectures else 'off'}"
+            )
 
             # Sections are whatever THIS repo has (the same discovery the release workflows
             # use), not a hardcoded lectures/readings pair - a course whose content lives
@@ -228,13 +236,7 @@ def sync_public_site(
                     if sec_src is None:
                         continue
                     dest = site_session / section
-                    shutil.copytree(
-                        sec_src,
-                        dest,
-                        dirs_exist_ok=True,
-                        symlinks=True,
-                        ignore=_publication_ignore,
-                    )
+                    copy_tree(sec_src, dest, _publication_ignore)
                     links = _public_links(dest, f"{url_base}/{section}")
                     if links:
                         rows = (
@@ -246,13 +248,7 @@ def sync_public_site(
                 if read_src is not None:
                     if readings_mode == "actual-readings":
                         dest = site_session / READINGS_SECTION
-                        shutil.copytree(
-                            read_src,
-                            dest,
-                            dirs_exist_ok=True,
-                            symlinks=True,
-                            ignore=_publication_ignore,
-                        )
+                        copy_tree(read_src, dest, _publication_ignore)
                         links = _public_links(dest, f"{url_base}/{READINGS_SECTION}")
                         if links:
                             section_links.append((READINGS_SECTION, links))

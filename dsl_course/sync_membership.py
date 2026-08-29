@@ -35,7 +35,7 @@ from .discovery import (
     discover_cohorts,
     discover_content_repos,
 )
-from .gh_teams import _acting_login
+from .gh_teams import acting_login
 from .log import log_err, log_ok
 
 
@@ -128,7 +128,7 @@ def main() -> int:
     # unauthenticated run would otherwise reconcile nothing and still report
     # "[ok] Sync complete" - masking e.g. an org secret that stopped being
     # delivered to this repo.
-    if _acting_login() is None:
+    if acting_login() is None:
         log_err(
             "gh is not authenticated (empty or invalid GH_TOKEN?) - "
             "refusing to run: every read would come back empty and the sync "

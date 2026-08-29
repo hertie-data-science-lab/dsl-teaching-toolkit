@@ -4,19 +4,55 @@ topic and describe it, add a collaborator - and what a published page may never 
 
 from __future__ import annotations
 
+import json
 from fnmatch import fnmatch
 from functools import cache
+from typing import NamedTuple
 
-from .ghcli import gh, is_missing_resource
+from .ghcli import gh, is_already_exists, is_missing_resource
 from .log import log, log_err, log_ok, log_skip
+
+
+class _RepoReadFailed(RuntimeError):
+    """`GET repos/{org}/{name}` did not answer. Carries gh's output, so a caller can ask
+    `is_missing_resource` whether that was a definite 404 or merely "could not tell"."""
+
+    def __init__(self, out: str) -> None:
+        super().__init__(out)
+        self.out = out
+
+
+@cache
+def _repo(org: str, name: str) -> dict:
+    """The repo object, read once per repo per process.
+
+    "Is it there", "is it private", "is it archived", "what is its default branch" are
+    four questions about ONE object, and a single sweep asks several of them about the
+    same repo; a repo's identity cannot change under one run. A failed read RAISES rather
+    than returning a sentinel, because functools.cache does not memoise a raise - so a 502
+    is retried on the next question instead of being pinned for the life of the process.
+    Cleared between tests (tests/conftest.py)."""
+    code, out = gh("api", f"repos/{org}/{name}")
+    if code != 0:
+        raise _RepoReadFailed(out)
+    try:
+        body = json.loads(out)
+    except json.JSONDecodeError as exc:
+        raise _RepoReadFailed(out) from exc
+    if not isinstance(body, dict):
+        raise _RepoReadFailed(out)
+    return body
 
 
 def repo_missing(org: str, name: str) -> bool:
     """Whether GitHub positively says the repo is NOT there (a 404). The shape for a
     caller about to record something permanent on the strength of absence: a 5xx or a
     rate limit is neither present nor absent, and must read as "could not tell"."""
-    code, out = gh("api", f"repos/{org}/{name}")
-    return code != 0 and is_missing_resource(out)
+    try:
+        _repo(org, name)
+    except _RepoReadFailed as exc:
+        return is_missing_resource(exc.out)
+    return False
 
 
 def repo_exists(org: str, name: str) -> bool:
@@ -26,32 +62,25 @@ def repo_exists(org: str, name: str) -> bool:
     Its neighbour `org_exists` is deliberately the opposite shape - it raises rather than
     call an unreadable org deleted - because its callers act destructively on a False.
     Reach for that one whenever absence is going to remove something."""
-    code, _ = gh("api", f"repos/{org}/{name}")
-    return code == 0
+    try:
+        _repo(org, name)
+    except _RepoReadFailed:
+        return False
+    return True
 
 
 def org_exists(org: str) -> bool:
     """Whether `org` is still a live GitHub org.
 
-    The liveness half of discovery, and the ONLY evidence an org is gone that anything
-    here may act on. The topic search behind the inventory is eventually consistent, and
-    generously so: a deleted org kept coming back from `gh search repos topic:dsl-cohort`
-    for ten days after the org itself was gone. The search says what is INDEXED; this says
-    what is THERE.
-
-    Fails CLOSED, which is the whole point - only an unambiguous 404 is absence. A 403, a
-    5xx, a rate limit or a timeout all mean "could not tell", and both callers act
-    destructively on a False (a row dropped from a generated page, a cohort unregistered
-    from every nightly sync). Reading "could not tell" as "deleted" would do that on any
-    transient failure, so it raises instead. `repo_exists` above is deliberately the
-    opposite shape: it answers a cheap should-I-create question where a wrong guess costs
-    a retry, not a deletion.
+    Fails CLOSED: only an unambiguous 404 is absence. A 403, a 5xx, a rate limit or a
+    timeout all mean "could not tell", and both callers act destructively on a False (a
+    row dropped from a generated page, a cohort unregistered from every nightly sync), so
+    it raises instead. `repo_exists` above is deliberately the opposite shape.
 
     Even the 404 is weaker evidence than it looks: GitHub answers 404, not 403, for an org
-    the TOKEN cannot see, so a bot removed from one org - or running on a rotated token
-    that was never re-invited - reads identically to a deleted org. False therefore means
-    "not visible to this token", and a caller that acts destructively on it needs more
-    than one look (see seed._live_cohorts, which requires two consecutive misses)."""
+    the TOKEN cannot see, so a bot removed from one org reads exactly like a deleted one.
+    False therefore means "not visible to this token", and seed._live_cohorts requires two
+    consecutive misses before acting on it."""
     code, out = gh("api", f"orgs/{org}", "--jq", ".login")
     if code == 0:
         return True
@@ -64,8 +93,10 @@ def org_exists(org: str) -> bool:
 
 def repo_is_private(org: str, name: str) -> bool:
     """Return True if the repo is private (assume private if the check fails)."""
-    code, out = gh("api", f"repos/{org}/{name}", "--jq", ".private")
-    return out.strip() != "false" if code == 0 else True
+    try:
+        return bool(_repo(org, name).get("private", True))
+    except _RepoReadFailed:
+        return True
 
 
 def repo_is_archived(org: str, name: str) -> bool:
@@ -75,36 +106,29 @@ def repo_is_archived(org: str, name: str) -> bool:
     a transient API failure must not silently skip a live cohort's refresh. Guess wrong
     that way and the write itself fails loudly, which is the outcome we want.
     """
-    code, out = gh("api", f"repos/{org}/{name}", "--jq", ".archived")
-    return out.strip() == "true" if code == 0 else False
+    try:
+        return bool(_repo(org, name).get("archived"))
+    except _RepoReadFailed:
+        return False
 
 
-def get_default_branch(org: str, name: str) -> str:
-    """Return the default branch of a repo. Falls back to 'main'."""
-    code, out = gh("api", f"repos/{org}/{name}", "--jq", ".default_branch")
-    if code == 0 and out:
-        return out
-    return "main"
+def default_branch(org: str, name: str, *, fallback: str | None = None) -> str:
+    """The repo's default branch.
 
-
-@cache
-def default_branch(org: str, name: str) -> str:
-    """The default branch, RAISING if it cannot be read - and cached per repo.
-
-    The fail-loud twin of get_default_branch, for writers. Guessing "main" is the right
-    default for a reader that would otherwise just find nothing; for a write it aims a
-    commit at a branch that may not be the one that exists, so put_files would rather fail
-    than land work somewhere nobody is looking.
-
-    Cached because a repo's default branch cannot change mid-run, and one run commits to
-    the same repo more than once (a cohort's classroom-config takes both a contract and a
-    samples commit; an org's `.github` takes both a workflows and a READMEs commit).
-    functools.cache does not memoise a raised exception, so a transient failure is retried
-    rather than pinned for the life of the process."""
-    code, out = gh("api", f"repos/{org}/{name}", "--jq", ".default_branch")
-    if code != 0 or not out.strip():
-        raise RuntimeError(f"could not read {org}/{name}'s default branch: {out[:200]}")
-    return out.strip()
+    Fail-LOUD by default, which is what a writer needs: guessing "main" aims a commit at a
+    branch that may not be the one that exists, so put_files would rather fail than land
+    work somewhere nobody is looking. A READER that would otherwise just find nothing
+    passes `fallback="main"` and gets it whenever the repo cannot be read."""
+    detail = "the repo names no default branch"
+    try:
+        branch = str(_repo(org, name).get("default_branch") or "").strip()
+        if branch:
+            return branch
+    except _RepoReadFailed as exc:
+        detail = exc.out[:200]
+    if fallback is not None:
+        return fallback
+    raise RuntimeError(f"could not read {org}/{name}'s default branch: {detail}")
 
 
 SUPERSEDED_DESCRIPTIONS = {
@@ -159,12 +183,25 @@ SUPERSEDED_COURSE_DESCRIPTIONS = {
 }
 
 
-def converge_descriptions(org: str, repos: list[dict], cohort: bool = False) -> int:
+class Converged(NamedTuple):
+    """What one convergence pass did: how many repos it CHANGED, and how many changes it
+    could not make. One shape for all three passes, so the orchestrator decides which
+    failures red a run rather than each pass deciding by what it happens to return."""
+
+    changed: int = 0
+    failures: int = 0
+
+
+def converge_descriptions(
+    org: str, repos: list[dict], tier: str | None = None
+) -> Converged:
     """Update every repo in `repos` whose description we have since reworded.
 
-    `cohort` selects the tier-specific table on top of the shared one: the same old
-    `.github` wording becomes "[do not touch]" on a cohort org and "[control panel]" on a
-    course org, because they are opposite instructions to the same reader.
+    `tier` (`discovery.org_tier`) selects the tier-specific table on top of the shared
+    one: the same old `.github` wording becomes "[do not touch]" on a cohort org and
+    "[control panel]" on a course org, because they are opposite instructions to the same
+    reader. None - a listing that cannot place the org - reads as a cohort, the same way
+    the faculty floor does.
 
     A GitHub description is only ever set at repo CREATION, so a wording fix otherwise
     never reaches a repo that already exists - while being the "What it's for" column on
@@ -176,13 +213,16 @@ def converge_descriptions(org: str, repos: list[dict], cohort: bool = False) -> 
     renders the listing straight afterwards shows the new wording in the same run rather
     than one run late.
 
-    Never fatal - a description is documentation, and a failed PATCH is worth a line, not
-    a failed refresh. Returns the number changed.
+    A failed PATCH is a line, not an exception; whether it reds the run is the caller's
+    call (see seed._converge_org_metadata).
     """
     superseded = SUPERSEDED_DESCRIPTIONS | (
-        SUPERSEDED_COHORT_DESCRIPTIONS if cohort else SUPERSEDED_COURSE_DESCRIPTIONS
+        SUPERSEDED_COURSE_DESCRIPTIONS
+        if tier == "course"
+        else SUPERSEDED_COHORT_DESCRIPTIONS
     )
     changed = 0
+    failures = 0
     for repo in repos:
         if repo.get("archived"):
             continue  # GitHub refuses the PATCH; a frozen cohort logged one failure a night
@@ -203,7 +243,8 @@ def converge_descriptions(org: str, repos: list[dict], cohort: bool = False) -> 
             changed += 1
         else:
             log(f"  ({repo['name']}: could not update the description)")
-    return changed
+            failures += 1
+    return Converged(changed, failures)
 
 
 def create_repo(
@@ -236,10 +277,7 @@ def create_repo(
     if code == 0:
         log_ok(f"repo created: {org}/{name}")
         return True
-    # Only a genuine name-clash 422 is success. A bare `"422" in out` also swallowed an
-    # invalid-name or policy/plan 422 as success, so a caller would then write into a repo
-    # that was never created. Key on GitHub's specific message text instead.
-    if "name already exists" in out.lower():
+    if is_already_exists(out):
         log_skip(f"repo {org}/{name}")
         return True
     log_err(f"failed to create repo {org}/{name}: {out[:200]}")
@@ -279,9 +317,15 @@ def has_denied_component(path: str) -> bool:
     return any(is_denied_publication(part) for part in path.split("/") if part)
 
 
+def topic_name(text: str) -> str:
+    """`text` as GitHub stores a topic: lowercase kebab. Shared by the write and by every
+    comparison against a live topic list, which must agree or a repo converges nightly."""
+    return text.lower().replace("_", "-")
+
+
 def set_repo_topics(org: str, repo: str, topics: list[str]) -> bool:
     """Replace the full topic list on a repo (GitHub limit: 20 topics, lowercase kebab)."""
-    normalised = sorted({t.lower().replace("_", "-") for t in topics if t})
+    normalised = sorted({topic_name(t) for t in topics if t})
     args = [
         "api",
         "--method",
@@ -316,16 +360,29 @@ def add_collaborator(org: str, repo: str, login: str, permission: str = "push") 
 
 
 def is_collaborator(org: str, repo: str, login: str) -> bool | None:
-    """Whether `login` is a DIRECT collaborator on `org/repo`.
+    """Whether `login` holds a DIRECT collaborator grant on `org/repo`.
 
-    None means the answer could not be read. Kept distinct from False on purpose: the one
-    caller is about to REVOKE access, and a rate limit or a network drop must never read as
-    "not a collaborator, nothing to do" - nor, worse, be acted on either way."""
-    code, out = gh("api", f"repos/{org}/{repo}/collaborators/{login}")
+    Read from the `affiliation=direct` LISTING, not from
+    `GET /collaborators/{login}` - that endpoint 204s for anyone who can reach the repo
+    at all, including through a team and by being an org owner. Its answer is therefore
+    "has access", and the one caller here revokes on it: every faculty member and the bot
+    would have read as a direct collaborator on every repo named after a handle they
+    happen to share, and the DELETE that followed reported a revoke that removed nothing.
+
+    None means the answer could not be read. Kept distinct from False on purpose: the
+    caller is about to REVOKE access, and a rate limit or a network drop must never read
+    as "not a collaborator, nothing to do" - nor, worse, be acted on either way."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"repos/{org}/{repo}/collaborators?affiliation=direct&per_page=100",
+        "--jq",
+        ".[].login",
+    )
     if code == 0:
-        return True
+        return login.casefold() in {ln.strip().casefold() for ln in out.splitlines()}
     if is_missing_resource(out):
-        return False
+        return False  # no such repo - nothing to revoke on it
     log_err(
         f"could not check whether {login} collaborates on {org}/{repo}: {out[:160]}"
     )
@@ -340,6 +397,48 @@ def remove_collaborator(org: str, repo: str, login: str) -> bool:
     if code == 0:
         return True
     log_err(f"could not remove {login} from {org}/{repo}: {out[:160]}")
+    return False
+
+
+def pending_invitations(org: str, repo: str, login: str) -> list[str] | None:
+    """The ids of `login`'s un-accepted invitations to `org/repo`, `[]` if there are none,
+    None if the listing could not be read.
+
+    A collaborator granted before the student accepted their org invite is an INVITATION,
+    not a collaborator row - so `is_collaborator` says no and `remove_collaborator` removes
+    nothing, while the invitation stays live and accepting it hands back `maintain`.
+
+    None is kept distinct from `[]` for the same reason as `is_collaborator`: the caller is
+    about to revoke, and an unreadable listing must never read as "nothing to cancel"."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"repos/{org}/{repo}/invitations?per_page=100",
+        "--jq",
+        ".[] | [.id, .invitee.login] | @tsv",
+    )
+    if code != 0:
+        if is_missing_resource(out):
+            return []  # no such repo - nothing to cancel on it
+        log_err(f"could not list invitations on {org}/{repo}: {out[:160]}")
+        return None
+    fold = login.casefold()
+    ids = []
+    for line in out.splitlines():
+        invitation_id, _, invitee = line.partition("\t")
+        if invitee.strip().casefold() == fold:
+            ids.append(invitation_id.strip())
+    return ids
+
+
+def cancel_invitation(org: str, repo: str, invitation_id: str) -> bool:
+    """Cancel one repo invitation by id."""
+    code, out = gh(
+        "api", "--method", "DELETE", f"repos/{org}/{repo}/invitations/{invitation_id}"
+    )
+    if code == 0:
+        return True
+    log_err(f"could not cancel invitation {invitation_id} on {org}/{repo}: {out[:160]}")
     return False
 
 
@@ -370,7 +469,7 @@ def generate_from_template(
     )
     if code == 0:
         return True
-    if "name already exists" in out.lower():
+    if is_already_exists(out):
         log_skip(f"repo {owner}/{name}")
         return True
     log_err(f"failed to generate {owner}/{name} from template: {out[:200]}")

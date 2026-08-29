@@ -23,11 +23,11 @@ END_OF_TERM = date(2026, 12, 18)
 
 
 @pytest.fixture(autouse=True)
-def _no_acting_login(monkeypatch):
+def _noacting_login(monkeypatch):
     """_team_people asks who the sync is authenticated as, and the real lookup shells out
     to `gh` (green on an authenticated dev box, red in tokenless CI). None excludes
     nobody, which is what every test here but the bot-card one wants."""
-    monkeypatch.setattr(site_repo, "_acting_login", lambda: None)
+    monkeypatch.setattr(site_repo, "acting_login", lambda: None)
 
 
 def _sched(releases: list[Release]) -> Schedule:
@@ -467,14 +467,19 @@ def _plan(
         "sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
-    monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
+    # ONE cohort listing answers both of the build's questions of the org. Everything in
+    # it carries the handed-out topic, so it names the templates and no content repos.
+    monkeypatch.setattr(
+        site,
+        "list_org_repos",
+        lambda org: [
+            {"name": n, "topics": ["assignment-template"]} for n in handed_out
+        ],
+    )
     monkeypatch.setattr(
         site, "discover_release_sources", lambda org, repos: list(sources)
     )
     monkeypatch.setattr(site, "discover_assignments", lambda org: list(assignments))
-    monkeypatch.setattr(
-        site, "discover_handed_out_assignments", lambda org: frozenset(handed_out)
-    )
     monkeypatch.setattr(site, "yaml_file", lambda *a: {})
     monkeypatch.setattr(site.schedule, "load", lambda org: sched)
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
@@ -489,6 +494,47 @@ def _plan(
     monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
     assert site.sync_site("Course-Org", "Cohort-f2026") == 0
     return captured["plan"]
+
+
+def test_the_build_lists_the_cohort_once_for_both_of_its_questions(
+    monkeypatch, tmp_path
+):
+    # "Which repos hold released content" and "which assignments have gone out" are two
+    # questions about one listing; each paid for its own full paginated walk of the org.
+    listed: list[str] = []
+    captured: dict = {}
+    monkeypatch.setattr(
+        site,
+        "sync_site_repo",
+        lambda org, build: captured.update(plan=build(tmp_path)) or 0,
+    )
+    monkeypatch.setattr(
+        site,
+        "list_org_repos",
+        lambda org: (
+            listed.append(org)
+            or [
+                {"name": "materials", "topics": []},
+                {"name": "assignment-1", "topics": ["assignment-template"]},
+            ]
+        ),
+    )
+    seen_content: list[list[str]] = []
+    monkeypatch.setattr(
+        site,
+        "discover_release_sources",
+        lambda org, repos: seen_content.append(repos) or [],
+    )
+    monkeypatch.setattr(site, "discover_assignments", lambda org: [])
+    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
+    monkeypatch.setattr(site.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "")
+
+    assert site.sync_site("Course-Org", "Cohort-f2026") == 0
+    assert listed == ["Cohort-f2026"], "the cohort was listed twice for one build"
+    # The same listing, read two ways: the templated repo is a hand-out, not content.
+    assert seen_content == [["materials"]]
 
 
 def test_cohort_site_links_back_to_the_cohort_org(monkeypatch, tmp_path):
@@ -542,12 +588,9 @@ def test_course_description_flows_from_course_metadata_into_config(
         "sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
-    monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
+    monkeypatch.setattr(site, "list_org_repos", lambda org: [])
     monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
     monkeypatch.setattr(site, "discover_assignments", lambda org: [])
-    monkeypatch.setattr(
-        site, "discover_handed_out_assignments", lambda org: frozenset()
-    )
     monkeypatch.setattr(site.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
 
@@ -559,7 +602,7 @@ def test_course_description_flows_from_course_metadata_into_config(
         site, "yaml_file", lambda *a: {"course_description": "Nets, from 0."}
     )
     assert site.sync_site("Course-Org", "Cohort-f2026") == 0
-    cfg = site_repo._set_config(
+    cfg = site_repo._replace_config_scalar(
         'course_name: "x"\ncourse_description: "old"\ncourse_code: "y"\n',
         "course_description",
         captured["plan"].config["course_description"],
@@ -568,10 +611,10 @@ def test_course_description_flows_from_course_metadata_into_config(
     assert yaml.safe_load(cfg)["course_code"] == "y"  # neighbours untouched
 
 
-def test_set_config_writes_one_line_over_a_block_scalar():
+def test_replacing_a_config_scalar_writes_one_line_over_a_block_scalar():
     # A faculty `>` block in dsl-course.yml, and/or one already in _config.yml: either way
     # the result must stay valid YAML on one line, its body not stranded as loose text.
-    cfg = site_repo._set_config(
+    cfg = site_repo._replace_config_scalar(
         "course_description: >\n  an old\n  folded blurb\ncourse_code: 'y'\n",
         "course_description",
         "line one\nline two\n",
@@ -597,12 +640,9 @@ def test_site_still_builds_when_schedule_yml_does_not_parse(
         "sync_site_repo",
         lambda org, build: captured.update(plan=build(tmp_path)) or 0,
     )
-    monkeypatch.setattr(site, "discover_cohort_repos", lambda orgs: [])
+    monkeypatch.setattr(site, "list_org_repos", lambda org: [])
     monkeypatch.setattr(site, "discover_release_sources", lambda org, repos: [])
     monkeypatch.setattr(site, "discover_assignments", lambda org: [])
-    monkeypatch.setattr(
-        site, "discover_handed_out_assignments", lambda org: frozenset()
-    )
     monkeypatch.setattr(site, "yaml_file", lambda *a: {"course_name": "Deep Learning"})
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     # the REAL schedule.load, fed the malformed file
@@ -963,14 +1003,14 @@ def test_two_plan_entries_citing_one_template_stay_two_assignments(
 
 
 def test_session_files_missing_tree_is_empty(monkeypatch):
-    monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "HTTP 404: Not Found"))
     assert site._session_files("Cohort-f2026", "materials", "lectures", "03_x") == []
 
 
 def test_session_files_fetch_failure_raises_rather_than_stripping_the_site(monkeypatch):
     # A swallowed failure returned (), the site republished with every material link gone.
-    monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "HTTP 502: bad gateway"))
     with pytest.raises(RuntimeError):
         site._session_files("Cohort-f2026", "materials", "lectures", "03_x")
@@ -1023,7 +1063,7 @@ def test_team_people_never_renders_the_syncs_own_bot_account(monkeypatch, capsys
 
     monkeypatch.setattr(site_repo, "gh", fake)
     monkeypatch.setattr(
-        site_repo, "_acting_login", lambda: "Hertie-DSL-Bot"
+        site_repo, "acting_login", lambda: "Hertie-DSL-Bot"
     )  # logins fold case
     assert site_repo._team_people("Course", "instructors") == [
         ("Jane", "https://a/j.png", "https://gh/jane")

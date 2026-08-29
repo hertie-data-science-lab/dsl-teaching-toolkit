@@ -34,13 +34,13 @@ CLI:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import datetime, timedelta, timezone
 
 from . import scaffold
 from .access import converge_faculty_access, converge_topics
-from .central import CENTRAL, central_ref_exists
+from .central import MissingCentralRef
 from .course import CONFIG_REPO, term_tag
 from .discovery import (
     central_ref_for,
@@ -53,10 +53,11 @@ from .discovery import (
     unregister_cohort,
 )
 from .gh_contents import get_file_content, put_file, put_files, refresh_stubs
-from .ghcli import gh
+from .gh_teams import converge_org_settings
+from .ghcli import bot_token, gh
 from .log import log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
-from .repos import converge_descriptions, org_exists, repo_is_archived
+from .repos import converge_descriptions, org_exists
 from .welcome import (
     refresh_classroom_samples,
     refresh_classroom_system_files,
@@ -89,11 +90,13 @@ from .workflows_render import (
 # from. See _write_heartbeat.
 HEARTBEAT_PATH = ".github/.last-refresh"
 
-# The cohort orgs the last refresh could not see, one per line, beside the heartbeat in the
-# course org's `.github` repo. One 404 is not proof an org is gone (see _live_cohorts), so
-# the verdict has to survive until the next nightly run - and a file in the repo the cron
-# already writes to is the only state this toolkit has that does.
+# The MISS LEDGER: `<cohort> <first missed at>` per line, beside the heartbeat in the
+# course org's `.github` repo - the only cross-run state this toolkit has. Unregistering a
+# cohort takes two misses at least MISS_GRACE_HOURS apart (see _live_cohorts), so the
+# first verdict has to survive to the next run, and the grace period has to be measured in
+# WALL time: two manual runs ten minutes apart are also two consecutive refreshes.
 MISSES_PATH = ".github/.missing-cohorts"
+MISS_GRACE_HOURS = 20
 
 
 def _write_heartbeat(course_org: str) -> int:
@@ -126,60 +129,68 @@ def _write_heartbeat(course_org: str) -> int:
     return 1
 
 
-def _read_misses(course_org: str) -> set[str]:
-    """The cohorts the PREVIOUS refresh could not see - see MISSES_PATH."""
+def _read_misses(course_org: str) -> dict[str, str]:
+    """`{cohort: when it was FIRST missed}` from the previous refreshes - see MISSES_PATH.
+
+    A line carrying no timestamp - a ledger written before they were recorded - maps to
+    "", which reads as "too recent to act on" and costs one more grace period. That is the
+    safe direction: never an unregistration."""
     content = get_file_content(course_org, ".github", MISSES_PATH)
-    return {
-        line.strip().casefold() for line in (content or "").splitlines() if line.strip()
-    }
+    out: dict[str, str] = {}
+    for line in (content or "").splitlines():
+        cohort, _, first_seen = line.strip().partition(" ")
+        if cohort:
+            out[cohort.casefold()] = first_seen.strip()
+    return out
 
 
-def _write_misses(course_org: str, misses: set[str], previous: set[str]) -> None:
+def _write_misses(
+    course_org: str, misses: dict[str, str], previous: dict[str, str]
+) -> None:
     """Record this run's misses, if they differ from the last run's.
+
+    Each line is `<cohort> <first missed at>`, and a cohort still missing keeps the
+    ORIGINAL timestamp - re-stamping it every night would restart the grace period every
+    night and nothing would ever be unregistered.
 
     Best effort: a failed write only costs a second grace period (the next miss reads as
     a first one), which is the safe direction - never an unregistration."""
-    if {m.casefold() for m in misses} == previous:
+    if misses == previous:
         return
     put_file(
         course_org,
         ".github",
         MISSES_PATH,
-        ("".join(f"{m}\n" for m in sorted(misses))).encode(),
+        ("".join(f"{c} {at}\n" for c, at in sorted(misses.items()))).encode(),
         "chore: record cohort orgs this refresh could not see",
     )
 
 
-def _live_cohorts(course_org: str) -> list[str]:
+def _live_cohorts(course_org: str) -> tuple[list[str], int]:
     """The registry, converged: every registered cohort whose org still exists, with any
-    that has been missing for two consecutive refreshes dropped from the registry on the
-    way past.
+    that has been missing for two refreshes at least MISS_GRACE_HOURS apart dropped from
+    the registry on the way past. Returns `(live cohorts, how many were unregistered)`.
 
-    A cohort ORG DELETED after it was registered 404s on every write, which would red the
-    nightly cron forever. Detect a genuinely-gone org by probing the ORG ITSELF: probing
-    one of its repos instead wrongly skipped a live org that had only lost its
-    classroom-config repo - which is a real problem that must fail loud in
-    refresh_classroom_samples, not be pruned away.
+    The count goes into the refresh's failure total: nothing re-adds a cohort, and every
+    nightly sync in every tool stops looking at that org, so a run that removed one is not
+    an ordinary green night.
 
-    The registry is CONVERGED rather than merely annotated: this used to log "prune it by
-    hand", which nobody does, so a deleted org stayed registered and every nightly sync in
-    every tool went on trying it. Removal is safe precisely because the org is proven gone
-    - see `unregister_cohort` for why the ADD side stays manual.
+    TWO misses, on two different days, because GitHub answers 404 - not 403 - for an org
+    the TOKEN cannot see: a bot dropped from one org, or a rotated token never re-invited,
+    is indistinguishable from a deleted org, and one bad night would silently unregister a
+    live cohort. The first miss is loud, costs that cohort only that night's refresh, and
+    is carried to the next run in MISSES_PATH; a cohort that answers again clears it.
 
-    TWO consecutive misses, though, not one. GitHub answers 404 - not 403 - for an org the
-    TOKEN cannot see, so a bot dropped from one org, or a rotated token never re-invited
-    to it, is indistinguishable from a deleted org: one bad night would have silently
-    unregistered a live cohort from every nightly sync, and nothing re-adds it. The first
-    miss is loud and costs the cohort only that night's refresh; MISSES_PATH carries the
-    verdict to the next run, and a cohort that answers again clears it.
-
-    `org_exists` raises rather than guessing, and the safe reading of "could not tell" here
-    is LIVE: the cohort is refreshed as usual and fails loudly on its own if something is
-    really wrong, rather than being unregistered on a rate limit or a 502."""
+    Liveness is probed on the ORG itself, never one of its repos - a live org that has only
+    lost its classroom-config must fail loud in refresh_classroom_samples, not be pruned
+    away. `org_exists` raises rather than guessing, and "could not tell" reads as LIVE.
+    """
     registered = discover_cohorts(course_org)
     previous = _read_misses(course_org)
+    now = datetime.now(timezone.utc)
     live: list[str] = []
-    missing: set[str] = set()
+    missing: dict[str, str] = {}
+    unregistered = 0
     for cohort in registered:
         try:
             gone = not org_exists(cohort)
@@ -189,16 +200,26 @@ def _live_cohorts(course_org: str) -> list[str]:
         if not gone:
             live.append(cohort)
             continue
-        if cohort.casefold() not in previous:
-            missing.add(cohort)
+        first_seen = previous.get(cohort.casefold(), "")
+        try:
+            since = now - datetime.fromisoformat(first_seen)
+        except ValueError:
+            since = timedelta(0)  # never recorded, or unparseable - start the clock now
+        if since < timedelta(hours=MISS_GRACE_HOURS):
+            missing[cohort.casefold()] = first_seen or now.isoformat(timespec="seconds")
             log_err(
                 f"{cohort} did not answer - it is either deleted or no longer visible to "
                 f"this token. Left registered and skipped for tonight; if it is still "
-                f"missing at the next refresh it will be unregistered from {course_org}."
+                f"missing at a refresh more than {MISS_GRACE_HOURS}h from the first miss "
+                f"it will be unregistered from {course_org}."
             )
             continue
-        log(f"  [skip] {cohort} (missing for a second consecutive refresh)")
+        log(
+            f"  [skip] {cohort} (missing since {first_seen} - unregistering it from "
+            f"{course_org})"
+        )
         unregister_cohort(course_org, cohort)
+        unregistered += 1
         # The cohort's own `instructors-<tag>` team lives in the COURSE org, so deleting
         # the cohort org does not take it with it - and once unregistered, sync_faculty
         # never looks at it again. Say so here: before the prune this showed up as a
@@ -209,7 +230,7 @@ def _live_cohorts(course_org: str) -> list[str]:
             f"an orphaned team with push access - delete it by hand if so"
         )
     _write_misses(course_org, missing, previous)
-    return live
+    return live, unregistered
 
 
 def seed_github_workflows(course_org: str, central_ref: str) -> int:
@@ -290,26 +311,13 @@ def _propagate_repo_secret(course_org: str, repos: list[str]) -> int:
     with no auth and fails weeks later when faculty run them, so a failure here must
     count into refresh's exit code rather than pass silently.
 
-    Only DSL_BOT_TOKEN is published. A maintainer running `seed refresh` by hand usually
-    has their PERSONAL GH_TOKEN exported; publishing that as the shared repo secret would
-    leak their PAT into every content repo, so if only GH_TOKEN is set we refuse. The
-    refusal counts every repo as unpropagated rather than passing green: until the nightly
-    refresh self-heals an org, its content repos still run the pre-fix new-assignment.yml
-    (no DSL_BOT_TOKEN in env), so a green refusal is a live workflow path left with no auth.
-    The value goes over stdin - `gh secret set` reads it from there whenever `--body` is
-    omitted - never argv, so it is not visible in `ps`."""
-    token = os.environ.get("DSL_BOT_TOKEN")
+    `ghcli.bot_token` owns the "never a personal GH_TOKEN" refusal; its failure counts
+    every repo as unpropagated rather than passing green, because until the nightly
+    refresh self-heals an org its content repos still run the pre-fix new-assignment.yml
+    (no DSL_BOT_TOKEN in env). The value goes over stdin - `gh secret set` reads it from
+    there whenever `--body` is omitted - never argv, so it is not visible in `ps`."""
+    token = bot_token("the DSL_BOT_TOKEN repo secret")
     if not token:
-        if os.environ.get("GH_TOKEN"):
-            log_err(
-                "DSL_BOT_TOKEN not set (only GH_TOKEN is) - refusing to publish a personal "
-                "token as the DSL_BOT_TOKEN repo secret; set DSL_BOT_TOKEN to propagate it."
-            )
-        else:
-            log_err(
-                "DSL_BOT_TOKEN not set - cannot propagate the repo secret to "
-                f"{len(repos)} content repo(s)."
-            )
         return len(repos)
     failures = 0
     for repo in repos:
@@ -345,21 +353,52 @@ def _converge_org_metadata(org: str, repos: list[dict]) -> int:
     landing page rendered from the same listing shows the corrected wording in this run
     rather than the next.
 
-    Returns the failure count that must reach the refresh's exit code - the topic stamps.
-    A failed description PATCH is documentation and logs a line; a failed access PUT
-    self-heals on the next sweep and is likewise not fatal."""
-    # `tier` is None for an org the listing cannot place (a legacy cohort with no topics
-    # and no `welcome`). The description table and the topic sweep read that as "course";
-    # the ACCESS sweep must not, so it takes `cohort=tier != "course"` - only a listing
-    # that positively says "course" earns the write-everywhere floor, and `protected`
-    # holds every per-student repo to READ whatever the tier turns out to be.
+    Returns the failure count that must reach the refresh's exit code."""
     tier = org_tier(repos)
-    is_cohort = tier == "cohort"
-    converge_descriptions(org, repos, cohort=is_cohort)
-    converge_faculty_access(
-        org, repos, cohort=tier != "course", protected=student_repo_names(repos)
+    described = converge_descriptions(org, repos, tier)
+    granted = converge_faculty_access(
+        org, repos, tier, protected=student_repo_names(repos)
     )
-    return converge_topics(org, repos, cohort=is_cohort)
+    topics = converge_topics(org, repos, tier)
+    changed = described.changed + granted.changed + topics.changed
+    if changed:
+        log_ok(f"{org}: {changed} repo(s) converged (descriptions, access, topics)")
+    # Only a missing TOPIC reds the run. A topic is what keeps a student's submission repo
+    # and a private gradebook off the landing page, out of the release targets and on the
+    # faculty read floor, and nothing else revisits it. A reworded description is
+    # documentation, and a failed access PUT is retried by the next sweep - both have
+    # already logged their own line.
+    return topics.failures
+
+
+def _converge_org(org: str, central_ref: str, listing: list[dict] | None = None) -> int:
+    """Sweep one org's repo listing and re-render its landing pages from that SAME
+    snapshot. Failure count.
+
+    One listing for both: the sweep corrects the descriptions the landing page's table is
+    built from, so the page is right in this run rather than one run behind.
+
+    Run for the course org and for every live cohort. A cohort's own pages - the
+    student-facing profile/README.md and the orientation in its `.github` - were written
+    once at Bootstrap and then frozen, so every wording fix since reached the course org
+    and no cohort. The `.github` README is SYSTEM-owned and rewritten outright; the
+    student-facing landing page is INSTRUCTOR-owned, so only its marked repo table is
+    refreshed (see profile_readme.splice_repo_table) - which is what keeps that table
+    honest as repos are added, without flattening an instructor's wording around it.
+
+    `listing` is that snapshot when the caller already holds one - a cohort's refresh reads
+    its archived flag off the same listing rather than probing classroom-config for it.
+
+    The org's own settings are converged here too (gh_teams.converge_org_settings). They
+    used to be written only at bootstrap, so every org tightened after its own bootstrap
+    kept GitHub's default of `read` for every member on every repo."""
+    if listing is None:
+        listing = list_org_repos(org)
+    return (
+        converge_org_settings(org)
+        + _converge_org_metadata(org, listing)
+        + update_profile_readme(org, central_ref=central_ref, repos=listing)
+    )
 
 
 def _refresh_stubs(course_org: str, repo: str) -> int:
@@ -422,16 +461,7 @@ def refresh(course_org: str) -> int:
     # validator all have to be pinned to the same ref, and a cohort inherits its course
     # org's (central_ref_for), so re-reading it per cohort could only ever disagree.
     central_ref = central_ref_for(course_org)
-    # ...and one check that the ref is THERE, before a single workflow is rendered at it.
-    # The ref goes into the checkout step of every workflow this run writes, Refresh
-    # itself included, so rendering a ref that does not exist takes the org's entire
-    # Actions tab down at once and removes the one button that would have healed it. A
-    # tier branch nobody created yet is that case, and `release` is the default. When the
-    # ref is missing the previous rendering is LEFT IN PLACE - stale workflows that run
-    # beat current workflows that cannot check anything out - and every other step of the
-    # refresh proceeds as usual.
-    ref_live = central_ref_exists(central_ref)
-    cohorts = _live_cohorts(course_org)
+    cohorts, unregistered = _live_cohorts(course_org)
     targets = discover_content_repos(course_org)
     assignments = discover_assignments(
         course_org
@@ -440,36 +470,40 @@ def refresh(course_org: str) -> int:
         f"Refreshing {course_org} at central ref {central_ref}: {len(targets)} content "
         f"repo(s), cohorts {cohorts or 'none'}"
     )
-    failures = 0
-    if not ref_live:
-        log_err(
-            f"{CENTRAL}@{central_ref} does not exist, so {course_org}'s workflows are "
-            f"NOT being re-rendered - they would all fail at checkout, Refresh included. "
-            f"Create the ref (Promote), or fix `central_ref:` in "
-            f"{course_org}/.github/dsl-course.yml."
-        )
-        failures += 1
+    # An unregistration is never a silent success: see _live_cohorts.
+    failures = unregistered
+    # `central.pin_central_ref` refuses a ref the central repo does not have, and every
+    # workflow write below goes through it. Caught ONCE, here: the first refusal counts a
+    # single failure and skips every later workflow write, leaving the PREVIOUS rendering
+    # exactly where it is - stale workflows that run beat current workflows that cannot
+    # check anything out - while every other step of the refresh proceeds as usual.
+    refused = False
+
+    def render(step: Callable[[], int]) -> int:
+        nonlocal refused
+        if refused:
+            return 0
+        try:
+            return step()
+        except MissingCentralRef as exc:
+            refused = True
+            log_err(f"{exc} {course_org}'s workflows are NOT being re-rendered.")
+            return 1
+
     for repo in sorted(targets):
-        if ref_live:
-            failures += push_content_workflows(
+        failures += render(
+            lambda repo=repo: push_content_workflows(
                 course_org, repo, cohorts, assignments, central_ref
             )
+        )
         failures += _refresh_stubs(course_org, repo)
         # A no-op on the code and dataset repos this sweep also returns; the gate is
         # inside, so no caller can forget it.
         failures += scaffold.refresh_materials_system_files(course_org, repo)
     failures += _propagate_repo_secret(course_org, targets)
-    if ref_live:
-        failures += seed_github_workflows(course_org, central_ref)
+    failures += render(lambda: seed_github_workflows(course_org, central_ref))
     failures += _write_heartbeat(course_org)
-    # One listing, swept and then rendered: the sweep corrects the descriptions the
-    # landing page's table is built from, so both see the same snapshot and the page is
-    # right in this run rather than one run behind.
-    listing = list_org_repos(course_org)
-    failures += _converge_org_metadata(course_org, listing)
-    failures += update_profile_readme(
-        course_org, central_ref=central_ref, repos=listing
-    )
+    failures += _converge_org(course_org, central_ref)
     # A cohort's onboarding workflows, classroom-config dispatchers and config samples are
     # seeded at Bootstrap cohort, and would otherwise stay frozen for the whole semester
     # while the engine they call - and the schemas the samples demonstrate - move on.
@@ -478,13 +512,19 @@ def refresh(course_org: str) -> int:
         f"in {len(cohorts)} cohort org(s)"
     )
     for cohort in cohorts:
+        # ONE listing of the cohort: the archived flag below, and the convergence sweep +
+        # profile rebuild at the end of the loop, are all read off this same snapshot. The
+        # flag used to be its own GET of classroom-config, a night after night probe for a
+        # field the listing already carries.
+        listing = list_org_repos(cohort)
+        config_repo = next((r for r in listing if r["name"] == CONFIG_REPO), None)
         # A finished semester's cohort is archived, and an archived repo is read-only:
         # every write 403s, and the samples are new files so put_file's sha no-op can't
         # absorb it. A past cohort is meant to stay frozen anyway, so skip it whole rather
         # than turn the nightly cron red in every org that has ever finished a semester.
-        # repo_is_archived assumes LIVE on a transient read failure, so a live cohort's
-        # refresh is never silently skipped.
-        if repo_is_archived(cohort, CONFIG_REPO):
+        # A cohort with no classroom-config at all is not archived, it is unfinished, and
+        # the writes below are what give it one.
+        if config_repo is not None and config_repo.get("archived"):
             log(f"  [skip] {cohort} (archived cohort - left frozen)")
             continue
         failures += refresh_welcome_workflows(cohort)
@@ -492,26 +532,14 @@ def refresh(course_org: str) -> int:
         # students.csv/teams.csv/schedule.yml/people.yml are never touched here, or this
         # nightly cron would overwrite a live roster every night. Skipped whole when the
         # ref is missing: the set includes validate-schedule.yml, which is rendered at it.
-        if ref_live:
-            failures += refresh_classroom_system_files(cohort, central_ref)
+        failures += render(
+            lambda cohort=cohort: refresh_classroom_system_files(cohort, central_ref)
+        )
         failures += refresh_classroom_samples(cohort)
         # The pointer its dispatchers read to find this course org. Also SYSTEM-owned and
         # also only ever written by Bootstrap cohort until now - same bug class.
         failures += refresh_cohort_pointer(cohort, course_org)
-        # The cohort's OWN landing pages - the student-facing profile/README.md and the
-        # orientation in its .github repo. Only the COURSE org's pair was ever refreshed
-        # (below the content-repo sweep above): a cohort's were written once at Bootstrap
-        # and then frozen for the life of the org, so every wording fix since reached the
-        # course org and no cohort. The .github README is SYSTEM-owned and rewritten
-        # outright; the student-facing landing page is INSTRUCTOR-owned, so only its
-        # marked repo table is refreshed (see profile_readme.splice_repo_table) - which is
-        # what keeps that table honest as repos are added, without flattening an
-        # instructor's wording around it.
-        cohort_repos = list_org_repos(cohort)
-        failures += _converge_org_metadata(cohort, cohort_repos)
-        failures += update_profile_readme(
-            cohort, central_ref=central_ref, repos=cohort_repos
-        )
+        failures += _converge_org(cohort, central_ref, listing)
     if failures:
         log_err(f"refresh incomplete: {failures} file(s) could not be written")
         return 1

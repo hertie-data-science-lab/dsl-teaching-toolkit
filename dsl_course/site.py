@@ -1,6 +1,6 @@
 """dsl-course site -- regenerate a course/cohort website from the live org structure.
 
-Two sites, two audiences, one Jekyll template (course-website-template):
+Two sites, two audiences, one set of Jekyll templates (`templates/site/`):
 
 - **cohort site** (`<cohort>.github.io`, `sync_site`) - student-facing. Its lecture links
   point at the cohort's PRIVATE content repos (wherever a release actually landed each
@@ -39,22 +39,24 @@ from .course import (
     pages_repo,
     resolve_is_group,
     session_number,
+    submission_repo,
     term_tag,
 )
 from .discovery import (
     COHORTS_PATH,
+    cohort_content_repos,
     discover_assignments,
-    discover_cohort_repos,
     discover_cohorts,
-    discover_handed_out_assignments,
     discover_release_sources,
+    handed_out_assignments,
+    list_org_repos,
 )
 from .gh_contents import get_file_content, repo_tree
 from .log import log_err, log_step
 from .public_site import resync_public_site, sync_public_site
 from .readings import demote_headings, is_reading_overlay
 from .repos import (
-    get_default_branch,
+    default_branch,
     has_denied_component,
 )
 from .schedule_plan import (
@@ -114,7 +116,7 @@ def _repo_tree(org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     `()` and the caller simply finds no files, while any other failure RAISES rather than
     reporting an empty tree - swallowed, it republished the site with every material link
     stripped."""
-    branch = get_default_branch(org, repo)
+    branch = default_branch(org, repo, fallback="main")
     return branch, repo_tree(org, repo, branch, "blob")
 
 
@@ -790,7 +792,7 @@ def _assignment_entry(
         schedule_type=found[1].type if found else None,
         template_group=None,
     )
-    repo_name = f"{slug}-{'<your-team>' if group else '<your-handle>'}"
+    repo_name = submission_repo(slug, "<your-team>" if group else "<your-handle>")
     # The slug's own name: the row's IDENTIFIER, bold beside its name, and the one half
     # that must not change at hand-out. It used to be overwritten by the README heading, so
     # a row published as "Assignment 2" became "Assignment 1 - linear regression from
@@ -987,7 +989,12 @@ def sync_site(course_org: str, cohort_org: str) -> int:
     the schedule (exams, special events, term dates)."""
 
     def build(_wd: Path) -> SitePlan:
-        content_repos = discover_cohort_repos([cohort_org])
+        # ONE listing of the cohort answers both questions this build asks of it: which
+        # repos hold released content, and which assignments have actually gone out.
+        # Taken here rather than memoised in `discovery`, because a memo would serve a
+        # listing from before assign.py created the template it is syncing the site for.
+        cohort_repos = list_org_repos(cohort_org)
+        content_repos = cohort_content_repos(cohort_repos)
         release_sources = discover_release_sources(cohort_org, content_repos)
         # One row per (ordinal, kind): a week's lecture materials and its lab are separate
         # rows on the schedule, so a lab released into `labs/` never folds into the
@@ -1005,7 +1012,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # Which of them this cohort has actually been given - what gates their briefs. Read
         # from the cohort org rather than inferred from the plan, since the manual workflow
         # hands out with no `handout_datetime` pinned at all.
-        handed_out = discover_handed_out_assignments(cohort_org)
+        handed_out = handed_out_assignments(cohort_repos)
 
         # Course identity comes from the course org metadata, semester from the cohort tag.
         meta = yaml_file(course_org, ".github", "dsl-course.yml")

@@ -36,7 +36,13 @@ import sys
 from datetime import date
 
 from .access import grant_team_repo_access
-from .course import CONFIG_REPO, active_today, term_tag
+from .course import (
+    CONFIG_REPO,
+    COURSE_ADMIN_TEAM,
+    INSTRUCTORS_TEAM,
+    active_today,
+    term_tag,
+)
 from .discovery import (
     discover_assignments,
     discover_cohorts,
@@ -47,9 +53,9 @@ from .gh_teams import create_team, is_valid_github_username, reconcile_team_memb
 from .log import log, log_err, log_ok, log_step
 
 ROLE_TEAM = {
-    "instructors": "instructors",
-    "teaching_assistants": "instructors",
-    "course_admins": "course-admin",
+    "instructors": INSTRUCTORS_TEAM,
+    "teaching_assistants": INSTRUCTORS_TEAM,
+    "course_admins": COURSE_ADMIN_TEAM,
 }
 COHORT_PEOPLE_PATH = "people.yml"
 
@@ -185,11 +191,11 @@ def sync_course_admins(
             f"{1 + len(cohorts)} org(s)); skipping"
         )
         return 1
-    desired = _desired_for(faculty, "course-admin", date.today().isoformat())
+    desired = _desired_for(faculty, COURSE_ADMIN_TEAM, date.today().isoformat())
     errors = 0
     for org in [course_org] + cohorts:
         errors += reconcile_team_members(
-            org, "course-admin", desired, prune=True, dry_run=dry_run
+            org, COURSE_ADMIN_TEAM, desired, prune=True, dry_run=dry_run
         )
     return errors
 
@@ -217,15 +223,15 @@ def sync_cohort_instructors(
             f"absent config would prune every instructor); skipping"
         )
         return 1
-    desired = _desired_for(faculty, "instructors", date.today().isoformat())
+    desired = _desired_for(faculty, INSTRUCTORS_TEAM, date.today().isoformat())
     errors = reconcile_team_members(
-        cohort_org, "instructors", desired, prune=True, dry_run=dry_run
+        cohort_org, INSTRUCTORS_TEAM, desired, prune=True, dry_run=dry_run
     )
 
     tag = term_tag(cohort_org)
     if tag is None:
         return errors
-    team = f"instructors-{tag}"
+    team = f"{INSTRUCTORS_TEAM}-{tag}"
     if not dry_run:
         if not create_team(
             course_org, team, f"Instructors for {tag} (cohort-declared)"

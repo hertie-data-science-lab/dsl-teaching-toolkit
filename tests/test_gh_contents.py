@@ -10,6 +10,10 @@ import pytest
 
 from dsl_course import gh_contents, repos
 
+# What `GET repos/{org}/{name}` answers. `repos._repo` reads the whole object once and
+# every question about the repo - default branch included - is asked of that.
+_REPO_OBJECT = '{"default_branch": "main", "private": true, "archived": false}'
+
 
 def _stub_gh(monkeypatch, fake):
     """One fake for both `gh` bindings a write path reads: `put_files` asks `repos` for the
@@ -67,7 +71,7 @@ def test_put_files_commits_nothing_when_every_file_already_matches(monkeypatch):
     def fake_gh(*args, **kwargs):
         calls.append(args)
         if args[1] == "repos/org/repo":
-            return 0, "main\n"
+            return 0, _REPO_OBJECT
         return 0, "\n".join(
             ["false", *(f"{p}\t{_blob_sha(c)}" for p, c in files.items())]
         )
@@ -90,7 +94,7 @@ def test_put_files_lands_every_change_in_one_commit(monkeypatch):
         calls.append((args, kwargs.get("stdin")))
         url = args[1]
         if url == "repos/org/repo":
-            return 0, "main\n"
+            return 0, _REPO_OBJECT
         if "git/trees/main" in url:  # every path exists, none matches
             # "false" first: the jq asks for `truncated` ahead of the entries.
             return 0, "false\na.yml\tstale\nb.yml\tstale\nold.yml\tstale"
@@ -146,7 +150,7 @@ def test_put_files_seeds_a_repo_that_has_no_commits_yet(monkeypatch):
         calls.append((args, kwargs.get("stdin")))
         url = args[1]
         if url == "repos/org/repo":
-            return 0, "main\n"
+            return 0, _REPO_OBJECT
         # every git-data read AND write says the same thing on an empty repo
         if "git/trees" in url or url == "repos/org/repo/commits/main":
             return 1, "gh: Git Repository is empty. (HTTP 409)"
@@ -180,7 +184,7 @@ def test_put_files_still_commits_when_only_the_deletion_is_outstanding(monkeypat
         calls.append((args, kwargs.get("stdin")))
         url = args[1]
         if url == "repos/org/repo":
-            return 0, "main\n"
+            return 0, _REPO_OBJECT
         if "git/trees/main" in url:
             return 0, f"false\na.yml\t{_blob_sha(content)}\nold.yml\tstill-here"
         if url == "repos/org/repo/commits/main":
@@ -205,7 +209,7 @@ def test_put_files_skips_a_deletion_of_a_file_that_is_already_gone(monkeypatch):
 
     def fake_gh(*args, **kwargs):
         if args[1] == "repos/org/repo":
-            return 0, "main\n"
+            return 0, _REPO_OBJECT
         if "git/trees/main" in args[1]:
             return 0, f"false\na.yml\t{_blob_sha(content)}"
         raise AssertionError("nothing to do - no commit legs should run")

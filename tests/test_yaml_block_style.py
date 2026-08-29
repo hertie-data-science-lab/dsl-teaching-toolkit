@@ -58,9 +58,16 @@ def _rel(p: Path) -> str:
     return p.relative_to(ROOT).as_posix()
 
 
+def _scanned(p: Path) -> bool:
+    """Tracked source only. A dot-directory under the repo root is local state, not
+    source - `.venv`, `.pytest_cache`, `.ruff_cache`, `.git` - and letting the globs walk
+    into it makes the collected test count depend on whose checkout is running. `.github`
+    falls under the same rule, which is also the exemption the docstring above describes."""
+    return not any(part.startswith(".") for part in p.relative_to(ROOT).parts[:-1])
+
+
 def _in_scope(p: Path) -> bool:
-    rel = _rel(p)
-    return not rel.startswith(".github/workflows/") and rel not in EXCLUDED
+    return _rel(p) not in EXCLUDED
 
 
 def _offences(text: str, rel: str) -> list[str]:
@@ -86,10 +93,8 @@ def _fence_lines(text: str) -> list[tuple[int, str]]:
     return out
 
 
-YAML_FILES = sorted(
-    p for p in ROOT.rglob("*.yml") if ".git/" not in _rel(p) and _in_scope(p)
-)
-MD_FILES = sorted(p for p in ROOT.rglob("*.md") if ".git/" not in _rel(p))
+YAML_FILES = sorted(p for p in ROOT.rglob("*.yml") if _scanned(p) and _in_scope(p))
+MD_FILES = sorted(p for p in ROOT.rglob("*.md") if _scanned(p))
 PY_FILES = sorted((ROOT / "dsl_course").glob("*.py"))
 
 
@@ -161,6 +166,16 @@ def test_the_sweep_actually_sees_files():
     assert len(YAML_FILES) >= 8
     assert len(MD_FILES) >= 10
     assert len(PY_FILES) >= 20
+
+
+def test_the_sweep_stays_out_of_dot_directories():
+    """Otherwise what is collected depends on local state - a `.venv` in the checkout, or
+    whether pytest has already written its cache - and the count differs per machine."""
+    assert not _scanned(ROOT / ".venv" / "lib" / "site-packages" / "pkg" / "README.md")
+    assert not _scanned(ROOT / ".pytest_cache" / "README.md")
+    assert not _scanned(ROOT / ".github" / "workflows" / "ci.yml")
+    assert _scanned(ROOT / "docs" / "README.md")
+    assert _scanned(ROOT / "README.md")
 
 
 @pytest.mark.parametrize("path", YAML_FILES, ids=_rel)

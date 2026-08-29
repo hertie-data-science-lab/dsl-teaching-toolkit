@@ -6,11 +6,11 @@ tests/test_site_templates.py cross-checks the templates' Liquid keys against. Bo
 the SAME site, so the offline key check and the real Jekyll build cannot disagree about
 what the sync writes.
 
-Generated, never hand-written: every collection page, `_data/people.yml`, `_data/nav.yml`
-and `_data/materials.yml` come out of `dsl_course.site`'s own functions, so the fixture
-cannot drift into a shape the toolkit never produces. Only the half a site brings with it
-- `_config.yml`, the theme's `default`/`page`/`post` layouts, `_data/late_policy.yml`,
-`index.md`, `schedule.md` - is vendored, under `base/`.
+Generated, never hand-written: the whole site comes out of `dsl_course`'s own functions -
+the collection pages and `_data/*.yml` from `site`, and `_config.yml`, `index.md` and the
+rest of the seed-once half from `templates/site-seed/`. Only the THEME's stand-ins - its
+`default`/`page`/`post` layouts and stylesheet entrypoint, which the offline build does
+not fetch - are vendored, under `base/`.
 
 The states it covers are the ones that render DIFFERENTLY, one of each: a released
 session, an unreleased one, a lab, a session whose readings are still to come, a
@@ -268,33 +268,26 @@ def build(dest: Path) -> None:
     shutil.copytree(HERE / "base", dest)
 
     out = generated()
-    for coll, entries in out["collections"].items():
-        (dest / coll).mkdir(parents=True, exist_ok=True)
-        for name, body in entries.items():
-            (dest / coll / name).write_text(
-                site_repo._stamp_front_matter(body), encoding="utf-8"
-            )
-    for rel, body in {**out["files"], **site_repo.site_templates()}.items():
-        path = dest / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(body, encoding="utf-8")
-
-    cfg = (dest / "_config.yml").read_text(encoding="utf-8")
-    for key, value in {
-        "course_name": "Deep Learning (Fixture)",
-        "course_description": "A fixture course. Nothing here is a real offering.",
-        "course_semester": "Fall 2026",
-        "course_code": "E1234",
-        "github_org": COHORT_ORG,
-    }.items():
-        cfg = site_repo._set_config(cfg, key, value)
-    for key, value in site_repo._THEME_CONFIG.items():
-        cfg = site_repo._set_config(cfg, key, value, insert=True)
-    cfg = site_repo._ensure_config_block(
-        cfg, "collections", site_repo._COLLECTIONS_BLOCK
+    # Written through the sync's OWN apply step, so the site CI builds is assembled the
+    # way a real one is - config upsert, collection regeneration, front-matter stamp and
+    # all - rather than by a second copy of it here that can drift out of step.
+    site_repo.apply_plan(
+        dest,
+        site_repo.SitePlan(
+            config={
+                "course_name": "Deep Learning (Fixture)",
+                "course_description": (
+                    "A fixture course. Nothing here is a real offering."
+                ),
+                "course_semester": "Fall 2026",
+                "course_code": "E1234",
+                "github_org": COHORT_ORG,
+            },
+            collections=out["collections"],
+            files={**out["files"], **site_repo.site_templates()},
+            commit="fixture: build the CI site",
+        ),
     )
-    cfg = site_repo._ensure_config_block(cfg, "defaults", site_repo._DEFAULTS_BLOCK)
-    (dest / "_config.yml").write_text(cfg, encoding="utf-8")
     (dest / "_config.offline.yml").write_text(OFFLINE_CONFIG, encoding="utf-8")
 
 

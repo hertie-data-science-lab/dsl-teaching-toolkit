@@ -13,6 +13,9 @@ from collections.abc import Iterable
 from datetime import date, datetime
 from pathlib import Path
 
+# The per-org identity/config file, at the root of every org's `.github` repo: a course
+# org's declares its name and its faculty SSOT, a cohort org's is a pointer back to it.
+COURSE_CONFIG = "dsl-course.yml"
 # The private per-cohort config repo: roster, teams, schedule, grades, autograde records.
 # Every cohort org has exactly one, under exactly this name.
 CONFIG_REPO = "classroom-config"
@@ -42,6 +45,32 @@ SYLLABUS_SESSIONS_FILE = "SYLLABUS.sessions.md"
 FACULTY_ONLY_HEADING = "delete this section before releasing the README"
 # The branch an assignment template keeps its solution and grading.yml on.
 SOLUTION_BRANCH = "solution"
+
+# The four ROLE teams every org's access is expressed in: the two faculty teams, created
+# in course and cohort orgs alike, and the two cohort-only student teams. Named here
+# because the grants (access), the reconciles (sync_faculty, sync_roster), the bootstrap
+# that creates them and the slugs the student-written Join-team form may never claim
+# (sync_teams) all address them by these exact strings.
+INSTRUCTORS_TEAM = "instructors"
+COURSE_ADMIN_TEAM = "course-admin"
+STUDENTS_TEAM = "students"
+AUDITORS_TEAM = "auditors"
+ROLE_TEAMS = frozenset(
+    {INSTRUCTORS_TEAM, COURSE_ADMIN_TEAM, STUDENTS_TEAM, AUDITORS_TEAM}
+)
+
+
+def submission_repo(slug: str, suffix: str) -> str:
+    """A submission repo's name: `<slug>-<handle>` individually, `<slug>-<team>` for a
+    group. One composition, so the provisioner, the grader and the "your repo is called"
+    line on the site cannot spell it differently."""
+    return f"{slug}-{suffix}"
+
+
+def submission_suffix(repo: str, template: str) -> str:
+    """The handle-or-team half of `submission_repo` - what is left once the template the
+    repo was generated from is taken off the front."""
+    return repo[len(template) + 1 :]
 
 
 def term_tag(name: str) -> str | None:
@@ -185,6 +214,20 @@ def find_session_dir(section_dir: Path, session: str) -> Path | None:
         if child.is_dir() and session_number(child.name) == target:
             return child
     return None
+
+
+def discover_local_sessions(repo_root: Path) -> list[str]:
+    """The session numbers a CHECKOUT holds, across every discovered section.
+
+    The local-checkout twin of `discovery.discover_sessions`, which asks GitHub for a
+    recursive tree instead. A caller that has already cloned the repo to copy files out of
+    it has the answer on disk, and the API's copy of it can only be the same or staler."""
+    return [
+        str(n)
+        for n in sorted(
+            {n for parent, _, n in session_dirs(_local_dir_paths(repo_root)) if parent}
+        )
+    ]
 
 
 def discover_sections(repo_root: Path) -> list[str]:

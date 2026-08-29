@@ -26,7 +26,8 @@ from __future__ import annotations
 import json
 import re
 
-from .central import CENTRAL
+from .central import CENTRAL, CENTRAL_REF
+from .discovery import central_ref_for
 from .ghcli import gh
 from .log import log_err, log_ok, log_step
 from .schedule import (
@@ -115,7 +116,11 @@ def transitions(
 
 
 def render_body(
-    faults: list[SourceFault], now, course_org: str, state: dict[str, str] | None = None
+    faults: list[SourceFault],
+    now,
+    course_org: str,
+    state: dict[str, str] | None = None,
+    central_ref: str = CENTRAL_REF,
 ) -> str:
     """The whole issue body: the current list grouped by rung, plus the state marker.
 
@@ -124,7 +129,10 @@ def render_body(
 
     `state` is the map the caller computed transitions against; passing it makes "the
     marker matches what was compared" true by construction rather than by both sides
-    recomputing it from the same inputs and happening to agree."""
+    recomputing it from the same inputs and happening to agree.
+
+    `central_ref` is the tier this org runs, so the field reference points at the docs for
+    the engine that will read the file - not at whatever `main` says today."""
     by_rung: dict[Severity, list[SourceFault]] = {}
     for f in faults:
         by_rung.setdefault(f.severity(now), []).append(f)
@@ -159,7 +167,10 @@ def render_body(
     out += [
         "",
         "---",
-        f"Field reference: https://github.com/{CENTRAL}/blob/main/docs/07-schedule-releases.md",
+        (
+            f"Field reference: https://github.com/{CENTRAL}/blob/{central_ref}"
+            f"/docs/07-schedule-releases.md"
+        ),
         "",
         f"<!-- dsl-source-state: {marker} -->",
     ]
@@ -264,7 +275,13 @@ def sync(
     previous = read_state(existing[1]) if existing else {}
     current = current_state(faults, now)
     appeared, escalated, cleared = transitions(previous, current)
-    body = render_body(faults, now, course_org, current)
+    # A ref that cannot be resolved is not worth failing a notification over - the
+    # digest's own contract is that it never takes a release cron down.
+    try:
+        ref = central_ref_for(course_org)
+    except RuntimeError:
+        ref = CENTRAL_REF
+    body = render_body(faults, now, course_org, current, ref)
     note = _comment(appeared, escalated, cleared, current)
     if dry_run:
         log_step(

@@ -1,11 +1,15 @@
-# The jekyll-contract job's gems (.github/workflows/ci.yml).
+# The jekyll-contract jobs' gems (.github/workflows/ci.yml).
 #
 # Plain jekyll + kramdown, deliberately NOT the github-pages gem: this build proves the
 # course templates in templates/site/ compile against the front matter site.py writes, and
 # github-pages pins an old Jekyll and drags in a metadata plugin that refuses to build
-# without a repo to attribute the site to. The theme is not fetched either - the build is
-# offline (see the fixture's _config.offline.yml).
+# without a repo to attribute the site to.
+#
+# The remote-theme and feed plugins are the ones a generated `_config.yml` names, and only
+# the THEMED job loads them: the offline job's `_config.offline.yml` sets `plugins: []`.
 source "https://rubygems.org"
 
 gem "jekyll", "~> 4.3"
 gem "kramdown-parser-gfm", "~> 1.1"
+gem "jekyll-remote-theme", "~> 0.4"
+gem "jekyll-feed", "~> 0.17"

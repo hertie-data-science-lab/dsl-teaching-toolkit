@@ -2,7 +2,12 @@
 SYSTEM-OWNED - do not edit. Written by the DSL course sync from templates/site/ in the
 toolkit; every sync rewrites it.
 {%- endcomment -%}
-<div class="col col-1" style="color: #a94442 ;font-weight: bold;" data-label="Event">Lecture</div>
+{%- comment -%}
+Also THE lab row: `schedule_row_lab.html` includes this file with its own `kind`/`colour`,
+because the two differ in nothing else. Both defaults spell the lecture row, so the
+schedule layout's own include of this file - which passes `event` only - is unchanged.
+{%- endcomment -%}
+<div class="col col-1" style="color: {{ include.colour | default: '#a94442' }} ;font-weight: bold;" data-label="Event">{{ include.kind | default: 'Lecture' }}</div>
 <div class="col col-1-2" data-label="Date">
     {{ include.event.date | date: site.dateformat }}
     {{ include.event.date | date: "%H:%M" }}

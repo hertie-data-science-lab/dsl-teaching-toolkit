@@ -22,6 +22,17 @@ def test_parse_groups_by_assignment_and_team():
     assert per["assignment-6-project"]["team-x"] == ["anna-adams"]
 
 
+def test_a_capitalised_schedule_key_still_finds_its_rows():
+    # The Join-team form lower-cases the assignment it writes; schedule.yml's keys are
+    # typed by hand. Keyed raw, a `Assignment-4` entry found NO teams - so its group
+    # handout, its deadline snapshot and its grading pass each silently had nothing to do,
+    # while every repo they should have touched existed.
+    per = teams.parse("assignment,team,github_handle\nAssignment-4,Team-X,anna-adams\n")
+    assert per == {"assignment-4": {"team-x": ["anna-adams"]}}
+    assert teams.teams_for(per, "Assignment-4") == {"team-x": ["anna-adams"]}
+    assert teams.teams_for(per, "assignment-4") == {"team-x": ["anna-adams"]}
+
+
 def test_parse_dedupes_and_skips_blank_rows():
     text = (
         "assignment,team,github_handle\n"
@@ -67,3 +78,16 @@ def test_team_names_are_casefolded():
     assert teams.parse(text) == {
         "assignment-4-project": {"wizards": ["ada-l", "ben-b"]}
     }
+
+
+def test_one_account_typed_two_ways_is_one_member():
+    # GitHub logins are case-insensitive, and teams.csv is student-written. `ALICE` and
+    # `alice` are the same account, so they earned two collaborator adds and - once
+    # vet_handles folded them back to one canonical handle - two rows in the grades CSV.
+    per = teams.parse(
+        "assignment,team,github_handle\n"
+        "project,team-x,ALICE\n"
+        "project,team-x,alice\n"
+        "project,team-x,bob\n"
+    )
+    assert per["project"]["team-x"] == ["alice", "bob"]

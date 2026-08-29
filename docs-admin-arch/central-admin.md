@@ -108,8 +108,8 @@ ref an org runs **is** that org's engine. Three tiers, three branches:
 
 `staging` and `release` never carry commits of their own: both are always fast-forwards of
 `main`. An org's tier is `central_ref:` in its **course** org's `.github/dsl-course.yml`;
-cohorts inherit it. The [inventory page](../bootstrapped-orgs-inventory.md) shows it per
-course org, and **Check cohort setup** shows it per cohort.
+cohorts inherit it. The [inventory report](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml) shows it per course org, and
+**Check cohort setup** shows it per cohort.
 
 Neither tier branch exists until someone makes it, and `central.CENTRAL_REF` is already
 `release`. **Order, on first setup:**
@@ -134,8 +134,9 @@ commit to promote only that one.
 
 Promote refuses anything that is not both on `main`'s history and a descendant of the tier's
 current tip, so it can only ever move a tier forward - it cannot rewrite one, and cannot ship
-what `main` has not seen. It then dispatches **Refresh actions** on every course org at that
-tier, so they converge in minutes rather than at the next 05:27 cron.
+what `main` has not seen. It then runs each course org's refresh itself, out of the promoted
+checkout, so they converge in minutes rather than at the next 05:27 cron - and so an org that
+has just changed tier is re-rendered by the tier it is joining, not the one it is leaving.
 
 Anyone with write on this repo can run it; promoting to `release` then waits on the
 environment's required reviewers. Nothing else can push to either tier branch - see
@@ -143,8 +144,9 @@ environment's required reviewers. Nothing else can push to either tier branch - 
 
 ### Soak on staging
 
-After promoting to `staging`, check the demo org (`hertie-dsl-demo-course-e1234` and
-`hertie-dsl-demo-f2026`) before promoting on. A day covers one nightly refresh:
+After promoting to `staging`, check the demo course org (`hertie-dsl-demo-course-e1234`) and
+both its cohorts (`hertie-dsl-demo-f2025`, `hertie-dsl-demo-f2026`) before promoting on. A day
+covers one nightly refresh:
 
 - [ ] **Refresh actions** green, both the Promote-triggered run and the next nightly cron
 - [ ] one **Scheduled release** tick green (hourly; a dry run is enough if nothing is due)
@@ -184,21 +186,26 @@ Promote's checks are worth nothing on their own: `faculty` and `instructors` bot
 here, so without this any of them can `git push origin whatever:release` and put unreviewed
 code straight into every live org. Three settings, none of them in code:
 
-1. **Give the DSL bot `write` on this repo.** Promote pushes as the bot, not as
-   `GITHUB_TOKEN` - a ruleset can restrict a branch to a named account, and the Actions
-   token cannot be one.
-2. **A ruleset on `staging` and `release`** (Settings -> Rules -> Rulesets, targeting both
-   branches): *restrict updates* to the bot account only, *block force pushes*, *block
-   deletions*, *require linear history*. Promote passes `--force-with-lease` purely as a
-   concurrency guard; every push it makes is a fast-forward, so blocking force pushes never
-   blocks it.
-3. **Create the `release` environment** (Settings -> Environments) with the `admin` team as
-   **required reviewers**. Promote's job runs in the environment named by its `to:` input,
-   so a release promotion waits for an approval and a staging soak does not.
+1. **A repo deploy key with write, as `PROMOTE_DEPLOY_KEY`.** Promote pushes as that key,
+   not as `GITHUB_TOKEN` or the bot: a deploy key is scoped to this repo alone, and it is
+   the one actor a ruleset bypass can name that no person and no Actions token can be.
+   `ssh-keygen -t ed25519 -N "" -C promote@dsl-teaching-toolkit -f promote_key`; the public
+   half goes to Settings -> Deploy keys -> Add deploy key, **Allow write access**; the
+   private half to Settings -> Secrets and variables -> Actions -> `PROMOTE_DEPLOY_KEY`.
+   **The DSL bot holds `read` here** - it reads across orgs for Promote's refresh fan-out
+   and never pushes.
+2. **A repository ruleset on `staging` and `release`** (Settings -> Rules -> New branch
+   ruleset): target both branches, *Restrict updates*, *Restrict deletions*, *Block force
+   pushes*, *Require linear history*, and set the bypass list to **Deploy keys** only.
+   Promote passes `--force-with-lease` purely as a concurrency guard; every push it makes
+   is a fast-forward, so blocking force pushes never blocks it.
+3. **Create the `release` environment** (Settings -> Environments) with the maintainer as
+   **required reviewer** (self-approval allowed) and its deployment branch policy set to
+   `main` only. Promote's job runs in the environment named by its `to:` input, so a release
+   promotion waits for an approval and a staging soak does not.
 On `main`: PR only, with **both** `ci.yml` jobs required - `pytest` **and**
-`jekyll-contract`. Required checks are named by hand, and `jekyll-contract` is the only
-thing that catches a Liquid error in the site templates; unrequired, it is a check a PR
-merges straight past.
+`jekyll-contract`. Required checks are named by hand and a job can only be named after it
+has reported on `main` at least once, so land a new CI job first and require it after.
 
 ### Putting an org on a tier
 
@@ -206,7 +213,8 @@ merges straight past.
 To put the demo course on staging, set **`central_ref: staging`** in
 `hertie-dsl-demo-course-e1234/.github/dsl-course.yml` and run **Refresh actions** in that org;
 its cohorts follow. Valid values are `main`, `staging`, `release`, or a full 40-character
-commit SHA - anything else is refused in the log and the org falls back to `release`.
+commit SHA on `main`'s history; anything else is refused, and the org keeps the workflows it
+already has until someone fixes the key.
 
 A new org is bootstrapped straight onto a tier by **Bootstrap Course Org**'s `central_ref`
 input (default `release`). It does two things at once: the run checks the toolkit out at
@@ -218,15 +226,13 @@ refresh would undo it.
 
 ## What orgs exist
 
-**[`bootstrapped-orgs-inventory.md`](../bootstrapped-orgs-inventory.md)** is the live list: one
-nested tree, each course org (topic `dsl-course-hub`) with the toolkit tier it runs and the
-cohort orgs (topic `dsl-cohort`) that point at it listed underneath. A cohort GitHub shows
-but the course's registry does not is marked **not registered**; a cohort pointing at no
-discovered course org is **orphaned** and listed at the end. It is auto-generated **Mondays
-06:00 UTC** (and on demand); when the list changed it opens a PR and merges it in the same run. Don't
-hand-edit it - a missing org means a failed or never-run bootstrap, not a forgotten edit. The
-refresh aborts rather than committing a net deletion (a truncated search page must not read as
-"these orgs are gone").
+**[Refresh Course Orgs Inventory](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml)** renders the live list into its own job
+summary: one nested tree, each course org (topic `dsl-course-hub`) with the toolkit tier it
+runs and the cohort orgs (topic `dsl-cohort`) that point at it listed underneath. A cohort
+GitHub shows but the course's registry does not is marked **not registered**; a cohort
+pointing at no discovered course org is **orphaned** and listed at the end. It runs
+**Mondays 06:00 UTC** and on demand, and goes red rather than reporting a partial estate as
+complete. A missing org means a failed or never-run bootstrap.
 
 ## Related
 

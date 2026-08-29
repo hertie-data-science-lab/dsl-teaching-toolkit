@@ -24,6 +24,7 @@ import yaml
 from .central import resolve_central_ref
 from .course import (
     COHORT_TOPIC,
+    COURSE_CONFIG,
     COURSE_HUB_TOPIC,
     GRADEBOOK_PREFIX,
     session_dirs,
@@ -31,7 +32,7 @@ from .course import (
 from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
 from .ghcli import gh
 from .log import log_err, log_ok
-from .repos import get_default_branch
+from .repos import default_branch
 
 COHORTS_PATH = (
     "cohort-courses-pages.yml"  # standalone registry in the course org's .github repo
@@ -69,14 +70,44 @@ def org_tier(repos: list[dict]) -> str | None:
     return None
 
 
-def student_repo_names(repos: list[dict]) -> frozenset[str]:
-    """The per-student and per-team repos in a listing, by topic OR by name.
+def classify_repos(repos: list[dict]) -> dict[str, str | None]:
+    """`{repo name: the cohort assignment template it derives from, or None}`.
 
-    Submission repos are `<slug>-<handle>` generated from the cohort template `<slug>` (the
-    one template repo in a cohort org); gradebooks are `grades-<handle>`. The topics that
-    mark them are stamped after the create and never converged, so a name rule backs them
-    up: whatever decides faculty write access must never depend on one PATCH."""
-    return frozenset(r["name"] for r in repos if is_student_repo(r, repos))
+    THE submission-repo rule, computed ONCE for a whole listing. A submission repo is
+    generated from one of the org's cohort assignment templates, so its name is that
+    template's name plus a `-<handle>` or `-<team>` suffix.
+
+    Longest template first: `assignment-4` and `assignment-4-project` both prefix
+    `assignment-4-project-ada-l`, and only the longer one leaves a suffix that is a handle
+    rather than `project-ada-l`. Templates themselves map to None - `assignment-4-project`
+    is a repo in this listing AND starts with `assignment-4-`, so a cohort holding both
+    would otherwise read one of its own templates as a submission belonging to `project`.
+    """
+    templates = sorted(
+        (r["name"] for r in repos if r.get("isTemplate")), key=len, reverse=True
+    )
+    return {
+        r["name"]: None
+        if r.get("isTemplate")
+        else next((t for t in templates if r["name"].startswith(f"{t}-")), None)
+        for r in repos
+    }
+
+
+def is_student_repo(repo: dict, derived: dict[str, str | None]) -> bool:
+    """Whether `repo` is a per-student/team repo, by topic OR by name.
+
+    `derived` is one `classify_repos` over the same listing. The topic that marks a
+    submission repo is stamped after the create and never converged, so a repo merely
+    NAMED off a template counts too: on a public page, and in the faculty-access floor,
+    the roster must not depend on one PATCH having landed."""
+    return _has_infra_topic(repo) or derived.get(repo["name"]) is not None
+
+
+def student_repo_names(repos: list[dict]) -> frozenset[str]:
+    """The per-student and per-team repos in a listing - submission repos and gradebooks."""
+    derived = classify_repos(repos)
+    return frozenset(r["name"] for r in repos if is_student_repo(r, derived))
 
 
 def _is_infra_repo(repo: dict) -> bool:
@@ -92,36 +123,17 @@ def _is_infra_repo(repo: dict) -> bool:
     name = repo["name"]
     if name in INFRA_REPOS or name.endswith(".github.io"):
         return True
-    return has_infra_topic(repo)
+    return _has_infra_topic(repo)
 
 
-def has_infra_topic(repo: dict) -> bool:
-    """Whether `repo`'s TOPICS mark it machinery - a per-student submission repo, a frozen
-    cohort assignment template, or a private gradebook.
-
-    Split out of _is_infra_repo because the org landing page needs this half and not the
-    other: it must drop those per-student repos (naming them exposes the roster and every
-    team's membership on a page students land on) while KEEPING `welcome`,
-    `classroom-config` and the site repo, which _is_infra_repo also excludes.
-
-    A gradebook is also recognised by NAME: the topic is stamped in a separate call after
-    the create, and a failed stamp must not put `grades-<handle>` on a public page."""
+def _has_infra_topic(repo: dict) -> bool:
+    """Whether `repo`'s TOPICS mark it machinery - a submission repo, a frozen cohort
+    assignment template, or a private gradebook. A gradebook is recognised by NAME too:
+    the topic is stamped in a separate call after the create, and a failed stamp must not
+    put `grades-<handle>` on a public page."""
     if repo["name"].startswith(GRADEBOOK_PREFIX):
         return True
     return bool(set(repo.get("topics") or []) & INFRA_TOPICS)
-
-
-def is_student_repo(repo: dict, repos: list[dict]) -> bool:
-    """Whether `repo` is a per-student/team repo, by topic OR by name.
-
-    Submission repos are `<slug>-<handle>` generated from the cohort template `<slug>`,
-    which is the one template repo in a cohort org. The topic that marks them is stamped
-    after the create and never converged, so a repo named off a template in the same
-    listing counts too - on a PUBLIC page the roster must not depend on one PATCH."""
-    if has_infra_topic(repo):
-        return True
-    templates = {r["name"] for r in repos if r.get("isTemplate")}
-    return any(repo["name"].startswith(f"{t}-") for t in templates)
 
 
 def list_org_repos(org: str) -> list[dict]:
@@ -188,6 +200,18 @@ def _read_cohorts(course_org: str) -> list[str]:
     return [c for c in cohorts if c]
 
 
+def org_meta(org: str) -> dict:
+    """An org's `.github/dsl-course.yml`, or `{}` when it declares none.
+
+    THE read for an org's declared identity - the course name, the faculty SSOT, a
+    cohort's `course:` pointer, the `central_ref:` its workflows run. `{}` for a genuine
+    404 or an empty file; a MALFORMED one still raises, because reading a typo as "this
+    org declares nothing" files a cohort under the course orgs and rewrites the inventory
+    around it. The one caller that must tell ABSENT from EMPTY - sync_faculty, which
+    would otherwise prune every admin - reads load_yaml_config directly."""
+    return load_yaml_config(org, ".github", COURSE_CONFIG) or {}
+
+
 def course_name_for_cohort(cohort_org: str) -> str:
     """This cohort's course name, for student-facing prose ("your grades for X").
 
@@ -199,7 +223,7 @@ def course_name_for_cohort(cohort_org: str) -> str:
     generic wording. A student must never be emailed a blank or a literal placeholder
     where the course name belongs.
     """
-    pointer = load_yaml_config(cohort_org, ".github", "dsl-course.yml") or {}
+    pointer = org_meta(cohort_org)
     return course_name_of(str(pointer.get("course") or ""))
 
 
@@ -212,7 +236,7 @@ def course_name_of(course_org: str) -> str:
     course org needs no guard of its own."""
     if not course_org:
         return ""
-    meta = load_yaml_config(course_org, ".github", "dsl-course.yml") or {}
+    meta = org_meta(course_org)
     return str(meta.get("course_name") or meta.get("org_name") or "")
 
 
@@ -225,14 +249,14 @@ def central_ref_for(org: str) -> str:
     a cohort's file is ignored, because a cohort running a different engine from the course
     org that releases into it is not a state anyone wants to debug.
 
-    Absent, or unreadable as a tier, means `central.CENTRAL_REF` - see resolve_central_ref
-    for why junk falls back rather than failing the run."""
-    meta = load_yaml_config(org, ".github", "dsl-course.yml") or {}
+    Absent means `central.CENTRAL_REF`; a value that is neither a tier nor a full SHA
+    raises `central.MissingCentralRef` - see resolve_central_ref."""
+    meta = org_meta(org)
     course = str(meta.get("course") or "")
     if course:
-        org, meta = course, load_yaml_config(course, ".github", "dsl-course.yml") or {}
+        org, meta = course, org_meta(course)
     return resolve_central_ref(
-        meta.get("central_ref"), source=f"{org}/.github/dsl-course.yml"
+        meta.get("central_ref"), source=f"{org}/.github/{COURSE_CONFIG}"
     )
 
 
@@ -280,23 +304,14 @@ def _write_cohorts(
 
 
 def unregister_cohort(course_org: str, cohort_org: str) -> bool:
-    """Drop cohort_org from the course's registry (idempotent). The prune half of
-    `register_cohort`, and deliberately NOT its mirror image.
+    """Drop cohort_org from the course's registry (idempotent), and NOT the mirror image
+    of `register_cohort`: the registry is APPEND-ON-INTENT, PRUNE-ON-REALITY.
 
-    The registry is APPEND-ON-INTENT, PRUNE-ON-REALITY. Adding stays a deliberate act
-    (Bootstrap cohort), because a cohort's absence can be intended - a faculty member may
-    unregister one to stop its nightly syncs, and a refresh that re-added every org it
-    discovered would silently override that. Removal cannot be intent in the same way:
-    the caller has already established that the ORG ITSELF is gone (see
-    `seed._live_cohorts`, which needs the org to have missed two consecutive refreshes,
-    because a 404 alone only says the token cannot see it), and nothing can be synced
-    into an org that does not exist.
-
-    Removing on anything weaker than that would be the worse bug. A cohort dropped from
-    here is invisible to every nightly sync - membership, faculty, site, scheduler - which
-    is a SILENT no-op, where a stale entry merely fails loudly once a night. So the
-    liveness verdict belongs to the caller (`repos.org_exists`, which raises rather than
-    guessing), and this function only writes down what it was told.
+    Adding stays a deliberate act, because a cohort's absence can be intended - a faculty
+    member may unregister one to stop its nightly syncs. Removal cannot: a cohort dropped
+    from here is invisible to every nightly sync, which is a SILENT no-op, where a stale
+    entry merely fails loudly once a night. So the liveness verdict belongs to the caller
+    (`seed._live_cohorts`) and this only writes down what it was told.
 
     Returns True if the cohort is absent from the registry afterwards."""
     cohorts = set(_read_cohorts(course_org))
@@ -314,15 +329,15 @@ def unregister_cohort(course_org: str, cohort_org: str) -> bool:
     )
 
 
-def discover_cohort_repos(cohort_orgs: list[str]) -> list[str]:
-    """Candidate target repos: real cohort content repos, excluding everything
-    _is_infra_repo covers (infra, the website, submission repos, assignment templates,
-    gradebooks). Only what genuinely exists - no placeholder default, so an org with
-    nothing registered yet correctly shows an empty (not phantom) dropdown."""
-    repos: set[str] = set()
-    for org in cohort_orgs:
-        repos |= {r["name"] for r in list_org_repos(org) if not _is_infra_repo(r)}
-    return sorted(repos)
+def cohort_content_repos(repos: list[dict]) -> list[str]:
+    """Candidate target repos in a cohort LISTING: real content repos, excluding
+    everything _is_infra_repo covers (infra, the website, submission repos, assignment
+    templates, gradebooks). Only what genuinely exists - no placeholder default, so an org
+    with nothing registered yet correctly shows an empty (not phantom) dropdown.
+
+    Takes the listing rather than the org, because its one caller (the cohort site build)
+    asks two questions of the same org and paid for two full paginated listings to do it."""
+    return sorted(r["name"] for r in repos if not _is_infra_repo(r))
 
 
 def _repo_tree_dirs(org: str, repo: str) -> tuple[str, ...]:
@@ -335,23 +350,7 @@ def _repo_tree_dirs(org: str, repo: str) -> tuple[str, ...]:
     directories, any other failure RAISES. It must never come back as "no sessions" - the
     site clears and rewrites its collections from these rows, so one rate-limited fetch
     would republish the cohort site with every session row deleted."""
-    return repo_tree(org, repo, get_default_branch(org, repo), "tree")
-
-
-def _section_session_pairs(org: str, repo: str) -> list[tuple[str, int]]:
-    """(section, session_number) for every immediate child - across every top-level
-    directory - whose name has an ordinal prefix."""
-    return [
-        (section, n)
-        for section, _, n in session_dirs(_repo_tree_dirs(org, repo))
-        if section
-    ]
-
-
-def discover_sessions(org: str, repo: str) -> list[str]:
-    """Session numbers present in a content repo, across every discovered section.
-    Used by the public-site builder to walk a source repo session by session."""
-    return [str(n) for n in sorted({n for _, n in _section_session_pairs(org, repo)})]
+    return repo_tree(org, repo, default_branch(org, repo, fallback="main"), "tree")
 
 
 def discover_release_sources(
@@ -380,7 +379,7 @@ def discover_assignments(course_org: str) -> list[str]:
     )
 
 
-def discover_handed_out_assignments(cohort_org: str) -> frozenset[str]:
+def handed_out_assignments(repos: list[dict]) -> frozenset[str]:
     """The cohort-side name of every assignment this cohort has ACTUALLY been given.
 
     assign.py's stage 1 freezes a cohort-level template repo named exactly the cohort-side
@@ -395,13 +394,12 @@ def discover_handed_out_assignments(cohort_org: str) -> frozenset[str]:
     `handout_datetime` pinned - the manual workflow's documented mode - is invisible to the
     plan, and gating on the plan alone published those briefs on sight.
 
-    This is a second listing of an org `sync_site` already listed, and it must stay one:
-    memoising `list_org_repos` would serve assign.py a listing taken BEFORE it created the
-    template repo it then syncs the site for, withholding the brief it just handed out."""
+    Takes the LISTING, shared with `cohort_content_repos` by the site build that asks both
+    of the same org. SHARED, never memoised: a process-wide memo of `list_org_repos` would
+    serve the site a listing taken BEFORE assign.py created the template repo it then syncs
+    the site for, withholding the brief it had just handed out."""
     return frozenset(
-        r["name"]
-        for r in list_org_repos(cohort_org)
-        if ASSIGNMENT_TEMPLATE_TOPIC in (r.get("topics") or [])
+        r["name"] for r in repos if ASSIGNMENT_TEMPLATE_TOPIC in (r.get("topics") or [])
     )
 
 

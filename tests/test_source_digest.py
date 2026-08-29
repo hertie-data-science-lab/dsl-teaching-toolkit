@@ -51,6 +51,9 @@ def gh(monkeypatch):
     def _make(issues=None):
         fake = _Gh(issues)
         monkeypatch.setattr(sd, "gh", fake)
+        # The body's field-reference link is pinned to the tier the course org runs; that
+        # read is not what any of these tests is about.
+        monkeypatch.setattr(sd, "central_ref_for", lambda org: "release")
         return fake
 
     return _make
@@ -230,3 +233,12 @@ def test_the_digest_lookup_asks_for_more_than_the_default_page(monkeypatch):
     assert sd._open_issue("Cohort-f2026") is None
     (args,) = seen
     assert "--limit" in args and args[args.index("--limit") + 1] == "100"
+
+
+def test_the_field_reference_points_at_the_tier_the_org_runs(monkeypatch):
+    # The runbook describes the engine the org actually runs; a staging org sent to main's
+    # docs reads a schema for code it does not have.
+    body = sd.render_body(
+        [_f("releases.a", timedelta(hours=2))], NOW, "Course", None, "staging"
+    )
+    assert "/blob/staging/docs/07-schedule-releases.md" in body

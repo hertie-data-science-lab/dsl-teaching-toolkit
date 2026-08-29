@@ -15,7 +15,8 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
-from dsl_course import course, deploy, scheduler, seed
+from dsl_course import collect as collect_mod
+from dsl_course import course, deploy, ghcli, scheduler, seed
 from dsl_course.schedule import (
     AssignmentEntry,
     Deploy,
@@ -209,26 +210,82 @@ def test_run_batches_all_deploys_through_deploy_many(monkeypatch):
     assert synced == [("Course-Org", "Cohort-Org")]
 
 
+def test_a_tick_that_provisions_nothing_does_not_re_render_the_site(monkeypatch):
+    # `due_releases` is CUMULATIVE: a handed-out assignment is due again on every hourly
+    # tick for the rest of the term. Marking the tick as having assigned regardless of what
+    # provisioning actually did meant a full cohort website re-render, once an hour, off a
+    # pass in which every repo was skipped.
+    monkeypatch.setattr(
+        "dsl_course.scheduler.provision_all",
+        lambda *a, **kw: (0, False),  # every unit `skipped`
+    )
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "load",
+        lambda cohort: _sched_with([_r("w1", WHEN, assignment="assignment-2-f2026")]),
+    )
+    synced = []
+    monkeypatch.setattr(
+        "dsl_course.site.sync_site", lambda c, o: synced.append((c, o)) or 0
+    )
+    now = datetime(2026, 12, 1, tzinfo=timezone.utc)
+    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
+    assert synced == [], "an unchanged tick re-rendered the site"
+
+    # ... and a tick that DID provision something still syncs, exactly once.
+    monkeypatch.setattr(
+        "dsl_course.scheduler.provision_all", lambda *a, **kw: (0, True)
+    )
+    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
+    assert synced == [("Course-Org", "Cohort-Org")]
+
+
 def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.scheduler.provision_all",
-        lambda master_org, template, cohort_org, solution=False, touch_existing=True: (
-            calls.append((master_org, template, cohort_org, solution, touch_existing))
-            or 0
+        lambda master_org, template, cohort_org, solution=False, touch_existing=True, scheduled=False: (
+            (
+                calls.append(
+                    (
+                        master_org,
+                        template,
+                        cohort_org,
+                        solution,
+                        touch_existing,
+                        scheduled,
+                    )
+                ),
+                (0, True),
+            )[1]
         ),
     )
     r = _r("s", WHEN, assignment="assignment-2-f2026")
-    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == 0
-    # The hourly path never re-touches an existing repo (the manual button does).
-    assert calls[0] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", False, False)
+    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == (0, True)
+    # The hourly path never re-touches an existing repo (the manual button does), and says
+    # it is the cron - a group handout with no teams yet then waits instead of going red.
+    assert calls[0] == (
+        "Course-Org",
+        "assignment-2-f2026",
+        "Cohort-Org",
+        False,
+        False,
+        True,
+    )
 
     # The solution release is the SAME call, asked to push the solution too - so a
     # scheduled solution can never diverge from what include_solution does by hand.
     r = _r("s", WHEN, assignment="assignment-2-f2026")
     r.assignment_solution = True
-    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == 0
-    assert calls[1] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", True, False)
+    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == (0, True)
+    assert calls[1] == (
+        "Course-Org",
+        "assignment-2-f2026",
+        "Cohort-Org",
+        True,
+        False,
+        True,
+    )
 
 
 def _git_with_staged_changes(*args):
@@ -261,13 +318,13 @@ def test_deploy_many_clones_each_repo_once(monkeypatch):
             return (0, "")
         return (0, "")
 
-    monkeypatch.setattr(deploy, "gh", fake_gh)
+    monkeypatch.setattr(ghcli, "gh", fake_gh)
     # `git diff --cached --quiet` reports staged changes (exit 1) so the copies commit;
     # everything else (add/commit/push) succeeds.
     monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     deploys = [
         Deploy("cm", "lectures/00_x", "lectures", None),
@@ -292,11 +349,11 @@ def test_deploy_many_missing_course_source_path_is_an_error_not_silent(monkeypat
             return (0, "")
         return (0, "")
 
-    monkeypatch.setattr(deploy, "gh", fake_gh)
+    monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "git", lambda *a: (0, ""))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
@@ -322,11 +379,11 @@ def _clone_failing(*failing: str):
 
 
 def _no_io(monkeypatch, fake_gh):
-    monkeypatch.setattr(deploy, "gh", fake_gh)
+    monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "git", lambda *a: (0, ""))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
 
 def test_a_released_repo_grants_faculty_read(monkeypatch):
@@ -335,16 +392,14 @@ def test_a_released_repo_grants_faculty_read(monkeypatch):
     # the course org's materials repo, then re-release.
     _no_io(monkeypatch, _clone_failing("Course-Org/cm"))
     faculty = []
-    monkeypatch.setattr(
-        deploy, "grant_faculty_read_access", lambda *a: faculty.append(a)
-    )
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: faculty.append(a))
     deploy.deploy_many(
         "Course-Org",
         "Cohort-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
     )
-    assert faculty == [("Cohort-Org", "materials")]
+    assert faculty == [("Cohort-Org", "materials", deploy.FACULTY_READ_ACCESS)]
 
 
 def test_deploy_many_counts_a_doomed_deploy_once(monkeypatch):
@@ -484,7 +539,7 @@ def test_deploy_many_never_copies_a_dot_git_directory(monkeypatch):
     # dest's git metadata and misdirect the push. Inspect the dest tree at `git add` time,
     # before the TemporaryDirectory is cleaned up.
     monkeypatch.setattr(
-        deploy,
+        ghcli,
         "gh",
         _clone_with_tree(
             {"lectures/00_x/f.txt": "hi", "lectures/00_x/.git/config": "x"}
@@ -494,7 +549,7 @@ def test_deploy_many_never_copies_a_dot_git_directory(monkeypatch):
     monkeypatch.setattr(deploy, "git", _git_spying_staged(copied_rel))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
@@ -520,11 +575,11 @@ def _git_commit_failing(*args):
 def test_deploy_many_counts_a_real_commit_failure(monkeypatch, capsys):
     # A non-zero commit with staged changes is a real failure (disk/lock/hook), NOT the
     # "nothing new to release" no-op - it must count as an error, not be silently dropped.
-    monkeypatch.setattr(deploy, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
+    monkeypatch.setattr(ghcli, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
     monkeypatch.setattr(deploy, "git", _git_commit_failing)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
@@ -541,13 +596,13 @@ def test_deploy_many_counts_a_real_commit_failure(monkeypatch, capsys):
 def test_deploy_many_reports_nothing_new_when_index_is_empty(monkeypatch, capsys):
     # An empty index (diff --cached exits 0) is the genuine idempotent no-op: no error, no
     # commit attempted, "nothing new to release".
-    monkeypatch.setattr(deploy, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
+    monkeypatch.setattr(ghcli, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
     monkeypatch.setattr(
         deploy, "git", lambda *a: (0, "")
     )  # diff --cached: nothing staged
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
@@ -562,11 +617,11 @@ def test_deploy_many_reports_nothing_new_when_index_is_empty(monkeypatch, capsys
 def test_deploy_many_counts_a_raised_site_sync(monkeypatch):
     # site.sync_site RAISES on a genuine read failure - deploy_many must catch it, count it,
     # and return non-zero, not let the traceback escape.
-    monkeypatch.setattr(deploy, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
+    monkeypatch.setattr(ghcli, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
     monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     def boom(course, cohort):
         raise RuntimeError("tree read failed")
@@ -662,7 +717,8 @@ def _stub_snapshots(monkeypatch, existing: set[str]):
         # `is_group` is REQUIRED (no default), so a scheduler that stopped passing it fails
         # these tests loudly instead of silently freezing every assignment as individual.
         lambda org, slug, deadline, *, is_group, teams_key=None: (
-            taken.append((org, slug, deadline, teams_key)) or True
+            taken.append((org, slug, deadline, teams_key))
+            or scheduler.SnapshotResult.WRITTEN
         ),
     )
     # The snapshot pass resolves group-ness from the template grading.yml when the schedule
@@ -686,6 +742,25 @@ def test_run_snapshots_a_passed_deadline_that_has_no_snapshot_yet(monkeypatch):
     org, slug, deadline, _key = taken[0]
     assert (org, slug) == ("Cohort-Org", "assignment-1")
     assert deadline.startswith("2026-10-13T23:59:59")
+
+
+def test_the_snapshot_is_named_by_the_cohort_name_and_keyed_by_the_schedule_slug(
+    monkeypatch,
+):
+    # TWO names, and they are not interchangeable. `cohort_dest_repo` makes them differ:
+    # the repos (and so the snapshot) are named after the cohort NAME, while teams.csv is
+    # keyed on the SCHEDULE SLUG - the Join-team form writes what schedule.yml declares.
+    # Freezing a group assignment under the name found no teams and froze nothing at all.
+    taken = _stub_snapshots(monkeypatch, existing=set())
+    entry = _due(13)
+    entry.cohort_dest_repo = "group-project"
+    monkeypatch.setattr(
+        scheduler.schedule, "load", lambda cohort: _assignments(project=entry)
+    )
+    now = datetime(2026, 10, 14, tzinfo=timezone.utc)
+    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
+    org, slug, _deadline, teams_key = taken[0]
+    assert (org, slug, teams_key) == ("Cohort-Org", "group-project", "project")
 
 
 def test_run_never_re_snapshots_an_assignment_already_frozen(monkeypatch):
@@ -757,7 +832,9 @@ def test_run_reports_a_failed_snapshot(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
-        lambda org, slug, deadline, *, is_group, teams_key=None: False,
+        lambda org, slug, deadline, *, is_group, teams_key=None: (
+            scheduler.SnapshotResult.FAILED
+        ),
     )
     _stub_autograde(monkeypatch)
     monkeypatch.setattr(
@@ -814,7 +891,7 @@ def test_a_course_source_repo_that_does_not_exist_says_so(monkeypatch, capsys):
 def _stub_collect(monkeypatch, marked: set[str], templates: set[str], rc: int = 0):
     """Record collect() calls. `marked` = slugs whose autograde/<slug>/ already exists;
     `templates` = the template repos that exist in the course org."""
-    graded: list[tuple[str, str, str, str, bool]] = []
+    graded: list[tuple[str, str, str, str, bool, bool]] = []
     monkeypatch.setattr(
         scheduler, "has_autograde_results", lambda org, slug: slug in marked
     )
@@ -825,8 +902,10 @@ def _stub_collect(monkeypatch, marked: set[str], templates: set[str], rc: int = 
     )
     monkeypatch.setattr(
         "dsl_course.scheduler.collect",
-        lambda m, t, c, deadline=None, group=False: (
-            graded.append((m, t, c, deadline, group)) or rc
+        # `scheduled=True` is the cron's contract with collect (an empty target list is a
+        # "not yet", not a permanent skip) - a scheduler that stopped passing it fails here.
+        lambda m, t, c, deadline=None, group=False, *, scheduled: (
+            graded.append((m, t, c, deadline, group, scheduled)) or rc
         ),
     )
     return graded
@@ -838,7 +917,9 @@ def _only_snapshots_taken(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
-        lambda org, slug, dl, *, is_group, teams_key=None: True,
+        lambda org, slug, dl, *, is_group, teams_key=None: (
+            scheduler.SnapshotResult.WRITTEN
+        ),
     )
 
 
@@ -852,7 +933,7 @@ def test_run_autogrades_a_passed_deadline_with_no_marker(monkeypatch):
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
     assert scheduler.run("Course-Org", "Cohort-f2026", now) == 0
-    ((course, template, cohort, deadline, group),) = graded
+    ((course, template, cohort, deadline, group, scheduled),) = graded
     assert (course, template, cohort) == (
         "Course-Org",
         "assignment-1-f2026",
@@ -860,6 +941,9 @@ def test_run_autogrades_a_passed_deadline_with_no_marker(monkeypatch):
     )
     # graded at exactly the instant the snapshot froze, and never guessed as a group run
     assert deadline.startswith("2026-10-13T23:59:59") and group is False
+    assert (
+        scheduled is True
+    )  # a cron run, so no-targets waits rather than being recorded
 
 
 def test_run_never_autogrades_twice_the_marker_is_the_state(monkeypatch):
@@ -1131,7 +1215,9 @@ def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
-        lambda org, slug, dl, *, is_group, teams_key=None: True,
+        lambda org, slug, dl, *, is_group, teams_key=None: (
+            scheduler.SnapshotResult.WRITTEN
+        ),
     )
     _stub_autograde(monkeypatch)
     monkeypatch.setattr(
@@ -1376,11 +1462,11 @@ def _run_release(monkeypatch, seed_source, deploys) -> tuple[int, set[str]]:
             )
         return _git_with_staged_changes(*args)
 
-    monkeypatch.setattr(deploy, "gh", fake_gh)
+    monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "git", fake_git)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
     errors, _changed = deploy.deploy_many(
         "Course-Org", "Cohort-Org", deploys, sync=False
     )
@@ -1479,11 +1565,11 @@ def test_withholding_the_stub_never_deletes_the_cohorts_own_readme(monkeypatch):
             )
         return _git_with_staged_changes(*args)
 
-    monkeypatch.setattr(deploy, "gh", fake_gh)
+    monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "git", fake_git)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
     errors, _changed = deploy.deploy_many(
         "Course-Org", "Cohort-Org", [Deploy("cm", "/", "materials", None)], sync=False
     )
@@ -1507,6 +1593,84 @@ def test_withholding_the_stub_is_visible_without_failing_the_run(monkeypatch, ca
     assert "Write it for students, then release again." in captured.err
 
 
+def test_the_snapshot_pass_hands_autograde_what_it_froze(monkeypatch):
+    # Both passes walk the same passed deadlines, so asking the snapshot file's state
+    # twice was a read per passed deadline per tick for an answer the first pass had.
+    reads: list[str] = []
+    monkeypatch.setattr(
+        scheduler, "load_snapshots", lambda org, name: reads.append(name) or None
+    )
+    monkeypatch.setattr(scheduler, "template_is_group", lambda org, repo: None)
+    monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
+    monkeypatch.setattr(
+        scheduler,
+        "snapshot_assignment",
+        lambda org, name, deadline, **k: (
+            scheduler.SnapshotResult.WRITTEN
+            if name != "assignment-2"
+            else scheduler.SnapshotResult.FAILED
+        ),
+    )
+    sched = _assignments(
+        **{"assignment-1": _due(13), "assignment-2": _due(14)},
+    )
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    errors, frozen = scheduler._snapshot_passed_deadlines("C", "K", sched, now, False)
+    assert errors == 1
+    assert frozen == frozenset({"assignment-1"}), "a failed freeze counted as frozen"
+    assert reads == ["assignment-1", "assignment-2"], "one read per passed deadline"
+
+
+def _real_snapshot_then_autograde(monkeypatch, targets):
+    """Both deadline phases over the REAL snapshot_assignment, with `targets` as the
+    assignment's submission units. Returns the (course_org, template, ...) collect got."""
+    graded: list[tuple] = []
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name: None)
+    monkeypatch.setattr(collect_mod, "load_snapshots", lambda org, name: None)
+    monkeypatch.setattr(
+        collect_mod,
+        "submission_targets",
+        lambda org, slug, is_group, teams_key=None: targets,
+    )
+    monkeypatch.setattr(
+        collect_mod,
+        "_snapshot_sha",
+        lambda org, repo, deadline, at="": collect_mod._REPO_ABSENT,
+    )
+
+    def no_write(*a, **k):
+        raise AssertionError("nothing may be written when there is nothing to freeze")
+
+    monkeypatch.setattr(collect_mod, "put_file", no_write)
+    monkeypatch.setattr(scheduler, "template_is_group", lambda org, repo: None)
+    monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
+    monkeypatch.setattr(scheduler, "has_autograde_results", lambda org, slug: False)
+    monkeypatch.setattr(scheduler, "collect", lambda *a, **k: graded.append(a) or 0)
+    sched = _assignments(**{"assignment-1": _due(13)})
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    errors, frozen = scheduler._snapshot_passed_deadlines("C", "K", sched, now, False)
+    errors += scheduler._autograde_passed_deadlines("C", "K", sched, now, False, frozen)
+    return errors, frozen, graded
+
+
+def test_a_snapshot_that_froze_nothing_does_not_licence_autograding(monkeypatch):
+    # Nobody onboarded yet: snapshot_assignment writes nothing and is green. Counting that
+    # as frozen let the same tick autograde, and collect then wrote write-once ZEROS for
+    # the whole cohort and marked the assignment graded - green, and unrecoverable.
+    errors, frozen, graded = _real_snapshot_then_autograde(monkeypatch, targets=[])
+    assert (errors, frozen, graded) == (0, frozenset(), [])
+
+
+def test_a_snapshot_whose_repos_are_all_absent_does_not_licence_autograding(
+    monkeypatch,
+):
+    # Same, one step later: the repos are declared but not generated yet (every target 404s).
+    errors, frozen, graded = _real_snapshot_then_autograde(
+        monkeypatch, targets=[("assignment-1-anna", "anna", ["anna"])]
+    )
+    assert (errors, frozen, graded) == (0, frozenset(), [])
+
+
 def test_autograde_waits_for_a_completed_snapshot(monkeypatch):
     # Without a snapshot, collect pins on committer dates - and when no submission repo
     # exists at all it records a permanent write-once ZERO for every student and marks the
@@ -1515,13 +1679,22 @@ def test_autograde_waits_for_a_completed_snapshot(monkeypatch):
     monkeypatch.setattr(scheduler, "has_autograde_results", lambda org, slug: False)
     monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
     monkeypatch.setattr(scheduler, "collect", lambda *a, **k: graded.append(a) or 0)
-    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
     sched = _assignments(**{"assignment-1": _due(13)})
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
-    assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
-    assert graded == []
-    monkeypatch.setattr(
-        scheduler, "load_snapshots", lambda org, slug: {"assignment-1-ada": "abc"}
+    # `frozen` is what the snapshot pass just established for this same tick - read, not
+    # re-fetched, so a passed deadline costs one snapshot read per tick rather than two.
+    nothing_frozen = frozenset()
+    assert (
+        scheduler._autograde_passed_deadlines(
+            "C", "K", sched, now, False, nothing_frozen
+        )
+        == 0
     )
-    assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
+    assert graded == []
+    assert (
+        scheduler._autograde_passed_deadlines(
+            "C", "K", sched, now, False, frozenset({"assignment-1"})
+        )
+        == 0
+    )
     assert len(graded) == 1

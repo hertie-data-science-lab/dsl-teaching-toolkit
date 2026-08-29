@@ -21,7 +21,7 @@ example-course/cohort-org/ rather than authored twice.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 import yaml
@@ -29,6 +29,7 @@ import yaml
 from dsl_course import bootstrap_course as bc
 from dsl_course import (
     gh_contents,
+    gh_teams,
     grades,
     roster,
     schedule,
@@ -37,6 +38,9 @@ from dsl_course import (
     teams,
     welcome,
 )
+from dsl_course.central import CENTRAL
+from dsl_course.repos import Converged
+from tests.conftest import repo_row
 
 # Derived from the seeding tables, so a sixth config file cannot silently miss the set
 # these tests police - which is the whole point of the tables existing.
@@ -99,8 +103,8 @@ class FakeOrg:
 @pytest.fixture
 def fake(monkeypatch):
     f = FakeOrg()
-    # USER-owned files go through gh_contents.seed_if_absent / seed_files_if_absent
-    # (create-if-absent), which resolve get_file_content / put_file / put_files / log_skip
+    # USER-owned files go through gh_contents.seed_if_absent / put_files(create_only=True),
+    # which resolve get_file_content / put_file / put_files / log_skip
     # in the gh_contents namespace; SYSTEM-owned files are written by bc.put_file directly. Fake
     # every layer to the same recorder.
     monkeypatch.setattr(gh_contents, "get_file_content", f.get_file_content)
@@ -108,6 +112,7 @@ def fake(monkeypatch):
     monkeypatch.setattr(gh_contents, "put_files", f.put_files)
     monkeypatch.setattr(gh_contents, "log_skip", lambda msg: f.skips.append(msg))
     monkeypatch.setattr(bc, "put_file", f.put_file)
+    monkeypatch.setattr(bc, "put_files", f.put_files)
     # The welcome repo's SYSTEM-owned files are written by dsl_course.welcome (so that
     # seed.refresh can re-push them without importing bootstrap_course), in one commit per
     # set - so its put_files has to be faked too.
@@ -120,6 +125,16 @@ def fake(monkeypatch):
     monkeypatch.setattr(bc, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(bc.scaffold, "scaffold_site", lambda org: 0)
     return f
+
+
+def test_every_seeded_doc_link_names_the_orgs_own_tier(fake):
+    # The scaffolds link the runbooks by absolute URL. They named `main` whatever the org
+    # ran, so a release cohort read the schema of code nobody had promoted yet.
+    bc.setup_cohort_extras("Cohort-f2026", "staging")
+    for path in ("schedule.yml", "people.yml"):
+        body = fake.files[("classroom-config", path)]
+        assert f"{CENTRAL}/blob/staging/docs/" in body, path
+        assert f"{CENTRAL}/blob/main/docs/" not in body, path
 
 
 def test_fresh_cohort_seeds_every_file(fake):
@@ -186,7 +201,7 @@ def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
         welcome.example_cohort_file("teams.csv")
     )
     assert fake.files[("welcome", ".github/workflows/onboard.yml")] == (
-        welcome.template("welcome/onboard.yml")
+        welcome.welcome_workflow("welcome/onboard.yml")
     )
     assert fake.written("welcome") == WELCOME_SYSTEM_OWNED | {"README.md"}
 
@@ -215,7 +230,7 @@ def test_the_scaffold_set_lands_as_one_commit_but_stays_create_only_per_file(
     # codes, onboarded handles) untouched.
     live = {"students.csv": "live-roster-sha"}
     monkeypatch.setattr(gh_contents, "log_skip", lambda msg: None)
-    monkeypatch.setattr(gh_contents, "default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(gh_contents, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "repo_blob_shas", lambda org, repo, branch: live)
     committed = []
     monkeypatch.setattr(
@@ -224,11 +239,12 @@ def test_the_scaffold_set_lands_as_one_commit_but_stays_create_only_per_file(
         lambda org, repo, branch, tree, message: committed.append(tree) or True,
     )
 
-    assert gh_contents.seed_files_if_absent(
+    assert gh_contents.put_files(
         "Cohort-f2026",
         "classroom-config",
         {"students.csv": b"header only\n", "teams.csv": b"t\n", "people.yml": b"p\n"},
         "init: scaffolds",
+        create_only=True,
     )
     assert len(committed) == 1
     assert {entry["path"] for entry in committed[0]} == {"teams.csv", "people.yml"}, (
@@ -236,20 +252,24 @@ def test_the_scaffold_set_lands_as_one_commit_but_stays_create_only_per_file(
     )
 
 
-def test_seed_files_if_absent_commits_nothing_when_every_file_is_already_there(
+def test_a_create_only_write_commits_nothing_when_every_file_is_already_there(
     monkeypatch,
 ):
     # The whole set present is the ordinary repair-re-run case, and it must cost no commit.
     monkeypatch.setattr(gh_contents, "log_skip", lambda msg: None)
-    monkeypatch.setattr(gh_contents, "default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(gh_contents, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(
         gh_contents, "repo_blob_shas", lambda org, repo, branch: {"students.csv": "sha"}
     )
     monkeypatch.setattr(
         gh_contents, "_commit_tree", lambda *a, **k: pytest.fail("wrote a no-op commit")
     )
-    assert gh_contents.seed_files_if_absent(
-        "Cohort-f2026", "classroom-config", {"students.csv": b"x\n"}, "init: scaffolds"
+    assert gh_contents.put_files(
+        "Cohort-f2026",
+        "classroom-config",
+        {"students.csv": b"x\n"},
+        "init: scaffolds",
+        create_only=True,
     )
 
 
@@ -439,29 +459,12 @@ def test_cohort_extras_reds_when_a_repo_cannot_be_created(fake, monkeypatch):
     assert fake.writes == []
 
 
-def test_org_settings_red_when_the_tighten_patch_fails(monkeypatch):
-    # An org left at GitHub's default (every member reads every repo) is a real
-    # misconfiguration - a non-zero there must red the bootstrap, not just log and pass.
-    monkeypatch.setattr(bc, "gh", lambda *a, **k: (1, "gh: HTTP 403"))
-    assert bc.set_org_settings("Cohort-f2026") == 2  # 2FA + base permissions
-
-
-def test_a_course_org_is_tightened_like_a_cohort(monkeypatch):
-    # It used to be cohort-only, so every member of a COURSE org - every TA, every
-    # visiting instructor - could read the unreleased materials, the model solutions and
-    # the assignment `solution` branches. Faculty access comes from the team grants.
-    patched: list[tuple[str, ...]] = []
-    monkeypatch.setattr(bc, "gh", lambda *a, **k: patched.append(a) or (0, ""))
-    assert bc.set_org_settings("Course-Org") == 0
-    fields = [f for call in patched for f in call]
-    assert "default_repository_permission=none" in fields
-    assert "members_can_create_repositories=false" in fields
-
-
 def test_cohort_extras_no_longer_repeat_the_org_tighten(fake, monkeypatch):
-    # One home for the PATCH (set_org_settings), so the two org kinds cannot drift.
+    # One home for the PATCH (gh_teams.converge_org_settings), so the two org kinds
+    # cannot drift.
     patched: list[tuple[str, ...]] = []
     monkeypatch.setattr(bc, "gh", lambda *a, **k: patched.append(a) or (0, ""))
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: patched.append(a) or (0, ""))
     bc.setup_cohort_extras("Cohort-f2026", "release")
     fields = [f for call in patched for f in call]
     assert "default_repository_permission=none" not in fields
@@ -494,7 +497,7 @@ def _stub_bootstrap(monkeypatch) -> None:
     # Every configuration step reports a failure count that _run threads into its exit
     # code and into the closing summary - a clean stub reports zero failures.
     for name in (
-        "set_org_settings",
+        "converge_org_settings",
         "create_default_teams",
         "grant_button_access",
         "setup_cohort_extras",
@@ -599,10 +602,10 @@ def _stub_refresh(
     failure count, which is what refresh's exit code is built from.
 
     Returns the in-memory `.github` file store, seeded with `prior_misses` as the
-    previous night's miss ledger (MISSES_PATH) - so a test can drive the two-consecutive-
-    misses rule across runs without stubbing the rule itself."""
+    previous night's miss ledger (MISSES_PATH) - so a test can drive the two-misses rule
+    across runs without stubbing the rule itself. Each entry is a `<cohort> <first missed
+    at>` line; `_missed_at` builds one at a chosen age."""
     monkeypatch.setattr(seed, "central_ref_for", lambda org: "release")
-    monkeypatch.setattr(seed, "central_ref_exists", lambda ref: True)
     monkeypatch.setattr(
         seed, "discover_cohorts", lambda org: ["Cohort-f2026", "Cohort-s2027"]
     )
@@ -610,6 +613,7 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "discover_assignments", lambda org: [])
     monkeypatch.setattr(seed, "_propagate_repo_secret", lambda org, repos: 0)
     monkeypatch.setattr(seed, "list_org_repos", lambda org: [])
+    monkeypatch.setattr(seed, "converge_org_settings", lambda org: 0)
     monkeypatch.setattr(seed, "_converge_org_metadata", lambda org, repos: 0)
     monkeypatch.setattr(seed, "seed_github_workflows", lambda org, ref: seed_failures)
     monkeypatch.setattr(seed, "_write_heartbeat", lambda org: heartbeat_failures)
@@ -619,12 +623,11 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "refresh_classroom_system_files", system_failures)
     monkeypatch.setattr(seed, "refresh_cohort_pointer", pointer_failures)
     # The per-cohort loop probes the cohort ORG once: gone = unregister + skip. A live org
-    # then checks repo_is_archived (archived = skip frozen). org_exists True +
-    # repo_is_archived False = present and live, proceed.
+    # then reads the archived flag off its own listing (empty above = nothing archived),
+    # so org_exists True + an unarchived classroom-config = present and live, proceed.
     monkeypatch.setattr(seed, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(seed, "org_exists", lambda org: True)
     monkeypatch.setattr(seed, "unregister_cohort", lambda course, cohort: True)
-    monkeypatch.setattr(seed, "repo_is_archived", lambda org, repo: False)
     store = {seed.MISSES_PATH: "".join(f"{m}\n" for m in prior_misses)}
     monkeypatch.setattr(
         seed, "get_file_content", lambda org, repo, path: store.get(path)
@@ -710,9 +713,18 @@ def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
         system_failures=refresh_one,
     )
     # Both orgs live (org probe healthy); Cohort-f2026 is a finished, archived semester.
+    # Read off the cohort's own listing, which the convergence sweep below needs anyway.
     monkeypatch.setattr(seed, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(
-        seed, "repo_is_archived", lambda org, repo: org == "Cohort-f2026"
+        seed,
+        "list_org_repos",
+        lambda org: [
+            {
+                "name": seed.CONFIG_REPO,
+                "topics": [],
+                "archived": org == "Cohort-f2026",
+            }
+        ],
     )
 
     rendered: list[str] = []
@@ -737,6 +749,18 @@ def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
     assert "refresh incomplete" not in out.err
 
 
+# Read ONCE, not per call: a ledger line is stamped to the second, and a test that builds
+# the expected line separately from the one it fed in flaked whenever the two calls
+# straddled a second boundary. Only the relative ages matter to the rule under test.
+_RUN_START = datetime.now(timezone.utc)
+
+
+def _missed_at(cohort: str, hours_ago: float) -> str:
+    """A miss-ledger line for `cohort`, first missed `hours_ago` hours ago."""
+    when = _RUN_START - timedelta(hours=hours_ago)
+    return f"{cohort.casefold()} {when.isoformat(timespec='seconds')}"
+
+
 def _missing_cohort_run(monkeypatch, prior_misses=()):
     """One refresh in which Cohort-f2026 does not answer; returns what it did."""
     refreshed: list[str] = []
@@ -757,24 +781,53 @@ def _missing_cohort_run(monkeypatch, prior_misses=()):
     return seed.refresh("Course-Org"), refreshed, pruned, store
 
 
-def test_refresh_prunes_a_cohort_missing_two_runs_running(monkeypatch, capsys):
+def test_refresh_prunes_a_cohort_missing_since_the_day_before(monkeypatch, capsys):
     # A cohort org DELETED after it was registered 404s on every write - which reds the
     # nightly cron forever (distinct from an archived cohort, which still exists). It is
     # skipped AND dropped from the registry: logging "prune it by hand" left the dead org
     # registered, so every nightly sync in every tool went on trying it.
     code, refreshed, pruned, store = _missing_cohort_run(
-        monkeypatch, prior_misses=["Cohort-f2026"]
+        monkeypatch, prior_misses=[_missed_at("Cohort-f2026", 25)]
     )
 
-    assert code == 0
     assert refreshed == ["Cohort-s2027"] * 3  # deleted cohort skipped whole
     assert pruned == [
         ("Course-Org", "Cohort-f2026")
     ]  # and unregistered, not just noted
     assert store[seed.MISSES_PATH] == ""  # the ledger is cleared once it has acted
+    # Unregistering is never a silent success: nothing re-adds a cohort, so the run that
+    # did it has to be a run somebody looks at.
+    assert code == 1
     out = capsys.readouterr()
     assert "[skip] Cohort-f2026" in out.out
-    assert "refresh incomplete" not in out.err
+    assert "refresh incomplete" in out.err
+
+
+def test_a_second_miss_hours_after_the_first_does_not_unregister(monkeypatch):
+    # "Two consecutive refreshes" was nominally a night apart, but two manual runs minutes
+    # apart are also two consecutive refreshes - which unregistered a live cohort inside
+    # one bad afternoon, off a token blip that was over by the morning.
+    code, _refreshed, pruned, store = _missing_cohort_run(
+        monkeypatch, prior_misses=[_missed_at("Cohort-f2026", 2)]
+    )
+
+    assert code == 0
+    assert pruned == []
+    # ... and the ORIGINAL timestamp survives, or the grace period would restart nightly
+    # and nothing would ever be unregistered.
+    assert store[seed.MISSES_PATH].strip() == _missed_at("Cohort-f2026", 2)
+
+
+def test_a_ledger_written_before_timestamps_costs_one_more_grace_period(monkeypatch):
+    # The live orgs carry a bare `<cohort>` line. Reading that as "missed at the epoch"
+    # would unregister every one of them on the first run of this code; it reads as "too
+    # recent to act on" instead, and the next run has a real timestamp to measure from.
+    code, _refreshed, pruned, store = _missing_cohort_run(
+        monkeypatch, prior_misses=["Cohort-f2026"]
+    )
+
+    assert (code, pruned) == (0, [])
+    assert store[seed.MISSES_PATH].startswith("cohort-f2026 20")
 
 
 def test_a_first_miss_never_unregisters_a_cohort(monkeypatch, capsys):
@@ -786,12 +839,13 @@ def test_a_first_miss_never_unregisters_a_cohort(monkeypatch, capsys):
     assert code == 0
     assert pruned == []
     assert refreshed == ["Cohort-s2027"] * 3  # skipped for tonight, not unregistered
-    assert store[seed.MISSES_PATH] == "Cohort-f2026\n"  # remembered for the next run
+    # remembered for the next run, WITH the moment it was first missed
+    assert store[seed.MISSES_PATH].startswith("cohort-f2026 20")
     assert "Cohort-f2026 did not answer" in capsys.readouterr().err
 
 
 def test_a_cohort_that_answers_again_clears_its_miss(monkeypatch):
-    store = _stub_refresh(monkeypatch, prior_misses=["Cohort-f2026"])
+    store = _stub_refresh(monkeypatch, prior_misses=[_missed_at("Cohort-f2026", 25)])
     pruned: list = []
     monkeypatch.setattr(
         seed, "unregister_cohort", lambda course, cohort: pruned.append(cohort)
@@ -891,7 +945,7 @@ def test_propagate_repo_secret_reds_when_no_token_at_all_is_set(monkeypatch, cap
     monkeypatch.setattr(seed, "gh", lambda *a, **k: (0, ""))
 
     assert seed._propagate_repo_secret("Course-Org", ["cm-f2026"]) == 1
-    assert "cannot propagate the repo secret" in capsys.readouterr().err
+    assert "cannot set the DSL_BOT_TOKEN repo secret" in capsys.readouterr().err
 
 
 def test_propagate_repo_secret_uses_stdin_and_counts_failures(monkeypatch, capsys):
@@ -1108,7 +1162,6 @@ def test_refresh_cli_logs_an_unreachable_api_instead_of_a_traceback(
         raise RuntimeError("could not list repos in Course-Org: gh: HTTP 502")
 
     monkeypatch.setattr(seed, "central_ref_for", lambda org: "release")
-    monkeypatch.setattr(seed, "central_ref_exists", lambda ref: True)
     monkeypatch.setattr(seed, "discover_cohorts", boom)
     monkeypatch.setattr("sys.argv", ["seed", "refresh", "--course-org", "Course-Org"])
 
@@ -1180,32 +1233,8 @@ def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypat
     assert len(written) == len(set(written))
 
 
-def test_org_settings_ok_line_only_prints_when_2fa_was_set(monkeypatch, capsys):
-    # The summary line claims "(2FA enforced)" - it must not print when the PATCH failed.
-    monkeypatch.setattr(bc, "gh", lambda *a, **k: (1, "gh: HTTP 403"))
-    bc.set_org_settings("Course-Org")
-    out = capsys.readouterr()
-    assert "2FA enforced" not in out.out
-    assert "could not enable 2FA" in out.err
-
-    monkeypatch.setattr(bc, "gh", lambda *a, **k: (0, ""))
-    bc.set_org_settings("Course-Org")
-    assert "2FA enforced" in capsys.readouterr().out
-
-
 # ------------------------------------ every claimed step is counted, and the summary
 # ------------------------------------ is rendered from what actually happened
-
-
-def test_a_failed_2fa_patch_is_counted_not_just_logged(monkeypatch):
-    def fake_gh(*args, **k):
-        two_fa = "two_factor_requirement_enabled=true" in args
-        return (1, "gh: HTTP 403") if two_fa else (0, "")
-
-    monkeypatch.setattr(bc, "gh", fake_gh)
-    assert bc.set_org_settings("Course-Org") == 1
-    monkeypatch.setattr(bc, "gh", lambda *a, **k: (0, ""))
-    assert bc.set_org_settings("Course-Org") == 0
 
 
 def test_a_team_that_could_not_be_created_is_counted(monkeypatch):
@@ -1253,14 +1282,14 @@ def test_a_missing_bot_token_reds_the_bootstrap(monkeypatch, capsys):
 
 def test_the_summary_names_the_step_that_failed(monkeypatch, capsys):
     # The closing block used to assert every line whatever happened, so an operator read
-    # "2FA enforcement enabled" off a run that never enforced it.
+    # a configured org off a run that configured nothing.
     _stub_bootstrap(monkeypatch)
-    monkeypatch.setattr(bc, "set_org_settings", lambda org: 1)
+    monkeypatch.setattr(bc, "converge_org_settings", lambda org: 1)
     monkeypatch.setattr("sys.argv", ["bootstrap_course", "--org", "Course-Org"])
 
     assert bc.main() == 1
     out = capsys.readouterr().out
-    assert "- [FAILED] Org settings: 2FA enforced" in out
+    assert "- [FAILED] Org settings: base permission none" in out
     assert "- Faculty teams:" in out
     assert "bootstrap INCOMPLETE" in out
 
@@ -1295,27 +1324,20 @@ def test_the_student_facing_teams_are_secret(monkeypatch):
 # repo permissions in the estate.
 
 
-def _r(name, **extra):
-    return {
-        "name": name,
-        "url": "u",
-        "visibility": "private",
-        "description": "",
-        **extra,
-    }
+_r = repo_row  # one row of a real list_org_repos listing
 
 
 def _spy_sweep(monkeypatch, repos):
     """Run the sweep over `repos` and return what converge_faculty_access was told."""
     seen: dict = {}
 
-    def spy(org, repos, cohort, protected):
-        seen.update(cohort=cohort, protected=set(protected))
-        return 0
+    def spy(org, repos, tier, protected):
+        seen.update(tier=tier, protected=set(protected))
+        return Converged()
 
     monkeypatch.setattr(seed, "converge_faculty_access", spy)
-    monkeypatch.setattr(seed, "converge_descriptions", lambda *a, **k: 0)
-    monkeypatch.setattr(seed, "converge_topics", lambda *a, **k: 0)
+    monkeypatch.setattr(seed, "converge_descriptions", lambda *a, **k: Converged())
+    monkeypatch.setattr(seed, "converge_topics", lambda *a, **k: Converged())
     seed._converge_org_metadata("Org", repos)
     return seen
 
@@ -1326,19 +1348,19 @@ def test_the_sweep_is_told_the_tier_and_the_student_repos(monkeypatch):
     # site passes.
     cohort = [_r(".github", topics=["dsl-cohort"]), _r("welcome"), _r("grades-ada")]
     assert _spy_sweep(monkeypatch, cohort) == {
-        "cohort": True,
+        "tier": "cohort",
         "protected": {"grades-ada"},
     }
 
     course = [_r(".github", topics=["dsl-course-hub"]), _r("course-materials-f2026")]
-    assert _spy_sweep(monkeypatch, course) == {"cohort": False, "protected": set()}
+    assert _spy_sweep(monkeypatch, course) == {"tier": "course", "protected": set()}
 
 
 def test_an_org_of_unknown_tier_gets_the_read_floor(monkeypatch):
     # A legacy cohort: `.github` without topics, student repos, no `welcome`. The landing
     # page renders it as a course org, but the sweep must NOT hand instructors push on
-    # every submission repo - so it is told "cohort" (read floor), and the student repos
-    # are protected by name as well.
+    # every submission repo - so it is told the tier is UNKNOWN, which faculty_floor reads
+    # as the read floor, and the student repos are protected by name as well.
     legacy = [
         _r(".github"),
         _r("assignment-1", isTemplate=True),
@@ -1346,7 +1368,7 @@ def test_an_org_of_unknown_tier_gets_the_read_floor(monkeypatch):
         _r("grades-ada"),
     ]
     assert _spy_sweep(monkeypatch, legacy) == {
-        "cohort": True,
+        "tier": None,
         "protected": {"assignment-1-ada", "grades-ada"},
     }
 
@@ -1355,9 +1377,9 @@ def test_a_failed_topic_stamp_reds_the_refresh(monkeypatch):
     # A missing `submission`/`gradebook` topic is what puts a student's repo on the public
     # landing page and into the release targets, so it counts; a reworded description or
     # a retryable access PUT does not.
-    monkeypatch.setattr(seed, "converge_descriptions", lambda *a, **k: 0)
-    monkeypatch.setattr(seed, "converge_faculty_access", lambda *a, **k: 0)
-    monkeypatch.setattr(seed, "converge_topics", lambda *a, **k: 2)
+    monkeypatch.setattr(seed, "converge_descriptions", lambda *a, **k: Converged())
+    monkeypatch.setattr(seed, "converge_faculty_access", lambda *a, **k: Converged())
+    monkeypatch.setattr(seed, "converge_topics", lambda *a, **k: Converged(0, 2))
     assert seed._converge_org_metadata("Org", [_r(".github")]) == 2
 
 
@@ -1367,8 +1389,12 @@ def test_refresh_sweeps_every_org_off_one_listing(monkeypatch):
     # landing page so the page renders the descriptions this run just corrected.
     listings: list[str] = []
     swept: list[str] = []
+    tightened: list[str] = []
     rendered: list[tuple[str, int]] = []
     _stub_refresh(monkeypatch)
+    monkeypatch.setattr(
+        seed, "converge_org_settings", lambda org: tightened.append(org) or 0
+    )
     monkeypatch.setattr(
         seed, "list_org_repos", lambda org: listings.append(org) or [_r(".github")]
     )
@@ -1383,5 +1409,9 @@ def test_refresh_sweeps_every_org_off_one_listing(monkeypatch):
 
     assert seed.refresh("Course-Org") == 0
     assert swept == ["Course-Org", "Cohort-f2026", "Cohort-s2027"]
+    # The org's own settings converge on the same sweep. They were written only at
+    # bootstrap, so every org tightened after its own bootstrap kept GitHub's default of
+    # `read` for every member on every repo.
+    assert tightened == swept
     assert listings == swept
     assert rendered == [("Course-Org", 1), ("Cohort-f2026", 1), ("Cohort-s2027", 1)]

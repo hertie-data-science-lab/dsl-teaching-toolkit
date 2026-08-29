@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from dsl_course import enrol_codes, mailer, roster
+from tests.conftest import ROSTER_HEADER
 
 
 def _student(email="a@x.edu", name="Ada", code="", handle=""):
@@ -57,16 +58,6 @@ def test_code_message_names_the_course_and_falls_back_when_unnamed():
     _to, subject, unnamed = enrol_codes.code_message(s, url)
     assert "To join the course on GitHub" in unnamed
     assert subject == "Your course enrolment code"
-
-
-def test_roster_dump_roundtrips_with_enrol_code():
-    students = [
-        _student(email="ada@uni.edu", name="Ada", code="dsl-abc", handle="ada-l")
-    ]
-    reparsed = roster.parse(roster.dump(students))
-    assert reparsed[0].enrol_code == "dsl-abc"
-    assert reparsed[0].hertie_email == "ada@uni.edu"
-    assert reparsed[0].onboarded is True
 
 
 def test_mailer_dry_run_previews_without_config(capsys):
@@ -159,7 +150,7 @@ def test_a_failed_graph_token_is_not_reported_as_nothing_to_send(monkeypatch):
 
 
 def test_fill_enrol_codes_preserves_unknown_columns_and_raw_role():
-    # The old round-trip through roster.dump re-serialised only roster.FIELDS, dropping
+    # The old whole-file round-trip re-serialised only roster.FIELDS, dropping
     # every column the engine does not read - a faculty-added `notes`, and the retired
     # `student_id`/`section` a deployed cohort's roster still carries - and normalising
     # `role`. A surgical cell edit must leave every other column and each cell's raw text
@@ -187,17 +178,33 @@ def test_fill_enrol_codes_appends_the_column_when_the_roster_predates_it():
     import csv
     import io
 
-    text = "student_id,name,github_handle\n1,Ada,ada-l\n"
+    # A roster predating the column, but still a roster: the required columns are what
+    # `roster.parse` requires, and only `enrol_code` is optional here.
+    text = "hertie_email,name,github_handle\nada@uni.edu,Ada,ada-l\n"
     out = enrol_codes.fill_enrol_codes_in_csv(text, {0: "dsl-new"})
     rows = list(csv.DictReader(io.StringIO(out)))
     assert rows[0]["enrol_code"] == "dsl-new"
     assert out.splitlines()[0].endswith("enrol_code")  # added at the end
 
 
+def test_a_semicolon_export_is_refused_rather_than_written_back_mangled():
+    # A German-locale Excel saves `;`-delimited CSV. DictReader sees ONE header column and
+    # every field reads "", so this path used to bolt an `enrol_code` column onto the
+    # single mangled column and commit that over the roster - exit 0, nobody told. These
+    # two readers bypassed `roster.parse`, which has refused it all along.
+    text = "hertie_email;name;github_handle\nada@uni.edu;Ada;ada-l\n"
+    for call in (
+        lambda: enrol_codes.fill_enrol_codes_in_csv(text, {0: "dsl-new"}),
+        lambda: enrol_codes.rows_for_codes(text, [(0, "ada@uni.edu", "dsl-new")]),
+    ):
+        with pytest.raises(RuntimeError, match="comma-separated"):
+            call()
+
+
 # ------------------- a code write must not revert a Join binding that landed meanwhile
 
 
-HEADER = "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+HEADER = ROSTER_HEADER + "\n"
 STALE = HEADER + "ada@uni.edu,Ada,,,,enrolled\nbob@uni.edu,Bob,,,,enrolled\n"
 # What the roster looks like after a Join issue bound Ada's handle mid-run.
 FRESH = HEADER + "ada@uni.edu,Ada,ada-l,42,,enrolled\nbob@uni.edu,Bob,,,,enrolled\n"
@@ -222,7 +229,7 @@ def test_a_refused_write_is_retried_against_the_fresh_roster(monkeypatch):
     monkeypatch.setattr(
         enrol_codes, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
     )
-    assert enrol_codes.write_codes("COHORT", STALE, "stale", _codes()) is True
+    assert enrol_codes.write_codes("COHORT", STALE, "stale", _codes()) == written[-1]
     assert attempts["n"] == 2
     # The retry carries Ada's handle - it was never this run's to remove - and both codes.
     assert "ada-l" in written[-1]
@@ -234,7 +241,7 @@ def test_the_retry_gives_up_after_a_bounded_number_of_attempts(monkeypatch):
     monkeypatch.setattr(
         enrol_codes, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
     )
-    assert enrol_codes.write_codes("COHORT", STALE, "stale", _codes()) is False
+    assert enrol_codes.write_codes("COHORT", STALE, "stale", _codes()) is None
 
 
 def test_a_code_that_arrived_in_between_is_left_alone(monkeypatch):
@@ -256,6 +263,38 @@ def test_a_code_that_arrived_in_between_is_left_alone(monkeypatch):
     assert "dsl-theirs" in written[-1] and "dsl-aaa111" not in written[-1]
 
 
+def test_the_emails_carry_the_code_the_roster_actually_holds(monkeypatch):
+    # Another run filled Ada's cell first, so our write was refused and the retry left
+    # `dsl-theirs` in place. Emailing the code THIS run generated in memory gave Ada one
+    # that enrols nobody: the Join issue rejected her, with no sign anything went wrong.
+    theirs = (
+        HEADER + "ada@uni.edu,Ada,,,dsl-theirs,enrolled\nbob@uni.edu,Bob,,,,enrolled\n"
+    )
+    reads = iter([(STALE, "stale"), (theirs, "fresh")])
+    monkeypatch.setattr(
+        enrol_codes, "get_file_with_sha", lambda org, repo, path: next(reads)
+    )
+    monkeypatch.setattr(
+        enrol_codes,
+        "put_file",
+        lambda org, repo, path, content, msg, expected_sha=None: (
+            expected_sha == "fresh"
+        ),
+    )
+    monkeypatch.setattr(enrol_codes, "course_name_for_cohort", lambda org: "Test")
+    sent: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        enrol_codes.mailer,
+        "send_bulk",
+        lambda messages, dry_run=False, sample=None: (
+            sent.extend(messages) or len(messages)
+        ),
+    )
+    assert enrol_codes.run("COHORT") == 0
+    ada = next(body for to, _subject, body in sent if to == "ada@uni.edu")
+    assert "dsl-theirs" in ada  # not the code this run generated for her in memory
+
+
 def test_rows_are_relocated_by_email_not_by_their_original_index():
     # A row inserted above shifts every index below it; the email is what identifies the
     # student the code was generated for.
@@ -263,6 +302,29 @@ def test_rows_are_relocated_by_email_not_by_their_original_index():
     assert enrol_codes.rows_for_codes(shifted, _codes()) == {
         1: "dsl-aaa111",
         2: "dsl-bbb222",
+    }
+
+
+def test_two_rows_sharing_an_email_each_keep_their_own_code():
+    # A registrar export with the same address twice (a duplicate enrolment, a shared
+    # departmental inbox) mapped BOTH codes onto the first of the two rows, so the pair
+    # collapsed to one dict key and the second row was left with no code at all - silently,
+    # on a green run. A non-unique email re-locates nothing; those rows keep their index.
+    text = (
+        HEADER
+        + "ada@uni.edu,Ada,,,,enrolled\n"
+        + "dept@uni.edu,First,,,,enrolled\n"
+        + "dept@uni.edu,Second,,,,enrolled\n"
+    )
+    codes = [
+        (0, "ada@uni.edu", "dsl-aaa111"),
+        (1, "dept@uni.edu", "dsl-bbb222"),
+        (2, "dept@uni.edu", "dsl-ccc333"),
+    ]
+    assert enrol_codes.rows_for_codes(text, codes) == {
+        0: "dsl-aaa111",
+        1: "dsl-bbb222",
+        2: "dsl-ccc333",
     }
 
 

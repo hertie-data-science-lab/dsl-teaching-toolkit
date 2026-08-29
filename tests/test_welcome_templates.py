@@ -10,13 +10,16 @@ column they address by name really exists in roster.FIELDS / teams.FIELDS.
 
 from __future__ import annotations
 
+import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
 import yaml
 
-from dsl_course import roster, teams
+from dsl_course import course, roster, sync_teams, teams, welcome
 
 WELCOME = Path(__file__).resolve().parents[1] / "templates" / "welcome"
 TEMPLATES = [
@@ -30,8 +33,10 @@ CSV_WORKFLOWS = {"onboard.yml": "onboard", "team-formation.yml": "form-team"}
 
 
 def script_of(rel: str, job: str) -> str:
-    """The github-script body of a workflow's single step."""
-    doc = yaml.safe_load((WELCOME / rel).read_text())
+    """The github-script body of a workflow's single step, AS SEEDED - through the same
+    reader the seeding uses, so the shared helper block is spliced in the way a cohort
+    receives it rather than left as its marker."""
+    doc = yaml.safe_load(welcome.welcome_workflow(f"welcome/{rel}"))
     (step,) = doc["jobs"][job]["steps"]
     return step["with"]["script"]
 
@@ -104,12 +109,25 @@ def test_csv_is_parsed_with_quote_aware_helpers_not_split(rel, job):
 
 
 def test_csv_helpers_do_not_drift_between_workflows():
-    # Both workflows write the same roster/teams CSVs, so the two hand-rolled copies
-    # (no shared module - these files ship verbatim) must stay byte-identical.
+    # Both workflows write the same roster/teams CSVs, and both get their reader/writer
+    # from ONE file spliced in at seeding time - so they cannot drift. Asserted on the
+    # SEEDED text, because the splice (and its indentation) is what a cohort receives.
     onboard, formation = (
         csv_helpers(script_of(rel, job)) for rel, job in sorted(CSV_WORKFLOWS.items())
     )
     assert onboard == formation
+    assert onboard.strip() in welcome.template(welcome.SHARED_SCRIPT)
+
+
+@pytest.mark.parametrize("rel,job", sorted(CSV_WORKFLOWS.items()))
+def test_an_unspliced_workflow_is_still_valid_yaml(rel, job):
+    # The marker is a JS comment inside the block scalar, so the file on disk parses (and
+    # reads as JavaScript) whether or not anything has spliced into it - a template that
+    # only becomes well-formed at seeding time is one nobody can review.
+    doc = yaml.safe_load((WELCOME / rel).read_text())
+    script = doc["jobs"][job]["steps"][0]["with"]["script"]
+    assert welcome.SHARED_SCRIPT_MARK in script
+    assert "const parseCsv" not in script  # the copy is gone, not duplicated
 
 
 def test_onboard_addresses_roster_columns_declared_in_python():
@@ -161,19 +179,38 @@ def test_onboard_never_downgrades_an_existing_org_admin():
     assert "no access changes" in script
 
 
-def test_team_formation_refuses_auditors():
+def test_team_formation_refuses_auditors_without_publishing_their_role():
     # Auditors are read-only: assignment release is roster-driven (enrolled rows only), so an
     # auditor recorded in teams.csv would be handed a group assignment repo anyway. They must
-    # be refused on the same comment + needs-review path as every other rejection.
+    # be refused on the same comment + needs-review path as every other rejection - and with
+    # the SAME words a non-enrolee gets. This issue is public and permanent, so "your
+    # enrolment doesn't include project work" published the author's role to anyone reading.
     script = script_of("team-formation.yml", "form-team")
     code = code_of(script)
     assert f"=== '{roster.ROLE_AUDITOR}'" in code  # matches the Python spelling
     refusal = re.search(
         r"if \(iRole >= 0 [^\n]*\n(?:.*\n)*?\s+'needs-review'\);", code
     ).group(0)
-    assert "auditor" in refusal and "can't join a project team" in refusal
+    assert "NOT_A_PARTICIPANT" in refusal, (
+        "the auditor refusal has its own wording again"
+    )
+    assert "enrolment" not in refusal
+    # ... and it is the same constant the not-on-the-roster path uses.
+    assert len(re.findall(r"fail\(\s*NOT_A_PARTICIPANT", code)) == 2
     # refused before anything is written back to teams.csv
     assert code.index("iRole >= 0") < code.index("createOrUpdateFileContents")
+
+
+def test_a_refused_team_name_gives_no_reason():
+    # A team may not be named after a roster handle (a group repo is `<slug>-<team>` and a
+    # per-student one `<slug>-<handle>`), but SAYING so turned the form into a membership
+    # oracle: try a name, and the reply tells you whether that person is in this cohort.
+    # Reserved names and handle collisions share one reason-free refusal.
+    code = code_of(script_of("team-formation.yml", "form-team"))
+    assert "named after a GitHub handle" not in code
+    assert "handles.has(team)) return fail(NAME_TAKEN" in code
+    # ... the same words the reserved-name refusal uses, so the two are indistinguishable.
+    assert len(re.findall(r"fail\(\s*NAME_TAKEN", code)) == 2
 
 
 def test_team_formation_treats_a_missing_role_column_as_enrolled():
@@ -271,6 +308,22 @@ def test_onboard_retries_the_roster_write_on_a_conflict():
     assert "(row[iRole] || '')" not in code
 
 
+def test_onboard_re_matches_a_renamed_account_by_its_immutable_id():
+    # A login is renameable; a GitHub id is not. Comparing only the handle, a student who
+    # renamed their account got NO_MATCH on every re-run while the nightly reconcile pruned
+    # their new login off every team - a break with no recovery short of a hand edit.
+    # `boundElsewhere` therefore accepts a row whose `github_id` is this user's, and both
+    # the pre-loop guard and the in-loop re-check go through it.
+    code = code_of(script_of("onboard.yml", "onboard"))
+    guard = re.search(r"const boundElsewhere = \(r\) =>(.*?);", code, re.DOTALL)
+    assert guard, "the single-use guard is gone"
+    assert re.search(r"r\[iId\].*!==\s*String\(userId\)", guard.group(1)), (
+        "the guard does not exempt the same account under a new name"
+    )
+    assert "boundElsewhere(row)" in code, "the pre-loop check must use the same guard"
+    assert code.index("const boundElsewhere") < code.index("boundElsewhere(row)")
+
+
 def test_team_formation_retakes_the_cap_decision_on_every_attempt():
     code = code_of(script_of("team-formation.yml", "form-team"))
     loop = retry_loop(code)
@@ -290,6 +343,82 @@ def test_team_cap_is_read_from_schedule_yml_per_assignment():
     assert "MAX_TEAM_SIZE" not in script
     assert "max_team_size" in script and "schedule.yml" in script
     assert "DEFAULT_TEAM_SIZE = 5" in script
+
+
+_JSC = shutil.which("osascript")
+
+
+def _team_cap_answers(schedule_yml: str, slugs: list[str]) -> list[int | None]:
+    """Run the SHIPPED `teamCap` scanner over `schedule_yml` in JavaScriptCore, with its
+    one await stubbed out, and return its answer for each slug. Skipped where there is no
+    JS engine (Linux CI); the text guard below runs everywhere."""
+    script = script_of("team-formation.yml", "form-team")
+    start = script.index("const DEFAULT_TEAM_SIZE")
+    end = script.index("};", script.index("return cap === null")) + 2
+    block = (
+        script[start:end]
+        .replace("async (slug)", "(slug)")
+        .replace("await github", "github")
+    )
+    calls = ", ".join(f"teamCap({json.dumps(s)})" for s in slugs)
+    harness = (
+        f"const SCHEDULE = {json.dumps(schedule_yml)};\n"
+        "const org = 'O', CONFIG = 'c';\n"
+        "const Buffer = { from: (s, e) => ({ toString: () => SCHEDULE }) };\n"
+        "const github = { rest: { repos: { getContent: () => "
+        "({ data: { content: '' } }) } } };\n"
+        f"{block}\n"
+        f"JSON.stringify([{calls}]);\n"
+    )
+    run = subprocess.run(
+        [_JSC, "-l", "JavaScript", "-e", harness],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert run.returncode == 0, run.stderr
+    return json.loads(run.stdout)
+
+
+@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+def test_only_a_group_assignment_may_form_a_team():
+    # Any DECLARED assignment used to pass, so a student could open a Join-team issue
+    # against an individual assignment and mint a real GitHub team - with `maintain` on the
+    # repo it is granted - under a name of their choosing.
+    schedule_yml = (
+        "assignments:\n"
+        "  solo:\n"
+        "    type: individual\n"
+        "  project:\n"
+        "    type: group\n"
+        "    max_team_size: 3\n"
+        "  inline: {type: individual}\n"
+        "  untyped:\n"
+        "    due_datetime: 2026-10-01\n"
+    )
+    assert _team_cap_answers(
+        schedule_yml, ["solo", "project", "inline", "untyped", "invented"]
+    ) == [None, 3, None, 5, None]
+    # `untyped` is 5, not None: `type:` may live in the template's grading.yml instead, and
+    # this workflow cannot read it - refusing there would break real group assignments.
+
+
+def test_the_group_only_guard_is_in_the_shipped_script():
+    # The behavioural test above needs a JS engine; this one holds the line in CI.
+    code = code_of(script_of("team-formation.yml", "form-team"))
+    assert "declaredType !== 'group'" in code
+
+
+def test_every_code_in_the_body_is_redacted_not_only_the_one_that_binds():
+    # The redaction re-used the STRICT form match, so a code pasted anywhere the match
+    # could not bind from - the wrong field, an extra line - stayed live in a public issue.
+    code = code_of(script_of("onboard.yml", "onboard"))
+    m = re.search(r"\.replace\(/(.*?)/gi, 'dsl-\[redacted\]'\)", code)
+    assert m, "the loose redaction is gone"
+    pattern = re.compile(m.group(1), re.IGNORECASE)
+    body = "Enrolment code\n\nDSL-ABC234\n\nnote: my other one was dsl-zzz999\n"
+    assert pattern.sub("dsl-[redacted]", body).count("dsl-[redacted]") == 2
+    assert "abc234" not in pattern.sub("dsl-[redacted]", body).lower()
 
 
 def test_the_join_form_code_regex_matches_exactly_the_codes_we_mint():
@@ -337,7 +466,26 @@ def test_onboard_throttles_a_student_before_it_touches_the_roster():
     code = code_of(script_of("onboard.yml", "onboard"))
     throttle = code.index("listForRepo")
     assert "creator: handle" in code and "labels: 'needs-review'" in code
-    assert "unresolved.length >= 3" in code
+    # The THRESHOLD, as a number and not as a prefix: `>= 30` contains `>= 3`, and a
+    # throttle that only fires on the thirtieth open Join issue is no throttle at all.
+    assert re.search(r"unresolved\.length >= 3\b", code)
     assert "unresolved Join issues - contact the teaching team" in code
     assert throttle < code.index("await readRoster()")
     assert throttle < code.index("process.env.HAS_BOT")
+
+
+def test_the_form_refuses_exactly_the_slugs_the_reconcile_reserves():
+    # teams.csv is STUDENT-written, and `team_slug("course", "admin")` is `course-admin` -
+    # the faculty team with admin on every repo in the cohort. The form is the gate; the
+    # reconcile (sync_teams.is_reserved_slug) is the backstop for a row that reached the
+    # CSV another way. Two lists in two languages, so they are pinned to each other here:
+    # a role team added to course.ROLE_TEAMS and not to the form is a slug a student can
+    # claim, and the reconcile would then add them to it and prune the real members.
+    code = code_of(script_of("team-formation.yml", "form-team"))
+    declared = re.search(r"const RESERVED = new Set\(\[([^\]]*)\]\)", code)
+    assert declared, "the form no longer declares a RESERVED set"
+    assert set(re.findall(r"'([^']+)'", declared.group(1))) == set(
+        sync_teams.RESERVED_TEAM_SLUGS
+    )
+    # ...and the `instructors-<tag>` prefix rule, which is a startswith on both sides.
+    assert f"startsWith('{course.INSTRUCTORS_TEAM}-')" in code

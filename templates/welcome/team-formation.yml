@@ -54,44 +54,7 @@ jobs:
             const CONFIG = 'classroom-config';
             const TEAMS  = 'teams.csv', ROSTER = 'students.csv';
 
-            // --- CSV, RFC-4180-ish (github-script has no npm deps, so hand-rolled).
-            // Both CSVs are written by Python's csv module, so a field containing a comma (a
-            // roster name like "Doe, Jane") arrives QUOTED. A naive line.split(',') shifts every
-            // column right of it, so we'd miss an enrolled student's handle and could rewrite
-            // teams.csv with mangled rows. Quoted fields may contain commas, newlines and
-            // "" -escaped quotes; serialiseCsv re-quotes on the same rule as csv.QUOTE_MINIMAL.
-            const parseCsv = (text) => {
-              const rows = [];
-              let row = [], field = '', quoted = false;
-              for (let i = 0; i < text.length; i++) {
-                const c = text[i];
-                if (quoted) {
-                  if (c === '"' && text[i + 1] === '"') { field += '"'; i++; }
-                  else if (c === '"') { quoted = false; }
-                  else { field += c; }
-                  continue;
-                }
-                if (c === '"') { quoted = true; }
-                else if (c === ',') { row.push(field); field = ''; }
-                else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-                else if (c !== '\r') { field += c; }
-              }
-              if (field !== '' || row.length) { row.push(field); rows.push(row); }
-              return rows.filter(r => r.some(v => v !== ''));  // drop blank lines
-            };
-            const csvCell = (v) => {
-              const s = (v === undefined || v === null) ? '' : String(v);
-              return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-            };
-            const serialiseCsv = (rows) => rows.map(r => r.map(csvCell).join(',')).join('\n') + '\n';
-
-            const fail = async (msg, label) => {
-              await github.rest.issues.createComment({
-                owner: org, repo: context.repo.repo, issue_number: issue.number, body: msg });
-              await github.rest.issues.addLabels({
-                owner: org, repo: context.repo.repo, issue_number: issue.number, labels: [label] });
-              core.setFailed(msg.replace(/\*\*/g, ''));
-            };
+            // {shared_script}
 
             try {
               if (!process.env.HAS_BOT) {
@@ -112,9 +75,12 @@ jobs:
               //       max_team_size: 4        # (or inline: {due_datetime: ..., max_team_size: 4})
               // Line-scanned (github-script has no YAML lib) tolerant of comments and both
               // block and flow styles. Returns null when the slug is NOT under `assignments:`
-              // (or there is no schedule.yml): a team may only form for an assignment the
-              // teaching team has declared, or one student could mint any number of real GitHub
-              // teams under names of their choosing. A declared slug with no cap -> DEFAULT_TEAM_SIZE.
+              // (or there is no schedule.yml), and when the entry declares a `type:` that is
+              // not `group`: a team may only form for a group assignment the teaching team has
+              // declared, or one student could mint any number of real GitHub teams under names
+              // of their choosing. `type:` may instead live in the template's grading.yml, which
+              // this workflow cannot read, so an entry with no `type:` still forms a team.
+              // A declared slug with no cap -> DEFAULT_TEAM_SIZE.
               const DEFAULT_TEAM_SIZE = 5;
               const teamCap = async (slug) => {
                 let text;
@@ -129,6 +95,7 @@ jobs:
                 // 4-space file must not read as "no assignments declared" and refuse every team.
                 let known = false, slugIndent = null;
                 let inAssignments = false, inSlug = false;
+                let cap = null, declaredType = null;
                 for (const raw of text.split(/\r?\n/)) {
                   const line = raw.replace(/#.*$/, '').trimEnd();
                   if (!line.trim()) continue;
@@ -142,16 +109,21 @@ jobs:
                     known = known || inSlug;
                     if (inSlug && m && m[2]) {
                       const f = m[2].match(/max_team_size:\s*(\d+)/);
-                      if (f) return parseInt(f[1], 10);
+                      if (f) cap = parseInt(f[1], 10);
+                      const t = m[2].match(/type:\s*([\w-]+)/);
+                      if (t) declaredType = t[1].toLowerCase();
                     }
                     continue;
                   }
                   if (inSlug && indent > slugIndent) {
                     const f = line.trim().match(/^max_team_size:\s*(\d+)$/);
-                    if (f) return parseInt(f[1], 10);
+                    if (f) cap = parseInt(f[1], 10);
+                    const t = line.trim().match(/^type:\s*([\w-]+)$/);
+                    if (t) declaredType = t[1].toLowerCase();
                   }
                 }
-                return known ? DEFAULT_TEAM_SIZE : null;
+                if (!known || (declaredType !== null && declaredType !== 'group')) return null;
+                return cap === null ? DEFAULT_TEAM_SIZE : cap;
               };
 
               if (!aMatch || !tMatch) return fail(
@@ -168,9 +140,13 @@ jobs:
               // in this org. Never let a form submission name a faculty team.
               const RESERVED = new Set(['course-admin', 'instructors', 'students', 'auditors']);
               const slug = `${assignment}-${team}`;
+              // ONE reason-free message for every unavailable name. This issue is public, so a
+              // message that said WHY ("a team can't be named after a GitHub handle") answered,
+              // for any name anyone cared to try, whether that person is in this cohort.
+              const NAME_TAKEN =
+                `Thanks @${handle} - that assignment + team combination isn't available. Pick another team name.`;
               if (RESERVED.has(slug) || slug.startsWith('instructors-')) return fail(
-                `Thanks @${handle} - that assignment + team combination is reserved. Pick another team name.`,
-                'needs-review');
+                NAME_TAKEN, 'needs-review');
 
               // Verify the author is an onboarded student (handle recorded in the roster).
               // Columns (dsl_course.roster.FIELDS) are addressed BY NAME, never by position.
@@ -186,29 +162,31 @@ jobs:
                 `Thanks @${handle} - the roster's header is missing a \`github_handle\` column. ` +
                 `A maintainer will action this.`,
                 'needs-review');
+              // ONE message for "not on the roster" and "on it, but not as a project
+              // participant". This issue is public and permanent, and telling the two apart
+              // published the author's enrolment role to anyone who could read the repo.
+              const NOT_A_PARTICIPANT =
+                `Thanks @${handle} - I can't find you on the roster yet. Please open a **Join** issue first ` +
+                `to onboard, then come back to join a team. If you have already joined, contact the teaching team.`;
               const myRow = rosterTable.slice(1)
                 .find(r => (r[iRosterHandle] || '').trim().toLowerCase() === handle.toLowerCase());
-              if (!myRow) return fail(
-                `Thanks @${handle} - I can't find you on the roster yet. Please open a **Join** issue first ` +
-                `to onboard, then come back to join a team.`,
-                'needs-review');
+              if (!myRow) return fail(NOT_A_PARTICIPANT, 'needs-review');
               // Auditors are read-only: assignment release is roster-driven (enrolled rows only),
               // so they never receive an assignment repo - and a group assignment's repo goes to
               // the whole team. Refuse politely rather than recording a membership that would
               // hand an auditor a group repo.
-              // Neutral wording: this issue is public, and the roster role is not.
+              // Neutral wording: this issue is public, and the roster role is not - so an
+              // auditor gets the SAME message a non-enrolee does. Saying "your enrolment
+              // doesn't include project work" published the author's role in a permanent,
+              // world-readable issue.
               if (iRole >= 0 && (myRow[iRole] || '').trim().toLowerCase() === 'auditor') return fail(
-                `Thanks @${handle} - your enrolment doesn't include project work, so you can't join a project team. ` +
-                `Contact the teaching team if you think this is a mistake.`,
-                'needs-review');
+                NOT_A_PARTICIPANT, 'needs-review');
               // A team may not be named after a roster handle: submission repos are
               // `<slug>-<handle>` and a group repo is `<slug>-<team>`, so a team called after a
               // classmate would be granted that classmate's repo if the assignment were ever
               // provisioned as a group.
               const handles = new Set(rosterTable.slice(1).map(r => (r[iRosterHandle] || '').trim().toLowerCase()).filter(Boolean));
-              if (handles.has(team)) return fail(
-                `Thanks @${handle} - a team can't be named after a GitHub handle. Pick another team name.`,
-                'needs-review');
+              if (handles.has(team)) return fail(NAME_TAKEN, 'needs-review');
 
               // Read teams.csv (create it on first use). Columns: dsl_course.teams.FIELDS.
               const FIELDS = ['assignment', 'team', 'github_handle'];

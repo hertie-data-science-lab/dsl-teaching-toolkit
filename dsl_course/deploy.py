@@ -33,17 +33,19 @@ import tempfile
 from pathlib import Path
 
 from . import site
-from .access import grant_faculty_read_access, grant_read_teams
+from .access import FACULTY_READ_ACCESS, grant_faculty, grant_read_teams
 from .course import (
     FACULTY_ONLY_HEADING,
     SYLLABUS_SAMPLE_FILE,
     SYLLABUS_SESSIONS_FILE,
 )
+from .fs import copy_tree
 from .gh_contents import is_untouched_stub
-from .ghcli import GIT_ENV, gh, git
+from .ghcli import GIT_ENV, clone, git
 from .log import log, log_err, log_ok, log_step
 from .repos import create_repo
 from .schedule import Deploy
+from .schedule_plan import deploy_dest
 
 # Never copied, at any depth: a `.git` landing in the dest overwrites its git metadata and
 # redirects the release's own push into the SOURCE repo.
@@ -179,7 +181,7 @@ def deploy_many(
         src_dirs: dict[str, Path] = {}
         for repo in sorted({d.course_source_repo for d in deploys}):
             sd = root / "src" / repo
-            if gh("repo", "clone", f"{source_org}/{repo}", str(sd), "--", "-q")[0] != 0:
+            if not clone(source_org, repo, sd):
                 log_err(f"could not clone source {source_org}/{repo}")
             else:
                 src_dirs[repo] = sd
@@ -197,9 +199,9 @@ def deploy_many(
             # Read, not write: this is the RELEASED copy, and a re-release copies over it
             # (`copytree(dirs_exist_ok=True)`), so an edit made here would vanish. A
             # correction belongs in the course org's materials repo, then re-release.
-            grant_faculty_read_access(cohort_org, repo)
+            grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
             dd = root / "out" / repo
-            if gh("repo", "clone", f"{cohort_org}/{repo}", str(dd), "--", "-q")[0] != 0:
+            if not clone(cohort_org, repo, dd):
                 log_err(f"could not clone dest {cohort_org}/{repo}")
             else:
                 dest_dirs[repo] = dd
@@ -223,7 +225,10 @@ def deploy_many(
                 continue  # its source/dest failed to clone (already counted)
             # A root cohort_dest_path means the dest repo's root, exactly as a root
             # course_source_path means the source repo's - no mirror-the-source fallback.
-            dest_rel = (d.cohort_dest_path or d.course_source_path).strip("/")
+            # The rule is stated once (schedule_plan.deploy_dest) because the site reads
+            # the same rule to work out which schedule row a release lands in; two copies
+            # is how a release and its row come to disagree about where it went.
+            dest_rel = deploy_dest(d)
             src_root = src_dirs[d.course_source_repo].resolve()
             srcp = _resolve_within(src_root, d.course_source_path)
             if srcp is None:
@@ -270,19 +275,10 @@ def deploy_many(
                                 _warn_withheld_stub(
                                     source_org, d.course_source_repo, stub
                                 )
-                    # symlinks=True copies each link AS a link. Following them, a symlink
-                    # pointing at nothing raised shutil.Error and a directory symlink
-                    # pointing at its own parent recursed - and this runs under the hourly
-                    # cron, so one such path in one materials repo aborted the whole
-                    # cohort's release, every hour, until someone noticed.
-                    shutil.copytree(
+                    copy_tree(
                         srcp,
                         destp,
-                        dirs_exist_ok=True,
-                        symlinks=True,
-                        ignore=_copy_ignore(
-                            srcp if srcp == src_root else None, withheld
-                        ),
+                        _copy_ignore(srcp if srcp == src_root else None, withheld),
                     )
                 elif _is_withheld_stub(
                     d.course_source_path,

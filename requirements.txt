@@ -6,3 +6,11 @@ PyYAML==6.0.3
 # zoneinfo (stdlib) reads the OS tz database; tzdata is the pure-Python fallback so the
 # schedule's timezone handling works even on minimal runners without a system tzdata.
 tzdata==2026.3
+# The AUTOGRADER's runtime, here rather than in the one workflow that used to install it by
+# hand. The hourly scheduler grades at each passed deadline through the same preamble as
+# every other seeded workflow, which installs this file and nothing else: without these two
+# `python -m pytest` was "No module named pytest", every target scored the grading-failed
+# zero, and the systemic guard reddened the cron - hourly, for the rest of the term. Every
+# workflow now pays the install; a grading run that cannot grade costs the whole cohort.
+pytest==8.4.2
+nbconvert==7.17.1

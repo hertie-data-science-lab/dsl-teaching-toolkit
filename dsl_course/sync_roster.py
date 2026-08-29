@@ -26,50 +26,54 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import roster
-from .discovery import list_org_repos
+from . import roster, teams
+from .course import AUDITORS_TEAM, STUDENTS_TEAM, submission_repo, submission_suffix
+from .discovery import classify_repos, list_org_repos
 from .gh_teams import reconcile_team_members, set_org_membership
-from .log import log_err, log_ok, log_step, log_verbose
-from .repos import is_collaborator, remove_collaborator
+from .log import log_err, log_ok, log_person, log_step
+from .repos import (
+    cancel_invitation,
+    is_collaborator,
+    pending_invitations,
+    remove_collaborator,
+)
 
-TEAM = "students"  # enrolled rows
-AUDITOR_TEAM = "auditors"  # read-only rows
+TEAM = STUDENTS_TEAM  # enrolled rows
+AUDITOR_TEAM = AUDITORS_TEAM  # read-only rows
 
 
-def desired_members(students: list[roster.Student]) -> dict[str, set[str]]:
-    """{role team: handles} for the two cohort role teams, onboarded rows only.
+def desired_members(students: list[roster.Student]) -> dict[str, list[roster.Student]]:
+    """`{role team: the onboarded rows that belong in it}` - the ONE partition of a roster
+    into the two cohort role teams.
 
     A not-yet-onboarded row has no handle to add, so it isn't wanted anywhere yet. Both
     keys are always present, so a pruning sync empties a team that should be empty rather
-    than leaving yesterday's members in it."""
+    than leaving yesterday's members in it.
+
+    ROWS, not handles, because the reconcile needs both halves of each: the login to add,
+    and the immutable GitHub id it is handed as `keep_ids`. A login is renameable and an
+    id is not, so a student who renames their account leaves the roster's `github_handle`
+    cell stale while still being on the roster - the add of the old login 404s and the
+    prune evicts the new one, every night, until somebody hand-edits the CSV."""
     onboarded = [s for s in students if s.onboarded]
     return {
-        TEAM: {s.github_handle for s in onboarded if s.is_enrolled},
-        AUDITOR_TEAM: {s.github_handle for s in onboarded if s.is_auditor},
+        TEAM: [s for s in onboarded if s.is_enrolled],
+        AUDITOR_TEAM: [s for s in onboarded if s.is_auditor],
     }
 
 
 def submission_repo_suffixes(repos: list[dict]) -> list[tuple[str, str]]:
-    """`(repo, suffix)` for every `<template>-<suffix>` repo in a cohort org's listing.
+    """`(repo, suffix)` for every submission repo in a cohort org's listing.
 
-    The same rule `discovery.is_student_repo` uses: a submission repo is generated from one
-    of the org's cohort assignment templates, so its name is that template's name plus a
-    suffix. The suffix is a student's HANDLE for an individual assignment and a TEAM name
-    for a group one - which is exactly why nothing downstream acts on a suffix without
-    asking GitHub whether it is really a collaborator."""
-    templates = sorted(
-        (r["name"] for r in repos if r.get("isTemplate")), key=len, reverse=True
-    )
-    out = []
-    # Templates themselves are excluded: `assignment-4-project` is a repo in this listing
-    # AND starts with `assignment-4-`, so a cohort with both templates would otherwise
-    # read one of its own templates as a submission repo belonging to `project`.
-    for repo in sorted(r["name"] for r in repos if not r.get("isTemplate")):
-        for template in templates:  # longest first, so a nested slug wins
-            if repo.startswith(f"{template}-"):
-                out.append((repo, repo[len(template) + 1 :]))
-                break
-    return out
+    `discovery.classify_repos` names the template each one derives from; the suffix is
+    what is left. That suffix is a student's HANDLE for an individual assignment and a
+    TEAM name for a group one - which is exactly why nothing downstream acts on one
+    without first asking GitHub whether it is really a collaborator."""
+    return [
+        (repo, submission_suffix(repo, template))
+        for repo, template in sorted(classify_repos(repos).items())
+        if template
+    ]
 
 
 def revoke_offboarded_access(
@@ -85,15 +89,31 @@ def revoke_offboarded_access(
     on every assignment repo they had ever been handed, indefinitely, while every report
     said they had been removed.
 
+    A grant made before the org invite was accepted is a pending INVITATION rather than a
+    collaborator row, so it is cancelled too - otherwise accepting it later hands the
+    access straight back. Org membership itself is not touched here.
+
     Deliberately narrow. Only the login the repo is NAMED after is ever revoked, and only
-    once GitHub confirms it is a direct collaborator - a group repo's suffix is a team
-    name, faculty and the bot hold their access through teams, and a repo name is not a
-    reason to take anyone's access away. `on_roster` is casefolded, because GitHub logins
+    once GitHub confirms it is a direct collaborator or holds an invitation - a group
+    repo's suffix is a team name, faculty and the bot hold their access through teams, and
+    a repo name is not a reason to take anyone's access away. `on_roster` is casefolded, because GitHub logins
     are case-insensitive and a case-only difference is the same account."""
+    # teams.csv already says which repos are the GROUP ones, so asking GitHub whether a
+    # team is a collaborator on its own repo is a paginated read per team repo per night,
+    # for an answer that is always "no". Matched on the whole repo NAME rather than the
+    # bare suffix: a team name and a student's handle live in the same namespace, and only
+    # `<assignment>-<team>` says which of the two this repo is. An assignment renamed by
+    # `cohort_dest_repo` does not match and simply keeps its probe.
+    declared_team_repos = {
+        submission_repo(key, team).casefold()
+        for key, per_team in teams.load(cohort_org).items()
+        for team in per_team
+    }
     stale = [
         (repo, suffix)
         for repo, suffix in submission_repo_suffixes(list_org_repos(cohort_org))
         if suffix.casefold() not in on_roster
+        and repo.casefold() not in declared_team_repos
     ]
     errors = 0
     revoked = 0
@@ -102,20 +122,38 @@ def revoke_offboarded_access(
         if present is None:  # unreadable - never guess, in either direction
             errors += 1
             continue
-        if not present:
-            continue  # a team name, or already revoked
-        if dry_run:
-            log_verbose(f"    DRY-RUN revoke {suffix} <- {cohort_org}/{repo}")
-            revoked += 1
-        elif remove_collaborator(cohort_org, repo, suffix):
-            log_verbose(f"  [ok] revoked {suffix} from {cohort_org}/{repo}")
-            revoked += 1
-        else:
+        if present:
+            if dry_run:
+                log_person(f"    DRY-RUN revoke {suffix} <- {cohort_org}/{repo}")
+                revoked += 1
+            elif remove_collaborator(cohort_org, repo, suffix):
+                log_person(f"  [ok] revoked {suffix} from {cohort_org}/{repo}")
+                revoked += 1
+            else:
+                errors += 1
+        # A grant made before the org invite was accepted is a pending INVITATION, which
+        # `is_collaborator` cannot see and `remove_collaborator` does not touch. Left live,
+        # accepting it later hands `maintain` back to an off-boarded student.
+        invitations = pending_invitations(cohort_org, repo, suffix)
+        if invitations is None:
             errors += 1
+            continue
+        for invitation_id in invitations:
+            if dry_run:
+                log_person(f"    DRY-RUN cancel invite {suffix} <- {cohort_org}/{repo}")
+                revoked += 1
+            elif cancel_invitation(cohort_org, repo, invitation_id):
+                log_person(f"  [ok] cancelled {suffix}'s invite to {cohort_org}/{repo}")
+                revoked += 1
+            else:
+                errors += 1
     if revoked:
+        # Only DIRECT grants and pending invitations are counted, because only those were
+        # removed: `is_collaborator` reads the affiliation=direct listing, so a repo whose
+        # suffix merely matches somebody with team or owner access is never one of these.
         log_ok(
-            f"{revoked} submission-repo grant(s) revoked for handle(s) no longer on the "
-            f"roster{' (dry run)' if dry_run else ''}"
+            f"{revoked} direct submission-repo grant(s)/invite(s) revoked for handle(s) "
+            f"no longer on the roster{' (dry run)' if dry_run else ''}"
         )
     return errors
 
@@ -133,23 +171,31 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
     )
 
     errors = 0
-    for team, handles in wanted.items():
+    for team, rows in wanted.items():
+        handles = {s.github_handle for s in rows}
         for handle in sorted(handles):
             if dry_run:
-                log_verbose(f"    DRY-RUN enroll: {handle} -> org member")
+                log_person(f"    DRY-RUN enroll: {handle} -> org member")
             elif not set_org_membership(cohort_org, handle, role="member"):
                 errors += 1
         # Team membership via the shared reconcile so pruning inherits its guard:
-        # an org Owner (or the acting bot) on the roster is never evicted.
+        # an org Owner (or the acting bot) on the roster is never evicted. `keep_ids` is
+        # keyed per TEAM, not cohort-wide - a role change is meant to prune the handle out
+        # of the team it left.
         errors += reconcile_team_members(
-            cohort_org, team, handles, prune=prune, dry_run=dry_run
+            cohort_org,
+            team,
+            handles,
+            prune=prune,
+            dry_run=dry_run,
+            keep_ids={s.github_id for s in rows if s.github_id},
         )
     if prune:
         # Behind the same flag as the team prune, and for the same reason: this is the
         # other half of off-boarding, and an ad-hoc run must not silently revoke anything.
         errors += revoke_offboarded_access(
             cohort_org,
-            {h.casefold() for handles in wanted.values() for h in handles},
+            {s.github_handle.casefold() for rows in wanted.values() for s in rows},
             dry_run=dry_run,
         )
     return errors

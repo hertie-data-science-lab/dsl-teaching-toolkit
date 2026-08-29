@@ -45,6 +45,7 @@ from datetime import datetime, timezone
 from . import schedule, site, source_digest
 from .assign import provision_all, solution_released
 from .collect import (
+    SnapshotResult,
     collect,
     has_autograde_results,
     load_snapshots,
@@ -56,7 +57,8 @@ from .collect import (
 from .deploy import deploy_many
 from .log import log, log_err, log_ok, log_step
 from .repos import repo_exists
-from .schedule import Deploy, Release
+from .schedule import Release
+from .schedule_plan import deploy_dest
 from .seed import discover_cohorts
 
 # --------------------------------------------------------------------------- pure core
@@ -101,10 +103,6 @@ def due_snapshots(sched: schedule.Schedule, now: datetime) -> list[tuple[str, st
     return [(slug, at.isoformat()) for slug, at in sorted(passed, key=lambda p: p[1])]
 
 
-def _dest(d: Deploy) -> str:
-    return d.cohort_dest_path or d.course_source_path
-
-
 def describe(release: Release, now: datetime | None = None) -> list[str]:
     """Human one-liners for a release's actions (for dry-run / 'what opens when'). With
     `now`, deploys not yet due (a deploy_datetime after the entry's event_datetime) are
@@ -122,7 +120,7 @@ def describe(release: Release, now: datetime | None = None) -> list[str]:
         )
         lines.append(
             f"deploy {d.course_source_repo}/{d.course_source_path} -> "
-            f"{d.cohort_dest_repo}/{_dest(d)}{suffix}"
+            f"{d.cohort_dest_repo}/{deploy_dest(d)}{suffix}"
         )
     actions_pending = now is not None and (release.when is None or release.when > now)
     actions_suffix = (
@@ -139,27 +137,33 @@ def describe(release: Release, now: datetime | None = None) -> list[str]:
 # ---------------------------------------------------------------------- gh/git wiring
 
 
-def _execute_nondeploy(course_org: str, cohort_org: str, release: Release) -> int:
+def _execute_nondeploy(
+    course_org: str, cohort_org: str, release: Release
+) -> tuple[int, bool]:
     """Run one release's non-deploy action (an assignment handout, and once its
     `solution_datetime` has passed, the model solution with it). Deploys are batched
-    across the whole run (see `run`) so their source/dest repos clone once. Returns the
-    error count."""
+    across the whole run (see `run`) so their source/dest repos clone once. Returns
+    `(error count, whether anything was actually provisioned)` - the same shape
+    `deploy_many` answers in, and for the same reason: `due_releases` is cumulative, so
+    a handed-out release re-fires on every tick and almost all of them change nothing."""
     errors = 0
+    changed = False
     if release.assignment:
         # provision_all's default (group=None) resolves group-vs-individual from the
         # cohort schedule / the template's grading.yml - so a scheduled group handout
         # provisions per TEAM, not one repo per student.
-        failed = provision_all(
+        failed, changed = provision_all(
             course_org,
             release.assignment,
             cohort_org,
             solution=release.assignment_solution,
             # Hourly: leave existing repos alone (the manual button still repairs access).
             touch_existing=False,
+            scheduled=True,
         )
         if failed != 0:
             errors += 1
-    return errors
+    return errors, changed
 
 
 def _snapshot_passed_deadlines(
@@ -168,17 +172,25 @@ def _snapshot_passed_deadlines(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-) -> int:
+) -> tuple[int, frozenset[str]]:
     """Freeze every passed-deadline assignment that has no snapshot yet. Write-once: an
     assignment already frozen is skipped silently, so this is a no-op on every tick after
-    the first. Returns the error count."""
+    the first.
+
+    Returns `(error count, the cohort names that HAVE a snapshot afterwards)` - already
+    frozen or frozen by this pass. Autograding refuses to grade what was never frozen, and
+    asking again there was a second read of the same file for every passed deadline on
+    every tick; this pass has just established the answer."""
     errors = 0
+    frozen: set[str] = set()
     for slug, deadline in due_snapshots(sched, now):
         entry = sched.assignments[slug]
         # every cohort-side artefact keys on the assignment's cohort NAME, not its slug
         name = schedule.cohort_name(slug, entry)
         if load_snapshots(cohort_org, name) is not None:
-            continue  # already frozen - never re-snapshot, a late push must not move it
+            # already frozen - never re-snapshot, a late push must not move it
+            frozen.add(name)
+            continue
         if dry_run:
             log(f"    DRY-RUN  snapshot {snapshot_path(name)} (deadline {deadline})")
             continue
@@ -200,11 +212,17 @@ def _snapshot_passed_deadlines(
             force=False, schedule_type=entry.type, template_group=template_group
         )
         # `name` names the repos, `slug` (the schedule key) is what teams.csv is keyed on.
-        if not snapshot_assignment(
+        result = snapshot_assignment(
             cohort_org, name, deadline, is_group=is_group, teams_key=slug
-        ):
+        )
+        if result is SnapshotResult.FAILED:
             errors += 1
-    return errors
+        elif result is not SnapshotResult.NOTHING_TO_FREEZE:
+            # NOTHING_TO_FREEZE wrote no snapshot, so the assignment is NOT frozen and must
+            # not be graded this tick - autograding it would write write-once zeros for a
+            # cohort that has not been handed out yet.
+            frozen.add(name)
+    return errors, frozenset(frozen)
 
 
 def _assignment_template(
@@ -229,9 +247,15 @@ def _autograde_passed_deadlines(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
+    frozen: frozenset[str],
 ) -> int:
     """Autograde every passed-deadline assignment exactly once - zero config. Returns the
     error count.
+
+    `frozen` is `_snapshot_passed_deadlines`' answer for this same tick: the cohort names
+    that have a snapshot. It is read rather than re-fetched, because the snapshot pass ran
+    immediately before over the same deadlines and is the only thing that could have
+    changed it.
 
     Fire-once: the `autograde/<slug>/_graded.json` sentinel (or the `_skipped.json` record) in
     classroom-config is the marker. Absent means never machine-graded, so grade now; present
@@ -258,14 +282,14 @@ def _autograde_passed_deadlines(
         # record a permanent write-once ZERO for every student and mark the assignment
         # graded - on a green run. A snapshot that failed this tick, or was skipped because
         # nothing was handed out yet, simply means: not now. The next tick looks again.
-        if load_snapshots(cohort_org, name) is None:
+        if name not in frozen:
             log(f"  [wait] autograde {slug} - no completed snapshot yet, not grading")
             continue
         if dry_run:
             log(f"    DRY-RUN  autograde {slug} via {template} (deadline {deadline})")
             continue
         log_step(f"  autograde {slug} via {template} (deadline {deadline})")
-        if collect(course_org, template, cohort_org, deadline) != 0:
+        if collect(course_org, template, cohort_org, deadline, scheduled=True) != 0:
             errors += 1
     return errors
 
@@ -296,8 +320,16 @@ def _run_releases(
                 f"  [{release.label}] assignment handout"
                 + (" + solution" if release.assignment_solution else "")
             )
-            errors += _execute_nondeploy(course_org, cohort_org, release)
-            did_assign = True
+            handout_errors, handout_changed = _execute_nondeploy(
+                course_org, cohort_org, release
+            )
+            errors += handout_errors
+            # Only a handout that PROVISIONED something has anything new to show the site.
+            # `due_releases` is cumulative - every handed-out assignment is due again on
+            # every tick - so setting this unconditionally re-rendered the whole cohort
+            # website once an hour, for the rest of the term, off a pass that had skipped
+            # every repo.
+            did_assign = did_assign or handout_changed
 
     # One website sync at the end, only if something actually changed.
     if changed or did_assign:
@@ -420,7 +452,6 @@ def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) 
     # cohort, and an hourly GREEN tick is exactly how that goes unnoticed. `load` has
     # already logged what is wrong and where; this is what makes anyone look.
     # (Individually DROPPED entries stay advisory, as before - the rest of the plan runs.)
-    unreadable_plan = 1 if sched.unparseable else 0
     # Re-sorted, not just concatenated: the synthesised handouts carry their own datetimes
     # and would otherwise land after every scheduled release whatever their date.
     releases = sorted(
@@ -436,9 +467,14 @@ def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) 
     # Freeze passed deadlines FIRST: server-timed, and before anything grades against the
     # snapshot. Then autograde those same assignments, once each. Both are independent of
     # the release plan - a cohort can pin due dates without scheduling a single release.
-    errors = unreadable_plan
-    errors += _snapshot_passed_deadlines(course_org, cohort_org, sched, now, dry_run)
-    errors += _autograde_passed_deadlines(course_org, cohort_org, sched, now, dry_run)
+    errors = int(sched.unparseable)
+    snapshot_errors, frozen = _snapshot_passed_deadlines(
+        course_org, cohort_org, sched, now, dry_run
+    )
+    errors += snapshot_errors
+    errors += _autograde_passed_deadlines(
+        course_org, cohort_org, sched, now, dry_run, frozen
+    )
     # Look AHEAD as well as at what is due: a deploy whose source was never staged fails
     # at its moment, which is far too late to write the thing. This is the only unattended
     # surface that notices - the commit-time validator only ever runs when someone edits
@@ -451,7 +487,7 @@ def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) 
         for release in due:
             for line in describe(release, now):
                 log(f"    DRY-RUN  [{release.label}] {line}")
-        return unreadable_plan
+        return int(sched.unparseable)
 
     if not releases:
         log(

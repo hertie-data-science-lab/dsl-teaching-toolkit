@@ -36,11 +36,12 @@ def test_a_gradebook_or_submission_repo_is_recognised_by_name_too():
         {"name": "grades-ada-l", "topics": []},
         {"name": "materials", "topics": []},
     ]
-    assert discovery.has_infra_topic({"name": "grades-ada-l", "topics": []})
-    assert discovery.is_student_repo(repos[1], repos)
-    assert discovery.is_student_repo(repos[2], repos)
-    assert not discovery.is_student_repo(repos[3], repos)
-    assert not discovery.is_student_repo(repos[0], repos)  # the template itself
+    derived = discovery.classify_repos(repos)
+    assert discovery._has_infra_topic({"name": "grades-ada-l", "topics": []})
+    assert discovery.is_student_repo(repos[1], derived)
+    assert discovery.is_student_repo(repos[2], derived)
+    assert not discovery.is_student_repo(repos[3], derived)
+    assert not discovery.is_student_repo(repos[0], derived)  # the template itself
 
 
 def test_is_infra_repo_excludes_by_name_and_by_topic():
@@ -81,8 +82,7 @@ def test_handed_out_assignments_are_the_topic_stamped_cohort_templates(monkeypat
     # The site withholds an assignment's brief until this says the cohort has it, so it
     # must name the frozen cohort template (assign.py stage 1) and nothing else - not the
     # per-student submission repos beside it, not the gradebooks.
-    monkeypatch.setattr(discovery, "list_org_repos", lambda org: INFRA_AND_CONTENT)
-    assert discovery.discover_handed_out_assignments("Cohort-f2026") == frozenset(
+    assert discovery.handed_out_assignments(INFRA_AND_CONTENT) == frozenset(
         {"assignment-1-f2026-template"}
     )
 
@@ -93,7 +93,7 @@ def test_both_discover_functions_apply_the_same_infra_exclusions(monkeypatch):
     # repo secret), and gradebooks/submissions must never appear as release targets.
     monkeypatch.setattr(discovery, "list_org_repos", lambda org: INFRA_AND_CONTENT)
     expected = ["course-materials-f2026", "labs"]
-    assert discovery.discover_cohort_repos(["Cohort-f2026"]) == expected
+    assert discovery.cohort_content_repos(INFRA_AND_CONTENT) == expected
     assert discovery.discover_content_repos("My-Course-E1234") == expected
 
 
@@ -167,25 +167,20 @@ def test_discover_release_sources_detects_root_and_nested_shapes(monkeypatch):
     }
 
 
-def test_sections_and_sessions_ignore_root_level_and_over_deep_folders(monkeypatch):
+def test_sections_and_sessions_ignore_root_level_and_over_deep_folders(tmp_path):
     # Only `section/NN_.../` makes a section: a bare `NN_.../` at the root has no
     # section name, and anything deeper is a session's own contents.
-    monkeypatch.setattr(
-        discovery,
-        "_repo_tree_dirs",
-        lambda org, repo: [
-            # Root-level session folder: excluded (no parent section). 07, not 01, so it
-            # can't hide behind lectures/01_intro's session number - if the root-level
-            # exclusion ever regressed, a spurious "7" would appear in the assert below.
-            "07_loose",
-            "lectures",
-            "lectures/01_intro",
-            "lectures/01_intro/data",  # too deep
-            "notes/appendix",  # no ordinal prefix
-            "labs/2_wrangling",
-        ],
-    )
-    assert discovery.discover_sessions("org", "r") == ["1", "2"]
+    for rel in (
+        # Root-level session folder: excluded (no parent section). 07, not 01, so it
+        # can't hide behind lectures/01_intro's session number - if the root-level
+        # exclusion ever regressed, a spurious "7" would appear in the assert below.
+        "07_loose",
+        "lectures/01_intro/data",  # the `data` level is too deep to be a session
+        "notes/appendix",  # no ordinal prefix
+        "labs/2_wrangling",
+    ):
+        (tmp_path / rel).mkdir(parents=True, exist_ok=True)
+    assert course.discover_local_sessions(tmp_path) == ["1", "2"]
 
 
 def test_api_and_filesystem_transports_share_one_session_folder_rule(tmp_path):
@@ -212,7 +207,7 @@ def test_api_and_filesystem_transports_share_one_session_folder_rule(tmp_path):
 def test_repo_tree_dirs_reads_an_absent_or_empty_repo_as_no_directories(monkeypatch):
     # A 404 (no such repo/tree) and a 409 (a repo with no commits yet) both genuinely mean
     # "no session folders" - a brand-new cohort repo is not a failure.
-    monkeypatch.setattr(discovery, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(discovery, "default_branch", lambda org, repo, **k: "main")
     for out in ("gh: Not Found (HTTP 404)", "gh: Conflict (HTTP 409)"):
         monkeypatch.setattr(gh_contents, "gh", lambda *a, out=out, **k: (1, out))
         assert discovery._repo_tree_dirs("Cohort-f2026", "materials") == ()
@@ -224,11 +219,11 @@ def test_repo_tree_dirs_raises_rather_than_reporting_a_repo_with_no_sessions(
     # The site-wipe class: these rows ARE the cohort site's schedule, and the sync clears
     # and rewrites the collections from them - so a rate-limited tree fetch swallowed as
     # `[]` republished the site with every session row deleted, silently and green.
-    monkeypatch.setattr(discovery, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(discovery, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(
         gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 502 Bad Gateway")
     )
-    with pytest.raises(RuntimeError, match="could not read the file tree"):
+    with pytest.raises(RuntimeError, match="could not read the tree"):
         discovery.discover_release_sources("Cohort-f2026", ["materials"])
 
 
@@ -243,8 +238,8 @@ def test_both_transports_share_one_tree_fetch(monkeypatch):
         calls.append(args)
         return (0, "false\nlectures\nlectures/01_intro\n")
 
-    monkeypatch.setattr(discovery, "get_default_branch", lambda org, repo: "main")
-    monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(discovery, "default_branch", lambda org, repo, **k: "main")
+    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", fake_gh)
     discovery._repo_tree_dirs("Cohort-f2026", "materials")
     site._repo_tree("Cohort-f2026", "materials")
@@ -337,6 +332,23 @@ def test_org_tier_reads_the_dotgithub_topic_then_the_cohort_only_repos_then_give
     assert discovery.org_tier([gh(), {"name": "classroom-config"}]) == "cohort"
     assert discovery.org_tier([gh(), {"name": "assignment-1-ada"}]) is None
     assert discovery.org_tier([{"name": "materials"}]) is None  # no .github at all
+
+
+def test_a_nested_template_classifies_on_the_longest_match():
+    # `assignment-4` and `assignment-4-project` both prefix the repo; only the longer one
+    # leaves a suffix that is a handle. The templates themselves derive from nothing.
+    repos = [
+        {"name": "assignment-4", "isTemplate": True},
+        {"name": "assignment-4-project", "isTemplate": True},
+        {"name": "assignment-4-project-ada-l"},
+        {"name": "materials"},
+    ]
+    assert discovery.classify_repos(repos) == {
+        "assignment-4": None,
+        "assignment-4-project": None,
+        "assignment-4-project-ada-l": "assignment-4-project",
+        "materials": None,
+    }
 
 
 def test_student_repo_names_by_topic_or_by_name():

@@ -111,6 +111,10 @@ def test_every_seeded_template_path_resolves():
     # files, welcome for the onboarding workflows it also re-pushes on every refresh.
     source = Path(bc.__file__).read_text() + Path(welcome.__file__).read_text()
     rels = set(re.findall(r"\btemplate\(\s*[\"']([^\"']+)[\"']\s*\)", source))
+    # ...plus the two tables that carry a template path instead of calling template()
+    # with a literal, and are therefore invisible to the scan above.
+    rels |= set(welcome.CLASSROOM_SCAFFOLDS.values())
+    rels |= {rel for _, rel in welcome.CLASSROOM_SYSTEM_FILES}
     assert len(rels) >= 12
     for rel in sorted(rels):
         assert (welcome.TEMPLATES / rel).is_file(), f"missing template: {rel}"
@@ -194,7 +198,7 @@ def test_inventory_skips_cohort_pointer_orgs(monkeypatch):
         },
         "Cohort-Org": {"course": "Course-Org", "org": "Cohort-Org"},
     }
-    monkeypatch.setattr(list_orgs, "_fetch_metadata", lambda org: metas[org])
+    monkeypatch.setattr(list_orgs, "org_meta", lambda org: metas[org])
     monkeypatch.setattr(list_orgs, "org_exists", lambda org: True)
     orgs = list_orgs.discover_course_orgs()
     assert [o["org"] for o in orgs] == ["Course-Org"]

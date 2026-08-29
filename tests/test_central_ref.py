@@ -8,6 +8,7 @@ resolved value reaches every file the toolkit writes into an org.
 
 from __future__ import annotations
 
+import pytest
 import yaml
 
 from dsl_course import (
@@ -67,22 +68,23 @@ def test_a_full_sha_pins_an_org_to_one_build(monkeypatch):
     assert discovery.central_ref_for("Course") == SHA
 
 
-def test_junk_falls_back_to_the_default_and_names_the_file(monkeypatch, capsys):
-    # Rendered into the checkout step of every workflow in the org, so a typo would take
-    # the whole Actions tab down at the first run, hours later, with nothing pointing at
-    # the cause. Falling back keeps the org running; the [err] line says where to fix it.
+def test_junk_is_refused_and_names_the_file(monkeypatch):
+    # It used to fall back to `release` with an [err] line, which is silent where it
+    # counts: the fallback rendered a full set of working workflows and the refresh
+    # reported success, so `stagign` ran `release` for as long as nobody read the log.
     _configs(monkeypatch, {"Course": {"central_ref": "stagign"}})
-    assert discovery.central_ref_for("Course") == CENTRAL_REF
-    err = capsys.readouterr().err
-    assert "stagign" in err
-    assert "Course/.github/dsl-course.yml" in err
+    with pytest.raises(central.MissingCentralRef) as exc:
+        discovery.central_ref_for("Course")
+    assert "stagign" in str(exc.value)
+    assert "Course/.github/dsl-course.yml" in str(exc.value)
 
 
-def test_an_abbreviated_sha_is_junk(monkeypatch, capsys):
-    # actions/checkout resolves short SHAs inconsistently, so only the full 40 count.
+def test_an_abbreviated_sha_is_junk(monkeypatch):
+    # A short SHA resolves inconsistently where the workflows use it, so only the full
+    # 40 count.
     _configs(monkeypatch, {"Course": {"central_ref": "0" * 7}})
-    assert discovery.central_ref_for("Course") == CENTRAL_REF
-    assert "not one of" in capsys.readouterr().err
+    with pytest.raises(central.MissingCentralRef, match="not one of"):
+        discovery.central_ref_for("Course")
 
 
 # ------------------------------------------- and that the resolved value reaches the org
@@ -157,6 +159,10 @@ def test_a_cohorts_schedule_validator_is_pinned_to_the_inherited_ref(monkeypatch
     raw = written[".github/workflows/validate-schedule.yml"].decode()
     assert CENTRAL_REF_PLACEHOLDER not in raw
     assert _central_checkout_refs(raw) == ["staging"]
+    # Its failure issue links the field reference too, and at the same ref.
+    assert f"{CENTRAL}/blob/staging/docs/07-schedule-releases.md" in raw.replace(
+        "%s", CENTRAL
+    )
 
 
 def test_the_faculty_landing_page_links_the_docs_at_the_orgs_ref():
@@ -186,12 +192,26 @@ def test_a_tier_branch_that_exists_is_checked_as_a_branch(monkeypatch):
     assert calls == [("api", f"repos/{CENTRAL}/branches/release", "--silent")]
 
 
-def test_a_pinned_sha_is_checked_as_a_commit(monkeypatch):
+def test_a_pinned_sha_is_checked_against_mains_history(monkeypatch):
     # `branches/<sha>` 404s for a perfectly good commit, so the endpoint has to follow
-    # what the ref IS - otherwise every SHA-pinned org reads as bricked.
-    calls = _api_calls(monkeypatch, (0, ""))
+    # what the ref IS - otherwise every SHA-pinned org reads as bricked. And it is
+    # compared with main rather than merely fetched: `commits/<sha>` answers for the whole
+    # FORK NETWORK, so it accepted a commit off somebody's fork - code main, and therefore
+    # CI and review, never saw - and pinned a live org to it.
+    calls = _api_calls(monkeypatch, (0, "behind"))
     assert central.central_ref_exists(SHA) is True
-    assert calls == [("api", f"repos/{CENTRAL}/commits/{SHA}", "--silent")]
+    assert calls == [
+        ("api", f"repos/{CENTRAL}/compare/main...{SHA}", "--jq", ".status")
+    ]
+
+
+def test_a_sha_that_is_not_on_mains_history_is_refused(monkeypatch):
+    # `ahead` is a commit main does not contain; `diverged` is a fork's. Neither may be
+    # pinned into an org's workflows.
+    for status in ("ahead", "diverged"):
+        central.central_ref_exists.cache_clear()
+        _api_calls(monkeypatch, (0, status))
+        assert central.central_ref_exists(SHA) is False
 
 
 def test_a_missing_ref_is_reported_as_missing(monkeypatch):
@@ -210,36 +230,42 @@ def test_a_ref_that_cannot_be_checked_is_assumed_present(monkeypatch, capsys):
 def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
     """`seed.refresh`'s exit code, and which of its renderers actually ran."""
     rendered: list[str] = []
+
+    def renders(name: str):
+        """A renderer double that pins the ref exactly as the real one does - through the
+        one chokepoint that refuses a ref the central repo does not have."""
+
+        def step(*args) -> int:
+            central.pin_central_ref("", args[-1])
+            rendered.append(name)
+            return 0
+
+        return step
+
     monkeypatch.setattr(seed, "central_ref_for", lambda org: "release")
-    monkeypatch.setattr(seed, "central_ref_exists", lambda ref: ref_exists)
-    monkeypatch.setattr(seed, "_live_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(
+        central,
+        "gh",
+        lambda *a, **k: (0, "") if ref_exists else (1, "gh: Not Found (HTTP 404)"),
+    )
+    monkeypatch.setattr(seed, "_live_cohorts", lambda org: (["Cohort-f2026"], 0))
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["materials-f2026"])
     monkeypatch.setattr(seed, "discover_assignments", lambda org: [])
-    monkeypatch.setattr(
-        seed,
-        "push_content_workflows",
-        lambda *a: rendered.append("content-workflows") or 0,
-    )
+    monkeypatch.setattr(seed, "push_content_workflows", renders("content-workflows"))
     monkeypatch.setattr(seed, "_refresh_stubs", lambda org, repo: 0)
     monkeypatch.setattr(
         seed.scaffold, "refresh_materials_system_files", lambda org, repo: 0
     )
     monkeypatch.setattr(seed, "_propagate_repo_secret", lambda org, repos: 0)
     monkeypatch.setattr(seed, "list_org_repos", lambda org: [])
+    monkeypatch.setattr(seed, "converge_org_settings", lambda org: 0)
     monkeypatch.setattr(seed, "_converge_org_metadata", lambda org, repos: 0)
-    monkeypatch.setattr(
-        seed,
-        "seed_github_workflows",
-        lambda org, ref: rendered.append("org-workflows") or 0,
-    )
+    monkeypatch.setattr(seed, "seed_github_workflows", renders("org-workflows"))
     monkeypatch.setattr(seed, "_write_heartbeat", lambda org: 0)
     monkeypatch.setattr(seed, "update_profile_readme", lambda org, **k: 0)
-    monkeypatch.setattr(seed, "repo_is_archived", lambda org, repo: False)
     monkeypatch.setattr(seed, "refresh_welcome_workflows", lambda org: 0)
     monkeypatch.setattr(
-        seed,
-        "refresh_classroom_system_files",
-        lambda org, ref: rendered.append("classroom-system-files") or 0,
+        seed, "refresh_classroom_system_files", renders("classroom-system-files")
     )
     monkeypatch.setattr(seed, "refresh_classroom_samples", lambda org: 0)
     monkeypatch.setattr(seed, "refresh_cohort_pointer", lambda org, course: 0)
@@ -268,3 +294,20 @@ def test_refresh_refuses_to_render_workflows_at_a_ref_that_does_not_exist(
     assert rendered == []
     err = capsys.readouterr().err
     assert "release" in err and "Course-Org" in err
+
+
+def test_a_mistyped_central_ref_reds_the_refresh_instead_of_running_release(
+    monkeypatch, capsys
+):
+    # seed.refresh reads the tier before it renders anything, so a refusal there
+    # re-renders nothing and leaves last night's workflows exactly where they are - and
+    # the CLI turns the cron red rather than converging the org onto a tier nobody chose.
+    monkeypatch.setattr(
+        discovery,
+        "load_yaml_config",
+        lambda org, repo, path: {"central_ref": "stagign"},
+    )
+    monkeypatch.setattr("sys.argv", ["seed", "refresh", "--course-org", "Course-Org"])
+
+    assert seed.main() == 1
+    assert "stagign" in capsys.readouterr().err

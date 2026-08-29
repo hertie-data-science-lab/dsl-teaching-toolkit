@@ -27,18 +27,17 @@ from __future__ import annotations
 import re
 
 from .central import CENTRAL
+from .course import COURSE_CONFIG
 from .discovery import (
     course_name_of,
     discover_cohorts,
-    is_student_repo,
     list_org_repos,
+    org_meta,
     org_tier,
+    student_repo_names,
 )
-from .gh_contents import get_file_content, load_yaml_config, put_files
+from .gh_contents import get_file_content, put_files
 from .log import log, log_err, log_ok
-
-# Per-org identity/people/schedule config, lives at the root of each org's `.github` repo.
-COURSE_CONFIG = "dsl-course.yml"
 
 
 def _repo_table(repos: list[dict]) -> str:
@@ -51,9 +50,8 @@ def _repo_table(repos: list[dict]) -> str:
     the thing this pipeline keeps out of public view. The site repo stays: it is public
     anyway, and faculty need the "do not touch" row.
     """
-    visible = [
-        r for r in repos if r["name"] != ".github" and not is_student_repo(r, repos)
-    ]
+    students = student_repo_names(repos)
+    visible = [r for r in repos if r["name"] != ".github" and r["name"] not in students]
     visible.sort(key=lambda r: (r["name"].lower() != "welcome", r["name"].lower()))
     rows = []
     for r in visible:
@@ -402,7 +400,7 @@ def update_profile_readme(
         # own, so fall back to the org name. A MALFORMED config raises here (with a clear,
         # logged message) rather than the bare `yaml.safe_load` traceback that used to
         # surface from mid-refresh - a non-mapping is likewise refused, not coerced to {}.
-        cfg = load_yaml_config(org, ".github", COURSE_CONFIG) or {}
+        cfg = org_meta(org)
         org_name = org_name or cfg.get("org_name") or org
         # A COHORT org's dsl-course.yml is only a pointer - it carries no course_name of
         # its own, so this used to fall all the way back to the org slug and title the

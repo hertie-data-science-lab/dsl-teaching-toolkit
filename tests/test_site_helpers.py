@@ -15,6 +15,7 @@ import pytest
 import yaml
 
 from dsl_course import gh_contents, public_site, repos, schedule_plan, site, site_repo
+from tests.conftest import repo_row
 
 
 def test_semester_label():
@@ -120,9 +121,9 @@ def test_people_yaml_passes_every_declared_display_field_through():
         assert access_only not in out
 
 
-def test_set_config_replaces_only_the_named_key():
+def test_replacing_a_config_scalar_touches_only_the_named_key():
     cfg = 'course_name: "old"\ncourse_code: "X"\n'
-    out = site_repo._set_config(cfg, "course_name", "Deep Learning")
+    out = site_repo._replace_config_scalar(cfg, "course_name", "Deep Learning")
     assert 'course_name: "Deep Learning"' in out
     assert 'course_code: "X"' in out  # untouched
 
@@ -261,7 +262,7 @@ def _tree_gh(*args, **kwargs):
 def test_session_files_lists_nested_files_by_path(monkeypatch):
     # release.py copytrees a session folder wholesale, so nested files ARE released -
     # a non-recursive listing dropped them from the site entirely.
-    monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", _tree_gh)
     pairs = site._session_files("Cohort-f2026", "materials", "lectures", "03_week-3")
     assert [n for n, _ in pairs] == [
@@ -278,7 +279,7 @@ def test_session_files_lists_nested_files_by_path(monkeypatch):
 
 
 def test_session_files_root_shape_and_other_sessions_excluded(monkeypatch):
-    monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", _tree_gh)
     # subpath="" - the release landed at the repo root (default destination)
     assert site._session_files("Cohort-f2026", "lectures", "", "01_intro") == [
@@ -298,7 +299,7 @@ def test_repo_tree_is_fetched_once_per_repo(monkeypatch):
         calls.append(args)
         return (0, _TREE)
 
-    monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", counting_gh)
     for folder in ("03_week-3", "04_week-4", "03_week-30"):
         assert site._session_files("Cohort-f2026", "materials", "lectures", folder)
@@ -307,7 +308,7 @@ def test_repo_tree_is_fetched_once_per_repo(monkeypatch):
 
 def test_session_files_absent_repo_is_empty(monkeypatch):
     # A genuine 404 (repo/tree absent) is empty - gh's real wording, case included.
-    monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(
         gh_contents, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)")
     )
@@ -317,11 +318,11 @@ def test_session_files_absent_repo_is_empty(monkeypatch):
 def test_session_files_real_failure_raises(monkeypatch):
     # A non-404 failure must NOT be read as "no files" (which republishes the site with
     # every material link stripped) - it raises instead.
-    monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(
         gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 500 Server Error")
     )
-    with pytest.raises(RuntimeError, match="could not read the file tree"):
+    with pytest.raises(RuntimeError, match="could not read the tree"):
         site._session_files("Cohort-f2026", "materials", "lectures", "03_x")
 
 
@@ -902,7 +903,7 @@ def test_the_syllabus_choice_is_stable_when_a_cohort_has_two(monkeypatch):
 
 
 def _repos(*names):
-    return [{"name": n} for n in names]
+    return [repo_row(n) for n in names]
 
 
 def test_a_renamed_org_fails_the_sync_instead_of_no_opping(monkeypatch):

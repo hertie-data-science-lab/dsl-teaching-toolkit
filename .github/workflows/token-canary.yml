@@ -1,0 +1,36 @@
+name: Bot Token Canary
+
+# DSL_BOT_TOKEN is the one credential every button in every org runs under, and rotating it
+# is a per-org job (docs-admin-arch/central-admin.md#bot-lifecycle---setup--rotation). Its
+# expiry would otherwise be discovered by every course at once, mid-term.
+
+on:
+  schedule:
+    - cron: "0 7 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  expiry:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Warn if the bot token expires within 14 days
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+        run: |
+          set -eo pipefail
+          # tr: HTTP headers end CRLF, and a trailing \r would make `date` reject the value.
+          headers=$(curl -sI -H "Authorization: token $GH_TOKEN" https://api.github.com/user | tr -d '\r')
+          expiry=$(grep -i '^github-authentication-token-expiration:' <<<"$headers" | cut -d' ' -f2-)
+          if [ -z "$expiry" ]; then
+            # No header means either a token that never expires or one GitHub has stopped
+            # accepting - only the status line tells them apart.
+            grep -q '^HTTP/[0-9.]* 200' <<<"$headers" || { echo "::error::DSL_BOT_TOKEN was rejected by the API - it has expired or been revoked."; exit 1; }
+            echo "DSL_BOT_TOKEN does not expire."
+            exit 0
+          fi
+          days=$(( ( $(date -u -d "$expiry" +%s) - $(date -u +%s) ) / 86400 ))
+          echo "DSL_BOT_TOKEN expires $expiry ($days days)."
+          [ "$days" -ge 14 ] || { echo "::error::DSL_BOT_TOKEN expires in $days day(s) - rotate it (docs-admin-arch/central-admin.md#bot-lifecycle---setup--rotation)."; exit 1; }

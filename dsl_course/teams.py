@@ -18,11 +18,10 @@ authoritative - it can't drift out of sync the way a Classroom-managed team does
 
 from __future__ import annotations
 
-import csv
-import io
+from functools import cache
 
 from .course import CONFIG_REPO
-from .gh_contents import get_file_content, require_csv_header, strip_bom
+from .gh_contents import get_file_content, read_csv
 
 TEAMS_PATH = "teams.csv"
 FIELDS = ("assignment", "team", "github_handle")
@@ -31,22 +30,24 @@ FIELDS = ("assignment", "team", "github_handle")
 def parse(text: str) -> dict[str, dict[str, list[str]]]:
     """Parse teams.csv into {assignment: {team: [handles]}}.
 
-    Blank rows are skipped; a handle listed twice in a team is de-duplicated; member
-    order follows first appearance so provisioning is deterministic.
+    Blank rows are skipped; a handle listed twice in a team is de-duplicated, CASEFOLDED
+    (GitHub logins are case-insensitive, so `ALICE` and `alice` are one account and were
+    two members here - two collaborator adds, two grade rows); member order follows first
+    appearance so provisioning is deterministic.
 
-    Team names are CASEFOLDED. The GitHub team they materialise into is lower-cased
-    (`sync_teams.team_slug`) and so is the repo named after them, so `Wizards` and
-    `wizards` were always one team downstream while reading here as two - two entries in
-    the parsed map, two provisioning units, one repo. The Join-team form already writes
-    lower-case rows; a legacy hand-edited row may be mixed-case, and folding here is what
-    makes the two agree."""
+    Assignment keys and team names are both CASEFOLDED. The GitHub team they materialise
+    into is lower-cased (`sync_teams.team_slug`) and so is the repo named after them, so
+    `Wizards` and `wizards` were always one team downstream while reading here as two -
+    two entries in the parsed map, two provisioning units, one repo. The Join-team form
+    already writes both lower-case; a schedule key declared `Assignment-4` (or a legacy
+    hand-edited row) is what the lookups arrive with, and folding here is what makes the
+    two agree - keyed raw, such an assignment found no teams at all and every group
+    handout, snapshot and grading pass for it silently had nothing to do."""
     out: dict[str, dict[str, list[str]]] = {}
-    reader = csv.DictReader(io.StringIO(strip_bom(text)))
-    require_csv_header(reader.fieldnames, FIELDS, "teams.csv")
-    for row in reader:
-        assignment = (row.get("assignment") or "").strip()
+    for row in read_csv(text, FIELDS, TEAMS_PATH):
+        assignment = (row.get("assignment") or "").strip().casefold()
         team = (row.get("team") or "").strip().casefold()
-        handle = (row.get("github_handle") or "").strip()
+        handle = (row.get("github_handle") or "").strip().casefold()
         if not (assignment and team and handle):
             continue
         members = out.setdefault(assignment, {}).setdefault(team, [])
@@ -55,18 +56,32 @@ def parse(text: str) -> dict[str, dict[str, list[str]]]:
     return out
 
 
+@cache
+def _teams_text(cohort_org: str) -> str | None:
+    """teams.csv's text, read ONCE per cohort per process.
+
+    A single run asks for it repeatedly - the handout, the collection and the off-boarding
+    revoke each want the same file - and only the welcome workflow writes it, in a process
+    of its own. The TEXT is memoised rather than `load`'s map, so each caller still parses
+    its own copy and cannot mutate another's. Cleared between tests (tests/conftest.py)."""
+    return get_file_content(cohort_org, CONFIG_REPO, TEAMS_PATH)
+
+
 def load(cohort_org: str) -> dict[str, dict[str, list[str]]]:
     """Fetch + parse teams.csv from the cohort's PRIVATE classroom-config repo.
 
     A pure loader: a missing CSV returns {} silently. Whether that is benign (a
     cohort with no group assignments yet) or an error (group provisioning/grading
     asked for) is the caller's call - each contextualises it for itself."""
-    content = get_file_content(cohort_org, CONFIG_REPO, TEAMS_PATH)
+    content = _teams_text(cohort_org)
     return parse(content) if content is not None else {}
 
 
 def teams_for(
     per: dict[str, dict[str, list[str]]], assignment: str
 ) -> dict[str, list[str]]:
-    """The {team: [handles]} map for one assignment (empty if none)."""
-    return per.get(assignment, {})
+    """The {team: [handles]} map for one assignment (empty if none).
+
+    Casefolded on the way in, to match `parse`: the caller's key comes from schedule.yml,
+    which faculty write by hand, while the form writes the lower-cased spelling."""
+    return per.get(assignment.strip().casefold(), {})

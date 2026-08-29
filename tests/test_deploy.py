@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import access, course, deploy, repos
+from dsl_course import access, course, deploy, ghcli, repos
 
 
 def test_a_single_path_with_no_comma_still_works():
@@ -299,8 +299,8 @@ def _converge(monkeypatch, listing):
     monkeypatch.setattr(repos, "gh", fake_gh)
     monkeypatch.setattr(repos, "log", lambda *a, **k: None)
     monkeypatch.setattr(repos, "log_ok", lambda *a, **k: None)
-    changed = repos.converge_descriptions("Org", listing)
-    return [a for a in calls if "--method" in a and "PATCH" in a], changed
+    swept = repos.converge_descriptions("Org", listing)
+    return [a for a in calls if "--method" in a and "PATCH" in a], swept.changed
 
 
 def test_a_superseded_description_is_updated_and_others_are_left_alone(monkeypatch):
@@ -368,9 +368,9 @@ def test_the_dotgithub_description_says_the_opposite_thing_per_tier():
     repos.gh = fake
     try:
         cohort = [dict(r) for r in listing]
-        repos.converge_descriptions("Cohort-f2026", cohort, cohort=True)
+        repos.converge_descriptions("Cohort-f2026", cohort, "cohort")
         course = [dict(r) for r in listing]
-        repos.converge_descriptions("Course", course, cohort=False)
+        repos.converge_descriptions("Course", course, "course")
     finally:
         repos.gh = original
     assert cohort[0]["description"] == "[do not touch]: Org profile and configuration"
@@ -547,11 +547,11 @@ def _stub_deploy_many(monkeypatch, build_source, real_grants=False):
             snapshots[root.name] = snap
         return 0, ""
 
-    monkeypatch.setattr(deploy, "gh", fake_gh)
+    monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     if not real_grants:
         monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-        monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+        monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "git", fake_git)
     return snapshots
 

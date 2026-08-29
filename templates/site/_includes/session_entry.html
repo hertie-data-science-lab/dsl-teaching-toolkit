@@ -30,7 +30,7 @@ carries no quoted spaces.
 {%- capture links -%}
 {%- for link in entry.links -%}
 {%- if link.name contains label -%}
-<li class="raw_li"><a href="{% if link.url contains '://' %}{{ link.url }}{% else %}{{ link.url | prepend: site.baseurl }}{% endif %}">{{ link.name | remove_first: label }}</a></li>
+<li><a href="{% if link.url contains '://' %}{{ link.url }}{% else %}{{ link.url | prepend: site.baseurl }}{% endif %}">{{ link.name | remove_first: label }}</a></li>
 {%- endif -%}
 {%- endfor -%}
 {%- endcapture -%}
