@@ -180,6 +180,30 @@ def test_publish_site_inputs():
     assert inp["include_lectures"]["type"] == "boolean"
 
 
+def test_publish_site_defaults_to_the_newest_materials_repo():
+    # Publishing REPLACES what the site serves. The dropdown's default used to be the
+    # alphabetically last option of the newest year, so a faculty member clicking Run with
+    # the defaults republished from a code repo and wiped a live site's materials.
+    inp = workflow_inputs(
+        workflows_render.render_publish_site(
+            [
+                "course-materials-f2025",
+                "course-materials-f2026",
+                "course-materials-s2026",
+                "lecture-code-f2026",
+            ]
+        )
+    )
+    assert inp["source_repo"]["default"] == "course-materials-f2026"
+
+
+def test_publish_site_without_a_materials_repo_defaults_to_the_first_option():
+    inp = workflow_inputs(
+        workflows_render.render_publish_site(["lecture-code", "slides-f2026"])
+    )
+    assert inp["source_repo"]["default"] == "lecture-code"
+
+
 def test_publish_site_has_publish_job_running_public_sync():
     rendered = workflows_render.render_publish_site(["course-materials-f2026"])
     assert "publish" in workflow_jobs(rendered)
