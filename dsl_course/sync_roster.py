@@ -26,8 +26,8 @@ from __future__ import annotations
 import argparse
 import sys
 
-from . import roster
-from .course import AUDITORS_TEAM, STUDENTS_TEAM, submission_suffix
+from . import roster, teams
+from .course import AUDITORS_TEAM, STUDENTS_TEAM, submission_repo, submission_suffix
 from .discovery import classify_repos, list_org_repos
 from .gh_teams import reconcile_team_members, set_org_membership
 from .log import log_err, log_ok, log_person, log_step
@@ -89,10 +89,22 @@ def revoke_offboarded_access(
     name, faculty and the bot hold their access through teams, and a repo name is not a
     reason to take anyone's access away. `on_roster` is casefolded, because GitHub logins
     are case-insensitive and a case-only difference is the same account."""
+    # teams.csv already says which repos are the GROUP ones, so asking GitHub whether a
+    # team is a collaborator on its own repo is a paginated read per team repo per night,
+    # for an answer that is always "no". Matched on the whole repo NAME rather than the
+    # bare suffix: a team name and a student's handle live in the same namespace, and only
+    # `<assignment>-<team>` says which of the two this repo is. An assignment renamed by
+    # `cohort_dest_repo` does not match and simply keeps its probe.
+    declared_team_repos = {
+        submission_repo(key, team).casefold()
+        for key, per_team in teams.load(cohort_org).items()
+        for team in per_team
+    }
     stale = [
         (repo, suffix)
         for repo, suffix in submission_repo_suffixes(list_org_repos(cohort_org))
         if suffix.casefold() not in on_roster
+        and repo.casefold() not in declared_team_repos
     ]
     errors = 0
     revoked = 0

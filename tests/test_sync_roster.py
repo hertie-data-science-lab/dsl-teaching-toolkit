@@ -6,9 +6,19 @@ would silently lose them. The gh calls around it are wiring, not tested.
 
 from __future__ import annotations
 
+import pytest
+
 from dsl_course import roster, sync_roster
 
 HEADER = "hertie_email,name,github_handle,github_id,enrol_code,role"
+
+
+@pytest.fixture(autouse=True)
+def _no_teams_csv(monkeypatch):
+    """The revoke reads teams.csv to know which submission repos belong to a TEAM. A
+    cohort with no group assignments is the uninteresting answer here; the tests about
+    that read set their own."""
+    monkeypatch.setattr(sync_roster.teams, "load", lambda org: {})
 
 
 def _roster(*rows: str) -> list[roster.Student]:
@@ -151,7 +161,7 @@ def test_a_nested_template_name_splits_on_the_longest_match():
     ]
 
 
-def _offboard_stubs(monkeypatch, *, collaborators):
+def _offboard_stubs(monkeypatch, *, collaborators, declared=None, probed=None):
     repos = _repos(
         "assignment-1-ada-l",
         "assignment-1-zoe-z",
@@ -159,11 +169,14 @@ def _offboard_stubs(monkeypatch, *, collaborators):
         templates=("assignment-1", "assignment-4-project"),
     )
     monkeypatch.setattr(sync_roster, "list_org_repos", lambda org: repos)
-    monkeypatch.setattr(
-        sync_roster,
-        "is_collaborator",
-        lambda org, repo, login: login in collaborators,
-    )
+    monkeypatch.setattr(sync_roster.teams, "load", lambda org: declared or {})
+
+    def collaborator(org, repo, login):
+        if probed is not None:
+            probed.append(repo)
+        return login in collaborators
+
+    monkeypatch.setattr(sync_roster, "is_collaborator", collaborator)
     removed: list[tuple[str, str]] = []
     monkeypatch.setattr(
         sync_roster,
@@ -189,6 +202,38 @@ def test_a_group_repos_team_suffix_is_never_revoked(monkeypatch):
     removed = _offboard_stubs(monkeypatch, collaborators={"ada-l"})
     assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l"}) == 0
     assert removed == []
+
+
+def test_a_repo_teams_csv_declares_as_a_teams_is_not_even_probed(monkeypatch):
+    # teams.csv already says `assignment-4-project-team-x` belongs to a team, so asking
+    # GitHub whether "team-x" collaborates on it is a paginated read per team repo per
+    # night for an answer that is always "no".
+    probed: list[str] = []
+    removed = _offboard_stubs(
+        monkeypatch,
+        collaborators={"ada-l", "zoe-z"},
+        declared={"assignment-4-project": {"team-x": ["ada-l"]}},
+        probed=probed,
+    )
+    assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l"}) == 0
+    assert removed == [("assignment-1-zoe-z", "zoe-z")]
+    assert probed == ["assignment-1-zoe-z"], "the team repo was probed anyway"
+
+
+def test_a_team_name_that_matches_another_assignment_still_probes(monkeypatch):
+    # Matched on the whole repo NAME, not the bare suffix: team names and student handles
+    # share a namespace, so a team called `zoe-z` under one assignment must not stop an
+    # off-boarded @zoe-z losing her INDIVIDUAL repo for another.
+    probed: list[str] = []
+    removed = _offboard_stubs(
+        monkeypatch,
+        collaborators={"ada-l", "zoe-z"},
+        declared={"assignment-4-project": {"zoe-z": ["ada-l"]}},
+        probed=probed,
+    )
+    assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l"}) == 0
+    assert removed == [("assignment-1-zoe-z", "zoe-z")]
+    assert "assignment-1-zoe-z" in probed
 
 
 def test_a_case_only_difference_is_the_same_account(monkeypatch):
