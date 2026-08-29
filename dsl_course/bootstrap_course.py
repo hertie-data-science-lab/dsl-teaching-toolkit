@@ -20,7 +20,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import re
 import sys
 
 from . import scaffold, seed, site, sync_faculty
@@ -33,6 +32,7 @@ from .course import (
     COURSE_HUB_TOPIC,
     INSTRUCTORS_TEAM,
     STUDENTS_TEAM,
+    term_tag,
 )
 from .discovery import COHORTS_PATH, central_ref_for, register_cohort
 from .gh_contents import put_file, put_files, seed_if_absent
@@ -102,12 +102,13 @@ def _tag_and_year(org: str) -> tuple[str, int]:
     """This cohort's year tag (fYYYY/sYYYY) and year, derived from the org-name suffix.
 
     Renders the seeded scaffolds' examples (schedule.yml repo names/dates, people.yml
-    dates) copy-paste-correct for THIS cohort. A name with no tag suffix falls back to
-    f2026-shaped examples - purely cosmetic, everything rendered from this is commented."""
-    m = re.search(r"[-_]([fs])(\d{4})$", org, re.IGNORECASE)
-    if not m:
-        return "f2026", 2026
-    return f"{m.group(1).lower()}{m.group(2)}", int(m.group(2))
+    dates) copy-paste-correct for THIS cohort. A name with no tag falls back to
+    f2026-shaped examples - purely cosmetic, everything rendered from this is commented.
+
+    Through `course.term_tag`, the toolkit's one spelling of that rule: three copies of
+    this regex once disagreed about which names carried a tag."""
+    tag = term_tag(org)
+    return (tag, int(tag[1:])) if tag else ("f2026", 2026)
 
 
 def set_org_secret(org: str, secret_name: str, secret_value: str) -> bool:
@@ -461,10 +462,9 @@ def create_profile_repo(
     if not set_repo_topics(org, ".github", _profile_topics(is_cohort, course_code)):
         failures += 1
 
-    if failures:
-        return failures
-    log_ok(".github profile repo initialised")
-    return 0
+    if not failures:
+        log_ok(".github profile repo initialised")
+    return failures
 
 
 def set_org_settings(org: str) -> int:
@@ -815,8 +815,14 @@ def _outcome_lines(steps: list[tuple[int, str]]) -> str:
     It used to be a fixed block asserting every line, printed whatever happened - so a run
     that failed to enforce 2FA, or never seeded dsl-course.yml, still handed the operator
     "DONE (automated): ... 2FA enforcement enabled". The failure count at the very bottom
-    was the only hint, and it named no step."""
-    return "\n".join(("- " if not bad else "- [FAILED] ") + text for bad, text in steps)
+    was the only hint, and it named no step.
+
+    A step with an empty summary (the cohort pointer, the registry write, the faculty
+    sync, the README) still counts towards the exit code; it just has nothing to say
+    here."""
+    return "\n".join(
+        ("- " if not bad else "- [FAILED] ") + text for bad, text in steps if text
+    )
 
 
 def _run(args: argparse.Namespace) -> int:
@@ -834,10 +840,13 @@ def _run(args: argparse.Namespace) -> int:
         if args.central_ref
         else central_ref_for(args.course or args.org)
     )
-    # Sub-steps that write machinery (workflows, welcome/config seeds, the cohort
-    # registration, the faculty sync) each report a failure count; a half-configured org
-    # must exit non-zero, so they are threaded here rather than logged and dropped.
-    failures = 0
+    # Every sub-step that writes machinery reports a failure count, and a half-configured
+    # org must exit non-zero - so each is recorded here as `(failures, summary line)`.
+    # ONE list: the closing "WHAT THIS RUN DID" block and the exit code are read off the
+    # same numbers, rather than six parallel counters kept in step with a running total by
+    # hand. An empty summary is a step with nothing to say in that block (see
+    # `_outcome_lines`); the failures still count.
+    steps: list[tuple[int, str]] = []
 
     log(f"Bootstrapping org: {args.org}")
     log(f"  Org name: {org_name}")
@@ -848,12 +857,23 @@ def _run(args: argparse.Namespace) -> int:
         return 1
 
     # 1. Org settings
-    settings_failures = set_org_settings(args.org)
-    failures += settings_failures
+    steps.append(
+        (
+            set_org_settings(args.org),
+            "Org settings: 2FA enforced, base permission none, no member repo creation",
+        )
+    )
 
     # 2. Default teams
-    team_failures = create_default_teams(args.org)
-    failures += team_failures
+    steps.append(
+        (
+            create_default_teams(args.org),
+            (
+                "Faculty teams: instructors, course-admin (students + auditors "
+                "are created per cohort)"
+            ),
+        )
+    )
 
     # 3. Profile repo (course org only - identity + faculty roster; a cohort org
     # gets no dsl-course.yml, its config all lives in classroom-config). --admins is
@@ -872,14 +892,13 @@ def _run(args: argparse.Namespace) -> int:
         # every new org against a default it should simply follow.
         central_ref=central_ref if args.central_ref else None,
     )
-    failures += profile_failures
+    steps.append((profile_failures, ".github profile repo with README"))
 
     # 3b. Course vs cohort wiring.
     workflow_failures = 0
     if args.cohort:
         # Cohort: student-facing welcome + roster + tightened perms.
         workflow_failures = setup_cohort_extras(args.org, central_ref)
-        failures += workflow_failures
         if args.course:
             # Pointer back to the course org, in this cohort's .github/dsl-course.yml -
             # the classroom-config dispatchers read its `course:` line to know where to
@@ -900,7 +919,7 @@ def _run(args: argparse.Namespace) -> int:
                 _cohort_metadata(args.org, args.course).encode(),
                 "ci: seed cohort -> course pointer (dispatchers read this)",
             ):
-                failures += 1
+                steps.append((1, ""))
                 log_err(
                     f"could not seed the cohort -> course pointer in {args.org}/.github - "
                     f"the classroom-config dispatchers cannot resolve {args.course}"
@@ -909,7 +928,7 @@ def _run(args: argparse.Namespace) -> int:
             # invisible to discover_cohorts is invisible to every nightly sync, so a claimed
             # -but-unregistered cohort must red the bootstrap rather than proceed silently.
             if not register_cohort(args.course, args.org):
-                failures += 1
+                steps.append((1, ""))
                 log_err(
                     f"could not register {args.org} in {args.course}'s cohort registry - "
                     f"it will be missing from the faculty dropdowns and every nightly sync"
@@ -918,7 +937,7 @@ def _run(args: argparse.Namespace) -> int:
             # from day one (instructors/course-admin), rather than waiting for the
             # next push/cron sync. Scoped to just this cohort (cohorts=[args.org]) so
             # bootstrapping one more cohort doesn't re-touch every already-registered one.
-            failures += sync_faculty.sync(args.course, cohorts=[args.org])
+            steps.append((sync_faculty.sync(args.course, cohorts=[args.org]), ""))
             # Populate + prune + wire the freshly-scaffolded site from the org structure.
             # This ONE sync is what replaces the website template's placeholders ("Fall
             # 2025", "Course Name (Code)") with this course's identity and the cohort's
@@ -948,16 +967,31 @@ def _run(args: argparse.Namespace) -> int:
     else:
         # Course: seed the org-level workflows (incl. the central Release actions) into .github.
         workflow_failures = seed_workflows(args.org, central_ref)
-        failures += workflow_failures
 
     # 3c. Workflow access: grant this course's own instructors/course-admin teams write/admin
     # on .github (without it only the org owner can run the workflows), then seed the named
     # admin(s) into course-admin. Access is per-course - central DSL faculty/admin are a
     # separate concern (who may bootstrap), not auto-added here.
-    access_failures = grant_button_access(args.org) + add_course_admins(
-        args.org, args.admins
+    steps.append(
+        (
+            workflow_failures,
+            (
+                "Workflows in .github: Release materials, Release assignment, "
+                "Sync membership,\n  Bootstrap cohort, Refresh actions"
+            ),
+        )
     )
-    failures += access_failures
+    steps.append(
+        (
+            grant_button_access(args.org) + add_course_admins(args.org, args.admins),
+            (
+                "Workflow access: instructors (write) + course-admin (admin) "
+                "granted on .github; any\n  --admins handles added to course-admin "
+                "(they accept the org invite once, then the\n  workflows appear in "
+                "their Actions tab) and declared in dsl-course.yml's SSOT"
+            ),
+        )
+    )
 
     # 4. Secret (set or validate)
     secret_failures = 0
@@ -996,12 +1030,18 @@ def _run(args: argparse.Namespace) -> int:
                 "Re-run with --set-secret <path>, or set it at "
                 f"https://github.com/{args.org}/settings/secrets/actions"
             )
-    failures += secret_failures
+    steps.append((secret_failures, "DSL_BOT_TOKEN secret validated (or set)"))
 
     # 5. Generate the org-overview README now that all repos exist (clickable index).
-    failures += update_profile_readme(
-        args.org, org_name, course_name, central_ref=central_ref
+    steps.append(
+        (
+            update_profile_readme(
+                args.org, org_name, course_name, central_ref=central_ref
+            ),
+            "",
+        )
     )
+    failures = sum(failed for failed, _ in steps)
 
     if admin_logins and not args.cohort:
         admins_step = (
@@ -1022,42 +1062,6 @@ def _run(args: argparse.Namespace) -> int:
             "declared per cohort instead, in that cohort's own classroom-config/people.yml "
             "(see step 4)."
         )
-    steps = _outcome_lines(
-        [
-            (
-                team_failures,
-                (
-                    "Faculty teams: instructors, course-admin (students + auditors "
-                    "are created per cohort)"
-                ),
-            ),
-            (
-                settings_failures,
-                (
-                    "Org settings: 2FA enforced, base permission none, no member repo "
-                    "creation"
-                ),
-            ),
-            (profile_failures, ".github profile repo with README"),
-            (
-                workflow_failures,
-                (
-                    "Workflows in .github: Release materials, Release assignment, "
-                    "Sync membership,\n  Bootstrap cohort, Refresh actions"
-                ),
-            ),
-            (secret_failures, "DSL_BOT_TOKEN secret validated (or set)"),
-            (
-                access_failures,
-                (
-                    "Workflow access: instructors (write) + course-admin (admin) "
-                    "granted on .github; any\n  --admins handles added to course-admin "
-                    "(they accept the org invite once, then the\n  workflows appear in "
-                    "their Actions tab) and declared in dsl-course.yml's SSOT"
-                ),
-            ),
-        ]
-    )
     headline = "complete" if failures == 0 else "INCOMPLETE"
     log(f"""
 ============================================================
@@ -1065,7 +1069,7 @@ Course org bootstrap {headline}: {args.org}
 
 WHAT THIS RUN DID:
 ============================================================
-{steps}
+{_outcome_lines(steps)}
 
 NEXT STEPS (manual):
 ============================================================
