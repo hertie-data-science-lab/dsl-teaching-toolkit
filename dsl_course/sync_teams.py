@@ -26,6 +26,7 @@ import argparse
 import sys
 
 from . import roster, teams
+from .course import INSTRUCTORS_TEAM, ROLE_TEAMS
 from .gh_teams import create_team, reconcile_team_members
 from .log import log_err, log_ok, log_step, log_verbose
 
@@ -44,11 +45,11 @@ def team_slug(assignment: str, team: str) -> str:
 # team that holds admin on every repo in the cohort. Reconciling that slug from teams.csv
 # would add the student to it and prune the real admins. The workflow refuses these at the
 # form; this is the backstop for a row that reached the CSV any other way.
-RESERVED_TEAM_SLUGS = frozenset({"course-admin", "instructors", "students", "auditors"})
+RESERVED_TEAM_SLUGS = ROLE_TEAMS
 
 
 def is_reserved_slug(slug: str) -> bool:
-    return slug in RESERVED_TEAM_SLUGS or slug.startswith("instructors-")
+    return slug in RESERVED_TEAM_SLUGS or slug.startswith(f"{INSTRUCTORS_TEAM}-")
 
 
 def desired_teams(per: dict[str, dict[str, list[str]]]) -> dict[str, set[str]]:

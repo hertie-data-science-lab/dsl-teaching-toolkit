@@ -40,7 +40,12 @@ import yaml
 from . import roster, schedule, site, sync_teams, teams
 from .access import grant_faculty_read_access, grant_team_repo_access
 from .collect import assignment_is_group
-from .course import CONFIG_REPO, SOLUTION_BRANCH, assignment_slug
+from .course import (
+    CONFIG_REPO,
+    SOLUTION_BRANCH,
+    assignment_slug,
+    submission_repo,
+)
 from .discovery import ASSIGNMENT_TEMPLATE_TOPIC
 from .gh_contents import put_file
 from .ghcli import GIT_ENV, gh, git
@@ -522,11 +527,14 @@ def provision_all(
                     f"arbitrary accounts into {cohort_org}). Re-run the CLI locally with "
                     f"DSL_VERBOSE=1 to see which."
                 )
-            units.append((f"{slug}-{team}", vetted, sync_teams.team_slug(key, team)))
+            units.append(
+                (submission_repo(slug, team), vetted, sync_teams.team_slug(key, team))
+            )
         what = f"{len(units)} team(s)"
     else:
         units = [
-            (f"{slug}-{s.github_handle}", [s.github_handle], None) for s in onboarded
+            (submission_repo(slug, s.github_handle), [s.github_handle], None)
+            for s in onboarded
         ]
         what = f"{len(units)} student(s)"
 

@@ -20,7 +20,7 @@ from functools import cache
 from pathlib import Path
 
 from . import scaffold, welcome
-from .course import active_today, pages_repo
+from .course import INSTRUCTORS_TEAM, active_today, pages_repo
 from .discovery import list_org_repos
 from .gh_contents import load_yaml_config
 from .gh_teams import _acting_login
@@ -614,7 +614,7 @@ def people_yaml(
     else:
         instructors = [
             {"name": n, "profile_pic": p, "webpage": w}
-            for n, p, w in _team_people(org, "instructors")
+            for n, p, w in _team_people(org, INSTRUCTORS_TEAM)
         ]
         tas = []
         note = "auto-generated from the org's instructors team"

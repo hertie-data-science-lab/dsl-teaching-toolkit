@@ -43,6 +43,32 @@ FACULTY_ONLY_HEADING = "delete this section before releasing the README"
 # The branch an assignment template keeps its solution and grading.yml on.
 SOLUTION_BRANCH = "solution"
 
+# The four ROLE teams every org's access is expressed in: the two faculty teams, created
+# in course and cohort orgs alike, and the two cohort-only student teams. Named here
+# because the grants (access), the reconciles (sync_faculty, sync_roster), the bootstrap
+# that creates them and the slugs the student-written Join-team form may never claim
+# (sync_teams) all address them by these exact strings.
+INSTRUCTORS_TEAM = "instructors"
+COURSE_ADMIN_TEAM = "course-admin"
+STUDENTS_TEAM = "students"
+AUDITORS_TEAM = "auditors"
+ROLE_TEAMS = frozenset(
+    {INSTRUCTORS_TEAM, COURSE_ADMIN_TEAM, STUDENTS_TEAM, AUDITORS_TEAM}
+)
+
+
+def submission_repo(slug: str, suffix: str) -> str:
+    """A submission repo's name: `<slug>-<handle>` individually, `<slug>-<team>` for a
+    group. One composition, so the provisioner, the grader and the "your repo is called"
+    line on the site cannot spell it differently."""
+    return f"{slug}-{suffix}"
+
+
+def submission_suffix(repo: str, template: str) -> str:
+    """The handle-or-team half of `submission_repo` - what is left once the template the
+    repo was generated from is taken off the front."""
+    return repo[len(template) + 1 :]
+
 
 def term_tag(name: str) -> str | None:
     """The fYYYY / sYYYY term tag in an org or repo name (`course-materials-F2026` ->

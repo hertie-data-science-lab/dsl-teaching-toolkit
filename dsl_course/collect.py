@@ -94,7 +94,13 @@ from pathlib import Path
 import yaml
 
 from . import grades, roster, schedule, sync_teams, teams
-from .course import CONFIG_REPO, SOLUTION_BRANCH, assignment_slug, resolve_is_group
+from .course import (
+    CONFIG_REPO,
+    SOLUTION_BRANCH,
+    assignment_slug,
+    resolve_is_group,
+    submission_repo,
+)
 from .gh_contents import get_file_content, put_file
 from .ghcli import GIT_ENV, gh, git, is_missing_resource
 from .log import log, log_err, log_ok, log_skip, log_step
@@ -358,14 +364,14 @@ def submission_targets(
                     f"  ! {len(rejected)} handle(s) in teams.csv for `{key}` are not "
                     f"enrolled, onboarded roster handles - they get no grade row"
                 )
-            out.append((f"{slug}-{team}", team, vetted))
+            out.append((submission_repo(slug, team), team, vetted))
         return out
     # Enrolled participants only, matching assign/grades: an auditor deliberately has no
     # submission repo, so listing one makes it an unclonable phantom target (noise, and a
     # spurious "could not be read"). `roster.enrolled` drops auditors; `onboarded` drops
     # the not-yet-joined.
     targets = [
-        (f"{slug}-{s.github_handle}", s.github_handle, [s.github_handle])
+        (submission_repo(slug, s.github_handle), s.github_handle, [s.github_handle])
         for s in roster.enrolled(roster.load(cohort_org) or [])
         if s.onboarded
     ]

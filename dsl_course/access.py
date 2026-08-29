@@ -6,7 +6,13 @@ from __future__ import annotations
 
 import json
 
-from .course import GRADEBOOK_PREFIX
+from .course import (
+    AUDITORS_TEAM,
+    COURSE_ADMIN_TEAM,
+    GRADEBOOK_PREFIX,
+    INSTRUCTORS_TEAM,
+    STUDENTS_TEAM,
+)
 from .gh_teams import create_team
 from .ghcli import gh, is_missing_resource
 from .log import log, log_err, log_ok
@@ -43,7 +49,7 @@ def grant_team_repo_access(
 # releases day-to-day (write), course-admin manage (admin). Applied to `.github` at bootstrap
 # and to every scaffolded materials/assignment repo, so faculty & instructors can push content without an
 # owner hand-granting each new repo.
-COURSE_TEAM_ACCESS = {"instructors": "push", "course-admin": "admin"}
+COURSE_TEAM_ACCESS = {INSTRUCTORS_TEAM: "push", COURSE_ADMIN_TEAM: "admin"}
 
 # Faculty access to a repo they should READ but not edit: the RELEASED copy of materials,
 # and a student's gradebook. Both have a source of truth elsewhere, so a hand edit here is
@@ -65,7 +71,7 @@ COURSE_TEAM_ACCESS = {"instructors": "push", "course-admin": "admin"}
 #
 # `course-admin` stays admin throughout - it is the cohort's owner of last resort, and read
 # access cannot fix a broken repo.
-FACULTY_READ_ACCESS = {"instructors": "pull", "course-admin": "admin"}
+FACULTY_READ_ACCESS = {INSTRUCTORS_TEAM: "pull", COURSE_ADMIN_TEAM: "admin"}
 
 # The cohort repos faculty AUTHOR in - the only cohort repos that get write. Everything else
 # in a cohort org has its source of truth elsewhere and takes FACULTY_READ_ACCESS. `.github`
@@ -110,13 +116,13 @@ def grant_tagged_team_access(course_org: str, repo: str, tag: str) -> None:
     Ensures the team exists first (idempotent) - callable in either order, whether
     a tag's content repo is scaffolded before or after its cohort first declares
     instructors."""
-    team = f"instructors-{tag}"
+    team = f"{INSTRUCTORS_TEAM}-{tag}"
     create_team(course_org, team, f"Instructors for {tag} (cohort-declared)")
     grant_team_repo_access(course_org, team, repo, "push")
 
 
 # The cohort-org role teams that get read on released content.
-READ_TEAMS = ("students", "auditors")
+READ_TEAMS = (STUDENTS_TEAM, AUDITORS_TEAM)
 
 
 def grant_read_teams(cohort_org: str, repo: str) -> None:

@@ -27,13 +27,14 @@ import argparse
 import sys
 
 from . import roster
+from .course import AUDITORS_TEAM, STUDENTS_TEAM
 from .discovery import list_org_repos
 from .gh_teams import reconcile_team_members, set_org_membership
 from .log import log_err, log_ok, log_step, log_verbose
 from .repos import is_collaborator, remove_collaborator
 
-TEAM = "students"  # enrolled rows
-AUDITOR_TEAM = "auditors"  # read-only rows
+TEAM = STUDENTS_TEAM  # enrolled rows
+AUDITOR_TEAM = AUDITORS_TEAM  # read-only rows
 
 
 def desired_members(students: list[roster.Student]) -> dict[str, set[str]]:

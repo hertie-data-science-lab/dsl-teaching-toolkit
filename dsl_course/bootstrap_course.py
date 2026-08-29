@@ -27,7 +27,14 @@ import sys
 from . import scaffold, seed, site, sync_faculty
 from .access import COHORT_WRITE_REPOS, COURSE_TEAM_ACCESS, grant_team_repo_access
 from .central import resolve_central_ref
-from .course import COHORT_TOPIC, COURSE_HUB_TOPIC
+from .course import (
+    AUDITORS_TEAM,
+    COHORT_TOPIC,
+    COURSE_ADMIN_TEAM,
+    COURSE_HUB_TOPIC,
+    INSTRUCTORS_TEAM,
+    STUDENTS_TEAM,
+)
 from .discovery import COHORTS_PATH, central_ref_for, register_cohort
 from .gh_contents import put_file, seed_files_if_absent, seed_if_absent
 from .gh_teams import create_team
@@ -164,8 +171,8 @@ def set_org_secret(org: str, secret_name: str, secret_value: str) -> bool:
 # Faculty role teams - created in EVERY org (course + cohort): instructors run the workflows
 # and push content (write); course-admin manage the org (admin).
 FACULTY_TEAMS = [
-    ("instructors", "Instructors and TAs", "closed"),
-    ("course-admin", "Course administrators - DSL team", "closed"),
+    (INSTRUCTORS_TEAM, "Instructors and TAs", "closed"),
+    (COURSE_ADMIN_TEAM, "Course administrators - DSL team", "closed"),
 ]
 # Cohort-only role teams: enrolled students + read-only auditors. The persistent course org
 # never gets these - it holds unreleased materials, model solutions, and hidden tests, so
@@ -178,9 +185,9 @@ FACULTY_TEAMS = [
 # scaffolding. A secret team is visible only to its own members and to org owners, which
 # costs the students nothing (nobody needs to browse the roster to do the course).
 COHORT_TEAMS = [
-    ("students", "Enrolled students", "secret"),
+    (STUDENTS_TEAM, "Enrolled students", "secret"),
     (
-        "auditors",
+        AUDITORS_TEAM,
         "Auditors - read-only (released materials only, no assignments)",
         "secret",
     ),
@@ -293,14 +300,14 @@ def add_course_admins(org: str, handles: str) -> int:
     logins = _parse_handles(handles)
     if not logins:
         return 0
-    log_step(f"Adding {len(logins)} admin(s) to {org}/course-admin")
+    log_step(f"Adding {len(logins)} admin(s) to {org}/{COURSE_ADMIN_TEAM}")
     failures = 0
     for login in logins:
         code, out = gh(
             "api",
             "-X",
             "PUT",
-            f"orgs/{org}/teams/course-admin/memberships/{login}",
+            f"orgs/{org}/teams/{COURSE_ADMIN_TEAM}/memberships/{login}",
             "-f",
             "role=member",
             "--jq",

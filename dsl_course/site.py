@@ -39,6 +39,7 @@ from .course import (
     pages_repo,
     resolve_is_group,
     session_number,
+    submission_repo,
     term_tag,
 )
 from .discovery import (
@@ -790,7 +791,7 @@ def _assignment_entry(
         schedule_type=found[1].type if found else None,
         template_group=None,
     )
-    repo_name = f"{slug}-{'<your-team>' if group else '<your-handle>'}"
+    repo_name = submission_repo(slug, "<your-team>" if group else "<your-handle>")
     # The slug's own name: the row's IDENTIFIER, bold beside its name, and the one half
     # that must not change at hand-out. It used to be overwritten by the README heading, so
     # a row published as "Assignment 2" became "Assignment 1 - linear regression from
