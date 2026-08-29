@@ -165,6 +165,16 @@ def test_bootstrap_org_offers_no_dev_tier():
     assert options == ["release", "staging"]
 
 
+def test_the_site_deploys_on_a_push_to_main_or_master():
+    # A site repo has exactly one branch, whichever it was born with: the retired site
+    # template made `master` ones, the scaffold makes `main`. A trigger naming only
+    # `main` left every `master` site never deploying again once the sync wrote this
+    # workflow over the template's.
+    doc = SHIPPED_WORKFLOWS["templates/site/.github/workflows/deploy.yml"]
+    trigger = doc.get("on", doc.get(True))
+    assert trigger["push"]["branches"] == ["main", "master"]
+
+
 def _site_build_step() -> dict:
     doc = SHIPPED_WORKFLOWS["templates/site/.github/workflows/deploy.yml"]
     return next(
