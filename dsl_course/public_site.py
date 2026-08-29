@@ -22,6 +22,7 @@ import yaml
 
 from .course import discover_sections, find_session_dir, pages_repo
 from .discovery import discover_sessions
+from .fs import copy_tree
 from .gh_contents import get_file_content
 from .ghcli import clone
 from .log import log, log_err, log_step
@@ -58,10 +59,9 @@ def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:
     thing this exists to stop - a `solution/` beside the lab it answers - is precisely a
     nested folder.
 
-    It filters NAMES, so every copytree it guards passes `symlinks=True` (as deploy.py
-    does). Following links would copy a `notes.pdf -> ../solution/answers.pdf` in as the
-    answers themselves, under a name this filter has no reason to deny - publishing the
-    exact content the denylist exists to withhold, to a public site."""
+    It filters NAMES, which is why `fs.copy_tree` never follows a symlink: a
+    `notes.pdf -> ../solution/answers.pdf` would otherwise be copied in as the answers
+    themselves, under a name this filter has no reason to deny."""
     return {n for n in names if is_denied_publication(n)}
 
 
@@ -228,13 +228,7 @@ def sync_public_site(
                     if sec_src is None:
                         continue
                     dest = site_session / section
-                    shutil.copytree(
-                        sec_src,
-                        dest,
-                        dirs_exist_ok=True,
-                        symlinks=True,
-                        ignore=_publication_ignore,
-                    )
+                    copy_tree(sec_src, dest, _publication_ignore)
                     links = _public_links(dest, f"{url_base}/{section}")
                     if links:
                         rows = (
@@ -246,13 +240,7 @@ def sync_public_site(
                 if read_src is not None:
                     if readings_mode == "actual-readings":
                         dest = site_session / READINGS_SECTION
-                        shutil.copytree(
-                            read_src,
-                            dest,
-                            dirs_exist_ok=True,
-                            symlinks=True,
-                            ignore=_publication_ignore,
-                        )
+                        copy_tree(read_src, dest, _publication_ignore)
                         links = _public_links(dest, f"{url_base}/{READINGS_SECTION}")
                         if links:
                             section_links.append((READINGS_SECTION, links))

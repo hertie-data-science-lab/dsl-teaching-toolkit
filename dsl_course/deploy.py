@@ -39,6 +39,7 @@ from .course import (
     SYLLABUS_SAMPLE_FILE,
     SYLLABUS_SESSIONS_FILE,
 )
+from .fs import copy_tree
 from .gh_contents import is_untouched_stub
 from .ghcli import GIT_ENV, clone, git
 from .log import log, log_err, log_ok, log_step
@@ -270,19 +271,10 @@ def deploy_many(
                                 _warn_withheld_stub(
                                     source_org, d.course_source_repo, stub
                                 )
-                    # symlinks=True copies each link AS a link. Following them, a symlink
-                    # pointing at nothing raised shutil.Error and a directory symlink
-                    # pointing at its own parent recursed - and this runs under the hourly
-                    # cron, so one such path in one materials repo aborted the whole
-                    # cohort's release, every hour, until someone noticed.
-                    shutil.copytree(
+                    copy_tree(
                         srcp,
                         destp,
-                        dirs_exist_ok=True,
-                        symlinks=True,
-                        ignore=_copy_ignore(
-                            srcp if srcp == src_root else None, withheld
-                        ),
+                        _copy_ignore(srcp if srcp == src_root else None, withheld),
                     )
                 elif _is_withheld_stub(
                     d.course_source_path,
