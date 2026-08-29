@@ -11,8 +11,9 @@ import csv
 from pathlib import Path
 
 from dsl_course import roster
+from tests.conftest import ROSTER_HEADER
 
-HEADER = "hertie_email,name,github_handle,github_id,enrol_code,role"
+HEADER = ROSTER_HEADER
 
 
 def test_role_defaults_to_enrolled_when_the_column_is_absent():

@@ -15,6 +15,7 @@ import pytest
 import yaml
 
 from dsl_course import gh_contents, public_site, repos, schedule_plan, site, site_repo
+from tests.conftest import repo_row
 
 
 def test_semester_label():
@@ -902,7 +903,7 @@ def test_the_syllabus_choice_is_stable_when_a_cohort_has_two(monkeypatch):
 
 
 def _repos(*names):
-    return [{"name": n} for n in names]
+    return [repo_row(n) for n in names]
 
 
 def test_a_renamed_org_fails_the_sync_instead_of_no_opping(monkeypatch):

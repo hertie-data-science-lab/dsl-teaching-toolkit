@@ -13,8 +13,9 @@ import yaml
 
 from dsl_course import assign
 from dsl_course.schedule import Schedule
+from tests.conftest import ROSTER_HEADER
 
-HEADER = "hertie_email,name,github_handle,github_id,enrol_code,role"
+HEADER = ROSTER_HEADER
 
 
 def _roster_file(tmp_path, *rows: str):

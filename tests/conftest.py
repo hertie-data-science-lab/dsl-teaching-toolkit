@@ -16,6 +16,31 @@ import yaml
 
 from dsl_course import central, repos, roster, schedule, site, teams
 
+# students.csv's header row, DERIVED from the columns the engine declares rather than
+# re-typed. `roster.FIELDS` is a frozen public contract (the shipped JavaScript spells the
+# same columns out by hand), and five test files each carried their own copy of it - so a
+# column added to FIELDS left five fixtures describing a roster that no longer exists.
+ROSTER_HEADER = ",".join(roster.FIELDS)
+
+
+def repo_row(name: str, **extra) -> dict:
+    """One row of a `discovery.list_org_repos` listing, carrying every field it really has.
+
+    Three test files kept their own partial builder, each missing a different key, so code
+    that reads `archived` or `topics` off a listing was tested against rows that have
+    neither. Defaults are the uninteresting answer; `extra` overrides what a test is about.
+    """
+    return {
+        "name": name,
+        "description": "",
+        "visibility": "private",
+        "url": f"https://github.com/org/{name}",
+        "isTemplate": False,
+        "archived": False,
+        "topics": [],
+        **extra,
+    }
+
 
 @pytest.fixture(autouse=True)
 def _no_live_gh(monkeypatch):

@@ -38,6 +38,7 @@ from dsl_course import (
     welcome,
 )
 from dsl_course.repos import Converged
+from tests.conftest import repo_row
 
 # Derived from the seeding tables, so a sixth config file cannot silently miss the set
 # these tests police - which is the whole point of the tables existing.
@@ -1351,14 +1352,7 @@ def test_the_student_facing_teams_are_secret(monkeypatch):
 # repo permissions in the estate.
 
 
-def _r(name, **extra):
-    return {
-        "name": name,
-        "url": "u",
-        "visibility": "private",
-        "description": "",
-        **extra,
-    }
+_r = repo_row  # one row of a real list_org_repos listing
 
 
 def _spy_sweep(monkeypatch, repos):

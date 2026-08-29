@@ -8,6 +8,7 @@ from __future__ import annotations
 import pytest
 
 from dsl_course import enrol_codes, mailer, roster
+from tests.conftest import ROSTER_HEADER
 
 
 def _student(email="a@x.edu", name="Ada", code="", handle=""):
@@ -203,7 +204,7 @@ def test_a_semicolon_export_is_refused_rather_than_written_back_mangled():
 # ------------------- a code write must not revert a Join binding that landed meanwhile
 
 
-HEADER = "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+HEADER = ROSTER_HEADER + "\n"
 STALE = HEADER + "ada@uni.edu,Ada,,,,enrolled\nbob@uni.edu,Bob,,,,enrolled\n"
 # What the roster looks like after a Join issue bound Ada's handle mid-run.
 FRESH = HEADER + "ada@uni.edu,Ada,ada-l,42,,enrolled\nbob@uni.edu,Bob,,,,enrolled\n"

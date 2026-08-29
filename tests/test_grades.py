@@ -12,6 +12,7 @@ import pytest
 import yaml
 
 from dsl_course import ghcli, grades, roster
+from tests.conftest import ROSTER_HEADER
 
 
 def test_parse_grades_tolerates_blank_and_missing_columns():
@@ -341,7 +342,7 @@ def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
     # this pure - the roster is the only input, and nothing is provisioned.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-student lines are verbose-only
     students = roster.parse(
-        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+        ROSTER_HEADER + "\n"
         "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
         "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor\n"
         "bob@uni.edu,Bob,bob-b,44,dsl-def,\n"  # blank role -> enrolled
@@ -358,8 +359,7 @@ def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
 def test_gradebook_sync_names_no_student_in_a_public_log(monkeypatch, capsys):
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     students = roster.parse(
-        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+        ROSTER_HEADER + "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     assert grades.sync("COHORT", dry_run=True) == 0
@@ -404,7 +404,7 @@ def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
     # The send count used to be discarded, so a student who never got the "your grades are
     # updated" mail left no trace in the log at all.
     students = roster.parse(
-        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+        ROSTER_HEADER + "\n"
         "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
         "bob@uni.edu,Bob,bob-b,43,dsl-def,enrolled\n"
     )
@@ -422,8 +422,7 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
     # updated" from another, so the body names the course - but a course org that carries
     # no name yet must produce the generic sentence, never a blank or a placeholder.
     students = roster.parse(
-        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+        ROSTER_HEADER + "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     sent: list[list] = []
@@ -449,8 +448,7 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
 
 def test_grade_notification_dry_run_carries_a_placeholder_sample(monkeypatch):
     students = roster.parse(
-        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+        ROSTER_HEADER + "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "Deep Learning")
@@ -530,8 +528,7 @@ def test_build_gradebooks_folds_one_student_written_two_ways():
 
 def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
     students = roster.parse(
-        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
-        "ada@uni.edu,Ada,Ada-L,42,dsl-abc,enrolled\n"
+        ROSTER_HEADER + "\nada@uni.edu,Ada,Ada-L,42,dsl-abc,enrolled\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
@@ -578,8 +575,7 @@ def _distribute_with(
         ),
     )
     students = roster.parse(
-        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+        ROSTER_HEADER + "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")

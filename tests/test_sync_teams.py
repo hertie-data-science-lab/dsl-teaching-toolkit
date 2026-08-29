@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from dsl_course import gh_teams, roster, sync_teams
+from tests.conftest import ROSTER_HEADER
 
 
 def test_team_slug_is_assignment_prefixed_and_lowercased():
@@ -98,7 +99,7 @@ def test_ensure_team_without_prune_only_adds(stub_team):
     assert stub_team["removed"] == []
 
 
-HEADER = "hertie_email,name,github_handle,github_id,enrol_code,role"
+HEADER = ROSTER_HEADER
 
 
 def _students(*rows: str) -> list[roster.Student]:

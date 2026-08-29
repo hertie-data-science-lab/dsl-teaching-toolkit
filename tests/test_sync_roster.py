@@ -9,8 +9,9 @@ from __future__ import annotations
 import pytest
 
 from dsl_course import roster, sync_roster
+from tests.conftest import ROSTER_HEADER, repo_row
 
-HEADER = "hertie_email,name,github_handle,github_id,enrol_code,role"
+HEADER = ROSTER_HEADER
 
 
 @pytest.fixture(autouse=True)
@@ -153,10 +154,7 @@ def test_a_role_change_moves_the_handle_between_teams():
 
 
 def _repos(*names, templates=()):
-    return [
-        {"name": n, "isTemplate": n in templates, "topics": []}
-        for n in (*names, *templates)
-    ]
+    return [repo_row(n, isTemplate=n in templates) for n in (*names, *templates)]
 
 
 def test_submission_repo_suffixes_splits_on_the_cohort_template_name():

@@ -22,6 +22,7 @@ import pytest
 from dsl_course import collect, gh_contents, ghcli, grades
 from dsl_course.roster import Student
 from dsl_course.schedule import Schedule
+from tests.conftest import ROSTER_HEADER
 
 SHA = "a" * 40
 OTHER_SHA = "b" * 40
@@ -1424,8 +1425,7 @@ def _roster_of(monkeypatch, *rows: str):
         collect.roster,
         "load",
         lambda org: collect.roster.parse(
-            "hertie_email,name,github_handle,github_id,enrol_code,role\n"
-            + "".join(r + "\n" for r in rows)
+            ROSTER_HEADER + "\n" + "".join(r + "\n" for r in rows)
         ),
     )
 
