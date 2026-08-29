@@ -37,9 +37,10 @@ SHIPPED_WORKFLOWS = _shipped_workflows()
 
 
 def test_the_shipped_workflow_sweep_sees_them_all():
-    # ci, bootstrap-org, refresh-inventory, both dispatchers, validate-schedule, onboard,
-    # team-formation - a broken glob would make the tests below vacuous.
-    assert len(SHIPPED_WORKFLOWS) >= 8
+    # ci, bootstrap-org, promote, refresh-inventory, token-canary, both dispatchers,
+    # validate-schedule, onboard, team-formation - a broken glob would make the tests
+    # below vacuous.
+    assert len(SHIPPED_WORKFLOWS) >= 10
 
 
 @pytest.mark.parametrize("rel", sorted(SHIPPED_WORKFLOWS))
