@@ -621,7 +621,7 @@ def _render_with(monkeypatch, tmp_path, *, staged, commit_ok=True):
     """`render` against a local clone; `staged` is what `git diff --cached --quiet` says."""
     per = {"assignment-1": [grades.GradeRow(github_handle="ada-l", final_grade="88")]}
     monkeypatch.setattr(grades, "load_grade_sources", lambda org: per)
-    monkeypatch.setattr(grades, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(grades, "default_branch", lambda org, repo, **k: "main")
 
     def fake_gh(*args, **kwargs):
         if args[:2] == ("repo", "clone"):

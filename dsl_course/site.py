@@ -55,7 +55,7 @@ from .log import log_err, log_step
 from .public_site import resync_public_site, sync_public_site
 from .readings import demote_headings, is_reading_overlay
 from .repos import (
-    get_default_branch,
+    default_branch,
     has_denied_component,
 )
 from .schedule_plan import (
@@ -115,7 +115,7 @@ def _repo_tree(org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     `()` and the caller simply finds no files, while any other failure RAISES rather than
     reporting an empty tree - swallowed, it republished the site with every material link
     stripped."""
-    branch = get_default_branch(org, repo)
+    branch = default_branch(org, repo, fallback="main")
     return branch, repo_tree(org, repo, branch, "blob")
 
 

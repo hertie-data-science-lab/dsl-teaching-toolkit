@@ -261,7 +261,7 @@ def _tree_gh(*args, **kwargs):
 def test_session_files_lists_nested_files_by_path(monkeypatch):
     # release.py copytrees a session folder wholesale, so nested files ARE released -
     # a non-recursive listing dropped them from the site entirely.
-    monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", _tree_gh)
     pairs = site._session_files("Cohort-f2026", "materials", "lectures", "03_week-3")
     assert [n for n, _ in pairs] == [
@@ -278,7 +278,7 @@ def test_session_files_lists_nested_files_by_path(monkeypatch):
 
 
 def test_session_files_root_shape_and_other_sessions_excluded(monkeypatch):
-    monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", _tree_gh)
     # subpath="" - the release landed at the repo root (default destination)
     assert site._session_files("Cohort-f2026", "lectures", "", "01_intro") == [
@@ -298,7 +298,7 @@ def test_repo_tree_is_fetched_once_per_repo(monkeypatch):
         calls.append(args)
         return (0, _TREE)
 
-    monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", counting_gh)
     for folder in ("03_week-3", "04_week-4", "03_week-30"):
         assert site._session_files("Cohort-f2026", "materials", "lectures", folder)
@@ -307,7 +307,7 @@ def test_repo_tree_is_fetched_once_per_repo(monkeypatch):
 
 def test_session_files_absent_repo_is_empty(monkeypatch):
     # A genuine 404 (repo/tree absent) is empty - gh's real wording, case included.
-    monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(
         gh_contents, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)")
     )
@@ -317,7 +317,7 @@ def test_session_files_absent_repo_is_empty(monkeypatch):
 def test_session_files_real_failure_raises(monkeypatch):
     # A non-404 failure must NOT be read as "no files" (which republishes the site with
     # every material link stripped) - it raises instead.
-    monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
+    monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(
         gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 500 Server Error")
     )

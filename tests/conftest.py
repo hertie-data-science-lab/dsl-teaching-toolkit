@@ -64,7 +64,7 @@ def _clear_process_memos():
     different fakes, so clear them between tests."""
     site._repo_tree.cache_clear()
     central.central_ref_exists.cache_clear()
-    repos.default_branch.cache_clear()
+    repos._repo.cache_clear()
 
 
 def workflow_inputs(rendered: str) -> dict:

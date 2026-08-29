@@ -32,7 +32,7 @@ from .course import (
 from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
 from .ghcli import gh
 from .log import log_err, log_ok
-from .repos import get_default_branch
+from .repos import default_branch
 
 COHORTS_PATH = (
     "cohort-courses-pages.yml"  # standalone registry in the course org's .github repo
@@ -359,7 +359,7 @@ def _repo_tree_dirs(org: str, repo: str) -> tuple[str, ...]:
     directories, any other failure RAISES. It must never come back as "no sessions" - the
     site clears and rewrites its collections from these rows, so one rate-limited fetch
     would republish the cohort site with every session row deleted."""
-    return repo_tree(org, repo, get_default_branch(org, repo), "tree")
+    return repo_tree(org, repo, default_branch(org, repo, fallback="main"), "tree")
 
 
 def _section_session_pairs(org: str, repo: str) -> list[tuple[str, int]]:

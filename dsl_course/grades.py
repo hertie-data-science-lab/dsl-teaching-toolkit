@@ -55,7 +55,7 @@ from .log import log, log_err, log_ok, log_step, log_verbose
 from .repos import (
     add_collaborator,
     create_repo,
-    get_default_branch,
+    default_branch,
     repo_exists,
     set_repo_topics,
 )
@@ -458,7 +458,7 @@ def render(cohort_org: str) -> int:
         f"-> preview PR on {cohort_org}/{CONFIG_REPO}"
     )
 
-    base = get_default_branch(cohort_org, CONFIG_REPO)
+    base = default_branch(cohort_org, CONFIG_REPO, fallback="main")
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "cfg"
         if not clone(cohort_org, CONFIG_REPO, wd):

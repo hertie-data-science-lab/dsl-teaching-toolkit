@@ -30,7 +30,7 @@ from . import grades, roster, schedule, sync_faculty, teams
 from .central import CENTRAL_REF, resolve_central_ref
 from .discovery import org_meta
 from .log import log_err
-from .repos import get_default_branch
+from .repos import default_branch
 
 ITEMS = ("B1", "B6", "B7", "C2", "C3", "C4", "C5", "C6", "C7")
 # Rows whose input is marked `[required]` in docs/DEPLOYMENT-CHECKLIST.md;
@@ -102,8 +102,8 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
 
     # Every course-org row lives in .github; every cohort row lives in
     # classroom-config - resolve each default branch once, not once per row.
-    course_branch = get_default_branch(course_org, ".github")
-    cohort_branch = get_default_branch(cohort_org, schedule.CONFIG_REPO)
+    course_branch = default_branch(course_org, ".github", fallback="main")
+    cohort_branch = default_branch(cohort_org, schedule.CONFIG_REPO, fallback="main")
 
     data: dict[str, dict] = {}
 

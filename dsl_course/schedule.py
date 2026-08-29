@@ -970,7 +970,7 @@ def _repo_paths(course_org: str, repo: str) -> set[str] | None:
     Kept distinct from "the repo is not there" (the caller asks `repo_exists` first),
     because the two want opposite handling: an absent repo is a fault worth naming, an
     unreadable one must be passed over in silence. `default_branch` is the fail-loud twin
-    on purpose - `get_default_branch` guesses `main` when it cannot read the repo,
+    on purpose - `default_branch(fallback="main")` guesses when it cannot read the repo,
     `repo_tree` then 404s on the guess and reports `()`, and every deploy in the plan comes
     back as "no such repo": the exact cry-wolf this check exists to avoid."""
     try:
