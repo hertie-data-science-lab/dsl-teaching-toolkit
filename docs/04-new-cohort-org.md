@@ -61,7 +61,7 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
 
     - `github_handle` grants access; a named entry with no `github_handle` is also valid - it is display-only (a site card, no access granted). 
     - The optional `start`/`end` dates **bound when the access is live**: it is granted from `start` and revoked after `end`, automatically - this is how you hand a guest lecturer or a fixed-term TA push access for one term. 
-      - Course-wide admins are declared at the **course** level instead (`.github/dsl-course.yml` → `course_admins`), not here. 
+      - Course-wide admins are declared at the **course** level instead (course org → `.github` → `dsl-course.yml` → `course_admins`), not here. 
       - Full guide, including removing people   and how quickly changes land: [05 Manage the teaching team](05-manage-teaching-team.md).
 
 6. **Load the student roster.** 

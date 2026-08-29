@@ -143,8 +143,9 @@ environment's required reviewers. Nothing else can push to either tier branch - 
 
 ### Soak on staging
 
-After promoting to `staging`, check the demo org (`hertie-dsl-demo-course-e1234` and
-`hertie-dsl-demo-f2026`) before promoting on. A day covers one nightly refresh:
+After promoting to `staging`, check the demo course org (`hertie-dsl-demo-course-e1234`) and
+both its cohorts (`hertie-dsl-demo-f2025`, `hertie-dsl-demo-f2026`) before promoting on. A day
+covers one nightly refresh:
 
 - [ ] **Refresh actions** green, both the Promote-triggered run and the next nightly cron
 - [ ] one **Scheduled release** tick green (hourly; a dry run is enough if nothing is due)
@@ -185,20 +186,21 @@ here, so without this any of them can `git push origin whatever:release` and put
 code straight into every live org. Three settings, none of them in code:
 
 1. **Give the DSL bot `write` on this repo.** Promote pushes as the bot, not as
-   `GITHUB_TOKEN` - a ruleset can restrict a branch to a named account, and the Actions
-   token cannot be one.
-2. **A ruleset on `staging` and `release`** (Settings -> Rules -> Rulesets, targeting both
-   branches): *restrict updates* to the bot account only, *block force pushes*, *block
-   deletions*, *require linear history*. Promote passes `--force-with-lease` purely as a
-   concurrency guard; every push it makes is a fast-forward, so blocking force pushes never
-   blocks it.
-3. **Create the `release` environment** (Settings -> Environments) with the `admin` team as
-   **required reviewers**. Promote's job runs in the environment named by its `to:` input,
-   so a release promotion waits for an approval and a staging soak does not.
+   `GITHUB_TOKEN` - branch protection can restrict pushes to a named account, and the
+   Actions token cannot be one.
+2. **Classic branch protection on `staging` and `release`** (Settings -> Branches -> Add
+   rule, one per branch): *restrict who can push* to the `hertie-dsl-bot` user, *include
+   administrators*, *require linear history*, and allow neither force pushes nor deletions.
+   It has to be classic: a repo ruleset cannot restrict pushes to a user, and an org-level
+   ruleset needs a paid plan. Promote passes `--force-with-lease` purely as a concurrency
+   guard; every push it makes is a fast-forward, so blocking force pushes never blocks it.
+3. **Create the `release` environment** (Settings -> Environments) with the maintainer as
+   **required reviewer** (self-approval allowed) and its deployment branch policy set to
+   `main` only. Promote's job runs in the environment named by its `to:` input, so a release
+   promotion waits for an approval and a staging soak does not.
 On `main`: PR only, with **both** `ci.yml` jobs required - `pytest` **and**
-`jekyll-contract`. Required checks are named by hand, and `jekyll-contract` is the only
-thing that catches a Liquid error in the site templates; unrequired, it is a check a PR
-merges straight past.
+`jekyll-contract`. Required checks are named by hand and a job can only be named after it
+has reported on `main` at least once, so land a new CI job first and require it after.
 
 ### Putting an org on a tier
 

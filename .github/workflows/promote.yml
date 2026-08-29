@@ -45,8 +45,8 @@ jobs:
   promote:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # The tier being promoted to, as a deployment environment: `release` carries the admin
-    # team as required reviewers, so a release promotion pauses for a human, while a
+    # The tier being promoted to, as a deployment environment: `release` carries the
+    # maintainer as a required reviewer, so a release promotion pauses for a human, while a
     # staging soak stays one click. GitHub creates a named environment on first use, so an
     # environment with no rules is simply no extra gate.
     environment: ${{ inputs.to }}
@@ -56,8 +56,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
-          # The push below is the BOT's, not GITHUB_TOKEN's: a branch ruleset can restrict
-          # the tier branches to one account, and GITHUB_TOKEN cannot be that account -
+          # The push below is the BOT's, not GITHUB_TOKEN's: classic branch protection can
+          # restrict the tier branches to one account, and GITHUB_TOKEN cannot be that account -
           # which left the tiers pushable by every write-holder on this repo. Checkout's
           # own credentials would win over the bot's (it writes an auth header into the
           # repo config), so they are not persisted.
