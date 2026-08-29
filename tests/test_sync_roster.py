@@ -206,6 +206,13 @@ def _offboard_stubs(monkeypatch, *, collaborators, declared=None, probed=None):
         "remove_collaborator",
         lambda org, repo, login: removed.append((repo, login)) or True,
     )
+    # No pending invitations unless a test says otherwise (it re-stubs these after us).
+    monkeypatch.setattr(sync_roster, "pending_invitations", lambda org, repo, login: [])
+    monkeypatch.setattr(
+        sync_roster,
+        "cancel_invitation",
+        lambda *a: pytest.fail("there was no invitation to cancel"),
+    )
     return removed
 
 
@@ -263,6 +270,35 @@ def test_a_case_only_difference_is_the_same_account(monkeypatch):
     removed = _offboard_stubs(monkeypatch, collaborators={"Ada-L", "zoe-z"})
     assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l", "zoe-z"}) == 0
     assert removed == []
+
+
+def test_a_never_accepted_invitation_is_cancelled_too(monkeypatch):
+    # A repo granted before the student accepted their org invite is an INVITATION, not a
+    # collaborator row: is_collaborator says no, remove_collaborator removes nothing, and
+    # accepting it after off-boarding handed `maintain` straight back.
+    removed = _offboard_stubs(monkeypatch, collaborators=set())
+    monkeypatch.setattr(
+        sync_roster,
+        "pending_invitations",
+        lambda org, repo, login: ["777"] if login == "zoe-z" else [],
+    )
+    cancelled: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        sync_roster,
+        "cancel_invitation",
+        lambda org, repo, invitation_id: (
+            cancelled.append((repo, invitation_id)) or True
+        ),
+    )
+    assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l"}) == 0
+    assert removed == []
+    assert cancelled == [("assignment-1-zoe-z", "777")]
+
+
+def test_an_unreadable_invitation_listing_is_an_error_not_a_pass(monkeypatch):
+    _offboard_stubs(monkeypatch, collaborators=set())
+    monkeypatch.setattr(sync_roster, "pending_invitations", lambda *a: None)
+    assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l"}) == 2
 
 
 def test_an_unreadable_collaborator_check_is_an_error_not_a_revoke(monkeypatch):

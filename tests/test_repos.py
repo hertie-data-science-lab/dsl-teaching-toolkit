@@ -112,3 +112,20 @@ def test_is_collaborator_asks_for_direct_grants_only(monkeypatch):
     assert repos.is_collaborator("Cohort", "assignment-1-ada-l", "ada-l") is None
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
     assert repos.is_collaborator("Cohort", "gone", "ada-l") is False
+
+
+def test_pending_invitations_picks_out_one_logins_ids(monkeypatch):
+    # GitHub logins are case-insensitive, and the listing carries everyone's invitations -
+    # cancelling the wrong one revokes a colleague's access to a repo they still need.
+    listing = "12\tZoe-Z\n13\tada-l\n14\tzoe-z\n"
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, listing))
+    assert repos.pending_invitations("O", "r", "zoe-z") == ["12", "14"]
+    assert repos.pending_invitations("O", "r", "nobody") == []
+
+
+def test_an_unreadable_invitation_listing_is_none_not_empty(monkeypatch):
+    # The caller is about to revoke: a rate limit must never read as "nothing to cancel".
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "HTTP 403: rate limited"))
+    assert repos.pending_invitations("O", "r", "zoe-z") is None
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    assert repos.pending_invitations("O", "r", "zoe-z") == []

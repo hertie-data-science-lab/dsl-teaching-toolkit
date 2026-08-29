@@ -31,7 +31,12 @@ from .course import AUDITORS_TEAM, STUDENTS_TEAM, submission_repo, submission_su
 from .discovery import classify_repos, list_org_repos
 from .gh_teams import reconcile_team_members, set_org_membership
 from .log import log_err, log_ok, log_person, log_step
-from .repos import is_collaborator, remove_collaborator
+from .repos import (
+    cancel_invitation,
+    is_collaborator,
+    pending_invitations,
+    remove_collaborator,
+)
 
 TEAM = STUDENTS_TEAM  # enrolled rows
 AUDITOR_TEAM = AUDITORS_TEAM  # read-only rows
@@ -84,10 +89,14 @@ def revoke_offboarded_access(
     on every assignment repo they had ever been handed, indefinitely, while every report
     said they had been removed.
 
+    A grant made before the org invite was accepted is a pending INVITATION rather than a
+    collaborator row, so it is cancelled too - otherwise accepting it later hands the
+    access straight back. Org membership itself is not touched here.
+
     Deliberately narrow. Only the login the repo is NAMED after is ever revoked, and only
-    once GitHub confirms it is a direct collaborator - a group repo's suffix is a team
-    name, faculty and the bot hold their access through teams, and a repo name is not a
-    reason to take anyone's access away. `on_roster` is casefolded, because GitHub logins
+    once GitHub confirms it is a direct collaborator or holds an invitation - a group
+    repo's suffix is a team name, faculty and the bot hold their access through teams, and
+    a repo name is not a reason to take anyone's access away. `on_roster` is casefolded, because GitHub logins
     are case-insensitive and a case-only difference is the same account."""
     # teams.csv already says which repos are the GROUP ones, so asking GitHub whether a
     # team is a collaborator on its own repo is a paginated read per team repo per night,
@@ -113,23 +122,38 @@ def revoke_offboarded_access(
         if present is None:  # unreadable - never guess, in either direction
             errors += 1
             continue
-        if not present:
-            continue  # a team name, or already revoked
-        if dry_run:
-            log_person(f"    DRY-RUN revoke {suffix} <- {cohort_org}/{repo}")
-            revoked += 1
-        elif remove_collaborator(cohort_org, repo, suffix):
-            log_person(f"  [ok] revoked {suffix} from {cohort_org}/{repo}")
-            revoked += 1
-        else:
+        if present:
+            if dry_run:
+                log_person(f"    DRY-RUN revoke {suffix} <- {cohort_org}/{repo}")
+                revoked += 1
+            elif remove_collaborator(cohort_org, repo, suffix):
+                log_person(f"  [ok] revoked {suffix} from {cohort_org}/{repo}")
+                revoked += 1
+            else:
+                errors += 1
+        # A grant made before the org invite was accepted is a pending INVITATION, which
+        # `is_collaborator` cannot see and `remove_collaborator` does not touch. Left live,
+        # accepting it later hands `maintain` back to an off-boarded student.
+        invitations = pending_invitations(cohort_org, repo, suffix)
+        if invitations is None:
             errors += 1
+            continue
+        for invitation_id in invitations:
+            if dry_run:
+                log_person(f"    DRY-RUN cancel invite {suffix} <- {cohort_org}/{repo}")
+                revoked += 1
+            elif cancel_invitation(cohort_org, repo, invitation_id):
+                log_person(f"  [ok] cancelled {suffix}'s invite to {cohort_org}/{repo}")
+                revoked += 1
+            else:
+                errors += 1
     if revoked:
-        # Only DIRECT collaborator grants are counted, because only those were removed:
-        # `is_collaborator` reads the affiliation=direct listing, so a repo whose suffix
-        # merely matches somebody with team or owner access is never one of these.
+        # Only DIRECT grants and pending invitations are counted, because only those were
+        # removed: `is_collaborator` reads the affiliation=direct listing, so a repo whose
+        # suffix merely matches somebody with team or owner access is never one of these.
         log_ok(
-            f"{revoked} direct submission-repo grant(s) revoked for handle(s) no longer "
-            f"on the roster{' (dry run)' if dry_run else ''}"
+            f"{revoked} direct submission-repo grant(s)/invite(s) revoked for handle(s) "
+            f"no longer on the roster{' (dry run)' if dry_run else ''}"
         )
     return errors
 

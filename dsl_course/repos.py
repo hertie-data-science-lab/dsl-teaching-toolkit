@@ -400,6 +400,48 @@ def remove_collaborator(org: str, repo: str, login: str) -> bool:
     return False
 
 
+def pending_invitations(org: str, repo: str, login: str) -> list[str] | None:
+    """The ids of `login`'s un-accepted invitations to `org/repo`, `[]` if there are none,
+    None if the listing could not be read.
+
+    A collaborator granted before the student accepted their org invite is an INVITATION,
+    not a collaborator row - so `is_collaborator` says no and `remove_collaborator` removes
+    nothing, while the invitation stays live and accepting it hands back `maintain`.
+
+    None is kept distinct from `[]` for the same reason as `is_collaborator`: the caller is
+    about to revoke, and an unreadable listing must never read as "nothing to cancel"."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"repos/{org}/{repo}/invitations?per_page=100",
+        "--jq",
+        ".[] | [.id, .invitee.login] | @tsv",
+    )
+    if code != 0:
+        if is_missing_resource(out):
+            return []  # no such repo - nothing to cancel on it
+        log_err(f"could not list invitations on {org}/{repo}: {out[:160]}")
+        return None
+    fold = login.casefold()
+    ids = []
+    for line in out.splitlines():
+        invitation_id, _, invitee = line.partition("\t")
+        if invitee.strip().casefold() == fold:
+            ids.append(invitation_id.strip())
+    return ids
+
+
+def cancel_invitation(org: str, repo: str, invitation_id: str) -> bool:
+    """Cancel one repo invitation by id."""
+    code, out = gh(
+        "api", "--method", "DELETE", f"repos/{org}/{repo}/invitations/{invitation_id}"
+    )
+    if code == 0:
+        return True
+    log_err(f"could not cancel invitation {invitation_id} on {org}/{repo}: {out[:160]}")
+    return False
+
+
 def generate_from_template(
     template_org: str,
     template_name: str,
