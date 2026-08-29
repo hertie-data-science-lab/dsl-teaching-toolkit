@@ -49,8 +49,15 @@ class _Fakes:
             # `--format=` leaves a leading blank line - the parser must survive it.
             return (0, "\n" + "\n".join(self.changed))
         if "log" in args:
-            row = self.last_touch.get(args[-1])
-            return (0, "\t".join(row)) if row else (0, "")
+            # ONE walk of the history for every path, in `git log --name-only` shape: a
+            # NUL-prefixed author header, then the paths that commit touched.
+            return (
+                0,
+                "\n".join(
+                    f"\0{sha}\t{name}\t{email}\n\n{path}"
+                    for path, (sha, name, email) in self.last_touch.items()
+                ),
+            )
         return (0, "")
 
     def gh(self, *args, **kwargs):
@@ -112,6 +119,17 @@ def test_an_overwritten_human_edit_files_an_issue(human_edit):
     create = next(c for c in fakes.gh_calls if c[:2] == ("issue", "create"))
     assert create[create.index("--repo") + 1] == f"{ORG}/{SITE}"
     assert create[create.index("--title") + 1] == site_repo.OVERWRITE_ISSUE_TITLE
+
+
+def test_the_history_is_walked_once_however_many_files_changed(monkeypatch):
+    # A sync rewrites every generated page and collection entry, so a `git log -1 -- <path>`
+    # each meant a hundred-odd subprocesses per site per sync to read one history.
+    paths = [f"_lectures/{n:02d}-session.md" for n in range(20)]
+    fakes = _Fakes(paths, dict.fromkeys(paths, HUMAN))
+    assert _run(monkeypatch, fakes) == 0
+    assert sum(1 for c in fakes.git_calls if "log" in c) == 1
+    body = fakes.created_body()
+    assert all(f"`{p}`" in body for p in paths), "a path was lost in the single walk"
 
 
 @pytest.mark.parametrize("author", [BOT, TOKEN_ACCOUNT, APP])

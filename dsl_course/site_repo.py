@@ -738,6 +738,35 @@ def _is_machine_author(name: str, email: str) -> bool:
     )
 
 
+def _last_touched_before_head(wd: Path) -> dict[str, tuple[str, str, str]]:
+    """`{path: (sha, author name, author email)}` for the last commit BEFORE HEAD to touch
+    each path in the history.
+
+    ONE walk. This was a `git log -1 -- <path>` per path, and a sync rewrites every
+    generated page and collection entry, so an ordinary cohort site paid a hundred-odd
+    subprocesses per sync to read one history. `--name-only` lists each commit's paths
+    under its own header line (NUL-prefixed, so no filename can be mistaken for one), and
+    the FIRST header a path appears under is the most recent commit to touch it.
+
+    A path absent from the result was touched by no commit before HEAD: this sync created
+    it. An unreadable history is `{}` - the same "say nothing" the per-path read gave."""
+    code, out = git(
+        "-C", str(wd), "log", "--name-only", "--format=%x00%H%x09%an%x09%ae", "HEAD^"
+    )
+    if code != 0:
+        return {}
+    touched: dict[str, tuple[str, str, str]] = {}
+    author = ("", "", "")
+    for line in out.splitlines():
+        if line.startswith("\0"):
+            sha, _, rest = line[1:].partition("\t")
+            name, _, email = rest.partition("\t")
+            author = (sha, name, email)
+        elif line.strip():
+            touched.setdefault(line.strip(), author)
+    return touched
+
+
 def _overwritten_edits(wd: Path) -> dict[str, tuple[str, list[str]]]:
     """The human commits the sync commit at HEAD just discarded: `{sha: (author, paths)}`.
 
@@ -748,17 +777,15 @@ def _overwritten_edits(wd: Path) -> dict[str, tuple[str, list[str]]]:
     code, out = git("-C", str(wd), "show", "--name-only", "--format=", "HEAD")
     if code != 0:
         raise RuntimeError(f"could not list the files the sync commit changed: {out}")
+    touched = _last_touched_before_head(wd)
     overwritten: dict[str, tuple[str, list[str]]] = {}
     for path in (ln.strip() for ln in out.splitlines()):
         if not path:
             continue
-        code, out = git(
-            "-C", str(wd), "log", "-1", "--format=%H%x09%an%x09%ae", "HEAD^", "--", path
-        )
-        if code != 0 or not out.strip():
+        previous = touched.get(path)
+        if previous is None:
             continue
-        sha, _, rest = out.strip().partition("\t")
-        name, _, email = rest.partition("\t")
+        sha, name, email = previous
         if _is_machine_author(name, email):
             continue
         overwritten.setdefault(sha, (name, []))[1].append(path)
