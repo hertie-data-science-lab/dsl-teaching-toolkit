@@ -116,6 +116,10 @@ def test_promote_pushes_the_tiers_with_a_deploy_key_not_the_bot():
     step = next(s for s in job["steps"] if s.get("name", "").startswith("Fast-forward"))
     assert step["env"]["PROMOTE_DEPLOY_KEY"] == "${{ secrets.PROMOTE_DEPLOY_KEY }}"
     assert 'git remote set-url origin "git@github.com:' in step["run"]
+    # ssh-keyscan trusts whatever answers, so it would have written a substituted
+    # github.com's key into known_hosts and pushed the deploy key straight at it.
+    assert "ssh-keyscan" not in step["run"]
+    assert "gh api meta --jq '.ssh_keys[]'" in step["run"]
 
 
 def _promote_refresh_job() -> dict:
