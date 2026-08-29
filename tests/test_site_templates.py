@@ -49,8 +49,7 @@ STAMP = (
 
 # Stripped before anything is extracted. A Liquid comment is where these files explain
 # themselves, and they quote field names constantly - including ones that were removed on
-# purpose. An HTML comment is the same, plus `_layouts/home.html`'s commented-out
-# instructor block, which reads a shape nothing has written for years.
+# purpose. An HTML comment is the same.
 _LIQUID_COMMENT = re.compile(
     r"\{%-?\s*comment\s*-?%\}.*?\{%-?\s*endcomment\s*-?%\}", re.DOTALL
 )
@@ -228,6 +227,16 @@ def test_the_shipped_stylesheet_defines_the_schedule_tables_own_classes(cls):
         f".{cls} is used by the schedule table but no rule in _sass/_course.scss "
         f"defines it"
     )
+
+
+_IMG_TAG = re.compile(r"<img\b[^>]*>")
+
+
+@pytest.mark.parametrize("rel", sorted(_liquid_templates()))
+def test_every_image_a_template_renders_carries_alt_text(rel):
+    # A screen reader announces an alt-less portrait as its file name.
+    for tag in _IMG_TAG.finditer(_strip_comments(_liquid_templates()[rel])):
+        assert re.search(r'\balt="[^"]+"', tag.group(0)), f"{rel}: {tag.group(0)}"
 
 
 def test_a_schedule_row_template_exists_for_every_type_the_sync_emits(documents):
