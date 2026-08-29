@@ -15,8 +15,9 @@ from pathlib import Path
 Deny = Callable[[str, list[str]], set[str]]
 
 
-def copy_tree(src: Path, dst: Path, deny: Deny) -> None:
-    """Copy the tree at `src` over `dst`, skipping whatever `deny` names.
+def copy_tree(src: Path, dst: Path, deny: Deny | None = None) -> None:
+    """Copy the tree at `src` over `dst`, skipping whatever `deny` names (nothing by
+    default).
 
     `dirs_exist_ok=True` because both callers copy into a checkout that may already hold
     an earlier copy.

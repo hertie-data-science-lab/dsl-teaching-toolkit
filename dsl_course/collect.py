@@ -96,6 +96,7 @@ from .course import (
     resolve_is_group,
     submission_repo,
 )
+from .fs import copy_tree
 from .gh_contents import dump_csv, file_exists, get_file_content, put_file
 from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
 from .log import log, log_err, log_ok, log_skip, log_step
@@ -947,7 +948,7 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
             )
     with tempfile.TemporaryDirectory() as run:
         tests_dir = Path(run) / "tests"
-        shutil.copytree(tests_src, tests_dir)
+        copy_tree(tests_src, tests_dir)
         # Make the submission importable by the hidden tests WITHOUT letting a student
         # module shadow a stdlib/site name (`operator.py`, `json.py`) a hidden test imports.
         # A `sitecustomize` in its own dir - the ONLY thing on PYTHONPATH - runs at
@@ -1098,19 +1099,7 @@ def collect(
 
     with tempfile.TemporaryDirectory() as sd:
         soldir = Path(sd) / "sol"
-        if (
-            gh(
-                "repo",
-                "clone",
-                f"{master_org}/{template}",
-                str(soldir),
-                "--",
-                "-q",
-                "-b",
-                SOLUTION_BRANCH,
-            )[0]
-            != 0
-        ):
+        if not clone(master_org, template, soldir, branch=SOLUTION_BRANCH):
             log_err(
                 f"no `{SOLUTION_BRANCH}` branch on {master_org}/{template} - no hidden "
                 f"tests to run; nothing to collect."

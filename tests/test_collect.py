@@ -312,6 +312,20 @@ def test_run_tests_renames_a_non_py_nbconvert_output(
     assert "renamed the stray output" in out and "starter" not in out
 
 
+def test_run_tests_copies_a_symlinked_fixture_as_a_link(monkeypatch, tmp_path):
+    # The hidden tests are copied out of the solution branch with a plain copytree, which
+    # FOLLOWS links - so one dangling fixture symlink raised and zeroed the whole cohort.
+    _fake_nbconvert(monkeypatch, None)
+    work = tmp_path / "sub"
+    work.mkdir()
+    tests = tmp_path / "hidden"
+    tests.mkdir()
+    (tests / "test_x.py").write_text("def test_solve(): pass\n")
+    (tests / "fixture.csv").symlink_to("nowhere.csv")
+
+    assert collect._run_tests(work, tests)["score"] == 1
+
+
 def test_run_tests_leaves_a_correct_py_conversion_alone(monkeypatch, tmp_path):
     # The happy path must not be disturbed: a notebook declaring `file_extension: ".py"`
     # already converts to starter.py, and a stray same-stem .txt is not the script.
@@ -636,21 +650,23 @@ def test_load_snapshots_distinguishes_a_missing_file_from_blank_shas(monkeypatch
 
 
 def _clone_writing(grading: str):
-    """A `gh` whose `repo clone` of the template's solution branch is faked into a real
+    """A `ghcli.clone` double that fakes the template's solution branch into a real
     directory carrying `grading`."""
 
-    def fake_gh(*args, **kwargs):
-        if args[:2] == ("repo", "clone"):
-            dest = Path(args[3])
-            dest.mkdir(parents=True, exist_ok=True)
-            (dest / "grading.yml").write_text(grading)
-            (dest / "tests").mkdir(exist_ok=True)
-        return (0, "")
+    def fake_clone(org, repo, dest, branch=None):
+        dest = Path(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+        (dest / "grading.yml").write_text(grading)
+        (dest / "tests").mkdir(exist_ok=True)
+        return True
 
-    return fake_gh
+    return fake_clone
 
 
-_fake_solution_clone = _clone_writing("autograde: true\nmax_auto: 2\n")
+def _stub_solution_clone(monkeypatch, grading: str = "autograde: true\nmax_auto: 2\n"):
+    """Fake the solution-branch clone, and answer every other `gh` blandly."""
+    monkeypatch.setattr(collect, "clone", _clone_writing(grading))
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, ""))
 
 
 def _captured_writes(monkeypatch) -> list[tuple[str, str]]:
@@ -667,7 +683,7 @@ def _captured_writes(monkeypatch) -> list[tuple[str, str]]:
 
 
 def _stub_collect(monkeypatch, snapshots):
-    monkeypatch.setattr(collect, "gh", _fake_solution_clone)
+    _stub_solution_clone(monkeypatch)
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(
         collect,
@@ -857,7 +873,7 @@ def test_collect_resolves_the_cohort_type_from_the_entry_not_the_cohort_name(
 def test_collect_records_a_skip_when_the_template_has_no_solution_branch(monkeypatch):
     # Fire-once: no marker means the scheduler re-clones this template and re-decides the
     # same skip on every hourly tick, for ever. Hand-marked assignments are common.
-    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "no such branch"))
+    monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
@@ -867,7 +883,7 @@ def test_collect_records_a_skip_when_the_template_has_no_solution_branch(monkeyp
 
 
 def test_collect_records_a_skip_when_autograde_is_disabled(monkeypatch):
-    monkeypatch.setattr(collect, "gh", _clone_writing("autograde: false\n"))
+    _stub_solution_clone(monkeypatch, "autograde: false\n")
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
@@ -878,7 +894,7 @@ def test_collect_records_a_skip_when_autograde_is_disabled(monkeypatch):
 
 def test_collect_dry_run_records_no_skip(monkeypatch):
     # A dry run must not fire the marker - that would silence the real run that follows.
-    monkeypatch.setattr(collect, "gh", _clone_writing("autograde: false\n"))
+    _stub_solution_clone(monkeypatch, "autograde: false\n")
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort", dry_run=True) == 0
@@ -890,7 +906,7 @@ def test_collect_with_nothing_gradable_records_a_skip_and_succeeds(monkeypatch, 
     # whose team has no members). The snapshot is frozen, so an hourly retry would see
     # exactly this and go red every hour - record the skip and stay green.
     _stub_collect(monkeypatch, {"assignment-1-team-x": ""})
-    monkeypatch.setattr(collect, "gh", _clone_writing("type: group\nautograde: true\n"))
+    _stub_solution_clone(monkeypatch, "type: group\nautograde: true\n")
     monkeypatch.setattr(
         collect,
         "submission_targets",
@@ -1529,7 +1545,7 @@ def test_an_unwritten_autograde_false_marker_goes_red_rather_than_green(
     # The `_skipped.json` record IS the skip: without it the cron re-clones the template
     # and re-decides the identical skip on every hourly tick, for ever. Returning 0 on a
     # failed write reported that as done.
-    monkeypatch.setattr(collect, "gh", _clone_writing("autograde: false\n"))
+    _stub_solution_clone(monkeypatch, "autograde: false\n")
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     _failing_put_file(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
@@ -1539,7 +1555,7 @@ def test_an_unwritten_autograde_false_marker_goes_red_rather_than_green(
 def test_an_unwritten_no_solution_branch_marker_goes_red(monkeypatch, capsys):
     # No `solution` branch means hand-marked, recorded once. A failed record means the
     # same clone attempt, and the same decision, every hour.
-    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "no such branch"))
+    monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     _failing_put_file(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
@@ -1548,7 +1564,7 @@ def test_an_unwritten_no_solution_branch_marker_goes_red(monkeypatch, capsys):
 
 def test_an_unwritten_nothing_gradable_marker_goes_red(monkeypatch, capsys):
     _stub_collect(monkeypatch, {"assignment-1-team-x": ""})
-    monkeypatch.setattr(collect, "gh", _clone_writing("type: group\nautograde: true\n"))
+    _stub_solution_clone(monkeypatch, "type: group\nautograde: true\n")
     monkeypatch.setattr(
         collect,
         "submission_targets",

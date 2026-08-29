@@ -1037,3 +1037,19 @@ def test_wait_for_content_does_not_sleep_after_its_last_poll(monkeypatch):
     monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, "0"))
     assert assign._wait_for_content("COHORT", "a1", attempts=3, delay=1.5) is False
     assert slept == [1.5, 1.5]
+
+
+def test_a_solution_holding_a_symlink_still_pushes(tmp_path, monkeypatch):
+    # A plain copytree FOLLOWS links: one pointing at nothing raises and one pointing at
+    # its own parent recurses, so a single such file aborted the handout - hourly.
+    sol = tmp_path / "solution"
+    sol.mkdir()
+    (sol / "answers.md").write_text("the answers")
+    (sol / "stale.md").symlink_to("nowhere.md")
+    monkeypatch.setattr(
+        assign,
+        "clone",
+        lambda org, repo, dest, branch=None: Path(dest).mkdir(parents=True) or True,
+    )
+    monkeypatch.setattr(assign, "git", lambda *a, **k: (0, ""))
+    assert assign.push_solution("COHORT", "a1-ada", sol) is True

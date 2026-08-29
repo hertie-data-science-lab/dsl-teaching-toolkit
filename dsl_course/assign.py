@@ -29,7 +29,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
 import sys
 import tempfile
 import time
@@ -47,6 +46,7 @@ from .course import (
     submission_repo,
 )
 from .discovery import ASSIGNMENT_TEMPLATE_TOPIC, list_org_repos
+from .fs import copy_tree
 from .gh_contents import file_exists, put_file
 from .ghcli import GIT_ENV, clone, gh, git
 from .log import log, log_err, log_ok, log_person, log_skip, log_step
@@ -205,17 +205,7 @@ def fetch_solution(master_org: str, template: str, dest: Path) -> Path | None:
 
     Solutions live on a non-default branch so native template-generate (default branch
     only) never copies them into student repos - they're pushed separately, on demand."""
-    code, _ = gh(
-        "repo",
-        "clone",
-        f"{master_org}/{template}",
-        str(dest),
-        "--",
-        "-q",
-        "-b",
-        SOLUTION_BRANCH,
-    )
-    if code != 0:
+    if not clone(master_org, template, dest, branch=SOLUTION_BRANCH):
         log_err(
             f"  ! no `{SOLUTION_BRANCH}` branch on {master_org}/{template} - "
             f"nothing to push (add the solution there first)"
@@ -240,7 +230,7 @@ def push_solution(cohort_org: str, repo: str, sol_dir: Path) -> bool:
         wd = Path(work) / "r"
         if not clone(cohort_org, repo, wd):
             return False
-        shutil.copytree(sol_dir, wd / SOLUTION_DIR, dirs_exist_ok=True)
+        copy_tree(sol_dir, wd / SOLUTION_DIR)
         git("-C", str(wd), *GIT_ENV, "add", "-A")
         code, _ = git(
             "-C",

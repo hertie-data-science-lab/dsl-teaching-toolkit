@@ -187,3 +187,14 @@ def test_reads_are_never_paced(monkeypatch):
 )
 def test_which_argv_shapes_count_as_a_write(args, mutating):
     assert ghcli._is_mutating(args) is mutating
+
+
+def test_clone_carries_a_branch_when_one_is_asked_for(monkeypatch):
+    # The solution branch is cloned in two places, which each spelled the argv out by hand;
+    # a clone that quietly lands on the default branch reads as "no solution here".
+    seen: list[tuple[str, ...]] = []
+    monkeypatch.setattr(ghcli, "gh", lambda *a, **k: seen.append(a) or (0, ""))
+    assert ghcli.clone("O", "R", "/tmp/x", branch="solution")
+    assert seen[-1] == ("repo", "clone", "O/R", "/tmp/x", "--", "-q", "-b", "solution")
+    ghcli.clone("O", "R", "/tmp/x")
+    assert seen[-1] == ("repo", "clone", "O/R", "/tmp/x", "--", "-q")
