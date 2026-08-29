@@ -7,7 +7,7 @@ from __future__ import annotations
 from fnmatch import fnmatch
 from functools import cache
 
-from .ghcli import gh, is_missing_resource
+from .ghcli import gh, is_already_exists, is_missing_resource
 from .log import log, log_err, log_ok, log_skip
 
 
@@ -236,10 +236,7 @@ def create_repo(
     if code == 0:
         log_ok(f"repo created: {org}/{name}")
         return True
-    # Only a genuine name-clash 422 is success. A bare `"422" in out` also swallowed an
-    # invalid-name or policy/plan 422 as success, so a caller would then write into a repo
-    # that was never created. Key on GitHub's specific message text instead.
-    if "name already exists" in out.lower():
+    if is_already_exists(out):
         log_skip(f"repo {org}/{name}")
         return True
     log_err(f"failed to create repo {org}/{name}: {out[:200]}")
@@ -383,7 +380,7 @@ def generate_from_template(
     )
     if code == 0:
         return True
-    if "name already exists" in out.lower():
+    if is_already_exists(out):
         log_skip(f"repo {owner}/{name}")
         return True
     log_err(f"failed to generate {owner}/{name} from template: {out[:200]}")

@@ -52,7 +52,7 @@ from .gh_contents import (
     require_csv_header,
     strip_bom,
 )
-from .ghcli import GIT_ENV, gh, git
+from .ghcli import GIT_ENV, gh, git, is_already_exists
 from .log import log, log_err, log_ok, log_step, log_verbose
 from .repos import (
     add_collaborator,
@@ -581,7 +581,7 @@ def render(cohort_org: str) -> int:
     )
     if code == 0:
         log_ok(f"preview PR opened: {out.strip().splitlines()[-1]}")
-    elif "already exists" in out.lower():
+    elif is_already_exists(out):
         log_ok("preview PR already open for this branch (updated).")
     else:
         log_err(f"could not open PR: {out[:200]}")

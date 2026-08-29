@@ -8,7 +8,7 @@ import json
 import re
 from functools import cache, lru_cache
 
-from .ghcli import gh
+from .ghcli import gh, is_already_exists
 from .log import log_err, log_ok, log_skip, log_verbose
 
 # GitHub usernames: 1-39 chars, ASCII alphanumerics or single hyphens, no leading/
@@ -44,17 +44,7 @@ def create_team(
     if code == 0:
         log_ok(f"team created: {name}")
         return True
-    # Only a genuine duplicate-name 422 is success. A bare `"422" in out` also swallowed
-    # an invalid-name or policy/plan 422 as success, so a caller would then write into a
-    # team that was never created. Key on the message text, and on all three spellings
-    # GitHub uses: "already exists", the JSON `already_exists` error code, and - what the
-    # teams endpoint actually returns - "Name must be unique for this org". Missing that
-    # last one hard-failed every membership sync after a team's first creation.
-    lower = out.lower()
-    if any(
-        phrase in lower
-        for phrase in ("already exists", "already_exists", "must be unique")
-    ):
+    if is_already_exists(out):
         log_skip(f"team {name}")
         return True
     log_err(f"failed to create team {name}: {out[:200]}")

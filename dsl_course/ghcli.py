@@ -144,3 +144,24 @@ def is_missing_resource(out: str) -> bool:
     SENSITIVE, so a lowercase `not found` inside some other error's text (a jq key miss,
     say) is NOT misread as a 404 and does not suppress a real failure."""
     return "HTTP 404" in out or "Not Found" in out
+
+
+# What a failed create means when the thing is ALREADY THERE: GitHub's 422 name clash, its
+# JSON `already_exists` error code, the teams endpoint's "Name must be unique for this org",
+# and a plain 409 Conflict (the Pages endpoint's answer). Deliberately these phrasings and
+# not a bare "422"/"already" - an invalid-name or policy 422 read as success would let a
+# caller go on writing into a repo or team that was never created.
+_ALREADY_EXISTS_MARKERS = (
+    "already exists",
+    "already_exists",
+    "must be unique",
+    "http 409",
+)
+
+
+def is_already_exists(out: str) -> bool:
+    """Whether a failed `gh` output means the resource is already there - an idempotent
+    success, not an error. The twin of `is_missing_resource`, and shared for the same
+    reason: every create-if-absent site must agree on what "already there" looks like."""
+    lower = out.lower()
+    return any(m in lower for m in _ALREADY_EXISTS_MARKERS)

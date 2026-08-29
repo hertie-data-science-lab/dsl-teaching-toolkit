@@ -32,7 +32,7 @@ from .course import (
 )
 from .discovery import central_ref_for, discover_assignments, discover_cohorts
 from .gh_contents import put_files, refresh_stubs, seed_files_if_absent, seed_if_absent
-from .ghcli import GIT_ENV, gh, git
+from .ghcli import GIT_ENV, gh, git, is_already_exists
 from .log import log, log_err, log_ok, log_skip, log_step
 from .readings import READING_OVERLAY_FILE
 from .repos import create_repo, generate_from_template, repo_exists, set_repo_topics
@@ -750,7 +750,7 @@ def scaffold_site(org: str) -> int:
         "-f",
         "build_type=workflow",
     )
-    if code != 0 and "409" not in out and "already" not in out.lower():
+    if code != 0 and not is_already_exists(out):
         # POST creates; PUT updates a site that already has a different build type. Its
         # return used to be dropped, so a repo where BOTH calls failed - no Pages at all -
         # went on to "site scaffolded -> https://...", a URL that has never served
