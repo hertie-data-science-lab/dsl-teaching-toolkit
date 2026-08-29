@@ -58,7 +58,8 @@ escape hatch: invisible to config & Check cohort setup`"]
 ## What `course-admin` grants
 
 Membership of **that course org's own `course-admin` team** makes **every** workflow in that org's
-Actions tab visible and runnable, across all its cohorts, and gives admin on each cohort org too.
+Actions tab visible and runnable, across all its cohorts. The team is mirrored into each of the
+course's cohort orgs, where it holds **admin on every repo** - not ownership of the org itself.
 It is scoped to **one course**.
 
 Cron-driven runs (**Scheduled release**, and the automatic paths of **Sync site** /
@@ -81,10 +82,29 @@ So a TA on `f2026` can push labs into `course-materials-f2026` and release them 
 without any further grant - the release itself runs server-side as the bot.
 
 The suffix match is the whole rule. A course-org repo **without** the year tag in its name is not
-covered; name per-year content repos `<thing>-<tag>`, or grant that repo by hand. Newly scaffolded
-tagged repos are picked up on the next Sync membership.
+covered; name per-year content repos `<thing>-<tag>`, or grant that repo by hand. A repo scaffolded
+by **New materials repo** / **New assignment** is granted **as it is created**, not on some later
+sync.
 
 Cohort-side, the same people get write on `classroom-config` and `welcome`.
+
+## What faculty hold on each repo
+
+Two teams carry every faculty grant: `instructors` (this org's teaching team) and `course-admin`.
+
+| Repo | `instructors` | `course-admin` |
+|---|---|---|
+| course org - **every** repo, `.github` included | push | admin |
+| cohort `.github`, `welcome`, `classroom-config` | push | admin |
+| cohort released content, submission repos, `grades-<handle>` | **read** | admin |
+
+Read on everything a cohort *receives*: a re-release overwrites released material, and marks
+live in `classroom-config/grades/<slug>.csv` (**Distribute grades** rewrites gradebooks from it),
+so an edit in the received copy would silently vanish. `.github` keeps push because GitHub
+requires write to trigger a `workflow_dispatch`.
+
+Grants are set at repo creation; the nightly **Refresh actions** sweep raises any repo below its
+floor and never demotes.
 
 ## The four `instructors` teams
 
@@ -112,7 +132,8 @@ record who's on it elsewhere. Route FA (faculty assistant) and TA access through
   team or `instructors-<tag>` through the GitHub Teams UI survives only until the next Sync
   membership run, which removes anyone the config doesn't name. A hand-*removal* is likewise
   re-added. Edit the file.
-- **Students never get write**, so they never see the workflows.
+- **Students hold `maintain` on their own submission repo** and read on their own
+  `grades-<handle>`; nowhere else, so no faculty workflow is visible or runnable for them.
 - **New members must accept a one-time org invite** - membership shows `pending` until they do.
 - **Nobody ever holds the bot token.** Every workflow runs server-side under `DSL_BOT_TOKEN`; the
   actor's own permissions are only ever used as the gate.

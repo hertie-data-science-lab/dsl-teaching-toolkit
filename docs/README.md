@@ -6,8 +6,8 @@ Step-by-step runbooks for instructor-facing processes, end to end.
 
 | Tier | Lives in | Lifetime | Holds |
 |------|----------|----------|-------|
-| **Course org** | e.g. `<course-name>-<CODE>` | persistent (all years) | materials, assignment templates, the faculty & instructors **control panel** (`.github`) |
-| **Cohort org** | e.g. `<course-name>-f/sYYYY` | one per year | released materials, student repos, roster, the cohort website |
+| **Course org** | `hertie-<course-slug>-<code>`, e.g. `hertie-dsl-demo-course-e1234` | persistent (all years) | materials, assignment templates, the faculty & instructors **control panel** (`.github`) |
+| **Cohort org** | `hertie-<course-slug>-<termtag>`, termtag `fYYYY`/`sYYYY`, e.g. `hertie-dsl-demo-f2026` | one per year | released materials, student repos, roster, the cohort website |
 
 The course org is the single source of truth (SSOT); each cohort org receives **releases** of it.
 Full model: [`../docs-admin-arch/architecture.md`](../docs-admin-arch/architecture.md).
@@ -81,7 +81,18 @@ Numbered in reading order - **course-level** (01-03) before **cohort-level** (04
 | 11 | [Configure the cohort website](11-configure-cohort-site.md) | course + cohort | whenever the site should say something different - and to know what not to hand-edit |
 
 For a one-page summary of **every workflow**, see [`actions-reference.md`](reference/actions-reference.md);
-for who may run them, [`access-reference.md`](reference/access-reference.md).
+for who may run them, [`access-reference.md`](reference/access-reference.md). If you maintain the
+toolkit itself rather than a course, start at [`maintainers.md`](reference/maintainers.md).
+
+## Three things that look cosmetic and are not
+
+- **The cohort org's `fYYYY`/`sYYYY` suffix** is parsed: it picks the year's `instructors-<tag>`
+  team and `*-<tag>` content repos. The course org's name is not validated.
+- **Repo topics** (`dsl-course-hub`, `dsl-cohort`, `submission`, `gradebook`,
+  `assignment-template`) are how discovery tells orgs and repos apart. Remove one by hand and
+  the repo drops out of every sweep.
+- **`.github/.last-refresh`** is a heartbeat: GitHub disables crons after 60 quiet days, so the
+  nightly refresh commits a date. If it has stopped, run any workflow by hand to restart them.
 
 ## Example org artefacts
 

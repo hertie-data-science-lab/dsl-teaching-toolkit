@@ -9,6 +9,7 @@ pass against the flag list `gh --help` actually publishes. They skip where gh is
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -19,6 +20,20 @@ from dsl_course import bootstrap_course as bc
 from dsl_course import seed
 
 needs_gh = pytest.mark.skipif(shutil.which("gh") is None, reason="gh CLI not installed")
+
+
+def test_ci_actually_has_the_gh_cli_to_check_against():
+    # Every test below skips when `gh` is absent, so an image without the CLI turns this
+    # whole file into a green no-op - which is precisely the state in which an invented
+    # flag ships. Locally that is a reasonable convenience; in CI it is the failure this
+    # file exists to prevent, so there the CLI has to be there.
+    if not os.environ.get("CI"):
+        pytest.skip("local run - the gh CLI is optional here")
+    assert shutil.which("gh") is not None, (
+        "CI has no `gh` on PATH, so every flag-contract test below silently skipped. "
+        "Install the CLI in the workflow image (it is preinstalled on ubuntu-latest)."
+    )
+
 
 # Flag definition lines only: "  -b, --body string   The value..." / "      --no-store".
 # Anchored to the definition column so flags mentioned in the EXAMPLES prose are ignored.

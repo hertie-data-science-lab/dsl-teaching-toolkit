@@ -39,9 +39,11 @@ and `dry_run` (both default **off**). It runs the hidden tests and writes into
 - `grades/<slug>.csv` → the `autograde_score` column, on group assignments as well as individual ones (every member of a team carries the team's count, plus `team`). **Write-once:**
   a cell that already holds a value is never overwritten - re-running fills empty cells only,
   so your hand-edits stand. For fresh machine scores, blank those cells first.
-- `autograde/<slug>/<handle-or-team>.json` → the raw per-test result, for appeals. This folder
-  is also the **fire-once marker**: while it exists the cron will not grade this assignment
-  again. Delete it to let the next hourly tick re-grade.
+- `autograde/<slug>/<handle-or-team>.json` → the raw per-test result, for appeals.
+- `autograde/<slug>/_graded.json` (a completed run) or `_skipped.json` (a decision not to
+  grade) → the **fire-once marker**. While either record exists the cron will not grade this
+  assignment again; the folder alone is not the marker, so an aborted run still re-grades.
+  Delete the folder to let the next hourly tick re-grade.
 
 There is **no deadline input**: the deadline is the cohort schedule's
 `assignments.<slug>.grading_datetime` (default: the `due_datetime`), and the graded commit is the one frozen into
@@ -50,6 +52,10 @@ There is **no deadline input**: the deadline is the cohort schedule's
 there means nothing was pushed by the deadline, and that scores zero.
 
 Nothing is written to any student repo. Auditors are never graded.
+
+The run log is public, so it names each submission by a per-run `#tag`, not by handle. The tag
+is recorded beside the repo in `classroom-config/autograde/<slug>/*.json`; scores are in
+`classroom-config/grades/<slug>.csv`.
 
 ### What autograde guarantees
 
@@ -64,8 +70,10 @@ Nothing is written to any student repo. Auditors are never graded.
 - **A failed run is safe to retry.** The fire-once marker is written only after every score is
   recorded and every repo was read. If a run is interrupted, or any submission repo can't be
   read, no marker is written and the next tick re-grades - already-recorded scores are left
-  untouched (write-once). A snapshot is likewise never frozen while every target repo is still
-  empty or absent, so a not-yet-provisioned assignment isn't locked in as "nobody submitted".
+  untouched (write-once). A snapshot is likewise never frozen while **every** target repo is
+  still absent (404 - not provisioned yet), so a late hand-out isn't locked in as "nobody
+  submitted". A repo that exists but is empty is a real non-submission and *is* frozen, as a
+  zero - that closes the backdating window.
 
 ## 2. Add your marks (on top of / instead of autograde)
 
@@ -137,7 +145,8 @@ Copies each merged gradebook to `grades-<handle>/grades.yml` and emails the stud
 > *NB: the automated email functionality is configured centrally by the DSL team; if/when it isn't live, the grades still reach each student's repo, but no email notification will be dispatched.
 
 **`dry_run` defaults to `true`** - it pushes nothing and sends nothing until you untick it.
-`silent` pushes the grades without emailing.
+A dry run lists the **masked** recipient and the subject of each message, never the body:
+this log is public. `silent` pushes the grades without emailing.
 
 ## Next
 

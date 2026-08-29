@@ -59,15 +59,21 @@ def test_score_from_junit_handles_testsuites_root():
     assert result == {"score": 1, "max": 1, "tests": [{"name": "a", "passed": True}]}
 
 
-def test_summary_lines_use_tick_cross_not_emoji():
-    result = {
-        "score": 1,
-        "max": 2,
-        "tests": [{"name": "a", "passed": True}, {"name": "b", "passed": False}],
-    }
-    text = "\n".join(collect.summary_lines(result))
-    assert "✓ a" in text and "✗ b" in text
-    assert "✅" not in text and "❌" not in text
+def test_the_public_log_never_names_a_submission_repo(monkeypatch, capsys):
+    # Every grading log line is world-readable (the workflows run in the course org's
+    # PUBLIC .github), and a submission repo is `<slug>-<handle>`. The tag is stable so a
+    # marker can match it to the private archive, and carries no handle.
+    ref = collect.target_ref("assignment-1-ada-l")
+    assert ref == collect.target_ref("assignment-1-ada-l")
+    assert ref.startswith("#") and len(ref) == 8
+    assert "ada" not in ref
+    # The clone-failure paths log the tag, not the repo.
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "clone failed"))
+    monkeypatch.setattr(collect, "repo_missing", lambda *a: True)
+    collect._grade_target("COHORT", "assignment-1-ada-l", {}, None, "2026-09-08")
+    captured = capsys.readouterr()
+    out = captured.out + captured.err
+    assert "ada-l" not in out and ref in out
 
 
 def test_today_in_cohort_tz_follows_the_schedule_timezone():
@@ -116,17 +122,33 @@ def test_snapshot_path_lives_under_snapshots():
 
 
 @pytest.mark.parametrize(
-    "deadline,expected",
+    "deadline,tz,expected",
     [
-        ("2026-10-13", "2026-10-13T23:59:59Z"),  # bare date -> end of day, like the pin
-        ("2026-10-15T23:59:59+02:00", "2026-10-15T21:59:59Z"),  # offset -> UTC
-        ("2026-10-15T23:59:59", "2026-10-15T23:59:59Z"),  # naive read as UTC
+        # A bare date is the end of that day WHERE THE STUDENTS ARE. Read as end-of-day
+        # UTC, "the 13th" ran until 01:59 on the 14th in Berlin summer time - two hours of
+        # late work graded as on time.
+        ("2026-10-13", "Europe/Berlin", "2026-10-13T21:59:59Z"),
+        ("2026-10-13", "America/New_York", "2026-10-14T03:59:59Z"),
+        ("2026-10-13", "UTC", "2026-10-13T23:59:59Z"),
+        # A naive datetime is a local one, for the same reason.
+        ("2026-10-15T12:00:00", "Europe/Berlin", "2026-10-15T10:00:00Z"),
+        # An explicit offset already names an instant - only re-expressed, never moved.
+        ("2026-10-15T23:59:59+02:00", "America/New_York", "2026-10-15T21:59:59Z"),
+        # No zone given: the schedule's own default, exactly as _today_in_cohort_tz uses.
+        ("2026-10-13", None, "2026-10-13T21:59:59Z"),
     ],
 )
-def test_until_param_is_always_a_utc_z_stamp(deadline, expected):
+def test_until_param_is_a_utc_z_stamp_of_the_cohorts_own_deadline(
+    deadline, tz, expected
+):
     # A `+HH:MM` offset in a query string would be read as a space, silently shifting the
     # cutoff by hours - so the API cutoff is always normalised to UTC Z.
-    assert collect._until_param(deadline) == expected
+    assert collect._until_param(deadline, tz) == expected
+
+
+def test_an_unparseable_deadline_still_raises_rather_than_matching_nothing():
+    with pytest.raises(ValueError):
+        collect.local_deadline("last thursday", "Europe/Berlin")
 
 
 # ------------------------------------------------------------------------------ the pin
@@ -261,7 +283,10 @@ def test_run_tests_renames_a_non_py_nbconvert_output(
         "max": 1,
         "tests": [{"name": "test_solve", "passed": True}],
     }
-    assert "-> starter.py" in capsys.readouterr().out  # the rename is not silent
+    # The rename is not silent - but names no file: the notebook is student-named and the
+    # log is public.
+    out = capsys.readouterr().out
+    assert "renamed the stray output" in out and "starter" not in out
 
 
 def test_run_tests_leaves_a_correct_py_conversion_alone(monkeypatch, tmp_path):
@@ -421,7 +446,9 @@ def _stub_snapshot_write(monkeypatch, shas: dict[str, str | None], existing=None
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=False: [(r, r.split("-")[-1], []) for r in shas],
+        lambda org, slug, is_group=False, teams_key=None: [
+            (r, r.split("-")[-1], []) for r in shas
+        ],
     )
     monkeypatch.setattr(
         collect, "_snapshot_sha", lambda org, repo, deadline: shas[repo]
@@ -558,7 +585,7 @@ def _stub_collect(monkeypatch, snapshots):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None: [
+        lambda org, slug, is_group=None, teams_key=None: [
             (f"{slug}-{h}", h, [h]) for h in ("anna", "ben", "cara")
         ],
     )
@@ -620,7 +647,7 @@ def test_collect_resolves_the_cohort_type_from_the_entry_not_the_cohort_name(
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None: (
+        lambda org, slug, is_group=None, teams_key=None: (
             kinds.append(is_group) or [(f"{slug}-team-x", "team-x", ["anna", "ben"])]
         ),
     )
@@ -684,7 +711,9 @@ def test_collect_with_nothing_gradable_records_a_skip_and_succeeds(monkeypatch, 
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None: [(f"{slug}-team-x", "team-x", [])],
+        lambda org, slug, is_group=None, teams_key=None: [
+            (f"{slug}-team-x", "team-x", [])
+        ],
     )
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
@@ -966,7 +995,7 @@ def test_snapshot_assignment_requires_and_passes_is_group_through(monkeypatch):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group: seen.append(is_group) or [],
+        lambda org, slug, is_group, teams_key=None: seen.append(is_group) or [],
     )
     collect.snapshot_assignment("Cohort", "assignment-1", "2026-11-15", is_group=False)
     collect.snapshot_assignment("Cohort", "assignment-1", "2026-11-15", is_group=True)
@@ -1214,3 +1243,96 @@ def test_collect_withholds_the_sentinel_when_an_archive_write_fails(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
     assert "grades/assignment-1.csv" in written  # scores still durably recorded
     assert "autograde/assignment-1/_graded.json" not in written  # marker withheld
+
+
+def test_a_zero_is_recorded_only_when_github_says_the_repo_is_gone(monkeypatch):
+    # `repo_exists` reads ANY failure as absent. A clone hiccup followed by one 5xx on the
+    # probe used to write a permanent, write-once zero for a student who had submitted.
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "clone failed"))
+    monkeypatch.setattr(collect, "repo_missing", lambda *a: False)  # a 5xx: cannot tell
+    assert collect._grade_target("K", "a1-ada", {}, None, "2026-09-08") is None
+    monkeypatch.setattr(collect, "repo_missing", lambda *a: True)  # GitHub says 404
+    result = collect._grade_target("K", "a1-ada", {}, None, "2026-09-08")
+    assert result["score"] == 0 and "does not exist" in result["note"]
+
+
+# ---------- teams.csv is keyed on the SCHEDULE KEY, submission repos on the cohort name
+
+
+def test_submission_targets_looks_teams_up_by_the_schedule_key(monkeypatch):
+    # `cohort_dest_repo` makes the cohort-side name differ from the schedule key. teams.csv
+    # carries the key (the Join-team form writes what schedule.yml declares), so looking up
+    # by the name found no teams and the whole group assignment silently had nothing to
+    # grade - while the repos it should have graded existed under the name.
+    asked: list[str] = []
+    monkeypatch.setattr(collect.teams, "load", lambda org: {})
+    monkeypatch.setattr(
+        collect.teams,
+        "teams_for",
+        lambda rows, slug: (
+            asked.append(slug)
+            or ({"team-1": ["ada-l"]} if slug == "regression" else {})
+        ),
+    )
+    targets = collect.submission_targets(
+        "Cohort", "wk3-regression", True, teams_key="regression"
+    )
+    assert asked == ["regression"]
+    assert targets == [("wk3-regression-team-1", "team-1", ["ada-l"])]
+
+
+def test_submission_targets_defaults_the_teams_key_to_the_name(monkeypatch):
+    monkeypatch.setattr(collect.teams, "load", lambda org: {})
+    monkeypatch.setattr(
+        collect.teams,
+        "teams_for",
+        lambda rows, slug: {"team-1": ["ada-l"]} if slug == "assignment-4" else {},
+    )
+    assert collect.submission_targets("Cohort", "assignment-4", True) == [
+        ("assignment-4-team-1", "team-1", ["ada-l"])
+    ]
+
+
+# ------------- a skip that was not recorded is not a skip (the marker write is checked)
+
+
+def _failing_put_file(monkeypatch):
+    monkeypatch.setattr(collect, "put_file", lambda *a, **k: False)
+
+
+def test_an_unwritten_autograde_false_marker_goes_red_rather_than_green(
+    monkeypatch, capsys
+):
+    # The `_skipped.json` record IS the skip: without it the cron re-clones the template
+    # and re-decides the identical skip on every hourly tick, for ever. Returning 0 on a
+    # failed write reported that as done.
+    monkeypatch.setattr(collect, "gh", _clone_writing("autograde: false\n"))
+    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    _failing_put_file(monkeypatch)
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
+    assert "could not record the skip" in capsys.readouterr().err
+
+
+def test_an_unwritten_no_solution_branch_marker_goes_red(monkeypatch, capsys):
+    # No `solution` branch means hand-marked, recorded once. A failed record means the
+    # same clone attempt, and the same decision, every hour.
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (1, "no such branch"))
+    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    _failing_put_file(monkeypatch)
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
+    assert "could not record the skip" in capsys.readouterr().err
+
+
+def test_an_unwritten_nothing_gradable_marker_goes_red(monkeypatch, capsys):
+    _stub_collect(monkeypatch, {"assignment-1-team-x": ""})
+    monkeypatch.setattr(collect, "gh", _clone_writing("type: group\nautograde: true\n"))
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group=None, teams_key=None: [
+            (f"{slug}-team-x", "team-x", [])
+        ],
+    )
+    _failing_put_file(monkeypatch)
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
+    assert "could not record the skip" in capsys.readouterr().err

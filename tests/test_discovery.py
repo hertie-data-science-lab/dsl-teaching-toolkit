@@ -27,6 +27,22 @@ INFRA_AND_CONTENT = [
 ]
 
 
+def test_a_gradebook_or_submission_repo_is_recognised_by_name_too():
+    # The topic is stamped in a separate call after the create and never converged, so a
+    # failed PATCH must not put `grades-<handle>` or `<slug>-<handle>` on a public page.
+    repos = [
+        {"name": "assignment-1", "isTemplate": True, "topics": []},
+        {"name": "assignment-1-ada-l", "isTemplate": False, "topics": []},
+        {"name": "grades-ada-l", "topics": []},
+        {"name": "materials", "topics": []},
+    ]
+    assert discovery.has_infra_topic({"name": "grades-ada-l", "topics": []})
+    assert discovery.is_student_repo(repos[1], repos)
+    assert discovery.is_student_repo(repos[2], repos)
+    assert not discovery.is_student_repo(repos[3], repos)
+    assert not discovery.is_student_repo(repos[0], repos)  # the template itself
+
+
 def test_is_infra_repo_excludes_by_name_and_by_topic():
     infra, content = INFRA_AND_CONTENT[:7], INFRA_AND_CONTENT[7:]
     assert all(discovery._is_infra_repo(r) for r in infra)
@@ -223,7 +239,7 @@ def test_both_transports_share_one_tree_fetch(monkeypatch):
 
     def fake_gh(*args, **kwargs):
         calls.append(args)
-        return (0, "lectures\nlectures/01_intro\n")
+        return (0, "false\nlectures\nlectures/01_intro\n")
 
     monkeypatch.setattr(discovery, "get_default_branch", lambda org, repo: "main")
     monkeypatch.setattr(site, "get_default_branch", lambda org, repo: "main")
@@ -231,8 +247,8 @@ def test_both_transports_share_one_tree_fetch(monkeypatch):
     discovery._repo_tree_dirs("Cohort-f2026", "materials")
     site._repo_tree("Cohort-f2026", "materials")
     assert [a[-1] for a in calls] == [
-        '.tree[] | select(.type=="tree") | .path',
-        '.tree[] | select(.type=="blob") | .path',
+        '"\\(.truncated)", (.tree[] | select(.type=="tree") | .path)',
+        '"\\(.truncated)", (.tree[] | select(.type=="blob") | .path)',
     ]
 
 
@@ -261,6 +277,16 @@ def test_read_cohorts_tolerates_a_bare_list_registry(monkeypatch):
         discovery, "get_file_content", _registry("- Course-f2026\n- Course-f2025\n")
     )
     assert discovery.discover_cohorts("Course") == ["Course-f2025", "Course-f2026"]
+
+
+def test_read_cohorts_names_the_file_when_the_yaml_does_not_parse(monkeypatch):
+    # The bare safe_load surfaced a raw PyYAML traceback from wherever the registry
+    # happened to be read, naming "<unicode string>" rather than the file to fix.
+    monkeypatch.setattr(
+        discovery, "get_file_content", _registry("cohorts: [unclosed\n")
+    )
+    with pytest.raises(RuntimeError, match="malformed cohort registry in Course"):
+        discovery._read_cohorts("Course")
 
 
 def test_read_cohorts_raises_on_a_malformed_registry_shape(monkeypatch):
@@ -303,3 +329,35 @@ def test_seed_facade_still_exposes_discovery(monkeypatch):
     monkeypatch.setattr(discovery, "list_org_repos", lambda org: INFRA_AND_CONTENT)
     assert seed.discover_content_repos("Org") == ["course-materials-f2026", "labs"]
     assert seed.COHORTS_PATH == discovery.COHORTS_PATH
+
+
+def test_org_tier_reads_the_dotgithub_topic_then_the_cohort_only_repos_then_gives_up():
+    # None is a real answer: a legacy cohort (`.github` + student repos, no `welcome`, no
+    # topics) is indistinguishable from a course org by elimination, and the faculty
+    # sweep reads "course" as "push everywhere".
+    gh = lambda *topics: {"name": ".github", "topics": list(topics)}
+    assert discovery.org_tier([gh("dsl-cohort"), {"name": "a1-ada"}]) == "cohort"
+    assert discovery.org_tier([gh("dsl-course-hub"), {"name": "cm-f2026"}]) == "course"
+    assert discovery.org_tier([gh(), {"name": "welcome"}]) == "cohort"
+    assert discovery.org_tier([gh(), {"name": "classroom-config"}]) == "cohort"
+    assert discovery.org_tier([gh(), {"name": "assignment-1-ada"}]) is None
+    assert discovery.org_tier([{"name": "materials"}]) is None  # no .github at all
+
+
+def test_student_repo_names_by_topic_or_by_name():
+    # The topics are stamped after the create and never converged, so a failed PATCH must
+    # not let a student repo be treated as faculty-authored content.
+    repos = [
+        {"name": "assignment-1", "isTemplate": True, "topics": []},
+        {"name": "assignment-1-ada-l", "topics": []},  # topic never landed
+        {"name": "assignment-1-wizards", "topics": ["assignment-1", "submission"]},
+        {"name": "grades-ada-l", "topics": []},
+        {"name": "materials", "topics": []},
+        {"name": "welcome", "topics": []},
+    ]
+    # The template itself is not a student repo unless its own topic says so.
+    assert discovery.student_repo_names(repos) == {
+        "assignment-1-ada-l",
+        "assignment-1-wizards",
+        "grades-ada-l",
+    }

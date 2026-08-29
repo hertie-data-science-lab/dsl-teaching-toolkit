@@ -27,7 +27,7 @@ import csv
 import io
 from dataclasses import dataclass
 
-from .utils import get_file_content, log_err, strip_bom
+from .utils import get_file_content, log_err, require_csv_header, strip_bom
 
 CONFIG_REPO = "classroom-config"
 ROSTER_PATH = "students.csv"
@@ -41,6 +41,9 @@ FIELDS = (
     "enrol_code",
     "role",
 )
+# The columns no roster may lack. `enrol_code` and `role` were added later and stay
+# optional so an older cohort keeps parsing; these two are what every consumer keys on.
+REQUIRED_FIELDS = ("hertie_email", "github_handle")
 
 
 @dataclass
@@ -89,7 +92,9 @@ def parse(text: str) -> list[Student]:
     Tolerant of a roster written before a column existed: a missing `enrol_code` or
     `role` column is fine (blank / `enrolled` respectively)."""
     rows = []
-    for row in csv.DictReader(io.StringIO(strip_bom(text))):
+    reader = csv.DictReader(io.StringIO(strip_bom(text)))
+    require_csv_header(reader.fieldnames, REQUIRED_FIELDS, ROSTER_PATH)
+    for row in reader:
         values = {f: (row.get(f) or "").strip() for f in FIELDS}
         values["role"] = normalise_role(values["role"])
         rows.append(Student(**values))

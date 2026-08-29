@@ -381,19 +381,26 @@ type, and the type is never a field you set - it follows from where the row came
 So lecture vs lab is decided by the deployed section folder, not by the entry label, and a
 week with both a lecture and a lab renders two rows.
 
-**Silent failures - the parser never errors.** A malformed entry is dropped, not reported:
+**A malformed entry is dropped - and every drop is reported.** The parser never raises, so
+the rest of the term still runs, but nothing is silent: each drop is named in the run log,
+counted by **Check cohort setup**, and makes `--validate` exit non-zero. A push to
+`schedule.yml` runs **Validate schedule** in `classroom-config`; a file the scheduler cannot
+fully read goes red and opens an issue naming the bad entry.
 
 | Mistake | What happens |
 |---------|--------------|
-| `event_datetime:` missing/unparseable | that entry is silently dropped |
-| `deploy_datetime:` unparseable | silently ignored - that copy ships at the `event_datetime` |
+| `event_datetime:` missing/unparseable | that `releases:`/`events:` entry is dropped |
 | `due_datetime:` missing/unparseable | the whole `assignments:` entry is dropped - no grading pin, no site date |
-| `grading_datetime:` unparseable | silently ignored - the grading deadline falls back to `due_datetime` |
-| unknown `timezone:` | silent fallback to `Europe/Berlin` |
-| `deploy` missing `course_source_repo`/`course_source_path` | that copy is silently skipped |
+| `deploy` missing `course_source_repo`/`course_source_path` | that copy is dropped |
+| `solution_datetime:` malformed, or not after `handout_datetime` | dropped - the solution waits for a human |
+| `handout_datetime:` unparseable | kept, but nothing is ever handed out |
+| `grading_datetime:` unparseable | kept - the grading deadline falls back to `due_datetime` |
+| `deploy_datetime:` unparseable | kept - that copy ships at the `event_datetime` |
+| `max_team_size:` unparseable | kept - no cap |
+| unknown `type:`, unknown key, unknown `timezone:` | kept, on the documented fallback |
 
-Verify with `python3 -m dsl_course.schedule --cohort-org <COHORT>` - anything dropped is
-simply absent from the dump. Workflow: [Schedule releases](07-schedule-releases.md).
+Verify with `python3 -m dsl_course.schedule --cohort-org <COHORT> --validate`. Full account:
+[Schedule releases -> Dropped entries](07-schedule-releases.md#dropped-entries).
 
 **What happens at the grading deadline.** The hourly cron freezes each submission repo's
 commit into `classroom-config/snapshots/<slug>.csv` (write-once - delete it to re-freeze),

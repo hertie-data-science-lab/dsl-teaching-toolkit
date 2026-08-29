@@ -67,10 +67,12 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import io
 import json
 import os
 import resource
+import secrets
 import shutil
 import signal
 import subprocess
@@ -97,7 +99,7 @@ from .utils import (
     log_skip,
     log_step,
     put_file,
-    repo_exists,
+    repo_missing,
 )
 
 CONFIG_REPO = roster.CONFIG_REPO  # classroom-config
@@ -259,13 +261,21 @@ def score_from_junit(xml_text: str) -> dict:
     }
 
 
-def summary_lines(result: dict) -> list[str]:
-    """Human-readable per-target summary (plain tick/cross glyphs, never emoji)."""
-    lines = [f"  Score: {result['score']}/{result['max']}"]
-    if result.get("note"):
-        lines.append(f"  ({result['note']})")
-    lines += [f"    {'✓' if c['passed'] else '✗'} {c['name']}" for c in result["tests"]]
-    return lines
+# Salted per RUN. Without the salt the tag is sha1("<slug>-<handle>") and both halves are
+# public (the slug on the cohort site, the handle in the welcome repo's Join issue titles),
+# so anyone could recompute the tag and read the student back off the log.
+_REF_SALT = secrets.token_hex(8)
+
+
+def target_ref(repo: str) -> str:
+    """A short tag standing in for a submission repo in the run log - stable within a run,
+    unrecoverable from outside it.
+
+    The log is PUBLIC (every workflow runs in the course org's public `.github`) and a
+    submission repo is named `<slug>-<handle>`, so naming it beside a score or a
+    non-submission publishes a student's result. The private per-target archive under
+    autograde/<slug>/ records the tag next to the repo, which is where a marker looks it up."""
+    return "#" + hashlib.sha1((_REF_SALT + repo).encode()).hexdigest()[:7]
 
 
 def _zero_result(note: str) -> dict:
@@ -323,11 +333,18 @@ def _sanitised_env() -> dict:
 
 
 def submission_targets(
-    cohort_org: str, slug: str, is_group: bool
+    cohort_org: str, slug: str, is_group: bool, teams_key: str | None = None
 ) -> list[tuple[str, str, list[str]]]:
     """The submission units for `slug` as (repo, key, members): one per team for a group
     assignment, one per onboarded student otherwise. Empty - with the reason logged - when
     there is nothing to grade.
+
+    `slug` is the cohort-side NAME (`schedule.cohort_name`), which is what every repo here
+    is named after. `teams_key` is the SCHEDULE KEY, which is what teams.csv is keyed on -
+    the Join-team form validates the assignment against `assignments:` in schedule.yml and
+    writes that key. The two differ whenever `cohort_dest_repo` is set, and looking teams
+    up by the name then found none, so a group assignment silently had no targets at all.
+    Defaults to `slug` for the (usual) case where they are the same.
 
     `is_group` is decided upstream by `resolve_is_group` (force -> schedule -> grading.yml)
     and passed in; it is NEVER inferred from teams.csv here. teams.csv is student-writable (a
@@ -335,9 +352,10 @@ def submission_targets(
     decide the assignment's KIND would let a student turn an individual assignment into a group
     one - it is read only to enumerate a KNOWN-group assignment's teams."""
     if is_group:
-        groups = teams.teams_for(teams.load(cohort_org), slug)
+        key = teams_key or slug
+        groups = teams.teams_for(teams.load(cohort_org), key)
         if not groups:
-            log_err(f"no teams for `{slug}` in {cohort_org}/{CONFIG_REPO}/teams.csv.")
+            log_err(f"no teams for `{key}` in {cohort_org}/{CONFIG_REPO}/teams.csv.")
             return []
         return [
             (f"{slug}-{team}", team, members)
@@ -357,16 +375,32 @@ def submission_targets(
     return targets
 
 
-def _until_param(deadline: str) -> str:
-    """`deadline` (ISO date or datetime, with or without an offset) as a UTC `...Z` stamp -
-    the form the commits API's `until=` takes. A bare date means end of that day, matching
-    the date-pin fallback; a naive datetime is read as UTC (every schedule-derived deadline
-    is already offset-carrying)."""
+def local_deadline(deadline: str, tz: str | None = None) -> str:
+    """`deadline` (ISO date or datetime) as an OFFSET-CARRYING ISO string in the COHORT's
+    own timezone. Raises ValueError on anything that is not ISO.
+
+    A bare date means the END of that day, and a naive datetime is a local time, because
+    the deadline a student was given ("submit by the 15th") is a local one - the site shows
+    it in the cohort's zone and schedule.yml declares that zone. Read as UTC, as it was,
+    "the 15th" ran until 01:59 on the 16th in Berlin summer time: two hours of late work
+    graded as on time, and the snapshot froze at the wrong instant to match.
+
+    `tz` is the schedule's `timezone` (`schedule._tz` supplies the default and tolerates an
+    unknown zone). A deadline that already carries an offset names an instant and is only
+    re-expressed, never moved."""
     raw = deadline if ("T" in deadline or ":" in deadline) else f"{deadline}T23:59:59"
     dt = datetime.fromisoformat(raw)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    zone = schedule._tz(tz)
+    return (dt.replace(tzinfo=zone) if dt.tzinfo is None else dt).isoformat()
+
+
+def _until_param(deadline: str, tz: str | None = None) -> str:
+    """`deadline` as a UTC `...Z` stamp - the form the commits API's `until=` takes."""
+    return (
+        datetime.fromisoformat(local_deadline(deadline, tz))
+        .astimezone(timezone.utc)
+        .strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
 
 
 def _snapshot_sha(cohort_org: str, repo: str, deadline: str) -> str | None:
@@ -405,7 +439,7 @@ def _snapshot_sha(cohort_org: str, repo: str, deadline: str) -> str | None:
     # "nobody submitted" for ever. A precise marker match, not a loose `"empty" in out`.
     if is_missing_resource(out):
         return _REPO_ABSENT
-    log_err(f"  ! could not read commits for {cohort_org}/{repo}: {out[:160]}")
+    log_err(f"  ! could not read commits for {target_ref(repo)}: {out[:160]}")
     return None
 
 
@@ -427,7 +461,7 @@ def _warn_if_late_commits_only(cohort_org: str, repo: str, deadline: str) -> Non
     )
     if code == 0 and out.strip():
         log(
-            f"    ({repo} has commit(s), but none on/before {deadline} - an empty freeze "
+            f"    ({target_ref(repo)} has commit(s), but none on/before {deadline} - an empty freeze "
             f"here can also be a client clock skewed past the deadline; check if unexpected)"
         )
 
@@ -507,7 +541,12 @@ def load_snapshots(cohort_org: str, slug: str) -> dict[str, str] | None:
 
 
 def snapshot_assignment(
-    cohort_org: str, slug: str, deadline: str, *, is_group: bool
+    cohort_org: str,
+    slug: str,
+    deadline: str,
+    *,
+    is_group: bool,
+    teams_key: str | None = None,
 ) -> bool:
     """Freeze, at a server-chosen moment, the commit each of `slug`'s submission repos will
     be graded at. Write-once: an existing snapshot is never re-taken or overwritten, so a
@@ -524,7 +563,7 @@ def snapshot_assignment(
     if load_snapshots(cohort_org, slug) is not None:
         log_skip(f"snapshot {snapshot_path(slug)}")
         return True
-    targets = submission_targets(cohort_org, slug, is_group)
+    targets = submission_targets(cohort_org, slug, is_group, teams_key)
     if not targets:
         # Nobody onboarded, or no teams for a group assignment - which is also what an
         # assignment not handed out yet looks like from here. The snapshot is write-once,
@@ -813,7 +852,7 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
             timeout=RUN_TIMEOUT,
         ):
             log_err(
-                f"  ! converting {nb.name} timed out after {RUN_TIMEOUT}s "
+                f"  ! converting a notebook timed out after {RUN_TIMEOUT}s "
                 f"(process group killed) - abandoning this submission"
             )
             return None
@@ -821,8 +860,7 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
         if not script.exists() and (stray := _stray_conversion(nb)):
             stray.rename(script)
             log(
-                f"    ({nb.name} declares no python file_extension - "
-                f"{stray.name} -> {script.name})"
+                "    (a notebook declares no python file_extension - renamed the stray output)"
             )
     with tempfile.TemporaryDirectory() as run:
         tests_dir = Path(run) / "tests"
@@ -889,16 +927,19 @@ def _grade_target(
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "sub"
         if gh("repo", "clone", f"{cohort_org}/{repo}", str(wd), "--", "-q")[0] != 0:
-            if not repo_exists(cohort_org, repo):
-                # The repo genuinely does not exist (deleted, or never provisioned) - a
+            if repo_missing(cohort_org, repo):
+                # GitHub SAYS the repo does not exist (deleted, or never provisioned) - a
                 # recorded zero, NOT a transient failure. Returning None ('unreachable') would
                 # hold the fire-once marker and re-clone + re-grade every OTHER repo hourly,
-                # for ever, on an assignment that can never complete.
+                # for ever, on an assignment that can never complete. Only a 404 counts:
+                # `repo_exists` reads ANY failure as absent, and a clone hiccup followed by
+                # one 5xx on the probe would write a permanent zero for a student who
+                # submitted.
                 log_err(
-                    f"  ! {cohort_org}/{repo} does not exist - scoring 0 (no submission)"
+                    f"  ! {target_ref(repo)} does not exist - scoring 0 (no submission)"
                 )
                 return _zero_result("submission repo does not exist")
-            log_err(f"  ! could not clone {cohort_org}/{repo} (transient - will retry)")
+            log_err(f"  ! could not clone {target_ref(repo)} (transient - will retry)")
             return None
         sha = _pin_commit(wd, deadline, snapshot)
         if sha is None:
@@ -949,11 +990,16 @@ def collect(
         or schedule.grading_datetime_iso(sched, key)
         or _today_in_cohort_tz(sched)
     )
-    # Validate the deadline up front (raises on a non-ISO string). git's `rev-list --before`
-    # would otherwise take an unparseable `--deadline` as an approxidate that silently matches
+    # Pin the deadline to an explicit instant in the COHORT's timezone, once, here: a bare
+    # `--deadline 2026-11-15` means the end of the 15th where the students are, and every
+    # consumer below (the commits API `until=`, git's `rev-list --before`, the log lines)
+    # then reads the same moment instead of each defaulting to the runner's UTC.
+    #
+    # It also validates (raises on a non-ISO string). git's `rev-list --before` would
+    # otherwise take an unparseable `--deadline` as an approxidate that silently matches
     # NOTHING, zeroing every submission in the cohort without a word.
     try:
-        _until_param(deadline)
+        deadline = local_deadline(deadline, sched.timezone)
     except ValueError:
         log_err(
             f"--deadline '{deadline}' is not an ISO date/datetime - refusing to grade "
@@ -981,13 +1027,18 @@ def collect(
                 f"tests to run; nothing to collect."
             )
             # Hand-marked, then: say so once in the archive rather than re-deciding it on
-            # every hourly tick (see FIRE-ONCE above).
-            if not dry_run:
-                mark_not_autograded(
-                    cohort_org,
-                    slug,
-                    f"no `{SOLUTION_BRANCH}` branch on {master_org}/{template}",
+            # every hourly tick (see FIRE-ONCE above). A marker that could not be written
+            # is not a skip at all - the next tick re-clones the template and re-decides
+            # the identical skip - so it goes red rather than reporting a quiet success.
+            if not dry_run and not mark_not_autograded(
+                cohort_org,
+                slug,
+                f"no `{SOLUTION_BRANCH}` branch on {master_org}/{template}",
+            ):
+                log_err(
+                    f"{slug}: could not record the skip - the next run re-decides it"
                 )
+                return 1
             return 0
         spec_path = soldir / GRADING_FILE
         spec = parse_grading_spec(spec_path.read_text() if spec_path.is_file() else "")
@@ -995,10 +1046,13 @@ def collect(
             log_ok(
                 f"{slug}: autograde disabled in {GRADING_FILE} - all-manual, nothing to collect."
             )
-            if not dry_run:
-                mark_not_autograded(
-                    cohort_org, slug, f"`autograde: false` in {GRADING_FILE}"
+            if not dry_run and not mark_not_autograded(
+                cohort_org, slug, f"`autograde: false` in {GRADING_FILE}"
+            ):
+                log_err(
+                    f"{slug}: could not record the skip - the next run re-decides it"
                 )
+                return 1
             return 0
         # group-vs-individual via the single `resolve_is_group` precedence (force -> cohort
         # schedule `type:` -> template grading.yml -> individual). The entry is the one found
@@ -1017,10 +1071,25 @@ def collect(
             )
             return 1
 
-        # Targets: one per team (group) or one per onboarded student (individual).
-        targets = submission_targets(cohort_org, slug, is_group)
+        # Targets: one per team (group) or one per onboarded student (individual). Repos
+        # are named after the cohort-side `slug`; teams.csv is keyed on the schedule `key`.
+        targets = submission_targets(cohort_org, slug, is_group, key)
         if not targets:
-            return 1
+            # Nothing to grade at a passed deadline is a RESULT (the reason is logged
+            # above): a cohort with nobody onboarded, or a group assignment whose teams.csv
+            # has no teams. Left unrecorded, the cron came back every hour and went red
+            # every hour (live in the demo cohort for days). Record the skip; a deliberate
+            # re-grade is still a delete of autograde/<slug>/ away.
+            if dry_run:
+                return 0
+            if not mark_not_autograded(
+                cohort_org, slug, f"no submission targets as of {deadline}"
+            ):
+                log_err(
+                    f"{slug}: could not record the skip - the next run re-decides it"
+                )
+                return 1
+            return 0
 
         # Which commit each repo is graded at was frozen server-side just after the
         # deadline (see the module docstring). Without that file we can only trust the
@@ -1054,7 +1123,7 @@ def collect(
         # cohort - see the systemic-failure guard below.
         failed_to_run: list[str] = []
         for repo, target_key, members in targets:
-            log_step(repo)
+            log_step(target_ref(repo))
             if dry_run:
                 if snapshots is None:
                     pin = f"<= {deadline}"
@@ -1062,14 +1131,14 @@ def collect(
                     pin = f"snapshot {(snapshots[repo] or 'none')[:8]}"
                 else:
                     pin = "no snapshot row -> zero"
-                log(f"    DRY-RUN would grade {cohort_org}/{repo} (pin {pin})")
+                log(f"    DRY-RUN would grade {target_ref(repo)} (pin {pin})")
                 continue
             if snapshots is not None and repo not in snapshots:
                 # The snapshot file exists but never recorded THIS repo (provisioned after the
                 # freeze?). Distinct from a missing file: do NOT silently drop to the
                 # student-datable committer-date pin - score zero with a loud per-repo warning.
                 log_err(
-                    f"  ! {repo} has no row in {snapshot_path(slug)} - it was not part of "
+                    f"  ! {target_ref(repo)} has no row in {snapshot_path(slug)} - it was not part of "
                     f"the deadline freeze; scoring 0 rather than pinning on student-"
                     f"controlled commit dates"
                 )
@@ -1088,8 +1157,9 @@ def collect(
                 continue
             if result.get("note") == GRADE_FAILED_NOTE:
                 failed_to_run.append(repo)
-            for line in summary_lines(result):
-                log(line)
+            # The score and per-test detail go ONLY to the private archive: this log is
+            # public, and the tag above is the only thing that may stand for the student here.
+            result = {"repo": repo, "ref": target_ref(repo), **result}
             archives.append(
                 (
                     f"{autograde_path(slug)}/{target_key}.json",
@@ -1121,7 +1191,7 @@ def collect(
             # one outage must never mark an assignment as permanently not-machine-graded.
             log_err(
                 f"{slug}: none of the {len(unreachable)} submission repo(s) could be read "
-                f"(named above) - nothing graded, and nothing recorded; the next run retries"
+                f"(tagged above) - nothing graded, and nothing recorded; the next run retries"
             )
             return 1
         if not updates:
@@ -1133,11 +1203,15 @@ def collect(
                 f"{slug}: nothing gradable across {len(targets)} target(s) - recording "
                 f"the skip rather than retrying every hour."
             )
-            mark_not_autograded(
+            if not mark_not_autograded(
                 cohort_org,
                 slug,
                 f"nothing gradable across {len(targets)} target(s) as of {deadline}",
-            )
+            ):
+                log_err(
+                    f"{slug}: could not record the skip - the next run re-decides it"
+                )
+                return 1
             return 0
         if failed_to_run and len(failed_to_run) == len(archives):
             # EVERY target that was examined failed to grade for the same class of reason -
@@ -1173,7 +1247,7 @@ def collect(
         if unreachable:
             log_err(
                 f"{slug}: recorded {len(updates)} score(s), but {len(unreachable)} "
-                f"submission repo(s) could not be read (named above) - NOT marking {slug} "
+                f"submission repo(s) could not be read (tagged above) - NOT marking {slug} "
                 f"machine-graded; the next run retries the missing one(s)"
             )
             return 1
@@ -1193,7 +1267,9 @@ def collect(
             )
             return 1
     log_ok(
-        f"recorded {len(updates)} auto score(s) -> {path} (faculty & instructors add manual marks, then render)"
+        f"recorded {len(updates)} auto score(s) -> {path}; "
+        f"{len(failed_to_run)} failed to run, {len(unreachable)} unreachable "
+        f"(per-target detail in {autograde_path(slug)}/) - faculty add manual marks, then render"
     )
     return 0
 

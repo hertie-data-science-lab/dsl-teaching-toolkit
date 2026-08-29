@@ -213,20 +213,22 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.assign.provision_all",
-        lambda master_org, template, cohort_org, solution=False: (
-            calls.append((master_org, template, cohort_org, solution)) or 0
+        lambda master_org, template, cohort_org, solution=False, touch_existing=True: (
+            calls.append((master_org, template, cohort_org, solution, touch_existing))
+            or 0
         ),
     )
     r = _r("s", WHEN, assignment="assignment-2-f2026")
     assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == 0
-    assert calls[0] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", False)
+    # The hourly path never re-touches an existing repo (the manual button does).
+    assert calls[0] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", False, False)
 
     # The solution release is the SAME call, asked to push the solution too - so a
     # scheduled solution can never diverge from what include_solution does by hand.
     r = _r("s", WHEN, assignment="assignment-2-f2026")
     r.assignment_solution = True
     assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == 0
-    assert calls[1] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", True)
+    assert calls[1] == ("Course-Org", "assignment-2-f2026", "Cohort-Org", True, False)
 
 
 def _git_with_staged_changes(*args):
@@ -265,6 +267,7 @@ def test_deploy_many_clones_each_repo_once(monkeypatch):
     monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
 
     deploys = [
         Deploy("cm", "lectures/00_x", "lectures", None),
@@ -293,6 +296,7 @@ def test_deploy_many_missing_course_source_path_is_an_error_not_silent(monkeypat
     monkeypatch.setattr(deploy, "git", lambda *a: (0, ""))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
@@ -322,6 +326,25 @@ def _no_io(monkeypatch, fake_gh):
     monkeypatch.setattr(deploy, "git", lambda *a: (0, ""))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+
+
+def test_a_released_repo_grants_faculty_read(monkeypatch):
+    # Read, not write: a re-release copies over the released copy
+    # (copytree dirs_exist_ok=True), so a correction made here would vanish - it belongs in
+    # the course org's materials repo, then re-release.
+    _no_io(monkeypatch, _clone_failing("Course-Org/cm"))
+    faculty = []
+    monkeypatch.setattr(
+        deploy, "grant_faculty_read_access", lambda *a: faculty.append(a)
+    )
+    deploy.deploy_many(
+        "Course-Org",
+        "Cohort-Org",
+        [Deploy("cm", "lectures/00_x", "materials", None)],
+        sync=False,
+    )
+    assert faculty == [("Cohort-Org", "materials")]
 
 
 def test_deploy_many_counts_a_doomed_deploy_once(monkeypatch):
@@ -471,6 +494,7 @@ def test_deploy_many_never_copies_a_dot_git_directory(monkeypatch):
     monkeypatch.setattr(deploy, "git", _git_spying_staged(copied_rel))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
@@ -500,6 +524,7 @@ def test_deploy_many_counts_a_real_commit_failure(monkeypatch, capsys):
     monkeypatch.setattr(deploy, "git", _git_commit_failing)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
@@ -522,6 +547,7 @@ def test_deploy_many_reports_nothing_new_when_index_is_empty(monkeypatch, capsys
     )  # diff --cached: nothing staged
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
@@ -540,6 +566,7 @@ def test_deploy_many_counts_a_raised_site_sync(monkeypatch):
     monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
 
     def boom(course, cohort):
         raise RuntimeError("tree read failed")
@@ -625,7 +652,7 @@ def _stub_autograde(monkeypatch, marked: bool = True):
 
 def _stub_snapshots(monkeypatch, existing: set[str]):
     """Track snapshot_assignment calls; `existing` are the slugs already frozen."""
-    taken: list[tuple[str, str, str]] = []
+    taken: list[tuple[str, str, str, str | None]] = []
     monkeypatch.setattr(
         collect, "load_snapshots", lambda org, slug: {} if slug in existing else None
     )
@@ -634,8 +661,8 @@ def _stub_snapshots(monkeypatch, existing: set[str]):
         "snapshot_assignment",
         # `is_group` is REQUIRED (no default), so a scheduler that stopped passing it fails
         # these tests loudly instead of silently freezing every assignment as individual.
-        lambda org, slug, deadline, *, is_group: (
-            taken.append((org, slug, deadline)) or True
+        lambda org, slug, deadline, *, is_group, teams_key=None: (
+            taken.append((org, slug, deadline, teams_key)) or True
         ),
     )
     # The snapshot pass resolves group-ness from the template grading.yml when the schedule
@@ -656,7 +683,7 @@ def test_run_snapshots_a_passed_deadline_that_has_no_snapshot_yet(monkeypatch):
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
     assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
-    org, slug, deadline = taken[0]
+    org, slug, deadline, _key = taken[0]
     assert (org, slug) == ("Cohort-Org", "assignment-1")
     assert deadline.startswith("2026-10-13T23:59:59")
 
@@ -710,7 +737,7 @@ def test_run_snapshots_even_with_no_releases(monkeypatch):
         )
         == 0
     )
-    assert [slug for _org, slug, _dl in taken] == ["assignment-1"]
+    assert [slug for _org, slug, _dl, _key in taken] == ["assignment-1"]
 
 
 def test_run_dry_run_snapshots_nothing(monkeypatch):
@@ -728,7 +755,9 @@ def test_run_dry_run_snapshots_nothing(monkeypatch):
 def test_run_reports_a_failed_snapshot(monkeypatch):
     monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: None)
     monkeypatch.setattr(
-        collect, "snapshot_assignment", lambda org, slug, deadline, *, is_group: False
+        collect,
+        "snapshot_assignment",
+        lambda org, slug, deadline, *, is_group, teams_key=None: False,
     )
     _stub_autograde(monkeypatch)
     monkeypatch.setattr(
@@ -806,7 +835,9 @@ def _only_snapshots_taken(monkeypatch):
     """Snapshots always succeed and are never the subject of these tests."""
     monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: {})
     monkeypatch.setattr(
-        collect, "snapshot_assignment", lambda org, slug, dl, *, is_group: True
+        collect,
+        "snapshot_assignment",
+        lambda org, slug, dl, *, is_group, teams_key=None: True,
     )
 
 
@@ -1097,7 +1128,9 @@ def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):
     # September handout is processed after a December release.
     monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: {})
     monkeypatch.setattr(
-        collect, "snapshot_assignment", lambda org, slug, dl, *, is_group: True
+        collect,
+        "snapshot_assignment",
+        lambda org, slug, dl, *, is_group, teams_key=None: True,
     )
     _stub_autograde(monkeypatch)
     monkeypatch.setattr(
@@ -1135,12 +1168,13 @@ def test_release_order_puts_undated_tbc_entries_last():
     assert sorted([tbc, dated], key=scheduler.release_order) == [dated, tbc]
 
 
-def test_run_survives_an_unparseable_schedule_and_exits_zero(monkeypatch, capsys):
-    # The incident: unparseable schedule.yml raised inside schedule.load and killed the
-    # hourly tick for the cohort. Now the tick releases nothing (same as the crash, minus
-    # the collateral) but carries the loud error and stays green - a red run for one
-    # cohort's typo would mask the real per-cohort action failures that DO exit non-zero
-    # (--all-cohorts ORs each run's rc).
+def test_run_survives_an_unparseable_schedule_but_goes_red(monkeypatch, capsys):
+    # The original incident: an unparseable schedule.yml raised inside schedule.load and
+    # killed the hourly tick for the cohort. It must still not RAISE - one cohort's typo
+    # cannot be allowed to abort the others under --all-cohorts, which is why load falls
+    # back to an empty Schedule. But it must not be GREEN either: while the file stands,
+    # nothing is released, handed out, snapshotted or graded for this cohort, and an hourly
+    # green tick is precisely how that survives a term unnoticed.
     from tests.test_schedule import MALFORMED_SCHEDULE
 
     _stub_snapshots(monkeypatch, existing=set())
@@ -1151,11 +1185,39 @@ def test_run_survives_an_unparseable_schedule_and_exits_zero(monkeypatch, capsys
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
 
-    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
+    assert scheduler.run("Course-Org", "Cohort-Org", now) == 1
 
     captured = capsys.readouterr()
     assert "is NOT valid YAML" in captured.err
     assert "0/0 release(s) due" in captured.out
+
+
+def test_a_dry_run_reports_an_unparseable_schedule_too(monkeypatch):
+    # The manual dispatch defaults to dry-run, so this is the preview an operator looks at
+    # first; a green preview of a plan that cannot be read is the wrong answer there too.
+    from tests.test_schedule import MALFORMED_SCHEDULE
+
+    _stub_snapshots(monkeypatch, existing=set())
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "get_file_content",
+        lambda org, repo, path: MALFORMED_SCHEDULE,
+    )
+    now = datetime(2026, 10, 14, tzinfo=timezone.utc)
+    assert scheduler.run("Course-Org", "Cohort-Org", now, dry_run=True) == 1
+
+
+def test_dropped_entries_alone_stay_advisory(monkeypatch):
+    # A file that PARSES but loses an entry is a different fault: the rest of the plan
+    # still runs, so it is logged (loudly, by load) and left advisory as before.
+    _stub_snapshots(monkeypatch, existing=set())
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "get_file_content",
+        lambda org, repo, path: "releases:\n  lab-1:\n    title: no date at all\n",
+    )
+    now = datetime(2026, 10, 14, tzinfo=timezone.utc)
+    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
 
 
 # ---------------------------------------------- per-cohort isolation (--all-cohorts)
@@ -1315,6 +1377,7 @@ def _run_release(monkeypatch, seed_source, deploys) -> tuple[int, set[str]]:
     monkeypatch.setattr(deploy, "git", fake_git)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
     errors, _changed = deploy.deploy_many(
         "Course-Org", "Cohort-Org", deploys, sync=False
     )
@@ -1417,6 +1480,7 @@ def test_withholding_the_stub_never_deletes_the_cohorts_own_readme(monkeypatch):
     monkeypatch.setattr(deploy, "git", fake_git)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
     errors, _changed = deploy.deploy_many(
         "Course-Org", "Cohort-Org", [Deploy("cm", "/", "materials", None)], sync=False
     )
@@ -1438,3 +1502,23 @@ def test_withholding_the_stub_is_visible_without_failing_the_run(monkeypatch, ca
     assert "::warning::" in captured.err
     assert "was NOT released" in captured.err
     assert "Write it for students, then release again." in captured.err
+
+
+def test_autograde_waits_for_a_completed_snapshot(monkeypatch):
+    # Without a snapshot, collect pins on committer dates - and when no submission repo
+    # exists at all it records a permanent write-once ZERO for every student and marks the
+    # assignment graded, on a green run. A missing snapshot means "not now", never "grade".
+    graded = []
+    monkeypatch.setattr(collect, "has_autograde_results", lambda org, slug: False)
+    monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
+    monkeypatch.setattr(collect, "collect", lambda *a, **k: graded.append(a) or 0)
+    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: None)
+    sched = _assignments(**{"assignment-1": _due(13)})
+    now = datetime(2026, 11, 1, tzinfo=timezone.utc)
+    assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
+    assert graded == []
+    monkeypatch.setattr(
+        collect, "load_snapshots", lambda org, slug: {"assignment-1-ada": "abc"}
+    )
+    assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
+    assert len(graded) == 1

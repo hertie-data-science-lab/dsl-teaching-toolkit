@@ -14,9 +14,14 @@ name: Onboard student
 # Existing org ADMINS (owners - e.g. a course admin testing the student flow) get the roster
 # link but no access change: granting them `member` would demote the owner.
 #
-# The code carries no personal data, so nothing in the public issue needs redacting; and
-# because it's unguessable + single-use (the "already linked" guard), a classmate can't
-# bind your roster row to their account.
+# The code carries no personal data, but it IS a live credential: it binds a roster row to
+# the FIRST account that claims it. So the first thing this does is redact it from the
+# public issue body, before any path can fail. That defeats a casual reader only: GitHub
+# keeps an issue body's EDIT HISTORY readable and offers no API to delete a revision, so an
+# unclaimed code in a failed Join issue is still one click away until a maintainer DELETES
+# the issue (docs/06, triage). The messages below tell students never to put the code in a
+# comment, which is never redacted. Once bound, a code is single-use (the "already linked"
+# guard), so a classmate can't bind your row to their account.
 #
 # Runs under secrets.DSL_BOT_TOKEN, which needs, on the cohort org: Contents R/W on
 # classroom-config, Members R/W (org invite + team), Issues R/W on welcome.
@@ -100,187 +105,232 @@ jobs:
               core.setFailed(msg.replace(/\*\*/g, ''));
             };
 
-            if (!process.env.HAS_BOT) {
-              return fail(
-                `Thanks @${handle} - enrolment is **not yet armed**: the \`DSL_BOT_TOKEN\` secret is unset, ` +
-                `so I can't read the private roster or invite you. A maintainer will action this.`,
-                'needs-review');
-            }
-
-            // Read the enrolment code from the issue form.
-            const m = (issue.body || '').match(/Enrolment code\s*[\r\n]+\s*([A-Za-z0-9-]+)/i);
-            const code = m && m[1].trim();
-            if (!code) return fail(
-              `Thanks @${handle} - I couldn't read an **enrolment code** from the form. Please edit the issue and add it.`,
-              'needs-review');
-
-            // Read the PRIVATE roster. Columns (dsl_course.roster.FIELDS):
-            // hertie_email,name,github_handle,github_id,enrol_code,role
-            // Re-readable, because the write below retries on a 409 (another student's Join
-            // issue landed a row first) and must re-apply this row's edit to the fresh file.
-            const readRoster = async () => {
-              const got = await github.rest.repos.getContent({ owner: org, repo: CONFIG, path: FILE });
-              const table = parseCsv(Buffer.from(got.data.content, 'base64').toString('utf8'));
-              const head = (table[0] || []).map(h => h.trim());
-              const width = head.length;
-              return { sha: got.data.sha, header: head, rows: table.slice(1).map(r => {
-                while (r.length < width) r.push('');  // keep short rows addressable by index
-                return r;
-              }) };
-            };
-            let { sha, header, rows } = await readRoster();
-            // Address columns BY NAME - never by position - so a roster gaining/reordering a
-            // column can't make us read a code or overwrite a handle in the wrong cell.
-            const iHandle = header.indexOf('github_handle');
-            const iId = header.indexOf('github_id');
-            const iCode = header.indexOf('enrol_code');
-            // `role` is OPTIONAL - a roster seeded before the column existed has none, and a
-            // missing/blank cell means `enrolled` (dsl_course.roster.normalise_role). Never
-            // required, so an older cohort's roster keeps onboarding.
-            const iRole = header.indexOf('role');
-            if (iHandle < 0 || iId < 0 || iCode < 0) return fail(
-              `Thanks @${handle} - the roster's header is missing a required column ` +
-              `(\`github_handle\`, \`github_id\`, \`enrol_code\`). A maintainer will action this.`,
-              'needs-review');
-
-            // Match the code to a registrar-seeded row - reject non-enrolees.
-            const row = rows.find(r => r[iCode].trim().toLowerCase() === code.toLowerCase());
-            if (!row) return fail(
-              `Thanks @${handle} - that enrolment code isn't recognised. Check the code in your email, ` +
-              `or contact the teaching team.`,
-              'needs-review');
-            if (row[iHandle] && row[iHandle].toLowerCase() !== handle.toLowerCase()) return fail(
-              `That enrolment code is already linked to a different GitHub account. ` +
-              `Contact the teaching team to resolve this.`,
-              'needs-review');
-
-            // Write the authenticated handle + immutable id back (idempotent).
-            //
-            // Many Join issues are in flight at once on the first day, and each one is a
-            // read-modify-write of the SAME file. The `sha` makes a lost update impossible -
-            // a stale one is rejected with a 409 - so the burst is handled by RETRYING:
-            // re-read the roster, re-find this student's row by their (unique) code, re-apply
-            // the two cells, and write again. Only this row is ever touched, so a retry can
-            // never undo the row a competing run just committed.
-            //
-            // `matched` is this student's row IN THE CURRENT SNAPSHOT: each re-read replaces
-            // it, so nothing below reads a cell off the table we already discarded.
-            const boundElsewhere = (r) =>
-              r[iHandle] && r[iHandle].toLowerCase() !== handle.toLowerCase();
-            // A 409 is a stale sha (someone committed between our read and our write). A 403
-            // naming GitHub's SECONDARY rate limit / abuse detection is GitHub asking us to
-            // back off - a first-day burst hits it - and is equally worth another attempt.
-            // Anything else is a real error and stops now.
-            const retryable = (e) => e.status === 409 ||
-              (e.status === 403 && /secondary rate limit|abuse detection/i.test(String(e.message || '')));
-            let matched = row;
-            if (matched[iHandle] !== handle) {
-              // Jittered backoff: a burst that retries in lockstep just collides again on the
-              // same schedule, so each waiter spreads itself across ~400ms of its own.
-              const ATTEMPTS = 8, columns = header.join(',');
-              for (let attempt = 1; ; attempt++) {
-                matched = rows.find(r => r[iCode].trim().toLowerCase() === code.toLowerCase());
-                if (!matched) return fail(
-                  `Thanks @${handle} - your roster row disappeared while I was writing to it. ` +
-                  `Please re-open this issue, or contact the teaching team.`,
-                  'needs-review');
-                // Re-check the single-use binding on the FRESH row, not only before the loop:
-                // two issues quoting the same code race here, and the loser must not overwrite
-                // the winner's handle when it re-applies its edit.
-                if (boundElsewhere(matched)) return fail(
-                  `That enrolment code is already linked to a different GitHub account. ` +
-                  `Contact the teaching team to resolve this.`,
-                  'needs-review');
-                matched[iHandle] = handle; matched[iId] = String(userId);
-                const body = serialiseCsv([header, ...rows]);
+            try {
+              // Read the enrolment code from the issue form, then REDACT it from the public
+              // body before anything else can fail. This uses the ambient token's issues:write on
+              // THIS repo, so it works even when the bot token is unset. The shape is strict
+              // (dsl_course.enrol_codes.make_code): a stray character - a mail client's Unicode
+              // hyphen, say - must not turn `dsl` into the string we redact.
+              const m = (issue.body || '').match(/Enrolment code\s*[\r\n]+\s*(dsl-[a-z0-9]{6})\b/i);
+              const code = m && m[1].trim();
+              if (code) {
                 try {
-                  await github.rest.repos.createOrUpdateFileContents({
-                    owner: org, repo: CONFIG, path: FILE, sha,
-                    message: `roster: link @${handle} (id ${userId})`,
-                    content: Buffer.from(body, 'utf8').toString('base64'),
-                  });
-                  break;
+                  await github.rest.issues.update({
+                    owner: org, repo: context.repo.repo, issue_number: issue.number,
+                    body: issue.body.split(code).join('dsl-[redacted]') });
                 } catch (e) {
-                  // Giving up is a RESULT, not a crash: an uncaught throw leaves a red run with
-                  // no comment and no label, so the student is dropped in silence and nobody
-                  // triages it. Every terminal path goes through fail() instead.
-                  if (!retryable(e) || attempt === ATTEMPTS) return fail(
-                    `Thanks @${handle} - I couldn't write you to the roster after ${attempt} ` +
-                    `attempt(s) (\`${e.status}\`). A maintainer will action this.`,
-                    'needs-review');
-                  await new Promise(r => setTimeout(r, 500 * attempt + Math.random() * 400));
-                  ({ sha, header, rows } = await readRoster());
-                  // The column indices above were resolved against the header we first read.
-                  // If someone changed the columns mid-write, they no longer address what
-                  // they name - stop rather than write into the wrong cells.
-                  if (header.join(',') !== columns) return fail(
-                    `Thanks @${handle} - the roster's columns changed while I was writing to it, ` +
-                    `so I stopped rather than risk writing into the wrong cells. A maintainer will action this.`,
-                    'needs-review');
+                  // A failed redaction must not become an uncaught throw (red run, no comment,
+                  // no label - the student is dropped in silence). Carry on: the match below is
+                  // what matters, and the code is consumed the moment it binds.
+                  core.warning(`could not redact the code from the issue body (${e.status || e.name})`);
                 }
               }
-            }
+              if (!code) return fail(
+                `Thanks @${handle} - I couldn't read an **enrolment code** from the form (codes look like \`dsl-xxxxxx\`). ` +
+                `Please open a new Join issue with the code in the form field - never in a comment, which is public and stays public.`,
+                'needs-review');
 
-            // Never DOWNGRADE org staff. A course admin is an org OWNER (`role: admin`);
-            // `setMembershipForUser({ role: 'member' })` on them silently demotes the owner
-            // to a plain member, which strips their access to every private repo (the org is
-            // default_repository_permission=none) until someone restores it via the bot. So
-            // when a Join issue comes from an admin - typically an admin testing the student
-            // flow - link the roster row above (that's the useful half) and skip every
-            // access-changing call.
-            let orgRole = null;
-            try {
-              const membership = await github.rest.orgs.getMembershipForUser({ org, username: handle });
-              orgRole = membership.data.role;      // 'admin' (owner) | 'member'
-            } catch (e) {
-              if (e.status !== 404) throw e;       // 404 = not an org member (yet) - the normal case
-            }
-            if (orgRole === 'admin') {
+              // Throttle, BEFORE the roster read and before any bot-token work. Every Join
+              // issue costs a private roster read, an org invite attempt and a team write; a
+              // student who keeps opening new issues instead of reading the reply on the last
+              // one (or anyone with a public repo and a script) pays that cost on repeat, in a
+              // repo anyone can open an issue in. Three unresolved ones is well past the point
+              // where a fourth run tells them anything new. Counted with the ambient token, in
+              // this repo only, and only issues THEY opened that are still labelled
+              // `needs-review` - so a triaged one (relabelled or closed) stops counting and
+              // the student is unblocked by the teaching team's normal triage, not by a timer.
+              const unresolved = (await github.paginate(github.rest.issues.listForRepo, {
+                owner: org, repo: context.repo.repo, state: 'open',
+                creator: handle, labels: 'needs-review', per_page: 100,
+              })).filter(i => !i.pull_request && i.number !== issue.number);
+              if (unresolved.length >= 3) return fail(
+                `Thanks @${handle} - you have ${unresolved.length} unresolved Join issues - contact the teaching team. ` +
+                `I have not read the roster for this one. They will sort out what went wrong on the earlier issues; ` +
+                `please don't open another (and never put your enrolment code in a comment).`,
+                'needs-review');
+
+              if (!process.env.HAS_BOT) {
+                return fail(
+                  `Thanks @${handle} - enrolment is **not yet armed**: the \`DSL_BOT_TOKEN\` secret is unset, ` +
+                  `so I can't read the private roster or invite you. A maintainer will action this.`,
+                  'needs-review');
+              }
+
+              // Read the PRIVATE roster. Columns (dsl_course.roster.FIELDS):
+              // hertie_email,name,github_handle,github_id,enrol_code,role
+              // Re-readable, because the write below retries on a 409 (another student's Join
+              // issue landed a row first) and must re-apply this row's edit to the fresh file.
+              const readRoster = async () => {
+                const got = await github.rest.repos.getContent({ owner: org, repo: CONFIG, path: FILE });
+                const table = parseCsv(Buffer.from(got.data.content, 'base64').toString('utf8'));
+                const head = (table[0] || []).map(h => h.trim());
+                const width = head.length;
+                return { sha: got.data.sha, header: head, rows: table.slice(1).map(r => {
+                  while (r.length < width) r.push('');  // keep short rows addressable by index
+                  return r;
+                }) };
+              };
+              let { sha, header, rows } = await readRoster();
+              // Address columns BY NAME - never by position - so a roster gaining/reordering a
+              // column can't make us read a code or overwrite a handle in the wrong cell.
+              const iHandle = header.indexOf('github_handle');
+              const iId = header.indexOf('github_id');
+              const iCode = header.indexOf('enrol_code');
+              // `role` is OPTIONAL - a roster seeded before the column existed has none, and a
+              // missing/blank cell means `enrolled` (dsl_course.roster.normalise_role). Never
+              // required, so an older cohort's roster keeps onboarding.
+              const iRole = header.indexOf('role');
+              if (iHandle < 0 || iId < 0 || iCode < 0) return fail(
+                `Thanks @${handle} - the roster's header is missing a required column ` +
+                `(\`github_handle\`, \`github_id\`, \`enrol_code\`). A maintainer will action this.`,
+                'needs-review');
+
+              // Match the code to a registrar-seeded row - reject non-enrolees. ONE message for
+              // "no such code" and "code already bound to another account": telling them apart
+              // in a public issue confirms to anyone that a pasted code is a real, live one.
+              const NO_MATCH =
+                `Thanks @${handle} - that enrolment code could not be matched to an unclaimed roster row. ` +
+                `Check the code in your email; if you have already joined from another GitHub account, ` +
+                `or think this is a mistake, contact the teaching team. Do not post the code in a comment - ` +
+                `comments are public and are never redacted.`;
+              const row = rows.find(r => r[iCode].trim().toLowerCase() === code.toLowerCase());
+              if (!row) return fail(NO_MATCH, 'needs-review');
+              if (row[iHandle] && row[iHandle].toLowerCase() !== handle.toLowerCase()) return fail(
+                NO_MATCH, 'needs-review');
+
+              // Write the authenticated handle + immutable id back (idempotent).
+              //
+              // Many Join issues are in flight at once on the first day, and each one is a
+              // read-modify-write of the SAME file. The `sha` makes a lost update impossible -
+              // a stale one is rejected with a 409 - so the burst is handled by RETRYING:
+              // re-read the roster, re-find this student's row by their (unique) code, re-apply
+              // the two cells, and write again. Only this row is ever touched, so a retry can
+              // never undo the row a competing run just committed.
+              //
+              // `matched` is this student's row IN THE CURRENT SNAPSHOT: each re-read replaces
+              // it, so nothing below reads a cell off the table we already discarded.
+              const boundElsewhere = (r) =>
+                r[iHandle] && r[iHandle].toLowerCase() !== handle.toLowerCase();
+              // A 409 is a stale sha (someone committed between our read and our write). A 403
+              // naming GitHub's SECONDARY rate limit / abuse detection is GitHub asking us to
+              // back off - a first-day burst hits it - and is equally worth another attempt.
+              // Anything else is a real error and stops now.
+              const retryable = (e) => e.status === 409 ||
+                (e.status === 403 && /secondary rate limit|abuse detection/i.test(String(e.message || '')));
+              let matched = row;
+              if (matched[iHandle] !== handle) {
+                // Jittered backoff: a burst that retries in lockstep just collides again on the
+                // same schedule, so each waiter spreads itself across ~400ms of its own.
+                const ATTEMPTS = 8, columns = header.join(',');
+                for (let attempt = 1; ; attempt++) {
+                  matched = rows.find(r => r[iCode].trim().toLowerCase() === code.toLowerCase());
+                  if (!matched) return fail(
+                    `Thanks @${handle} - your roster row disappeared while I was writing to it. ` +
+                    `Please re-open this issue, or contact the teaching team.`,
+                    'needs-review');
+                  // Re-check the single-use binding on the FRESH row, not only before the loop:
+                  // two issues quoting the same code race here, and the loser must not overwrite
+                  // the winner's handle when it re-applies its edit.
+                  if (boundElsewhere(matched)) return fail(NO_MATCH, 'needs-review');
+                  matched[iHandle] = handle; matched[iId] = String(userId);
+                  const body = serialiseCsv([header, ...rows]);
+                  try {
+                    await github.rest.repos.createOrUpdateFileContents({
+                      owner: org, repo: CONFIG, path: FILE, sha,
+                      message: `roster: link @${handle} (id ${userId})`,
+                      content: Buffer.from(body, 'utf8').toString('base64'),
+                    });
+                    break;
+                  } catch (e) {
+                    // Giving up is a RESULT, not a crash: an uncaught throw leaves a red run with
+                    // no comment and no label, so the student is dropped in silence and nobody
+                    // triages it. Every terminal path goes through fail() instead.
+                    if (!retryable(e) || attempt === ATTEMPTS) return fail(
+                      `Thanks @${handle} - I couldn't write you to the roster after ${attempt} ` +
+                      `attempt(s) (\`${e.status}\`). A maintainer will action this.`,
+                      'needs-review');
+                    await new Promise(r => setTimeout(r, 500 * attempt + Math.random() * 400));
+                    ({ sha, header, rows } = await readRoster());
+                    // The column indices above were resolved against the header we first read.
+                    // If someone changed the columns mid-write, they no longer address what
+                    // they name - stop rather than write into the wrong cells.
+                    if (header.join(',') !== columns) return fail(
+                      `Thanks @${handle} - the roster's columns changed while I was writing to it, ` +
+                      `so I stopped rather than risk writing into the wrong cells. A maintainer will action this.`,
+                      'needs-review');
+                  }
+                }
+              }
+
+              // Never DOWNGRADE org staff. A course admin is an org OWNER (`role: admin`);
+              // `setMembershipForUser({ role: 'member' })` on them silently demotes the owner
+              // to a plain member, which strips their access to every private repo (the org is
+              // default_repository_permission=none) until someone restores it via the bot. So
+              // when a Join issue comes from an admin - typically an admin testing the student
+              // flow - link the roster row above (that's the useful half) and skip every
+              // access-changing call.
+              let orgRole = null;
+              try {
+                const membership = await github.rest.orgs.getMembershipForUser({ org, username: handle });
+                orgRole = membership.data.role;      // 'admin' (owner) | 'member'
+              } catch (e) {
+                if (e.status !== 404) throw e;       // 404 = not an org member (yet) - the normal case
+              }
+              if (orgRole === 'admin') {
+                await github.rest.issues.createComment({
+                  owner: org, repo: context.repo.repo, issue_number: issue.number, body: [
+                    `Thanks **@${handle}** - your enrolment code is matched, and your handle + GitHub id are now linked to that roster row.`,
+                    ``,
+                    `- You're already an **owner/admin of \`${org}\`**, so I made **no access changes**: adding you as a \`member\` would DOWNGRADE your owner role and lock you out of the private repos.`,
+                    `- Nothing else to do. To exercise the real student path end to end, re-run this from an account that isn't org staff.`,
+                  ].join('\n') });
+                await github.rest.issues.addLabels({
+                  owner: org, repo: context.repo.repo, issue_number: issue.number, labels: ['staff'] });
+                await github.rest.issues.update({
+                  owner: org, repo: context.repo.repo, issue_number: issue.number,
+                  title: `Join course: ${handle} (staff)`, state: 'closed' });
+                return;
+              }
+
+              // Route by role: auditors are read-only (released materials, no assignments), so
+              // they go to the `auditors` team; everyone else to `students`. Both teams carry
+              // read on released repos - only `students` gets assignment repos + a gradebook.
+              // Read off `matched` - the row of the LAST snapshot read - not the first read's
+              // copy, which a retry has already thrown away.
+              const isAuditor = iRole >= 0 && (matched[iRole] || '').trim().toLowerCase() === 'auditor';
+              const team = isAuditor ? 'auditors' : 'students';
+
+              // Grant access: org membership (invites if needed) + the role team.
+              await github.rest.orgs.setMembershipForUser({ org, username: handle, role: 'member' });
+              await github.rest.teams.addOrUpdateMembershipForUserInOrg({
+                org, team_slug: team, username: handle, role: 'member' });
+
+              // Confirm.
               await github.rest.issues.createComment({
                 owner: org, repo: context.repo.repo, issue_number: issue.number, body: [
-                  `Thanks **@${handle}** - your enrolment code is matched, and your handle + GitHub id are now linked to that roster row.`,
+                  `Welcome **@${handle}** - your enrolment code is matched.`,
                   ``,
-                  `- You're already an **owner/admin of \`${org}\`**, so I made **no access changes**: adding you as a \`member\` would DOWNGRADE your owner role and lock you out of the private repos.`,
-                  `- Nothing else to do. To exercise the real student path end to end, re-run this from an account that isn't org staff.`,
+                  `- **Check your email and accept the invitation to the \`${org}\` org** - until you accept, you can't see anything here.`,
+                  `- Your handle + GitHub id are recorded and your access is set from the roster (released materials unlock once you've accepted; assignment repos, if your enrolment includes them, appear as the teaching team provisions each one).`,
                 ].join('\n') });
+              // One label for everyone. This issue is public and permanent: a per-role label
+              // would publish each student's enrolment status (enrolled vs auditing).
               await github.rest.issues.addLabels({
-                owner: org, repo: context.repo.repo, issue_number: issue.number, labels: ['staff'] });
+                owner: org, repo: context.repo.repo, issue_number: issue.number,
+                labels: ['onboarded'] });
+              // Title is auto-derived - the form's fixed default plus the authenticated author.
               await github.rest.issues.update({
                 owner: org, repo: context.repo.repo, issue_number: issue.number,
-                title: `Join course: ${handle} (staff)`, state: 'closed' });
-              return;
+                title: `Join course: ${handle}`, state: 'closed' });
+            } catch (e) {
+              // Giving up is a RESULT, not a crash: an uncaught throw leaves a red run with no
+              // comment and no label, so the student is dropped in silence and nobody triages
+              // it. Every terminal path goes through fail() - this is the one for the paths
+              // that did not expect to fail.
+              await fail(
+                `Thanks @${handle} - something went wrong on my side (\`${e.status || e.name}\`). ` +
+                `A maintainer will action this; there is nothing you need to do.`,
+                'needs-review');
             }
-
-            // Route by role: auditors are read-only (released materials, no assignments), so
-            // they go to the `auditors` team; everyone else to `students`. Both teams carry
-            // read on released repos - only `students` gets assignment repos + a gradebook.
-            // Read off `matched` - the row of the LAST snapshot read - not the first read's
-            // copy, which a retry has already thrown away.
-            const isAuditor = iRole >= 0 && (matched[iRole] || '').trim().toLowerCase() === 'auditor';
-            const team = isAuditor ? 'auditors' : 'students';
-
-            // Grant access: org membership (invites if needed) + the role team.
-            await github.rest.orgs.setMembershipForUser({ org, username: handle, role: 'member' });
-            await github.rest.teams.addOrUpdateMembershipForUserInOrg({
-              org, team_slug: team, username: handle, role: 'member' });
-
-            // Confirm.
-            await github.rest.issues.createComment({
-              owner: org, repo: context.repo.repo, issue_number: issue.number, body: [
-                `Welcome **@${handle}** - your enrolment code is matched.`,
-                ``,
-                `- **Check your email and accept the invitation to the \`${org}\` org** - until you accept, you can't see anything here.`,
-                `- Your handle + GitHub id are recorded; you've been added to the **${team}** team (unlocks released materials once you've accepted).`,
-                isAuditor
-                  ? `- You're enrolled as an **auditor**: you get the released materials, but no assignment repos and no grades.`
-                  : `- Your assignment repos appear here once the teaching team provisions each assignment.`,
-              ].join('\n') });
-            await github.rest.issues.addLabels({
-              owner: org, repo: context.repo.repo, issue_number: issue.number,
-              labels: [isAuditor ? 'auditor' : 'enrolled'] });
-            // Title is auto-derived - the form's fixed default plus the authenticated author.
-            await github.rest.issues.update({
-              owner: org, repo: context.repo.repo, issue_number: issue.number,
-              title: `Join course: ${handle}`, state: 'closed' });
         env:
           HAS_BOT: ${{ secrets.DSL_BOT_TOKEN != '' || '' }}

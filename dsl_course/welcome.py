@@ -103,6 +103,9 @@ def refresh_welcome_workflows(org: str) -> int:
             ".github/ISSUE_TEMPLATE/02-join-team.yml": template(
                 "welcome/ISSUE_TEMPLATE/02-join-team.yml"
             ).encode(),
+            ".github/ISSUE_TEMPLATE/config.yml": template(
+                "welcome/ISSUE_TEMPLATE/config.yml"
+            ).encode(),
         },
         "ci: refresh onboarding workflows + Join forms",
         # The forms were renamed to control the issue-chooser ordering (01-/02- prefix);

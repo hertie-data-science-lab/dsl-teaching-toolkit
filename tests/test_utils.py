@@ -97,7 +97,7 @@ def test_put_files_commits_nothing_when_every_file_already_matches(monkeypatch):
         if args[1] == "repos/org/repo":
             return 0, "main\n"
         return 0, "\n".join(
-            f"{path}\t{_blob_sha(content)}" for path, content in files.items()
+            ["false", *(f"{p}\t{_blob_sha(c)}" for p, c in files.items())]
         )
 
     monkeypatch.setattr(utils, "gh", fake_gh)
@@ -120,7 +120,8 @@ def test_put_files_lands_every_change_in_one_commit(monkeypatch):
         if url == "repos/org/repo":
             return 0, "main\n"
         if "git/trees/main" in url:  # every path exists, none matches
-            return 0, "a.yml\tstale\nb.yml\tstale\nold.yml\tstale"
+            # "false" first: the jq asks for `truncated` ahead of the entries.
+            return 0, "false\na.yml\tstale\nb.yml\tstale\nold.yml\tstale"
         if url == "repos/org/repo/commits/main":
             return 0, "head-sha\tbase-tree-sha\n"
         return 0, "new-sha\n"
@@ -205,7 +206,7 @@ def test_put_files_still_commits_when_only_the_deletion_is_outstanding(monkeypat
         if url == "repos/org/repo":
             return 0, "main\n"
         if "git/trees/main" in url:
-            return 0, f"a.yml\t{_blob_sha(content)}\nold.yml\tstill-here"
+            return 0, f"false\na.yml\t{_blob_sha(content)}\nold.yml\tstill-here"
         if url == "repos/org/repo/commits/main":
             return 0, "head-sha\tbase-tree-sha\n"
         return 0, "new-sha\n"
@@ -230,7 +231,7 @@ def test_put_files_skips_a_deletion_of_a_file_that_is_already_gone(monkeypatch):
         if args[1] == "repos/org/repo":
             return 0, "main\n"
         if "git/trees/main" in args[1]:
-            return 0, f"a.yml\t{_blob_sha(content)}"
+            return 0, f"false\na.yml\t{_blob_sha(content)}"
         raise AssertionError("nothing to do - no commit legs should run")
 
     monkeypatch.setattr(utils, "gh", fake_gh)
@@ -556,3 +557,174 @@ def test_reconcile_team_members_skips_the_prune_when_the_owners_are_unreadable(
     assert added == ["carol"]
     assert removed == []
     assert "pruning skipped" in capsys.readouterr().err
+
+
+def test_repo_missing_is_true_only_on_a_404(monkeypatch):
+    # `repo_exists` is optimistic (any failure = absent) because it answers a create-if-
+    # missing question. `repo_missing` answers "may I record something permanent on the
+    # strength of absence?" - so a 5xx or a rate limit is neither present nor absent.
+    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
+    assert utils.repo_missing("O", "r")
+    monkeypatch.setattr(utils, "gh", lambda *a, **k: (1, "HTTP 502 bad gateway"))
+    assert not utils.repo_missing("O", "r")
+    monkeypatch.setattr(utils, "gh", lambda *a, **k: (0, "{}"))
+    assert not utils.repo_missing("O", "r")
+
+
+# ------------------------------- per-person lines stay out of a world-readable log
+
+
+def test_log_verbose_is_silent_unless_dsl_verbose_is_set(capsys, monkeypatch):
+    # Every faculty workflow runs in the course org's PUBLIC .github, so a line naming a
+    # student may only appear when a human asks for it on their own machine.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    utils.log_verbose("@ada-l")
+    assert capsys.readouterr().out == ""
+    monkeypatch.setenv("DSL_VERBOSE", "1")
+    utils.log_verbose("@ada-l")
+    assert "@ada-l" in capsys.readouterr().out
+
+
+def test_an_empty_dsl_verbose_is_not_verbose(capsys, monkeypatch):
+    monkeypatch.setenv("DSL_VERBOSE", "")
+    utils.log_verbose("@ada-l")
+    assert capsys.readouterr().out == ""
+
+
+def test_reconcile_keeps_the_handles_it_adds_and_removes_out_of_a_public_log(
+    capsys, monkeypatch
+):
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    monkeypatch.setattr(utils, "get_team_members", lambda org, team: {"zoe-zed"})
+    monkeypatch.setattr(utils, "_acting_login", lambda: "bot")
+    monkeypatch.setattr(utils, "get_org_owners", lambda org: frozenset())
+    monkeypatch.setattr(utils, "add_team_member", lambda *a, **k: True)
+    monkeypatch.setattr(utils, "remove_team_member", lambda *a, **k: True)
+    assert utils.reconcile_team_members("org", "students", {"ada-l"}, prune=True) == 0
+    captured = capsys.readouterr()
+    assert "ada-l" not in captured.out and "zoe-zed" not in captured.out
+
+
+# ------------------------- a read-modify-write must not clobber a concurrent commit
+
+
+def _record_gh(monkeypatch, answers):
+    """Stub utils.gh with a queue of (code, out) answers; returns the arg tuples seen."""
+    queue = list(answers)
+    calls: list[tuple[str, ...]] = []
+
+    def fake_gh(*args, **kwargs):
+        calls.append(args)
+        return queue.pop(0) if queue else (0, "")
+
+    monkeypatch.setattr(utils, "gh", fake_gh)
+    return calls
+
+
+def test_put_file_sends_the_sha_the_caller_read_without_re_reading(monkeypatch):
+    # The bug: put_file fetched the sha immediately before writing, so the write succeeded
+    # however stale its content was - and a commit that landed in between was reverted.
+    calls = _record_gh(monkeypatch, [(0, "")])
+    assert utils.put_file(
+        "O", "R", "students.csv", b"new", "msg", expected_sha="abc123"
+    )
+    assert len(calls) == 1  # the write only - no fresh read to race against
+    assert "sha=abc123" in calls[0]
+
+
+def test_put_file_with_an_expected_sha_reports_a_refused_write(monkeypatch, capsys):
+    _record_gh(monkeypatch, [(1, "HTTP 409: is at ... but expected abc123")])
+    assert not utils.put_file(
+        "O", "R", "students.csv", b"new", "msg", expected_sha="abc123"
+    )
+    assert "failed to put students.csv" in capsys.readouterr().err
+
+
+def test_put_file_skips_a_write_that_would_change_nothing(monkeypatch):
+    calls = _record_gh(monkeypatch, [])
+    content = b"unchanged"
+    assert utils.put_file(
+        "O", "R", "f", content, "msg", expected_sha=utils.blob_sha(content)
+    )
+    assert calls == []  # no read, no write
+
+
+def test_put_file_without_an_expected_sha_still_reads_then_writes(monkeypatch):
+    calls = _record_gh(monkeypatch, [(0, "livesha"), (0, "")])
+    assert utils.put_file("O", "R", "f", b"new", "msg")
+    assert len(calls) == 2 and "sha=livesha" in calls[1]
+
+
+def test_get_file_with_sha_splits_the_sha_off_the_content(monkeypatch):
+    _record_gh(monkeypatch, [(0, "abc123\nname,email\nAda,a@x.edu")])
+    assert utils.get_file_with_sha("O", "R", "students.csv") == (
+        "name,email\nAda,a@x.edu",
+        "abc123",
+    )
+
+
+def test_get_file_with_sha_is_none_only_for_a_genuine_404(monkeypatch):
+    _record_gh(monkeypatch, [(1, "gh: Not Found (HTTP 404)")])
+    assert utils.get_file_with_sha("O", "R", "students.csv") is None
+    _record_gh(monkeypatch, [(1, "HTTP 403: rate limited")])
+    with pytest.raises(RuntimeError, match="could not read"):
+        utils.get_file_with_sha("O", "R", "students.csv")
+
+
+# ------------------------- a truncated tree listing is not a smaller repo
+
+
+def test_repo_tree_raises_when_github_truncated_the_listing(monkeypatch):
+    # The git-tree API caps a recursive listing and says so in `truncated: true` rather
+    # than failing. Believed, a partial listing looks exactly like a smaller repo - the
+    # site drops the material links it never saw, and put_files rewrites what it thinks
+    # is missing.
+    _record_gh(monkeypatch, [(0, "true\nlectures/01_intro/notes.pdf")])
+    with pytest.raises(utils.TruncatedTree, match="TRUNCATED"):
+        utils.repo_tree("O", "R", "main")
+
+
+def test_repo_blob_shas_raises_when_github_truncated_the_listing(monkeypatch):
+    _record_gh(monkeypatch, [(0, "true\na.yml\tsha1")])
+    with pytest.raises(utils.TruncatedTree):
+        utils.repo_blob_shas("O", "R", "main")
+
+
+def test_an_untruncated_tree_drops_the_flag_line(monkeypatch):
+    _record_gh(monkeypatch, [(0, "false\nb.md\na.md")])
+    assert utils.repo_tree("O", "R", "main") == ("a.md", "b.md")
+    _record_gh(monkeypatch, [(0, "false\na.yml\tsha1")])
+    assert utils.repo_blob_shas("O", "R", "main") == {"a.yml": "sha1"}
+
+
+# --------------------------------------------------- git must not hang for six hours
+
+
+def test_a_hung_git_comes_back_as_an_ordinary_failure(monkeypatch):
+    import subprocess
+
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd="git", timeout=kwargs.get("timeout", 0))
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    code, out = utils.git("clone", "https://example.invalid/r")
+    assert code == 1  # every caller's `!= 0` check reports it; no exception escapes
+    assert "timed out" in out
+
+
+def test_git_passes_a_timeout_to_the_subprocess(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, **kwargs):
+        seen.update(kwargs)
+
+        class R:
+            returncode, stdout, stderr = 0, "", ""
+
+        return R()
+
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    utils.git("status")
+    assert seen["timeout"] == utils.GIT_TIMEOUT_SECONDS

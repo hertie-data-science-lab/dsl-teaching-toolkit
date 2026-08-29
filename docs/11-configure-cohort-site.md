@@ -18,7 +18,7 @@ You never edit what the site shows - you edit the file it reads, and it re-syncs
 | Materials links | *nothing to set* | the row appears as soon as `schedule.yml` names the session, marked "not released yet"; the links fill in as you [release](08-release-materials-to-cohort.md) |
 | A session's name + blurb | cohort `classroom-config/schedule.yml` ([07](07-schedule-releases.md)) | `title`, `description` on the `releases:` entry - the Hertie syllabus's session title and learning objectives. `description` may run to several paragraphs |
 | Readings on the **Readings** tab | course materials repo | drop the readings into `readings/NN_.../` and **every file is listed and linked automatically** for enrolled students - nothing to write. `READINGS.md` (or `.txt`/`.bib`) beside them is OPTIONAL, for what a file cannot say: a URL, pointers for what to focus on, or clean citation-style metadata. It is published as written (this site is public, so it never hosts a reading itself directly, rather links to the GH-hosted files (with their permission restrictions enforced there))|
-| The **All Materials** tab | *nothing to set* | every file released to the cohort, grouped by section and nested exactly as its repo has it - a folder opens in the page itself, at any depth, rather than only counting its contents. The only page not keyed on a session ordinal, so a released `SYLLABUS.md` or a flat `datasets/` appears here and nowhere else |
+| The **All Materials** tab | *nothing to set* | every file released to the cohort, grouped by section and nested exactly as its repo has it - a folder opens in the page itself, at any depth, rather than only counting its contents. The only page not keyed on a session ordinal, so a released `SYLLABUS.md` or a flat `datasets/` appears here rather than on a session tab. A released syllabus is *also* pinned on the home page (found by name at the repo root, in any format) |
 | Which files each session links | course org `.github/dsl-course.yml` | *nothing to set* by default: a session lists its root files plus one link per subfolder, so a rendered deck lists the deck and not its assets. `site_link_extensions: [pdf, html]` narrows it further. Everything you release ships either way |
 
 ## What never to touch
@@ -34,10 +34,14 @@ repo linking the overwritten commit and naming the file to edit instead.
 | `_data/nav.yml` | the tab bar - generated, so a new tab reaches sites that already exist. Add a page of your own as a file and link it from `index.md` |
 | `_data/materials.yml` | the All Materials index, rebuilt from what each cohort repo actually holds |
 | `_config.yml` keys `course_name`, `course_code`, `course_semester`, `course_description`, `github_org` | overwritten from the sources in the table above |
+| `README.md` | rewritten every sync - it is the repo's own "do not edit this repository" notice |
 
-**Everything else in the site repo is yours and survives forever** - a custom `index.md` or any
-other page, CSS/SCSS, `_layouts/`, further `_data/*.yml`, assets, `_images/`. Only the surfaces
-listed above are ever written.
+**Faculty are not expected to hand-edit the cohort site at all.** Everything it shows comes
+from the files in the table at the top of this page; edit those. What is left over -
+`index.md` and any other page of your own, `_announcements/`, further `_data/*.yml`, assets,
+`_images/` - is yours and survives. `_layouts/`, `_includes/` and `_sass/_course.scss` are
+**reserved for the toolkit**: they come from the shared theme and will be converged like the
+surfaces above, so a change made there will not last.
 
 ## When it redeploys
 

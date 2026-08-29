@@ -52,14 +52,28 @@ The same workflow releases **code**, because code is just another path. Keep a g
 - Copies are additive, so each release extends what students already have 
 - release the package base early (e.g. `mlpkg/core`) so partial releases still import. The [example schedule](../example-course/cohort-org/schedule.yml) shows the scheduled version of the same pattern (weeks 1, 3 and 5 each unlock an `mlpkg` subpackage).
 
-## The README is withheld until you write it
+## Fixing something you have already released
 
-Releasing the repo root (`/`), or naming `README.md` outright, copies the materials repo's
-`README.md` to students as their course overview. While it is still the scaffold's
-placeholder - addressed to faculty, with a "delete this section before releasing" block and
-a link to `MAINTAINING.md` - the release **skips it and says so**. Everything else in the
+Edit it in the **course org** and release again. A release overwrites the file at that path,
+so the correction lands; a copy is only additive in that it never *deletes* anything.
+
+Do not edit the cohort's released copy directly - instructors have read on it for that
+reason. An edit there survives only until the next release of that path, then vanishes with
+no warning.
+
+## The unwritten root stubs are withheld until you write them
+
+Two root files are withheld while they are still the scaffold's placeholder: `README.md` and
+`SYLLABUS.md`. Releasing the repo root (`/`), or naming either outright, would otherwise
+publish faculty instructions as the students' course overview, and an empty table as their
+syllabus - which the site then pins on the cohort home page.
+
+So while the file is untouched the release **skips it and says so**. Everything else in the
 release still ships and the run stays green; the withheld file appears as a warning on the
 run summary. Rewrite it for students and release again.
+
+Only the ROOT file is ever withheld - a `README.md` inside a session folder is your own
+writing about that session and always ships.
 
 ## Live updates to the deployed `<course>.github.io` site
 - Any released materials will automatically show up in the deployed site (i.e. their release triggers a redeploy).

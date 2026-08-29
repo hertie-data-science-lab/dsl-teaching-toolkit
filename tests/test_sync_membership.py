@@ -97,21 +97,38 @@ def test_a_registered_cohort_is_matched_case_insensitively(monkeypatch):
     assert synced == ["cohort-f2026"]
 
 
-def test_an_empty_registry_does_not_block_a_named_cohort(monkeypatch, capsys):
-    # With nothing registered there is nothing to check against, and a brand-new course org
-    # legitimately has an empty registry - refusing there would break first-run bootstrap.
+def test_an_empty_registry_authorises_no_cohort(monkeypatch, capsys):
+    # "Nothing registered means nothing to check against" made the authorisation check
+    # opt-out: a course org whose registry was empty, or whose registry read came back
+    # empty, accepted any org a dispatch named - and then reconciled and PRUNED its
+    # roster and teams. Bootstrap registers the cohort before any sync names it.
     monkeypatch.setattr(sync_membership.seed, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(sync_membership.seed, "discover_content_repos", lambda org: [])
     monkeypatch.setattr(sync_membership.seed, "discover_assignments", lambda org: [])
     _stub_course_admins(monkeypatch)
-    monkeypatch.setattr(sync_membership.sync_roster, "sync", lambda org, **k: 0)
+    touched: list[str] = []
+    monkeypatch.setattr(
+        sync_membership.sync_roster, "sync", lambda org, **k: touched.append(org) or 0
+    )
     monkeypatch.setattr(sync_membership.sync_teams, "sync", lambda org, **k: 0)
     monkeypatch.setattr(
         sync_membership.sync_faculty, "sync_cohort_instructors", lambda *a, **k: 0
     )
 
-    assert sync_membership.sync("Course", cohort_org="Cohort-f2026") == 0
-    assert "no cohorts are registered" in capsys.readouterr().err
+    assert sync_membership.sync("Course", cohort_org="Cohort-f2026") == 1
+    assert touched == []
+    assert "is not registered under Course" in capsys.readouterr().err
+
+
+def test_an_empty_registry_still_reconciles_the_course_admins(monkeypatch):
+    # A brand-new course org legitimately has no cohorts; the course-org half of the
+    # sync must still run, so an unnamed cohort is not an error.
+    monkeypatch.setattr(sync_membership.seed, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(sync_membership.seed, "discover_content_repos", lambda org: [])
+    monkeypatch.setattr(sync_membership.seed, "discover_assignments", lambda org: [])
+    _stub_course_admins(monkeypatch)
+
+    assert sync_membership.sync("Course") == 0
 
 
 def test_a_clean_multi_cohort_run_reports_no_errors(monkeypatch):

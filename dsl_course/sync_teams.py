@@ -28,10 +28,10 @@ import sys
 from . import roster, teams
 from .utils import (
     create_team,
-    log,
     log_err,
     log_ok,
     log_step,
+    log_verbose,
     reconcile_team_members,
 )
 
@@ -45,16 +45,35 @@ def team_slug(assignment: str, team: str) -> str:
     return f"{assignment}-{team}".lower()
 
 
+# Team slugs students may never materialise. teams.csv is STUDENT-written (the public
+# Join-team issue form), and `team_slug("course", "admin")` is `course-admin` - the faculty
+# team that holds admin on every repo in the cohort. Reconciling that slug from teams.csv
+# would add the student to it and prune the real admins. The workflow refuses these at the
+# form; this is the backstop for a row that reached the CSV any other way.
+RESERVED_TEAM_SLUGS = frozenset({"course-admin", "instructors", "students", "auditors"})
+
+
+def is_reserved_slug(slug: str) -> bool:
+    return slug in RESERVED_TEAM_SLUGS or slug.startswith("instructors-")
+
+
 def desired_teams(per: dict[str, dict[str, list[str]]]) -> dict[str, set[str]]:
     """Flatten parsed teams.csv {assignment: {team: [handles]}} to {team_slug: {handles}}.
 
     team_slug lower-cases, so two team names differing only in case (`Team-X`/`team-x`)
     map to the same slug: UNION their members rather than overwriting, or one team's
-    members would vanish from the reconcile."""
+    members would vanish from the reconcile. A RESERVED slug is dropped, loudly."""
     wanted: dict[str, set[str]] = {}
     for assignment, groups in per.items():
         for team, members in groups.items():
-            wanted.setdefault(team_slug(assignment, team), set()).update(members)
+            slug = team_slug(assignment, team)
+            if is_reserved_slug(slug):
+                log_err(
+                    f"  ! teams.csv row ({assignment}, {team}) names the faculty team "
+                    f"`{slug}` - refusing to manage it from teams.csv; remove the row"
+                )
+                continue
+            wanted.setdefault(slug, set()).update(members)
     return wanted
 
 
@@ -126,14 +145,23 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
     for slug in sorted(wanted):
         accepted, rejected = vet_handles(sorted(wanted[slug]), allowed_by_fold)
         for member in rejected:
-            log_err(
-                f"{member} in teams.csv is not an onboarded roster handle - "
+            # Names a handle a STUDENT typed into teams.csv, so the detail is verbose-only
+            # (this workflow's log is world-readable). The count below is what a faculty
+            # member acts on, and it names nobody.
+            log_verbose(
+                f"    {member} in teams.csv is not an onboarded roster handle - "
                 f"not adding to {slug} (would invite an arbitrary GitHub account)"
             )
-            errors += 1
+        if rejected:
+            errors += len(rejected)
+            log_err(
+                f"{len(rejected)} handle(s) in teams.csv are not onboarded roster handles "
+                f"- not added to {slug} (they would invite arbitrary GitHub accounts). "
+                f"Re-run the CLI locally with DSL_VERBOSE=1 to see which."
+            )
         members = set(accepted)
         if dry_run:
-            log(
+            log_verbose(
                 f"    DRY-RUN team {slug}: {', '.join('@' + m for m in sorted(members))}"
             )
         elif not ensure_team(cohort_org, slug, members, prune):

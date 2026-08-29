@@ -27,14 +27,19 @@ from .central import CENTRAL, CENTRAL_REF
 from .discovery import (
     course_name_of,
     discover_cohorts,
-    has_infra_topic,
+    is_student_repo,
     list_org_repos,
+    org_tier,
+    student_repo_names,
 )
 from .utils import (
     converge_descriptions,
+    converge_faculty_access,
+    converge_topics,
     get_file_content,
     load_yaml_config,
     log,
+    log_err,
     log_ok,
     put_files,
 )
@@ -53,7 +58,9 @@ def _repo_table(repos: list[dict]) -> str:
     the thing this pipeline keeps out of public view. The site repo stays: it is public
     anyway, and faculty need the "do not touch" row.
     """
-    visible = [r for r in repos if r["name"] != ".github" and not has_infra_topic(r)]
+    visible = [
+        r for r in repos if r["name"] != ".github" and not is_student_repo(r, repos)
+    ]
     visible.sort(key=lambda r: (r["name"].lower() != "welcome", r["name"].lower()))
     rows = []
     for r in visible:
@@ -268,6 +275,7 @@ _(automatically bootstrapped from the central
 | [**Send enrolment codes**](https://github.com/{org}/.github/actions/workflows/send-codes.yml) | Generates enrolment codes for each student and emails each their code (to their university inbox). Students paste the code into the welcome Join issue. This keeps personal data out of the public repo. `dry_run` previews codes + emails. | Run by instructor |
 | [**New materials repo**](https://github.com/{org}/.github/actions/workflows/new-materials.yml) | Scaffolds a correctly-structured `course-materials-<year>` repo (session folders + the Release workflows). Ready for material to be added. | Run by instructor |
 | [**New assignment**](https://github.com/{org}/.github/actions/workflows/new-assignment.yml) | Scaffolds an `assignment-N-<year>` template repo (starter on `main`; the `solution` branch carries the model solution, `grading.yml`, and the hidden tests). | Run by instructor |
+| [**Generate syllabus**](https://github.com/{org}/.github/actions/workflows/generate-syllabus.yml) | Writes the "Course sessions and readings" section of a syllabus - one block per session, with its title, learning objectives and reading list - from a cohort's `classroom-config/schedule.yml` and this repo's `readings/` folders. It lands in `SYLLABUS.sessions.md` beside your syllabus (never released to students) and never edits `SYLLABUS.md` itself. | Run by instructor |
 | [**Check cohort setup**](https://github.com/{org}/.github/actions/workflows/check-cohort-setup.yml) | A per-cohort checklist of everything configured (identity, people, schedule + release plan, roster, teams, grades) with direct edit links for anything missing. Read-only. | Run by instructor |
 | [**Publish course website**](https://github.com/{org}/.github/actions/workflows/publish-site.yml) | **[OPTIONAL]** **[DEFERRED]** Build/refresh a public openware site for the course `{org}.github.io`. This will share this course's lecture materials and (limited) readings with the open internet. Opt-in (the first run scaffolds the site); afterwards a daily cron re-syncs it from the settings that run chose, so later materials edits appear without another click. Pick a materials repo and choose for readings: `reading-list` (citations only) or `actual-readings` (also host the files). Because the materials repos are private, the site **hosts** the shared files itself. This is separate from each cohort's student-facing site. | Run by instructor |
 | [**Release materials**](https://github.com/{org}/.github/actions/workflows/release-materials.yml) | Manually release materials to student-facing cohort orgs *(NB: it is recommended to instead use the [scheduling function](https://github.com/{CENTRAL}/blob/{CENTRAL_REF}/docs/07-schedule-releases.md) for regular releases)*. Select path(s) for any folder or file, one or several at a time. | Run by instructor |
@@ -288,8 +296,8 @@ The following are runnable by explicit ad hoc manual dispatch; course instructor
 | Action | What it does | Managed |
 | --- | --- | --- |
 | [**Sync membership**](https://github.com/{org}/.github/actions/workflows/sync-membership.yml) | Reconciles org + `students`-team access (from `students.csv`), project teams (from `teams.csv`), `course_admins` (from this org's declared `people:` block, mirrored into every cohort's own `course-admin` team), and each cohort's own `instructors`/`teaching_assistants` (from its `classroom-config/people.yml`, reconciled into that cohort's `instructors` team AND a course-org `instructors-<tag>` team).<br><br> Triggers on (1) push (editing any of those files takes effect immediately, including removals so that the file is the live truth) and (2) on a daily cron (catches a faculty entry's `start`/`end` rotation with no edit that day);`workflow_dispatch` is a manual escape hatch. | Auto-handled |
-| [**Refresh actions**](https://github.com/{org}/.github/actions/workflows/refresh-actions.yml) | Repopulates the cohort/session/assignment dropdowns, re-equips content repos, and rebuilds this index. Runs itself nightly, so this org stays in step with the central toolkit on its own. | Auto-handled |
-| [**Scheduled release**](https://github.com/{org}/.github/actions/workflows/scheduled-release.yml) | Hourly cron that auto-releases whatever each cohort's `classroom-config/schedule.yml` `releases:` plan says is now due (honouring each release's `when` time to the hour). Manual runs default to a dry-run preview ("what opens when"). The manual workflows above still work for early/ad-hoc release. | Auto-handled |
+| [**Refresh actions**](https://github.com/{org}/.github/actions/workflows/refresh-actions.yml) | Repopulates the cohort/source-repo/assignment dropdowns, re-equips content repos, and rebuilds this index. Runs itself nightly, so this org stays in step with the central toolkit on its own. | Auto-handled |
+| [**Scheduled release**](https://github.com/{org}/.github/actions/workflows/scheduled-release.yml) | Hourly cron that auto-releases whatever each cohort's `classroom-config/schedule.yml` `releases:` plan says is now due (honouring each entry's `event_datetime` / `deploy_datetime` to the hour). Manual runs default to a dry-run preview ("what opens when"). The manual workflows above still work for early/ad-hoc release. | Auto-handled |
 | _[**Sync site**](https://github.com/{org}/.github/actions/workflows/sync-site.yml)_ | _Regenerate a cohort's website from the org structure (releases do this automatically; standard workflow has no need for manual sync)._ | Auto-handled |
 
 
@@ -313,7 +321,7 @@ The following are runnable by explicit ad hoc manual dispatch; course instructor
 
 This whole structure is fully bootstrapped from the central [`dsl-teaching-toolkit`](https://github.com/{CENTRAL}) repo (via its **Bootstrap Course Org** action), and the actions above run that same central code.
 
-The course-level actions assume this layout - use **New materials repo** / **New assignment** above to scaffold correctly. These scaffolds are designed to be generic & non-presciptive, however if these formats to not suit your intended course delivery structure, please contact the DSL (`h.baker@hertie-school.org`).
+The course-level actions assume this layout - use **New materials repo** / **New assignment** above to scaffold correctly. These scaffolds are designed to be generic & non-prescriptive, however if these formats to not suit your intended course delivery structure, please contact the DSL (`h.baker@hertie-school.org`).
 
 ### Materials repo
 
@@ -372,11 +380,15 @@ Maintained by the [Hertie Data Science Lab](https://github.com/hertie-data-scien
 
 def update_profile_readme(
     org: str, org_name: str | None = None, course_name: str | None = None
-) -> None:
+) -> int:
     """(Re)generate the org's profile/README.md from its metadata + live repo list.
 
     A cohort org (one with a `welcome` repo) gets a student-facing page; a course org
-    gets the faculty-facing one."""
+    gets the faculty-facing one.
+
+    Returns the number of failed writes (0 or 1), so the nightly refresh can count it:
+    the commit's return used to be discarded under an unconditional "refreshed" line, and
+    a whole org whose landing pages never converged reported success every night."""
     if org_name is None or course_name is None:
         # Guarded load: absent (None) is normal - a cohort org has no dsl-course.yml of its
         # own, so fall back to the org name. A MALFORMED config raises here (with a clear,
@@ -400,12 +412,28 @@ def update_profile_readme(
     repos = list_org_repos(org)
     # Read off the same listing, and BEFORE the convergence below, which needs the tier:
     # one old description becomes "[do not touch]" on a cohort org and "[control panel]"
-    # on a course org.
-    is_cohort = any(r["name"] == "welcome" for r in repos)
+    # on a course org. `tier` is None for an org the listing cannot place (a legacy cohort
+    # with no topics and no `welcome`); the page renders it as a course org, as before.
+    tier = org_tier(repos)
+    is_cohort = tier == "cohort"
     # The listing carries every repo's description, and the table below is rendered
     # from it - so this is the one place that can fix a reworded description without
     # paying a read for it, and the corrected text reaches the page in the same run.
     converge_descriptions(org, repos, cohort=is_cohort)
+    # And the faculty teams' standing access, off the same listing and for the same reason:
+    # a team grant is set at repo creation and never revisited, so every repo kind added
+    # since a grant existed keeps whatever it started with. In a cohort org that is the
+    # whole of a non-owner instructor's access (default_repository_permission=none).
+    # The sweep fails SAFE where the page merely guesses: only a listing that positively
+    # says "course" gets the write-everywhere floor, and a student repo never gets push.
+    converge_faculty_access(
+        org, repos, cohort=tier != "course", protected=student_repo_names(repos)
+    )
+    # And the machinery topics, off the same listing: assign/grades stamp them in a
+    # separate PATCH after the create, so a repo whose stamp failed stays untagged
+    # forever - and the topics are what keep a student's submission repo and a private
+    # gradebook off this very page.
+    failures = converge_topics(org, repos, cohort=is_cohort)
     cohorts = None if is_cohort else discover_cohorts(org)
     body = render_profile_readme(org, org_name, course_name, repos, is_cohort, cohorts)
     if is_cohort:
@@ -416,12 +444,17 @@ def update_profile_readme(
     # Both are rendered from the same org snapshot and move together, so they belong in one
     # commit - kept separate from the workflow refresh's commit, because `docs:` vs `ci:` is
     # the one distinction in this history worth reading.
-    put_files(org, ".github", files, "docs: refresh org READMEs (profile + .github)")
+    if not put_files(
+        org, ".github", files, "docs: refresh org READMEs (profile + .github)"
+    ):
+        log_err(f"could not write {org}/.github READMEs")
+        return failures + 1
     log_ok(
         "profile + .github READMEs refreshed"
         if "profile/README.md" in files
         else ".github README refreshed (landing page left as the instructor has it)"
     )
+    return failures
 
 
 def _cohort_profile_body(org: str, repos: list[dict], seeded: str) -> str | None:

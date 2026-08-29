@@ -46,7 +46,7 @@ import yaml
 
 from . import schedule, seed
 from .assign import assignment_slug
-from .discovery import discover_handed_out_assignments
+from .discovery import discover_handed_out_assignments, list_org_repos
 from .utils import (
     GIT_ENV,
     READING_OVERLAY_NAMES,
@@ -58,6 +58,8 @@ from .utils import (
     get_file_content,
     gh,
     git,
+    has_denied_component,
+    is_denied_publication,
     is_missing_resource,
     load_yaml_config,
     log,
@@ -1093,6 +1095,12 @@ def _materials_index(
     for repo in sorted(content_repos):
         branch, paths = _repo_tree(cohort_org, repo)
         for path in paths:
+            # A released `solution/`, `grading.yml` or hidden `tests/` is not course
+            # material, and this index is the one page that lists everything a release
+            # happened to carry - so it was the shortest route from "someone released a
+            # folder wholesale" to "the whole class has the answers".
+            if has_denied_component(path):
+                continue
             if "/" not in path:
                 docs.setdefault(
                     path,
@@ -1984,6 +1992,24 @@ def _notify_overwritten_edits(
         log(f"  (manual edits to {len(rows)} file(s) were overwritten - issue filed)")
 
 
+def _stale_site_repo(org: str, site: str) -> str | None:
+    """A `*.github.io` repo in `org` under a name that is NOT `site`, if one exists.
+
+    Renaming an org does not rename its `<org>.github.io` repo, and GitHub quietly
+    demotes the now-mismatched repo from an org site to a project page. The expected
+    site repo is then simply absent, which every sync happily read as "this cohort
+    never opted into a site" - a permanent green no-op while the published site rotted.
+    Finding the old name is what lets the sync say so instead."""
+    for repo in list_org_repos(org):
+        name = repo.get("name", "")
+        if (
+            name.casefold().endswith(".github.io")
+            and name.casefold() != site.casefold()
+        ):
+            return name
+    return None
+
+
 def _sync_site_repo(
     org: str,
     build: Callable[[Path], _SitePlan | None],
@@ -2014,6 +2040,18 @@ def _sync_site_repo(
     site = _site_repo(org)
     just_scaffolded = False
     if not repo_exists(org, site):
+        try:
+            stale = _stale_site_repo(org, site)
+        except RuntimeError as exc:
+            log_err(str(exc))
+            return 1
+        if stale is not None:
+            log_err(
+                f"{org} has no {site}, but it does hold {org}/{stale} - the org was "
+                "renamed and its Pages site was silently demoted to a project page. "
+                f"Rename {stale} to {site} (GitHub does not do it for you), then re-run."
+            )
+            return 1
         if not scaffold_missing:
             log(f"  (no site repo {org}/{site} - skipping site sync)")
             return 0
@@ -2297,6 +2335,17 @@ def sync_site(course_org: str, cohort_org: str) -> int:
     return _sync_site_repo(cohort_org, build)
 
 
+def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:
+    """A `copytree` ignore filter for the PUBLIC site: drop every denylisted name, at any
+    depth (see utils.PUBLICATION_DENYLIST).
+
+    At any depth, unlike `deploy._copy_ignore`, which anchors its exclusions to the repo
+    root: the release path excludes plumbing that only ever lives at the root, while the
+    thing this exists to stop - a `solution/` beside the lab it answers - is precisely a
+    nested folder."""
+    return {n for n in names if is_denied_publication(n)}
+
+
 def _public_links(local_dir: Path, url_prefix: str) -> list[tuple[str, str]]:
     """(display-name, site-relative URL) for the files of a copied session folder that the
     page LISTS - not every file it serves.
@@ -2322,7 +2371,14 @@ def _public_links(local_dir: Path, url_prefix: str) -> list[tuple[str, str]]:
     the allowlist excluded would be served and unreachable. The cohort site takes the extra
     narrowing because it CAN offer a folder link; this one keeps every file reachable."""
     files = sorted(q for q in local_dir.rglob("*") if q.is_file())
-    rels = [q.relative_to(local_dir).as_posix() for q in files]
+    # Denylisted paths are already absent from a folder THIS run copied
+    # (`_publication_ignore`), so this is the second lock on the same door - and the one
+    # that holds if a file ever reaches the served tree by another route.
+    rels = [
+        rel
+        for rel in (q.relative_to(local_dir).as_posix() for q in files)
+        if not has_denied_component(rel)
+    ]
     if any("/" not in rel for rel in rels):
         rels = [rel for rel in rels if "/" not in rel]
     return [(rel, f"{url_prefix}/{quote(rel)}") for rel in rels]
@@ -2453,7 +2509,9 @@ def sync_public_site(
                     if sec_src is None:
                         continue
                     dest = site_session / section
-                    shutil.copytree(sec_src, dest, dirs_exist_ok=True)
+                    shutil.copytree(
+                        sec_src, dest, dirs_exist_ok=True, ignore=_publication_ignore
+                    )
                     links = _public_links(dest, f"{url_base}/{section}")
                     if links:
                         rows = (
@@ -2465,7 +2523,12 @@ def sync_public_site(
                 if read_src is not None:
                     if readings_mode == "actual-readings":
                         dest = site_session / READINGS_SECTION
-                        shutil.copytree(read_src, dest, dirs_exist_ok=True)
+                        shutil.copytree(
+                            read_src,
+                            dest,
+                            dirs_exist_ok=True,
+                            ignore=_publication_ignore,
+                        )
                         links = _public_links(dest, f"{url_base}/{READINGS_SECTION}")
                         if links:
                             section_links.append((READINGS_SECTION, links))
@@ -2640,14 +2703,15 @@ def main() -> int:
         # scheduler, the --all-cohorts loop above) already passes a cohort it read FROM the
         # registry - only the CLI takes one from outside. Casefold: GitHub org names are
         # case-insensitive.
+        # An EMPTY registry authorises nothing. It used to short-circuit the whole check,
+        # so a course org that had never registered a cohort - or whose registry failed to
+        # parse to anything - accepted any org name a dispatch cared to name.
         registered = seed.discover_cohorts(args.course_org)
-        if registered and args.cohort_org.casefold() not in {
-            c.casefold() for c in registered
-        }:
+        if args.cohort_org.casefold() not in {c.casefold() for c in registered}:
+            listed = ", ".join(sorted(registered)) or "nothing"
             log_err(
                 f"{args.cohort_org} is not registered under {args.course_org} "
-                f"({seed.COHORTS_PATH} lists {', '.join(sorted(registered))}) - refusing "
-                f"to sync its site."
+                f"({seed.COHORTS_PATH} lists {listed}) - refusing to sync its site."
             )
             return 1
         return sync_site(args.course_org, args.cohort_org)

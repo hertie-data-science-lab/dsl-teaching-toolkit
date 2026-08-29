@@ -3,10 +3,10 @@
 The same idempotent release functions as the manual workflows, fired automatically from the
 cohort's own `classroom-config/schedule.yml` `releases:` plan (see
 `dsl_course.schedule`). Each labelled release carries a `when` datetime and a mix of
-actions - `deploy` (copy a source path from a COURSE-org repo into a COHORT-org repo),
-`assignment` (provision one student repo per enrolled student from a template), and
-`grade` (run the faculty-side autograder). An hourly cron fires every release whose
-`when` has arrived. Because every release is idempotent, re-runs are no-ops and there is
+actions - `deploy` (copy a source path from a COURSE-org repo into a COHORT-org repo) and
+`assignment` (provision one student repo per enrolled student from a template). Grading is
+NOT one of them: it is driven off each assignment's own deadline, below, not off a
+`releases:` entry. An hourly cron fires every release whose `when` has arrived. Because every release is idempotent, re-runs are no-ops and there is
 no "already released" state to track. Grading is the exception - see AUTOGRADE below.
 
 Assignment handouts are declared with the rest of the assignment's lifecycle -
@@ -143,6 +143,8 @@ def _execute_nondeploy(course_org: str, cohort_org: str, release: Release) -> in
             release.assignment,
             cohort_org,
             solution=release.assignment_solution,
+            # Hourly: leave existing repos alone (the manual button still repairs access).
+            touch_existing=False,
         )
         if failed != 0:
             errors += 1
@@ -194,7 +196,10 @@ def _snapshot_passed_deadlines(
         is_group = resolve_is_group(
             force=False, schedule_type=entry.type, template_group=template_group
         )
-        if not snapshot_assignment(cohort_org, name, deadline, is_group=is_group):
+        # `name` names the repos, `slug` (the schedule key) is what teams.csv is keyed on.
+        if not snapshot_assignment(
+            cohort_org, name, deadline, is_group=is_group, teams_key=slug
+        ):
             errors += 1
     return errors
 
@@ -236,19 +241,26 @@ def _autograde_passed_deadlines(
     A missing template repo, a template with no `solution` branch, and `autograde: false`
     are all skips, not failures: plenty of assignments are hand-marked. Group vs individual
     is not guessed here - `collect` resolves it from the cohort schedule / grading.yml."""
-    from .collect import collect, has_autograde_results
+    from .collect import collect, has_autograde_results, load_snapshots
 
     errors = 0
     for slug, deadline in due_snapshots(sched, now):
         # the fire-once marker is keyed on the cohort NAME - it must agree with what
         # collect writes, or a passed deadline re-grades every tick
-        if has_autograde_results(
-            cohort_org, schedule.cohort_name(slug, sched.assignments[slug])
-        ):
+        name = schedule.cohort_name(slug, sched.assignments[slug])
+        if has_autograde_results(cohort_org, name):
             continue  # already machine-graded - re-grading is a deliberate act
         template = _assignment_template(course_org, slug, sched.assignments[slug])
         if template is None:
             log(f"  [skip] autograde {slug} - no template repo for it in {course_org}")
+            continue
+        # Never grade what was never frozen. Without a snapshot `collect` pins on committer
+        # dates (student-controlled), and when no submission repo exists at all it would
+        # record a permanent write-once ZERO for every student and mark the assignment
+        # graded - on a green run. A snapshot that failed this tick, or was skipped because
+        # nothing was handed out yet, simply means: not now. The next tick looks again.
+        if load_snapshots(cohort_org, name) is None:
+            log(f"  [wait] autograde {slug} - no completed snapshot yet, not grading")
             continue
         if dry_run:
             log(f"    DRY-RUN  autograde {slug} via {template} (deadline {deadline})")
@@ -409,6 +421,13 @@ def _preflight_sources(
 
 def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) -> int:
     sched = schedule.load(cohort_org)
+    # A plan that could not be read AS A PLAN is not an empty one. `load` deliberately
+    # falls back to an empty Schedule so one cohort's typo cannot freeze the cron - but
+    # while it stands, nothing is released, handed out, snapshotted or graded for this
+    # cohort, and an hourly GREEN tick is exactly how that goes unnoticed. `load` has
+    # already logged what is wrong and where; this is what makes anyone look.
+    # (Individually DROPPED entries stay advisory, as before - the rest of the plan runs.)
+    unreadable_plan = 1 if sched.unparseable else 0
     # Re-sorted, not just concatenated: the synthesised handouts carry their own datetimes
     # and would otherwise land after every scheduled release whatever their date.
     releases = sorted(
@@ -424,7 +443,8 @@ def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) 
     # Freeze passed deadlines FIRST: server-timed, and before anything grades against the
     # snapshot. Then autograde those same assignments, once each. Both are independent of
     # the release plan - a cohort can pin due dates without scheduling a single release.
-    errors = _snapshot_passed_deadlines(course_org, cohort_org, sched, now, dry_run)
+    errors = unreadable_plan
+    errors += _snapshot_passed_deadlines(course_org, cohort_org, sched, now, dry_run)
     errors += _autograde_passed_deadlines(course_org, cohort_org, sched, now, dry_run)
     # Look AHEAD as well as at what is due: a deploy whose source was never staged fails
     # at its moment, which is far too late to write the thing. This is the only unattended
@@ -438,7 +458,7 @@ def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) 
         for release in due:
             for line in describe(release, now):
                 log(f"    DRY-RUN  [{release.label}] {line}")
-        return 0
+        return unreadable_plan
 
     if not releases:
         log(

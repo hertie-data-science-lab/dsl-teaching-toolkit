@@ -283,7 +283,7 @@ RETIRED_STUBS = ("readings/01_session-1/reading.md",)
 
 def refreshable_stubs(tag: str) -> dict[str, bytes]:
     """The seeded files that are stubs rather than skeletons - improvable later, while they
-    still carry the mark (see `utils.seed_or_refresh_stub`).
+    still carry the mark (see `utils.refresh_stubs`).
 
     Named here, where they are written, and read by `seed.refresh` so the nightly
     convergence reaches repos scaffolded before a stub improved. One list rather than two
@@ -362,9 +362,10 @@ def _maintaining(org: str, repo: str) -> str:
         "case sensitive)\n\n"
         "Add more sessions by creating `lectures/02_session-2/`, `readings/02_session-2/`, ... "
         "(only the ordinal prefix matters - name the rest whatever you like), or add a whole "
-        "new section (e.g. `datasets/01_intro/`). If you release materials by hand, run "
-        "**Refresh actions** afterwards so the session dropdown and the Release workflow's "
-        "section toggles pick it up - unnecessary if you release via `schedule.yml`.\n\n"
+        "new section (e.g. `datasets/01_intro/`). Nothing needs refreshing afterwards: the "
+        "Release workflows take the path as free text (`course_source_path`), so a new "
+        "session or section is releasable the moment you push it. **Refresh actions** "
+        "repopulates the repo/cohort dropdowns, and runs itself nightly.\n\n"
         "## Available actions\n\n" + actions_table + "\n"
         "## Public course website (optional) **[DEFERRED]**\n\n"
         "The **Publish course website** action can share this repo's materials on a public "
@@ -485,7 +486,7 @@ def scaffold_materials(org: str, tag: str) -> int:
     # USER-owned skeletons: create-only, so a re-run against a repo faculty have since
     # authored must not revert their README/SYLLABUS to the stub or resurrect a deleted
     # starter directory. A failed seed (an absent file whose write failed) reds the scaffold.
-    # Stubs that REFRESH while they are still ours (see utils.seed_or_refresh_stub): the
+    # Stubs that REFRESH while they are still ours (see utils.refresh_stubs): the
     # improvement then reaches the courses already running, not just the next repo
     # scaffolded. Written before the create-only set below so a re-run's log reads in the
     # order the rules apply.
@@ -760,7 +761,11 @@ def scaffold_site(org: str) -> int:
         "build_type=workflow",
     )
     if code != 0 and "409" not in out and "already" not in out.lower():
-        gh(
+        # POST creates; PUT updates a site that already has a different build type. Its
+        # return used to be dropped, so a repo where BOTH calls failed - no Pages at all -
+        # went on to "site scaffolded -> https://...", a URL that has never served
+        # anything. Nothing downstream re-enables Pages, so this is the only chance.
+        code, out = gh(
             "api",
             "--method",
             "PUT",
@@ -768,11 +773,16 @@ def scaffold_site(org: str) -> int:
             "-f",
             "build_type=workflow",
         )
+        if code != 0:
+            log_err(f"  ! could not enable Pages on {org}/{site}: {out[:200]}")
+            return 1
 
     # The auto-created github-pages environment restricts which branches may deploy -
     # clear the policy so any branch (the template's default, plus sync-site's pushes)
-    # can deploy.
-    gh(
+    # can deploy. Not fatal: Pages IS on, the default branch usually deploys anyway, and
+    # the environment can lag its repo - but a silent failure here is what makes a
+    # sync-site push deploy nothing, so say it.
+    code, out = gh(
         "api",
         "--method",
         "PUT",
@@ -780,6 +790,11 @@ def scaffold_site(org: str) -> int:
         "-F",
         "deployment_branch_policy=null",
     )
+    if code != 0:
+        log_err(
+            f"  ! could not clear the github-pages branch policy on {org}/{site}: "
+            f"{out[:160]} - pushes from a non-default branch will not deploy"
+        )
 
     # template-generate doesn't fire workflows, so kick the first deploy by hand AND
     # confirm it lands. Enabling Pages with build_type=workflow races the platform's

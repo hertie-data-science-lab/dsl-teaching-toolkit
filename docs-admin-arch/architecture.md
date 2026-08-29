@@ -437,12 +437,15 @@ non-bot commit sits on it - a reviewer's correction is never clobbered.
 ## Convergence - the daily self-refresh
 
 Seeded workflow YAML is frozen in each org at seed time, while the engine it calls is always
-checked out from central `main`. Engine changes therefore land on the next press; *workflow
-shape* changes land because every course org re-seeds itself nightly.
+checked out from central `release` (`central.CENTRAL_REF`). A merge to `main` changes nothing
+in any live course: promoting it to `release` is a deliberate second act, and a rollback is a
+revert on `release`, which every org picks up on its next run with no re-seed. Engine changes
+therefore land on the first press after a promotion; *workflow shape* changes land because
+every course org re-seeds itself nightly.
 
 ```mermaid
 flowchart LR
-  c["`central main
+  c["`central release
 dsl-teaching-toolkit`"]
   c -->|"checked out by every run"| eng["engine - current on every press"]
   c -.->|"`Refresh actions
@@ -529,7 +532,7 @@ READMEs.
 - **course_source_repo** (central only) / **assignment** - the course org's content / `assignment-*` repos.
 - Every list-taking dropdown **pre-selects the newest term year** rather than letting GitHub
   select the alphabetically-first option, which used to pre-select last year's cohort. The one
-  deliberate exception is Sync enrolment, pinned to a `(faculty only)` placeholder so acting on
+  deliberate exception is Sync membership, pinned to a `(faculty only)` placeholder so acting on
   membership stays opt-in.
 - **course_source_path / cohort_dest_path** - free text. Both accept a comma-separated list,
   paired by index; a blank `cohort_dest_path` mirrors every `course_source_path`, and a count
@@ -660,13 +663,15 @@ Self-contained - workflows and their Python implementation both live in this rep
 - `dsl_course/`:
   - `central` - the one definition of which repo/ref every seeded workflow checks out; imported
     by both the renderers and the generated READMEs so the two can't disagree.
-  - `bootstrap_course` - configure a course or (`--cohort`) cohort org; create teams; grant
-    button access on `.github` and, cohort-side, on the infra repos faculty actually work in
-    (`grant_cohort_faculty_access` / `COHORT_FACULTY_REPOS` = `welcome`, `classroom-config`, so
-    non-owner instructors get write and course-admin gets admin under
-    `default_repository_permission=none`); propagate the secret.
+  - `bootstrap_course` - configure a course or (`--cohort`) cohort org; tighten BOTH kinds to
+    `default_repository_permission=none` (a course org holds the unreleased materials and the
+    assignment `solution` branches, so members must not read it by default either); create
+    teams; grant button access on `.github` and, cohort-side, on the infra repos faculty
+    actually work in (`grant_cohort_faculty_access` / `COHORT_FACULTY_REPOS` = `welcome`,
+    `classroom-config`, so non-owner instructors get write and course-admin gets admin);
+    propagate the secret.
   - `seed` - place the workflows (central + run-from-repo) and the `refresh` CLI, whose nightly
-    run also loops every registered cohort (gone orgs pruned with a hint, archived ones left
+    run also loops every registered cohort (orgs missing two runs running pruned with a hint, archived ones left
     frozen) re-converging its welcome workflows, classroom-config system files and samples; it
     delegates to four modules and re-exports a few of their names (see `__all__`; new code
     imports from the owner):

@@ -19,7 +19,7 @@ import argparse
 import json
 import sys
 
-from .utils import gh, gh_json, log_err, org_exists
+from .utils import gh_json, load_yaml_config, log_err, org_exists
 
 COURSE_HUB_TOPIC = "dsl-course-hub"
 COHORT_TOPIC = "dsl-cohort"
@@ -141,26 +141,14 @@ def _fetch_metadata(org: str) -> dict:
     {} means the org genuinely carries no metadata (a 404, or an empty file); any other
     read failure raises. The tier split reads this file - `course:` present means a
     cohort - so a transient failure would file a cohort org under Course orgs, and the
-    inventory is fully generated: a wrong refresh is worse than no refresh."""
-    code, raw = gh(
-        "api",
-        f"repos/{org}/.github/contents/dsl-course.yml",
-        "--jq",
-        ".content | @base64d",
-    )
-    if code != 0 and not ("HTTP 404" in raw or "Not Found" in raw):
-        raise RuntimeError(f"could not read {org}/.github/dsl-course.yml: {raw[:200]}")
-    if code != 0 or not raw:
-        return {}
+    inventory is fully generated: a wrong refresh is worse than no refresh.
 
-    try:
-        import yaml
-
-        parsed = yaml.safe_load(raw) or {}
-        return parsed if isinstance(parsed, dict) else {}
-    except Exception as e:
-        log_err(f"could not parse dsl-course.yml for {org}: {e}")
-        return {}
+    Through `load_yaml_config`, so there is one reader for this file. Its own copy of the
+    404 test drifted from `utils.is_missing_resource`, and its `except Exception: return
+    {}` turned a MALFORMED dsl-course.yml into "this org declares nothing" - which files a
+    cohort under Course orgs and rewrites the inventory around it, exactly the wrong
+    refresh this docstring warns about."""
+    return load_yaml_config(org, ".github", "dsl-course.yml") or {}
 
 
 def _registered_cohorts(course_org: str) -> list[str]:

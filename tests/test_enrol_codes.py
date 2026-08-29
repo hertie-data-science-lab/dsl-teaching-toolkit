@@ -69,10 +69,53 @@ def test_roster_dump_roundtrips_with_enrol_code():
     assert reparsed[0].onboarded is True
 
 
-def test_mailer_dry_run_previews_without_config():
-    msgs = [("a@x.edu", "Subj", "Body"), ("b@x.edu", "Subj", "Body")]
+def test_mailer_dry_run_previews_without_config(capsys):
+    msgs = [("ada@x.edu", "Subj", "Hello Ada, your code is dsl-abc123")]
     # no SMTP env needed for a dry-run preview
-    assert mailer.send_bulk(msgs, dry_run=True) == 2
+    assert mailer.send_bulk(msgs, dry_run=True) == 1
+    # The workflow log is PUBLIC: never the body (name + live enrol code), never the
+    # address in full.
+    out = capsys.readouterr().out
+    assert "dsl-abc123" not in out and "Ada" not in out and "ada@x.edu" not in out
+    assert "a***@x.edu" in out and "Subj" in out
+
+
+def test_dry_run_prints_one_placeholder_sample_and_no_real_body(capsys):
+    # The wording is the one thing a masked recipient list cannot show a reviewer, so a
+    # dry run prints ONE body - rendered from placeholders, never a student's own.
+    msgs = [
+        ("ada@x.edu", "Subj", "Hello Ada, your code is dsl-abc123"),
+        ("bo@x.edu", "Subj", "Hello Bo, your code is dsl-def456"),
+    ]
+    sample = enrol_codes.sample_body("https://github.com/org/welcome/issues")
+    assert mailer.send_bulk(msgs, dry_run=True, sample=sample) == 2
+    out = capsys.readouterr().out
+    assert out.count(mailer.SAMPLE_HEADER) == 1
+    assert "<code>" in out and "<name>" in out
+    assert "dsl-abc123" not in out and "Ada" not in out and "Bo" not in out
+
+
+def test_a_real_send_never_prints_the_sample(capsys, monkeypatch):
+    monkeypatch.setattr(mailer, "graph_config_from_env", lambda: None)
+    monkeypatch.setattr(mailer, "smtp_config_from_env", lambda: None)
+    mailer.send_bulk([("ada@x.edu", "Subj", "Body")], sample="SHOULD NOT APPEAR")
+    captured = capsys.readouterr()
+    assert "SHOULD NOT APPEAR" not in captured.out + captured.err
+
+
+def test_sample_body_names_the_course_like_a_real_message():
+    named = enrol_codes.sample_body(
+        "https://github.com/org/welcome/issues", "Deep Learning"
+    )
+    assert "To join the Deep Learning course on GitHub" in named
+    assert "<code>" in named and "<name>" in named
+
+
+def test_mask_email_keeps_one_character_and_the_domain():
+    assert mailer.mask_email("katarzyna.nowak@students.hertie-school.org") == (
+        "k***@students.hertie-school.org"
+    )
+    assert mailer.mask_email("nodomain") == "n***"
 
 
 def test_smtp_config_from_env_needs_all_three(monkeypatch):
@@ -149,3 +192,80 @@ def test_fill_enrol_codes_appends_the_column_when_the_roster_predates_it():
     rows = list(csv.DictReader(io.StringIO(out)))
     assert rows[0]["enrol_code"] == "dsl-new"
     assert out.splitlines()[0].endswith("enrol_code")  # added at the end
+
+
+# ------------------- a code write must not revert a Join binding that landed meanwhile
+
+
+HEADER = "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+STALE = HEADER + "ada@uni.edu,Ada,,,,enrolled\nbob@uni.edu,Bob,,,,enrolled\n"
+# What the roster looks like after a Join issue bound Ada's handle mid-run.
+FRESH = HEADER + "ada@uni.edu,Ada,ada-l,42,,enrolled\nbob@uni.edu,Bob,,,,enrolled\n"
+
+
+def _codes():
+    return [(0, "ada@uni.edu", "dsl-aaa111"), (1, "bob@uni.edu", "dsl-bbb222")]
+
+
+def test_a_refused_write_is_retried_against_the_fresh_roster(monkeypatch):
+    # The failure: put_file re-read the sha at write time, so this run's stale copy - with
+    # no handle for Ada - overwrote the Join binding, and Ada could not be provisioned.
+    written: list[str] = []
+    attempts = {"n": 0}
+
+    def fake_put_file(org, repo, path, content, message, expected_sha=None):
+        attempts["n"] += 1
+        written.append(content.decode())
+        return expected_sha == "fresh"  # only the up-to-date sha is accepted
+
+    monkeypatch.setattr(enrol_codes, "put_file", fake_put_file)
+    monkeypatch.setattr(
+        enrol_codes, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
+    )
+    assert enrol_codes.write_codes("COHORT", STALE, "stale", _codes()) is True
+    assert attempts["n"] == 2
+    # The retry carries Ada's handle - it was never this run's to remove - and both codes.
+    assert "ada-l" in written[-1]
+    assert "dsl-aaa111" in written[-1] and "dsl-bbb222" in written[-1]
+
+
+def test_the_retry_gives_up_after_a_bounded_number_of_attempts(monkeypatch):
+    monkeypatch.setattr(enrol_codes, "put_file", lambda *a, **k: False)
+    monkeypatch.setattr(
+        enrol_codes, "get_file_with_sha", lambda org, repo, path: (FRESH, "fresh")
+    )
+    assert enrol_codes.write_codes("COHORT", STALE, "stale", _codes()) is False
+
+
+def test_a_code_that_arrived_in_between_is_left_alone(monkeypatch):
+    # Another run (or a faculty edit) already filled Ada's cell. Ours must not replace it.
+    theirs = (
+        HEADER + "ada@uni.edu,Ada,,,dsl-theirs,enrolled\nbob@uni.edu,Bob,,,,enrolled\n"
+    )
+    written: list[str] = []
+
+    def fake_put_file(org, repo, path, content, message, expected_sha=None):
+        written.append(content.decode())
+        return expected_sha == "fresh"
+
+    monkeypatch.setattr(enrol_codes, "put_file", fake_put_file)
+    monkeypatch.setattr(
+        enrol_codes, "get_file_with_sha", lambda org, repo, path: (theirs, "fresh")
+    )
+    assert enrol_codes.write_codes("COHORT", STALE, "stale", _codes())
+    assert "dsl-theirs" in written[-1] and "dsl-aaa111" not in written[-1]
+
+
+def test_rows_are_relocated_by_email_not_by_their_original_index():
+    # A row inserted above shifts every index below it; the email is what identifies the
+    # student the code was generated for.
+    shifted = HEADER + "zoe@uni.edu,Zoe,,,,enrolled\n" + STALE[len(HEADER) :]
+    assert enrol_codes.rows_for_codes(shifted, _codes()) == {
+        1: "dsl-aaa111",
+        2: "dsl-bbb222",
+    }
+
+
+def test_a_row_with_no_email_keeps_its_original_index():
+    text = HEADER + ",Anonymous,,,,enrolled\n"
+    assert enrol_codes.rows_for_codes(text, [(0, "", "dsl-zzz")]) == {0: "dsl-zzz"}

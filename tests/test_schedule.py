@@ -392,16 +392,16 @@ def test_max_team_size_parses_and_defaults_to_none():
     meta = {
         "assignments": {
             "assignment-4-project": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-1",
                 "due_datetime": "2026-11-15",
                 "max_team_size": 3,
             },
             "assignment-1": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-2",
                 "due_datetime": "2026-10-13",
             },
             "bad": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-3",
                 "due_datetime": "2026-10-20",
                 "max_team_size": "lots",
             },
@@ -417,12 +417,12 @@ def test_assignment_handout_parses():
     meta = {
         "assignments": {
             "assignment-1": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-1",
                 "due_datetime": "2026-10-13",
                 "handout_datetime": "2026-09-22T09:00",
             },
             "assignment-2": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-2",
                 "due_datetime": "2026-11-10",
             },
         }
@@ -443,13 +443,13 @@ def test_assignment_solution_datetime_parses_and_has_no_default():
     meta = {
         "assignments": {
             "assignment-1": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-1",
                 "due_datetime": "2026-10-13",
                 "handout_datetime": "2026-09-22T09:00",
                 "solution_datetime": "2026-10-16T09:00",
             },
             "assignment-2": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-2",
                 "due_datetime": "2026-11-10",
             },
         }
@@ -605,21 +605,21 @@ def test_assignment_type_parses_and_rejects_unknown_values():
     meta = {
         "assignments": {
             "assignment-4-project": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-1",
                 "due_datetime": "2026-11-15",
                 "type": "group",
             },
             "assignment-1": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-2",
                 "due_datetime": "2026-10-13",
                 "type": "Individual",
             },
             "assignment-2": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-3",
                 "due_datetime": "2026-10-27",
             },
             "typo": {
-                "course_source_repo": "a-f2026",
+                "course_source_repo": "a-f2026-4",
                 "due_datetime": "2026-11-01",
                 "type": "grp",
             },
@@ -724,8 +724,9 @@ def test_unparseable_schedule_loads_as_empty_and_says_so_loudly(monkeypatch, cap
 
     sched = S.load("Cohort-f2026")
 
-    # same shape a missing schedule.yml yields - nothing scheduled, nothing raised
-    assert sched == Schedule()
+    # same shape a missing schedule.yml yields - nothing scheduled, nothing raised - but
+    # flagged, so the hourly scheduler can fail its run instead of ticking green for ever
+    assert sched == Schedule(unparseable=True)
     err = capsys.readouterr().err
     # self-diagnosing: which cohort, which file, the parser's own line/column, what to do
     assert "Cohort-f2026/classroom-config/schedule.yml is NOT valid YAML" in err
@@ -757,15 +758,29 @@ def test_a_wellformed_schedule_is_untouched_by_the_yaml_guard(monkeypatch, capsy
     assert capsys.readouterr().err == ""
 
 
-def test_a_non_mapping_schedule_still_loads_as_empty(monkeypatch):
+def test_a_non_mapping_schedule_still_loads_as_empty(monkeypatch, capsys):
     # parses fine, but isn't a mapping - the pre-existing isinstance guard, pinned here
-    # so the new try/except can't be mistaken for the only defence.
+    # so the new try/except can't be mistaken for the only defence. Same consequence as a
+    # parse failure (nothing in the file is read), so it carries the same flag.
     from dsl_course import schedule as S
 
     monkeypatch.setattr(
         S, "get_file_content", lambda org, repo, path: "- just\n- a list\n"
     )
+    assert S.load("Cohort-f2026") == Schedule(unparseable=True)
+    assert "not a mapping" in capsys.readouterr().err
+
+
+def test_a_comment_only_schedule_is_empty_not_unparseable(monkeypatch, capsys):
+    # `yaml.safe_load` returns None for a file of nothing but comments. That is an empty
+    # plan, exactly like an absent file - not a fault to redden the hourly cron with.
+    from dsl_course import schedule as S
+
+    monkeypatch.setattr(
+        S, "get_file_content", lambda org, repo, path: "# nothing yet\n"
+    )
     assert S.load("Cohort-f2026") == Schedule()
+    assert capsys.readouterr().err == ""
 
 
 # --------------------------------------------------------------- dropped-entry reporting
@@ -848,14 +863,14 @@ def test_cohort_dest_repo_parses_and_defaults_to_the_slug():
     sched = parse(
         {
             "assignments": {
-                "hw": {"course_source_repo": "a-f2026", "due_datetime": "2026-10-13"},
+                "hw": {"course_source_repo": "a-f2026-1", "due_datetime": "2026-10-13"},
                 "named": {
-                    "course_source_repo": "a-f2026",
+                    "course_source_repo": "a-f2026-2",
                     "cohort_dest_repo": "homework-1",
                     "due_datetime": "2026-10-20",
                 },
                 "blank": {
-                    "course_source_repo": "a-f2026",
+                    "course_source_repo": "a-f2026-3",
                     "cohort_dest_repo": "  ",
                     "due_datetime": "2026-10-27",
                 },
@@ -1635,3 +1650,26 @@ def test_worst_severity_is_the_loudest_not_the_first(monkeypatch):
     ]
     assert schedule.worst_severity(faults, now) is schedule.Severity.ERROR
     assert schedule.worst_severity([], now) is None
+
+
+def test_two_assignments_cannot_hand_out_the_same_repo():
+    # A copy-paste in Maths f2026 had assignments 3 and 4 both citing assignment-2's repo.
+    # Downstream nothing can tell them apart: the handout "skips" the other assignment's
+    # repos and ships nothing, then the autograder re-grades the other assignment hourly
+    # under this key. The second claimant is dropped, loudly, naming the first.
+    meta = {
+        "assignments": {
+            "assignment-2": {
+                "course_source_repo": "a2-f2026",
+                "due_datetime": "2026-10-13",
+            },
+            "assignment-3": {
+                "course_source_repo": "a2-f2026",
+                "due_datetime": "2026-11-10",
+            },
+        }
+    }
+    sched = parse(meta)
+    assert set(sched.assignments) == {"assignment-2"}
+    (drop,) = [d for d in sched.dropped if "assignments.assignment-3" in d]
+    assert "already used by assignments.assignment-2" in drop

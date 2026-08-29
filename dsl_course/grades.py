@@ -41,7 +41,7 @@ from pathlib import Path
 import yaml
 
 from . import mailer, roster
-from .discovery import course_name_for_cohort
+from .discovery import GRADEBOOK_PREFIX, course_name_for_cohort
 from .utils import (
     GIT_ENV,
     add_collaborator,
@@ -50,20 +50,22 @@ from .utils import (
     get_file_content,
     gh,
     git,
+    grant_faculty_read_access,
     log,
     log_err,
     log_ok,
-    log_skip,
     log_step,
+    log_verbose,
     put_file,
     repo_exists,
+    require_csv_header,
     set_repo_topics,
+    strip_bom,
 )
 
 CONFIG_REPO = roster.CONFIG_REPO  # classroom-config
 GRADES_DIR = "grades"  # faculty-edited source tables, one CSV per assignment
 GRADEBOOK_DIR = "gradebook"  # rendered per-student YAML staged for the preview PR
-GRADEBOOK_PREFIX = "grades-"  # per-student repo: grades-<handle>
 RENDER_BRANCH = "grades-update"
 COHORT_CSV_NAME = "cohort-gradebook.csv"  # generated wide faculty-only glance view
 
@@ -165,7 +167,11 @@ def parse_grades(text: str) -> list[GradeRow]:
 
     Raises RetiredGradeHeader if the header uses the pre-rename names - see
     `_RETIRED_GRADE_FIELDS` for why that cannot be tolerated the way an unknown column is."""
-    reader = csv.DictReader(io.StringIO(text))
+    # strip_bom: an Excel "CSV UTF-8" starts with a BOM, which glues itself to the first
+    # header name - `\ufeffgithub_handle` - so every handle read "" and merge_auto folded
+    # every student onto one row, destroying hand-entered marks. roster and teams already
+    # stripped it; this was the one hand-edited CSV that did not.
+    reader = csv.DictReader(io.StringIO(strip_bom(text)))
     stale = [f for f in (reader.fieldnames or []) if f.strip() in _RETIRED_GRADE_FIELDS]
     if stale:
         renames = ", ".join(f"{f} -> {_RETIRED_GRADE_FIELDS[f.strip()]}" for f in stale)
@@ -173,6 +179,7 @@ def parse_grades(text: str) -> list[GradeRow]:
             f"grades CSV uses retired column name(s): {renames}. Rename the header row and "
             f"re-run; reading it as-is would drop every mark in those columns."
         )
+    require_csv_header(reader.fieldnames, ("github_handle",), "grades CSV")
     return [
         GradeRow(**{f: (row.get(f) or "").strip() for f in GRADE_FIELDS})
         for row in reader
@@ -210,14 +217,15 @@ def build_gradebooks(per_assignment: dict[str, list[GradeRow]]) -> dict[str, dic
     Deterministic: assignments are folded in sorted order so the rendered YAML (and thus
     the preview diff) is stable across runs."""
     books: dict[str, dict] = {}
+    canonical: dict[str, str] = {}  # fold key -> the first spelling seen for it
     for assignment in sorted(per_assignment):
         for row in per_assignment[assignment]:
             if not row.github_handle:
                 continue
-            book = books.setdefault(
-                row.github_handle,
-                {"student": row.github_handle, "assignments": {}},
+            handle = canonical.setdefault(
+                row.github_handle.casefold(), row.github_handle
             )
+            book = books.setdefault(handle, {"student": handle, "assignments": {}})
             book["assignments"][assignment] = gradebook_entry(row)
     return books
 
@@ -283,15 +291,25 @@ def merge_auto(text: str, updates: list[tuple[str, dict[str, str]]]) -> str:
     marker's correction with a recomputed score. To get a fresh machine score, clear those
     cells (or delete the CSV) first, then re-grade."""
     rows = parse_grades(text) if text.strip() else []
-    order = [r.github_handle for r in rows]
-    by_handle = {r.github_handle: r for r in rows}
+    order: list[str] = []
+    by_handle: dict[str, GradeRow] = {}
+    # Fold-keyed: GitHub logins are case-insensitive, so `Ada-L` in a hand-typed CSV and
+    # `ada-l` from the API are one student. Keyed raw, the autograder appended a SECOND row
+    # for the same person and every write-once guard on the first one read as an empty
+    # cell. The row's own spelling - the marker's - is left exactly as written.
+    for r in rows:
+        key = r.github_handle.casefold()
+        if key not in by_handle:
+            by_handle[key] = r
+            order.append(key)
     preserved = 0
     for handle, fields in updates:
-        row = by_handle.get(handle)
+        key = handle.casefold()
+        row = by_handle.get(key)
         if row is None:
             row = GradeRow(github_handle=handle)
-            by_handle[handle] = row
-            order.append(handle)
+            by_handle[key] = row
+            order.append(key)
         kept = 0
         for key, value in fields.items():
             if key in MACHINE_FIELDS and getattr(row, key, ""):
@@ -300,7 +318,7 @@ def merge_auto(text: str, updates: list[tuple[str, dict[str, str]]]) -> str:
             setattr(row, key, value)
         if kept:
             preserved += kept
-            log(f"  [keep] {handle}: {kept} existing cell(s) left as they are")
+            log_verbose(f"  [keep] {handle}: {kept} existing cell(s) left as they are")
     if preserved:
         log_ok(
             f"{preserved} existing machine-written cell(s) preserved - "
@@ -377,7 +395,7 @@ def provision_one(cohort_org: str, handle: str) -> str:
     repo = f"{GRADEBOOK_PREFIX}{handle}"
     existed = repo_exists(cohort_org, repo)
     if existed:
-        log_skip(f"gradebook {cohort_org}/{repo}")
+        log_verbose(f"  [skip] gradebook {cohort_org}/{repo}")
     else:
         if not create_repo(
             cohort_org,
@@ -389,10 +407,16 @@ def provision_one(cohort_org: str, handle: str) -> str:
         put_file(
             cohort_org, repo, "README.md", _STARTER_README.encode(), "init gradebook"
         )
-        set_repo_topics(cohort_org, repo, ["gradebook"])
+        if not set_repo_topics(cohort_org, repo, ["gradebook"]):
+            # Not named: this log is public. The nightly sweep converges the topic.
+            log_err("  ! a gradebook is untagged - the nightly sweep converges it")
 
+    # Read, not write: `distribute` rewrites grades.yml from
+    # `classroom-config/grades/<slug>.csv`, so a mark corrected here would be overwritten
+    # on the next run. The CSV is where a mark belongs.
+    grant_faculty_read_access(cohort_org, repo)
     if add_collaborator(cohort_org, repo, handle, permission="pull"):
-        log_ok(f"  + @{handle} (read)")
+        log_verbose(f"  [ok]   + @{handle} (read)")
         return "skipped" if existed else "ok"
     # A gradebook the student can't open is a failure, not a partial success - the status
     # starts with "failed" so it reaches the exit code (see sync).
@@ -423,7 +447,9 @@ def sync(cohort_org: str, dry_run: bool = False) -> int:
     results: dict[str, int] = {}
     for s in onboarded:
         if dry_run:
-            log(f"    DRY-RUN  {cohort_org}/{GRADEBOOK_PREFIX}{s.github_handle}")
+            log_verbose(
+                f"    DRY-RUN  {cohort_org}/{GRADEBOOK_PREFIX}{s.github_handle}"
+            )
             continue
         status = provision_one(cohort_org, s.github_handle)
         results[status] = results.get(status, 0) + 1
@@ -502,12 +528,19 @@ def render(cohort_org: str) -> int:
         gbdir.mkdir(exist_ok=True)
         for handle in sorted(books):
             (gbdir / f"{handle}.yml").write_text(render_yaml(books[handle]))
-            log_ok(f"+ {GRADEBOOK_DIR}/{handle}.yml")
+            log_verbose(f"  [ok] + {GRADEBOOK_DIR}/{handle}.yml")
         (wd / COHORT_CSV_NAME).write_text(render_cohort_csv(per))
         log_ok(f"+ {COHORT_CSV_NAME}")
 
         git("-C", str(wd), *GIT_ENV, "add", "-A")
-        code, _ = git(
+        # `git commit` exits non-zero BOTH when there is nothing staged and when the commit
+        # itself fails (a lock, a full disk, a hook). Reported as "nothing new to render",
+        # a real failure looked like the idempotent no-op: green, no preview PR, and the
+        # marker's grades never distributed. Ask what is staged, then commit.
+        if git("-C", str(wd), "diff", "--cached", "--quiet")[0] == 0:
+            log_ok("nothing new to render (gradebooks already match the source).")
+            return 0
+        code, out = git(
             "-C",
             str(wd),
             *GIT_ENV,
@@ -518,8 +551,8 @@ def render(cohort_org: str) -> int:
             "grades: render gradebooks",
         )
         if code != 0:
-            log_ok("nothing new to render (gradebooks already match the source).")
-            return 0
+            log_err(f"could not commit the rendered gradebooks: {out[:200]}")
+            return 1
         if (
             git("-C", str(wd), *GIT_ENV, "push", "-q", "-f", "origin", RENDER_BRANCH)[0]
             != 0
@@ -588,7 +621,9 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
         pushed: list[str] = []
         for f in files:
             if dry_run:
-                log(f"    DRY-RUN  would update {GRADEBOOK_PREFIX}{f.stem}/grades.yml")
+                log_verbose(
+                    f"    DRY-RUN  would update {GRADEBOOK_PREFIX}{f.stem}/grades.yml"
+                )
                 pushed.append(f.stem)
                 continue
             status = _push_gradebook(cohort_org, f.stem, f.read_text())
@@ -600,9 +635,13 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
     else:
         log_ok(f"Done - {json.dumps(results)}")
 
+    notifications_failed = 0
     if notify and pushed:
-        _email_updates(cohort_org, pushed, dry_run=dry_run)
-    return 0 if dry_run else (1 if any(k.startswith("failed") for k in results) else 0)
+        notifications_failed = _email_updates(cohort_org, pushed, dry_run=dry_run)
+    if dry_run:
+        return 0
+    pushes_failed = any(k.startswith("failed") for k in results)
+    return 1 if pushes_failed or notifications_failed else 0
 
 
 def _push_gradebook(cohort_org: str, handle: str, content: str) -> str:
@@ -610,16 +649,65 @@ def _push_gradebook(cohort_org: str, handle: str, content: str) -> str:
     repo = f"{GRADEBOOK_PREFIX}{handle}"
     if not put_file(cohort_org, repo, "grades.yml", content.encode(), "grades: update"):
         return "failed-push"
-    log_ok(f"+ {repo}/grades.yml")
+    log_verbose(f"  [ok] + {repo}/grades.yml")
     return "ok"
 
 
-def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -> None:
+def update_message(
+    student: roster.Student, cohort_org: str, course_name: str = ""
+) -> mailer.Message:
+    """The 'your grades have been updated' email for one student: (to, subject, body).
+
+    The course goes in the SUBJECT as well as the body: the inbox list is where a student
+    taking several of these actually tells them apart, and by the time they have opened it
+    the body is redundant. A course that carries no name yet keeps the generic wording
+    rather than emailing a blank."""
+    url = f"https://github.com/{cohort_org}/{GRADEBOOK_PREFIX}{student.github_handle}"
+    course_suffix = f" for {course_name}" if course_name else ""
+    body = (
+        f"Hello {student.name or 'there'},\n\n"
+        f"Your grades{course_suffix} have been updated. View them in your private "
+        f"gradebook:\n"
+        f"  {url}\n"
+    )
+    subject = (
+        f"Your grades for {course_name} have been updated"
+        if course_name
+        else "Your grades have been updated"
+    )
+    return (student.hertie_email, subject, body)
+
+
+def sample_body(cohort_org: str, course_name: str = "") -> str:
+    """The notification rendered with PLACEHOLDERS, for the dry-run preview.
+
+    Same reason as `enrol_codes.sample_body`: a dry run masks every recipient and prints no
+    real body, so the wording - the only thing left to review - would never be seen. No
+    student's name or handle appears, so this is safe in a world-readable Actions log."""
+    placeholder = roster.Student(
+        hertie_email="<email>",
+        name="<name>",
+        github_handle="<handle>",
+        github_id="",
+    )
+    return update_message(placeholder, cohort_org, course_name)[2]
+
+
+def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -> int:
     """Email each student a 'grades updated' notification to their university inbox,
-    linking to their private gradebook repo (the grade's source of truth)."""
-    by_handle = {
-        s.github_handle: s for s in roster.load(cohort_org) or [] if s.github_handle
-    }
+    linking to their private gradebook repo (the grade's source of truth).
+
+    Returns how many notifications FAILED to send (0 when every one landed, and 0 for a
+    dry run). `distribute` exits on it: the grades themselves are already pushed by this
+    point, so a mail failure is not a reason to undo anything - but a student who never
+    got the notification does not know to look, and a green run told nobody."""
+    # Fold-keyed for the same reason merge_auto is: the gradebook filenames come from the
+    # grade CSVs (a marker's typing) and the roster's casing is its own, so a case-only
+    # difference used to mean a student was silently never told their grades had landed.
+    by_handle: dict[str, roster.Student] = {}
+    for s in roster.load(cohort_org) or []:
+        if s.github_handle:
+            by_handle.setdefault(s.github_handle.casefold(), s)
     # Name the course in the body - a student taking several of these can't tell one
     # "your grades have been updated" from another. Read live from the course org's
     # dsl-course.yml; a course that carries no name yet keeps the generic wording rather
@@ -633,38 +721,21 @@ def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -
     except Exception as exc:  # a name is never worth losing the notifications over
         log_err(f"could not read the course name ({exc}) - mailing without it")
         course_name = ""
-    course_suffix = f" for {course_name}" if course_name else ""
     messages = []
     for handle in handles:
-        student = by_handle.get(handle)
+        student = by_handle.get(handle.casefold())
         if not student or not student.hertie_email:
             continue
-        url = f"https://github.com/{cohort_org}/{GRADEBOOK_PREFIX}{handle}"
-        body = (
-            f"Hello {student.name or 'there'},\n\n"
-            f"Your grades{course_suffix} have been updated. View them in your private "
-            f"gradebook:\n"
-            f"  {url}\n"
-        )
-        # The course goes in the SUBJECT as well as the body: the inbox list is where a
-        # student taking several of these actually tells them apart, and by the time they
-        # have opened it the body is redundant.
-        subject = (
-            f"Your grades for {course_name} have been updated"
-            if course_name
-            else "Your grades have been updated"
-        )
-        messages.append((student.hertie_email, subject, body))
+        messages.append(update_message(student, cohort_org, course_name))
     if not messages:
-        return
-    # The grades themselves are already pushed by this point, so a mail failure isn't
-    # fatal - but it must not pass unmentioned: a student who never got the notification
-    # doesn't know to look.
-    sent = mailer.send_bulk(messages, dry_run=dry_run)
-    if sent < len(messages):
-        log_err(
-            f"{len(messages) - sent} of {len(messages)} grade notification(s) not sent"
-        )
+        return 0
+    sent = mailer.send_bulk(
+        messages, dry_run=dry_run, sample=sample_body(cohort_org, course_name)
+    )
+    failed = len(messages) - sent
+    if failed:
+        log_err(f"{failed} of {len(messages)} grade notification(s) not sent")
+    return failed
 
 
 def main() -> int:

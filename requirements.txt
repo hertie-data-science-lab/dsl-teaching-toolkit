@@ -1,4 +1,8 @@
-PyYAML>=6.0
+# PINNED, not floored. Every seeded workflow in every live course installs this file at
+# run time, so a new release on PyPI reaches production everywhere the moment it is
+# published - with no run in between to catch it. Bump these deliberately, the way
+# `central.CENTRAL_REF` is promoted.
+PyYAML==6.0.3
 # zoneinfo (stdlib) reads the OS tz database; tzdata is the pure-Python fallback so the
 # schedule's timezone handling works even on minimal runners without a system tzdata.
-tzdata>=2024.1
+tzdata==2026.3

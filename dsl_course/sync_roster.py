@@ -27,12 +27,15 @@ import argparse
 import sys
 
 from . import roster
+from .discovery import list_org_repos
 from .utils import (
-    log,
+    is_collaborator,
     log_err,
     log_ok,
     log_step,
+    log_verbose,
     reconcile_team_members,
+    remove_collaborator,
     set_org_membership,
 )
 
@@ -53,6 +56,77 @@ def desired_members(students: list[roster.Student]) -> dict[str, set[str]]:
     }
 
 
+def submission_repo_suffixes(repos: list[dict]) -> list[tuple[str, str]]:
+    """`(repo, suffix)` for every `<template>-<suffix>` repo in a cohort org's listing.
+
+    The same rule `discovery.is_student_repo` uses: a submission repo is generated from one
+    of the org's cohort assignment templates, so its name is that template's name plus a
+    suffix. The suffix is a student's HANDLE for an individual assignment and a TEAM name
+    for a group one - which is exactly why nothing downstream acts on a suffix without
+    asking GitHub whether it is really a collaborator."""
+    templates = sorted(
+        (r["name"] for r in repos if r.get("isTemplate")), key=len, reverse=True
+    )
+    out = []
+    # Templates themselves are excluded: `assignment-4-project` is a repo in this listing
+    # AND starts with `assignment-4-`, so a cohort with both templates would otherwise
+    # read one of its own templates as a submission repo belonging to `project`.
+    for repo in sorted(r["name"] for r in repos if not r.get("isTemplate")):
+        for template in templates:  # longest first, so a nested slug wins
+            if repo.startswith(f"{template}-"):
+                out.append((repo, repo[len(template) + 1 :]))
+                break
+    return out
+
+
+def revoke_offboarded_access(
+    cohort_org: str, on_roster: set[str], dry_run: bool = False
+) -> int:
+    """Revoke the collaborator grant an off-boarded student still holds on the submission
+    repos named after them. Returns the error count.
+
+    Pruning the role team was never the whole of off-boarding: an individual assignment
+    grants the student DIRECTLY, as a `maintain` collaborator (see `assign.provision_one` -
+    the individual path is collaborator-based by design, so that a repo works before the
+    org invite is accepted). A handle deleted from students.csv therefore kept full write
+    on every assignment repo they had ever been handed, indefinitely, while every report
+    said they had been removed.
+
+    Deliberately narrow. Only the login the repo is NAMED after is ever revoked, and only
+    once GitHub confirms it is a direct collaborator - a group repo's suffix is a team
+    name, faculty and the bot hold their access through teams, and a repo name is not a
+    reason to take anyone's access away. `on_roster` is casefolded, because GitHub logins
+    are case-insensitive and a case-only difference is the same account."""
+    stale = [
+        (repo, suffix)
+        for repo, suffix in submission_repo_suffixes(list_org_repos(cohort_org))
+        if suffix.casefold() not in on_roster
+    ]
+    errors = 0
+    revoked = 0
+    for repo, suffix in stale:
+        present = is_collaborator(cohort_org, repo, suffix)
+        if present is None:  # unreadable - never guess, in either direction
+            errors += 1
+            continue
+        if not present:
+            continue  # a team name, or already revoked
+        if dry_run:
+            log_verbose(f"    DRY-RUN revoke {suffix} <- {cohort_org}/{repo}")
+            revoked += 1
+        elif remove_collaborator(cohort_org, repo, suffix):
+            log_verbose(f"  [ok] revoked {suffix} from {cohort_org}/{repo}")
+            revoked += 1
+        else:
+            errors += 1
+    if revoked:
+        log_ok(
+            f"{revoked} submission-repo grant(s) revoked for handle(s) no longer on the "
+            f"roster{' (dry run)' if dry_run else ''}"
+        )
+    return errors
+
+
 def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
     students = roster.load(cohort_org)
     if students is None:  # missing/unreadable roster - load() already logged why
@@ -69,13 +143,21 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
     for team, handles in wanted.items():
         for handle in sorted(handles):
             if dry_run:
-                log(f"    DRY-RUN enroll: {handle} -> org member")
+                log_verbose(f"    DRY-RUN enroll: {handle} -> org member")
             elif not set_org_membership(cohort_org, handle, role="member"):
                 errors += 1
         # Team membership via the shared reconcile so pruning inherits its guard:
         # an org Owner (or the acting bot) on the roster is never evicted.
         errors += reconcile_team_members(
             cohort_org, team, handles, prune=prune, dry_run=dry_run
+        )
+    if prune:
+        # Behind the same flag as the team prune, and for the same reason: this is the
+        # other half of off-boarding, and an ad-hoc run must not silently revoke anything.
+        errors += revoke_offboarded_access(
+            cohort_org,
+            {h.casefold() for handles in wanted.values() for h in handles},
+            dry_run=dry_run,
         )
     return errors
 

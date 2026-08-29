@@ -256,8 +256,9 @@ _TREE = "\n".join(  # noqa: FLY002 - a list of paths reads better than one long 
 
 
 def _tree_gh(*args, **kwargs):
-    """Fake `gh api .../git/trees/<branch>?recursive=1` - the repo's blob paths."""
-    return (0, _TREE)
+    """Fake `gh api .../git/trees/<branch>?recursive=1` - the `truncated` flag the jq asks
+    for first, then the repo's blob paths."""
+    return (0, "false\n" + _TREE)
 
 
 def test_session_files_lists_nested_files_by_path(monkeypatch):
@@ -919,3 +920,79 @@ def test_the_syllabus_choice_is_stable_when_a_cohort_has_two(monkeypatch):
     assert site._released_syllabus("C", ["aaa", "zzz"]).endswith(
         "/aaa/blob/main/SYLLABUS.md"
     )
+
+
+def _repos(*names):
+    return [{"name": n} for n in names]
+
+
+def test_a_renamed_org_fails_the_sync_instead_of_no_opping(monkeypatch):
+    # Renaming an org leaves `<old>.github.io` behind, demoted to a project page. The
+    # expected site repo is then absent, which used to read as "never opted into a site"
+    # - green forever while the published site rotted.
+    monkeypatch.setattr(site, "repo_exists", lambda org, name: False)
+    monkeypatch.setattr(
+        site, "list_org_repos", lambda org: _repos("welcome", "OLD-NAME.github.io")
+    )
+    built: list[object] = []
+    assert site._sync_site_repo("new-name", lambda wd: built.append(wd)) == 1
+    assert built == []
+
+
+def test_an_org_that_never_had_a_site_is_still_a_quiet_noop(monkeypatch):
+    monkeypatch.setattr(site, "repo_exists", lambda org, name: False)
+    monkeypatch.setattr(
+        site, "list_org_repos", lambda org: _repos("welcome", ".github")
+    )
+    assert site._sync_site_repo("new-name", lambda wd: None) == 0
+
+
+def test_a_failed_repo_listing_is_not_read_as_no_site(monkeypatch):
+    monkeypatch.setattr(site, "repo_exists", lambda org, name: False)
+
+    def boom(org):
+        raise RuntimeError(f"could not list repos in {org}")
+
+    monkeypatch.setattr(site, "list_org_repos", boom)
+    assert site._sync_site_repo("new-name", lambda wd: None) == 1
+
+
+# ------------------------------------------------------- the publication denylist
+
+
+def test_the_all_materials_index_hides_what_should_never_have_shipped(monkeypatch):
+    # The catch-all index lists everything a release happened to carry, so it was the
+    # shortest route from "someone released a folder wholesale" to "the whole class has
+    # the answers".
+    repos = {
+        "labs": (
+            "01_lab/lab.ipynb",
+            "01_lab/solution/answers.ipynb",
+            "01_lab/grading.yml",
+            "01_lab/Tests/test_hidden.py",
+            ".env.production",
+            "README.md",
+        )
+    }
+    got = _parse(monkeypatch, repos)
+    assert [d["name"] for d in got["documents"]] == ["README.md"]
+    entries = got["sections"][0]["entries"]
+    assert [e["name"] for e in entries] == ["01_lab/"]
+    assert [e["name"] for e in entries[0]["entries"]] == ["lab.ipynb"]
+
+
+def test_a_denylisted_file_is_never_linked_from_a_public_page(tmp_path):
+    (tmp_path / "deck.html").write_text("slides")
+    (tmp_path / "grading.yml").write_text("points: 10")
+    (tmp_path / ".env").write_text("KEY=live")
+    links = site._public_links(tmp_path, "/m/session-1/lectures")
+    assert [name for name, _ in links] == ["deck.html"]
+
+
+def test_the_denylist_matches_by_name_at_any_depth_and_ignores_case():
+    assert utils.has_denied_component("labs/01_lab/Solution/answers.ipynb")
+    assert utils.has_denied_component("tests/test_x.py")
+    assert utils.has_denied_component("a/.env.local")
+    # ...and does not swallow a file that merely contains a denylisted word.
+    assert not utils.has_denied_component("labs/01_lab/solutions-discussion.md")
+    assert not utils.has_denied_component("labs/testing-guide.md")

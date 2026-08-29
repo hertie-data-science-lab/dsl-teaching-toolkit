@@ -5,11 +5,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
 from collections.abc import Iterable
 from datetime import date, datetime
+from fnmatch import fnmatch
 from functools import cache, lru_cache
 from pathlib import Path
 from typing import Any
@@ -104,6 +106,25 @@ def is_valid_github_username(handle: str) -> bool:
     return bool(_GITHUB_USERNAME_RE.match(handle))
 
 
+def require_csv_header(
+    fieldnames: list[str] | None, required: tuple[str, ...], what: str
+) -> None:
+    """Refuse a CSV whose header lacks a column the caller cannot do without.
+
+    The failure this exists for: a German-locale Excel saves `;`-delimited CSV. DictReader
+    then sees ONE header column, every field reads "", nothing raises, and the caller
+    proceeds on an empty roster / empty marks - `enrol_codes` even wrote such a file back
+    mangled, exit 0. A header that cannot name the required columns is a hard error."""
+    have = {f.strip() for f in (fieldnames or [])}
+    missing = [f for f in required if f not in have]
+    if missing:
+        raise RuntimeError(
+            f"{what}: header lacks {', '.join(missing)} (got {list(fieldnames or [])}). "
+            f"A semicolon-delimited export looks like this - save the file as "
+            f"comma-separated UTF-8 CSV and try again."
+        )
+
+
 def strip_bom(text: str) -> str:
     """Drop a leading UTF-8 BOM. Excel exports CSVs with one, and left in place
     `csv.DictReader` reads it into the first header name so every lookup on that column
@@ -111,15 +132,28 @@ def strip_bom(text: str) -> str:
     return text.lstrip("﻿")
 
 
+# Per-call ceiling for a single `git` subprocess, the sibling of GH_TIMEOUT_SECONDS.
+# Larger, because these are clones and pushes of whole materials repos rather than one API
+# call - but bounded, because an unauthenticated remote that decides to prompt, or a hung
+# TLS connection, otherwise blocks the job until GitHub's 6-hour limit kills it with no
+# message anyone can act on.
+GIT_TIMEOUT_SECONDS = 600
+
+
 def git(*args: str, cwd: str | None = None) -> tuple[int, str]:
-    """Run a git command."""
-    result = subprocess.run(
-        ["git"] + list(args),
-        capture_output=True,
-        check=False,
-        text=True,
-        cwd=cwd,
-    )
+    """Run a git command. A timeout comes back as a normal failure pair, so every caller's
+    existing `!= 0` check reports it rather than seeing an exception."""
+    try:
+        result = subprocess.run(
+            ["git"] + list(args),
+            capture_output=True,
+            check=False,
+            text=True,
+            cwd=cwd,
+            timeout=GIT_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return 1, f"git: timed out after {GIT_TIMEOUT_SECONDS}s"
     return result.returncode, (result.stdout + result.stderr).strip()
 
 
@@ -162,6 +196,31 @@ def log_err(msg: str) -> None:
     print(f"  [err] {msg}", file=sys.stderr, flush=True)
 
 
+def log_verbose(msg: str) -> None:
+    """Print `msg` only when `DSL_VERBOSE` is set in the environment.
+
+    Every faculty workflow runs in the course org's PUBLIC `.github`, so its Actions log is
+    world-readable - and a line naming one student's handle, their `<slug>-<handle>` repo,
+    or a team's roster publishes who is in the cohort and who is grouped with whom. Those
+    lines are INFORMATIONAL; what a faculty member actually reads is the aggregate
+    `Done - {...}` summary, which stays. So they are routed through here: printed when
+    someone runs the CLI locally with `DSL_VERBOSE=1`, absent from every workflow, because
+    no rendered workflow sets the variable (a test enforces that).
+
+    An ERROR a faculty member must act on keeps its handle and stays on `log_err` - those
+    are rare, and unactionable without saying who."""
+    if os.environ.get("DSL_VERBOSE"):
+        print(msg, flush=True)
+
+
+def repo_missing(org: str, name: str) -> bool:
+    """Whether GitHub positively says the repo is NOT there (a 404). The shape for a
+    caller about to record something permanent on the strength of absence: a 5xx or a
+    rate limit is neither present nor absent, and must read as "could not tell"."""
+    code, out = gh("api", f"repos/{org}/{name}")
+    return code != 0 and is_missing_resource(out)
+
+
 def repo_exists(org: str, name: str) -> bool:
     """Whether the repo is there. OPTIMISTIC: any read failure reads as absent, because
     this answers a create-if-missing question where guessing wrong costs a retry.
@@ -188,7 +247,13 @@ def org_exists(org: str) -> bool:
     from every nightly sync). Reading "could not tell" as "deleted" would do that on any
     transient failure, so it raises instead. `repo_exists` above is deliberately the
     opposite shape: it answers a cheap should-I-create question where a wrong guess costs
-    a retry, not a deletion."""
+    a retry, not a deletion.
+
+    Even the 404 is weaker evidence than it looks: GitHub answers 404, not 403, for an org
+    the TOKEN cannot see, so a bot removed from one org - or running on a rotated token
+    that was never re-invited - reads identically to a deleted org. False therefore means
+    "not visible to this token", and a caller that acts destructively on it needs more
+    than one look (see seed._live_cohorts, which requires two consecutive misses)."""
     code, out = gh("api", f"orgs/{org}", "--jq", ".login")
     if code == 0:
         return True
@@ -298,7 +363,7 @@ def set_org_membership(org: str, login: str, role: str = "member") -> bool:
     """
     current = org_membership_state(org, login)
     if current:
-        log_skip(f"org membership {login} ({current})")
+        log_verbose(f"  [skip] org membership {login} ({current})")
         return True
     code, out = gh(
         "api",
@@ -309,7 +374,7 @@ def set_org_membership(org: str, login: str, role: str = "member") -> bool:
         f"role={role}",
     )
     if code == 0:
-        log_ok(f"invited {login} to {org}")
+        log_verbose(f"  [ok] invited {login} to {org}")
         return True
     log_err(f"could not invite {login} (not a real account?): {out[:120]}")
     return False
@@ -423,9 +488,9 @@ def reconcile_team_members(
     current_by_fold = {h.casefold(): h for h in current}
     for handle in sorted(_fold_diff(wanted_by_fold, current_by_fold)):
         if dry_run:
-            log(f"    DRY-RUN add {handle} -> {org}/{team}")
+            log_verbose(f"    DRY-RUN add {handle} -> {org}/{team}")
         elif add_team_member(org, team, handle):
-            log_ok(f"{handle} -> {org}/{team}")
+            log_verbose(f"  [ok] {handle} -> {org}/{team}")
         else:
             errors += 1
     if prune:
@@ -441,9 +506,9 @@ def reconcile_team_members(
             if handle == acting or handle in owners:
                 continue
             if dry_run:
-                log(f"    DRY-RUN remove {handle} <- {org}/{team}")
+                log_verbose(f"    DRY-RUN remove {handle} <- {org}/{team}")
             elif remove_team_member(org, team, handle):
-                log_ok(f"removed {handle} from {org}/{team}")
+                log_verbose(f"  [ok] removed {handle} from {org}/{team}")
             else:
                 errors += 1
     return errors
@@ -562,8 +627,15 @@ def discover_sections(repo_root: Path) -> list[str]:
     )
 
 
-def grant_team_repo_access(org: str, team: str, repo: str, permission: str) -> bool:
-    """Grant a team a permission level on one repo (idempotent)."""
+def grant_team_repo_access(
+    org: str, team: str, repo: str, permission: str, *, missing_is_note: bool = False
+) -> bool:
+    """Grant a team a permission level on one repo (idempotent).
+
+    `missing_is_note`: a team that does not exist yet is logged as a note, not an error -
+    an org can be released into before its teams exist, and the next release or sync
+    fixes it. Any OTHER failure (a 5xx, a rate limit) stays an error either way; it used
+    to read as "team not found" on the read-teams path, which hid real outages."""
     code, out = gh(
         "api",
         "-X",
@@ -574,6 +646,9 @@ def grant_team_repo_access(org: str, team: str, repo: str, permission: str) -> b
     )
     if code == 0:
         return True
+    if missing_is_note and is_missing_resource(out):
+        log(f"  ({team} team not found - create it first)")
+        return False
     log_err(f"  ! could not grant {team} {permission} on {org}/{repo}: {out[:120]}")
     return False
 
@@ -584,11 +659,60 @@ def grant_team_repo_access(org: str, team: str, repo: str, permission: str) -> b
 # owner hand-granting each new repo.
 COURSE_TEAM_ACCESS = {"instructors": "push", "course-admin": "admin"}
 
+# Faculty access to a repo they should READ but not edit: the RELEASED copy of materials,
+# and a student's gradebook. Both have a source of truth elsewhere, so a hand edit here is
+# not durable and looks like one that stuck:
+#   - a re-release copies over the released copy (`copytree(dirs_exist_ok=True)`), so a
+#     correction belongs in the course org's materials repo, then re-release
+#   - `distribute` rewrites a gradebook's grades.yml from
+#     `classroom-config/grades/<slug>.csv`, so a mark belongs in that CSV
+# A submission repo is read for the same reason: marking happens in
+# `classroom-config/grades/<slug>.csv`, and by then the deadline snapshot has frozen its
+# HEAD and the autograder has run off that snapshot, so a commit there would reach no
+# gradebook and form no part of the record.
+#
+# What keeps WRITE is where faculty actually author: `classroom-config` (the grading CSVs,
+# schedule.yml, people.yml, the roster), `welcome/README.md` (the students' front door,
+# seeded create-only so faculty may reword it), and `.github` - that one because GitHub
+# requires write on a repo to trigger a workflow_dispatch at all, which is what every
+# faculty button is.
+#
+# `course-admin` stays admin throughout - it is the cohort's owner of last resort, and read
+# access cannot fix a broken repo.
+FACULTY_READ_ACCESS = {"instructors": "pull", "course-admin": "admin"}
+
+# The cohort repos faculty AUTHOR in - the only cohort repos that get write. Everything else
+# in a cohort org has its source of truth elsewhere and takes FACULTY_READ_ACCESS. `.github`
+# is here because GitHub requires write on a repo to trigger a workflow_dispatch at all.
+COHORT_WRITE_REPOS = frozenset({".github", "welcome", "classroom-config"})
+
+# GitHub's repo permissions, weakest first, in the vocabulary a PUT takes (`permission=`).
+# A team-repos LISTING answers in a different one (`role_name`: read/write/...) - which is
+# why the sweep reads the listing's `permissions` booleans instead; their keys are these.
+_PERM_RANK = {"pull": 1, "triage": 2, "push": 3, "maintain": 4, "admin": 5}
+
+
+def faculty_floor(repo: str, cohort: bool) -> dict[str, str]:
+    """The faculty teams' MINIMUM grant on `repo`: write where faculty author (every repo of
+    a course org, the COHORT_WRITE_REPOS of a cohort), read everywhere else in a cohort."""
+    if not cohort or repo in COHORT_WRITE_REPOS:
+        return COURSE_TEAM_ACCESS
+    return FACULTY_READ_ACCESS
+
 
 def grant_course_team_access(org: str, repo: str) -> None:
     """Give the course-org faculty teams their standing access to `repo` (COURSE_TEAM_ACCESS)."""
     for team, perm in COURSE_TEAM_ACCESS.items():
         grant_team_repo_access(org, team, repo, perm)
+
+
+def grant_faculty_read_access(org: str, repo: str) -> None:
+    """Give the faculty teams read on `repo` (FACULTY_READ_ACCESS) - for a repo whose source
+    of truth is elsewhere, so an edit made here would be overwritten."""
+    for team, perm in FACULTY_READ_ACCESS.items():
+        # Per-student hot path (every gradebook, every submission repo): a cohort whose
+        # faculty teams are not there yet must not print two errors per student.
+        grant_team_repo_access(org, team, repo, perm, missing_is_note=True)
 
 
 def grant_tagged_team_access(course_org: str, repo: str, tag: str) -> None:
@@ -617,18 +741,8 @@ def grant_read_teams(cohort_org: str, repo: str) -> None:
     missing team is a note, not an error: an org can be released into before its teams
     exist, and the next release (or Sync membership) fixes it."""
     for team in READ_TEAMS:
-        code, _ = gh(
-            "api",
-            "--method",
-            "PUT",
-            f"orgs/{cohort_org}/teams/{team}/repos/{cohort_org}/{repo}",
-            "--field",
-            "permission=pull",
-        )
-        if code == 0:
+        if grant_team_repo_access(cohort_org, team, repo, "pull", missing_is_note=True):
             log_ok(f"{team} team -> read")
-        else:
-            log(f"  ({team} team not found - create it first)")
 
 
 # Descriptions this toolkit wrote in a wording it has since REPLACED, mapped to the
@@ -693,6 +807,150 @@ SUPERSEDED_COURSE_DESCRIPTIONS = {
 }
 
 
+def _strongest_permission(permissions: dict) -> str | None:
+    """The strongest TRUE flag of a listing's cumulative `permissions` object, in the PUT
+    vocabulary. None when no flag we rank is set - the caller leaves that repo alone."""
+    held = [p for p, on in permissions.items() if on and p in _PERM_RANK]
+    return max(held, key=_PERM_RANK.__getitem__) if held else None
+
+
+def team_repo_access(org: str, team: str) -> dict[str, str | None] | None:
+    """`{repo: permission}` for every repo `team` holds - ONE paginated read, PUT vocabulary.
+
+    None when the team does not exist (a 404): an org can be swept before its teams are
+    created, and the next sweep picks it up. Not `{}` - that reads as "holds nothing", and
+    the caller would then PUT on every repo in the org and 404 on each. Any other failure
+    RAISES, on the same rule as every other listing here.
+
+    Read from the `permissions` booleans, never `.role_name`: the listing's role names
+    (`read`/`write`) are not the PUT vocabulary (`pull`/`push`), and ranking one in the
+    other's table once read every instructor's write as "below read" and demoted them. A
+    repo maps to None when its object sets no flag we rank; the caller must skip it."""
+    code, out = gh(
+        "api",
+        "--paginate",
+        f"orgs/{org}/teams/{team}/repos?per_page=100",
+        "--jq",
+        ".[] | {name, permissions: (.permissions // {})}",
+    )
+    if code != 0:
+        if is_missing_resource(out):
+            return None
+        raise RuntimeError(f"could not read {org}/{team}'s repos: {out[:200]}")
+    try:
+        rows = [json.loads(line) for line in out.splitlines() if line.strip()]
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"unparseable repo listing for {org}/{team}: {out[:200]}"
+        ) from exc
+    return {r["name"]: _strongest_permission(r["permissions"]) for r in rows}
+
+
+def converge_faculty_access(
+    org: str,
+    repos: list[dict],
+    cohort: bool,
+    protected: frozenset[str] = frozenset(),
+) -> int:
+    """Raise the faculty teams to their floor (`faculty_floor`) on every live repo of `org`.
+
+    A team grant is set when a repo is created and never revisited, so a repo kind that
+    predates its grant, or an org bootstrapped before one existed, keeps whatever it
+    started with. Both org kinds run at default_repository_permission=none, so that grant
+    is the WHOLE of a non-owner's access; every live faculty member being an org owner is
+    the only reason it went unnoticed. This is the convergence path.
+
+    A FLOOR, never a level: a repo already granted higher is left alone. Fail closed: a
+    grant this sweep cannot rank is skipped, never read as "nothing" and overwritten.
+    `protected` names the per-student repos (discovery.student_repo_names): they take the
+    READ floor whatever `cohort` says, so a mis-told tier can under-grant a course org but
+    can never hand instructors push on a student's submission or gradebook. Archived repos
+    are skipped (GitHub refuses the PUT).
+
+    Cost: `2 * ceil(N/100)` GETs for a converged org; the FIRST sweep of an unconverged
+    org is one PUT per missing grant (a 300-repo cohort: ~600 sequential PUTs, which may
+    trip the secondary rate limit and crawl through gh()'s backoff - it self-heals, the
+    next night finishes). Never fatal: a failed PUT is a line, not a red refresh."""
+    changed = 0
+    live = [r["name"] for r in repos if not r.get("archived")]
+    for team in COURSE_TEAM_ACCESS:
+        try:
+            have = team_repo_access(org, team)
+        except RuntimeError as exc:
+            log(f"  ({exc})")
+            continue
+        if have is None:
+            log(f"  (no {team} team in {org} yet - faculty access not converged)")
+            continue
+        for name in live:
+            floor = (
+                FACULTY_READ_ACCESS
+                if name in protected
+                else faculty_floor(name, cohort)
+            )[team]
+            if name in have:
+                current = have[name]
+                if current is None:
+                    log(
+                        f"  ({team} holds {name} at a level this sweep cannot rank - left)"
+                    )
+                    continue
+                if _PERM_RANK[current] >= _PERM_RANK[floor]:
+                    continue
+            if grant_team_repo_access(org, team, name, floor):
+                log_ok(f"{team} -> {floor} on {name}")
+                changed += 1
+    return changed
+
+
+def converge_topics(org: str, repos: list[dict], cohort: bool) -> int:
+    """Stamp the machinery topics missing from a COHORT org's per-student repos.
+
+    `submission` (plus the template's own name) on `<template>-<handle>`, `gradebook` on
+    `grades-<handle>` - exactly what assign.py and grades.py stamp at creation. That stamp
+    is a separate PATCH after the create, so any repo whose stamp failed, or that predates
+    the topic, is permanently untagged; nothing ever revisited it. Untagged matters: the
+    topics are what keep a student's submission repo and a private gradebook off the org
+    landing page, out of the release targets, and on the READ floor of the faculty sweep.
+    Both readers have a name rule as a backstop for exactly that reason, but a backstop is
+    not a reason to leave the record wrong.
+
+    ADDITIVE, and only where something is missing: the PUT replaces the whole topic list,
+    so whatever else a repo carries is read off the listing and written back with it, and
+    a repo already carrying its topics costs no call at all. Course orgs are skipped -
+    they have neither repo kind.
+
+    Costs no reads (the caller's listing carries `topics` and `isTemplate`) and is never
+    fatal: set_repo_topics logs its own failure, and this returns the count so a caller
+    that reports failures can include it."""
+    if not cohort:
+        return 0
+    # Local: discovery imports utils, so the names it owns come in at call time.
+    from .discovery import GRADEBOOK_PREFIX
+
+    templates = sorted(r["name"] for r in repos if r.get("isTemplate"))
+    failures = 0
+    for repo in repos:
+        if repo.get("archived"):
+            continue
+        name = repo["name"]
+        template = next((t for t in templates if name.startswith(f"{t}-")), None)
+        if template is not None:
+            wanted = {template, "submission"}
+        elif name.startswith(GRADEBOOK_PREFIX):
+            wanted = {"gradebook"}
+        else:
+            continue
+        have = set(repo.get("topics") or [])
+        if wanted <= have:
+            continue
+        if set_repo_topics(org, name, sorted(have | wanted)):
+            log_ok(f"topics converged on {name}")
+        else:
+            failures += 1
+    return failures
+
+
 def converge_descriptions(org: str, repos: list[dict], cohort: bool = False) -> int:
     """Update every repo in `repos` whose description we have since reworded.
 
@@ -718,6 +976,8 @@ def converge_descriptions(org: str, repos: list[dict], cohort: bool = False) -> 
     )
     changed = 0
     for repo in repos:
+        if repo.get("archived"):
+            continue  # GitHub refuses the PATCH; a frozen cohort logged one failure a night
         want = superseded.get((repo.get("description") or "").strip())
         if not want:
             continue
@@ -788,14 +1048,29 @@ def blob_sha(content: bytes) -> str:
     ).hexdigest()
 
 
-def put_file(org: str, repo: str, path: str, content: bytes, message: str) -> bool:
+def put_file(
+    org: str,
+    repo: str,
+    path: str,
+    content: bytes,
+    message: str,
+    expected_sha: str | None = None,
+) -> bool:
     """Create or update a file via the Contents API.
 
-    Updates require the existing file's SHA; we fetch it first if present. That SHA is
-    git's blob sha, so comparing it with the blob sha of `content` computed locally tells
-    us - with no extra API call - whether the write would change anything: an identical
-    file is left alone. Callers may therefore run on a schedule without filling repos with
-    no-op commits.
+    Updates require the existing file's SHA. By default it is fetched here, immediately
+    before the write. That SHA is git's blob sha, so comparing it with the blob sha of
+    `content` computed locally tells us - with no extra API call - whether the write would
+    change anything: an identical file is left alone. Callers may therefore run on a
+    schedule without filling repos with no-op commits.
+
+    `expected_sha` is for a read-modify-write: pass the sha the content was READ at (see
+    get_file_with_sha) and that sha is sent as-is, no fresh read. GitHub then REFUSES the
+    write if the file has moved on since - which is the whole point. Re-reading the sha at
+    write time makes the API call succeed however stale the content is, so a commit that
+    landed between the read and the write is silently reverted; that is how Send codes
+    could wipe a Join binding out of students.csv. A caller passing it must be ready to
+    re-read, re-apply its change, and retry.
 
     One file, one commit. Use put_files when several files belong in the SAME commit.
     """
@@ -810,22 +1085,52 @@ def put_file(org: str, repo: str, path: str, content: bytes, message: str) -> bo
         "--field",
         f"content={b64}",
     ]
-    # If the file already exists, fetch its SHA (required for update)
-    code, sha = gh(
-        "api",
-        f"repos/{org}/{repo}/contents/{path}",
-        "--jq",
-        ".sha",
-    )
-    if code == 0 and sha:
-        if sha == blob_sha(content):
-            return True
-        args += ["--field", f"sha={sha}"]
+    if expected_sha is not None:
+        if expected_sha == blob_sha(content):
+            return True  # the file already holds exactly this
+        if expected_sha:
+            args += ["--field", f"sha={expected_sha}"]
+    else:
+        # If the file already exists, fetch its SHA (required for update)
+        code, sha = gh(
+            "api",
+            f"repos/{org}/{repo}/contents/{path}",
+            "--jq",
+            ".sha",
+        )
+        if code == 0 and sha:
+            if sha == blob_sha(content):
+                return True
+            args += ["--field", f"sha={sha}"]
     code, out = gh(*args)
     if code == 0:
         return True
     log_err(f"failed to put {path}: {out[:200]}")
     return False
+
+
+class TruncatedTree(RuntimeError):
+    """A recursive git-tree listing GitHub had to cut short."""
+
+
+def _untruncated(out: str, org: str, repo: str) -> list[str]:
+    """The tree listing's path lines, having first checked the `truncated` flag it carries
+    on its FIRST line.
+
+    The git-tree API caps a recursive listing (100k entries / 7MB) and says so in
+    `truncated: true` rather than failing. Read past it, a partial listing looks exactly
+    like a smaller repo - so a site sync drops the material links it did not see, and
+    put_files rewrites the files it thinks are missing. Both callers here are the fail-loud
+    kind (see their docstrings), so this is one more way the answer can be untrustworthy
+    and must raise rather than be believed."""
+    lines = out.splitlines()
+    if lines and lines[0].strip() == "true":
+        raise TruncatedTree(
+            f"the recursive git tree of {org}/{repo} came back TRUNCATED - GitHub could "
+            f"not list every path, and acting on a partial listing would delete or "
+            f"rewrite whatever it left out. Split the repo, or read it per directory."
+        )
+    return lines[1:] if lines else []
 
 
 def repo_blob_shas(org: str, repo: str, branch: str) -> dict[str, str]:
@@ -844,13 +1149,14 @@ def repo_blob_shas(org: str, repo: str, branch: str) -> dict[str, str]:
         "api",
         f"repos/{org}/{repo}/git/trees/{branch}?recursive=1",
         "--jq",
-        '.tree[] | select(.type=="blob") | [.path, .sha] | @tsv',
+        r'"\(.truncated)", (.tree[] | select(.type=="blob") | [.path, .sha] | @tsv)',
     )
     if code != 0:
         if is_missing_resource(out) or "HTTP 409" in out:
             return {}
         raise RuntimeError(f"could not read the tree of {org}/{repo}: {out[:200]}")
-    entries = (line.split("\t") for line in out.splitlines() if "\t" in line)
+    lines = _untruncated(out, org, repo)
+    entries = (line.split("\t") for line in lines if "\t" in line)
     return {path: sha for path, sha in entries}
 
 
@@ -1117,6 +1423,39 @@ MATERIALS_REPO_PREFIX = "course-materials-"
 # Matched by whole filename, never by extension. Deciding by extension made an uploaded
 # `lecture-notes.md` or `refs.bib` - a reading in its own right - get swallowed into the page
 # as prose instead of listed as a file a student can download.
+# Path components a PUBLISHED course page must never carry - matched by NAME, at every
+# depth, case-insensitively, and as glob patterns so `.env.local` is caught alongside
+# `.env`. The public site copies whole discovered session folders wholesale, so anything a
+# faculty member happens to keep beside their teaching material is published with it: a
+# `solution/` next to the lab it answers, the `grading.yml` that says how it is marked, the
+# hidden `tests/`, a `.env` with a live key. None of those is a release decision anyone
+# made; they are what "copy the folder" means.
+#
+# NOT a release policy for the cohort path - `deploy` deliberately releases what faculty
+# name, including a solution, because a cohort repo is private and marking sometimes needs
+# one. This is the PUBLIC site, where there is no such case.
+PUBLICATION_DENYLIST = (
+    "solution",
+    "solutions",
+    "grading.yml",
+    "tests",
+    ".env",
+    ".env.*",
+    ".git",
+)
+
+
+def is_denied_publication(name: str) -> bool:
+    """Whether one path COMPONENT is on PUBLICATION_DENYLIST."""
+    lowered = name.casefold()
+    return any(fnmatch(lowered, pattern) for pattern in PUBLICATION_DENYLIST)
+
+
+def has_denied_component(path: str) -> bool:
+    """Whether any component of `path` is on PUBLICATION_DENYLIST."""
+    return any(is_denied_publication(part) for part in path.split("/") if part)
+
+
 READING_OVERLAY_FILE = "READINGS.md"
 READING_OVERLAY_NAMES = frozenset(
     {"readings.md", "readings.markdown", "readings.txt", "readings.bib"}
@@ -1229,6 +1568,31 @@ def get_file_content(org: str, repo: str, path: str, ref: str = "") -> str | Non
     return out
 
 
+def get_file_with_sha(
+    org: str, repo: str, path: str, ref: str = ""
+) -> tuple[str, str] | None:
+    """`(decoded text, blob sha)` for a file, or None if it is genuinely absent (a 404).
+
+    The read half of a safe read-modify-write: hand the sha back to
+    `put_file(..., expected_sha=...)` and the write is refused if anything else committed
+    to the file in between. Same fail-loud rule as get_file_content - any failure that is
+    NOT a 404 raises, because a caller treating it as "not there" would write over a file
+    it never managed to read.
+
+    The sha comes first in the jq output, on its own line, because the content may contain
+    newlines and a sha may not."""
+    url = f"repos/{org}/{repo}/contents/{path}"
+    if ref:
+        url += f"?ref={ref}"
+    code, out = gh("api", url, "--jq", r'"\(.sha)\n" + (.content | @base64d)')
+    if code != 0:
+        if is_missing_resource(out):
+            return None
+        raise RuntimeError(f"could not read {org}/{repo}/{path}: {out[:200]}")
+    sha, _, text = out.partition("\n")
+    return text, sha
+
+
 def repo_tree(org: str, repo: str, branch: str, kind: str = "") -> tuple[str, ...]:
     """Every path of type `kind` in `org/repo`'s `branch`, sorted - ONE recursive git-tree
     fetch, shared by both transports that need a repo's structure: `kind="tree"` is the
@@ -1249,7 +1613,7 @@ def repo_tree(org: str, repo: str, branch: str, kind: str = "") -> tuple[str, ..
         "api",
         f"repos/{org}/{repo}/git/trees/{branch}?recursive=1",
         "--jq",
-        f".tree[]{select} | .path",
+        f'"\\(.truncated)", (.tree[]{select} | .path)',
     )
     if code != 0:
         # 404 = no such tree; 409 = an empty repo (no commits) - a tree-specific signal on
@@ -1257,7 +1621,7 @@ def repo_tree(org: str, repo: str, branch: str, kind: str = "") -> tuple[str, ..
         if is_missing_resource(out) or "HTTP 409" in out:
             return ()
         raise RuntimeError(f"could not read the file tree of {org}/{repo}: {out[:200]}")
-    return tuple(sorted(out.splitlines()))
+    return tuple(sorted(_untruncated(out, org, repo)))
 
 
 def load_yaml_config(org: str, repo: str, path: str) -> dict | None:
@@ -1328,6 +1692,34 @@ def add_collaborator(org: str, repo: str, login: str, permission: str = "push") 
     if code == 0:
         return True
     log_err(f"failed to add {login} to {org}/{repo}: {out[:200]}")
+    return False
+
+
+def is_collaborator(org: str, repo: str, login: str) -> bool | None:
+    """Whether `login` is a DIRECT collaborator on `org/repo`.
+
+    None means the answer could not be read. Kept distinct from False on purpose: the one
+    caller is about to REVOKE access, and a rate limit or a network drop must never read as
+    "not a collaborator, nothing to do" - nor, worse, be acted on either way."""
+    code, out = gh("api", f"repos/{org}/{repo}/collaborators/{login}")
+    if code == 0:
+        return True
+    if is_missing_resource(out):
+        return False
+    log_err(
+        f"could not check whether {login} collaborates on {org}/{repo}: {out[:160]}"
+    )
+    return None
+
+
+def remove_collaborator(org: str, repo: str, login: str) -> bool:
+    """Revoke a direct collaborator grant. Idempotent - GitHub 204s either way."""
+    code, out = gh(
+        "api", "--method", "DELETE", f"repos/{org}/{repo}/collaborators/{login}"
+    )
+    if code == 0:
+        return True
+    log_err(f"could not remove {login} from {org}/{repo}: {out[:160]}")
     return False
 
 

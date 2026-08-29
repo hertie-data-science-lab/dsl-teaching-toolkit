@@ -595,6 +595,15 @@ def test_new_assignment_button_exposes_format_and_type():
 
 
 @pytest.mark.parametrize("name", sorted(ALL_RENDERED))
+def test_no_rendered_workflow_turns_on_dsl_verbose(name):
+    # DSL_VERBOSE un-suppresses the per-student log lines (utils.log_verbose) - who is
+    # enrolled, who is in which team, which `<slug>-<handle>` repo exists. Every one of
+    # these workflows runs in the course org's PUBLIC `.github`, whose Actions log anyone
+    # can read, so the variable is for a local CLI run only and no workflow may set it.
+    assert "DSL_VERBOSE" not in ALL_RENDERED[name]
+
+
+@pytest.mark.parametrize("name", sorted(ALL_RENDERED))
 def test_seed_refresh_steps_carry_dsl_bot_token(name):
     # `seed refresh` propagates the token as a repo secret onto every private content repo
     # (the Free-plan delivery gap), and it reads ONLY the DSL_BOT_TOKEN env var - handing
@@ -653,6 +662,7 @@ def test_update_profile_readme_absent_config_falls_back_without_crashing(monkeyp
     monkeypatch.setattr("dsl_course.utils.get_file_content", lambda *a, **k: None)
     # profile_readme imported the name, so the module binding is what the splice reads.
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
     monkeypatch.setattr(
         P,
         "list_org_repos",
@@ -740,6 +750,38 @@ def test_repo_table_drops_submission_and_gradebook_repos():
     assert "| [assignment-1]" not in rows
 
 
+def _readme_run(monkeypatch, put_ok):
+    from dsl_course import profile_readme as P
+
+    monkeypatch.setattr(P, "load_yaml_config", lambda org, repo, path: {})
+    monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
+    monkeypatch.setattr(P, "converge_descriptions", lambda *a, **k: 0)
+    monkeypatch.setattr(P, "converge_topics", lambda *a, **k: 0)
+    monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
+    monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(P, "log", lambda *a, **k: None)
+    said_ok: list[str] = []
+    monkeypatch.setattr(P, "log_ok", lambda msg: said_ok.append(msg))
+    monkeypatch.setattr(P, "log_err", lambda *a, **k: None)
+    monkeypatch.setattr(P, "put_files", lambda *a, **k: put_ok)
+    return P.update_profile_readme("Cohort-f2026"), said_ok
+
+
+def test_a_failed_readme_commit_is_counted_not_announced(monkeypatch):
+    # The commit's return was discarded under an unconditional "refreshed" line, so the
+    # nightly refresh could not see an org whose landing pages never converged.
+    code, said_ok = _readme_run(monkeypatch, put_ok=False)
+    assert code == 1
+    assert said_ok == []
+
+
+def test_a_written_readme_reports_no_failures(monkeypatch):
+    code, said_ok = _readme_run(monkeypatch, put_ok=True)
+    assert code == 0
+    assert said_ok
+
+
 def test_cohort_page_title_follows_the_course_pointer(monkeypatch):
     from dsl_course import profile_readme as P
 
@@ -750,6 +792,7 @@ def test_cohort_page_title_follows_the_course_pointer(monkeypatch):
     )
     monkeypatch.setattr(P, "course_name_of", lambda org: "Deep Learning")
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(P, "log", lambda *a, **k: None)
@@ -768,6 +811,7 @@ def _cohort_readme(monkeypatch, existing):
     from dsl_course import profile_readme as P
 
     monkeypatch.setattr(P, "get_file_content", lambda *a, **k: existing)
+    monkeypatch.setattr(P, "converge_faculty_access", lambda *a, **k: 0)
     monkeypatch.setattr(P, "list_org_repos", lambda org: _REPOS)
     monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(P, "log", lambda *a, **k: None)
@@ -947,6 +991,46 @@ def test_only_the_nightly_refresh_joins_the_seed_refresh_group():
             )
 
 
+# Every renderer that WRITES shared state, and the group name it must serialise under.
+# Listed rather than derived, because the decision is per workflow: a second overlapping
+# run of any of these races the first into sha conflicts, a clobbered force-push, or a
+# half-reconciled team. Read-only buttons (Check cohort setup) are deliberately absent.
+SERIALISED_WRITERS = {
+    "release": "release-materials",
+    "central_release": "release-materials",
+    "provision": "release-assignment",
+    "grade_assignment": "grade-assignment",
+    "render_grades": "render-grades",
+    "distribute_grades": "distribute-grades",
+    "sync_membership": "sync-membership",
+    "sync_site": "sync-site",
+    "publish_site": "publish-course-website",
+}
+
+
+@pytest.mark.parametrize("name", sorted(SERIALISED_WRITERS))
+def test_every_writer_serialises_against_itself_per_repo(name):
+    doc = yaml.safe_load(ALL_RENDERED[name])
+    assert doc.get("concurrency") == {
+        "group": "${{ github.repository }}-" + SERIALISED_WRITERS[name],
+        "cancel-in-progress": False,
+    }, f"{name} can overlap itself"
+
+
+def test_no_button_joins_the_scheduled_release_group():
+    # The cron's group guards FIRE-ONCE actions across every cohort and can outlive its
+    # slot. A button sharing it would be the third arrival that Actions silently drops -
+    # and a deliberate re-grade that never ran is worse than one that races the cron,
+    # which the autograde marker already makes safe.
+    grouped = {
+        n
+        for n, r in ALL_RENDERED.items()
+        if (yaml.safe_load(r).get("concurrency") or {}).get("group")
+        == "scheduled-release"
+    }
+    assert grouped == {"scheduler"}
+
+
 def test_the_hourly_scheduler_serialises_against_itself():
     # Hourly, and a pass over every cohort can outlive its slot - so it can overlap itself,
     # double-releasing whatever the running pass has not yet marked as fired.
@@ -1017,3 +1101,62 @@ def test_a_renamed_org_is_corrected_even_with_no_repo_table_markers():
         profile_readme.get_file_content = original
     assert out is not None, "a rename must still be written even with no markers"
     assert "old-org-f2026" not in out
+
+
+def _spy_sweep(monkeypatch, repos):
+    """Run update_profile_readme over `repos` and return the sweep's kwargs."""
+    from dsl_course import profile_readme as P
+
+    seen = {}
+
+    def spy(org, repos, cohort, protected):
+        seen.update(cohort=cohort, protected=set(protected))
+        return 0
+
+    monkeypatch.setattr(P, "converge_faculty_access", spy)
+    monkeypatch.setattr(P, "converge_descriptions", lambda *a, **k: 0)
+    monkeypatch.setattr(P, "converge_topics", lambda *a, **k: 0)
+    monkeypatch.setattr(P, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(P, "list_org_repos", lambda org: repos)
+    monkeypatch.setattr(P, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(P, "log", lambda *a, **k: None)
+    monkeypatch.setattr(P, "log_ok", lambda *a, **k: None)
+    monkeypatch.setattr(P, "put_files", lambda *a, **k: True)
+    P.update_profile_readme("Org", "Org", "Course")
+    return seen
+
+
+def _r(name, **extra):
+    return {
+        "name": name,
+        "url": "u",
+        "visibility": "private",
+        "description": "",
+        **extra,
+    }
+
+
+def test_the_sweep_is_told_the_tier_and_the_student_repos(monkeypatch):
+    # Deleting the call, or passing cohort=False for a cohort, used to be invisible: every
+    # test stubbed the sweep to a no-op. This pins what the one call site passes.
+    cohort = [_r(".github", topics=["dsl-cohort"]), _r("welcome"), _r("grades-ada")]
+    seen = _spy_sweep(monkeypatch, cohort)
+    assert seen == {"cohort": True, "protected": {"grades-ada"}}
+
+    course = [_r(".github", topics=["dsl-course-hub"]), _r("course-materials-f2026")]
+    assert _spy_sweep(monkeypatch, course) == {"cohort": False, "protected": set()}
+
+
+def test_an_org_of_unknown_tier_gets_the_read_floor(monkeypatch):
+    # A legacy cohort: `.github` without topics, student repos, no `welcome`. The page
+    # renders it as a course org (as before), but the sweep must NOT hand instructors push
+    # on every submission repo - so it is told "cohort" (read floor), and the student
+    # repos are protected by name as well.
+    legacy = [
+        _r(".github"),
+        _r("assignment-1", isTemplate=True),
+        _r("assignment-1-ada"),
+        _r("grades-ada"),
+    ]
+    seen = _spy_sweep(monkeypatch, legacy)
+    assert seen == {"cohort": True, "protected": {"assignment-1-ada", "grades-ada"}}

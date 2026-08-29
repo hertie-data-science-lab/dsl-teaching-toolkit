@@ -86,6 +86,33 @@ _SCHEDULED_RELEASE_CONCURRENCY = """concurrency:
   cancel-in-progress: false
 """
 
+
+def _concurrency(name: str) -> str:
+    """One run of this workflow at a time, per repo - the group every WRITER declares.
+
+    These workflows converge shared state: the Contents API (grades, gradebooks, the
+    roster), a force-pushed render branch, an org's team membership, a site repo. Two
+    overlapping runs race each other into sha conflicts and half-written state, and the
+    triggers that fire them are exactly the ones that bunch up (a push, a
+    repository_dispatch per cohort edit, a daily cron, an operator's click).
+
+    `cancel-in-progress: false`, so a run already doing work is never killed part-way.
+    Actions has no `queue:` - a group holds one pending run, and a third arrival drops the
+    second - but every one of these is an idempotent CONVERGE, so the run that does
+    survive reaches the same end state as the one it replaced. That is not true of
+    `seed-refresh`, whose group is deliberately not shared with the buttons that end in a
+    refresh (see _SEED_REFRESH_CONCURRENCY), nor of `scheduled-release`, whose fire-once
+    actions the manual grader must therefore never join.
+
+    The group is repo-scoped by name as well as by GitHub's own per-repository scoping, so
+    it reads unambiguously in a log line that carries no repo."""
+    return (
+        "concurrency:\n"
+        f"  group: ${{{{ github.repository }}}}-{name}\n"
+        "  cancel-in-progress: false\n"
+    )
+
+
 _CHECK_TEAM = """  check-team:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -310,6 +337,7 @@ on:
 {_choice_input("cohort_org", "3. target cohort org", cohort_orgs)}
 {_COHORT_DEST_INPUTS}
 
+{_concurrency("release-materials")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   release:
 {_run_preamble()}      - name: Release
@@ -418,6 +446,7 @@ on:
         type: boolean
         default: false
 
+{_concurrency("release-assignment")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   provision:
 {_run_preamble()}      - name: Provision
@@ -472,6 +501,7 @@ on:
         type: boolean
         default: false
 
+{_concurrency("grade-assignment")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   grade:
 {_run_preamble(_TIMEOUT_GRADING)}      - name: Grade
@@ -534,6 +564,7 @@ on:
     inputs:
 {_cohort_dropdown(cohort_orgs, optional=True)}
 
+{_concurrency("sync-membership")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   sync-dispatch:
 {_run_preamble()}      - name: Sync membership
@@ -617,6 +648,7 @@ on:
     inputs:
 {_cohort_dropdown(cohort_orgs)}
 
+{_concurrency("render-grades")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   render-grades:
 {_run_preamble()}      - name: Render grades
@@ -650,6 +682,7 @@ on:
         type: boolean
         default: false
 
+{_concurrency("distribute-grades")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   distribute-grades:
 {_run_preamble()}      - name: Distribute grades
@@ -805,7 +838,7 @@ def render_refresh() -> str:
     return f"""name: Refresh actions
 
 # Every seeded workflow is frozen at the moment it was seeded, while the engine it calls is
-# always checked out from central main - so an org left alone drifts, until a stale workflow
+# always checked out from central `release` - so an org left alone drifts, until a stale workflow
 # calls engine code that has since moved. This re-seeds the org daily, so every org
 # converges on central within 24h with nobody pressing anything. The refresh is idempotent
 # and skips files whose content is unchanged, so a night with no central changes is silent.
@@ -980,6 +1013,7 @@ on:
     inputs:
 {_choice_input("cohort_org", "Cohort whose site to regenerate from the org structure", cohort_orgs)}
 
+{_concurrency("sync-site")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   sync:
 {_run_preamble()}      - name: Sync site
@@ -1055,6 +1089,7 @@ on:
         type: boolean
         default: true
 
+{_concurrency("publish-course-website")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   publish:
 {_run_preamble()}      - name: Publish course website

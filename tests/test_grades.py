@@ -274,7 +274,8 @@ def test_merge_auto_write_once_is_per_row_not_per_file():
     assert rows["anna"].autograde_score == "9" and rows["ben"].autograde_score == "3"
 
 
-def test_merge_auto_logs_how_many_cells_were_preserved(capsys):
+def test_merge_auto_logs_how_many_cells_were_preserved(capsys, monkeypatch):
+    monkeypatch.setenv("DSL_VERBOSE", "1")  # the per-handle [keep] line is verbose-only
     existing = grades.dump_grades(
         [
             grades.GradeRow(
@@ -338,6 +339,7 @@ def test_render_cohort_csv_pivots_to_one_row_per_handle():
 def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
     # Auditors are never assessed, so they get no private gradebook repo. Dry-run keeps
     # this pure - the roster is the only input, and nothing is provisioned.
+    monkeypatch.setenv("DSL_VERBOSE", "1")  # per-student lines are verbose-only
     students = roster.parse(
         "hertie_email,name,github_handle,github_id,enrol_code,role\n"
         "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
@@ -353,12 +355,39 @@ def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
     assert "1 auditor row(s) skipped" in out
 
 
+def test_gradebook_sync_names_no_student_in_a_public_log(monkeypatch, capsys):
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    students = roster.parse(
+        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+    )
+    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    assert grades.sync("COHORT", dry_run=True) == 0
+    out = capsys.readouterr().out
+    assert "ada-l" not in out
+    assert "Syncing 1 gradebook repo(s)" in out  # the aggregate still reports
+
+
 def test_a_gradebook_the_student_cannot_open_is_a_failure(monkeypatch):
     # The old "created-no-collaborator" status doesn't start with "failed", so sync's exit
     # predicate ignored it: a student with no read on their own gradebook, reported green.
     monkeypatch.setattr(grades, "repo_exists", lambda org, repo: True)
+    monkeypatch.setattr(grades, "grant_faculty_read_access", lambda *a, **k: None)
     monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: False)
     assert grades.provision_one("COHORT", "ada-l").startswith("failed")
+
+
+def test_a_gradebook_grants_faculty_read(monkeypatch):
+    # Read, not write: `distribute` rewrites grades.yml from grades/<slug>.csv, so a mark
+    # corrected in the gradebook itself would be overwritten on the next run.
+    faculty = []
+    monkeypatch.setattr(grades, "repo_exists", lambda org, repo: True)
+    monkeypatch.setattr(
+        grades, "grant_faculty_read_access", lambda *a: faculty.append(a)
+    )
+    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
+    grades.provision_one("COHORT", "ada-l")
+    assert faculty == [("COHORT", "grades-ada-l")]
 
 
 def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
@@ -371,7 +400,9 @@ def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
-    monkeypatch.setattr(grades.mailer, "send_bulk", lambda msgs, dry_run=False: 1)
+    monkeypatch.setattr(
+        grades.mailer, "send_bulk", lambda msgs, dry_run=False, sample=None: 1
+    )
     grades._email_updates("COHORT", ["ada-l", "bob-b"])
     assert "1 of 2 grade notification(s) not sent" in capsys.readouterr().err
 
@@ -387,7 +418,9 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     sent: list[list] = []
     monkeypatch.setattr(
-        grades.mailer, "send_bulk", lambda msgs, dry_run=False: sent.append(msgs) or 1
+        grades.mailer,
+        "send_bulk",
+        lambda msgs, dry_run=False, sample=None: sent.append(msgs) or 1,
     )
 
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "Deep Learning")
@@ -404,6 +437,26 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
     assert subject == "Your grades have been updated"
 
 
+def test_grade_notification_dry_run_carries_a_placeholder_sample(monkeypatch):
+    students = roster.parse(
+        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+    )
+    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "Deep Learning")
+    seen: dict = {}
+    monkeypatch.setattr(
+        grades.mailer,
+        "send_bulk",
+        lambda msgs, dry_run=False, sample=None: seen.update(sample=sample) or 1,
+    )
+    grades._email_updates("COHORT", ["ada-l"], dry_run=True)
+    # The reviewer sees the wording; no real student's name or handle is in it.
+    assert "<name>" in seen["sample"] and "<handle>" in seen["sample"]
+    assert "Ada" not in seen["sample"] and "ada-l" not in seen["sample"]
+    assert "Deep Learning" in seen["sample"]
+
+
 # ------------------------------------------ render must not clobber a reviewer's edit (fix 16)
 
 
@@ -414,3 +467,163 @@ def test_human_commit_authors_flags_only_non_bot_commits():
     assert grades._human_commit_authors(log) == ["Dr Reviewer"]  # de-duplicated, sorted
     assert grades._human_commit_authors("dsl-bot\ndsl-bot\n") == []  # only bot renders
     assert grades._human_commit_authors("") == []  # branch absent / no commits
+
+
+def test_parse_grades_survives_an_excel_bom_and_refuses_a_semicolon_export():
+    # The BOM glued itself to the first header name, so every handle read "" and merge_auto
+    # folded every student onto one row - hand-entered marks destroyed. roster and teams
+    # already stripped it; this was the one hand-edited CSV that did not.
+    import pytest
+
+    text = "\ufeffgithub_handle,team,autograde_score\nada-l,,5\nbob-b,,3\n"
+    rows = grades.parse_grades(text)
+    assert [r.github_handle for r in rows] == ["ada-l", "bob-b"]
+    with pytest.raises(RuntimeError, match="semicolon"):
+        grades.parse_grades("github_handle;team;autograde_score\nada-l;;5\n")
+
+
+# ------------------------------- handles are one account whatever their casing (fix 3)
+
+
+def test_merge_auto_fills_the_existing_row_when_the_casing_differs():
+    # GitHub logins are case-insensitive. Keyed raw, the collector's `ada-l` update did not
+    # find the marker's `Ada-L` row, appended a second one, and the write-once guard on the
+    # first row protected nothing.
+    existing = grades.dump_grades(
+        [grades.GradeRow(github_handle="Ada-L", manual_score="18")]
+    )
+    out = grades.merge_auto(existing, [("ada-l", {"autograde_score": "7"})])
+    rows = grades.parse_grades(out)
+    assert len(rows) == 1
+    assert rows[0].github_handle == "Ada-L"  # the first-seen spelling is kept
+    assert rows[0].autograde_score == "7" and rows[0].manual_score == "18"
+
+
+def test_merge_auto_write_once_holds_across_a_case_difference():
+    existing = grades.dump_grades(
+        [grades.GradeRow(github_handle="Ada-L", autograde_score="9")]
+    )
+    out = grades.merge_auto(existing, [("ADA-L", {"autograde_score": "3"})])
+    (row,) = grades.parse_grades(out)
+    assert row.autograde_score == "9"  # the marker's correction survives
+
+
+def test_build_gradebooks_folds_one_student_written_two_ways():
+    per = {
+        "assignment-1": [grades.GradeRow(github_handle="Ada-L", final_grade="88")],
+        "assignment-2": [grades.GradeRow(github_handle="ada-l", final_grade="91")],
+    }
+    books = grades.build_gradebooks(per)
+    assert set(books) == {"Ada-L"}  # one gradebook, under the first-seen spelling
+    assert set(books["Ada-L"]["assignments"]) == {"assignment-1", "assignment-2"}
+
+
+def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
+    students = roster.parse(
+        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+        "ada@uni.edu,Ada,Ada-L,42,dsl-abc,enrolled\n"
+    )
+    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
+    sent: list[list] = []
+    monkeypatch.setattr(
+        grades.mailer,
+        "send_bulk",
+        lambda msgs, dry_run=False, sample=None: sent.append(msgs) or len(msgs),
+    )
+    grades._email_updates("COHORT", ["ada-l"])  # the gradebook file's spelling
+    assert sent and sent[-1][0][0] == "ada@uni.edu"
+
+
+# ---------------- an unsent notification reddens the run (the count is no longer dropped)
+
+
+def _distribute_with(monkeypatch, tmp_path, *, sent):
+    """`distribute` against a local classroom-config clone, pushing to nothing."""
+    cfg = tmp_path / "cfg"
+
+    def fake_gh(*args, **kwargs):
+        if args[:2] == ("repo", "clone"):
+            from pathlib import Path
+            from shutil import copytree
+
+            copytree(cfg, Path(args[3]))
+        return 0, ""
+
+    (cfg / grades.GRADEBOOK_DIR).mkdir(parents=True)
+    (cfg / grades.GRADEBOOK_DIR / "ada-l.yml").write_text("student: ada-l\n")
+    monkeypatch.setattr(grades, "gh", fake_gh)
+    monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
+    students = roster.parse(
+        "hertie_email,name,github_handle,github_id,enrol_code,role\n"
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+    )
+    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
+    monkeypatch.setattr(
+        grades.mailer, "send_bulk", lambda msgs, dry_run=False, sample=None: sent
+    )
+    return grades.distribute("COHORT")
+
+
+def test_distribute_goes_red_when_a_notification_could_not_be_sent(
+    tmp_path, monkeypatch, capsys
+):
+    # The grades are pushed by this point, so nothing is undone - but a student who never
+    # got the mail does not know to look, and the count used to be thrown away, so the run
+    # was green and said nothing.
+    assert _distribute_with(monkeypatch, tmp_path, sent=0) == 1
+    assert "1 of 1 grade notification(s) not sent" in capsys.readouterr().err
+
+
+def test_distribute_stays_green_when_every_notification_lands(tmp_path, monkeypatch):
+    assert _distribute_with(monkeypatch, tmp_path, sent=1) == 0
+
+
+# ---------------- "nothing new to render" must mean nothing new, not a failed commit
+
+
+def _render_with(monkeypatch, tmp_path, *, staged, commit_ok=True):
+    """`render` against a local clone; `staged` is what `git diff --cached --quiet` says."""
+    per = {"assignment-1": [grades.GradeRow(github_handle="ada-l", final_grade="88")]}
+    monkeypatch.setattr(grades, "load_grade_sources", lambda org: per)
+    monkeypatch.setattr(grades, "get_default_branch", lambda org, repo: "main")
+
+    def fake_gh(*args, **kwargs):
+        if args[:2] == ("repo", "clone"):
+            from pathlib import Path
+
+            Path(args[3]).mkdir(parents=True, exist_ok=True)
+        return 0, ""
+
+    def fake_git(*args, **kwargs):
+        if "ls-remote" in args:
+            return 1, ""  # no existing render branch
+        if "diff" in args:
+            return (1, "") if staged else (0, "")
+        if "commit" in args:
+            return (
+                (0, "") if commit_ok else (1, "fatal: unable to write new index file")
+            )
+        return 0, ""
+
+    monkeypatch.setattr(grades, "gh", fake_gh)
+    monkeypatch.setattr(grades, "git", fake_git)
+    return grades.render("COHORT")
+
+
+def test_a_failed_render_commit_is_not_reported_as_nothing_to_render(
+    tmp_path, monkeypatch, capsys
+):
+    # `git commit` exits non-zero both for "nothing staged" and for a real failure, so a
+    # lock or a full disk read as the idempotent no-op: green run, no preview PR, and the
+    # marker's grades never distributed.
+    assert _render_with(monkeypatch, tmp_path, staged=True, commit_ok=False) == 1
+    assert "could not commit the rendered gradebooks" in capsys.readouterr().err
+
+
+def test_genuinely_nothing_staged_is_still_the_green_no_op(
+    tmp_path, monkeypatch, capsys
+):
+    assert _render_with(monkeypatch, tmp_path, staged=False) == 0
+    assert "nothing new to render" in capsys.readouterr().out

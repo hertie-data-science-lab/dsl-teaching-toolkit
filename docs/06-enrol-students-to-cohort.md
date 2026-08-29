@@ -8,7 +8,7 @@
 
 - A bootstrapped [cohort org](04-new-cohort-org.md).
 
-## Steps for initial enrolement.
+## Steps for initial enrolment
 
 Live example roster: [`example-course/cohort-org/students.csv`](../example-course/cohort-org/students.csv).
 
@@ -26,14 +26,18 @@ Live example roster: [`example-course/cohort-org/students.csv`](../example-cours
 2. **Send enrolment codes.**
    - In Your **course** org → `.github` → **Actions** → **Send enrolment codes**: pick the cohort.
    - This workflow writes an `enrol_code` onto every roster row that lacks one and emails each not-yet-onboarded student at their `hertie_email`.
-   - NB: `dry_run` defaults to `true`. Untick it to write and send.
+   - NB: `dry_run` defaults to `true`. It lists masked recipients and subjects only - never a code or a name, because the run log is public. Untick it to write and send.
    
    > **If the emailing integration isn't live for any reason** the codes can still be written into `students.csv` by the `Send enrolment codes` workflow → then copy each student's code into an email of your own and send out manually.
 
+   > Emailing is live once the course org has the `GRAPH_*` secrets (preferred) or the `SMTP_*` ones - set centrally by the DSL team. Only **Send enrolment codes** and **Distribute grades** use them; without them both write their files, send nothing, and say so.
+
 3. **Students self-onboard.**
    - Each student opens a **Join course** issue in the cohort's `welcome` repo and pastes their code.
-   - That records their GitHub handle agaist their registered `hertie_email`, and adds them to the org and their role's team (student | auditor).
-   - They must accept the org invite before they can see anything.
+   - The match is on the **`enrol_code`**; the issue author is the authenticated GitHub handle, so the code binds that handle (and its GitHub id) to the roster row. Single-use once bound.
+   - Success: label `onboarded`, issue closed, student added to the org and to `students` | `auditors`. They must accept the org invite before they see anything.
+   - Failure: one neutral "could not be matched" message, whether the code is unknown or already claimed. **Triage `needs-review` issues, then delete them** - the code stays readable in the body's edit history until the issue is deleted (or rotate the code: blank the row's `enrol_code`, re-run Send codes).
+   - Students must never paste a code in a **comment** (public, never redacted). Blank issues are disabled in `welcome`.
 
    > The cohort org's `welcome` repo is automatically seeded when the cohort org is [bootstrapped by the course org](04-new-cohort-org.md#steps).
 
@@ -52,8 +56,10 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
 - There are 2 methods to form groups:
    1. Students open a **Join team** issue in `welcome`, 
    2. instructors edit `classroom-config/teams.csv`(`assignment, team, github_handle`)
-- The self-serve issue flow enforces a **team-size cap**: `max_team_size` per assignment under
-  `assignments:` in `classroom-config/schedule.yml` (default 5 when unset).
+- The issue flow only accepts an assignment already **declared under `assignments:` in
+  `classroom-config/schedule.yml`** (declare it before students form teams) and enforces its
+  `max_team_size` (default 5).
+- Team names are lower-cased; a GitHub handle or a faculty team name (`course-admin`) is refused.
 - The **Sync membership** workflow then creates a GitHub team per group.
 - A **Release assignment** run with `group` ticked then grants each team its shared repo.
 

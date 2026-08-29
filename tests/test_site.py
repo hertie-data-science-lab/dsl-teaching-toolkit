@@ -1210,6 +1210,24 @@ def test_main_refuses_a_cohort_this_course_org_never_registered(monkeypatch, cap
     assert "not registered under Course" in capsys.readouterr().err
 
 
+def test_main_refuses_every_cohort_when_the_registry_is_empty(monkeypatch, capsys):
+    # The check used to short-circuit on an empty registry, so a course org that had
+    # registered nothing accepted any org a dispatch named. An empty registry authorises
+    # nothing.
+    from dsl_course import seed
+
+    monkeypatch.setattr(seed, "discover_cohorts", lambda org: [])
+    synced: list = []
+    monkeypatch.setattr(site, "sync_site", lambda *a: synced.append(a) or 0)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["site", "sync", "--course-org", "Course", "--cohort-org", "Other-f2026"],
+    )
+    assert site.main() == 1
+    assert synced == []
+    assert "lists nothing" in capsys.readouterr().err
+
+
 def test_main_matches_a_registered_cohort_case_insensitively(monkeypatch):
     # GitHub org names are case-insensitive; a case difference must not read as a
     # cross-cohort dispatch.
