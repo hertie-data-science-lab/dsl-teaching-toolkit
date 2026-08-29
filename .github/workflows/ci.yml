@@ -32,6 +32,7 @@ jobs:
     # tests/test_site_templates.py reads - so it cannot drift into a shape the toolkit
     # never produces. The build is offline: the shared theme is not fetched (its
     # default/page/post layouts are stubbed), so a failure here is ours.
+    # `jekyll-theme-seam` below builds the same fixture against the real theme.
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -82,5 +83,63 @@ jobs:
             "table-row-due" "table-row-exam" "table-row-special_event" \
             "table-row-term_date"; do
             grep -rq -- "$needle" . || { echo "::error::$needle is nowhere in the build"; missing=1; }
+          done
+          exit $missing
+
+  jekyll-theme-seam:
+    # The same fixture, built against the REAL theme at the ref `site_repo.THEME_REF`
+    # pins - the one seam the offline job above stubs out. The course stylesheet used to
+    # ship rules that only worked nested inside the theme's, so a theme release could
+    # flatten every live schedule with both repos' own checks green.
+    #
+    # The pin is not repeated here: it is already in the `_config.yml` the fixture
+    # generates, so this build reads whatever site_repo says today. Needs the network
+    # (jekyll-remote-theme fetches the theme from codeload.github.com).
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b  # v1.321.0
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+          working-directory: tests/fixtures/site
+
+      - name: Generate the fixture cohort site
+        run: python3 tests/fixtures/site/build_fixture.py "$RUNNER_TEMP/themed"
+
+      - name: Drop the offline stand-ins the real theme supplies
+        # A file in the site shadows the theme's copy, so leaving these in would build
+        # against the stubs again and prove nothing.
+        run: |
+          rm -f "$RUNNER_TEMP/themed/_config.offline.yml"
+          rm -f "$RUNNER_TEMP/themed/assets/css/main.scss"
+          rm -f "$RUNNER_TEMP/themed"/_layouts/{default,page,post}.html
+          grep "^remote_theme:" "$RUNNER_TEMP/themed/_config.yml"
+
+      - name: Build it against the pinned theme
+        working-directory: tests/fixtures/site
+        env:
+          JEKYLL_ENV: production
+        run: |
+          bundle exec jekyll build \
+            --strict_front_matter \
+            --config "$RUNNER_TEMP/themed/_config.yml" \
+            --source "$RUNNER_TEMP/themed" \
+            --destination "$RUNNER_TEMP/themed-build"
+
+      - name: Check the course rules reached the compiled stylesheet
+        # Whichever repo defines them, the compiled CSS must carry the schedule table's
+        # layout, its row colours and the session blocks. True at the current pin (the
+        # theme still defines the first two) and after a bump (templates/site/ does).
+        run: |
+          css="$RUNNER_TEMP/themed-build/assets/css/main.css"
+          missing=0
+          for needle in ".responsive-table" ".table-row-lecture" ".session-title"; do
+            grep -qF -- "$needle" "$css" || { echo "::error::$needle is not in $css"; missing=1; }
           done
           exit $missing

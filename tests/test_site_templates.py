@@ -229,6 +229,15 @@ def test_the_shipped_stylesheet_defines_the_schedule_tables_own_classes(cls):
     )
 
 
+def test_the_fixture_config_pins_the_theme_the_toolkit_ships(tmp_path):
+    # CI's `jekyll-theme-seam` job builds this fixture against the real theme and reads
+    # the ref out of the generated `_config.yml` rather than repeating it. A fixture that
+    # stopped emitting a pin would build unthemed and pass on nothing.
+    build_fixture.build(tmp_path)
+    cfg = (tmp_path / "_config.yml").read_text(encoding="utf-8")
+    assert f"{site_repo.THEME_REPO}@{site_repo.THEME_REF}" in cfg
+
+
 _IMG_TAG = re.compile(r"<img\b[^>]*>")
 
 
