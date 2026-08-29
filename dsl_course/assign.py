@@ -46,7 +46,7 @@ from .course import (
     assignment_slug,
     submission_repo,
 )
-from .discovery import ASSIGNMENT_TEMPLATE_TOPIC
+from .discovery import ASSIGNMENT_TEMPLATE_TOPIC, list_org_repos
 from .gh_contents import file_exists, put_file
 from .ghcli import GIT_ENV, clone, gh, git
 from .log import log, log_err, log_ok, log_person, log_skip, log_step
@@ -86,15 +86,67 @@ def _wait_for_content(
     return False
 
 
+def _org_listing(cohort_org: str) -> list[dict] | None:
+    """One paginated listing of the cohort org, or None when it could not be read.
+
+    Both stages below ask the same question of it - "is this repo already there, and is it
+    already in the state we would otherwise write?" - and asking GitHub repo by repo cost a
+    GET per student per assignment on every hourly tick (a 400-student cohort carrying
+    three assignments: ~1,200 reads an hour, where one listing costs three).
+
+    None means the listing itself failed, and each caller falls back to its own per-repo
+    probe. The listing is an optimisation, not a new way for a handout to fail: a rate
+    limit here must not stop the students who onboarded this hour from getting their repos.
+    """
+    try:
+        return list_org_repos(cohort_org)
+    except RuntimeError as exc:
+        log_err(
+            f"could not list {cohort_org}'s repos - falling back to a probe per repo: {exc}"
+        )
+        return None
+
+
+def _template_is_ready(entry: dict | None, slug: str) -> bool:
+    """Whether an existing cohort template already carries everything the repair in
+    `ensure_cohort_template` would write.
+
+    `entry` is that repo's row in `_org_listing`'s listing (None when there is no listing,
+    or no such repo). The topics are the LAST thing the repair writes and the flag the
+    second, so a repo carrying both has been through a complete repair - which is also why
+    this needs no content check of its own: `_wait_for_content` gates both writes."""
+    if entry is None:
+        return False
+    wanted = {slug.lower().replace("_", "-"), ASSIGNMENT_TEMPLATE_TOPIC}
+    return bool(entry.get("isTemplate")) and wanted <= set(entry.get("topics") or [])
+
+
 def ensure_cohort_template(
-    master_org: str, template: str, cohort_org: str, slug: str
+    master_org: str,
+    template: str,
+    cohort_org: str,
+    slug: str,
+    listing: list[dict] | None = None,
 ) -> str | None:
     """Stage 1: freeze a cohort-level template repo (named `<slug>`) from the course
     template, so the cohort has its own copy and per-student repos generate from it
     (the role Classroom 50's classroom template used to play). Returns the cohort
     template name, or None on failure. Idempotent."""
-    if repo_exists(cohort_org, slug):
+    entry = (
+        next((r for r in listing if r["name"] == slug), None)
+        if listing is not None
+        else None
+    )
+    exists = entry is not None if listing is not None else repo_exists(cohort_org, slug)
+    if exists:
         log_skip(f"cohort template {cohort_org}/{slug}")
+        if _template_is_ready(entry, slug):
+            # Already frozen, flagged and topiced. The repair below is what HEALS a
+            # half-created template, and it has to stay reachable - but running it
+            # unconditionally meant a probe, a PATCH and a topics PUT per handed-out
+            # assignment on every hourly tick, re-writing state the listing just showed us
+            # is already correct.
+            return slug
     elif not generate_from_template(
         template_org=master_org,
         template_name=template,
@@ -106,13 +158,12 @@ def ensure_cohort_template(
         return None
     else:
         log_ok(f"created cohort template {cohort_org}/{slug}")
-    # Whether just created OR pre-existing, ENSURE it is both populated and flagged as a
-    # template - not only on the create path. A prior run that timed out in
-    # `_wait_for_content` left the repo existing but with `is_template` never set; the old
+    # Reached on the create path AND by a pre-existing template the listing did not show as
+    # ready - never only on the create path. A prior run that timed out in
+    # `_wait_for_content` left the repo existing but with `is_template` never set; an
     # exists-short-circuit then returned the slug without re-checking, so every later handout
     # failed with a misleading "<slug> is not a template" error. Both steps are idempotent,
-    # so a retry HEALS a half-created template rather than being wedged by it. For a healthy
-    # template `_wait_for_content` returns on its first poll, so the cost is one API call.
+    # so a retry HEALS a half-created template rather than being wedged by it.
     if not _wait_for_content(cohort_org, slug):
         log_err(
             f"  ! cohort template {cohort_org}/{slug} did not populate in time "
@@ -214,8 +265,13 @@ def provision_one(
     sol_dir: Path | None = None,
     team: str | None = None,
     touch_existing: bool = True,
+    existing: frozenset[str] | None = None,
 ) -> str:
     """Generate one submission repo and grant its members access.
+
+    `existing` is the cohort's repo names off ONE listing (`_org_listing`); membership in
+    it answers "does this repo already exist?" without a GET per student. None - no listing
+    to hand - falls back to probing this one repo.
 
     `touch_existing=False` (the hourly scheduler): a repo that already exists, with no
     solution due, is left exactly as it is - no access re-grant, no team reconcile. The
@@ -226,7 +282,9 @@ def provision_one(
     `team`, so each member is added as a collaborator. Group assignments also pass the
     GitHub Team slug: the team is materialised from `handles` and granted on the repo, so
     membership changes propagate to access (and members get @mentions + a team space)."""
-    existed = repo_exists(cohort_org, repo)
+    existed = (
+        repo in existing if existing is not None else repo_exists(cohort_org, repo)
+    )
     if existed:
         log_person(f"  [skip] repo {cohort_org}/{repo}")
         if sol_dir is None and not touch_existing:
@@ -550,8 +608,15 @@ def provision_all(
             )
         return 0, False
 
+    # ONE listing of the cohort, taken before anything is created, answers "is it already
+    # there?" for the template below and for every unit in stage 2.
+    listing = _org_listing(cohort_org)
+    existing = frozenset(r["name"] for r in listing) if listing is not None else None
+
     # Stage 1: freeze the cohort-level template.
-    cohort_template = ensure_cohort_template(master_org, template, cohort_org, slug)
+    cohort_template = ensure_cohort_template(
+        master_org, template, cohort_org, slug, listing
+    )
     if cohort_template is None:
         log_err("could not create the cohort assignment template.")
         return 1, False
@@ -588,6 +653,7 @@ def provision_all(
                 sol_dir,
                 team=team,
                 touch_existing=touch_existing,
+                existing=existing,
             )
             results[status] = results.get(status, 0) + 1
 

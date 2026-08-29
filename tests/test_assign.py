@@ -30,6 +30,14 @@ def _no_cohort_schedule(monkeypatch):
     monkeypatch.setattr("dsl_course.schedule.load", lambda org: Schedule())
 
 
+@pytest.fixture(autouse=True)
+def _empty_cohort_listing(monkeypatch):
+    """provision_all takes ONE repo listing of the cohort and answers "does this repo
+    exist?" out of it. An empty org is the uninteresting answer for the tests below; the
+    ones about the listing itself set their own after this fixture and win."""
+    monkeypatch.setattr(assign, "list_org_repos", lambda org: [])
+
+
 def test_assignment_slug_drops_the_cohort_suffix():
     assert assign.assignment_slug("assignment-1-f2026") == "assignment-1"
     assert assign.assignment_slug("assignment-4-project") == "assignment-4-project"
@@ -831,3 +839,136 @@ def test_a_group_whose_members_were_all_rejected_is_a_failed_unit(monkeypatch, c
     )
     assert status == "failed-no-members"
     assert "nobody can open a1-team-1" in capsys.readouterr().err
+
+
+# ------------------------------------------- ONE listing instead of a probe per repo
+
+
+def _ready_template(name="assignment-1"):
+    return {"name": name, "isTemplate": True, "topics": [name, "assignment-template"]}
+
+
+def _listing_run(tmp_path, monkeypatch, listing):
+    """provision_all over two students, with `listing` standing in for the org listing.
+    Returns (the orgs listed, the repos generate_from_template was asked to create)."""
+    path = _roster_file(
+        tmp_path,
+        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
+        "bob@uni.edu,Bob,bob-b,43,dsl-def,enrolled",
+    )
+    listed: list[str] = []
+
+    def fake_listing(org):
+        listed.append(org)
+        if isinstance(listing, Exception):
+            raise listing
+        return listing
+
+    created: list[str] = []
+    monkeypatch.setattr(assign, "list_org_repos", fake_listing)
+    monkeypatch.setattr(
+        assign, "generate_from_template", lambda **k: created.append(k["name"]) or True
+    )
+    monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
+    monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+    assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
+    )
+    return listed, created
+
+
+def test_provision_all_lists_the_org_once_and_probes_no_repo(tmp_path, monkeypatch):
+    # A `repo_exists` per unit cost a GET per student per assignment on EVERY hourly tick
+    # (~1,200 an hour for a large cohort) where one paginated listing costs three.
+    monkeypatch.setattr(
+        assign,
+        "repo_exists",
+        lambda *a, **k: pytest.fail("a per-repo probe is back in the hot path"),
+    )
+    listed, created = _listing_run(
+        tmp_path,
+        monkeypatch,
+        [_ready_template(), {"name": "assignment-1-ada-l", "topics": []}],
+    )
+    assert listed == ["COHORT"], "one listing per run, not one per repo"
+    assert created == ["assignment-1-bob-b"], "a listed repo was regenerated"
+
+
+def test_a_failed_listing_falls_back_to_probing_each_repo(tmp_path, monkeypatch):
+    # The listing is an optimisation. A rate limit on it must not stop the students who
+    # onboarded this hour from getting their repos.
+    probed: list[str] = []
+    monkeypatch.setattr(
+        assign, "repo_exists", lambda org, name: probed.append(name) or False
+    )
+    listed, created = _listing_run(
+        tmp_path, monkeypatch, RuntimeError("could not list repos in COHORT: 502")
+    )
+    assert listed == ["COHORT"]
+    assert created == ["assignment-1", "assignment-1-ada-l", "assignment-1-bob-b"]
+    assert probed == ["assignment-1", "assignment-1-ada-l", "assignment-1-bob-b"]
+
+
+def test_a_cohort_template_the_listing_shows_ready_is_left_alone(monkeypatch):
+    # The repair is three writes per handed-out assignment; running it on a template the
+    # listing already shows as frozen, flagged and topiced re-wrote correct state hourly.
+    monkeypatch.setattr(
+        assign,
+        "_wait_for_content",
+        lambda *a: pytest.fail("the hourly re-probe is back"),
+    )
+    monkeypatch.setattr(
+        assign,
+        "gh",
+        lambda *a, **k: pytest.fail("the hourly is_template PATCH is back"),
+    )
+    monkeypatch.setattr(
+        assign,
+        "set_repo_topics",
+        lambda *a: pytest.fail("the hourly topics PUT is back"),
+    )
+    assert (
+        assign.ensure_cohort_template(
+            "COURSE",
+            "assignment-1-f2026",
+            "COHORT",
+            "assignment-1",
+            [_ready_template()],
+        )
+        == "assignment-1"
+    )
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"name": "assignment-1", "isTemplate": False, "topics": ["assignment-1"]},
+        {"name": "assignment-1", "isTemplate": True, "topics": []},
+    ],
+)
+def test_a_half_created_cohort_template_is_still_repaired_from_the_listing(
+    monkeypatch, entry
+):
+    # A run that timed out in _wait_for_content leaves the repo existing but unflagged or
+    # untopiced. The listing must not read that as "ready" - every later handout would
+    # fail with a misleading "not a template", or the site would withhold the brief.
+    monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
+    patched: list[tuple] = []
+    monkeypatch.setattr(assign, "gh", lambda *a, **k: patched.append(a) or (0, ""))
+    stamped: list[tuple] = []
+    monkeypatch.setattr(assign, "set_repo_topics", lambda *a: stamped.append(a) or True)
+    assert (
+        assign.ensure_cohort_template(
+            "COURSE", "assignment-1-f2026", "COHORT", "assignment-1", [entry]
+        )
+        == "assignment-1"
+    )
+    assert any("is_template=true" in a for a in patched)
+    assert stamped == [
+        ("COHORT", "assignment-1", ["assignment-1", "assignment-template"])
+    ]
