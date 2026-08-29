@@ -673,11 +673,15 @@ def test_record_handout_round_trips_through_the_parser(monkeypatch):
     store = {
         "text": "assignments:\n  assignment-1:\n    course_source_repo: a-f2026\n    due_datetime: 2026-10-13\n"
     }
-    monkeypatch.setattr(S, "get_file_content", lambda org, repo, path: store["text"])
+    monkeypatch.setattr(
+        S, "get_file_with_sha", lambda org, repo, path: (store["text"], "sha0")
+    )
     writes = []
     monkeypatch.setattr(
         "dsl_course.schedule.put_file",
-        lambda org, repo, path, content, msg: writes.append(content.decode()) or True,
+        lambda org, repo, path, content, msg, expected_sha=None: (
+            writes.append(content.decode()) or True
+        ),
     )
     S.record_handout("Cohort-f2026", "assignment-1", "2026-09-22T14:05")
     (new,) = writes
@@ -711,6 +715,9 @@ def test_the_plan_is_read_once_per_cohort_and_a_handout_reopens_it(monkeypatch):
     assert len(reads) == 2, "one cohort's plan answered for another"
 
     monkeypatch.setattr(schedule, "put_file", lambda *a, **k: True)
+    monkeypatch.setattr(
+        schedule, "get_file_with_sha", lambda org, repo, path: ("", "sha0")
+    )
     schedule.record_handout("Cohort-f2026", "assignment-1", "2026-09-22T14:05")
     schedule.load("Cohort-f2026")
     assert len(reads) == 3, "the memo survived a write to schedule.yml"
@@ -1353,7 +1360,7 @@ def test_record_handout_says_so_loudly_when_the_file_shape_defeats_the_edit(
     from dsl_course import schedule as S
 
     flow = "assignments: {assignment-1: {due_datetime: 2026-10-13}}\n"
-    monkeypatch.setattr(S, "get_file_content", lambda org, repo, path: flow)
+    monkeypatch.setattr(S, "get_file_with_sha", lambda org, repo, path: (flow, "sha0"))
     monkeypatch.setattr(
         "dsl_course.schedule.put_file",
         lambda *a, **k: pytest.fail("must not write into a shape it cannot parse"),
@@ -1374,7 +1381,7 @@ def test_record_handout_says_so_loudly_when_the_write_itself_fails(monkeypatch, 
     from dsl_course import schedule as S
 
     good = "assignments:\n  assignment-1:\n    due_datetime: 2026-10-13\n"
-    monkeypatch.setattr(S, "get_file_content", lambda org, repo, path: good)
+    monkeypatch.setattr(S, "get_file_with_sha", lambda org, repo, path: (good, "sha0"))
     monkeypatch.setattr("dsl_course.schedule.put_file", lambda *a, **k: False)
 
     S.record_handout("Cohort-f2026", "assignment-1", "2026-09-22T14:05")
@@ -1383,6 +1390,48 @@ def test_record_handout_says_so_loudly_when_the_write_itself_fails(monkeypatch, 
     assert "could NOT record the assignment-1 handout" in err
     assert "2026-09-22T14:05" in err
     assert "on record nowhere" in err
+
+
+def test_record_handout_never_reverts_an_edit_made_while_it_ran(monkeypatch):
+    # A handout can take minutes; a faculty member editing schedule.yml in that window had
+    # their edit silently reverted, because the write re-read the sha and so always won.
+    from dsl_course import schedule as S
+
+    before = "assignments:\n  assignment-1:\n    due_datetime: 2026-10-13\n"
+    after = before + "  assignment-2:\n    due_datetime: 2026-11-20\n"
+    store = {"text": before, "sha": "sha0"}
+    monkeypatch.setattr(
+        S, "get_file_with_sha", lambda org, repo, path: (store["text"], store["sha"])
+    )
+    writes: list[str] = []
+
+    def fake_put(org, repo, path, content, msg, expected_sha=None):
+        # expected_sha=None is put_file re-reading the sha itself, so the write always
+        # wins - which is the bug. A sha that has moved on is refused.
+        if expected_sha is not None and expected_sha != store["sha"]:
+            return False
+        store["text"] = content.decode()
+        store["sha"] = f"{store['sha']}+"
+        writes.append(store["text"])
+        return True
+
+    monkeypatch.setattr("dsl_course.schedule.put_file", fake_put)
+    # the edit lands between the read and the write
+    original_read = S.get_file_with_sha
+
+    def moving_read(org, repo, path):
+        text, sha = original_read(org, repo, path)
+        if store["text"] == before:
+            store["text"], store["sha"] = after, "sha1"
+        return text, sha
+
+    monkeypatch.setattr(S, "get_file_with_sha", moving_read)
+
+    S.record_handout("Cohort-f2026", "assignment-1", "2026-09-22T14:05")
+
+    (final,) = writes
+    assert "assignment-2" in final, "a concurrent edit was reverted"
+    assert "handout_datetime: 2026-09-22T14:05" in final
 
 
 def test_validate_cli_reports_an_unreadable_cohort_schedule(monkeypatch, capsys):

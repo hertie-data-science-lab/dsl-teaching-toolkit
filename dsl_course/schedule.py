@@ -80,7 +80,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import yaml
 
 from .course import CONFIG_REPO, coerce_date
-from .gh_contents import get_file_content, put_file, repo_tree
+from .gh_contents import get_file_content, get_file_with_sha, put_file, repo_tree
 from .log import log, log_err
 from .repos import default_branch, repo_exists
 
@@ -1293,14 +1293,55 @@ def _insert_handout(text: str, slug: str, stamp: str) -> str | _Declined | None:
     return "".join(lines)
 
 
+def _put_handout(
+    cohort_org: str, slug: str, stamp: str, body: str, sha: str | None
+) -> bool:
+    """Write the recorded handout over schedule.yml at the sha its text was READ at, so a
+    faculty edit committed during the run is refused rather than reverted; on a refusal,
+    re-read, re-apply the handout to the fresh text and try once more."""
+    message = f"schedule: record {slug} handout ({stamp})"
+
+    def write(text: str, at: str | None) -> bool:
+        return put_file(
+            cohort_org,
+            CONFIG_REPO,
+            SCHEDULE_PATH,
+            text.encode(),
+            message,
+            expected_sha=at,
+        )
+
+    if write(body, sha):
+        return True
+    log_err(
+        f"{SCHEDULE_PATH} in {cohort_org} was edited while {slug} was being handed out - "
+        f"re-reading and retrying once"
+    )
+    read = get_file_with_sha(cohort_org, CONFIG_REPO, SCHEDULE_PATH)
+    if read is None:
+        return False
+    fresh, fresh_sha = read
+    rebuilt = _insert_handout(fresh, slug, stamp)
+    if rebuilt is None:
+        return True  # the edit that beat us recorded the same handout
+    if isinstance(rebuilt, _Declined):
+        return False
+    return write(rebuilt, fresh_sha)
+
+
 def record_handout(cohort_org: str, slug: str, stamp: str | None = None) -> None:
     """Record a manual handout back into schedule.yml (`assignments.<slug>.handout_datetime`),
     so the schedule stays the one record of when every assignment went out - whether
     the cron released it or a person ran the workflow. Write-once: an existing
     handout_datetime (scheduled, or recorded by an earlier run) is never modified. Best
     effort - a failure here must never fail the release itself, but it is never silent
-    either: a file this can't edit means the handout happened and is on record nowhere."""
-    text = _schedule_text(cohort_org) or ""
+    either: a file this can't edit means the handout happened and is on record nowhere.
+
+    The edit is made against a FRESH read and written with that read's sha, so a faculty
+    edit committed during a long run is refused rather than reverted; one retry re-reads
+    and re-applies (as `enrol_codes.write_codes` does)."""
+    read = get_file_with_sha(cohort_org, CONFIG_REPO, SCHEDULE_PATH)
+    text, sha = read if read is not None else ("", None)
     # This is the one writer of schedule.yml inside a run, so it is the one place the
     # per-process read memo can go stale. Dropped up front: every path below either
     # returns without writing or writes, and a memo cleared once too often only costs a
@@ -1331,13 +1372,7 @@ def record_handout(cohort_org: str, slug: str, stamp: str | None = None) -> None
         return
     if new is None:
         return  # already recorded - write-once, nothing to do
-    if put_file(
-        cohort_org,
-        CONFIG_REPO,
-        SCHEDULE_PATH,
-        new.encode(),
-        f"schedule: record {slug} handout ({stamp})",
-    ):
+    if _put_handout(cohort_org, slug, stamp, new, sha):
         log(f"  recorded handout in {CONFIG_REPO}/{SCHEDULE_PATH}: {slug} @ {stamp}")
     else:
         # Same fault as the DECLINED branch above, one step later: the handout HAPPENED
