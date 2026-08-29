@@ -31,8 +31,8 @@ files block below needs no guard of its own.
 {% if entry.pdf %}
 <p class="session-files-label" style="margin-bottom: 2px;"><strong>Files</strong></p>
 <ul class="session-files">
-  <li class="raw_li"><a title="Download problems (pdf)" href="{{ entry.pdf | prepend: site.baseurl }}"><i class="fas fa-file-pdf"></i> problems (pdf)</a></li>
-  {% if entry.attachment %}<li class="raw_li"><a title="Download attachments (zip)" href="{{ entry.attachment | prepend: site.baseurl }}"><i class="fas fa-file-archive"></i> attachments (zip)</a></li>{% endif %}
+  <li><a title="Download problems (pdf)" href="{{ entry.pdf | prepend: site.baseurl }}"><i class="fas fa-file-pdf"></i> problems (pdf)</a></li>
+  {% if entry.attachment %}<li><a title="Download attachments (zip)" href="{{ entry.attachment | prepend: site.baseurl }}"><i class="fas fa-file-archive"></i> attachments (zip)</a></li>{% endif %}
 </ul>
 {% endif %}
 </section>

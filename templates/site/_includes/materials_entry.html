@@ -14,7 +14,7 @@ node, never reaches a leaf, and Liquid aborts the whole page with "Nesting too d
 three levels deep. `include.entry` is scoped per invocation, which is why this works. That
 also means the file-count span below stays duplicated rather than captured.
 {% endcomment %}
-<li class="raw_li">
+<li>
   {% if include.entry.entries.size > 0 %}
   <details>
     <summary style="cursor: pointer;">

@@ -192,6 +192,44 @@ def test_the_sync_ships_every_template_to_both_kinds_of_site(cohort_plan, public
         assert not missing
 
 
+# The schedule table's structural classes. The theme used to define them, so a course
+# site got its table layout from a repo the toolkit does not ship; a theme release that
+# drops them flattens every schedule, materials and assignments table on every live site.
+_TABLE_TEMPLATES = ("_layouts/schedule.html",) + tuple(
+    rel for rel in _templates() if rel.startswith("_includes/schedule_row_")
+)
+# Page chrome the theme still owns.
+_THEME_CHROME = frozenset({"home", "post-header", "post-title"})
+_CLASS_ATTR = re.compile(r'class="([^"]*)"')
+_SCSS_COMMENT = re.compile(r"//.*?$|/\*.*?\*/", re.DOTALL | re.MULTILINE)
+
+
+def _classes(text: str) -> set[str]:
+    """The static classes a template puts on an element - a Liquid-interpolated one
+    (`table-row-{{ event.type }}`) names no single class, so it is skipped."""
+    return {
+        name
+        for m in _CLASS_ATTR.finditer(_strip_comments(text))
+        for name in m.group(1).split()
+        if "{" not in name and "}" not in name
+    }
+
+
+@pytest.mark.parametrize(
+    "cls",
+    sorted(
+        {c for rel in _TABLE_TEMPLATES for c in _classes(_templates()[rel])}
+        - _THEME_CHROME
+    ),
+)
+def test_the_shipped_stylesheet_defines_the_schedule_tables_own_classes(cls):
+    scss = _SCSS_COMMENT.sub("", _templates()["_sass/_course.scss"])
+    assert re.search(rf"\.{re.escape(cls)}(?![-\w])", scss), (
+        f".{cls} is used by the schedule table but no rule in _sass/_course.scss "
+        f"defines it"
+    )
+
+
 def test_a_schedule_row_template_exists_for_every_type_the_sync_emits(documents):
     # The schedule dispatches on `type`, so a row kind added to site.py without its
     # template renders as the neutral fallback row - silently, on the live schedule.
