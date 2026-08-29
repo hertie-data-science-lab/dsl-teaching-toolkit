@@ -86,7 +86,7 @@ def _run(monkeypatch, fakes: _Fakes) -> int:
     monkeypatch.setattr(site_repo, "git", fakes.git)
     monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(site_repo, "repo_is_archived", lambda org, name: False)
-    monkeypatch.setattr(site_repo, "_acting_login", lambda: "dsl-bot-account")
+    monkeypatch.setattr(site_repo, "acting_login", lambda: "dsl-bot-account")
 
     def build(_wd: Path) -> site_repo.SitePlan:
         return site_repo.SitePlan(config={}, collections={}, commit="site: sync")

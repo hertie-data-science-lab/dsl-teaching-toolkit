@@ -23,11 +23,11 @@ END_OF_TERM = date(2026, 12, 18)
 
 
 @pytest.fixture(autouse=True)
-def _no_acting_login(monkeypatch):
+def _noacting_login(monkeypatch):
     """_team_people asks who the sync is authenticated as, and the real lookup shells out
     to `gh` (green on an authenticated dev box, red in tokenless CI). None excludes
     nobody, which is what every test here but the bot-card one wants."""
-    monkeypatch.setattr(site_repo, "_acting_login", lambda: None)
+    monkeypatch.setattr(site_repo, "acting_login", lambda: None)
 
 
 def _sched(releases: list[Release]) -> Schedule:
@@ -1023,7 +1023,7 @@ def test_team_people_never_renders_the_syncs_own_bot_account(monkeypatch, capsys
 
     monkeypatch.setattr(site_repo, "gh", fake)
     monkeypatch.setattr(
-        site_repo, "_acting_login", lambda: "Hertie-DSL-Bot"
+        site_repo, "acting_login", lambda: "Hertie-DSL-Bot"
     )  # logins fold case
     assert site_repo._team_people("Course", "instructors") == [
         ("Jane", "https://a/j.png", "https://gh/jane")

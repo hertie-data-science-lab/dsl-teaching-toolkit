@@ -23,7 +23,7 @@ def test_reconcile_team_members_adds_missing_and_removes_extra(monkeypatch):
     monkeypatch.setattr(
         gh_teams, "get_team_members", lambda org, team: {"alice", "bob"}
     )
-    monkeypatch.setattr(gh_teams, "_acting_login", lambda: None)
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: None)
     monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
     added, removed = [], []
     monkeypatch.setattr(
@@ -54,7 +54,7 @@ def test_reconcile_team_members_never_prunes_a_renamed_account(monkeypatch):
         "get_team_member_ids",
         lambda org, team: {"ada-new": "42", "stranger": "99"},
     )
-    monkeypatch.setattr(gh_teams, "_acting_login", lambda: None)
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: None)
     monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
     removed = []
     monkeypatch.setattr(gh_teams, "add_team_member", lambda *a, **k: True)
@@ -75,7 +75,7 @@ def test_reconcile_team_members_skips_the_prune_when_ids_are_unreadable(monkeypa
         gh_teams, "get_team_members", lambda org, team: {"ada-new", "stranger"}
     )
     monkeypatch.setattr(gh_teams, "get_team_member_ids", lambda org, team: None)
-    monkeypatch.setattr(gh_teams, "_acting_login", lambda: None)
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: None)
     monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
     removed = []
     monkeypatch.setattr(gh_teams, "add_team_member", lambda *a, **k: True)
@@ -89,11 +89,11 @@ def test_reconcile_team_members_skips_the_prune_when_ids_are_unreadable(monkeypa
     assert removed == []
 
 
-def test_reconcile_team_members_never_prunes_the_acting_login(monkeypatch):
+def test_reconcile_team_members_never_prunes_theacting_login(monkeypatch):
     monkeypatch.setattr(
         gh_teams, "get_team_members", lambda org, team: {"alice", "hertie-dsl-bot"}
     )
-    monkeypatch.setattr(gh_teams, "_acting_login", lambda: "hertie-dsl-bot")
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: "hertie-dsl-bot")
     monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
     removed = []
     monkeypatch.setattr(gh_teams, "add_team_member", lambda *a, **k: True)
@@ -114,7 +114,7 @@ def test_reconcile_team_members_never_prunes_any_org_owner(monkeypatch):
         lambda org, team: {"alice", "hertie-dsl-bot", "henrycgbaker"},
     )
     monkeypatch.setattr(
-        gh_teams, "_acting_login", lambda: "henrycgbaker"
+        gh_teams, "acting_login", lambda: "henrycgbaker"
     )  # a human, running locally
     monkeypatch.setattr(
         gh_teams,
@@ -136,7 +136,7 @@ def test_reconcile_team_members_compares_case_insensitively(monkeypatch, capsys)
     # `anna-adams` are the same account. Comparing raw casing added-then-pruned it every
     # run, oscillating that person's access nightly.
     monkeypatch.setattr(gh_teams, "get_team_members", lambda org, team: {"anna-adams"})
-    monkeypatch.setattr(gh_teams, "_acting_login", lambda: None)
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: None)
     monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
     added, removed = [], []
     monkeypatch.setattr(
@@ -182,8 +182,12 @@ def test_get_team_members_returns_none_on_failure_not_an_empty_set(monkeypatch):
     assert gh_teams.get_team_members("Org", "students") is None
     monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (0, "not json"))
     assert gh_teams.get_team_members("Org", "students") is None
-    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (0, '[{"login": "alice"}]'))
-    assert gh_teams.get_team_members("Org", "students") == {"alice"}
+    # One listing behind both readers, so it asks for the id as well - which is what lets
+    # a reconcile tell a stranger from somebody who has renamed their account.
+    row = '[{"login": "Alice", "id": 7}]'
+    monkeypatch.setattr(gh_teams, "gh", lambda *a, **k: (0, row))
+    assert gh_teams.get_team_members("Org", "students") == {"Alice"}
+    assert gh_teams.get_team_member_ids("Org", "students") == {"alice": "7"}
 
 
 def test_create_team_only_treats_an_already_exists_422_as_success(monkeypatch):
@@ -230,7 +234,7 @@ def test_reconcile_team_members_skips_the_prune_when_the_owners_are_unreadable(
     # Without the owner list there is no way to tell an Owner from a stray member, and a
     # blind prune could evict one. Adds still happen; the prune pass is skipped, loudly.
     monkeypatch.setattr(gh_teams, "get_team_members", lambda org, team: {"alice"})
-    monkeypatch.setattr(gh_teams, "_acting_login", lambda: None)
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: None)
     monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: None)
     added, removed = [], []
     monkeypatch.setattr(
@@ -253,7 +257,7 @@ def test_reconcile_keeps_the_handles_it_adds_and_removes_out_of_a_public_log(
 ):
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     monkeypatch.setattr(gh_teams, "get_team_members", lambda org, team: {"zoe-zed"})
-    monkeypatch.setattr(gh_teams, "_acting_login", lambda: "bot")
+    monkeypatch.setattr(gh_teams, "acting_login", lambda: "bot")
     monkeypatch.setattr(gh_teams, "get_org_owners", lambda org: frozenset())
     monkeypatch.setattr(gh_teams, "add_team_member", lambda *a, **k: True)
     monkeypatch.setattr(gh_teams, "remove_team_member", lambda *a, **k: True)

@@ -87,7 +87,7 @@ def _install_fakes(monkeypatch) -> dict[str, str]:
     monkeypatch.setattr(public_site, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(site_repo, "repo_is_archived", lambda org, name: False)
-    monkeypatch.setattr(site_repo, "_acting_login", lambda: None)
+    monkeypatch.setattr(site_repo, "acting_login", lambda: None)
     monkeypatch.setattr(public_site, "get_file_content", lambda *a, **k: "")
     # site_repo.yaml_file now reads via gh_contents.load_yaml_config, which resolves
     # get_file_content in the UTILS namespace - stub it there too, or the real gh

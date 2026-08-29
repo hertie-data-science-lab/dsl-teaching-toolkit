@@ -23,7 +23,7 @@ from . import scaffold, welcome
 from .course import INSTRUCTORS_TEAM, active_today, pages_repo
 from .discovery import list_org_repos
 from .gh_contents import load_yaml_config
-from .gh_teams import _acting_login
+from .gh_teams import acting_login
 from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
 from .log import log, log_err, log_ok, log_step
 from .repos import repo_exists, repo_is_archived
@@ -480,7 +480,7 @@ def _team_people(course_org: str, team: str) -> list[tuple[str, str, str]]:
     people = []
     # None means the login could not be read; the gh-auth fail-fast guard has already run,
     # so that is not this function's problem - it just excludes nobody.
-    acting = _acting_login()
+    acting = acting_login()
     for login in out.splitlines():
         login = login.strip()
         if not login:
@@ -737,7 +737,7 @@ def _is_machine_author(name: str, email: str) -> bool:
     scaffold's "Initial commit"), or any GitHub App. An unreadable acting login is None
     and matches nobody, which errs towards calling a commit human - the wrong guess there
     is one unnecessary issue, the other way round is a silently discarded edit."""
-    acting = _acting_login()
+    acting = acting_login()
     return (
         name == _git_identity("user.name")
         or email == _git_identity("user.email")

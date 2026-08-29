@@ -99,12 +99,13 @@ def add_team_member(org: str, team_slug: str, login: str, role: str = "member") 
     return False
 
 
-def get_team_members(org: str, team_slug: str) -> set[str] | None:
-    """Current members of a team, or None if the listing could not be read.
+def _team_member_rows(org: str, team_slug: str) -> dict[str, str] | None:
+    """`{login: GitHub id}` for a team's current members - the ONE listing behind both
+    public readers - or None if it could not be READ.
 
-    None (non-zero exit OR unparseable JSON) means "couldn't read" and must never be
-    conflated with an empty team: reconciling against an unreadable team would add or
-    prune blind. Mirrors get_org_owners."""
+    None (a non-zero exit OR unparseable JSON) must never be conflated with an empty team:
+    reconciling against an unreadable team would add or prune blind. Mirrors
+    get_org_owners."""
     code, out = gh(
         "api", f"orgs/{org}/teams/{team_slug}/members?per_page=100", "--paginate"
     )
@@ -112,31 +113,27 @@ def get_team_members(org: str, team_slug: str) -> set[str] | None:
         log_err(f"could not read the members of {org}/{team_slug}: {out[:200]}")
         return None
     try:
-        return {m["login"] for m in json.loads(out)}
+        return {m["login"]: str(m["id"]) for m in json.loads(out)}
     except (json.JSONDecodeError, KeyError, TypeError):
         log_err(f"unparseable member listing for {org}/{team_slug}: {out[:200]}")
         return None
+
+
+def get_team_members(org: str, team_slug: str) -> set[str] | None:
+    """The logins currently in a team, as GitHub spells them. None if unreadable."""
+    rows = _team_member_rows(org, team_slug)
+    return None if rows is None else set(rows)
 
 
 def get_team_member_ids(org: str, team_slug: str) -> dict[str, str] | None:
-    """`{login.casefold(): GitHub id}` for a team's current members, or None if the listing
-    could not be read.
+    """`{login.casefold(): GitHub id}` for a team's current members. None if unreadable.
 
-    The same call `get_team_members` makes, asked for the IMMUTABLE half as well. A login
-    is renameable; an id is not, so this is the only way a reconcile can tell "somebody who
-    does not belong here" from "the same person under a new name" - see the `keep_ids`
-    guard in `reconcile_team_members`."""
-    code, out = gh(
-        "api", f"orgs/{org}/teams/{team_slug}/members?per_page=100", "--paginate"
-    )
-    if code != 0:
-        log_err(f"could not read the members of {org}/{team_slug}: {out[:200]}")
-        return None
-    try:
-        return {m["login"].casefold(): str(m["id"]) for m in json.loads(out)}
-    except (json.JSONDecodeError, KeyError, TypeError):
-        log_err(f"unparseable member listing for {org}/{team_slug}: {out[:200]}")
-        return None
+    The IMMUTABLE half of the same listing. A login is renameable; an id is not, so this
+    is the only way a reconcile can tell "somebody who does not belong here" from "the
+    same person under a new name" - see the `keep_ids` guard in
+    `reconcile_team_members`."""
+    rows = _team_member_rows(org, team_slug)
+    return None if rows is None else {log.casefold(): gid for log, gid in rows.items()}
 
 
 def remove_team_member(org: str, team_slug: str, login: str) -> bool:
@@ -147,7 +144,7 @@ def remove_team_member(org: str, team_slug: str, login: str) -> bool:
 
 
 @lru_cache(maxsize=1)
-def _acting_login() -> str | None:
+def acting_login() -> str | None:
     """Login of the token `gh` is currently authenticated as (the bot, in CI)."""
     code, out = gh("api", "user", "--jq", ".login")
     return out.strip() if code == 0 and out.strip() else None
@@ -239,7 +236,7 @@ def reconcile_team_members(
                 f"read, and pruning without it risks evicting an Owner"
             )
             return errors
-        acting = _acting_login()
+        acting = acting_login()
         stale = sorted(_fold_diff(current_by_fold, wanted_by_fold))
         protected: set[str] = set()
         if stale and keep_ids:
