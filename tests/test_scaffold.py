@@ -71,7 +71,7 @@ def fake(monkeypatch):
     monkeypatch.setattr(gh_contents, "log_skip", lambda msg: f.skips.append(msg))
     monkeypatch.setattr(scaffold, "log_skip", lambda msg: f.skips.append(msg))
     monkeypatch.setattr(scaffold, "create_repo", lambda *a, **k: True)
-    monkeypatch.setattr(scaffold, "grant_course_team_access", lambda *a, **k: None)
+    monkeypatch.setattr(scaffold, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(scaffold, "grant_tagged_team_access", lambda *a, **k: None)
     monkeypatch.setattr(scaffold, "set_repo_topics", lambda *a, **k: None)
     monkeypatch.setattr(scaffold, "discover_cohorts", lambda org: [])

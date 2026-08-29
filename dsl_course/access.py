@@ -17,7 +17,7 @@ from .discovery import classify_repos
 from .gh_teams import create_team
 from .ghcli import gh, is_missing_resource
 from .log import log, log_err, log_ok
-from .repos import set_repo_topics
+from .repos import Converged, set_repo_topics
 
 
 def grant_team_repo_access(
@@ -104,19 +104,18 @@ def faculty_floor(
     return FACULTY_READ_ACCESS
 
 
-def grant_course_team_access(org: str, repo: str) -> None:
-    """Give the course-org faculty teams their standing access to `repo` (COURSE_TEAM_ACCESS)."""
-    for team, perm in COURSE_TEAM_ACCESS.items():
-        grant_team_repo_access(org, team, repo, perm)
+def grant_faculty(
+    org: str, repo: str, access: dict[str, str], *, missing_is_note: bool = False
+) -> None:
+    """Give the faculty teams `access` - COURSE_TEAM_ACCESS where they author,
+    FACULTY_READ_ACCESS where the source of truth is elsewhere - on one repo, at the point
+    it is created.
 
-
-def grant_faculty_read_access(org: str, repo: str) -> None:
-    """Give the faculty teams read on `repo` (FACULTY_READ_ACCESS) - for a repo whose source
-    of truth is elsewhere, so an edit made here would be overwritten."""
-    for team, perm in FACULTY_READ_ACCESS.items():
-        # Per-student hot path (every gradebook, every submission repo): a cohort whose
-        # faculty teams are not there yet must not print two errors per student.
-        grant_team_repo_access(org, team, repo, perm, missing_is_note=True)
+    `missing_is_note` for the per-student hot path (every gradebook, every submission
+    repo): a cohort whose faculty teams are not there yet must not print two errors per
+    student, and `converge_faculty_access` repairs the grant on the next sweep."""
+    for team, perm in access.items():
+        grant_team_repo_access(org, team, repo, perm, missing_is_note=missing_is_note)
 
 
 def grant_tagged_team_access(course_org: str, repo: str, tag: str) -> None:
@@ -205,7 +204,7 @@ def converge_faculty_access(
     repos: list[dict],
     tier: str | None,
     protected: frozenset[str] = frozenset(),
-) -> int:
+) -> Converged:
     """Raise the faculty teams to their floor (`faculty_floor`) on every live repo of `org`.
 
     A team grant is set when a repo is created and never revisited, so a repo kind that
@@ -222,8 +221,9 @@ def converge_faculty_access(
     Cost: `2 * ceil(N/100)` GETs for a converged org; the FIRST sweep of an unconverged
     org is one PUT per missing grant (a 300-repo cohort: ~600 sequential PUTs, which may
     trip the secondary rate limit and crawl through gh()'s backoff - it self-heals, the
-    next night finishes). Never fatal: a failed PUT is a line, not a red refresh."""
+    next night finishes)."""
     changed = 0
+    failures = 0
     live = [r["name"] for r in repos if not r.get("archived")]
     for team in COURSE_TEAM_ACCESS:
         try:
@@ -247,10 +247,12 @@ def converge_faculty_access(
             if grant_team_repo_access(org, team, name, floor):
                 log_ok(f"{team} -> {floor} on {name}")
                 changed += 1
-    return changed
+            else:
+                failures += 1
+    return Converged(changed, failures)
 
 
-def converge_topics(org: str, repos: list[dict], tier: str | None) -> int:
+def converge_topics(org: str, repos: list[dict], tier: str | None) -> Converged:
     """Stamp the machinery topics missing from a COHORT org's per-student repos.
 
     `submission` (plus the template's own name) on `<template>-<handle>`, `gradebook` on
@@ -268,12 +270,12 @@ def converge_topics(org: str, repos: list[dict], tier: str | None) -> int:
     "cohort" is swept: a course org has neither repo kind, and an unplaceable one is not
     worth a PATCH per repo on a guess.
 
-    Costs no reads (the caller's listing carries `topics` and `isTemplate`) and is never
-    fatal: set_repo_topics logs its own failure, and this returns the count so a caller
-    that reports failures can include it."""
+    Costs no reads (the caller's listing carries `topics` and `isTemplate`) and raises
+    nothing: set_repo_topics logs its own failure, and this counts it."""
     if tier != "cohort":
-        return 0
+        return Converged()
     derived = classify_repos(repos)
+    changed = 0
     failures = 0
     for repo in repos:
         if repo.get("archived"):
@@ -291,6 +293,7 @@ def converge_topics(org: str, repos: list[dict], tier: str | None) -> int:
             continue
         if set_repo_topics(org, name, sorted(have | wanted)):
             log_ok(f"topics converged on {name}")
+            changed += 1
         else:
             failures += 1
-    return failures
+    return Converged(changed, failures)

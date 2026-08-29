@@ -372,13 +372,22 @@ def _converge_org_metadata(org: str, repos: list[dict]) -> int:
     landing page rendered from the same listing shows the corrected wording in this run
     rather than the next.
 
-    Returns the failure count that must reach the refresh's exit code - the topic stamps.
-    A failed description PATCH is documentation and logs a line; a failed access PUT
-    self-heals on the next sweep and is likewise not fatal."""
+    Returns the failure count that must reach the refresh's exit code."""
     tier = org_tier(repos)
-    converge_descriptions(org, repos, tier)
-    converge_faculty_access(org, repos, tier, protected=student_repo_names(repos))
-    return converge_topics(org, repos, tier)
+    described = converge_descriptions(org, repos, tier)
+    granted = converge_faculty_access(
+        org, repos, tier, protected=student_repo_names(repos)
+    )
+    topics = converge_topics(org, repos, tier)
+    changed = described.changed + granted.changed + topics.changed
+    if changed:
+        log_ok(f"{org}: {changed} repo(s) converged (descriptions, access, topics)")
+    # Only a missing TOPIC reds the run. A topic is what keeps a student's submission repo
+    # and a private gradebook off the landing page, out of the release targets and on the
+    # faculty read floor, and nothing else revisits it. A reworded description is
+    # documentation, and a failed access PUT is retried by the next sweep - both have
+    # already logged their own line.
+    return topics.failures
 
 
 def _refresh_stubs(course_org: str, repo: str) -> int:

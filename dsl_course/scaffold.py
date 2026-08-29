@@ -23,7 +23,7 @@ import tempfile
 import time
 from pathlib import Path
 
-from .access import grant_course_team_access, grant_tagged_team_access
+from .access import COURSE_TEAM_ACCESS, grant_faculty, grant_tagged_team_access
 from .course import (
     FACULTY_ONLY_HEADING,
     MATERIALS_REPO_PREFIX,
@@ -466,7 +466,7 @@ def scaffold_materials(org: str, tag: str) -> int:
         ),
     ):
         return 1
-    grant_course_team_access(org, repo)
+    grant_faculty(org, repo, COURSE_TEAM_ACCESS)
     grant_tagged_team_access(org, repo, tag)
     readme = materials_readme(org)
     failures = 0
@@ -532,7 +532,7 @@ def scaffold_assignment(
         description=f"Assignment {number} template",
     ):
         return 1
-    grant_course_team_access(org, repo)
+    grant_faculty(org, repo, COURSE_TEAM_ACCESS)
     grant_tagged_team_access(org, repo, tag)
     starter_name = "starter.ipynb" if fmt == "notebook" else "starter.py"
     brief = "group assignment" if kind == "group" else "assignment"

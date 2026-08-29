@@ -33,7 +33,7 @@ import tempfile
 from pathlib import Path
 
 from . import site
-from .access import grant_faculty_read_access, grant_read_teams
+from .access import FACULTY_READ_ACCESS, grant_faculty, grant_read_teams
 from .course import (
     FACULTY_ONLY_HEADING,
     SYLLABUS_SAMPLE_FILE,
@@ -198,7 +198,7 @@ def deploy_many(
             # Read, not write: this is the RELEASED copy, and a re-release copies over it
             # (`copytree(dirs_exist_ok=True)`), so an edit made here would vanish. A
             # correction belongs in the course org's materials repo, then re-release.
-            grant_faculty_read_access(cohort_org, repo)
+            grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
             dd = root / "out" / repo
             if not clone(cohort_org, repo, dd):
                 log_err(f"could not clone dest {cohort_org}/{repo}")

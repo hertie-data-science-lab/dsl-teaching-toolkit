@@ -215,7 +215,7 @@ def test_a_failed_solution_push_reaches_the_returned_status(tmp_path, monkeypatc
     # provision_all could not tell. Both the group and individual paths must report it.
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
     monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
-    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
@@ -391,7 +391,7 @@ def test_a_repo_no_student_can_open_is_a_failed_handout(_provisioned, monkeypatc
     # The old "created-no-collaborator" status doesn't start with "failed", so a repo
     # nobody can see never reached provision_all's exit predicate: the release went green
     # while the student had nothing to submit into.
-    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: False)
     status = assign.provision_one(
         "COURSE",
@@ -408,7 +408,7 @@ def test_a_group_repo_reports_the_teams_own_failures(_provisioned, monkeypatch):
     # ensure_team's result used to be discarded, so a team that couldn't take its members
     # (they see nothing - access is via the team) still reported "ok".
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
-    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: False)
     status = assign.provision_one(
         "COURSE",
@@ -636,9 +636,7 @@ def test_both_assignment_arms_grant_faculty_read(_provisioned, monkeypatch):
     # project repo would go on granting nobody but the team. READ, not write: marking
     # happens in classroom-config/grades/<slug>.csv, after the snapshot froze HEAD.
     faculty = []
-    monkeypatch.setattr(
-        assign, "grant_faculty_read_access", lambda *a: faculty.append(a)
-    )
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: faculty.append(a))
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
@@ -652,7 +650,8 @@ def test_both_assignment_arms_grant_faculty_read(_provisioned, monkeypatch):
         "a1",
         team="a1-wizards",
     )
-    assert faculty == [("COHORT", "a1-ada-l"), ("COHORT", "a1-wizards")]
+    read = assign.FACULTY_READ_ACCESS
+    assert faculty == [("COHORT", "a1-ada-l", read), ("COHORT", "a1-wizards", read)]
 
 
 def test_the_scheduler_leaves_an_existing_repo_alone_but_the_button_repairs_it(
@@ -668,7 +667,7 @@ def test_the_scheduler_leaves_an_existing_repo_alone_but_the_button_repairs_it(
     for name in (
         "add_collaborator",
         "grant_team_repo_access",
-        "grant_faculty_read_access",
+        "grant_faculty",
     ):
         monkeypatch.setattr(
             assign, name, lambda *a, _n=name, **k: calls.append(_n) or True
@@ -686,7 +685,7 @@ def test_the_scheduler_leaves_an_existing_repo_alone_but_the_button_repairs_it(
     assert calls == []
     # the button (default) re-grants
     assert assign.provision_one("C", "t", "K", "a1-ada", ["ada"], "a1") == "skipped"
-    assert calls == ["grant_faculty_read_access", "add_collaborator"]
+    assert calls == ["grant_faculty", "add_collaborator"]
     pushed = []
     monkeypatch.setattr(assign, "push_solution", lambda *a: pushed.append(a) or True)
     assert assign.provision_one(
@@ -793,7 +792,7 @@ def test_a_failed_solution_wins_over_a_failed_access_grant(
     # forgotten - and the marker guaranteed no later tick would ever retry it.
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
     monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
-    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
@@ -808,7 +807,7 @@ def test_a_failed_solution_wins_over_a_failed_access_grant(
 def test_a_failed_solution_wins_over_a_team_missing_members(tmp_path, monkeypatch):
     monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
     monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: True)
-    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: False)
     status = assign.provision_one(
@@ -824,7 +823,7 @@ def test_a_group_whose_members_were_all_rejected_is_a_failed_unit(monkeypatch, c
     monkeypatch.setattr(assign, "repo_exists", lambda *a, **k: False)
     monkeypatch.setattr(assign, "generate_from_template", lambda **k: True)
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
-    monkeypatch.setattr(assign, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
     status = assign.provision_one(

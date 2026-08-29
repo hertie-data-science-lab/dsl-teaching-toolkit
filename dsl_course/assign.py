@@ -38,7 +38,7 @@ from pathlib import Path
 import yaml
 
 from . import roster, schedule, site, sync_teams, teams
-from .access import grant_faculty_read_access, grant_team_repo_access
+from .access import FACULTY_READ_ACCESS, grant_faculty, grant_team_repo_access
 from .collect import assignment_is_group
 from .course import (
     CONFIG_REPO,
@@ -276,7 +276,7 @@ def provision_one(
     # and by the time anyone marks, the deadline snapshot has already frozen this repo's
     # HEAD and the autograder has run off that snapshot - so a commit here would reach no
     # gradebook and form no part of the record. Faculty need to SEE the work, not edit it.
-    grant_faculty_read_access(cohort_org, repo)
+    grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
     if team is not None:
         # Group: materialise the team from its members and grant it on the repo, so
         # post-sync membership edits propagate to access (vs. one-off collaborator grants).

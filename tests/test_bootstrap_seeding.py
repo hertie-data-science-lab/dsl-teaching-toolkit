@@ -37,6 +37,7 @@ from dsl_course import (
     teams,
     welcome,
 )
+from dsl_course.repos import Converged
 
 # Derived from the seeding tables, so a sixth config file cannot silently miss the set
 # these tests police - which is the whole point of the tables existing.
@@ -1346,11 +1347,11 @@ def _spy_sweep(monkeypatch, repos):
 
     def spy(org, repos, tier, protected):
         seen.update(tier=tier, protected=set(protected))
-        return 0
+        return Converged()
 
     monkeypatch.setattr(seed, "converge_faculty_access", spy)
-    monkeypatch.setattr(seed, "converge_descriptions", lambda *a, **k: 0)
-    monkeypatch.setattr(seed, "converge_topics", lambda *a, **k: 0)
+    monkeypatch.setattr(seed, "converge_descriptions", lambda *a, **k: Converged())
+    monkeypatch.setattr(seed, "converge_topics", lambda *a, **k: Converged())
     seed._converge_org_metadata("Org", repos)
     return seen
 
@@ -1390,9 +1391,9 @@ def test_a_failed_topic_stamp_reds_the_refresh(monkeypatch):
     # A missing `submission`/`gradebook` topic is what puts a student's repo on the public
     # landing page and into the release targets, so it counts; a reworded description or
     # a retryable access PUT does not.
-    monkeypatch.setattr(seed, "converge_descriptions", lambda *a, **k: 0)
-    monkeypatch.setattr(seed, "converge_faculty_access", lambda *a, **k: 0)
-    monkeypatch.setattr(seed, "converge_topics", lambda *a, **k: 2)
+    monkeypatch.setattr(seed, "converge_descriptions", lambda *a, **k: Converged())
+    monkeypatch.setattr(seed, "converge_faculty_access", lambda *a, **k: Converged())
+    monkeypatch.setattr(seed, "converge_topics", lambda *a, **k: Converged(0, 2))
     assert seed._converge_org_metadata("Org", [_r(".github")]) == 2
 
 

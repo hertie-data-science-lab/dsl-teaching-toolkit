@@ -39,7 +39,7 @@ from pathlib import Path
 import yaml
 
 from . import mailer, roster
-from .access import grant_faculty_read_access
+from .access import FACULTY_READ_ACCESS, grant_faculty
 from .course import CONFIG_REPO, GRADEBOOK_PREFIX
 from .discovery import course_name_for_cohort
 from .gh_contents import (
@@ -399,7 +399,7 @@ def provision_one(cohort_org: str, handle: str) -> str:
     # Read, not write: `distribute` rewrites grades.yml from
     # `classroom-config/grades/<slug>.csv`, so a mark corrected here would be overwritten
     # on the next run. The CSV is where a mark belongs.
-    grant_faculty_read_access(cohort_org, repo)
+    grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
     if add_collaborator(cohort_org, repo, handle, permission="pull"):
         log_verbose(f"  [ok]   + @{handle} (read)")
         return "skipped" if existed else "ok"

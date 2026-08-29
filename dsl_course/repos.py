@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from fnmatch import fnmatch
 from functools import cache
+from typing import NamedTuple
 
 from .ghcli import gh, is_already_exists, is_missing_resource
 from .log import log, log_err, log_ok, log_skip
@@ -159,7 +160,18 @@ SUPERSEDED_COURSE_DESCRIPTIONS = {
 }
 
 
-def converge_descriptions(org: str, repos: list[dict], tier: str | None = None) -> int:
+class Converged(NamedTuple):
+    """What one convergence pass did: how many repos it CHANGED, and how many changes it
+    could not make. One shape for all three passes, so the orchestrator decides which
+    failures red a run rather than each pass deciding by what it happens to return."""
+
+    changed: int = 0
+    failures: int = 0
+
+
+def converge_descriptions(
+    org: str, repos: list[dict], tier: str | None = None
+) -> Converged:
     """Update every repo in `repos` whose description we have since reworded.
 
     `tier` (`discovery.org_tier`) selects the tier-specific table on top of the shared
@@ -178,8 +190,8 @@ def converge_descriptions(org: str, repos: list[dict], tier: str | None = None) 
     renders the listing straight afterwards shows the new wording in the same run rather
     than one run late.
 
-    Never fatal - a description is documentation, and a failed PATCH is worth a line, not
-    a failed refresh. Returns the number changed.
+    A failed PATCH is a line, not an exception; whether it reds the run is the caller's
+    call (see seed._converge_org_metadata).
     """
     superseded = SUPERSEDED_DESCRIPTIONS | (
         SUPERSEDED_COURSE_DESCRIPTIONS
@@ -187,6 +199,7 @@ def converge_descriptions(org: str, repos: list[dict], tier: str | None = None) 
         else SUPERSEDED_COHORT_DESCRIPTIONS
     )
     changed = 0
+    failures = 0
     for repo in repos:
         if repo.get("archived"):
             continue  # GitHub refuses the PATCH; a frozen cohort logged one failure a night
@@ -207,7 +220,8 @@ def converge_descriptions(org: str, repos: list[dict], tier: str | None = None) 
             changed += 1
         else:
             log(f"  ({repo['name']}: could not update the description)")
-    return changed
+            failures += 1
+    return Converged(changed, failures)
 
 
 def create_repo(

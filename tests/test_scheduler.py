@@ -297,7 +297,7 @@ def test_deploy_many_clones_each_repo_once(monkeypatch):
     monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     deploys = [
         Deploy("cm", "lectures/00_x", "lectures", None),
@@ -326,7 +326,7 @@ def test_deploy_many_missing_course_source_path_is_an_error_not_silent(monkeypat
     monkeypatch.setattr(deploy, "git", lambda *a: (0, ""))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
@@ -356,7 +356,7 @@ def _no_io(monkeypatch, fake_gh):
     monkeypatch.setattr(deploy, "git", lambda *a: (0, ""))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
 
 def test_a_released_repo_grants_faculty_read(monkeypatch):
@@ -365,16 +365,14 @@ def test_a_released_repo_grants_faculty_read(monkeypatch):
     # the course org's materials repo, then re-release.
     _no_io(monkeypatch, _clone_failing("Course-Org/cm"))
     faculty = []
-    monkeypatch.setattr(
-        deploy, "grant_faculty_read_access", lambda *a: faculty.append(a)
-    )
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: faculty.append(a))
     deploy.deploy_many(
         "Course-Org",
         "Cohort-Org",
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
     )
-    assert faculty == [("Cohort-Org", "materials")]
+    assert faculty == [("Cohort-Org", "materials", deploy.FACULTY_READ_ACCESS)]
 
 
 def test_deploy_many_counts_a_doomed_deploy_once(monkeypatch):
@@ -524,7 +522,7 @@ def test_deploy_many_never_copies_a_dot_git_directory(monkeypatch):
     monkeypatch.setattr(deploy, "git", _git_spying_staged(copied_rel))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
@@ -554,7 +552,7 @@ def test_deploy_many_counts_a_real_commit_failure(monkeypatch, capsys):
     monkeypatch.setattr(deploy, "git", _git_commit_failing)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
@@ -577,7 +575,7 @@ def test_deploy_many_reports_nothing_new_when_index_is_empty(monkeypatch, capsys
     )  # diff --cached: nothing staged
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     errors, changed = deploy.deploy_many(
         "Course-Org",
@@ -596,7 +594,7 @@ def test_deploy_many_counts_a_raised_site_sync(monkeypatch):
     monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
     def boom(course, cohort):
         raise RuntimeError("tree read failed")
@@ -1429,7 +1427,7 @@ def _run_release(monkeypatch, seed_source, deploys) -> tuple[int, set[str]]:
     monkeypatch.setattr(deploy, "git", fake_git)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
     errors, _changed = deploy.deploy_many(
         "Course-Org", "Cohort-Org", deploys, sync=False
     )
@@ -1532,7 +1530,7 @@ def test_withholding_the_stub_never_deletes_the_cohorts_own_readme(monkeypatch):
     monkeypatch.setattr(deploy, "git", fake_git)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
-    monkeypatch.setattr(deploy, "grant_faculty_read_access", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
     errors, _changed = deploy.deploy_many(
         "Course-Org", "Cohort-Org", [Deploy("cm", "/", "materials", None)], sync=False
     )

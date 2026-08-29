@@ -216,8 +216,8 @@ def _sweep(
         "grant_team_repo_access",
         lambda org, team, repo, perm: granted.append((team, repo, perm)) or True,
     )
-    changed = access.converge_faculty_access("Org", repos, tier, protected=protected)
-    return changed, granted
+    swept = access.converge_faculty_access("Org", repos, tier, protected=protected)
+    return swept.changed, granted
 
 
 def test_the_sweep_reads_the_permission_booleans_and_never_demotes_write(monkeypatch):
@@ -465,8 +465,8 @@ def _converge(monkeypatch, repos, ok=True):
         "set_repo_topics",
         lambda org, repo, topics: stamped.append((repo, topics)) or ok,
     )
-    failures = access.converge_topics("Cohort-f2026", repos, "cohort")
-    return failures, dict(stamped)
+    swept = access.converge_topics("Cohort-f2026", repos, "cohort")
+    return swept.failures, dict(stamped)
 
 
 def test_only_the_repos_missing_a_topic_are_patched(monkeypatch):
@@ -520,7 +520,7 @@ def test_an_archived_repo_and_a_course_org_are_left_alone(monkeypatch):
         "set_repo_topics",
         lambda *a: pytest.fail("course orgs have no such repo"),
     )
-    assert access.converge_topics("Course-Org", _topic_repos(), "course") == 0
+    assert access.converge_topics("Course-Org", _topic_repos(), "course") == (0, 0)
 
 
 def test_a_failed_stamp_is_counted(monkeypatch):
