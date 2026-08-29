@@ -670,3 +670,79 @@ def test_genuinely_nothing_staged_is_still_the_green_no_op(
 ):
     assert _render_with(monkeypatch, tmp_path, staged=False) == 0
     assert "nothing new to render" in capsys.readouterr().out
+
+
+# ------------------------------------------- ONE listing instead of a probe per gradebook
+
+
+def _sync_run(monkeypatch, listing, handles=("ada-l", "bob-b")):
+    """grades.sync over `handles`, with `listing` (or an Exception) standing in for the
+    org listing. Returns (the orgs listed, the gradebooks created)."""
+    students = roster.parse(
+        ROSTER_HEADER
+        + "\n"
+        + "".join(
+            f"{h}@uni.edu,{h},{h},4{i},dsl-{h},enrolled\n"
+            for i, h in enumerate(handles)
+        )
+    )
+    listed: list[str] = []
+
+    def fake_listing(org):
+        listed.append(org)
+        if isinstance(listing, Exception):
+            raise listing
+        return listing
+
+    created: list[str] = []
+    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    monkeypatch.setattr(grades, "list_org_repos", fake_listing)
+    monkeypatch.setattr(
+        grades, "create_repo", lambda org, repo, **k: created.append(repo) or True
+    )
+    monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
+    monkeypatch.setattr(grades, "set_repo_topics", lambda *a, **k: True)
+    monkeypatch.setattr(grades, "grant_faculty", lambda *a, **k: None)
+    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
+    assert grades.sync("COHORT") == 0
+    return listed, created
+
+
+def test_sync_lists_the_org_once_and_probes_no_gradebook(monkeypatch):
+    # A repo_exists per student cost a GET per student on every nightly sync, to ask what
+    # one paginated listing already answers for the whole cohort.
+    monkeypatch.setattr(
+        grades,
+        "repo_exists",
+        lambda *a, **k: pytest.fail("a per-repo probe is back in the hot path"),
+    )
+    listed, created = _sync_run(monkeypatch, [{"name": "grades-ada-l", "topics": []}])
+    assert listed == ["COHORT"], "one listing per run, not one per student"
+    assert created == ["grades-bob-b"], "a listed gradebook was recreated"
+
+
+def test_a_failed_listing_falls_back_to_probing_each_gradebook(monkeypatch):
+    # The listing is an optimisation. A rate limit on it must not leave a student who
+    # onboarded today without a gradebook.
+    probed: list[str] = []
+    monkeypatch.setattr(
+        grades, "repo_exists", lambda org, repo: probed.append(repo) or False
+    )
+    listed, created = _sync_run(
+        monkeypatch, RuntimeError("could not list repos in COHORT: 502")
+    )
+    assert listed == ["COHORT"]
+    assert probed == ["grades-ada-l", "grades-bob-b"]
+    assert created == ["grades-ada-l", "grades-bob-b"]
+
+
+def test_a_dry_run_lists_nothing(monkeypatch):
+    # Nothing is created, so nothing needs to know what exists.
+    students = roster.parse(
+        ROSTER_HEADER + "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+    )
+    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    monkeypatch.setattr(
+        grades, "list_org_repos", lambda org: pytest.fail("a dry run listed the org")
+    )
+    assert grades.sync("COHORT", dry_run=True) == 0

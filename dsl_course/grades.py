@@ -41,7 +41,7 @@ import yaml
 from . import mailer, roster
 from .access import FACULTY_READ_ACCESS, grant_faculty
 from .course import CONFIG_REPO, GRADEBOOK_PREFIX
-from .discovery import course_name_for_cohort
+from .discovery import course_name_for_cohort, list_org_repos
 from .gh_contents import (
     blob_sha,
     dump_csv,
@@ -375,10 +375,33 @@ def load_grade_sources(cohort_org: str) -> dict[str, list[GradeRow]]:
     return per
 
 
-def provision_one(cohort_org: str, handle: str) -> str:
-    """Ensure a private grades-<handle> repo exists with the student as read collaborator."""
+def _existing_repos(cohort_org: str) -> frozenset[str] | None:
+    """The cohort's repo names off ONE paginated listing, or None when it could not be read.
+
+    Asking `repo_exists` per student cost a GET per student on every nightly sync, for a
+    question one listing answers for the whole cohort. None falls the caller back to that
+    probe: the listing is an optimisation, not a new way for a sync to fail."""
+    try:
+        return frozenset(r["name"] for r in list_org_repos(cohort_org))
+    except RuntimeError as exc:
+        log_err(
+            f"could not list {cohort_org}'s repos - falling back to a probe per repo: {exc}"
+        )
+        return None
+
+
+def provision_one(
+    cohort_org: str, handle: str, existing: frozenset[str] | None = None
+) -> str:
+    """Ensure a private grades-<handle> repo exists with the student as read collaborator.
+
+    `existing` is the cohort's repo names off ONE listing (`_existing_repos`); membership
+    in it answers "is this gradebook already there?" without a GET per student. None - no
+    listing to hand - falls back to probing this one repo."""
     repo = f"{GRADEBOOK_PREFIX}{handle}"
-    existed = repo_exists(cohort_org, repo)
+    existed = (
+        repo in existing if existing is not None else repo_exists(cohort_org, repo)
+    )
     if existed:
         log_person(f"  [skip] gradebook {cohort_org}/{repo}")
     else:
@@ -433,12 +456,15 @@ def sync(cohort_org: str, dry_run: bool = False) -> int:
     if auditing:
         log(f"  ({auditing} auditor row(s) skipped - read-only, never assessed)")
 
+    # ONE listing of the cohort answers "is it already there?" for every student below.
+    # A dry run creates nothing, so it needs no answer.
+    existing = None if dry_run else _existing_repos(cohort_org)
     results: dict[str, int] = {}
     for s in onboarded:
         if dry_run:
             log_person(f"    DRY-RUN  {cohort_org}/{GRADEBOOK_PREFIX}{s.github_handle}")
             continue
-        status = provision_one(cohort_org, s.github_handle)
+        status = provision_one(cohort_org, s.github_handle, existing)
         results[status] = results.get(status, 0) + 1
     if dry_run:
         return 0
