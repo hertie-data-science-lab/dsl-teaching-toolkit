@@ -569,9 +569,11 @@ assignment plus a gradebook each.
 
 ## Cohort website
 
-Every cohort gets an **auto-deployed website** at `<cohort-org>.github.io`, generated from
-`course-website-template` by `scaffold_site` during Bootstrap cohort. `site.sync_site` then
-regenerates its content from the live org structure.
+Every cohort gets an **auto-deployed website** at `<cohort-org>.github.io`. `scaffold_site`
+creates the repo EMPTY during Bootstrap cohort and seeds only its Pages build; the whole site
+then ships from `templates/site/` (rewritten every sync) and `templates/site-seed/` (written
+once, into any path the site lacks). `site.sync_site` regenerates its content from the live
+org structure.
 
 ```mermaid
 flowchart LR
@@ -628,8 +630,7 @@ failing the daily cron forever.
 
 A course can **optionally** publish a **public** site at `<course-org>.github.io` via the
 **Publish course website** action (`public_site.sync_public_site`). It reuses the same
-`course-website-template` + `scaffold_site`, but differs from the cohort site in one decisive
-way: the cohort site *links* to files in private repos (404 for non-members, by design),
+`scaffold_site`, but differs from the cohort site in one decisive way: the cohort site *links* to files in private repos (404 for non-members, by design),
 whereas the course `course-materials-*` repos are private too, so the public site **hosts the
 shared files itself** under `public-materials/<source-repo>/session-N/...` (Jekyll serves any
 path not starting with `_`) and links to those site-relative URLs. Only that source's subtree is

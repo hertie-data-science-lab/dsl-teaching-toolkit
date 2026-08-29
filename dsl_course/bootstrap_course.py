@@ -663,7 +663,7 @@ def setup_cohort_extras(org: str, central_ref: str) -> int:
     # create_repo blocks above), so a re-run repairs an org that predates this.
     grant_cohort_faculty_access(org)
 
-    # Public, auto-deployed cohort website (from course-website-template).
+    # Public, auto-deployed cohort website.
     failures += scaffold.scaffold_site(org)
 
     return failures

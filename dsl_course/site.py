@@ -1,6 +1,6 @@
 """dsl-course site -- regenerate a course/cohort website from the live org structure.
 
-Two sites, two audiences, one Jekyll template (course-website-template):
+Two sites, two audiences, one set of Jekyll templates (`templates/site/`):
 
 - **cohort site** (`<cohort>.github.io`, `sync_site`) - student-facing. Its lecture links
   point at the cohort's PRIVATE content repos (wherever a release actually landed each

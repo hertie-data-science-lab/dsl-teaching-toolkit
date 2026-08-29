@@ -68,6 +68,11 @@ Seeded files carry their owner on the first line, and the write site enforces it
 
 The full rule is the ownership note at the top of `bootstrap_course.py`.
 
+A course website is wholly the toolkit's: `scaffold_site` creates `<org>.github.io` EMPTY and
+seeds only its Pages build, then every sync writes `templates/site/` (SYSTEM-OWNED) and seeds
+`templates/site-seed/` into any path the site lacks (INSTRUCTOR-OWNED). There is no
+`course-website-template` repo any more.
+
 ## Module layers
 
 `dsl_course` is layered, and the import graph is acyclic (`tests/test_architecture.py`

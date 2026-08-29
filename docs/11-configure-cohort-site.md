@@ -34,14 +34,16 @@ repo linking the overwritten commit and naming the file to edit instead.
 | `_data/nav.yml` | the tab bar - generated, so a new tab reaches sites that already exist. Add a page of your own as a file and link it from `index.md` |
 | `_data/materials.yml` | the All Materials index, rebuilt from what each cohort repo actually holds |
 | `_layouts/`, `_includes/`, `_sass/_course.scss` | how every page renders - shipped from `templates/site/` in the toolkit, so a rendering change reaches every course site at once |
+| `.github/workflows/deploy.yml` | the Pages build - shipped from `templates/site/` too |
 | `_config.yml` keys `course_name`, `course_code`, `course_semester`, `course_description`, `github_org` | overwritten from the sources in the table above |
 | `_config.yml` keys `remote_theme`, `dateformat`, `collections`, `defaults` | the pinned theme and the settings the layouts above depend on |
 | `README.md` | rewritten every sync - it is the repo's own "do not edit this repository" notice |
 
 **Faculty are not expected to hand-edit the cohort site at all.** Everything it shows comes
 from the files in the table at the top of this page; edit those. What is left over -
-`index.md` and any other page of your own, `_announcements/`, further `_data/*.yml`, assets,
-`_images/`, `Gemfile` - is yours and survives.
+`index.md`, `schedule.md`, any other page of your own, `_announcements/`, `_data/late_policy.yml`,
+further `_data/*.yml`, assets, `_images/`, `Gemfile`, `.gitignore` - is seeded once when the site
+is created and never rewritten.
 
 To change how a page *renders*, open a PR against
 [`templates/site/`](../templates/site) in this toolkit rather than the site repo; the rest

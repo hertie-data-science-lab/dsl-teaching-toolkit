@@ -69,9 +69,9 @@ _LIQUID_ACCESSORS = ("size", "first", "last")
 # Jekyll puts these on every document whatever its front matter says.
 JEKYLL_DOC_FIELDS = frozenset({"url", "content"})
 
-# Front matter the sync deliberately never writes: hand-authored fields from the upstream
-# course-website-template that a template renders only behind an `{% if %}`. Listed rather
-# than tolerated, so the check below stays an assertion about everything else.
+# Front matter the sync deliberately never writes: hand-authored fields a template renders
+# only behind an `{% if %}`. Listed rather than tolerated, so the check below stays an
+# assertion about everything else.
 HAND_AUTHORED = frozenset({"pdf", "attachment", "solutions"})
 
 
