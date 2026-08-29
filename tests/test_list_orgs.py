@@ -33,6 +33,7 @@ def test_main_writes_the_inventory_when_discovery_succeeds(
         lambda: [
             {
                 "org": "My-Course",
+                "readable": True,
                 "org_name": "My Course",
                 "course_name": "Deep Learning",
                 "course_code": "E1",
@@ -58,6 +59,7 @@ def test_the_tree_nests_each_cohort_under_its_own_course_org(monkeypatch):
     orgs = [
         {
             "org": "C1",
+            "readable": True,
             "course_name": "Deep Learning",
             "course_code": "E1",
             "central_ref": "staging",
@@ -65,6 +67,7 @@ def test_the_tree_nests_each_cohort_under_its_own_course_org(monkeypatch):
         },
         {
             "org": "C2",
+            "readable": True,
             "course_name": "Stats",
             "course_code": "",
             "central_ref": "release",
@@ -72,8 +75,8 @@ def test_the_tree_nests_each_cohort_under_its_own_course_org(monkeypatch):
         },
     ]
     cohorts = [
-        {"org": "C1-f2025", "course": "C1", "url": "u3"},
-        {"org": "C1-f2026", "course": "C1", "url": "u4"},
+        {"org": "C1-f2025", "readable": True, "course": "C1", "url": "u3"},
+        {"org": "C1-f2026", "readable": True, "course": "C1", "url": "u4"},
     ]
     out = list_orgs.render_tree(orgs, cohorts)
     assert out == (
@@ -96,6 +99,7 @@ def test_a_live_but_unregistered_cohort_is_marked_on_the_tree(monkeypatch):
         [
             {
                 "org": "C1",
+                "readable": True,
                 "course_name": "DL",
                 "course_code": "",
                 "central_ref": "release",
@@ -103,8 +107,8 @@ def test_a_live_but_unregistered_cohort_is_marked_on_the_tree(monkeypatch):
             }
         ],
         [
-            {"org": "C1-f2025", "course": "C1", "url": "u2"},
-            {"org": "C1-f2026", "course": "C1", "url": "u3"},
+            {"org": "C1-f2025", "readable": True, "course": "C1", "url": "u2"},
+            {"org": "C1-f2026", "readable": True, "course": "C1", "url": "u3"},
         ],
     )
     assert "    - [C1-f2025](u2)\n" in out + "\n"  # registered: no marker
@@ -121,6 +125,7 @@ def test_a_cohort_pointing_at_no_discovered_course_org_is_listed_as_orphaned(
         [
             {
                 "org": "C1",
+                "readable": True,
                 "course_name": "",
                 "course_code": "",
                 "central_ref": "release",
@@ -128,8 +133,13 @@ def test_a_cohort_pointing_at_no_discovered_course_org_is_listed_as_orphaned(
             }
         ],
         [
-            {"org": "lost-f2025", "course": "deleted-course", "url": "u2"},
-            {"org": "bare-f2025", "course": "", "url": "u3"},
+            {
+                "org": "lost-f2025",
+                "readable": True,
+                "course": "deleted-course",
+                "url": "u2",
+            },
+            {"org": "bare-f2025", "readable": True, "course": "", "url": "u3"},
         ],
     )
     assert "Orphaned cohort orgs" in out
@@ -143,12 +153,12 @@ def test_metadata_is_empty_only_for_an_org_that_carries_none(monkeypatch):
     monkeypatch.setattr(
         gh_contents, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)")
     )
-    assert list_orgs._fetch_metadata("Cohort-f2026") == {}
+    assert list_orgs.org_meta("Cohort-f2026") == {}
     monkeypatch.setattr(
         gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 403 - forbidden")
     )
     with pytest.raises(RuntimeError, match="Cohort-f2026/.github/dsl-course.yml"):
-        list_orgs._fetch_metadata("Cohort-f2026")
+        list_orgs.org_meta("Cohort-f2026")
 
 
 def test_a_malformed_dsl_course_yml_is_not_read_as_no_metadata(monkeypatch):
@@ -157,12 +167,12 @@ def test_a_malformed_dsl_course_yml_is_not_read_as_no_metadata(monkeypatch):
     # around it - the wrong refresh this reader exists to avoid.
     monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (0, "course: [unclosed\n"))
     with pytest.raises(yaml.YAMLError):
-        list_orgs._fetch_metadata("Cohort-f2026")
+        list_orgs.org_meta("Cohort-f2026")
     monkeypatch.setattr(
         gh_contents, "gh", lambda *a, **k: (0, "- a list, not a mapping\n")
     )
     with pytest.raises(RuntimeError, match="not a YAML mapping"):
-        list_orgs._fetch_metadata("Cohort-f2026")
+        list_orgs.org_meta("Cohort-f2026")
 
 
 def test_a_full_search_page_is_read_as_truncation(monkeypatch):
@@ -224,7 +234,7 @@ def test_only_a_404_counts_as_a_deleted_org(monkeypatch):
 
 def test_metadata_parses_the_yaml_body(monkeypatch):
     monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (0, "course: My-Course\n"))
-    assert list_orgs._fetch_metadata("Cohort-f2026") == {"course": "My-Course"}
+    assert list_orgs.org_meta("Cohort-f2026") == {"course": "My-Course"}
 
 
 def test_a_failed_metadata_read_stops_the_inventory_being_rewritten(
@@ -250,7 +260,7 @@ def test_each_course_org_reports_the_toolkit_tier_it_runs(monkeypatch):
     monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Soak", "Live"])
     monkeypatch.setattr(
         list_orgs,
-        "_fetch_metadata",
+        "org_meta",
         lambda org: {"central_ref": "staging"} if org == "Soak" else {},
     )
 
@@ -272,7 +282,7 @@ def test_one_unreadable_org_does_not_hide_every_other_one(monkeypatch, capsys):
             raise RuntimeError("Bad/.github/dsl-course.yml is not a YAML mapping")
         return {"central_ref": "staging"}
 
-    monkeypatch.setattr(list_orgs, "_fetch_metadata", meta)
+    monkeypatch.setattr(list_orgs, "org_meta", meta)
 
     orgs = list_orgs.discover_course_orgs()
     assert [(o["org"], o["central_ref"]) for o in orgs] == [
@@ -291,6 +301,7 @@ def test_an_unreadable_org_is_shown_on_the_tree_not_dropped_from_it(monkeypatch)
         [
             {
                 "org": "Bad",
+                "readable": False,
                 "org_name": "Bad",
                 "course_name": "",
                 "course_code": "",
@@ -301,7 +312,8 @@ def test_an_unreadable_org_is_shown_on_the_tree_not_dropped_from_it(monkeypatch)
         [
             {
                 "org": "Loose-f2026",
-                "course": None,
+                "readable": False,
+                "course": "",
                 "url": "https://github.com/Loose-f2026",
             }
         ],
@@ -318,7 +330,7 @@ def test_an_unreadable_org_still_stops_the_inventory_being_rewritten(
     monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Bad"])
     monkeypatch.setattr(
         list_orgs,
-        "_fetch_metadata",
+        "org_meta",
         lambda org: (_ for _ in ()).throw(RuntimeError("nope")),
     )
     page = tmp_path / "inventory.md"
@@ -335,7 +347,7 @@ def test_the_json_form_still_prints_what_it_could_read(monkeypatch, capsys):
     monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Bad"])
     monkeypatch.setattr(
         list_orgs,
-        "_fetch_metadata",
+        "org_meta",
         lambda org: (_ for _ in ()).throw(RuntimeError("nope")),
     )
     monkeypatch.setattr("sys.argv", ["list_orgs"])

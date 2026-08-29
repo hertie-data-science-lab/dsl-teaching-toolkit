@@ -194,7 +194,7 @@ def test_inventory_skips_cohort_pointer_orgs(monkeypatch):
         },
         "Cohort-Org": {"course": "Course-Org", "org": "Cohort-Org"},
     }
-    monkeypatch.setattr(list_orgs, "_fetch_metadata", lambda org: metas[org])
+    monkeypatch.setattr(list_orgs, "org_meta", lambda org: metas[org])
     monkeypatch.setattr(list_orgs, "org_exists", lambda org: True)
     orgs = list_orgs.discover_course_orgs()
     assert [o["org"] for o in orgs] == ["Course-Org"]
