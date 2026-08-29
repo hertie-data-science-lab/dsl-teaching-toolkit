@@ -13,8 +13,9 @@ runs - `central_ref:` in its course org's `.github/dsl-course.yml`, defaulting t
 Deploying is promoting: `main` -> `staging` (the demo org) -> `release` (everything else), via
 the **Promote** workflow, which can only fast-forward a tier along main's history. Engine
 changes are then live on the next press in each org; workflow *shapes* (inputs, jobs, crons)
-are re-rendered by each org's nightly **Refresh actions**, which Promote also dispatches so
-they land at once. Rollback is a `git revert` on `main`, promoted forward - never a force-push.
+are re-rendered by each org's nightly **Refresh actions**, and Promote runs that refresh itself
+out of the promoted checkout so they land at once. Rollback is a `git revert` on `main`,
+promoted forward - never a force-push.
 Tiers, soak checklist and the full rollback procedure:
 [central-admin.md](../../docs-admin-arch/central-admin.md#deploying-the-toolkit).
 

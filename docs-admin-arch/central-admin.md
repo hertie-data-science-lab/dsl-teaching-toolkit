@@ -134,8 +134,9 @@ commit to promote only that one.
 
 Promote refuses anything that is not both on `main`'s history and a descendant of the tier's
 current tip, so it can only ever move a tier forward - it cannot rewrite one, and cannot ship
-what `main` has not seen. It then dispatches **Refresh actions** on every course org at that
-tier, so they converge in minutes rather than at the next 05:27 cron.
+what `main` has not seen. It then runs each course org's refresh itself, out of the promoted
+checkout, so they converge in minutes rather than at the next 05:27 cron - and so an org that
+has just changed tier is re-rendered by the tier it is joining, not the one it is leaving.
 
 Anyone with write on this repo can run it; promoting to `release` then waits on the
 environment's required reviewers. Nothing else can push to either tier branch - see

@@ -100,3 +100,36 @@ def test_the_sha_agreement_sweep_actually_sees_the_estate():
     # A regex that stopped matching would make the test above pass on an empty dict.
     actions = _action_shas()
     assert {"actions/checkout", "actions/setup-python"} <= set(actions)
+
+
+def _promote_refresh_job() -> dict:
+    return SHIPPED_WORKFLOWS[".github/workflows/promote.yml"]["jobs"]["refresh-orgs"]
+
+
+def _refresh_step() -> dict:
+    return next(
+        s
+        for s in _promote_refresh_job()["steps"]
+        if s.get("name") == "Refresh every org on this tier"
+    )
+
+
+def test_promote_refreshes_orgs_from_the_promoted_checkout():
+    # The fan-out must run the refresh IN PROCESS, from the code that was just promoted.
+    # Dispatching each org's own "Refresh actions" instead runs the toolkit at the ref
+    # already baked into that org's workflow file, so an org whose central_ref has just
+    # changed tier is re-rendered by the OLD tier's code and never converges.
+    job = _promote_refresh_job()
+    checkout = next(s for s in job["steps"] if "checkout" in s.get("uses", ""))
+    assert checkout["with"]["ref"] == "${{ needs.promote.outputs.sha }}"
+    run = _refresh_step()["run"]
+    assert "python3 -m dsl_course.seed refresh --course-org" in run
+    assert "gh workflow run refresh-actions.yml" not in run
+
+
+def test_promote_refresh_carries_both_bot_tokens():
+    # seed refresh reads GH_TOKEN for the API and DSL_BOT_TOKEN to propagate the repo
+    # secret (ghcli.bot_token refuses to publish a token that is only GH_TOKEN).
+    env = _refresh_step()["env"]
+    assert env["GH_TOKEN"] == "${{ secrets.DSL_BOT_TOKEN }}"
+    assert env["DSL_BOT_TOKEN"] == "${{ secrets.DSL_BOT_TOKEN }}"
