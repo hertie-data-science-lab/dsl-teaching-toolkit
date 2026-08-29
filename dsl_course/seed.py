@@ -89,18 +89,12 @@ from .workflows_render import (
 # from. See _write_heartbeat.
 HEARTBEAT_PATH = ".github/.last-refresh"
 
-# The cohort orgs the last refresh could not see, one per line, beside the heartbeat in the
-# course org's `.github` repo. One 404 is not proof an org is gone (see _live_cohorts), so
-# the verdict has to survive until the next nightly run - and a file in the repo the cron
-# already writes to is the only state this toolkit has that does.
+# The MISS LEDGER: `<cohort> <first missed at>` per line, beside the heartbeat in the
+# course org's `.github` repo - the only cross-run state this toolkit has. Unregistering a
+# cohort takes two misses at least MISS_GRACE_HOURS apart (see _live_cohorts), so the
+# first verdict has to survive to the next run, and the grace period has to be measured in
+# WALL time: two manual runs ten minutes apart are also two consecutive refreshes.
 MISSES_PATH = ".github/.missing-cohorts"
-
-# How long a cohort must have been unreachable before a second miss may unregister it.
-# "Two consecutive refreshes" was nominally a night apart, but nothing enforced that: two
-# manual runs ten minutes apart, or a cron that fired twice around a retry, unregistered a
-# live cohort inside one bad afternoon. The ledger therefore carries the moment of the
-# FIRST miss, and the second one only acts once this much time has passed - loose enough
-# for the cron's own drift, tight enough that it is genuinely another day.
 MISS_GRACE_HOURS = 20
 
 
@@ -176,34 +170,20 @@ def _live_cohorts(course_org: str) -> tuple[list[str], int]:
     that has been missing for two refreshes at least MISS_GRACE_HOURS apart dropped from
     the registry on the way past. Returns `(live cohorts, how many were unregistered)`.
 
-    The count is the caller's, and it goes into the refresh's failure total. Removing a
-    cohort from the registry is not a routine convergence step - nothing re-adds it, and
-    every nightly sync in every tool stops looking at that org - so a run that did it must
-    not be reported as an ordinary green night.
+    The count goes into the refresh's failure total: nothing re-adds a cohort, and every
+    nightly sync in every tool stops looking at that org, so a run that removed one is not
+    an ordinary green night.
 
-    A cohort ORG DELETED after it was registered 404s on every write, which would red the
-    nightly cron forever. Detect a genuinely-gone org by probing the ORG ITSELF: probing
-    one of its repos instead wrongly skipped a live org that had only lost its
-    classroom-config repo - which is a real problem that must fail loud in
-    refresh_classroom_samples, not be pruned away.
+    TWO misses, on two different days, because GitHub answers 404 - not 403 - for an org
+    the TOKEN cannot see: a bot dropped from one org, or a rotated token never re-invited,
+    is indistinguishable from a deleted org, and one bad night would silently unregister a
+    live cohort. The first miss is loud, costs that cohort only that night's refresh, and
+    is carried to the next run in MISSES_PATH; a cohort that answers again clears it.
 
-    The registry is CONVERGED rather than merely annotated: this used to log "prune it by
-    hand", which nobody does, so a deleted org stayed registered and every nightly sync in
-    every tool went on trying it. Removal is safe precisely because the org is proven gone
-    - see `unregister_cohort` for why the ADD side stays manual.
-
-    TWO misses, though, not one - and on two different days. GitHub answers 404 - not 403 -
-    for an org the TOKEN cannot see, so a bot dropped from one org, or a rotated token
-    never re-invited to it, is indistinguishable from a deleted org: one bad night would
-    have silently unregistered a live cohort from every nightly sync, and nothing re-adds
-    it. The first miss is loud and costs the cohort only that night's refresh; MISSES_PATH
-    carries the moment of it to the next run, and a cohort that answers again clears it.
-    Counting bare consecutiveness was not enough on its own: two manual runs minutes apart
-    are two consecutive refreshes, so MISS_GRACE_HOURS has to have passed as well.
-
-    `org_exists` raises rather than guessing, and the safe reading of "could not tell" here
-    is LIVE: the cohort is refreshed as usual and fails loudly on its own if something is
-    really wrong, rather than being unregistered on a rate limit or a 502."""
+    Liveness is probed on the ORG itself, never one of its repos - a live org that has only
+    lost its classroom-config must fail loud in refresh_classroom_samples, not be pruned
+    away. `org_exists` raises rather than guessing, and "could not tell" reads as LIVE.
+    """
     registered = discover_cohorts(course_org)
     previous = _read_misses(course_org)
     now = datetime.now(timezone.utc)

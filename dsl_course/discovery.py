@@ -304,23 +304,14 @@ def _write_cohorts(
 
 
 def unregister_cohort(course_org: str, cohort_org: str) -> bool:
-    """Drop cohort_org from the course's registry (idempotent). The prune half of
-    `register_cohort`, and deliberately NOT its mirror image.
+    """Drop cohort_org from the course's registry (idempotent), and NOT the mirror image
+    of `register_cohort`: the registry is APPEND-ON-INTENT, PRUNE-ON-REALITY.
 
-    The registry is APPEND-ON-INTENT, PRUNE-ON-REALITY. Adding stays a deliberate act
-    (Bootstrap cohort), because a cohort's absence can be intended - a faculty member may
-    unregister one to stop its nightly syncs, and a refresh that re-added every org it
-    discovered would silently override that. Removal cannot be intent in the same way:
-    the caller has already established that the ORG ITSELF is gone (see
-    `seed._live_cohorts`, which needs the org to have missed two consecutive refreshes,
-    because a 404 alone only says the token cannot see it), and nothing can be synced
-    into an org that does not exist.
-
-    Removing on anything weaker than that would be the worse bug. A cohort dropped from
-    here is invisible to every nightly sync - membership, faculty, site, scheduler - which
-    is a SILENT no-op, where a stale entry merely fails loudly once a night. So the
-    liveness verdict belongs to the caller (`repos.org_exists`, which raises rather than
-    guessing), and this function only writes down what it was told.
+    Adding stays a deliberate act, because a cohort's absence can be intended - a faculty
+    member may unregister one to stop its nightly syncs. Removal cannot: a cohort dropped
+    from here is invisible to every nightly sync, which is a SILENT no-op, where a stale
+    entry merely fails loudly once a night. So the liveness verdict belongs to the caller
+    (`seed._live_cohorts`) and this only writes down what it was told.
 
     Returns True if the cohort is absent from the registry afterwards."""
     cohorts = set(_read_cohorts(course_org))

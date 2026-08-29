@@ -52,25 +52,10 @@ def grant_team_repo_access(
 # owner hand-granting each new repo.
 COURSE_TEAM_ACCESS = {INSTRUCTORS_TEAM: "push", COURSE_ADMIN_TEAM: "admin"}
 
-# Faculty access to a repo they should READ but not edit: the RELEASED copy of materials,
-# and a student's gradebook. Both have a source of truth elsewhere, so a hand edit here is
-# not durable and looks like one that stuck:
-#   - a re-release copies over the released copy (`copytree(dirs_exist_ok=True)`), so a
-#     correction belongs in the course org's materials repo, then re-release
-#   - `distribute` rewrites a gradebook's grades.yml from
-#     `classroom-config/grades/<slug>.csv`, so a mark belongs in that CSV
-# A submission repo is read for the same reason: marking happens in
-# `classroom-config/grades/<slug>.csv`, and by then the deadline snapshot has frozen its
-# HEAD and the autograder has run off that snapshot, so a commit there would reach no
-# gradebook and form no part of the record.
-#
-# What keeps WRITE is where faculty actually author: `classroom-config` (the grading CSVs,
-# schedule.yml, people.yml, the roster), `welcome/README.md` (the students' front door,
-# seeded create-only so faculty may reword it), and `.github` - that one because GitHub
-# requires write on a repo to trigger a workflow_dispatch at all, which is what every
-# faculty button is.
-#
-# `course-admin` stays admin throughout - it is the cohort's owner of last resort, and read
+# Faculty access to a repo whose source of truth is ELSEWHERE - a released copy of
+# materials, a submission repo, a gradebook. An edit made there is not durable and looks
+# like one that stuck; the grant sites say where each one's truth actually lives.
+# `course-admin` stays admin throughout: it is the org's owner of last resort, and read
 # access cannot fix a broken repo.
 FACULTY_READ_ACCESS = {INSTRUCTORS_TEAM: "pull", COURSE_ADMIN_TEAM: "admin"}
 

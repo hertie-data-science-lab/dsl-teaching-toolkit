@@ -17,30 +17,24 @@ the result - so a student never sees a score in their own repo.
 
 Student code is run in a subprocess with the GitHub token stripped from the environment.
 
-SNAPSHOTS (server-timed FREEZE, not a server-timed deadline).  A git committer date is
+SNAPSHOTS (a server-timed FREEZE, not a server-timed deadline).  A git committer date is
 entirely client-supplied (`GIT_COMMITTER_DATE`), so late work backdated to before the
 deadline passes a `rev-list --before` pin. The hourly scheduler therefore freezes each
-assignment shortly after its grading deadline passes, writing one row per submission repo
-into
+assignment shortly after its grading deadline, writing one row per submission repo into
 
     classroom-config/snapshots/<slug>.csv     repo,sha,recorded_at
 
-and never rewriting it (`snapshot_assignment` refuses to overwrite). Grading then pins to
-the recorded sha; an empty sha means "nothing had been pushed by the deadline" and scores
-zero. Only if no snapshot exists at all does grading fall back to the date-based pin, with
-a loud warning.
+and never rewriting it. Grading pins to the recorded sha; a blank sha means "nothing had
+been pushed by the deadline" and scores zero. Only with no snapshot at all does grading
+fall back to the date-based pin, loudly.
 
-Be precise about what that buys, because it is easy to over-read. Only the MOMENT of the
-freeze is server-timed: `recorded_at` is ours, and after it nothing a student pushes can
-move the pin. WHICH commit the freeze chooses is still the last one whose COMMITTER DATE is
-on or before the deadline (the commits API's `until=`), and that date is the student's to
-set. So what the snapshot closes is the unbounded window - not the hour before it.
-Concretely: a commit pushed after the deadline but before the next hourly tick, carrying a
-spoofed pre-deadline committer date, is still picked up by that first snapshot; a shorter
-cron interval shortens that window, and nothing here closes it. A chosen commit whose
-committer date is LATER than `recorded_at` is impossible without a skewed or doctored
-clock, so `_snapshot_sha` logs one. (To deliberately re-freeze - e.g. an assignment whose
-repos were provisioned late - delete the snapshot CSV and let the next tick rebuild it.)
+Only the MOMENT is server-timed, and it is easy to over-read what that buys. WHICH commit
+the freeze chooses is still the last one whose committer date is on or before the deadline,
+and that date is the student's to set - so a commit pushed after the deadline but before
+the next hourly tick, backdated, is still picked up by that first snapshot. What the
+snapshot closes is the UNBOUNDED window, not the hour before it. A chosen commit dated
+after `recorded_at` needs a skewed or doctored clock, so `_snapshot_sha` says so. To
+re-freeze deliberately, delete the snapshot CSV and let the next tick rebuild it.
 
 FIRE-ONCE.  The hourly scheduler autogrades each assignment exactly once, just after its
 grading deadline. The marker is an explicit SENTINEL file this module writes as the very last
