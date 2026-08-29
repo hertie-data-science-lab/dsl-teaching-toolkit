@@ -286,6 +286,17 @@ def test_the_seeded_config_carries_a_title_of_its_own(tmp_path):
     )
 
 
+def test_the_ci_fixture_bundles_the_metadata_plugin_a_live_site_loads():
+    # Live sites carry the instructor-owned Gemfile they were seeded with, which bundles
+    # github-pages, and Jekyll requires the :jekyll_plugins group whatever `plugins:`
+    # says - so jekyll-github-metadata runs on a real site whether its config asks for it
+    # or not. Out of this bundle, neither CI job can watch it fail, which is how theme
+    # v2.0.0 went out green.
+    gemfile = (FIXTURE_DIR / "Gemfile").read_text(encoding="utf-8")
+    assert "group :jekyll_plugins do" in gemfile
+    assert "jekyll-github-metadata" in gemfile
+
+
 def test_a_seeded_file_the_site_already_has_is_left_alone(tmp_path):
     # Seed-once: everything under templates/site-seed/ is the faculty's once written.
     mine = "---\nlayout: home\n---\n\nmy own words\n"

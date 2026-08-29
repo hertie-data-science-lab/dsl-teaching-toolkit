@@ -123,8 +123,16 @@ jobs:
 
       - name: Build it against the pinned theme
         working-directory: tests/fixtures/site
+        # MUST match the Build step of templates/site/.github/workflows/deploy.yml, which
+        # is the workflow every real site runs - anything extra here is help a live deploy
+        # will not get, and this job is green on it while the site is down.
+        # test_shipped_workflows.py holds the two to each other. BASE_PATH is the one
+        # exception: an org root site's baseurl is empty and there is no Pages step here to
+        # compute one.
         env:
           JEKYLL_ENV: production
+          JEKYLL_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PAGES_REPO_NWO: ${{ github.repository }}
         run: |
           bundle exec jekyll build \
             --strict_front_matter \
