@@ -390,6 +390,26 @@ def _converge_org_metadata(org: str, repos: list[dict]) -> int:
     return topics.failures
 
 
+def _converge_org(org: str, central_ref: str) -> int:
+    """Sweep one org's repo listing and re-render its landing pages from that SAME
+    snapshot. Failure count.
+
+    One listing for both: the sweep corrects the descriptions the landing page's table is
+    built from, so the page is right in this run rather than one run behind.
+
+    Run for the course org and for every live cohort. A cohort's own pages - the
+    student-facing profile/README.md and the orientation in its `.github` - were written
+    once at Bootstrap and then frozen, so every wording fix since reached the course org
+    and no cohort. The `.github` README is SYSTEM-owned and rewritten outright; the
+    student-facing landing page is INSTRUCTOR-owned, so only its marked repo table is
+    refreshed (see profile_readme.splice_repo_table) - which is what keeps that table
+    honest as repos are added, without flattening an instructor's wording around it."""
+    listing = list_org_repos(org)
+    return _converge_org_metadata(org, listing) + update_profile_readme(
+        org, central_ref=central_ref, repos=listing
+    )
+
+
 def _refresh_stubs(course_org: str, repo: str) -> int:
     """Bring a content repo's seeded STUBS up to date, without creating any.
 
@@ -492,14 +512,7 @@ def refresh(course_org: str) -> int:
     failures += _propagate_repo_secret(course_org, targets)
     failures += render(lambda: seed_github_workflows(course_org, central_ref))
     failures += _write_heartbeat(course_org)
-    # One listing, swept and then rendered: the sweep corrects the descriptions the
-    # landing page's table is built from, so both see the same snapshot and the page is
-    # right in this run rather than one run behind.
-    listing = list_org_repos(course_org)
-    failures += _converge_org_metadata(course_org, listing)
-    failures += update_profile_readme(
-        course_org, central_ref=central_ref, repos=listing
-    )
+    failures += _converge_org(course_org, central_ref)
     # A cohort's onboarding workflows, classroom-config dispatchers and config samples are
     # seeded at Bootstrap cohort, and would otherwise stay frozen for the whole semester
     # while the engine they call - and the schemas the samples demonstrate - move on.
@@ -529,20 +542,7 @@ def refresh(course_org: str) -> int:
         # The pointer its dispatchers read to find this course org. Also SYSTEM-owned and
         # also only ever written by Bootstrap cohort until now - same bug class.
         failures += refresh_cohort_pointer(cohort, course_org)
-        # The cohort's OWN landing pages - the student-facing profile/README.md and the
-        # orientation in its .github repo. Only the COURSE org's pair was ever refreshed
-        # (below the content-repo sweep above): a cohort's were written once at Bootstrap
-        # and then frozen for the life of the org, so every wording fix since reached the
-        # course org and no cohort. The .github README is SYSTEM-owned and rewritten
-        # outright; the student-facing landing page is INSTRUCTOR-owned, so only its
-        # marked repo table is refreshed (see profile_readme.splice_repo_table) - which is
-        # what keeps that table honest as repos are added, without flattening an
-        # instructor's wording around it.
-        cohort_repos = list_org_repos(cohort)
-        failures += _converge_org_metadata(cohort, cohort_repos)
-        failures += update_profile_readme(
-            cohort, central_ref=central_ref, repos=cohort_repos
-        )
+        failures += _converge_org(cohort, central_ref)
     if failures:
         log_err(f"refresh incomplete: {failures} file(s) could not be written")
         return 1

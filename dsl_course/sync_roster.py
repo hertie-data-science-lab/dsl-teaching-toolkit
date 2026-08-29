@@ -37,31 +37,23 @@ TEAM = STUDENTS_TEAM  # enrolled rows
 AUDITOR_TEAM = AUDITORS_TEAM  # read-only rows
 
 
-def desired_members(students: list[roster.Student]) -> dict[str, set[str]]:
-    """{role team: handles} for the two cohort role teams, onboarded rows only.
+def desired_members(students: list[roster.Student]) -> dict[str, list[roster.Student]]:
+    """`{role team: the onboarded rows that belong in it}` - the ONE partition of a roster
+    into the two cohort role teams.
 
     A not-yet-onboarded row has no handle to add, so it isn't wanted anywhere yet. Both
     keys are always present, so a pruning sync empties a team that should be empty rather
-    than leaving yesterday's members in it."""
+    than leaving yesterday's members in it.
+
+    ROWS, not handles, because the reconcile needs both halves of each: the login to add,
+    and the immutable GitHub id it is handed as `keep_ids`. A login is renameable and an
+    id is not, so a student who renames their account leaves the roster's `github_handle`
+    cell stale while still being on the roster - the add of the old login 404s and the
+    prune evicts the new one, every night, until somebody hand-edits the CSV."""
     onboarded = [s for s in students if s.onboarded]
     return {
-        TEAM: {s.github_handle for s in onboarded if s.is_enrolled},
-        AUDITOR_TEAM: {s.github_handle for s in onboarded if s.is_auditor},
-    }
-
-
-def desired_ids(students: list[roster.Student]) -> dict[str, set[str]]:
-    """`{role team: GitHub ids}` for exactly the rows `desired_members` names.
-
-    Handed to the prune as `keep_ids`. A GitHub login is renameable and an id is not, so a
-    student who renames their account leaves the roster's `github_handle` cell stale while
-    still being on the roster: the add of the old login 404s and the prune evicts the new
-    one, every night, until somebody hand-edits the CSV. Keyed per TEAM, not cohort-wide -
-    a role change is meant to prune the handle out of the team it left."""
-    onboarded = [s for s in students if s.onboarded and s.github_id]
-    return {
-        TEAM: {s.github_id for s in onboarded if s.is_enrolled},
-        AUDITOR_TEAM: {s.github_id for s in onboarded if s.is_auditor},
+        TEAM: [s for s in onboarded if s.is_enrolled],
+        AUDITOR_TEAM: [s for s in onboarded if s.is_auditor],
     }
 
 
@@ -137,35 +129,37 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
     # An empty roster (header only - a freshly bootstrapped cohort) is a valid state,
     # not an error: reconcile both role teams to empty like any other edit.
     wanted = desired_members(students)
-    keep_ids = desired_ids(students)
     log_step(
         f"Materialising access for {len(wanted[TEAM])} onboarded student(s) + "
         f"{len(wanted[AUDITOR_TEAM])} auditor(s) in {cohort_org}"
     )
 
     errors = 0
-    for team, handles in wanted.items():
+    for team, rows in wanted.items():
+        handles = {s.github_handle for s in rows}
         for handle in sorted(handles):
             if dry_run:
                 log_verbose(f"    DRY-RUN enroll: {handle} -> org member")
             elif not set_org_membership(cohort_org, handle, role="member"):
                 errors += 1
         # Team membership via the shared reconcile so pruning inherits its guard:
-        # an org Owner (or the acting bot) on the roster is never evicted.
+        # an org Owner (or the acting bot) on the roster is never evicted. `keep_ids` is
+        # keyed per TEAM, not cohort-wide - a role change is meant to prune the handle out
+        # of the team it left.
         errors += reconcile_team_members(
             cohort_org,
             team,
             handles,
             prune=prune,
             dry_run=dry_run,
-            keep_ids=keep_ids[team],
+            keep_ids={s.github_id for s in rows if s.github_id},
         )
     if prune:
         # Behind the same flag as the team prune, and for the same reason: this is the
         # other half of off-boarding, and an ad-hoc run must not silently revoke anything.
         errors += revoke_offboarded_access(
             cohort_org,
-            {h.casefold() for handles in wanted.values() for h in handles},
+            {s.github_handle.casefold() for rows in wanted.values() for s in rows},
             dry_run=dry_run,
         )
     return errors

@@ -15,13 +15,19 @@ def _roster(*rows: str) -> list[roster.Student]:
     return roster.parse("\n".join((HEADER, *rows)) + "\n")
 
 
+def _handles(wanted: dict) -> dict[str, set[str]]:
+    """The partition as bare logins - what these tests are about; `sync` reads the ids off
+    the same rows."""
+    return {team: {s.github_handle for s in rows} for team, rows in wanted.items()}
+
+
 def test_desired_members_splits_enrolled_from_auditors():
     students = _roster(
         "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
         "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor",
         "bob@uni.edu,Bob,bob-b,44,dsl-def,",  # blank role -> enrolled
     )
-    assert sync_roster.desired_members(students) == {
+    assert _handles(sync_roster.desired_members(students)) == {
         "students": {"ada-l", "bob-b"},
         "auditors": {"eve-e"},
     }
@@ -33,7 +39,7 @@ def test_desired_members_ignores_not_yet_onboarded_rows():
         "ada@uni.edu,Ada,,,dsl-abc,enrolled",
         "eve@uni.edu,Eve,,,dsl-xyz,auditor",
     )
-    assert sync_roster.desired_members(students) == {
+    assert _handles(sync_roster.desired_members(students)) == {
         "students": set(),
         "auditors": set(),
     }
@@ -45,7 +51,7 @@ def test_desired_members_covers_both_teams_even_when_one_is_empty():
     students = _roster("ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
     wanted = sync_roster.desired_members(students)
     assert set(wanted) == {sync_roster.TEAM, sync_roster.AUDITOR_TEAM}
-    assert wanted[sync_roster.AUDITOR_TEAM] == set()
+    assert wanted[sync_roster.AUDITOR_TEAM] == []
 
 
 def test_sync_hands_the_prune_each_teams_own_github_ids(monkeypatch):
@@ -95,11 +101,13 @@ def test_load_distinguishes_missing_from_empty(monkeypatch):
 
 
 def test_a_role_change_moves_the_handle_between_teams():
-    before = sync_roster.desired_members(
-        _roster("ada@uni.edu,Ada,ada-l,42,dsl-abc,auditor")
+    before = _handles(
+        sync_roster.desired_members(_roster("ada@uni.edu,Ada,ada-l,42,dsl-abc,auditor"))
     )
-    after = sync_roster.desired_members(
-        _roster("ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    after = _handles(
+        sync_roster.desired_members(
+            _roster("ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+        )
     )
     # the pruning pass sees ada-l as unwanted in `auditors` and wanted in `students`
     assert before["auditors"] == {"ada-l"} and before["students"] == set()
