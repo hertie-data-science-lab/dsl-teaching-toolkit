@@ -26,17 +26,16 @@ from . import scaffold, seed, site, sync_faculty
 from .access import COHORT_WRITE_REPOS, COURSE_TEAM_ACCESS, grant_team_repo_access
 from .central import pin_central_ref, resolve_central_ref
 from .course import (
-    AUDITORS_TEAM,
+    COHORT_TEAMS,
     COHORT_TOPIC,
     COURSE_ADMIN_TEAM,
     COURSE_HUB_TOPIC,
-    INSTRUCTORS_TEAM,
-    STUDENTS_TEAM,
+    FACULTY_TEAMS,
     term_tag,
 )
 from .discovery import COHORTS_PATH, central_ref_for, register_cohort
 from .gh_contents import put_file, put_files, seed_if_absent
-from .gh_teams import converge_org_settings, create_team
+from .gh_teams import converge_org_settings, create_role_teams
 from .ghcli import bot_token, gh
 from .log import log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
@@ -168,64 +167,26 @@ def set_org_secret(org: str, secret_name: str, secret_value: str) -> bool:
     return mirror_failures == 0
 
 
-# Faculty role teams - created in EVERY org (course + cohort): instructors run the workflows
-# and push content (write); course-admin manage the org (admin).
-FACULTY_TEAMS = [
-    (INSTRUCTORS_TEAM, "Instructors and TAs", "closed"),
-    (COURSE_ADMIN_TEAM, "Course administrators - DSL team", "closed"),
-]
-# Cohort-only role teams: enrolled students + read-only auditors. The persistent course org
-# never gets these - it holds unreleased materials, model solutions, and hidden tests, so
-# students/auditors must not be near it. Auditors are read-only: assignment release is
-# roster-driven (onboarded students only), so auditors never receive assignment repos.
-#
-# `secret`, not `closed`: a closed team's membership is visible to every member of the org,
-# so any student could open the `auditors` team page and read off exactly who is auditing
-# rather than enrolled - a classmate's academic status, published to the class by the
-# scaffolding. A secret team is visible only to its own members and to org owners, which
-# costs the students nothing (nobody needs to browse the roster to do the course).
-COHORT_TEAMS = [
-    (STUDENTS_TEAM, "Enrolled students", "secret"),
-    (
-        AUDITORS_TEAM,
-        "Auditors - read-only (released materials only, no assignments)",
-        "secret",
-    ),
-]
-
-
-def _create_teams(org: str, teams: list[tuple[str, str, str]]) -> int:
-    """Create `teams`, returning how many could NOT be created.
-
-    create_team already treats a duplicate-name 422 as success, so a non-zero count here
-    is a genuine failure - and every one of them is load-bearing: membership sync, the
-    faculty grants and the workflow buttons all address teams by slug, so a bootstrap
-    that lost one leaves an org nobody but its owner can work in. The count used to be
-    dropped on the floor and the run reported success."""
-    return sum(
-        0 if create_team(org, slug, desc, privacy=privacy) else 1
-        for slug, desc, privacy in teams
-    )
-
-
 def create_default_teams(org: str) -> int:
-    """Create the faculty role teams (FACULTY_TEAMS) - in both course and cohort orgs. The
-    cohort-only teams (students, auditors) are created separately by create_cohort_teams."""
+    """Create the faculty role teams (course.FACULTY_TEAMS) - in both course and cohort
+    orgs. The cohort-only teams (students, auditors) are created separately by
+    create_cohort_teams."""
     log_step("Creating faculty teams")
-    return _create_teams(org, FACULTY_TEAMS)
+    return create_role_teams(org, FACULTY_TEAMS)
 
 
 def create_cohort_teams(org: str) -> int:
-    """Create the cohort-only role teams (COHORT_TEAMS): enrolled students + read-only
-    auditors. Called at cohort bootstrap only - never on the persistent course org.
+    """Create the cohort-only role teams (course.COHORT_TEAMS): enrolled students +
+    read-only auditors. Called at cohort bootstrap only - never on the persistent course
+    org.
 
     Both are SECRET teams, so their membership is not browsable by the students in them
-    (see COHORT_TEAMS). The cost is that a non-owner instructor cannot read the enrolment
-    off the GitHub members view either: the roster CSV
+    (see course.COHORT_TEAMS). The cost is that a non-owner instructor cannot read the
+    enrolment off the GitHub members view either: the roster CSV
     (`classroom-config/students.csv`) is the SSOT for who is enrolled, and it always
     was - the members view only ever showed who had finished onboarding."""
     log_step("Creating cohort teams (students, auditors)")
-    return _create_teams(org, COHORT_TEAMS)
+    return create_role_teams(org, COHORT_TEAMS)
 
 
 # The course-org teams that may run the seeded workflows, and their grant on `.github`:

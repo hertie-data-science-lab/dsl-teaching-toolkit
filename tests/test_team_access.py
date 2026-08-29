@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import access, bootstrap_course, gh_contents, ghcli, scaffold
+from dsl_course import access, bootstrap_course, course, gh_contents, ghcli, scaffold
 
 
 def test_course_team_access_policy():
@@ -80,7 +80,7 @@ def test_a_scaffolded_assignment_repo_is_granted_to_the_faculty_teams(scaffold_g
 
 
 def test_faculty_teams_are_only_instructors_and_admin():
-    slugs = {t[0] for t in bootstrap_course.FACULTY_TEAMS}
+    slugs = {t[0] for t in course.FACULTY_TEAMS}
     assert slugs == {"instructors", "course-admin"}
     # students/auditors must NOT be created on the persistent course org (it holds
     # unreleased materials, model solutions, and hidden tests)
@@ -88,12 +88,12 @@ def test_faculty_teams_are_only_instructors_and_admin():
 
 
 def test_cohort_teams_are_students_and_auditors():
-    assert {t[0] for t in bootstrap_course.COHORT_TEAMS} == {"students", "auditors"}
+    assert {t[0] for t in course.COHORT_TEAMS} == {"students", "auditors"}
 
 
 def test_faculty_and_cohort_team_sets_are_disjoint():
-    faculty = {t[0] for t in bootstrap_course.FACULTY_TEAMS}
-    cohort = {t[0] for t in bootstrap_course.COHORT_TEAMS}
+    faculty = {t[0] for t in course.FACULTY_TEAMS}
+    cohort = {t[0] for t in course.COHORT_TEAMS}
     assert not (faculty & cohort)
 
 

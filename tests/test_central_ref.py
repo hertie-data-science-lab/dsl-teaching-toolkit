@@ -259,6 +259,7 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
     monkeypatch.setattr(seed, "_propagate_repo_secret", lambda org, repos: 0)
     monkeypatch.setattr(seed, "list_org_repos", lambda org: [])
     monkeypatch.setattr(seed, "converge_org_settings", lambda org: 0)
+    monkeypatch.setattr(seed, "create_role_teams", lambda org, teams: 0)
     monkeypatch.setattr(seed, "_converge_org_metadata", lambda org, repos: 0)
     monkeypatch.setattr(seed, "seed_github_workflows", renders("org-workflows"))
     monkeypatch.setattr(seed, "_write_heartbeat", lambda org: 0)

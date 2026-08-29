@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Iterable
 from functools import cache, lru_cache
 
 from .ghcli import gh, is_already_exists
@@ -85,6 +86,21 @@ def _converge_team_privacy(org: str, name: str, privacy: str | None) -> None:
         # The team exists either way, which is what create_team returns; only its privacy
         # could not be corrected.
         log_err(f"team {name}: privacy not set to {privacy}: {out[:120]}")
+
+
+def create_role_teams(org: str, teams: Iterable[tuple[str, str, str]]) -> int:
+    """Create (or converge the privacy of) each `(slug, description, privacy)` in
+    `teams`, returning how many could NOT be created.
+
+    create_team already treats a duplicate-name 422 as success, so a non-zero count here
+    is a genuine failure - and every one of them is load-bearing: membership sync, the
+    faculty grants and the workflow buttons all address teams by slug, so a bootstrap
+    that lost one leaves an org nobody but its owner can work in. The count used to be
+    dropped on the floor and the run reported success."""
+    return sum(
+        0 if create_team(org, slug, desc, privacy=privacy) else 1
+        for slug, desc, privacy in teams
+    )
 
 
 def members_without_2fa(org: str) -> int | None:

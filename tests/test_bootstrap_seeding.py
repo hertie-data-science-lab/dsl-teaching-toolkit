@@ -772,6 +772,7 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "_propagate_repo_secret", lambda org, repos: 0)
     monkeypatch.setattr(seed, "list_org_repos", lambda org: [])
     monkeypatch.setattr(seed, "converge_org_settings", lambda org: 0)
+    monkeypatch.setattr(seed, "create_role_teams", lambda org, teams: 0)
     monkeypatch.setattr(seed, "_converge_org_metadata", lambda org, repos: 0)
     monkeypatch.setattr(seed, "seed_github_workflows", lambda org, ref: seed_failures)
     monkeypatch.setattr(seed, "_write_heartbeat", lambda org: heartbeat_failures)
@@ -851,6 +852,49 @@ def test_refresh_rebuilds_every_cohorts_own_landing_pages(monkeypatch):
 
     assert seed.refresh("Course-Org") == 0
     assert rendered == ["Course-Org", "Cohort-f2026", "Cohort-s2027"]
+
+
+def test_refresh_reasserts_every_cohort_role_teams_privacy(monkeypatch):
+    # A team's privacy was asserted only by the create call at bootstrap, and nothing
+    # revisited it: every cohort made before students/auditors were declared `secret`
+    # still has them `closed`, with the class list browsable by the class. The nightly
+    # sweep is what closes that, from the SAME table bootstrap creates them with.
+    asked: list[tuple[str, str, str]] = []
+
+    def record(org, teams):
+        asked.extend((org, slug, privacy) for slug, _, privacy in teams)
+        return 0
+
+    _stub_refresh(monkeypatch)
+    monkeypatch.setattr(seed, "create_role_teams", record)
+
+    assert seed.refresh("Course-Org") == 0
+    # Cohorts only - the course org holds unreleased materials and never gets the
+    # student teams (course.COHORT_TEAMS).
+    assert asked == [
+        (cohort, slug, privacy)
+        for cohort in ("Cohort-f2026", "Cohort-s2027")
+        for slug, _, privacy in (*course.FACULTY_TEAMS, *course.COHORT_TEAMS)
+    ]
+    # ...and the table itself still says what the decision was, not just consistently
+    # whatever it happens to hold.
+    assert {slug: privacy for _, slug, privacy in asked} == {
+        "instructors": "closed",
+        "course-admin": "closed",
+        "students": "secret",
+        "auditors": "secret",
+    }
+
+
+def test_refresh_reds_when_a_role_team_privacy_cannot_be_converged(monkeypatch):
+    # A team whose privacy would not converge leaves a cohort's class list readable by
+    # the class, which is the kind of thing a green nightly cron must not hide.
+    _stub_refresh(monkeypatch)
+    monkeypatch.setattr(
+        seed, "create_role_teams", lambda org, teams: 1 if "f2026" in org else 0
+    )
+
+    assert seed.refresh("Course-Org") == 1
 
 
 def test_refresh_leaves_an_archived_cohort_frozen(monkeypatch, capsys):
@@ -1398,10 +1442,10 @@ def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypat
 def test_a_team_that_could_not_be_created_is_counted(monkeypatch):
     # create_team already absorbs the idempotent duplicate-name 422, so a False here is a
     # real failure - and an org missing `instructors` is one nobody but its owner can use.
-    monkeypatch.setattr(bc, "create_team", lambda *a, **k: False)
-    assert bc.create_default_teams("Course-Org") == len(bc.FACULTY_TEAMS)
-    assert bc.create_cohort_teams("Cohort-f2026") == len(bc.COHORT_TEAMS)
-    monkeypatch.setattr(bc, "create_team", lambda *a, **k: True)
+    monkeypatch.setattr(gh_teams, "create_team", lambda *a, **k: False)
+    assert bc.create_default_teams("Course-Org") == len(course.FACULTY_TEAMS)
+    assert bc.create_cohort_teams("Cohort-f2026") == len(course.COHORT_TEAMS)
+    monkeypatch.setattr(gh_teams, "create_team", lambda *a, **k: True)
     assert bc.create_default_teams("Course-Org") == 0
 
 
@@ -1467,7 +1511,7 @@ def test_the_student_facing_teams_are_secret(monkeypatch):
     # read the `auditors` list and learn a classmate's academic status.
     created: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        bc,
+        gh_teams,
         "create_team",
         lambda org, slug, desc, privacy: created.append((slug, privacy)) or True,
     )

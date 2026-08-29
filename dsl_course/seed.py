@@ -41,7 +41,7 @@ from datetime import datetime, timedelta, timezone
 from . import scaffold
 from .access import converge_faculty_access, converge_topics
 from .central import MissingCentralRef
-from .course import CONFIG_REPO, term_tag
+from .course import COHORT_TEAMS, CONFIG_REPO, FACULTY_TEAMS, term_tag
 from .discovery import (
     central_ref_for,
     discover_assignments,
@@ -53,7 +53,7 @@ from .discovery import (
     unregister_cohort,
 )
 from .gh_contents import get_file_content, put_file, put_files, refresh_stubs
-from .gh_teams import converge_org_settings
+from .gh_teams import converge_org_settings, create_role_teams
 from .ghcli import bot_token, gh
 from .log import log, log_err, log_ok, log_step
 from .profile_readme import update_profile_readme
@@ -371,7 +371,12 @@ def _converge_org_metadata(org: str, repos: list[dict]) -> int:
     return topics.failures
 
 
-def _converge_org(org: str, central_ref: str, listing: list[dict] | None = None) -> int:
+def _converge_org(
+    org: str,
+    central_ref: str,
+    listing: list[dict] | None = None,
+    is_cohort: bool = False,
+) -> int:
     """Sweep one org's repo listing and re-render its landing pages from that SAME
     snapshot. Failure count.
 
@@ -391,11 +396,19 @@ def _converge_org(org: str, central_ref: str, listing: list[dict] | None = None)
 
     The org's own settings are converged here too (gh_teams.converge_org_settings). They
     used to be written only at bootstrap, so every org tightened after its own bootstrap
-    kept GitHub's default of `read` for every member on every repo."""
+    kept GitHub's default of `read` for every member on every repo.
+
+    `is_cohort` says this org is a cohort, which additionally converges the four role teams'
+    PRIVACY (course.FACULTY_TEAMS + COHORT_TEAMS). Their privacy was asserted only by the
+    team-creating call at bootstrap, so `students` and `auditors` stayed `closed` - their
+    membership browsable by every student in the org - on every cohort created before they
+    were made `secret`. One GET per role team per night; the read-before-PATCH inside
+    create_team is what keeps that from being four writes."""
     if listing is None:
         listing = list_org_repos(org)
     return (
         converge_org_settings(org)
+        + (create_role_teams(org, (*FACULTY_TEAMS, *COHORT_TEAMS)) if is_cohort else 0)
         + _converge_org_metadata(org, listing)
         + update_profile_readme(org, central_ref=central_ref, repos=listing)
     )
@@ -539,7 +552,7 @@ def refresh(course_org: str) -> int:
         # The pointer its dispatchers read to find this course org. Also SYSTEM-owned and
         # also only ever written by Bootstrap cohort until now - same bug class.
         failures += refresh_cohort_pointer(cohort, course_org)
-        failures += _converge_org(cohort, central_ref, listing)
+        failures += _converge_org(cohort, central_ref, listing, is_cohort=True)
     if failures:
         log_err(f"refresh incomplete: {failures} file(s) could not be written")
         return 1
