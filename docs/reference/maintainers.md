@@ -123,7 +123,8 @@ silently do nothing.
 ## Tests
 
 `python3 -m pytest -q` (CI runs the same). `pytest` and `jekyll-contract`, `ci.yml`'s two
-jobs, are both required checks on `main`. Conventions:
+jobs, are both required checks on `main`. Python 3.10 is the floor (ruff's `target-version`);
+CI and every seeded workflow run 3.12. Conventions:
 
 - `conftest._no_live_gh` refuses any live `gh` from a test, guarding the **binary** rather than
   `ghcli.gh`, so the retry ladder stays testable and `git` against a tmp repo still runs.
