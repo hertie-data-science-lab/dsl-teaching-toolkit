@@ -71,12 +71,12 @@ def test_a_permanent_failure_is_not_retried(monkeypatch):
 
 
 def test_one_throttled_recipient_does_not_stop_the_batch(monkeypatch, capsys):
-    # Three attempts for ada, then bo goes through: the batch carries on, and the count
-    # says how many actually landed.
+    # Three attempts for ada, then bo goes through: the batch carries on, and the return
+    # says WHO actually landed.
     _replies(monkeypatch, [(429, {})] * 3 + [(202, {})])
     monkeypatch.setattr(mailer, "_graph_token", lambda cfg: "tok")
     sent = mailer._send_via_graph(CFG, [ONE, ("bo@x.edu", "Subj", "Body")])
-    assert sent == 1  # ada gave up after three attempts; bo still went out
+    assert sent == ["bo@x.edu"]  # ada gave up after three attempts; bo still went out
     captured = capsys.readouterr()
     assert "sent -> b***@x.edu" in captured.out
     assert "send to a***@x.edu failed (429)" in captured.err
@@ -95,3 +95,133 @@ def test_one_throttled_recipient_does_not_stop_the_batch(monkeypatch, capsys):
 )
 def test_retry_after_is_read_defaulted_and_capped(header, expected):
     assert mailer.retry_after_seconds(header) == expected
+
+
+# ------------------------------------------------------------- config from the environment
+
+
+def _graph_env(monkeypatch, **overrides):
+    values = {
+        "GRAPH_TENANT_ID": "tenant",
+        "GRAPH_CLIENT_ID": "client",
+        # Only its multi-line shape matters here; the real PEM parsing is tested where
+        # a real self-signed pair is built, in test_enrol_codes.
+        "GRAPH_CLIENT_CERT": "cert-line-one\ncert-line-two\n",
+        "GRAPH_SENDER": "bot@x.edu",
+    }
+    values.update(overrides)
+    for key, value in values.items():
+        monkeypatch.setenv(key, value)
+
+
+def test_graph_secrets_are_stripped_before_they_reach_a_url(monkeypatch):
+    # `gh secret set < file` leaves a trailing newline. tenant_id goes straight into the
+    # token URL, where that newline raised http.client.InvalidURL - uncaught, into a public
+    # log, AFTER the enrolment codes had already been committed.
+    _graph_env(monkeypatch, GRAPH_TENANT_ID="tenant\n", GRAPH_SENDER=" bot@x.edu ")
+    cfg = mailer.graph_config_from_env()
+    assert cfg and cfg.tenant_id == "tenant" and cfg.sender == "bot@x.edu"
+
+
+def test_a_multi_line_certificate_is_not_mistaken_for_a_mangled_secret(monkeypatch):
+    # The PEM is multi-line by construction; only the single-line values are vetted.
+    _graph_env(monkeypatch)
+    assert mailer.graph_config_from_env() is not None
+
+
+def test_nothing_configured_is_silent(monkeypatch, capsys):
+    # An offline dry-run preview is a documented feature and must not shout.
+    for key in mailer.GRAPH_ENV:
+        monkeypatch.delenv(key, raising=False)
+    assert mailer.graph_config_from_env() is None
+    assert capsys.readouterr().err == ""
+
+
+def test_a_half_configured_graph_names_the_missing_variables(monkeypatch, capsys):
+    # Actions masks the values, so the old blanket "no transport configured" could not tell
+    # "nothing is set" from "one name is misspelt".
+    _graph_env(monkeypatch)
+    monkeypatch.delenv("GRAPH_SENDER")
+    assert mailer.graph_config_from_env() is None
+    err = capsys.readouterr().err
+    assert "GRAPH_SENDER" in err and "GRAPH_TENANT_ID" not in err
+
+
+def test_a_secret_containing_whitespace_is_refused_by_name_not_by_value(
+    monkeypatch, capsys
+):
+    _graph_env(monkeypatch, GRAPH_TENANT_ID="ten ant")
+    assert mailer.graph_config_from_env() is None
+    err = capsys.readouterr().err
+    assert "GRAPH_TENANT_ID" in err and "ten ant" not in err
+
+
+def test_a_mangled_request_is_a_transport_failure_not_a_traceback(monkeypatch):
+    def boom(req):
+        raise mailer.http.client.InvalidURL("URL can't contain control characters")
+
+    monkeypatch.setattr(mailer.urllib.request, "urlopen", boom)
+    status, raw, headers = mailer._post("https://x/y", b"", {})
+    assert status == 0 and headers == {}
+    assert b"control characters" in raw
+
+
+# ------------------------------------------------------------------- pacing and the budget
+
+
+def test_the_batch_is_paced_below_the_graph_rate_limit(monkeypatch, _no_sleeping):
+    # ~30/min per mailbox. Sent back-to-back, a full cohort starts 429-ing around message
+    # 30 and then pays the retry ladder per recipient, serially, against a 30-minute job.
+    _replies(monkeypatch, [(202, {})] * 3)
+    monkeypatch.setattr(mailer, "_graph_token", lambda cfg: "tok")
+    messages = [(f"s{i}@x.edu", "Subj", "Body") for i in range(3)]
+    assert mailer._send_via_graph(CFG, messages) == [m[0] for m in messages]
+    assert _no_sleeping == [mailer._SEND_INTERVAL] * 2  # n-1: the first is not delayed
+
+
+def test_a_batch_that_runs_out_of_budget_stops_and_says_re_run(
+    monkeypatch, _no_sleeping, capsys
+):
+    # A batch KILLED at the job timeout takes the caller's sent-marker write with it, and
+    # the re-run then re-mails everyone who already got one. Stopping early is resumable.
+    _replies(monkeypatch, [(202, {})] * 3)
+    monkeypatch.setattr(mailer, "_graph_token", lambda cfg: "tok")
+    monkeypatch.setattr(mailer, "_BATCH_BUDGET", 0)
+    messages = [(f"s{i}@x.edu", "Subj", "Body") for i in range(3)]
+    assert mailer._send_via_graph(CFG, messages) == ["s0@x.edu"]
+    assert (
+        "stopped after 1 of 3 message(s) - re-run to continue"
+        in capsys.readouterr().err
+    )
+
+
+# --------------------------------------------------------------------------- the preflight
+
+
+def test_a_dry_run_proves_the_credential_after_it_prints_the_preview(
+    monkeypatch, capsys
+):
+    # The preview is what faculty came for; a broken credential must not cost them it.
+    _graph_env(monkeypatch)
+    monkeypatch.setattr(mailer, "_graph_token", lambda cfg: None)
+    with pytest.raises(RuntimeError):
+        mailer.send_bulk([ONE], dry_run=True)
+    assert "would send -> a***@x.edu" in capsys.readouterr().out
+
+
+def test_a_good_credential_says_which_mailbox_it_would_send_as(monkeypatch, capsys):
+    _graph_env(monkeypatch)
+    monkeypatch.setattr(mailer, "_graph_token", lambda cfg: "tok")
+    assert mailer.send_bulk([ONE], dry_run=True) == ["ada@x.edu"]
+    assert "would send as bot@x.edu" in capsys.readouterr().out
+
+
+def test_a_dry_run_with_no_transport_configured_still_previews_offline(
+    monkeypatch, capsys
+):
+    for key in mailer.GRAPH_ENV:
+        monkeypatch.delenv(key, raising=False)
+    assert mailer.send_bulk([ONE], dry_run=True) == ["ada@x.edu"]
+    captured = capsys.readouterr()
+    assert "would send -> a***@x.edu" in captured.out
+    assert "proves nothing about a send" in captured.err

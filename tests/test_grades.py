@@ -427,7 +427,9 @@ def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
     monkeypatch.setattr(
-        grades.mailer, "send_bulk", lambda msgs, dry_run=False, sample=None: 1
+        grades.mailer,
+        "send_bulk",
+        lambda msgs, dry_run=False, sample=None: [m[0] for m in msgs[:1]],
     )
     grades._email_updates("COHORT", ["ada-l", "bob-b"])
     assert "1 of 2 grade notification(s) not sent" in capsys.readouterr().err
@@ -445,7 +447,9 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
     monkeypatch.setattr(
         grades.mailer,
         "send_bulk",
-        lambda msgs, dry_run=False, sample=None: sent.append(msgs) or 1,
+        lambda msgs, dry_run=False, sample=None: (
+            sent.append(msgs) or [m[0] for m in msgs]
+        ),
     )
 
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "Deep Learning")
@@ -472,7 +476,9 @@ def test_grade_notification_dry_run_carries_a_placeholder_sample(monkeypatch):
     monkeypatch.setattr(
         grades.mailer,
         "send_bulk",
-        lambda msgs, dry_run=False, sample=None: seen.update(sample=sample) or 1,
+        lambda msgs, dry_run=False, sample=None: (
+            seen.update(sample=sample) or [m[0] for m in msgs]
+        ),
     )
     grades._email_updates("COHORT", ["ada-l"], dry_run=True)
     # The reviewer sees the wording; no real student's name or handle is in it.
@@ -552,7 +558,9 @@ def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
     monkeypatch.setattr(
         grades.mailer,
         "send_bulk",
-        lambda msgs, dry_run=False, sample=None: sent.append(msgs) or len(msgs),
+        lambda msgs, dry_run=False, sample=None: (
+            sent.append(msgs) or [m[0] for m in msgs]
+        ),
     )
     grades._email_updates("COHORT", ["ada-l"])  # the gradebook file's spelling
     assert sent and sent[-1][0][0] == "ada@uni.edu"
@@ -600,7 +608,7 @@ def _distribute_with(
         "send_bulk",
         lambda msgs, dry_run=False, sample=None: (
             outbox.append(msgs) if outbox is not None else None,
-            sent,
+            [m[0] for m in msgs[:sent]],
         )[1],
     )
     return grades.distribute("COHORT")

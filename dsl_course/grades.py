@@ -758,7 +758,7 @@ def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -
     sent = mailer.send_bulk(
         messages, dry_run=dry_run, sample=sample_body(cohort_org, course_name)
     )
-    failed = len(messages) - sent
+    failed = len(messages) - len(sent)
     if failed:
         log_err(f"{failed} of {len(messages)} grade notification(s) not sent")
     return failed

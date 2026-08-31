@@ -76,7 +76,7 @@ def test_code_message_names_the_course_and_falls_back_when_unnamed():
 def test_mailer_dry_run_previews_without_config(capsys):
     msgs = [("ada@x.edu", "Subj", "Hello Ada, your code is dsl-abc123")]
     # no transport env needed for a dry-run preview
-    assert mailer.send_bulk(msgs, dry_run=True) == 1
+    assert mailer.send_bulk(msgs, dry_run=True) == ["ada@x.edu"]
     # The workflow log is PUBLIC: never the body (name + live enrol code), never the
     # address in full.
     out = capsys.readouterr().out
@@ -92,7 +92,10 @@ def test_dry_run_prints_one_placeholder_sample_and_no_real_body(capsys):
         ("bo@x.edu", "Subj", "Hello Bo, your code is dsl-def456"),
     ]
     sample = enrol_codes.sample_body("https://github.com/org/welcome/issues")
-    assert mailer.send_bulk(msgs, dry_run=True, sample=sample) == 2
+    assert mailer.send_bulk(msgs, dry_run=True, sample=sample) == [
+        "ada@x.edu",
+        "bo@x.edu",
+    ]
     out = capsys.readouterr().out
     assert out.count(mailer.SAMPLE_HEADER) == 1
     assert "<code>" in out and "<name>" in out
@@ -392,7 +395,7 @@ def test_the_emails_carry_the_code_the_roster_actually_holds(monkeypatch):
         enrol_codes.mailer,
         "send_bulk",
         lambda messages, dry_run=False, sample=None: (
-            sent.extend(messages) or len(messages)
+            sent.extend(messages) or [m[0] for m in messages]
         ),
     )
     assert enrol_codes.run("COHORT") == 0

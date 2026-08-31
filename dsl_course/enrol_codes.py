@@ -268,7 +268,7 @@ def run(cohort_org: str, dry_run: bool = False) -> int:
     sent = mailer.send_bulk(
         messages, dry_run=dry_run, sample=sample_body(welcome_url, course_name)
     )
-    return 0 if sent == len(messages) else 1
+    return 0 if len(sent) == len(messages) else 1
 
 
 def main() -> int:

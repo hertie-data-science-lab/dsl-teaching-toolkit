@@ -28,6 +28,7 @@ to the app registration by hand.
 from __future__ import annotations
 
 import base64
+import http.client
 import json
 import os
 import time
@@ -71,15 +72,38 @@ class GraphConfig:
     sender: str
 
 
+# The env names the send workflows must carry. `workflows_render._MAIL_ENV` is asserted
+# against this tuple, so a rename cannot reach production as a silently unconfigured org.
+GRAPH_ENV = ("GRAPH_TENANT_ID", "GRAPH_CLIENT_ID", "GRAPH_CLIENT_CERT", "GRAPH_SENDER")
+# Every one of these is interpolated into a URL or a header. The certificate is NOT here:
+# a PEM is multi-line by construction.
+_SINGLE_LINE = ("GRAPH_TENANT_ID", "GRAPH_CLIENT_ID", "GRAPH_SENDER")
+
+
 def graph_config_from_env() -> GraphConfig | None:
-    """Build the Graph config from env, or None if any required secret is unset."""
-    tenant = os.environ.get("GRAPH_TENANT_ID")
-    client_id = os.environ.get("GRAPH_CLIENT_ID")
-    cert_pem = os.environ.get("GRAPH_CLIENT_CERT")
-    sender = os.environ.get("GRAPH_SENDER")
-    if not (tenant and client_id and cert_pem and sender):
+    """Build the Graph config from env, or None if it is not fully configured.
+
+    Silent when NOTHING is set - an offline `dry_run` preview is a documented feature. Loud
+    when SOME of it is set, naming the variables at fault: Actions masks secret values, so
+    a blanket "no transport configured" is undebuggable, and a half-configured transport is
+    a misconfiguration rather than an absence.
+
+    Whitespace inside a single-line value is refused BY NAME, never by value. `tenant_id`
+    goes straight into the token URL, so a trailing newline - what `gh secret set < file`
+    produces - raised `http.client.InvalidURL` out of the mail step, uncaught, into a public
+    log, after the enrolment codes had already been committed."""
+    found = {k: (os.environ.get(k) or "").strip() for k in GRAPH_ENV}
+    missing = [k for k, v in found.items() if not v]
+    if len(missing) == len(GRAPH_ENV):
         return None
-    return GraphConfig(tenant, client_id, cert_pem, sender)
+    if missing:
+        log_err(f"Graph is half-configured - unset or blank: {', '.join(missing)}")
+        return None
+    ragged = [k for k in _SINGLE_LINE if any(c.isspace() for c in found[k])]
+    if ragged:
+        log_err(f"whitespace inside {', '.join(ragged)} - re-set without line breaks")
+        return None
+    return GraphConfig(*(found[k] for k in GRAPH_ENV))
 
 
 def _b64url(raw: bytes) -> str:
@@ -183,6 +207,14 @@ _RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
 _MAX_SEND_ATTEMPTS = 3
 _RETRY_AFTER_DEFAULT = 5.0  # when the header is absent or unreadable
 _RETRY_AFTER_CAP = 60.0  # a header we cannot vet must not park the whole batch
+# Graph allows ~30 messages/minute per mailbox. 2.5s leaves headroom: a 126-row cohort takes
+# ~5min, where the same batch sent back-to-back starts 429-ing around message 30 and then
+# pays up to _MAX_SEND_ATTEMPTS x _RETRY_AFTER_CAP per recipient, serially.
+_SEND_INTERVAL = 2.5
+# Stop with time left in the 30-minute job. A batch KILLED at the job timeout takes the
+# caller's sent-marker write down with it, and the re-run then re-mails everyone who already
+# got one; a batch that stops itself reports what went out and is resumable.
+_BATCH_BUDGET = 20 * 60
 
 
 def _response_headers(raw) -> dict[str, str]:
@@ -205,6 +237,11 @@ def _post(url: str, data: bytes, headers: dict[str, str]) -> tuple[int, bytes, d
         return exc.code, exc.read(), _response_headers(exc.headers)
     except urllib.error.URLError as exc:
         return 0, str(exc.reason).encode(), {}
+    except (http.client.HTTPException, ValueError) as exc:
+        # A malformed URL or a half-closed connection is a transport failure, not a bug to
+        # traceback out of a public Actions log. URLError is an OSError and is caught above;
+        # InvalidURL, RemoteDisconnected and BadStatusLine are not.
+        return 0, str(exc).encode(), {}
 
 
 def retry_after_seconds(headers: dict[str, str]) -> float:
@@ -279,10 +316,14 @@ def _graph_send_one(
         return False
 
 
-def _send_via_graph(cfg: GraphConfig, messages: list[Message]) -> int:
-    """Send the whole batch on one token. Returns the number actually sent.
+def _send_via_graph(cfg: GraphConfig, messages: list[Message]) -> list[str]:
+    """Send the whole batch on one token. Returns the recipients that actually went out.
 
-    A failed token request raises rather than returning 0: nothing was sent AND nothing
+    Addresses, not a count: the caller records who was mailed so a re-run does not mail
+    them again, and a marker written off a count re-mails exactly the recipients that
+    succeeded.
+
+    A failed token request raises rather than returning empty: nothing was sent AND nothing
     could be, which is a transport failure, not an empty batch - the two must not read
     the same to the caller."""
     token = _graph_token(cfg)
@@ -290,11 +331,20 @@ def _send_via_graph(cfg: GraphConfig, messages: list[Message]) -> int:
         raise RuntimeError(
             "Microsoft Graph token request failed - check the GRAPH_* secrets. Nothing sent."
         )
-    sent = 0
-    for to, subject, body in messages:
+    sent: list[str] = []
+    started = time.monotonic()
+    for index, (to, subject, body) in enumerate(messages):
+        if index:
+            if time.monotonic() - started > _BATCH_BUDGET:
+                log_err(
+                    f"stopped after {len(sent)} of {len(messages)} message(s) "
+                    f"- re-run to continue"
+                )
+                break
+            time.sleep(_SEND_INTERVAL)
         if _graph_send_one(cfg, token, to, subject, body):
             log_ok(f"sent -> {mask_email(to)}")
-            sent += 1
+            sent.append(to)
     return sent
 
 
@@ -304,10 +354,29 @@ def _send_via_graph(cfg: GraphConfig, messages: list[Message]) -> int:
 SAMPLE_HEADER = "--- sample (placeholders) ---"
 
 
+def preflight() -> None:
+    """Prove the credential without sending anything. Raises if it is set but broken.
+
+    A preview otherwise validates nothing about the secrets: it returns before the transport
+    is chosen, so it reads the same whether the certificate is right, wrong or absent - and
+    the first real run is the first test, against real students."""
+    cfg = graph_config_from_env()
+    if cfg is None:
+        log_err(
+            "no mail transport configured - this preview proves nothing about a send"
+        )
+        return
+    if _graph_token(cfg) is None:
+        raise RuntimeError(
+            "Microsoft Graph token request failed - check the GRAPH_* secrets. Nothing sent."
+        )
+    log_ok(f"Graph credential OK - would send as {cfg.sender}")
+
+
 def send_bulk(
     messages: list[Message], dry_run: bool = False, sample: str | None = None
-) -> int:
-    """Preview (dry_run) or send a batch. Returns the count previewed/sent.
+) -> list[str]:
+    """Preview (dry_run) or send a batch. Returns the recipients previewed/sent.
 
     dry_run lists masked recipients + subjects and sends nothing. Never a REAL body: the
     enrolment-code email carries the student's name and a live credential, and this runs
@@ -324,12 +393,13 @@ def send_bulk(
             log(SAMPLE_HEADER)
             log(sample)
         log_ok(f"DRY-RUN previewed {len(messages)} message(s) - nothing sent")
-        return len(messages)
+        preflight()
+        return [to for to, _subject, _body in messages]
 
     graph = graph_config_from_env()
     if graph is None:
         log_err("No mail transport configured - set the GRAPH_* secrets. Nothing sent.")
-        return 0
+        return []
     return _send_via_graph(graph, messages)
 
 
