@@ -34,6 +34,7 @@ import json
 import sys
 import tempfile
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import yaml
@@ -62,6 +63,12 @@ from .repos import (
 
 GRADES_DIR = "grades"  # faculty-edited source tables, one CSV per assignment
 GRADEBOOK_DIR = "gradebook"  # rendered per-student YAML staged for the preview PR
+# Which student has been told about which version of their gradebook. SYSTEM-owned, in the
+# private classroom-config. Without it the notify set came from the PUSH outcome, which is
+# not durable: a notification that failed could never be retried, because the re-run saw
+# every gradebook as `unchanged` and emailed nobody, in green.
+NOTIFIED_PATH = f"{GRADEBOOK_DIR}/notified.csv"
+NOTIFIED_HEADER = ("github_handle", "grades_sha", "notified_at")
 RENDER_BRANCH = "grades-update"
 COHORT_CSV_NAME = "cohort-gradebook.csv"  # generated wide faculty-only glance view
 
@@ -625,33 +632,85 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
             return 1
         log_step(f"Distributing {len(files)} gradebook(s) in {cohort_org}")
 
+        notified = _read_notified(wd)
         results: dict[str, int] = {}
-        pushed: list[str] = []
+        changed: list[str] = []  # pushed a NEW version this run
+        live: dict[str, str] = {}  # handle -> the sha their repo now holds
         for f in files:
+            content = f.read_text()
+            sha = blob_sha(content.encode())
             if dry_run:
                 log_person(
                     f"    DRY-RUN  would update {GRADEBOOK_PREFIX}{f.stem}/grades.yml"
                 )
-                pushed.append(f.stem)
+                changed.append(f.stem)
                 continue
-            status = _push_gradebook(cohort_org, f.stem, f.read_text())
+            status = _push_gradebook(cohort_org, f.stem, content)
             results[status] = results.get(status, 0) + 1
-            # `unchanged` deliberately does NOT notify: a re-run after one correction used
-            # to email "your grades have been updated" to every student in the cohort.
             if status == "ok":
-                pushed.append(f.stem)
+                changed.append(f.stem)
+            if status in ("ok", "unchanged"):
+                live[f.stem] = sha
     if dry_run:
-        log_ok(f"DRY-RUN previewed {len(pushed)} gradebook update(s) - nothing pushed")
+        log_ok(f"DRY-RUN previewed {len(changed)} gradebook update(s) - nothing pushed")
+        if notify and changed:
+            _email_updates(cohort_org, changed, dry_run=True)
+        return 0
+    log_ok(f"Done - {json.dumps(results)}")
+
+    # Who still needs telling. A marker entry that does not match the sha now in the repo
+    # means either a new version (the `ok` case) or a notification that failed last time
+    # (the `unchanged` case the push outcome could never express).
+    if notified is None:
+        # First run on this cohort: no marker means nothing to catch up on. Notify what
+        # changed, and record every current gradebook so the next run has a baseline.
+        pending = list(changed)
     else:
-        log_ok(f"Done - {json.dumps(results)}")
+        pending = [h for h in live if notified.get(h) != live[h]]
 
     notifications_failed = 0
-    if notify and pushed:
-        notifications_failed = _email_updates(cohort_org, pushed, dry_run=dry_run)
-    if dry_run:
-        return 0
+    if notify and pending:
+        notifications_failed, told = _email_updates(cohort_org, pending, dry_run=False)
+    else:
+        told = []
+    if notify or notified is None:
+        record = dict(notified or {})
+        record.update({h: live[h] for h in (live if notified is None else told)})
+        if record != (notified or {}):
+            _write_notified(cohort_org, record)
+
     pushes_failed = any(k.startswith("failed") for k in results)
     return 1 if pushes_failed or notifications_failed else 0
+
+
+def _read_notified(wd: Path) -> dict[str, str] | None:
+    """`{handle: gradebook sha}` from the marker, or None if the cohort has none yet.
+
+    None is kept distinct from `{}`: a cohort with no marker file has nothing to catch up
+    on, and must NOT be told wholesale that their grades have been updated."""
+    path = wd / NOTIFIED_PATH
+    if not path.is_file():
+        return None
+    return {
+        (row.get("github_handle") or "").strip(): (row.get("grades_sha") or "").strip()
+        for row in read_csv(path.read_text(), ("github_handle",), NOTIFIED_PATH)
+    }
+
+
+def _write_notified(cohort_org: str, notified: dict[str, str]) -> None:
+    """One PUT for the whole cohort - the read was a local file in the clone."""
+    stamp = datetime.now(UTC).isoformat(timespec="seconds")
+    body = dump_csv(
+        NOTIFIED_HEADER,
+        ((handle, sha, stamp) for handle, sha in sorted(notified.items())),
+    )
+    put_file(
+        cohort_org,
+        CONFIG_REPO,
+        NOTIFIED_PATH,
+        body.encode(),
+        "grades: record notifications sent",
+    )
 
 
 def _push_gradebook(cohort_org: str, handle: str, content: str) -> str:
@@ -719,19 +778,31 @@ def sample_body(cohort_org: str, course_name: str = "") -> str:
     )
 
 
-def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -> int:
+def _email_updates(
+    cohort_org: str, handles: list[str], dry_run: bool = False
+) -> tuple[int, list[str]]:
     """Email each student a 'grades updated' notification to their university inbox,
     linking to their private gradebook repo (the grade's source of truth).
 
-    Returns how many notifications FAILED to send (0 when every one landed, and 0 for a
-    dry run). `distribute` exits on it: the grades themselves are already pushed by this
-    point, so a mail failure is not a reason to undo anything - but a student who never
-    got the notification does not know to look, and a green run told nobody."""
+    Returns `(how many FAILED, which handles were told)`. `distribute` exits on the first
+    and records the second: the grades themselves are already pushed by this point, so a
+    mail failure is not a reason to undo anything - but a student who never got the
+    notification does not know to look, and a green run told nobody."""
     # Fold-keyed for the same reason merge_auto is: the gradebook filenames come from the
     # grade CSVs (a marker's typing) and the roster's casing is its own, so a case-only
     # difference used to mean a student was silently never told their grades had landed.
+    students = roster.load(cohort_org)
+    if students is None:
+        # `or []` here read an unreadable roster as "nobody to email": the grades went out
+        # and the run was green having notified no one. enrol_codes.run reds on the same
+        # condition; so must this.
+        log_err(
+            f"roster in {cohort_org} could not be read - "
+            f"{len(handles)} notification(s) not sent."
+        )
+        return len(handles), []
     by_handle: dict[str, roster.Student] = {}
-    for s in roster.load(cohort_org) or []:
+    for s in students:
         if s.github_handle:
             by_handle.setdefault(s.github_handle.casefold(), s)
     # Name the course in the body - a student taking several of these can't tell one
@@ -748,20 +819,26 @@ def _email_updates(cohort_org: str, handles: list[str], dry_run: bool = False) -
         log_err(f"could not read the course name ({exc}) - mailing without it")
         course_name = ""
     messages = []
+    handle_for: dict[str, str] = {}
     for handle in handles:
         student = by_handle.get(handle.casefold())
         if not student or not student.hertie_email:
             continue
+        handle_for[student.hertie_email] = handle
         messages.append(update_message(student, cohort_org, course_name))
     if not messages:
-        return 0
+        # A withdrawn student is an ordinary state and must not red every distribution
+        # from here on; a count says it happened without naming anyone.
+        if handles:
+            log_err(f"{len(handles)} gradebook(s) have no roster row with an email")
+        return 0, []
     sent = mailer.send_bulk(
         messages, dry_run=dry_run, sample=sample_body(cohort_org, course_name)
     )
     failed = len(messages) - len(sent)
     if failed:
         log_err(f"{failed} of {len(messages)} grade notification(s) not sent")
-    return failed
+    return failed, [handle_for[to] for to in sent if to in handle_for]
 
 
 def main() -> int:

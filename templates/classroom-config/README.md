@@ -55,6 +55,8 @@ For an all-manual assignment (`autograde: false`), copy the sample's header into
 A generated, read-only `cohort-gradebook.csv` (one row per student, one column-group per assignment) appears alongside the per-student gradebooks on every **Render grades** - never hand-edit it, it's a glance view, not a source. **Nothing in `grades/`,`autograde/` or the gradebooks reaches a student until the separate Distribute grades
 workflow** - autograding and your review happen entirely in this private repo.
 
+`gradebook/notified.csv` records which student has been told about which version of their gradebook. SYSTEM-owned, do not hand-edit: it is what lets a failed notification be retried by simply re-running **Distribute grades**.
+
 ## `teams.csv` - group membership (optional, for group assignments)
 
 2 possible ways this is populated:
