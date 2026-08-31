@@ -89,7 +89,13 @@ def test_the_public_log_never_names_a_submission_repo(monkeypatch, capsys):
     ref = collect.target_ref("assignment-1-ada-l")
     assert ref == collect.target_ref("assignment-1-ada-l")
     assert ref.startswith("#") and len(ref) == 8
-    assert "ada" not in ref
+    # A hex digest, so nothing of the repo name survives in it. Asserted as "the digest is
+    # hex" rather than "`ada` is absent": a 7-char hex string contains any given 3-hex-char
+    # run about once in 800, so the substring form reddened CI at random - `#ada7313` on a
+    # run that had nothing to do with this code (`_REF_SALT` is a fresh random salt per
+    # process, so the digest differs every time).
+    assert set(ref[1:]) <= set("0123456789abcdef")
+    assert "assignment-1-ada-l" not in ref
     # The clone-failure paths log the tag, not the repo.
     monkeypatch.setattr(ghcli, "gh", lambda *a, **k: (1, "clone failed"))
     monkeypatch.setattr(collect, "repo_missing", lambda *a: True)
