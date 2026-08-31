@@ -10,7 +10,7 @@ from functools import cache
 from typing import NamedTuple
 
 from .ghcli import gh, is_already_exists, is_missing_resource
-from .log import log, log_err, log_ok, log_skip
+from .log import log, log_err, log_ok, log_person, log_skip
 
 
 class _RepoReadFailed(RuntimeError):
@@ -253,8 +253,14 @@ def create_repo(
     private: bool = True,
     description: str = "",
     is_template: bool = False,
+    person: bool = False,
 ) -> bool:
     """Create a repo. Idempotent - treats existing repo as success.
+
+    `person` marks a repo NAMED AFTER A STUDENT (`grades-<handle>`). These workflows run in
+    the org's PUBLIC `.github`, so the happy-path lines go through `log_person` and print
+    only under DSL_VERBOSE. The failure line still names the repo: an error a faculty member
+    must act on is worse unactionable than named.
 
     Sets `description` only on creation. Bringing an EXISTING repo's description up to a
     reworded one is converge_descriptions' job, off the listing the refresh already
@@ -275,10 +281,10 @@ def create_repo(
         args += ["--field", f"description={description}"]
     code, out = gh(*args)
     if code == 0:
-        log_ok(f"repo created: {org}/{name}")
+        (log_person if person else log_ok)(f"repo created: {org}/{name}")
         return True
     if is_already_exists(out):
-        log_skip(f"repo {org}/{name}")
+        (log_person if person else log_skip)(f"repo {org}/{name}")
         return True
     log_err(f"failed to create repo {org}/{name}: {out[:200]}")
     return False
@@ -449,8 +455,11 @@ def generate_from_template(
     name: str,
     private: bool = True,
     description: str = "",
+    person: bool = False,
 ) -> bool:
-    """Create a repo from a template. Idempotent."""
+    """Create a repo from a template. Idempotent.
+
+    `person` as in `create_repo`: a `<slug>-<handle>` repo must not be named in a public log."""
     code, out = gh(
         "api",
         "--method",
@@ -470,7 +479,7 @@ def generate_from_template(
     if code == 0:
         return True
     if is_already_exists(out):
-        log_skip(f"repo {owner}/{name}")
+        (log_person if person else log_skip)(f"repo {owner}/{name}")
         return True
     log_err(f"failed to generate {owner}/{name} from template: {out[:200]}")
     return False

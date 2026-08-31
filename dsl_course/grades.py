@@ -410,6 +410,7 @@ def provision_one(
             repo,
             private=True,
             description=f"Private gradebook for @{handle}",
+            person=True,
         ):
             return "failed-create"
         put_file(

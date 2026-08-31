@@ -11,7 +11,7 @@ import io
 import pytest
 import yaml
 
-from dsl_course import ghcli, grades, roster
+from dsl_course import ghcli, grades, repos, roster
 from tests.conftest import ROSTER_HEADER
 
 
@@ -366,6 +366,22 @@ def test_gradebook_sync_names_no_student_in_a_public_log(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "ada-l" not in out
     assert "Syncing 1 gradebook repo(s)" in out  # the aggregate still reports
+
+
+def test_gradebook_provisioning_names_nobody_on_the_happy_path(monkeypatch, capsys):
+    # The sibling test above covers `sync --dry-run`, which never creates anything. This is
+    # the CREATE branch, where `repo created: COHORT/grades-ada-l` used to reach the public
+    # log. `repos.gh` is stubbed - the process boundary - so the real create_repo runs.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    monkeypatch.setattr(grades, "repo_exists", lambda org, repo: False)
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, ""))
+    monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
+    monkeypatch.setattr(grades, "set_repo_topics", lambda *a, **k: True)
+    monkeypatch.setattr(grades, "grant_faculty", lambda *a, **k: None)
+    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
+    assert grades.provision_one("COHORT", "ada-l") == "ok"
+    captured = capsys.readouterr()
+    assert "ada-l" not in captured.out + captured.err
 
 
 def test_a_gradebook_the_student_cannot_open_is_a_failure(monkeypatch):

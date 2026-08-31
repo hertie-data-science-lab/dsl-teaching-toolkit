@@ -129,3 +129,57 @@ def test_an_unreadable_invitation_listing_is_none_not_empty(monkeypatch):
     assert repos.pending_invitations("O", "r", "zoe-z") is None
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)"))
     assert repos.pending_invitations("O", "r", "zoe-z") == []
+
+
+def test_a_repo_named_after_a_student_is_not_announced_in_a_public_log(
+    monkeypatch, capsys
+):
+    # `grades-<handle>` and `<slug>-<handle>` name a student. These workflows run in the
+    # org's PUBLIC `.github`, so the happy path must be silent without DSL_VERBOSE - the
+    # skip branch already was, the create branch was not.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, ""))
+    assert repos.create_repo("Cohort-f2026", "grades-ada-l", person=True) is True
+    assert "ada-l" not in capsys.readouterr().out
+
+    monkeypatch.setenv("DSL_VERBOSE", "1")
+    assert repos.create_repo("Cohort-f2026", "grades-ada-l", person=True) is True
+    assert "ada-l" in capsys.readouterr().out
+
+
+def test_a_repo_named_after_nobody_is_still_announced(monkeypatch, capsys):
+    # The flag must not silence the ordinary org fixtures - bootstrap and scaffold read
+    # these lines to know what they just built.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (0, ""))
+    assert repos.create_repo("Course-Org", "welcome") is True
+    assert "repo created: Course-Org/welcome" in capsys.readouterr().out
+
+
+def test_an_existing_student_repo_is_not_named_either(monkeypatch, capsys):
+    # The already-exists race: `assign` checks first, but two hourly ticks can overlap.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    monkeypatch.setattr(
+        repos,
+        "gh",
+        lambda *a, **k: (1, "HTTP 422: name already exists on this account"),
+    )
+    assert (
+        repos.generate_from_template(
+            template_org="Course-Org",
+            template_name="a1-template",
+            owner="Cohort-f2026",
+            name="a1-ada-l",
+            person=True,
+        )
+        is True
+    )
+    assert "ada-l" not in capsys.readouterr().out
+
+
+def test_a_failed_student_repo_create_still_names_it(monkeypatch, capsys):
+    # The carve-out: an error a faculty member must act on is worse unactionable than named.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "HTTP 403: forbidden"))
+    assert repos.create_repo("Cohort-f2026", "grades-ada-l", person=True) is False
+    assert "grades-ada-l" in capsys.readouterr().err

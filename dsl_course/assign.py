@@ -376,6 +376,7 @@ def provision_one(
         name=repo,
         private=True,
         description=f"{slug} - submission repo",
+        person=True,
     ):
         return "failed-create"
     else:
