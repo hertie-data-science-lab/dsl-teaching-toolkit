@@ -1,6 +1,6 @@
 # Enrol students
 
-1. Put the list of student into the roster CSV, 
+1. Put the list of students into the roster CSV, 
 2. Automatically send each student an enrolment code, 
 3. Students then self-onboard via a Join course issue.
 
@@ -24,13 +24,14 @@ Live example roster: [`example-course/cohort-org/students.csv`](../example-cours
    >Someone drops? Delete their row - the commit & push off-boards them.
 
 2. **Send enrolment codes.**
-   - In Your **course** org → `.github` → **Actions** → **Send enrolment codes**: pick the cohort.
+   - In your **course** org → `.github` → **Actions** → **Send enrolment codes**: pick the cohort.
    - This workflow writes an `enrol_code` onto every roster row that lacks one and emails each not-yet-onboarded student at their `hertie_email`.
-   - NB: `dry_run` defaults to `true`. It lists masked recipients and subjects only - never a code or a name, because the run log is public. Untick it to write and send.
-   
+   - NB: `dry_run` defaults to `true`. It lists masked recipients and subjects, plus one sample body rendered from placeholders - never a real code or name, because the run log is public. It also checks the mail credential, so a green preview means a real send will authenticate. Untick it to write and send.
+   - **Re-running is safe.** Each row records `code_sent_at` once its code has gone out, and only rows without it are emailed - so a re-run chases the students who still need a code and leaves the rest alone. To deliberately re-send, clear that row's `code_sent_at`.
+
    > **If the emailing integration isn't live for any reason** the codes can still be written into `students.csv` by the `Send enrolment codes` workflow → then copy each student's code into an email of your own and send out manually.
 
-   > Emailing is live once the course org has the `GRAPH_*` secrets (preferred) or the `SMTP_*` ones - set centrally by the DSL team. Only **Send enrolment codes** and **Distribute grades** use them; without them both write their files, send nothing, and say so.
+   > Emailing is live once the course org has the `GRAPH_*` secrets - set centrally by the DSL team. Only **Send enrolment codes** and **Distribute grades** use them; without them both write their files, send nothing, and say so.
 
 3. **Students self-onboard.**
    - Each student opens a **Join course** issue in the cohort's `welcome` repo and pastes their code.

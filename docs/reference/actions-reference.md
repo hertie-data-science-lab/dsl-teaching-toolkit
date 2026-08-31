@@ -26,7 +26,7 @@ grants it: [`access-reference.md`](access-reference.md).
 | **Scheduled release** | **Primary** - the hourly cron fires the cohort's `releases` plan and freezes passed deadlines. Manual runs default to `dry_run=true`. See [07](../07-schedule-releases.md). |
 | **Release materials** | Copy `course_source_path` (a folder, a file, or a comma-separated list) from a course-org `course_source_repo` into the cohort's `cohort_dest_repo` at `cohort_dest_path` - the same four fields as a `schedule.yml` `deploy`. Covers session folders, datasets, root files and code subpackages alike. _Fallback - see [07](../07-schedule-releases.md), [08](../08-release-materials-to-cohort.md)._ |
 | **Release assignment** | Freeze a cohort template from the chosen `assignment-*`, then generate one private `<slug>-<handle>` repo per onboarded student. `include_solution` and `dry_run` default off; `type` defaults to `auto` (follow `schedule.yml` / the template's `grading.yml`). _Fallback - see [07](../07-schedule-releases.md), [09](../09-release-assignment-to-cohort.md)._ |
-| **Send enrolment codes** | Generate an `enrol_code` per roster row, write it back to `students.csv`, email each not-yet-onboarded student theirs. **`dry_run` defaults to `true` - nothing is written or sent until you untick it.** |
+| **Send enrolment codes** | Generate an `enrol_code` per roster row, write it back to `students.csv`, email each not-yet-onboarded student theirs. Safe to re-run: a row's `code_sent_at` stops it being mailed twice. **`dry_run` defaults to `true` - nothing is written or sent until you untick it.** |
 | **Sync site** | Regenerate a cohort's website. Releases, a push to `schedule.yml` and a daily cron already do this for you. |
 
 ## Grades
@@ -38,7 +38,7 @@ Full flow: [Grade and return assignments](../10-grade-and-return-assignments.md)
 | **Grade assignment** | Faculty-side autograder: pins each submission to the frozen deadline snapshot, runs the template's hidden tests, writes `autograde_score` (and `team`, on a group assignment) into `classroom-config/grades/<slug>.csv`. Nothing is written to student repos. |
 | **Sync gradebooks** | Ensure every onboarded, enrolled student has a private `grades-<handle>` repo (student = read). Idempotent. |
 | **Render grades (preview)** | Pivot the grade CSVs into `gradebook/<handle>.yml` + a wide `cohort-gradebook.csv`, and open **one** PR in `classroom-config` - that diff is the preview. |
-| **Distribute grades** | After merging that PR: push each gradebook to the student's private repo and email them. **`dry_run` defaults to `true`**; `silent` pushes without emailing. |
+| **Distribute grades** | After merging that PR: push each gradebook to the student's private repo and email the students whose grades changed. Re-run to retry a notification that failed. **`dry_run` defaults to `true`**; `silent` pushes without emailing. |
 
 ## Optional: public course website
 
