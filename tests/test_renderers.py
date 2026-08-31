@@ -6,7 +6,9 @@ useful guard is: render -> yaml.safe_load -> assert the contract. No network.
 
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -14,6 +16,7 @@ import yaml
 from conftest import workflow_inputs, workflow_jobs
 
 from dsl_course import (
+    mailer,
     profile_readme,
     seed,
     workflows_place,
@@ -1133,3 +1136,54 @@ def test_a_renamed_org_is_corrected_even_with_no_repo_table_markers():
         profile_readme.get_file_content = original
     assert out is not None, "a rename must still be written even with no markers"
     assert "old-org-f2026" not in out
+
+
+# ------------------------------------------------------ the two buttons that send email
+
+MAIL_BUTTONS = ("send_codes", "distribute_grades")
+
+
+@pytest.mark.parametrize("name", MAIL_BUTTONS)
+def test_both_mail_buttons_default_to_a_dry_run(name):
+    # The entire safety rail on a button that emails a whole cohort, and until now it was
+    # asserted nowhere: a renderer edit flipping it would have been green.
+    dry_run = workflow_inputs(ALL_RENDERED[name])["dry_run"]
+    assert dry_run["type"] == "boolean"
+    assert dry_run["default"] is True
+
+
+@pytest.mark.parametrize("name", MAIL_BUTTONS)
+@pytest.mark.parametrize(
+    "value", ["", "true", "True", "TRUE", "yes", "1", " false", "false"]
+)
+def test_the_dry_run_gate_is_fail_closed_under_bash(name, value, tmp_path):
+    # Executed, not string-matched: `[ "$DRY_RUN" = "true" ] && args+=(--dry-run)` sent for
+    # real on ANY value that was not the exact lowercase string - "True", "1", a blank from
+    # a renamed input. Only an explicit `false` may send.
+    gate = next(
+        line.strip()
+        for line in ALL_RENDERED[name].splitlines()
+        if "--no-dry-run" in line
+    )
+    script = f'args=()\n{gate}\nprintf "%s\\n" "${{args[@]}}"'
+    out = subprocess.run(
+        ["bash", "-euo", "pipefail", "-c", script],
+        env={"DRY_RUN": value, "PATH": os.environ["PATH"]},
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    expected = "--no-dry-run" if value == "false" else "--dry-run"
+    assert out.strip() == expected
+
+
+@pytest.mark.parametrize("name", MAIL_BUTTONS)
+def test_the_mail_buttons_carry_every_transport_secret(name):
+    # Nothing tied the workflow's env to the names `mailer` actually reads, so a rename
+    # reached production as a silently unconfigured org rather than a red CI.
+    env = workflow_jobs(ALL_RENDERED[name])
+    step_env: dict = {}
+    for job in env.values():
+        for step in job.get("steps", []):
+            step_env.update(step.get("env") or {})
+    assert set(mailer.GRAPH_ENV) <= set(step_env)

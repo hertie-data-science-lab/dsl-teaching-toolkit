@@ -338,10 +338,14 @@ def _mark_sent(cohort_org: str, sent: list[str]) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cohort-org", required=True)
+    # Default ON, and the rendered workflow passes --dry-run / --no-dry-run explicitly.
+    # `store_true` meant a bare `python3 -m dsl_course.enrol_codes --cohort-org X` sent
+    # for real, with no confirmation step - the safe default lived only in the YAML.
     parser.add_argument(
         "--dry-run",
-        action="store_true",
-        help="Preview the codes + emails; write nothing, send nothing.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Preview the codes + emails; write nothing, send nothing (default).",
     )
     args = parser.parse_args()
     # A read helper (or the mail transport) that couldn't reach its API raises; in an

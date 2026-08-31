@@ -855,10 +855,14 @@ def main() -> int:
                 action="store_true",
                 help="Skip the email notification (just push the grades).",
             )
+            # Default ON, as in enrol_codes: the rendered workflow passes --dry-run /
+            # --no-dry-run explicitly, so a bare local invocation cannot send by accident.
+            # `sync --dry-run` above keeps store_true - it is not a mail path.
             p.add_argument(
                 "--dry-run",
-                action="store_true",
-                help="Preview the grade emails; push nothing, send nothing.",
+                action=argparse.BooleanOptionalAction,
+                default=True,
+                help="Preview the grade emails; push nothing, send nothing (default).",
             )
     args = parser.parse_args()
 

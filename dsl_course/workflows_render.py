@@ -725,7 +725,7 @@ on:
 {_MAIL_ENV}
         run: |
           args=(--cohort-org "$COHORT_ORG")
-          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          if [ "$DRY_RUN" = "false" ]; then args+=(--no-dry-run); else args+=(--dry-run); fi
           [ "$SILENT" = "true" ] && args+=(--no-notify)
           python3 -m dsl_course.grades distribute "${{args[@]}}"
 """
@@ -760,7 +760,7 @@ on:
 {_MAIL_ENV}
         run: |
           args=(--cohort-org "$COHORT_ORG")
-          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          if [ "$DRY_RUN" = "false" ]; then args+=(--no-dry-run); else args+=(--dry-run); fi
           python3 -m dsl_course.enrol_codes "${{args[@]}}"
 """
 
