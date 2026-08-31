@@ -87,8 +87,7 @@ What that means in practice:
 
 Two things differ from `.gitignore`, both deliberate:
 
-- **The file itself is never released.** Students and auditors have read on the cohort
-  materials repo, and the file's contents are a list of what you held back.
+- **The file itself is never released.**
 - **It covers each repo it lives in, not the whole course.** A pattern in
   `course-materials-f2026` does nothing for `assignment-1-f2026`; put one in each repo you
   want filtered. For an assignment, patterns on the default branch filter the starter
