@@ -82,6 +82,7 @@ import yaml
 from .course import CONFIG_REPO, coerce_date
 from .gh_contents import get_file_content, get_file_with_sha, put_file, repo_tree
 from .log import log, log_err
+from .releaseignore import RELEASEIGNORE, excluded_in_tree
 from .repos import default_branch, repo_exists
 
 SCHEDULE_PATH = "schedule.yml"
@@ -1040,6 +1041,13 @@ class SourceFault:
     # default: it is half of `key`, so a caller that forgets it would not fail, it would
     # quietly give this fault someone else's identity in the digest's state.
     field: str
+    # The loudest this fault may ever get. A MISSING source escalates to ERROR, because
+    # the copy will not ship and nobody meant that. A source a `.releaseignore` withholds
+    # is a decision faculty already made, so it caps at WARNING: the hourly scheduler
+    # folds ERROR into its exit code, and a `.releaseignore` covering a path still named
+    # in schedule.yml would otherwise redden that cron every hour for the rest of the
+    # term - the outcome this feature's every other channel is written to avoid.
+    ceiling: Severity = Severity.ERROR
 
     @property
     def key(self) -> str:
@@ -1061,9 +1069,9 @@ class SourceFault:
             return Severity.ADVISORY
         left = self.fires - now
         if left <= SOURCE_ERROR_WINDOW:
-            return Severity.ERROR
+            return min(Severity.ERROR, self.ceiling)
         if left <= SOURCE_WARN_WINDOW:
-            return Severity.WARNING
+            return min(Severity.WARNING, self.ceiling)
         return Severity.ADVISORY
 
     def line(self) -> str:
@@ -1128,11 +1136,47 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                 for _, where, fires in wanted[repo]
             )
             continue
+        # Which of this repo's paths a `.releaseignore` withholds - computed once per
+        # repo, off the tree already fetched above, and `read` is called only for the
+        # ignore files themselves. A repo without one costs nothing.
+        try:
+            withheld = set(
+                excluded_in_tree(
+                    paths,
+                    # `repo` bound now, not looked up later: the read is eager, but a
+                    # lambda over a loop variable is one edit away from not being.
+                    lambda p, _r=repo: get_file_content(course_org, _r, p),
+                )
+            )
+        except RuntimeError:
+            # `get_file_content` raises on any non-404 read failure, and this function
+            # promises that a repo it cannot READ is passed over in silence - its one
+            # caller that matters here is the commit-time validator, where a transient 429
+            # would otherwise be a traceback on faculty's own push. Degrade to "no
+            # withheld paths known": a missing source is still reported below.
+            withheld = set()
         for path, where, fires in wanted[repo]:
             # "" is the assignment case: the repo IS the source, so its existence is all
             # there is to check. `/` and `.` mean the whole repo, likewise.
             clean = path.strip("/").strip()
-            if clean in ("", ".") or clean in paths:
+            if clean in ("", "."):
+                continue
+            if clean in withheld:
+                # The file EXISTS, so nothing looks wrong - which is why this is worth
+                # saying here rather than leaving to the `::warning::` a green release run
+                # buries. Same rung as a missing source: the copy ships nothing either way.
+                out.append(
+                    SourceFault(
+                        where,
+                        f"`{repo}/{clean}` is withheld by a `{RELEASEIGNORE}` - this copy "
+                        f"ships nothing",
+                        fires,
+                        field="course_source_path",
+                        ceiling=Severity.WARNING,
+                    )
+                )
+                continue
+            if clean in paths:
                 continue
             out.append(
                 SourceFault(

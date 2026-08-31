@@ -61,6 +61,56 @@ Do not edit the cohort's released copy directly - instructors have read on it fo
 reason. An edit there survives only until the next release of that path, then vanishes with
 no warning.
 
+## Withholding files with `.releaseignore`
+
+New materials repos are scaffolded with a `.releaseignore` whose lines are all commented
+out - uncomment or add to it. Repos scaffolded earlier have none; create one by hand.
+
+It uses **`.gitignore` syntax**, in any directory, and applies to every copy out of the
+repo it sits in: the cohort release, the public course site, and the assignment handout.
+
+```
+# A comment must start its OWN line - a `#` after a pattern is part of the pattern.
+
+# never release a solutions notebook, at any depth
+**/solutions.ipynb
+
+# a whole directory
+__pycache__/
+
+*.key
+
+# a folder's contents, withheld while you work on them...
+/drafts/*
+# ...except this one
+!/drafts/week01.md
+```
+
+> Note the shape of that last pair. `drafts/` withholds the **directory**, and nothing
+> inside a withheld directory can be brought back - `!drafts/week01.md` after `drafts/`
+> does nothing. Withhold the contents (`/drafts/*`) when you want to re-include one.
+
+It behaves like `.gitignore` throughout:
+
+- **Nested.** A `.releaseignore` in a subfolder applies to that subfolder, and overrides the
+  one above it. Patterns anchor to the file's own directory.
+- **Silent.** Withheld files simply do not appear. The run stays green and says nothing.
+- **Not retroactive.** Adding a pattern stops *future* copies; it does not delete a file you
+  already released. Remove that from the cohort repo by hand.
+- **Naming a withheld path is refused.** Asking to release a path a `.releaseignore` covers
+  copies nothing and warns on the run summary - the same way `git add` refuses an ignored
+  file. `--validate` on `schedule.yml` flags it too, so a scheduled release says so when you
+  commit it rather than months later when it fires.
+
+Two things differ from `.gitignore`, both deliberate:
+
+- **The file itself is never released.** Students and auditors have read on the cohort
+  materials repo, and the file's contents are a list of what you held back.
+- **It covers each repo it lives in, not the whole course.** A pattern in
+  `course-materials-f2026` does nothing for `assignment-1-f2026`; put one in each repo you
+  want filtered. For an assignment, patterns on the default branch filter the starter
+  students receive, and patterns on the `solution` branch filter the model answer.
+
 ## The unwritten root stubs are withheld until you write them
 
 Two root files are withheld while they are still the scaffold's placeholder: `README.md` and
