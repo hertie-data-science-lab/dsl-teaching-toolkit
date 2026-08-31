@@ -83,17 +83,36 @@ republishes it. Rotation is still a per-org Bootstrap run from central.
 Enrolment-code and grade emails go through `dsl_course.mailer` under a **tenant-level mail
 credential** - a one-time central setup, not per course. `dry_run` previews need nothing.
 
-- **Microsoft Graph (preferred)** - secrets `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`,
-  `GRAPH_CLIENT_SECRET`, `GRAPH_SENDER`. Needs an Entra app registration with the **Mail.Send**
-  application permission, admin-consented, scoped to one shared mailbox (Exchange application
-  access policy), plus that shared mailbox as the sender.
-- **SMTP (fallback)** - `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD` (+ optional `SMTP_PORT`,
-  `SMTP_FROM`). Most M365 tenants disable SMTP AUTH (error `5.7.139`), so Graph is usually the
-  only viable route.
+Four secrets: `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_CERT`, `GRAPH_SENDER`. The
+Entra app holds the **Mail.Send** application permission (admin-consented) and sends as the
+shared mailbox `datasciencelab@hertie-school.org`. There is no SMTP fallback: the tenant
+disables SMTP AUTH, so it could never fire.
 
-Set the secrets once; they must reach each course org's `.github` repo (where the send
-workflows run). **Status: not yet configured in any DSL org** - a request to Hertie IT for the
-Entra app registration is pending.
+`Mail.Send` is tenant-wide by default; an Exchange application access policy restricts this app
+to that one mailbox. Verified 2026-08-31: sending as any other mailbox is refused with
+`ErrorAccessDenied ... [RAOP]`. Re-check after any change to the app registration.
+
+The app authenticates **by certificate, not a client secret**. `GRAPH_CLIENT_CERT` is one
+multi-line secret holding the PEM certificate *and* its unencrypted private key (as
+`cat cert.cer key.pem` produces); the mailer derives the `x5t` thumbprint from the certificate
+itself, so the two halves cannot drift apart. Entra holds only the public half.
+
+**Certificate expiry: 2028-08-26.** Nothing warns you but the mailer, which logs a warning
+inside 30 days *on a run that actually sends* - a lapse otherwise surfaces as enrolment codes
+silently not arriving. To rotate: generate a new keypair, upload the new `.cer` to the app
+registration (it can hold several), update `GRAPH_CLIENT_CERT`, then remove the old certificate.
+
+Because a GitHub secret can be written but never read back, and Entra only ever gets the public
+half, **the private key needs a copy outside GitHub** - institutional password manager or a
+shared vault, never the repo. Without one, a lost laptop means a new keypair and an Entra ticket.
+
+Set the secrets once as **org** secrets on each course org (`--visibility all`); the send
+workflows run in that org's public `.github`, so no per-repo propagation is needed. A `dry_run`
+acquires a token after printing its preview, so a credential that is SET but wrong reds the
+run. An org with no secrets at all still previews green, saying the preview proves nothing.
+
+**Status: live on `hertie-dsl-demo-course-e1234`, `hertie-intro-to-data-science-c11`,
+`hertie-maths-data-science-C23` and `hertie-nlp-e1282`.**
 
 ## Deploying the toolkit
 
@@ -151,7 +170,7 @@ covers one nightly refresh:
 - [ ] **Refresh actions** green, both the Promote-triggered run and the next nightly cron
 - [ ] one **Scheduled release** tick green (hourly; a dry run is enough if nothing is due)
 - [ ] a **Join** issue with a deliberately wrong code is rejected as usual
-- [ ] **Send enrolment codes** with `dry_run` previews codes and emails and sends nothing
+- [ ] **Send enrolment codes** with `dry_run` previews codes and emails, sends nothing, and reports `Graph credential OK` (if it says the preview proves nothing, the org's secrets are unset)
 - [ ] no failure issue opened in `hertie-dsl-demo-course-e1234/.github`
 
 ### Rollback

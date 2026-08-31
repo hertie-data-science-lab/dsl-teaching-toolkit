@@ -175,7 +175,7 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
         handles = {s.github_handle for s in rows}
         for handle in sorted(handles):
             if dry_run:
-                log_person(f"    DRY-RUN enroll: {handle} -> org member")
+                log_person(f"    DRY-RUN enrol: {handle} -> org member")
             elif not set_org_membership(cohort_org, handle, role="member"):
                 errors += 1
         # Team membership via the shared reconcile so pruning inherits its guard:

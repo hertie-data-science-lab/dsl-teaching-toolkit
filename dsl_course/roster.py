@@ -3,7 +3,7 @@
 The single durable roster artifact is a PRIVATE per-cohort `students.csv`, kept in
 the cohort org's `classroom-config` repo. Columns:
 
-    hertie_email,name,github_handle,github_id,enrol_code,role
+    hertie_email,name,github_handle,github_id,enrol_code,role,code_sent_at
 
 These are the columns the engine READS; a roster may carry any others faculty want
 (a registrar id, a lecture section, a notes column) and they are carried through
@@ -14,6 +14,10 @@ extra column is neither read nor lost.
 `github_handle` / `github_id` are blank until the student onboards (the `welcome` Join
 issue fills them); a row with a blank handle is enrolled-but-not-yet-onboarded and is
 skipped by provisioning.
+
+`code_sent_at` is SYSTEM-owned and records when that row's enrolment code was emailed.
+Blank means "not yet emailed", which is what Send enrolment codes selects on - without it,
+every re-run re-mailed every student who had not yet opened a Join issue.
 
 `role` splits the cohort into `enrolled` (the default - full participants) and `auditor`
 (read-only: released materials, but no assignment repos and no gradebook). A roster
@@ -40,6 +44,7 @@ FIELDS = (
     "github_id",
     "enrol_code",
     "role",
+    "code_sent_at",
 )
 # The columns no roster may lack. `enrol_code` and `role` were added later and stay
 # optional so an older cohort keeps parsing; these two are what every consumer keys on.
@@ -56,6 +61,7 @@ class Student:
         ""  # random non-PII token the bot generates + emails; pasted to enrol
     )
     role: str = ROLE_ENROLLED  # `enrolled` (default) or `auditor` (read-only)
+    code_sent_at: str = ""  # when the code email went out; blank = not yet emailed
 
     @property
     def onboarded(self) -> bool:

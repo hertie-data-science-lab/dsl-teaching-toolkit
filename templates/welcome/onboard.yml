@@ -92,8 +92,8 @@ jobs:
                 }
               }
               if (!code) return fail(
-                `Thanks @${handle} - I couldn't read an **enrolment code** from the form (codes look like \`dsl-xxxxxx\`). ` +
-                `Please open a new Join issue with the code in the form field - never in a comment, which is public and stays public.`,
+                `Thanks @${handle} - there was no valid **enrolment code** included in the submitted form (codes look like \`dsl-xxxxxx\`). ` +
+                `Please open a new Join course issue with the code in the form field.`,
                 'needs-review');
 
               // Throttle, BEFORE the roster read and before any bot-token work. Every Join
@@ -110,15 +110,13 @@ jobs:
                 creator: handle, labels: 'needs-review', per_page: 100,
               })).filter(i => !i.pull_request && i.number !== issue.number);
               if (unresolved.length >= 3) return fail(
-                `Thanks @${handle} - you have ${unresolved.length} unresolved Join issues - contact the teaching team. ` +
-                `I have not read the roster for this one. They will sort out what went wrong on the earlier issues; ` +
-                `please don't open another (and never put your enrolment code in a comment).`,
+                `Thanks @${handle} - you have ${unresolved.length} unresolved Join course issues - contact the teaching team.`,
                 'needs-review');
 
               if (!process.env.HAS_BOT) {
                 return fail(
                   `Thanks @${handle} - enrolment is **not yet armed**: the \`DSL_BOT_TOKEN\` secret is unset, ` +
-                  `so I can't read the private roster or invite you. A maintainer will action this.`,
+                  `so I can't read the private roster or invite you. Contact the instructor(s) for this course.`,
                   'needs-review');
               }
 
@@ -147,18 +145,17 @@ jobs:
               // required, so an older cohort's roster keeps onboarding.
               const iRole = header.indexOf('role');
               if (iHandle < 0 || iId < 0 || iCode < 0) return fail(
-                `Thanks @${handle} - the roster's header is missing a required column ` +
-                `(\`github_handle\`, \`github_id\`, \`enrol_code\`). A maintainer will action this.`,
+                `Thanks @${handle} - the enrolment roster file's header is missing a required column ` +
+                `(\`github_handle\`, \`github_id\`, \`enrol_code\`). Contact the instructor(s) for this course.`,
                 'needs-review');
 
               // Match the code to a registrar-seeded row - reject non-enrolees. ONE message for
               // "no such code" and "code already bound to another account": telling them apart
               // in a public issue confirms to anyone that a pasted code is a real, live one.
               const NO_MATCH =
-                `Thanks @${handle} - that enrolment code could not be matched to an unclaimed roster row. ` +
+                `Thanks @${handle} - that enrolment code could not be matched to an unclaimed enrolment placement. ` +
                 `Check the code in your email; if you have already joined from another GitHub account, ` +
-                `or think this is a mistake, contact the teaching team. Do not post the code in a comment - ` +
-                `comments are public and are never redacted.`;
+                `or think this is a mistake, contact the teaching team.`;
               // Single-use: a code binds to the FIRST account that claims it. The one
               // exception is that account under a NEW NAME. A GitHub id is immutable and a
               // login is not, so a row whose `github_id` is this user's IS this user, whatever
@@ -229,7 +226,7 @@ jobs:
                     // they name - stop rather than write into the wrong cells.
                     if (header.join(',') !== columns) return fail(
                       `Thanks @${handle} - the roster's columns changed while I was writing to it, ` +
-                      `so I stopped rather than risk writing into the wrong cells. A maintainer will action this.`,
+                      `so I stopped rather than risk writing into the wrong cells. Please contact the instructor(s) for this course.`,
                       'needs-review');
                   }
                 }
@@ -254,8 +251,7 @@ jobs:
                   owner: org, repo: context.repo.repo, issue_number: issue.number, body: [
                     `Thanks **@${handle}** - your enrolment code is matched, and your handle + GitHub id are now linked to that roster row.`,
                     ``,
-                    `- You're already an **owner/admin of \`${org}\`**, so I made **no access changes**: adding you as a \`member\` would DOWNGRADE your owner role and lock you out of the private repos.`,
-                    `- Nothing else to do. To exercise the real student path end to end, re-run this from an account that isn't org staff.`,
+                    `- You're already an **owner/admin of \`${org}\`**, so there are **no access changes**. Nothing else to do.`,
                   ].join('\n') });
                 await github.rest.issues.addLabels({
                   owner: org, repo: context.repo.repo, issue_number: issue.number, labels: ['staff'] });
@@ -283,8 +279,7 @@ jobs:
                 owner: org, repo: context.repo.repo, issue_number: issue.number, body: [
                   `Welcome **@${handle}** - your enrolment code is matched.`,
                   ``,
-                  `- **Check your email and accept the invitation to the \`${org}\` org** - until you accept, you can't see anything here.`,
-                  `- Your handle + GitHub id are recorded and your access is set from the roster (released materials unlock once you've accepted; assignment repos, if your enrolment includes them, appear as the teaching team provisions each one).`,
+                  `- **Check your email and accept the invitation to the \`${org}\` org**. Once you've accepted, your handle + GitHub id are recorded and your access is set. Until you accept, you can't see anything here.`,
                 ].join('\n') });
               // One label for everyone. This issue is public and permanent: a per-role label
               // would publish each student's enrolment status (enrolled vs auditing).
@@ -302,7 +297,7 @@ jobs:
               // that did not expect to fail.
               await fail(
                 `Thanks @${handle} - something went wrong on my side (\`${e.status || e.name}\`). ` +
-                `A maintainer will action this; there is nothing you need to do.`,
+                `Please contact the instructor(s) for this course; there is nothing further you need to do.`,
                 'needs-review');
             }
         env:

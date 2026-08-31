@@ -1,12 +1,12 @@
-hertie_email,name,github_handle,github_id,enrol_code,role
-anna.adams@students.hertie-school.org,Anna Adams,,,,enrolled
-ben.baker@students.hertie-school.org,Ben Baker,,,,enrolled
-carla.cohen@students.hertie-school.org,Carla Cohen,,,,enrolled
-dan.davies@students.hertie-school.org,Dan Davies,,,,
-eve.evans@students.hertie-school.org,Eve Evans,,,,auditor
-amara.okonjo@students.hertie-school.org,Amara Okonjo,,,,enrolled
-jonas.bergstrom@students.hertie-school.org,Jonas Bergstrom,,,,enrolled
-k.nowak.weiss@students.hertie-school.org,"Nowak-Weiss, Katarzyna",,,,enrolled
-miguel.santos@students.hertie-school.org,Miguel Santos,,,,enrolled
-priya.raman@students.hertie-school.org,Priya Raman,,,,enrolled
-tomas.havel@students.hertie-school.org,Tomas Havel,,,,enrolled
+hertie_email,name,github_handle,github_id,enrol_code,role,code_sent_at
+anna.adams@students.hertie-school.org,Anna Adams,,,,enrolled,
+ben.baker@students.hertie-school.org,Ben Baker,,,,enrolled,
+carla.cohen@students.hertie-school.org,Carla Cohen,,,,enrolled,
+dan.davies@students.hertie-school.org,Dan Davies,,,,,
+eve.evans@students.hertie-school.org,Eve Evans,,,,auditor,
+amara.okonjo@students.hertie-school.org,Amara Okonjo,,,,enrolled,
+jonas.bergstrom@students.hertie-school.org,Jonas Bergstrom,,,,enrolled,
+k.nowak.weiss@students.hertie-school.org,"Nowak-Weiss, Katarzyna",,,,enrolled,
+miguel.santos@students.hertie-school.org,Miguel Santos,,,,enrolled,
+priya.raman@students.hertie-school.org,Priya Raman,,,,enrolled,
+tomas.havel@students.hertie-school.org,Tomas Havel,,,,enrolled,

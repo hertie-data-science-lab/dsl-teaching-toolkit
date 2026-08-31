@@ -142,11 +142,16 @@ Course `.github` → **Actions** → **Distribute grades**: pick `cohort_org`, p
 
 Copies each merged gradebook to `grades-<handle>/grades.yml` and emails the student a "your grades have been updated" link (no marks in the email). 
 
-> *NB: the automated email functionality is configured centrally by the DSL team; if/when it isn't live, the grades still reach each student's repo, but no email notification will be dispatched.
+> NB: email is configured centrally by the DSL team. Where it is not live the grades still reach each student's repo; only the notification is skipped.
 
 **`dry_run` defaults to `true`** - it pushes nothing and sends nothing until you untick it.
-A dry run lists the **masked** recipient and the subject of each message, never the body:
-this log is public. `silent` pushes the grades without emailing.
+A dry run lists the **masked** recipient and subject of each message, plus one sample body
+rendered from placeholders - never a real student's, because this log is public. `silent`
+pushes the grades without emailing.
+
+Only students whose gradebook actually changed are emailed, and a notification that failed is
+retried by simply re-running: `gradebook/notified.csv` records who has been told about which
+version, so a re-run reaches exactly the students a failure left out.
 
 ## Next
 

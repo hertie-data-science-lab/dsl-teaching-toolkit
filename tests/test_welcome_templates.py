@@ -469,7 +469,7 @@ def test_onboard_throttles_a_student_before_it_touches_the_roster():
     # The THRESHOLD, as a number and not as a prefix: `>= 30` contains `>= 3`, and a
     # throttle that only fires on the thirtieth open Join issue is no throttle at all.
     assert re.search(r"unresolved\.length >= 3\b", code)
-    assert "unresolved Join issues - contact the teaching team" in code
+    assert "unresolved Join course issues - contact the teaching team" in code
     assert throttle < code.index("await readRoster()")
     assert throttle < code.index("process.env.HAS_BOT")
 

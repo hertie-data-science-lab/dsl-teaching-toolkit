@@ -280,9 +280,10 @@ sequenceDiagram
   Note over O,St: a push to students.csv triggers "Sync membership", reconciling both teams
 ```
 
-The enrolment code is random and carries no personal data, so nothing in the public issue needs
-redacting; it is unguessable and single-use, so a classmate cannot bind someone else's roster
-row to their account. The handle comes from the issue **author**, so it cannot be spoofed.
+The enrolment code carries no personal data, but it IS a live credential until claimed, so the
+bot redacts it from the issue body - it stays readable in the edit history until the issue is
+deleted. It is unguessable and single-use, so a classmate cannot bind someone else's roster row
+to their account. The handle comes from the issue **author**, so it cannot be spoofed.
 
 Onboarding is **burst-safe**: concurrency is scoped per issue rather than per repo, and the CSV
 write retries on 409/422 with the whole decision (duplicate check, size cap, append) *inside* the
@@ -697,7 +698,8 @@ Self-contained - workflows and their Python implementation both live in this rep
   - `collect` - the faculty-side autograder: deadline snapshots, pinned checkout, contained test
     run, fire-once sentinels, `autograde_score` into the grade CSV.
   - `grades` - gradebook repos (`sync`), the preview PR (`render`), fan-out + email (`distribute`).
-  - `enrol_codes` / `mailer` - generate + email enrolment codes; Graph or SMTP transport.
+  - `enrol_codes` / `mailer` - generate + email enrolment codes; Graph (certificate-signed
+    JWT assertion, no client secret).
   - `scaffold` - create structured materials / assignment repos + the website (cohort or course).
   - `site` - regenerate the cohort website (`sync_site`) and the public course website
     (`sync_public_site` / `resync_public_site`).

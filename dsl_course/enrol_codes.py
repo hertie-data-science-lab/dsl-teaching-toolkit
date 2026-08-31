@@ -5,7 +5,7 @@ Join issue, so no personal data ever touches the public repo - and because the c
 unguessable, a classmate can't bind your roster row to their account. This one action:
 
     1. fills blank `enrol_code` cells in classroom-config/students.csv (idempotent), then
-    2. emails each not-yet-onboarded student their code over SMTP (preview with --dry-run).
+    2. emails each not-yet-onboarded student their code (preview with --dry-run).
 
 Email reaches the student's UNIVERSITY inbox (the roster `hertie_email`), replacing the
 Excel -> Power Automate -> Outlook mail-merge. Reuses dsl_course.mailer.
@@ -25,6 +25,7 @@ import csv
 import io
 import secrets
 import sys
+from datetime import UTC, datetime
 
 from . import mailer, roster
 from .discovery import course_name_for_cohort
@@ -39,11 +40,11 @@ def make_code() -> str:
     return "dsl-" + "".join(secrets.choice(_ALPHABET) for _ in range(6))
 
 
-def fill_enrol_codes_in_csv(text: str, codes_by_row: dict[int, str]) -> str:
-    """Surgically write enrol codes into the RAW students.csv, preserving everything else.
+def fill_column_in_csv(text: str, column: str, values_by_row: dict[int, str]) -> str:
+    """Surgically write one column into the RAW students.csv, preserving everything else.
 
-    `codes_by_row` maps a 0-based DATA-row index (matching `roster.parse` order) to the code
-    to drop into that row's blank `enrol_code` cell. Only that one column is touched: every
+    `values_by_row` maps a 0-based DATA-row index (matching `roster.parse` order) to the
+    value to drop into that row's blank `column` cell. Only that one column is touched: every
     other column - including ones `roster.FIELDS` doesn't know about, e.g. a faculty-added
     `notes`/`moodle_id` - is carried through untouched, and no cell's raw text is normalised
     (so a `role` of `audit`/`Auditor` is left exactly as written). This replaces the old
@@ -51,18 +52,20 @@ def fill_enrol_codes_in_csv(text: str, codes_by_row: dict[int, str]) -> str:
     rewrote
     `role`, silently dropping unknown columns and mangling role text on every code write.
 
-    The `enrol_code` column is appended if the roster predates it."""
+    Blank cells only, which is what makes both callers idempotent: a code already issued is
+    never rotated, and a row already marked as emailed is never re-stamped. The column is
+    appended if the roster predates it, so a deployed cohort needs no migration."""
     # read_csv, not a bare DictReader: this path bypasses `roster.parse`, and a
     # `;`-delimited Excel export was written straight back with a code column bolted on -
     # exit 0, roster destroyed.
     reader = read_csv(text, roster.REQUIRED_FIELDS, roster.ROSTER_PATH)
     fieldnames = list(reader.fieldnames or [])
-    if "enrol_code" not in fieldnames:
-        fieldnames.append("enrol_code")
+    if column not in fieldnames:
+        fieldnames.append(column)
     rows = list(reader)
     for i, row in enumerate(rows):
-        if i in codes_by_row and not (row.get("enrol_code") or "").strip():
-            row["enrol_code"] = codes_by_row[i]
+        if i in values_by_row and not (row.get(column) or "").strip():
+            row[column] = values_by_row[i]
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=fieldnames)
     writer.writeheader()
@@ -71,14 +74,14 @@ def fill_enrol_codes_in_csv(text: str, codes_by_row: dict[int, str]) -> str:
     return out.getvalue()
 
 
-def rows_for_codes(text: str, codes: list[tuple[int, str, str]]) -> dict[int, str]:
-    """Where each generated code belongs in `text`, as `{row index: code}`.
+def rows_for_values(text: str, items: list[tuple[int, str, str]]) -> dict[int, str]:
+    """Where each value belongs in `text`, as `{row index: value}`.
 
-    `codes` is `(row index at generation time, hertie_email, code)`. A row is re-located by
+    `items` is `(row index at read time, hertie_email, value)`. A row is re-located by
     EMAIL, because a row index taken from an earlier read is not stable across an edit that
     landed in between - a Join issue filling in a handle, a faculty member inserting a row.
     A row carrying no email at all cannot be re-located and keeps its original index; that
-    is the one row for which a concurrent edit can still land the code on the wrong line,
+    is the one row for which a concurrent edit can still land the value on the wrong line,
     and it is also a row nobody can be emailed at.
 
     An email that is NOT unique cannot re-locate anything either - a registrar export with
@@ -92,9 +95,9 @@ def rows_for_codes(text: str, codes: list[tuple[int, str, str]]) -> dict[int, st
             # -1 marks "more than one row carries this" - not usable as a destination.
             seen[email] = i if email not in seen else -1
     placed: dict[int, str] = {}
-    for index, email, code in codes:
+    for index, email, value in items:
         at = seen.get(email, -1)
-        placed[at if at >= 0 else index] = code
+        placed[at if at >= 0 else index] = value
     return placed
 
 
@@ -103,31 +106,36 @@ def rows_for_codes(text: str, codes: list[tuple[int, str, str]]) -> dict[int, st
 WRITE_ATTEMPTS = 3
 
 
-def write_codes(
-    cohort_org: str, raw: str, sha: str, codes: list[tuple[int, str, str]]
+def write_column(
+    cohort_org: str,
+    raw: str,
+    sha: str,
+    column: str,
+    items: list[tuple[int, str, str]],
+    message: str,
 ) -> str | None:
-    """Commit the generated codes into students.csv without clobbering a concurrent edit.
+    """Commit one column into students.csv without clobbering a concurrent edit.
     Returns the roster text AS COMMITTED, or None if no attempt was accepted.
 
     `put_file`'s ordinary path re-reads the sha immediately before writing, so the write
     succeeds however stale its content is: a Join binding committed while Send codes was
     running was silently reverted, and the student's handle was simply gone. The sha the
     roster was READ at is sent instead, so GitHub refuses a write onto a file that has
-    moved on. We then re-read, re-apply only the codes THIS run generated onto the fresh
-    text - `fill_enrol_codes_in_csv` fills blank cells only, so a code that arrived in
+    moved on. We then re-read, re-apply only the values THIS run produced onto the fresh
+    text - `fill_column_in_csv` fills blank cells only, so a value that arrived in
     between is left exactly as it is - and try again.
 
     Which is exactly why the committed TEXT is returned rather than a bare success: after
     a retry the roster can hold a different code from the one this run generated, and the
     caller must email what the roster holds."""
     for attempt in range(1, WRITE_ATTEMPTS + 1):
-        body = fill_enrol_codes_in_csv(raw, rows_for_codes(raw, codes))
+        body = fill_column_in_csv(raw, column, rows_for_values(raw, items))
         if put_file(
             cohort_org,
             roster.CONFIG_REPO,
             roster.ROSTER_PATH,
             body.encode(),
-            f"roster: assign {len(codes)} enrolment code(s)",
+            message,
             expected_sha=sha,
         ):
             return body
@@ -179,7 +187,7 @@ def code_message(
     )
     body = (
         f"Hello {student.name or 'there'},\n\n"
-        f"To join {course} on GitHub, open a 'Join' issue here:\n"
+        f"To join {course} on GitHub, open a 'Join course' issue here:\n"
         f"  {welcome_url}\n\n"
         f"and paste this enrolment code when asked:\n\n"
         f"    {student.enrol_code}\n\n"
@@ -234,7 +242,14 @@ def run(cohort_org: str, dry_run: bool = False) -> int:
             for i, s in enumerate(students)
             if not before[i] and s.enrol_code
         ]
-        written = write_codes(cohort_org, raw, raw_sha, new_codes)
+        written = write_column(
+            cohort_org,
+            raw,
+            raw_sha,
+            "enrol_code",
+            new_codes,
+            f"roster: assign {len(new_codes)} enrolment code(s)",
+        )
         if written is None:
             log_err(
                 f"could not write the enrolment codes to {roster.ROSTER_PATH} in "
@@ -248,11 +263,20 @@ def run(cohort_org: str, dry_run: bool = False) -> int:
         students = roster.parse(written)
 
     welcome_url = f"https://github.com/{cohort_org}/welcome/issues/new/choose"
-    targets = [
-        s for s in students if s.enrol_code and s.hertie_email and not s.onboarded
-    ]
+    # One set, two jobs: `code_sent_at` keeps a re-run from re-mailing students who already
+    # have their code, and adding each address as we go collapses a duplicated roster row,
+    # which would otherwise get two emails carrying two different codes.
+    already = {
+        s.hertie_email.strip().casefold() for s in students if s.code_sent_at.strip()
+    }
+    targets = []
+    for s in students:
+        email = s.hertie_email.strip().casefold()
+        if s.enrol_code and email and not s.onboarded and email not in already:
+            already.add(email)
+            targets.append(s)
     if not targets:
-        log_ok("no not-yet-onboarded students with an email to mail.")
+        log_ok("no not-yet-onboarded students still to be sent a code.")
         return 0
     # The codes are already committed to students.csv by this point, and
     # load_yaml_config RAISES on a malformed dsl-course.yml or a non-404 read failure -
@@ -268,16 +292,57 @@ def run(cohort_org: str, dry_run: bool = False) -> int:
     sent = mailer.send_bulk(
         messages, dry_run=dry_run, sample=sample_body(welcome_url, course_name)
     )
-    return 0 if sent == len(messages) else 1
+    if not dry_run and sent and _mark_sent(cohort_org, sent) != 0:
+        return 1
+    return 0 if len(sent) == len(messages) else 1
+
+
+def _mark_sent(cohort_org: str, sent: list[str]) -> int:
+    """Stamp `code_sent_at` on the rows that were actually emailed. 0 on success.
+
+    Re-reads first: the code write above moved the sha, and a Join issue can land during
+    the several minutes a throttled batch takes."""
+    read = get_file_with_sha(cohort_org, roster.CONFIG_REPO, roster.ROSTER_PATH)
+    if read is not None:
+        raw, sha = read
+        stamp = datetime.now(UTC).isoformat(timespec="seconds")
+        went_out = set(sent)
+        marks = [
+            (i, s.hertie_email.strip(), stamp)
+            for i, s in enumerate(roster.parse(raw))
+            if s.hertie_email in went_out
+        ]
+        if marks and write_column(
+            cohort_org,
+            raw,
+            sha,
+            "code_sent_at",
+            marks,
+            f"roster: record {len(marks)} enrolment code email(s) sent",
+        ):
+            log_ok(f"recorded {len(marks)} code email(s) as sent")
+            return 0
+    # The one failure that must never be swallowed: the students HAVE their codes, and
+    # nothing on disk says so.
+    log_err(
+        f"{len(sent)} student(s) were emailed but {roster.ROSTER_PATH} in {cohort_org} "
+        f"could not record it - re-running WILL email them again. Fix the roster write, "
+        f"or fill code_sent_at by hand."
+    )
+    return 1
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cohort-org", required=True)
+    # Default ON, and the rendered workflow passes --dry-run / --no-dry-run explicitly.
+    # `store_true` meant a bare `python3 -m dsl_course.enrol_codes --cohort-org X` sent
+    # for real, with no confirmation step - the safe default lived only in the YAML.
     parser.add_argument(
         "--dry-run",
-        action="store_true",
-        help="Preview the codes + emails; write nothing, send nothing.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Preview the codes + emails; write nothing, send nothing (default).",
     )
     args = parser.parse_args()
     # A read helper (or the mail transport) that couldn't reach its API raises; in an

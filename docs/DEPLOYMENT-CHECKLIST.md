@@ -15,7 +15,7 @@ Accompanies the e2e [worked example](../example-course/).
 | *(optional)* | 5. Course admins | course | edit [`dsl-course.yml`](#dsl-courseyml), commit to `main` ([05](05-manage-teaching-team.md)) | GitHub handles, optional `start`/`end` | admin on the course org + every cohort, reconciled |
 | `[required]` | 6. Refresh | course | course `.github` → **Refresh actions** | none | dropdowns populated, secrets on content repos |
 
-> Enrolment-code + grade emails send through a centrally configured mailbox ([details](../docs-admin-arch/central-admin.md#email)). Where it isn't live yet, enrolment codes still land in `students.csv` (from which they need to be manually emailed), and grades are still sent to students' grades repos (just the notification email is not sent).
+> Enrolment-code + grade emails send as `datasciencelab@hertie-school.org` via a central Entra app, authenticated by certificate ([details](../docs-admin-arch/central-admin.md#email)). Live on every course org. Where it is not, enrolment codes still land in `students.csv` (to be emailed by hand) and grades still reach each student's repo; only the notification is skipped.
 
 ## Cohort setup (per year)
 
