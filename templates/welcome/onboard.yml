@@ -145,7 +145,7 @@ jobs:
               // required, so an older cohort's roster keeps onboarding.
               const iRole = header.indexOf('role');
               if (iHandle < 0 || iId < 0 || iCode < 0) return fail(
-                `Thanks @${handle} - the enrollment roster file's header is missing a required column ` +
+                `Thanks @${handle} - the enrolment roster file's header is missing a required column ` +
                 `(\`github_handle\`, \`github_id\`, \`enrol_code\`). Contact the instructor(s) for this course.`,
                 'needs-review');
 
@@ -153,7 +153,7 @@ jobs:
               // "no such code" and "code already bound to another account": telling them apart
               // in a public issue confirms to anyone that a pasted code is a real, live one.
               const NO_MATCH =
-                `Thanks @${handle} - that enrolment code could not be matched to an unclaimed enrollment placement. ` +
+                `Thanks @${handle} - that enrolment code could not be matched to an unclaimed enrolment placement. ` +
                 `Check the code in your email; if you have already joined from another GitHub account, ` +
                 `or think this is a mistake, contact the teaching team.`;
               // Single-use: a code binds to the FIRST account that claims it. The one
