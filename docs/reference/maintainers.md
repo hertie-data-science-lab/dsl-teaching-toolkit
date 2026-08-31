@@ -99,8 +99,8 @@ faculty floor is computed from what discovery finds, and `site_repo` above `scaf
 `welcome`, whose seeding it reuses.
 
 `releaseignore` is the only module at layer 0 with a third-party dependency (`pathspec`).
-Keep it out of widely imported modules: an import in `repos` gave every CLI in the
-package a hard dependency on it.
+Keep it out of widely imported modules - an import in `repos` or `gh_contents` gives every
+CLI in the package that dependency.
 
 Add a name to the layer that owns the subject, not to whichever module already imports it.
 

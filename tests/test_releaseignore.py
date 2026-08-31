@@ -96,6 +96,13 @@ CASES: dict[str, dict[str, str]] = {
         "x.log": "",
         "keep.md": "",
     },
+    # `#` only opens a comment at the START of a line, so a trailing one is part of the
+    # pattern - the subtlety that made a worked example in the docs withhold nothing.
+    "a hash after a pattern is part of the pattern": {
+        ".releaseignore": "*.log   # not a comment\n",
+        "x.log": "",
+        "x.log   # not a comment": "",
+    },
     "an escaped hash is a literal hash": {
         ".releaseignore": "\\#lit\n",
         "#lit": "",
@@ -121,6 +128,18 @@ CASES: dict[str, dict[str, str]] = {
         ".releaseignore": "build/\n!build/keep.txt\n",
         "build/keep.txt": "",
         "build/x": "",
+    },
+    # `drafts/` withholds the DIRECTORY, so a later `!` inside it is a no-op; withholding
+    # the contents (`/drafts/*`) is what leaves room to re-include one.
+    "withholding a folder's contents leaves room to re-include one": {
+        ".releaseignore": "/drafts/*\n!/drafts/week01.md\n",
+        "drafts/week01.md": "",
+        "drafts/week02.md": "",
+    },
+    "withholding the folder itself does not": {
+        ".releaseignore": "drafts/\n!drafts/week01.md\n",
+        "drafts/week01.md": "",
+        "drafts/week02.md": "",
     },
     "the canonical exclude-everything-but idiom works": {
         ".releaseignore": "/*\n!/foo\n/foo/*\n!/foo/bar\n",
@@ -437,44 +456,3 @@ def test_a_nested_ignore_file_works_through_the_tree_adapter():
         "w1/.releaseignore",
         "w1/other.md",
     )
-
-
-# ----------------------------------------------------- the documented example must work
-
-
-def test_the_example_in_the_docs_does_what_the_docs_say(tmp_path):
-    """The docs' snippet, run through the real matcher, straight out of the file.
-
-    It shipped withholding a file it said it re-included: `drafts/` excludes the DIRECTORY,
-    and nothing under a withheld directory can be brought back - so `!drafts/week01.md`
-    after it was a silent no-op, and faculty copying the example would have lost that file
-    from every release on a green run. Read from the page rather than restated here, so the
-    page itself cannot drift back."""
-    page = (
-        Path(__file__).resolve().parents[1]
-        / "docs"
-        / "08-release-materials-to-cohort.md"
-    ).read_text()
-    block = page.split("## Withholding files with `.releaseignore`")[1]
-    rules = block.split("```")[1].strip("\n")
-
-    _build(
-        tmp_path,
-        {
-            releaseignore.RELEASEIGNORE: rules + "\n",
-            "labs/solutions.ipynb": "",
-            "labs/lab.md": "",
-            "__pycache__/x.pyc": "",
-            "deploy.key": "",
-            "drafts/week01.md": "",
-            "drafts/week02.md": "",
-        },
-    )
-    deny = releaseignore.deny_for(tmp_path)
-    withheld = deny(str(tmp_path), ["__pycache__", "deploy.key", "drafts", "labs"])
-    assert withheld == {"__pycache__", "deploy.key"}
-    assert deny(str(tmp_path / "labs"), ["solutions.ipynb", "lab.md"]) == {
-        "solutions.ipynb"
-    }
-    # The point of the fix: week01 comes back, week02 does not.
-    assert deny(str(tmp_path / "drafts"), ["week01.md", "week02.md"]) == {"week02.md"}

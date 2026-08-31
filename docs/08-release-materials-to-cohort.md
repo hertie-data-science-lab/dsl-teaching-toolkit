@@ -63,34 +63,17 @@ no warning.
 
 ## Withholding files with `.releaseignore`
 
-New materials repos are scaffolded with a `.releaseignore` whose lines are all commented
-out - uncomment or add to it. Repos scaffolded earlier have none; create one by hand.
+Materials repos are scaffolded with a `.releaseignore` whose lines are all commented out -
+uncomment or add to it.
 
-It uses **`.gitignore` syntax**, in any directory, and applies to every copy out of the
-repo it sits in: the cohort release, the public course site, and the assignment handout.
+Its syntax is **exactly `.gitignore`'s** - patterns, `**`, character classes, `!` to
+re-include, `/` to anchor or to mean a directory, `#` comments. Anything you can write in a
+`.gitignore` means the same thing here.
 
-```
-# A comment must start its OWN line - a `#` after a pattern is part of the pattern.
+It applies to every copy out of the repo it sits in: the cohort release, the public course
+site, and the assignment handout.
 
-# never release a solutions notebook, at any depth
-**/solutions.ipynb
-
-# a whole directory
-__pycache__/
-
-*.key
-
-# a folder's contents, withheld while you work on them...
-/drafts/*
-# ...except this one
-!/drafts/week01.md
-```
-
-> Note the shape of that last pair. `drafts/` withholds the **directory**, and nothing
-> inside a withheld directory can be brought back - `!drafts/week01.md` after `drafts/`
-> does nothing. Withhold the contents (`/drafts/*`) when you want to re-include one.
-
-It behaves like `.gitignore` throughout:
+What that means in practice:
 
 - **Nested.** A `.releaseignore` in a subfolder applies to that subfolder, and overrides the
   one above it. Patterns anchor to the file's own directory.
