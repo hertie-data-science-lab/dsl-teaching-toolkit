@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 
 from .access import COURSE_TEAM_ACCESS, grant_faculty, grant_tagged_team_access
+from .central import CENTRAL
 from .course import (
     FACULTY_ONLY_HEADING,
     MATERIALS_REPO_PREFIX,
@@ -31,10 +32,11 @@ from .course import (
     pages_repo,
 )
 from .discovery import central_ref_for, discover_assignments, discover_cohorts
-from .gh_contents import put_files, refresh_stubs, seed_if_absent
+from .gh_contents import STUB_MARK, put_files, refresh_stubs, seed_if_absent
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
 from .log import log, log_err, log_ok, log_skip, log_step
 from .readings import READING_OVERLAY_FILE
+from .releaseignore import RELEASEIGNORE
 from .repos import create_repo, repo_exists, set_repo_topics
 from .welcome import TEMPLATES, example_course_file
 from .workflows_place import push_content_workflows
@@ -224,6 +226,23 @@ def _notebook(title_lines: list[str], code: str) -> str:
 # contents are scaffold instructions addressed to faculty.
 RETIRED_STUBS = ("readings/01_session-1/reading.md",)
 
+# Seeded inert - every line a comment - so it withholds nothing until faculty write a
+# pattern. It exists to be FOUND: a withhold list nobody knows about is one nobody uses,
+# and a docs page is only reachable by someone who already suspects it exists. The mark
+# comes FROM `gh_contents`, so a change to it cannot leave this stub unrecognised and
+# therefore never refreshed again.
+_RELEASEIGNORE_STUB = f"""\
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
+# {STUB_MARK} still the scaffold's, so the toolkit keeps it current. Write over it and it
+# is yours. Every line here is a comment, so nothing is withheld yet.
+#
+# Name a file here and it is never copied out of this repo - not into a cohort's
+# materials, not onto the public site, not with a solution. Same syntax as .gitignore,
+# and you can add another in any subfolder. Examples and the full rules:
+# https://github.com/{CENTRAL}/blob/main/docs/08-release-materials-to-cohort.md
+"""
+
 
 def refreshable_stubs(tag: str) -> dict[str, bytes]:
     """The seeded files that are stubs rather than skeletons - improvable later, while they
@@ -235,6 +254,7 @@ def refreshable_stubs(tag: str) -> dict[str, bytes]:
     return {
         "SYLLABUS.md": _SYLLABUS_STUB.format(tag=tag).encode(),
         f"readings/01_session-1/{READING_OVERLAY_FILE}": _READINGS_STUB,
+        RELEASEIGNORE: _RELEASEIGNORE_STUB.encode(),
     }
 
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import gh_contents, ghcli, scaffold, seed
+from dsl_course import gh_contents, ghcli, releaseignore, scaffold, seed
 
 
 class FakeRepo:
@@ -99,6 +99,8 @@ def test_fresh_materials_repo_gets_the_full_skeleton(fake):
         # where an online reading goes.
         "readings/01_session-1/READINGS.md",
         "labs/01_session-1/.gitkeep",
+        # Seeded inert, purely so faculty find out the withhold list exists.
+        ".releaseignore",
     }
     assert fake.skips == []
 
@@ -364,7 +366,7 @@ def test_every_seeded_stub_carries_the_mark_that_makes_it_refreshable(fake):
     # If a stub ships without the mark it is frozen forever, which is the bug this fixes -
     # so the mark is asserted on what the scaffold actually writes.
     assert scaffold.scaffold_materials("Org", "f2026") == 0
-    for path in ("SYLLABUS.md", "readings/01_session-1/READINGS.md"):
+    for path in scaffold.refreshable_stubs("f2026"):
         assert gh_contents.STUB_MARK in fake.files[("course-materials-f2026", path)], (
             path
         )
@@ -450,9 +452,24 @@ def test_the_scaffold_and_refresh_converge_the_same_stub_list():
     # One list, so a stub added to the scaffold is converged everywhere without a second
     # edit somewhere else.
     assert sorted(scaffold.refreshable_stubs("f2026")) == [
+        ".releaseignore",
         "SYLLABUS.md",
         "readings/01_session-1/READINGS.md",
     ]
+
+
+def test_the_seeded_releaseignore_withholds_nothing(tmp_path):
+    """Every line a comment. A stub that shipped one LIVE pattern would silently withhold
+    that path from every course scaffolded after it - green runs, missing material, and
+    nothing to connect the two. Asserted against the real matcher, not by reading the
+    text, so an accidentally-uncommented line fails here."""
+    body = scaffold.refreshable_stubs("f2026")[releaseignore.RELEASEIGNORE].decode()
+    (tmp_path / releaseignore.RELEASEIGNORE).write_text(body)
+    (tmp_path / "solutions.ipynb").write_text("")
+    (tmp_path / "drafts").mkdir()
+    deny = releaseignore.deny_for(tmp_path)
+    # `.releaseignore` itself is always withheld; nothing else is.
+    assert deny(str(tmp_path), ["solutions.ipynb", "drafts"]) == set()
 
 
 def test_the_renamed_readings_stub_is_retired_not_orphaned(fake):

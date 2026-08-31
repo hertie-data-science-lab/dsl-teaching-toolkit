@@ -26,6 +26,7 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
       - a `README.md` 
       - a `MAINTAINING.md`, 
       - a placeholder `SYLLABUS.md` 
+      - a commented-out `.releaseignore` 
       >It also seeds the two run-from-repo Release workflows (Release materials, Release assignment) & later scheduled release functionality. 
    - You have push on it immediately.
 
@@ -50,6 +51,8 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
    name the rest however is clearest (`01_intro`, `02_regression`, …).
 
    *NB: this repo stays private - students never see it. Only the sessions you **actively release** reach the cohort org, so you can privately stage the whole course here.*
+
+   *NB: to withhold a file from every release, name it in `.releaseignore` - `.gitignore` syntax, in any folder ([08](08-release-materials-to-cohort.md#withholding-files-with-releaseignore)).*
 
    *NB: a session folder is released whole, subfolders included - but the site lists its root files plus one link per subfolder, so a rendered deck links the deck rather than its hundreds of assets ([11](11-configure-cohort-site.md)).*
 

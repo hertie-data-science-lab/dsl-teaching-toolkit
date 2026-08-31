@@ -61,6 +61,38 @@ Do not edit the cohort's released copy directly - instructors have read on it fo
 reason. An edit there survives only until the next release of that path, then vanishes with
 no warning.
 
+## Withholding files with `.releaseignore`
+
+Materials repos are scaffolded with a `.releaseignore` whose lines are all commented out -
+uncomment or add to it.
+
+Its syntax is **exactly `.gitignore`'s** - patterns, `**`, character classes, `!` to
+re-include, `/` to anchor or to mean a directory, `#` comments. Anything you can write in a
+`.gitignore` means the same thing here.
+
+It applies to every copy out of the repo it sits in: the cohort release, the public course
+site, and the assignment handout.
+
+What that means in practice:
+
+- **Nested.** A `.releaseignore` in a subfolder applies to that subfolder, and overrides the
+  one above it. Patterns anchor to the file's own directory.
+- **Silent.** Withheld files simply do not appear. The run stays green and says nothing.
+- **Not retroactive.** Adding a pattern stops *future* copies; it does not delete a file you
+  already released. Remove that from the cohort repo by hand.
+- **Naming a withheld path is refused.** Asking to release a path a `.releaseignore` covers
+  copies nothing and warns on the run summary - the same way `git add` refuses an ignored
+  file. `--validate` on `schedule.yml` flags it too, so a scheduled release says so when you
+  commit it rather than months later when it fires.
+
+Two things differ from `.gitignore`, both deliberate:
+
+- **The file itself is never released.**
+- **It covers each repo it lives in, not the whole course.** A pattern in
+  `course-materials-f2026` does nothing for `assignment-1-f2026`; put one in each repo you
+  want filtered. For an assignment, patterns on the default branch filter the starter
+  students receive, and patterns on the `solution` branch filter the model answer.
+
 ## The unwritten root stubs are withheld until you write them
 
 Two root files are withheld while they are still the scaffold's placeholder: `README.md` and

@@ -336,6 +336,7 @@ Both ways of getting the two dates wrong are **refused at validate time**, not h
 
 ## Next
 
+- [Withhold files from a release](08-release-materials-to-cohort.md#withholding-files-with-releaseignore) - `.releaseignore`, in `.gitignore` syntax
 - [Manually Release materials](08-release-materials-to-cohort.md) 
 - [Manually release an assignment](09-release-assignment-to-cohort.md)
 - [Grade and return assignments](10-grade-and-return-assignments.md)

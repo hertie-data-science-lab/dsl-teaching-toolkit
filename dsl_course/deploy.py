@@ -39,10 +39,11 @@ from .course import (
     SYLLABUS_SAMPLE_FILE,
     SYLLABUS_SESSIONS_FILE,
 )
-from .fs import copy_tree
+from .fs import copy_tree, union_deny
 from .gh_contents import is_untouched_stub
 from .ghcli import GIT_ENV, clone, git
-from .log import log, log_err, log_ok, log_step
+from .log import log, log_err, log_ok, log_step, log_withheld
+from .releaseignore import RELEASEIGNORE, deny_for, excludes
 from .repos import create_repo
 from .schedule import Deploy
 from .schedule_plan import deploy_dest
@@ -86,14 +87,26 @@ def _warn_withheld_stub(source_org: str, repo: str, path: str) -> None:
     So it takes the channel this codebase already uses for "true, worth seeing, not a
     failure" (see `templates/classroom-config/validate-schedule.yml`): a `::warning::`
     annotation on a green run, which touches no exit code."""
-    fix = (
+    log_withheld(
         f"{source_org}/{repo}/{path} was NOT released - it is still the scaffold stub, "
         "written for faculty rather than students. Everything else in this release "
         "shipped. Write it for students, then release again."
     )
-    log(f"  (withheld) {fix}")
-    # Straight to stderr as a workflow command, so the run summary carries it too.
-    print(f"::warning::{fix}", file=sys.stderr)
+
+
+def _warn_ignored_source(source_org: str, repo: str, path: str) -> None:
+    """Say that a release's own source path is excluded by a `.releaseignore`.
+
+    Faculty naming a path outright is a clear ask, so answering it with nothing at all
+    would be the wrong kind of quiet - `git add <ignored-path>` refuses out loud too
+    rather than adding the file. It takes the ::warning::-on-a-green-run channel instead
+    of an error for the reason in `_warn_withheld_stub`: the hourly scheduler runs through
+    the same `deploy_many`."""
+    log_withheld(
+        f"{source_org}/{repo}/{path} was NOT released - a `{RELEASEIGNORE}` excludes it. "
+        "Everything else in this release shipped. Drop the pattern that matches it, or "
+        "release a path that is not excluded."
+    )
 
 
 def _is_withheld_stub(path: str, text: str) -> bool:
@@ -253,6 +266,14 @@ def deploy_many(
                 )
                 errors += 1
                 continue
+            if excludes(src_root, srcp):
+                # The source path is itself excluded - so is everything under it, and no
+                # `!` deeper down can re-include any of it. Nothing else was asked for, so
+                # this copy is a no-op rather than a partial one.
+                _warn_ignored_source(
+                    source_org, d.course_source_repo, d.course_source_path
+                )
+                continue
             try:
                 if srcp.is_dir():
                     # A WHOLE-REPO release carries the root README along, which is how the
@@ -278,7 +299,14 @@ def deploy_many(
                     copy_tree(
                         srcp,
                         destp,
-                        _copy_ignore(srcp if srcp == src_root else None, withheld),
+                        union_deny(
+                            # Two filters unioned, not one list: the toolkit's exclusions
+                            # are a contract it keeps with itself, `.releaseignore` is
+                            # faculty's. The patterns anchor at the CLONE root even for a
+                            # subpath copy, as a root `.gitignore` would.
+                            _copy_ignore(srcp if srcp == src_root else None, withheld),
+                            deny_for(src_root),
+                        ),
                     )
                 elif _is_withheld_stub(
                     d.course_source_path,

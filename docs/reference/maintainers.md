@@ -27,6 +27,7 @@ breaks a live link that faculty click:
 | Doc | Linked from |
 |---|---|
 | `docs/07-schedule-releases.md` | `source_digest.py`, `profile_readme.py`, `templates/classroom-config/schedule.yml`, `templates/classroom-config/validate-schedule.yml` |
+| `docs/08-release-materials-to-cohort.md` | `scaffold._RELEASEIGNORE_STUB` (seeded into every materials repo) |
 | `docs/05-manage-teaching-team.md` | `templates/classroom-config/people.yml` |
 | `docs/README.md` | `profile_readme.py` |
 
@@ -52,6 +53,11 @@ Things whose *literal spelling* is depended on from outside Python:
 - **`.github/cohort-courses-pages.yml`** is the cohort registry every dropdown reads, and
   **`.github/.last-refresh`** is the heartbeat that keeps an org's crons from GitHub's 60-day
   inactivity disable.
+- **`releaseignore.RELEASEIGNORE`** (`.releaseignore`) is seeded inert by
+  `scaffold.refreshable_stubs` and is a filename faculty type into their own
+  content repos. A rename silently stops withholding whatever the old name held back - which is
+  worse than an outage, because the release still goes green. Nothing re-spells it: the
+  matcher withholds the file itself, so no other module needs to name it.
 
 ## File ownership
 
@@ -81,7 +87,7 @@ layers above its own:
 
 | Layer | Modules |
 |---|---|
-| 0, nothing | `log`, `course` (the course vocabulary: config repo, term tag, session-folder rule, syllabus filenames, org topics), `readings`, `fs` |
+| 0, nothing | `log`, `course` (the course vocabulary: config repo, term tag, session-folder rule, syllabus filenames, org topics), `readings`, `fs`, `releaseignore` (the `.releaseignore` rule) |
 | 1, the shell | `ghcli` (`gh`/`git`, timeouts, the 404 test) |
 | 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams) |
 | 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
@@ -91,6 +97,10 @@ layers above its own:
 Two placements are not where they read: `access` sits above `discovery`, because the
 faculty floor is computed from what discovery finds, and `site_repo` above `scaffold` and
 `welcome`, whose seeding it reuses.
+
+`releaseignore` is the only module at layer 0 with a third-party dependency (`pathspec`).
+Keep it out of widely imported modules - an import in `repos` or `gh_contents` gives every
+CLI in the package that dependency.
 
 Add a name to the layer that owns the subject, not to whichever module already imports it.
 

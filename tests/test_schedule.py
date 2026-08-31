@@ -20,6 +20,7 @@ from dsl_course.schedule import (
     Event,
     Release,
     Schedule,
+    Severity,
     _coerce_date,
     _coerce_datetime,
     parse,
@@ -1484,6 +1485,79 @@ def test_missing_sources_names_the_path_that_will_ship_nothing(monkeypatch):
     assert len(out) == 1
     assert out[0].startswith("releases.lecture-2 -> course_source_path (due ")
     assert "`cm/lectures/02_b` does not exist yet" in out[0]
+
+
+def test_a_source_withheld_by_a_releaseignore_is_a_fault_at_commit_time(monkeypatch):
+    # The file EXISTS, so nothing looks wrong - which is exactly why it is worth saying
+    # here. Otherwise faculty find out only from a `::warning::` on a GREEN release run,
+    # months later, on the channel nobody opens when the run is green.
+    _org(monkeypatch, {"cm": [".releaseignore", "lectures", "lectures/01_a"]})
+    monkeypatch.setattr(
+        schedule, "get_file_content", lambda org, repo, path, **k: "lectures/01_a\n"
+    )
+    s = Schedule(releases=[_release("lecture-1", "lectures/01_a")])
+    out = [f.line() for f in schedule.source_faults(s, "Course-Org")]
+    assert len(out) == 1
+    assert out[0].startswith("releases.lecture-1 -> course_source_path (due ")
+    assert "is withheld by a `.releaseignore`" in out[0]
+
+
+def test_a_withheld_source_never_escalates_to_an_error(monkeypatch):
+    # A MISSING source becomes an ERROR as its moment nears, and stays one after it passes.
+    # A WITHHELD source is a decision faculty already made - and `scheduler._check_sources`
+    # folds ERROR into the hourly cron's exit code, so escalating this would redden that
+    # cron every hour for the rest of the term. That is the outcome every other channel in
+    # this feature is written to avoid.
+    _org(monkeypatch, {"cm": [".releaseignore", "lectures", "lectures/01_a"]})
+    monkeypatch.setattr(
+        schedule, "get_file_content", lambda org, repo, path, **k: "lectures/01_a\n"
+    )
+    s = Schedule(releases=[_release("lecture-1", "lectures/01_a")])
+    fault = schedule.source_faults(s, "Course-Org")[0]
+    # An hour before it fires, and a week after - both capped.
+    assert fault.severity(datetime(2026, 9, 8, 9, 0, tzinfo=BERLIN)) is Severity.WARNING
+    assert (
+        fault.severity(datetime(2026, 9, 15, 9, 0, tzinfo=BERLIN)) is Severity.WARNING
+    )
+
+
+def test_a_missing_source_still_escalates_to_an_error(monkeypatch):
+    # The ceiling is per-fault, so capping the withheld one must not soften this.
+    _org(monkeypatch, {"cm": ["lectures"]})
+    s = Schedule(releases=[_release("lecture-1", "lectures/01_a")])
+    fault = schedule.source_faults(s, "Course-Org")[0]
+    assert fault.severity(datetime(2026, 9, 8, 9, 0, tzinfo=BERLIN)) is Severity.ERROR
+
+
+def test_an_unreadable_releaseignore_blob_is_passed_over_in_silence(monkeypatch):
+    # `get_file_content` raises on any non-404 failure, and this function's contract is
+    # that a repo it cannot READ is passed over quietly. Its loudest caller is the
+    # commit-time validator, where a transient 429 would otherwise be a traceback on
+    # faculty's own push.
+    _org(monkeypatch, {"cm": [".releaseignore", "lectures", "lectures/01_a"]})
+
+    def boom(*a, **k):
+        raise RuntimeError("429 rate limited")
+
+    monkeypatch.setattr(schedule, "get_file_content", boom)
+    s = Schedule(releases=[_release("lecture-1", "lectures/01_a")])
+    # No raise, and the path is not falsely reported as withheld.
+    assert schedule.source_faults(s, "Course-Org") == []
+
+
+def test_a_repo_with_no_releaseignore_reads_no_blobs(monkeypatch):
+    # One tree fetch per repo is the existing budget; this must not add a blob read per
+    # path to every validate-schedule run in the estate.
+    _org(monkeypatch, {"cm": ["lectures", "lectures/01_a"]})
+    reads = []
+    monkeypatch.setattr(
+        schedule,
+        "get_file_content",
+        lambda org, repo, path, **k: reads.append(path) or None,
+    )
+    s = Schedule(releases=[_release("lecture-1", "lectures/01_a")])
+    assert schedule.source_faults(s, "Course-Org") == []
+    assert reads == []
 
 
 def test_missing_sources_reports_a_repo_that_is_not_there_at_all(monkeypatch):
