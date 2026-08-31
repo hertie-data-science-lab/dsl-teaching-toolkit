@@ -698,7 +698,7 @@ def render_distribute_grades(cohort_orgs: list[str]) -> str:
 
 # Run AFTER merging the Render grades preview PR. Copies each merged gradebook/<handle>.yml
 # into that student's private grades-<handle> repo and (unless silenced) emails them a
-# notification to their university inbox. Needs the GRAPH_* secrets for the email.
+# notification to their hertie email address. Needs the GRAPH_* secrets for the email.
 
 on:
   workflow_dispatch:
@@ -736,8 +736,8 @@ def render_send_codes(cohort_orgs: list[str]) -> str:
     return f"""name: Send enrolment codes
 
 # Generates a random enrolment code per student (into classroom-config/students.csv) and
-# emails each not-yet-onboarded student their code to their university inbox. Students paste
-# the code into the welcome Join issue - no personal data in the public repo. dry_run
+# emails each not-yet-onboarded student their code to their hertie email address. Students paste
+# the code into the welcome Join course issue - no personal data in the public repo. dry_run
 # previews the codes + emails without writing or sending. Needs the GRAPH_* secrets.
 
 on:

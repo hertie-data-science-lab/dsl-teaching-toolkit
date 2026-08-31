@@ -207,7 +207,7 @@ org; updates on every release.
 
 ## Getting started
 
-1. Open a **Join** issue in
+1. Open a **Join course** issue in
    [`welcome`](https://github.com/{org}/welcome/issues/new/choose) to enrol - your
    GitHub handle is captured automatically.
 2. Once you're enrolled, course **materials** open up here session by session, and your
@@ -269,7 +269,7 @@ _(automatically bootstrapped from the central
 | Action | What it does | Managed |
 | --- | --- | --- |
 | [**Bootstrap cohort**](https://github.com/{org}/.github/actions/workflows/bootstrap-cohort.yml) | Configures a freshly-created cohort org (sets up scaffold repos, registers it with the course org, seeds workflow functionality). | Run by instructor |
-| [**Send enrolment codes**](https://github.com/{org}/.github/actions/workflows/send-codes.yml) | Generates enrolment codes for each student and emails each their code (to their university inbox). Students paste the code into the welcome Join issue. This keeps personal data out of the public repo. `dry_run` previews codes + emails. | Run by instructor |
+| [**Send enrolment codes**](https://github.com/{org}/.github/actions/workflows/send-codes.yml) | Generates enrolment codes for each student and emails each their code (to their hertie email address). Students paste the code into the welcome Join course issue. This keeps personal data out of the public repo. `dry_run` previews codes + emails. | Run by instructor |
 | [**New materials repo**](https://github.com/{org}/.github/actions/workflows/new-materials.yml) | Scaffolds a correctly-structured `course-materials-<year>` repo (session folders + the Release workflows). Ready for material to be added. | Run by instructor |
 | [**New assignment**](https://github.com/{org}/.github/actions/workflows/new-assignment.yml) | Scaffolds an `assignment-N-<year>` template repo (starter on `main`; the `solution` branch carries the model solution, `grading.yml`, and the hidden tests). | Run by instructor |
 | [**Generate syllabus**](https://github.com/{org}/.github/actions/workflows/generate-syllabus.yml) | Writes the "Course sessions and readings" section of a syllabus - one block per session, with its title, learning objectives and reading list - from a cohort's `classroom-config/schedule.yml` and this repo's `readings/` folders. It lands in `SYLLABUS.sessions.md` beside your syllabus (never released to students) and never edits `SYLLABUS.md` itself. | Run by instructor |
@@ -280,7 +280,7 @@ _(automatically bootstrapped from the central
 | [**Grade assignment**](https://github.com/{org}/.github/actions/workflows/grade-assignment.yml) | Faculty-side autograder: after the deadline, run the HIDDEN tests (from the template's `solution` branch) against each submission and record the machine score into `classroom-config/grades/<assignment>.csv`. Nothing is written to student repos; faculty & instructors then add manual marks. Optional per assignment (skipped if `grading.yml` sets `autograde: false`). | Run by instructor |
 | [**Sync gradebooks**](https://github.com/{org}/.github/actions/workflows/sync-gradebooks.yml) | Ensure every onboarded student has a PRIVATE `grades-<handle>` repo (the single home for all their grades). | Run by instructor |
 | [**Render grades (preview)**](https://github.com/{org}/.github/actions/workflows/render-grades.yml) | Build per-student `gradebook/<handle>.yml` from `classroom-config/grades/<assignment>.csv` and open ONE pull request. **That PR is the preview** - review every student's grades in the diff before sending. | Run by instructor |
-| [**Distribute grades**](https://github.com/{org}/.github/actions/workflows/distribute-grades.yml) | After merging the preview PR, copy each student's gradebook into their private repo and (unless silenced) email each student a notification to their university inbox (needs the `GRAPH_*` secrets). | Run by instructor |
+| [**Distribute grades**](https://github.com/{org}/.github/actions/workflows/distribute-grades.yml) | After merging the preview PR, copy each student's gradebook into their private repo and (unless silenced) email each student a notification to their hertie email address (needs the `GRAPH_*` secrets). | Run by instructor |
 
 NB: alternatively each materials repo *also* carries its own **Release** workflows (run from inside the repo).
 

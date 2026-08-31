@@ -166,7 +166,7 @@ jobs:
               // participant". This issue is public and permanent, and telling the two apart
               // published the author's enrolment role to anyone who could read the repo.
               const NOT_A_PARTICIPANT =
-                `Thanks @${handle} - I can't find you on the roster yet. Please open a **Join** issue first ` +
+                `Thanks @${handle} - I can't find you on the roster yet. Please open a **Join course** issue first ` +
                 `to onboard, then come back to join a team. If you have already joined, contact the teaching team.`;
               const myRow = rosterTable.slice(1)
                 .find(r => (r[iRosterHandle] || '').trim().toLowerCase() === handle.toLowerCase());

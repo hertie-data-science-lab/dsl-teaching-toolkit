@@ -189,7 +189,7 @@ def code_message(
     )
     body = (
         f"Hello {student.name or 'there'},\n\n"
-        f"To join {course} on GitHub, open a 'Join' issue here:\n"
+        f"To join {course} on GitHub, open a 'Join course' issue here:\n"
         f"  {welcome_url}\n\n"
         f"and paste this enrolment code when asked:\n\n"
         f"    {student.enrol_code}\n\n"

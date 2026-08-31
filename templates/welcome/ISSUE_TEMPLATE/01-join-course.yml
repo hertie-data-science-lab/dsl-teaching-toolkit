@@ -13,7 +13,7 @@ body:
     id: enrol_code
     attributes:
       label: Enrolment code
-      description: The code emailed to your university address (looks like dsl-xxxxxx).
+      description: The code emailed to your hertie email address (looks like dsl-xxxxxx).
       placeholder: "dsl-ab3k9m"
     validations:
       required: true

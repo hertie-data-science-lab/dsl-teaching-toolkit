@@ -16,7 +16,7 @@ Three idempotent stages, each a faculty & instructors workflow:
                classroom-config/gradebook/<handle>.yml  -- opened as ONE PR (the preview)
                      |  distribute (after the PR merges)
                      v
-               cohort/grades-<handle>/grades.yml + an email to the student's university inbox
+               cohort/grades-<handle>/grades.yml + an email to the student's hertie email address
 
 `classroom-config` keeps the full grade archive (private source of truth); the PR diff is
 the all-students-at-once preview that the Power Automate flow never gave.
@@ -112,8 +112,8 @@ MACHINE_FIELDS = ("autograde_score", "team")
 # gradebook_entry can emit is defined here, and the two must be kept in step.
 _STARTER_README = (
     "# Your gradebook\n\n"
-    "This private repository is yours alone. Grades and feedback for each piece of "
-    "assessment appear in `grades.yml` as the course progresses.\n\n"
+    "This private repository is accessible only to you. Grades and feedback for each "
+    "piece of assessment appear in `grades.yml` as the course progresses.\n\n"
     "## What each field means\n\n"
     "| Field | Meaning |\n"
     "| --- | --- |\n"
@@ -123,9 +123,7 @@ _STARTER_README = (
     "| `team_score` | Group assignments only: the mark the whole team received. |\n"
     "| `individual_adjustment` | Group assignments only: your own adjustment to the team "
     "score, up or down. Nobody else on your team sees yours. |\n"
-    "| `team_comments` | Group assignments only: feedback shared with the whole team. |\n\n"
-    "A field you do not see simply does not apply - an individual assignment carries no "
-    "team fields.\n"
+    "| `team_comments` | Group assignments only: feedback shared with the whole team. |\n"
 )
 
 
@@ -611,7 +609,7 @@ def render(cohort_org: str) -> int:
 
 def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> int:
     """Fan the merged gradebook/<handle>.yml files out into each private grades-<handle>,
-    then (unless silenced) email each student a notification to their university inbox.
+    then (unless silenced) email each student a notification to their hertie email address.
 
     Clone classroom-config once and read the files locally (rather than an API GET per
     student); the only per-student call left is the unavoidable write to each repo.
@@ -781,7 +779,7 @@ def sample_body(cohort_org: str, course_name: str = "") -> str:
 def _email_updates(
     cohort_org: str, handles: list[str], dry_run: bool = False
 ) -> tuple[int, list[str]]:
-    """Email each student a 'grades updated' notification to their university inbox,
+    """Email each student a 'grades updated' notification to their hertie email address,
     linking to their private gradebook repo (the grade's source of truth).
 
     Returns `(how many FAILED, which handles were told)`. `distribute` exits on the first
