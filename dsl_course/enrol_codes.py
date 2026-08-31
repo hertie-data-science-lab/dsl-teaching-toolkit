@@ -5,7 +5,7 @@ Join issue, so no personal data ever touches the public repo - and because the c
 unguessable, a classmate can't bind your roster row to their account. This one action:
 
     1. fills blank `enrol_code` cells in classroom-config/students.csv (idempotent), then
-    2. emails each not-yet-onboarded student their code over SMTP (preview with --dry-run).
+    2. emails each not-yet-onboarded student their code (preview with --dry-run).
 
 Email reaches the student's UNIVERSITY inbox (the roster `hertie_email`), replacing the
 Excel -> Power Automate -> Outlook mail-merge. Reuses dsl_course.mailer.

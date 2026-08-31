@@ -1,6 +1,6 @@
 """mailer -- the transport's failure handling, which is where a whole cohort's mail is
 lost quietly. The HTTP POST itself is stubbed (`_post`), so nothing here reaches Graph or
-an SMTP server; everything asserted is what the module does with the answer it gets.
+Graph; everything asserted is what the module does with the answer it gets.
 """
 
 from __future__ import annotations
@@ -95,44 +95,3 @@ def test_one_throttled_recipient_does_not_stop_the_batch(monkeypatch, capsys):
 )
 def test_retry_after_is_read_defaulted_and_capped(header, expected):
     assert mailer.retry_after_seconds(header) == expected
-
-
-# ------------------------------------------------------------------------ SMTP config
-
-
-def _smtp_env(monkeypatch):
-    monkeypatch.setenv("SMTP_HOST", "smtp.x")
-    monkeypatch.setenv("SMTP_USER", "u@x.edu")
-    monkeypatch.setenv("SMTP_PASSWORD", "p")
-
-
-def test_a_blank_smtp_port_falls_back_to_the_default(monkeypatch):
-    # An Actions `env:` block always DEFINES the variable, so an unconfigured SMTP_PORT
-    # arrives as "" - and `int("")` was a traceback out of the mail step before a single
-    # message was built.
-    _smtp_env(monkeypatch)
-    monkeypatch.setenv("SMTP_PORT", "")
-    cfg = mailer.smtp_config_from_env()
-    assert cfg and cfg.port == mailer.DEFAULT_SMTP_PORT
-
-
-def test_a_garbage_smtp_port_defaults_and_says_so(monkeypatch, capsys):
-    _smtp_env(monkeypatch)
-    monkeypatch.setenv("SMTP_PORT", "five-eight-seven")
-    cfg = mailer.smtp_config_from_env()
-    assert cfg and cfg.port == mailer.DEFAULT_SMTP_PORT
-    assert "SMTP_PORT is not a number" in capsys.readouterr().err
-
-
-def test_a_real_smtp_port_is_honoured(monkeypatch):
-    _smtp_env(monkeypatch)
-    monkeypatch.setenv("SMTP_PORT", "2525")
-    cfg = mailer.smtp_config_from_env()
-    assert cfg and cfg.port == 2525
-
-
-def test_a_blank_smtp_from_falls_back_to_the_user(monkeypatch):
-    _smtp_env(monkeypatch)
-    monkeypatch.setenv("SMTP_FROM", "")
-    cfg = mailer.smtp_config_from_env()
-    assert cfg and cfg.from_addr == "u@x.edu"

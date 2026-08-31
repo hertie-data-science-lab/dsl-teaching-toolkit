@@ -190,12 +190,7 @@ _MAIL_ENV = """\
           GRAPH_TENANT_ID: ${{ secrets.GRAPH_TENANT_ID }}
           GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
           GRAPH_CLIENT_CERT: ${{ secrets.GRAPH_CLIENT_CERT }}
-          GRAPH_SENDER: ${{ secrets.GRAPH_SENDER }}
-          SMTP_HOST: ${{ secrets.SMTP_HOST }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
-          SMTP_FROM: ${{ secrets.SMTP_FROM }}"""
+          GRAPH_SENDER: ${{ secrets.GRAPH_SENDER }}"""
 
 
 # Unattended-run visibility, appended to the job of every workflow that has a cron.
@@ -703,7 +698,7 @@ def render_distribute_grades(cohort_orgs: list[str]) -> str:
 
 # Run AFTER merging the Render grades preview PR. Copies each merged gradebook/<handle>.yml
 # into that student's private grades-<handle> repo and (unless silenced) emails them a
-# notification to their university inbox. Needs the GRAPH_* (or SMTP_*) secrets for the email.
+# notification to their university inbox. Needs the GRAPH_* secrets for the email.
 
 on:
   workflow_dispatch:
@@ -737,13 +732,13 @@ on:
 
 
 def render_send_codes(cohort_orgs: list[str]) -> str:
-    """Generate a non-PII enrolment code per student and email each their code over SMTP."""
+    """Generate a non-PII enrolment code per student and email each their code."""
     return f"""name: Send enrolment codes
 
 # Generates a random enrolment code per student (into classroom-config/students.csv) and
 # emails each not-yet-onboarded student their code to their university inbox. Students paste
 # the code into the welcome Join issue - no personal data in the public repo. dry_run
-# previews the codes + emails without writing or sending. Needs the GRAPH_* (or SMTP_*) secrets.
+# previews the codes + emails without writing or sending. Needs the GRAPH_* secrets.
 
 on:
   workflow_dispatch:

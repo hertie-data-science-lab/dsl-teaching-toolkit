@@ -1,6 +1,6 @@
 """enrol-codes + mailer pure cores: code assignment must fill only blanks and stay unique
 (a clash would let one student claim another's row), the message must carry the code, and
-the roster must round-trip with the new enrol_code column. SMTP send is wiring, not tested.
+the roster must round-trip with the new enrol_code column.
 
 The Graph certificate credential IS tested: the client assertion is the whole of our
 authentication, it is built by hand here rather than by a library, and it is unverifiable
@@ -75,7 +75,7 @@ def test_code_message_names_the_course_and_falls_back_when_unnamed():
 
 def test_mailer_dry_run_previews_without_config(capsys):
     msgs = [("ada@x.edu", "Subj", "Hello Ada, your code is dsl-abc123")]
-    # no SMTP env needed for a dry-run preview
+    # no transport env needed for a dry-run preview
     assert mailer.send_bulk(msgs, dry_run=True) == 1
     # The workflow log is PUBLIC: never the body (name + live enrol code), never the
     # address in full.
@@ -101,7 +101,6 @@ def test_dry_run_prints_one_placeholder_sample_and_no_real_body(capsys):
 
 def test_a_real_send_never_prints_the_sample(capsys, monkeypatch):
     monkeypatch.setattr(mailer, "graph_config_from_env", lambda: None)
-    monkeypatch.setattr(mailer, "smtp_config_from_env", lambda: None)
     mailer.send_bulk([("ada@x.edu", "Subj", "Body")], sample="SHOULD NOT APPEAR")
     captured = capsys.readouterr()
     assert "SHOULD NOT APPEAR" not in captured.out + captured.err
@@ -120,16 +119,6 @@ def test_mask_email_keeps_one_character_and_the_domain():
         "k***@students.hertie-school.org"
     )
     assert mailer.mask_email("nodomain") == "n***"
-
-
-def test_smtp_config_from_env_needs_all_three(monkeypatch):
-    monkeypatch.delenv("SMTP_HOST", raising=False)
-    assert mailer.smtp_config_from_env() is None
-    monkeypatch.setenv("SMTP_HOST", "smtp.x")
-    monkeypatch.setenv("SMTP_USER", "u")
-    monkeypatch.setenv("SMTP_PASSWORD", "p")
-    cfg = mailer.smtp_config_from_env()
-    assert cfg and cfg.port == 587 and cfg.from_addr == "u"  # defaults applied
 
 
 def test_graph_config_from_env_needs_all_four(monkeypatch):
