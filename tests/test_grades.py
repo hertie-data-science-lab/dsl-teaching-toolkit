@@ -578,6 +578,7 @@ def _distribute_with(
     outbox: list | None = None,
     notified: str | None = None,
     marker: list | None = None,
+    dry_run: bool = False,
     roster_rows: str | None = "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n",
 ):
     """`distribute` against a local classroom-config clone, pushing to nothing.
@@ -628,7 +629,7 @@ def _distribute_with(
             [m[0] for m in msgs[:sent]],
         )[1],
     )
-    return grades.distribute("COHORT")
+    return grades.distribute("COHORT", dry_run=dry_run)
 
 
 def test_distribute_goes_red_when_a_notification_could_not_be_sent(
@@ -883,3 +884,42 @@ def test_gradebooks_with_no_roster_row_are_counted_not_fatal(
     )
     err = capsys.readouterr().err
     assert "no roster row with an email" in err and "ada-l" not in err
+
+
+def test_a_first_run_does_not_record_a_notification_that_failed(monkeypatch, tmp_path):
+    # The baseline seeded from every gradebook, told or not - so a mail that failed on the
+    # very first run was recorded as sent, `pending` was empty next time, and the student
+    # was never told. Every deployed cohort's first run after this ships takes this path.
+    outbox: list = []
+    marker: list = []
+    assert (
+        _distribute_with(
+            monkeypatch,
+            tmp_path,
+            sent=0,  # the notification fails
+            live=None,  # no gradebook there yet, so the push is `ok`
+            outbox=outbox,
+            marker=marker,
+        )
+        == 1
+    )
+    assert [m[0] for batch in outbox for m in batch] == ["ada@uni.edu"]
+    assert marker == [] or "ada-l" not in marker[-1], (
+        "a failed first-run notification was baselined as sent, so it can never be retried"
+    )
+
+
+def test_a_dry_run_previews_the_students_a_real_run_would_mail(monkeypatch, tmp_path):
+    # The preview appended every gradebook, so a 30-student cohort with one corrected
+    # grade previewed 30 recipients and then mailed 1. It is the documented review step.
+    outbox: list = []
+    _distribute_with(
+        monkeypatch,
+        tmp_path,
+        sent=1,
+        live=_ADA_YML,
+        notified=_notified_at(_ADA_SHA),  # already told about exactly this version
+        outbox=outbox,
+        dry_run=True,
+    )
+    assert [m[0] for batch in outbox for m in batch] == []

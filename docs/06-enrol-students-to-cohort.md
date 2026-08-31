@@ -28,6 +28,7 @@ Live example roster: [`example-course/cohort-org/students.csv`](../example-cours
    - This workflow writes an `enrol_code` onto every roster row that lacks one and emails each not-yet-onboarded student at their `hertie_email`.
    - NB: `dry_run` defaults to `true`. It lists masked recipients and subjects, plus one sample body rendered from placeholders - never a real code or name, because the run log is public. It also checks the mail credential, so a green preview means a real send will authenticate. Untick it to write and send.
    - **Re-running is safe.** Each row records `code_sent_at` once its code has gone out, and only rows without it are emailed - so a re-run chases the students who still need a code and leaves the rest alone. To deliberately re-send, clear that row's `code_sent_at`.
+     > On a cohort whose codes went out BEFORE this landed, no row carries `code_sent_at` yet, so the first run still mails every not-yet-onboarded student (the same code they already have). It is correct from then on; to skip that one run, fill `code_sent_at` on the rows already mailed.
 
    > **If the emailing integration isn't live for any reason** the codes can still be written into `students.csv` by the `Send enrolment codes` workflow → then copy each student's code into an email of your own and send out manually.
 

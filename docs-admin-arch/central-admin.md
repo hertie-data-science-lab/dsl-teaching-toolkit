@@ -108,8 +108,8 @@ shared vault, never the repo. Without one, a lost laptop means a new keypair and
 
 Set the secrets once as **org** secrets on each course org (`--visibility all`); the send
 workflows run in that org's public `.github`, so no per-repo propagation is needed. A `dry_run`
-acquires a token after printing its preview, so it does now test the credential - it prints
-`Graph credential OK - would send as ...`, or reds.
+acquires a token after printing its preview, so a credential that is SET but wrong reds the
+run. An org with no secrets at all still previews green, saying the preview proves nothing.
 
 **Status: live on `hertie-dsl-demo-course-e1234`, `hertie-intro-to-data-science-c11`,
 `hertie-maths-data-science-C23` and `hertie-nlp-e1282`.**
@@ -170,7 +170,7 @@ covers one nightly refresh:
 - [ ] **Refresh actions** green, both the Promote-triggered run and the next nightly cron
 - [ ] one **Scheduled release** tick green (hourly; a dry run is enough if nothing is due)
 - [ ] a **Join** issue with a deliberately wrong code is rejected as usual
-- [ ] **Send enrolment codes** with `dry_run` previews codes and emails, sends nothing, and reports `Graph credential OK`
+- [ ] **Send enrolment codes** with `dry_run` previews codes and emails, sends nothing, and reports `Graph credential OK` (if it says the preview proves nothing, the org's secrets are unset)
 - [ ] no failure issue opened in `hertie-dsl-demo-course-e1234/.github`
 
 ### Rollback

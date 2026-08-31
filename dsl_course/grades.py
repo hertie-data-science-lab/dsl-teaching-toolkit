@@ -636,38 +636,38 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
         changed: list[str] = []  # pushed a NEW version this run
         live: dict[str, str] = {}  # handle -> the sha their repo now holds
         for f in files:
+            content = f.read_text()
+            sha = blob_sha(content.encode())
             if dry_run:
                 log_person(
                     f"    DRY-RUN  would update {GRADEBOOK_PREFIX}{f.stem}/grades.yml"
                 )
+                # No push, so `ok` vs `unchanged` is unknowable without a read per
+                # student. Assume the push lands: that is what the preview is previewing.
                 changed.append(f.stem)
+                live[f.stem] = sha
                 continue
-            content = f.read_text()
-            sha = blob_sha(content.encode())
             status = _push_gradebook(cohort_org, f.stem, content)
             results[status] = results.get(status, 0) + 1
             if status == "ok":
                 changed.append(f.stem)
             if status in ("ok", "unchanged"):
                 live[f.stem] = sha
-    if dry_run:
-        log_ok(f"DRY-RUN previewed {len(changed)} gradebook update(s) - nothing pushed")
-        if notify and changed:
-            _email_updates(cohort_org, changed, dry_run=True)
-        return 0
-    log_ok(f"Done - {json.dumps(results)}")
-
-    # Who still needs telling. A marker entry that does not match the sha now in the repo
-    # means either a new version (the `ok` case) or a notification that failed last time
-    # (the `unchanged` case the push outcome could never express).
+    # Who still needs telling. On the first run there is no marker, so `changed` (a new
+    # version pushed) is the rule; after that, a recorded sha that does not match the one
+    # their repo now holds means either a new version OR a notification that failed last
+    # time - the case the push outcome alone could never express.
     if notified is None:
-        # First run on this cohort: no marker means nothing to catch up on.
         pending = list(changed)
     else:
-        # A recorded sha that does not match the one their repo now holds means either a
-        # new version or a notification that failed last time. An absent entry is a
-        # student who joined since the baseline.
         pending = [h for h in live if notified.get(h, ("", ""))[0] != live[h]]
+
+    if dry_run:
+        log_ok(f"DRY-RUN previewed {len(changed)} gradebook update(s) - nothing pushed")
+        if notify and pending:
+            _email_updates(cohort_org, pending, dry_run=True)
+        return 0
+    log_ok(f"Done - {json.dumps(results)}")
 
     notifications_failed, told = (
         _email_updates(cohort_org, pending, dry_run=False)
@@ -676,12 +676,15 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
     )
 
     stamp = datetime.now(UTC).isoformat(timespec="seconds")
+    # Record who was TOLD, plus - on a first run - a baseline for everyone who needed no
+    # telling. Never a handle in `pending` that is not in `told`: that is a notification
+    # that failed, and recording it would make the retry impossible, which is the whole
+    # point of the marker.
     if notified is None:
-        # Seed the baseline from every current gradebook, told or not - that is what "no
-        # marker means nothing to catch up on" commits us to.
-        record = {h: (sha, stamp) for h, sha in live.items()}
+        record = {h: (sha, stamp) for h, sha in live.items() if h not in pending}
     else:
-        record = notified | {h: (live[h], stamp) for h in told}
+        record = dict(notified)
+    record |= {h: (live[h], stamp) for h in told}
     marker_failed = record != (notified or {}) and not _write_notified(
         cohort_org, record
     )
