@@ -53,10 +53,8 @@ def fill_column_in_csv(text: str, column: str, values_by_row: dict[int, str]) ->
     `role`, silently dropping unknown columns and mangling role text on every code write.
 
     Blank cells only, which is what makes both callers idempotent: a code already issued is
-    never rotated, and a row already marked as emailed is never re-stamped.
-
-    The column is appended if the roster predates it - `code_sent_at` reaches every deployed
-    cohort that way, with no migration."""
+    never rotated, and a row already marked as emailed is never re-stamped. The column is
+    appended if the roster predates it, so a deployed cohort needs no migration."""
     # read_csv, not a bare DictReader: this path bypasses `roster.parse`, and a
     # `;`-delimited Excel export was written straight back with a code column bolted on -
     # exit 0, roster destroyed.
@@ -265,21 +263,18 @@ def run(cohort_org: str, dry_run: bool = False) -> int:
         students = roster.parse(written)
 
     welcome_url = f"https://github.com/{cohort_org}/welcome/issues/new/choose"
-    # One set does two jobs. `code_sent_at` makes a re-run stop re-mailing students who
-    # already have their code and simply have not enrolled yet - the predicate used to be
-    # the state of the ROSTER, not the state of the SEND, so every run re-mailed all of
-    # them. Adding each address as we go also collapses a duplicated roster row, which
-    # otherwise received two emails carrying two different codes, only one of which binds.
+    # One set, two jobs: `code_sent_at` keeps a re-run from re-mailing students who already
+    # have their code, and adding each address as we go collapses a duplicated roster row,
+    # which would otherwise get two emails carrying two different codes.
     already = {
         s.hertie_email.strip().casefold() for s in students if s.code_sent_at.strip()
     }
     targets = []
     for s in students:
         email = s.hertie_email.strip().casefold()
-        if not (s.enrol_code and email and not s.onboarded) or email in already:
-            continue
-        already.add(email)
-        targets.append(s)
+        if s.enrol_code and email and not s.onboarded and email not in already:
+            already.add(email)
+            targets.append(s)
     if not targets:
         log_ok("no not-yet-onboarded students still to be sent a code.")
         return 0
@@ -308,13 +303,15 @@ def _mark_sent(cohort_org: str, sent: list[str]) -> int:
     Re-reads first: the code write above moved the sha, and a Join issue can land during
     the several minutes a throttled batch takes."""
     read = get_file_with_sha(cohort_org, roster.CONFIG_REPO, roster.ROSTER_PATH)
-    stamp = datetime.now(UTC).isoformat(timespec="seconds")
-    marks = []
     if read is not None:
         raw, sha = read
-        for i, s in enumerate(roster.parse(raw)):
-            if s.hertie_email in sent:
-                marks.append((i, s.hertie_email.strip(), stamp))
+        stamp = datetime.now(UTC).isoformat(timespec="seconds")
+        went_out = set(sent)
+        marks = [
+            (i, s.hertie_email.strip(), stamp)
+            for i, s in enumerate(roster.parse(raw))
+            if s.hertie_email in went_out
+        ]
         if marks and write_column(
             cohort_org,
             raw,

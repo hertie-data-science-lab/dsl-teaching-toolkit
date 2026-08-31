@@ -253,14 +253,14 @@ def create_repo(
     private: bool = True,
     description: str = "",
     is_template: bool = False,
+    *,
     person: bool = False,
 ) -> bool:
     """Create a repo. Idempotent - treats existing repo as success.
 
     `person` marks a repo NAMED AFTER A STUDENT (`grades-<handle>`). These workflows run in
-    the org's PUBLIC `.github`, so the happy-path lines go through `log_person` and print
-    only under DSL_VERBOSE. The failure line still names the repo: an error a faculty member
-    must act on is worse unactionable than named.
+    the org's PUBLIC `.github`, so its happy-path lines go through `log_person`. The failure
+    line still names the repo: an error faculty must act on is worse unactionable.
 
     Sets `description` only on creation. Bringing an EXISTING repo's description up to a
     reworded one is converge_descriptions' job, off the listing the refresh already
@@ -455,11 +455,13 @@ def generate_from_template(
     name: str,
     private: bool = True,
     description: str = "",
+    *,
     person: bool = False,
 ) -> bool:
     """Create a repo from a template. Idempotent.
 
-    `person` as in `create_repo`: a `<slug>-<handle>` repo must not be named in a public log."""
+    `person` gates the already-exists line, the only one this logs; the success narration
+    belongs to the caller. A `<slug>-<handle>` repo must not be named in a public log."""
     code, out = gh(
         "api",
         "--method",

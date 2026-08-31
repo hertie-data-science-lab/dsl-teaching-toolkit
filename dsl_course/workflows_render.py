@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import re
 
+from . import mailer
 from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER, pin_central_ref
 from .course import MATERIALS_REPO_PREFIX, term_tag
 
@@ -183,14 +184,20 @@ def _run_preamble(minutes: int = _TIMEOUT_DEFAULT) -> str:
 
 # Mail secrets, wired into the env of the workflows that send email (enrolment codes, grade
 # notifications). A plain string (not the f-string body) so the GitHub `${{ }}` is literal.
-# GRAPH_CLIENT_CERT is the app's certificate credential - certificate + private key in one
-# multi-line secret. There is no GRAPH_CLIENT_SECRET: the mailer authenticates by
-# certificate only.
-_MAIL_ENV = """\
-          GRAPH_TENANT_ID: ${{ secrets.GRAPH_TENANT_ID }}
-          GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
-          GRAPH_CLIENT_CERT: ${{ secrets.GRAPH_CLIENT_CERT }}
-          GRAPH_SENDER: ${{ secrets.GRAPH_SENDER }}"""
+# Derived from the names the mailer actually reads, so a rename cannot leave an org
+# silently unconfigured. GRAPH_CLIENT_CERT holds certificate + private key in one
+# multi-line secret; there is no GRAPH_CLIENT_SECRET.
+_MAIL_ENV = "\n".join(
+    f"          {name}: ${{{{ secrets.{name} }}}}" for name in mailer.GRAPH_ENV
+)
+
+# Fail CLOSED: only an explicit `false` sends. Any other value - "True", "1", a blank from
+# a renamed input - previews. Shared by the two buttons that email a whole cohort; the
+# other dry-run gates in this module are not send paths and keep the simpler spelling.
+_DRY_RUN_GATE = (
+    '          if [ "$DRY_RUN" = "false" ]; '
+    "then args+=(--no-dry-run); else args+=(--dry-run); fi"
+)
 
 
 # Unattended-run visibility, appended to the job of every workflow that has a cron.
@@ -725,7 +732,7 @@ on:
 {_MAIL_ENV}
         run: |
           args=(--cohort-org "$COHORT_ORG")
-          if [ "$DRY_RUN" = "false" ]; then args+=(--no-dry-run); else args+=(--dry-run); fi
+{_DRY_RUN_GATE}
           [ "$SILENT" = "true" ] && args+=(--no-notify)
           python3 -m dsl_course.grades distribute "${{args[@]}}"
 """
@@ -760,7 +767,7 @@ on:
 {_MAIL_ENV}
         run: |
           args=(--cohort-org "$COHORT_ORG")
-          if [ "$DRY_RUN" = "false" ]; then args+=(--no-dry-run); else args+=(--dry-run); fi
+{_DRY_RUN_GATE}
           python3 -m dsl_course.enrol_codes "${{args[@]}}"
 """
 

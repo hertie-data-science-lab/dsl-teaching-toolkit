@@ -88,10 +88,9 @@ def graph_config_from_env() -> GraphConfig | None:
     a blanket "no transport configured" is undebuggable, and a half-configured transport is
     a misconfiguration rather than an absence.
 
-    Whitespace inside a single-line value is refused BY NAME, never by value. `tenant_id`
-    goes straight into the token URL, so a trailing newline - what `gh secret set < file`
-    produces - raised `http.client.InvalidURL` out of the mail step, uncaught, into a public
-    log, after the enrolment codes had already been committed."""
+    Values are stripped, so the trailing newline `gh secret set < file` leaves is simply
+    fixed. INTERIOR whitespace is refused by name, never by value - `tenant_id` is
+    interpolated into the token URL, where it raises `InvalidURL` rather than a 4xx."""
     found = {k: (os.environ.get(k) or "").strip() for k in GRAPH_ENV}
     missing = [k for k, v in found.items() if not v]
     if len(missing) == len(GRAPH_ENV):
@@ -103,7 +102,15 @@ def graph_config_from_env() -> GraphConfig | None:
     if ragged:
         log_err(f"whitespace inside {', '.join(ragged)} - re-set without line breaks")
         return None
-    return GraphConfig(*(found[k] for k in GRAPH_ENV))
+    # Named, not positional: GRAPH_ENV is a NAMING constant - exported, iterated in tests,
+    # asserted against the workflow env. Reordering it must not silently put the
+    # certificate in `tenant_id`.
+    return GraphConfig(
+        tenant_id=found["GRAPH_TENANT_ID"],
+        client_id=found["GRAPH_CLIENT_ID"],
+        cert_pem=found["GRAPH_CLIENT_CERT"],
+        sender=found["GRAPH_SENDER"],
+    )
 
 
 def _b64url(raw: bytes) -> str:
@@ -238,9 +245,8 @@ def _post(url: str, data: bytes, headers: dict[str, str]) -> tuple[int, bytes, d
     except urllib.error.URLError as exc:
         return 0, str(exc.reason).encode(), {}
     except (http.client.HTTPException, ValueError) as exc:
-        # A malformed URL or a half-closed connection is a transport failure, not a bug to
-        # traceback out of a public Actions log. URLError is an OSError and is caught above;
-        # InvalidURL, RemoteDisconnected and BadStatusLine are not.
+        # A malformed URL or half-closed connection is a transport failure, not a traceback
+        # out of a public log. URLError is an OSError, caught above; these are not.
         return 0, str(exc).encode(), {}
 
 
@@ -341,7 +347,10 @@ def _send_via_graph(cfg: GraphConfig, messages: list[Message]) -> list[str]:
                     f"- re-run to continue"
                 )
                 break
-            time.sleep(_SEND_INTERVAL)
+            # Sleep to the next SLOT, not for a fixed interval: a constant sleep is added
+            # to each send's round-trip, so the real rate drifts below the target the
+            # slower Graph is, and the budget stops meaning a predictable message count.
+            time.sleep(max(0.0, started + index * _SEND_INTERVAL - time.monotonic()))
         if _graph_send_one(cfg, token, to, subject, body):
             log_ok(f"sent -> {mask_email(to)}")
             sent.append(to)

@@ -793,6 +793,8 @@ def test_a_dry_run_lists_nothing(monkeypatch):
 
 
 _ADA_YML = "student: ada-l\n"
+_ADA_SHA = grades.blob_sha(_ADA_YML.encode())
+_STALE_SHA = "a-sha-from-an-earlier-version"
 
 
 def _notified_at(sha):
@@ -801,41 +803,38 @@ def _notified_at(sha):
     )
 
 
-def test_a_notification_that_failed_is_retried_on_the_next_run(monkeypatch, tmp_path):
-    # THE bug. Run 1 pushes and the mail fails; the re-run sees the gradebook as
-    # `unchanged`, so the old push-outcome rule notified nobody - green, and the student
-    # never learnt their grades had landed. The marker is what makes the retry possible.
-    outbox: list = []
-    assert (
-        _distribute_with(
-            monkeypatch,
-            tmp_path,
-            sent=0,
-            live=_ADA_YML,  # already identical: `unchanged`
-            notified=_notified_at("some-older-sha"),
-            outbox=outbox,
-        )
-        == 1
-    )
-    assert [m[0] for m in outbox[-1]] == ["ada@uni.edu"]
-
-
-def test_a_student_already_notified_for_this_gradebook_is_not_emailed_again(
-    monkeypatch, tmp_path
+@pytest.mark.parametrize(
+    ("notified_sha", "sent", "rc", "mailed", "marked"),
+    [
+        # The bug: the push says `unchanged`, so the old push-outcome rule notified nobody
+        # and the student whose mail failed last run could never be told.
+        (_STALE_SHA, 0, 1, ["ada@uni.edu"], False),
+        # ... and once the retry lands, the marker moves on.
+        (_STALE_SHA, 1, 0, ["ada@uni.edu"], True),
+        # Already told about exactly this version: nothing to send, nothing to record.
+        (_ADA_SHA, 1, 0, [], False),
+    ],
+    ids=["retried", "retry-recorded", "already-told"],
+)
+def test_a_notification_is_sent_once_per_version_and_retried_until_it_lands(
+    monkeypatch, tmp_path, notified_sha, sent, rc, mailed, marked
 ):
     outbox: list = []
+    marker: list = []
     assert (
         _distribute_with(
             monkeypatch,
             tmp_path,
-            sent=1,
-            live=_ADA_YML,
-            notified=_notified_at(grades.blob_sha(_ADA_YML.encode())),
+            sent=sent,
+            live=_ADA_YML,  # identical to the rendered file, so the push says `unchanged`
+            notified=_notified_at(notified_sha),
             outbox=outbox,
+            marker=marker,
         )
-        == 0
+        == rc
     )
-    assert outbox == []
+    assert [m[0] for batch in outbox for m in batch] == mailed
+    assert bool(marker) is marked, "a failed notification must not be recorded as sent"
 
 
 def test_a_cohort_with_no_notified_file_is_not_re_emailed_wholesale(
@@ -851,7 +850,7 @@ def test_a_cohort_with_no_notified_file_is_not_re_emailed_wholesale(
             monkeypatch,
             tmp_path,
             sent=1,
-            live=_ADA_YML,  # unchanged, and no marker file
+            live=_ADA_YML,
             outbox=outbox,
             marker=marker,
         )
@@ -859,23 +858,6 @@ def test_a_cohort_with_no_notified_file_is_not_re_emailed_wholesale(
     )
     assert outbox == []
     assert marker and "ada-l" in marker[-1]
-
-
-def test_the_marker_records_only_the_students_actually_told(monkeypatch, tmp_path):
-    # A marker written for everyone we TRIED would lose exactly the retry it exists for.
-    marker: list = []
-    assert (
-        _distribute_with(
-            monkeypatch,
-            tmp_path,
-            sent=0,  # the mail failed
-            live=_ADA_YML,
-            notified=_notified_at("some-older-sha"),
-            marker=marker,
-        )
-        == 1
-    )
-    assert marker == [], "a failed notification was recorded as sent"
 
 
 def test_distribute_reds_when_the_roster_cannot_be_read(monkeypatch, tmp_path, capsys):

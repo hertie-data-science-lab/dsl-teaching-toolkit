@@ -15,9 +15,19 @@ ONE = ("ada@x.edu", "Subj", "Body")
 
 @pytest.fixture(autouse=True)
 def _no_sleeping(monkeypatch):
-    """Retries must be exercised, not waited out."""
+    """Retries must be exercised, not waited out.
+
+    The clock advances by whatever was slept, so pacing-to-a-deadline and the batch
+    budget are measured against the time the module thinks has passed."""
     slept: list[float] = []
-    monkeypatch.setattr(mailer.time, "sleep", lambda s: slept.append(s))
+    clock = [0.0]
+
+    def fake_sleep(seconds):
+        slept.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr(mailer.time, "sleep", fake_sleep)
+    monkeypatch.setattr(mailer.time, "monotonic", lambda: clock[0])
     return slept
 
 
@@ -177,6 +187,7 @@ def test_the_batch_is_paced_below_the_graph_rate_limit(monkeypatch, _no_sleeping
     messages = [(f"s{i}@x.edu", "Subj", "Body") for i in range(3)]
     assert mailer._send_via_graph(CFG, messages) == [m[0] for m in messages]
     assert _no_sleeping == [mailer._SEND_INTERVAL] * 2  # n-1: the first is not delayed
+    assert mailer.time.monotonic() == 2 * mailer._SEND_INTERVAL
 
 
 def test_a_batch_that_runs_out_of_budget_stops_and_says_re_run(
@@ -186,11 +197,13 @@ def test_a_batch_that_runs_out_of_budget_stops_and_says_re_run(
     # the re-run then re-mails everyone who already got one. Stopping early is resumable.
     _replies(monkeypatch, [(202, {})] * 3)
     monkeypatch.setattr(mailer, "_graph_token", lambda cfg: "tok")
-    monkeypatch.setattr(mailer, "_BATCH_BUDGET", 0)
+    # Budget shorter than one slot: message two still goes (nothing has elapsed when it
+    # is checked), message three finds it spent.
+    monkeypatch.setattr(mailer, "_BATCH_BUDGET", mailer._SEND_INTERVAL / 2)
     messages = [(f"s{i}@x.edu", "Subj", "Body") for i in range(3)]
-    assert mailer._send_via_graph(CFG, messages) == ["s0@x.edu"]
+    assert mailer._send_via_graph(CFG, messages) == ["s0@x.edu", "s1@x.edu"]
     assert (
-        "stopped after 1 of 3 message(s) - re-run to continue"
+        "stopped after 2 of 3 message(s) - re-run to continue"
         in capsys.readouterr().err
     )
 
