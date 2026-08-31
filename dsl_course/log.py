@@ -28,6 +28,19 @@ def log_err(msg: str) -> None:
     print(f"  [err] {msg}", file=sys.stderr, flush=True)
 
 
+def log_withheld(msg: str) -> None:
+    """A path this toolkit deliberately did NOT copy.
+
+    The `  (withheld) ` line faculty read, plus the `::warning::` annotation that carries it
+    onto the run summary WITHOUT touching the exit code. Withholding is this working, not a
+    fault, and the hourly scheduler shares the code that does it - so an error here would
+    redden a cron every hour for the rest of the term, which is how real failures stop being
+    noticed. Both halves live here because the prefix is what faculty grep for and the
+    annotation is what keeps the run green; spelling either one twice loses that."""
+    log(f"  (withheld) {msg}")
+    print(f"::warning::{msg}", file=sys.stderr, flush=True)
+
+
 def log_person(msg: str) -> None:
     """A line that NAMES SOMEBODY - printed only when `DSL_VERBOSE` is set.
 

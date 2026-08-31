@@ -14,3 +14,9 @@ tzdata==2026.3
 # workflow now pays the install; a grading run that cannot grade costs the whole cohort.
 pytest==8.4.2
 nbconvert==7.17.1
+# The `.gitignore` pattern matcher behind `.releaseignore` (see dsl_course/releaseignore.py).
+# `GitIgnoreSpec.check_file(...).include` is the three-state verdict the nested-file walk
+# needs - excluded / re-included by a `!` / no opinion at all - which `match_file`'s bare
+# bool cannot express. The nesting and walk-pruning layer is ours; only the per-pattern
+# translation is here.
+pathspec==0.12.1
