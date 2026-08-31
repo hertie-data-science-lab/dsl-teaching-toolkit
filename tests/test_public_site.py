@@ -41,6 +41,12 @@ def _seed_source(root: Path) -> None:
         "labs/01_first-lab/grading.yml": "points: 10",
         "labs/02_second-lab/tests/test_hidden.py": "assert secret()",
         "readings/01_first-lab/.env.local": "OPENAI_API_KEY=sk-live",
+        # What no denylist has any reason to refuse, and faculty withheld by hand. At the
+        # CLONE root, while the copies below are session folders deep inside it.
+        ".releaseignore": "draft-*\n*.key\n",
+        "labs/01_first-lab/draft-notes.md": "half-written, not for students",
+        "labs/01_first-lab/deploy.key": "SECRET",
+        "readings/01_first-lab/embargoed.key": "not yet",
     }
     for rel, body in files.items():
         p = root / rel
@@ -261,6 +267,37 @@ def test_the_public_site_never_publishes_what_sits_beside_the_material(published
     ):
         assert leaked not in files
     assert "answers" not in files["_lectures/lab-01.md"]
+
+
+def test_the_public_site_honours_a_faculty_releaseignore(published):
+    # The denylist is what this toolkit refuses to publish; `.releaseignore` is faculty's
+    # own, and nothing here could have guessed either of these names. Anchored at the
+    # CLONE root even though what gets copied is a session folder several levels down -
+    # a rule that only worked from the folder being copied would be no rule at all.
+    files = published(readings_mode="actual-readings")
+    assert f"{SERVED}/session-1/labs/lab.ipynb" in files  # the material still ships
+    for withheld in (
+        f"{SERVED}/session-1/labs/draft-notes.md",
+        f"{SERVED}/session-1/labs/deploy.key",
+    ):
+        assert withheld not in files
+    assert "draft-notes" not in files["_lectures/lab-01.md"]
+
+
+def test_reading_list_mode_does_not_name_a_withheld_reading(published):
+    # `reading-list` is the DEFAULT and hosts nothing, so it never copies and the copytree
+    # ignore hook never runs. Naming a file IS publishing it in this mode.
+    files = published(readings_mode="reading-list")
+    page = files["_lectures/session-01.md"]
+    assert "Smith 2020" in page  # the citation list still publishes
+    assert "embargoed" not in page
+
+
+def test_the_releaseignore_itself_is_never_published(published):
+    # The one entry on PUBLICATION_DENYLIST that a cohort release deliberately DOES carry.
+    # Its contents name what was held back, and this destination is a world-readable page.
+    files = published(readings_mode="actual-readings")
+    assert not [p for p in files if Path(p).name == ".releaseignore"]
 
 
 def test_a_symlink_cannot_smuggle_a_denied_file_onto_the_public_site(published):

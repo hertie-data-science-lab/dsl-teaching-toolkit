@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+from collections.abc import Callable
 from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import quote
@@ -26,11 +27,12 @@ from .course import (
     find_session_dir,
     pages_repo,
 )
-from .fs import copy_tree
+from .fs import copy_tree, union_deny
 from .gh_contents import get_file_content
 from .ghcli import clone
 from .log import log, log_err, log_step
 from .readings import readings_block
+from .releaseignore import deny_for, excludes
 from .repos import has_denied_component, is_denied_publication, repo_exists
 from .schedule_plan import READINGS_SECTION, row_kind
 from .site_repo import (
@@ -67,6 +69,18 @@ def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:
     `notes.pdf -> ../solution/answers.pdf` would otherwise be copied in as the answers
     themselves, under a name this filter has no reason to deny."""
     return {n for n in names if is_denied_publication(n)}
+
+
+def _withheld_from_site(root: Path, path: Path) -> bool:
+    """Whether one path under the clone at `root` must not reach the public site.
+
+    The same two rules `copy_tree`'s filter applies, as a PREDICATE - because the listing
+    paths cannot use a copytree filter. `reading-list` mode (the DEFAULT) hosts nothing, so
+    it never calls `copy_tree` and the `ignore` hook never runs: it publishes filenames,
+    and inlines the overlay's prose verbatim. Without this, a withheld reading was named on
+    the open web and a withheld OVERLAY had its full text published there."""
+    rel = path.relative_to(root).as_posix()
+    return has_denied_component(rel) or excludes(root, path)
 
 
 def _public_links(local_dir: Path, url_prefix: str) -> list[tuple[str, str]]:
@@ -107,16 +121,20 @@ def _public_links(local_dir: Path, url_prefix: str) -> list[tuple[str, str]]:
     return [(rel, f"{url_prefix}/{quote(rel)}") for rel in rels]
 
 
-def _reading_list_md(readings_session_dir: Path) -> str:
+def _reading_list_md(readings_session_dir: Path, keep: Callable[[Path], bool]) -> str:
     """The readings rendered as TEXT for `reading-list` mode (no files hosted, no links).
 
     `readings_block`'s rule over a local directory: the overlay's prose inlined verbatim,
     then every other file by NAME only - so the public sees WHAT to read without the
     copyrighted bytes being published. This mode links nothing, so naming the files here is
-    the only way they appear at all."""
+    the only way they appear at all.
+
+    `keep` is not optional and is why this takes a callable: naming a file IS publishing it
+    here, and inlining an overlay publishes every word of it, so a withheld reading has to
+    be dropped before `readings_block` ever sees it."""
     d = readings_session_dir
     return readings_block(
-        [p.relative_to(d).as_posix() for p in d.rglob("*") if p.is_file()],
+        [p.relative_to(d).as_posix() for p in d.rglob("*") if p.is_file() and keep(p)],
         lambda n: (d / n).read_text(encoding="utf-8", errors="replace"),
     )
 
@@ -196,6 +214,10 @@ def sync_public_site(
             if not clone(course_org, source_repo, src):
                 log_err(f"could not clone {spec}")
                 return None
+            # Two filters unioned, not one list: the denylist is what this toolkit
+            # refuses to publish, `.releaseignore` is faculty's own. Anchored at the CLONE
+            # root even though what gets copied is a session folder deep inside it.
+            withhold = union_deny(_publication_ignore, deny_for(src))
 
             # Both readings of the source's structure come off THE CLONE - which every
             # session below is copied out of anyway. The session list used to be a
@@ -236,7 +258,7 @@ def sync_public_site(
                     if sec_src is None:
                         continue
                     dest = site_session / section
-                    copy_tree(sec_src, dest, _publication_ignore)
+                    copy_tree(sec_src, dest, withhold)
                     links = _public_links(dest, f"{url_base}/{section}")
                     if links:
                         rows = (
@@ -248,12 +270,14 @@ def sync_public_site(
                 if read_src is not None:
                     if readings_mode == "actual-readings":
                         dest = site_session / READINGS_SECTION
-                        copy_tree(read_src, dest, _publication_ignore)
+                        copy_tree(read_src, dest, withhold)
                         links = _public_links(dest, f"{url_base}/{READINGS_SECTION}")
                         if links:
                             section_links.append((READINGS_SECTION, links))
                     elif readings_mode == "reading-list":
-                        reading_list_md = _reading_list_md(read_src)
+                        reading_list_md = _reading_list_md(
+                            read_src, lambda p: not _withheld_from_site(src, p)
+                        )
 
                 # A row with nothing published gets no page at all, rather than an empty
                 # one the public would click through to.

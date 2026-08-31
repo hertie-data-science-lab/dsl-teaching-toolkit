@@ -47,11 +47,13 @@ from .course import (
 )
 from .discovery import ASSIGNMENT_TEMPLATE_TOPIC, list_org_repos
 from .fs import copy_tree
-from .gh_contents import file_exists, put_file
+from .gh_contents import file_exists, get_file_content, put_file, put_files, repo_tree
 from .ghcli import GIT_ENV, clone, gh, git
 from .log import log, log_err, log_ok, log_person, log_skip, log_step
+from .releaseignore import RELEASEIGNORE, deny_for, excluded_in_tree
 from .repos import (
     add_collaborator,
+    default_branch,
     generate_from_template,
     repo_exists,
     set_repo_topics,
@@ -123,6 +125,70 @@ def _template_is_ready(entry: dict | None, slug: str) -> bool:
     return bool(entry.get("isTemplate")) and wanted <= set(entry.get("topics") or [])
 
 
+def withhold_from_template(cohort_org: str, template: str) -> bool:
+    """Delete whatever the template's own `.releaseignore` withholds. True on success.
+
+    The one outbound copy with no clone to filter: `generate_from_template` is a server-side
+    GitHub copy of the whole default branch, so there is no `copytree` and no ignore hook to
+    hang a filter on. It happens here instead - after the cohort template has populated and
+    BEFORE it is marked `is_template`, which is the moment student repos start coming off
+    it. The `.releaseignore` files go with it; they withhold themselves.
+
+    Reads the COHORT copy rather than the course template. Same tree, but filtering what is
+    actually there makes a re-run self-healing: a template that predates this, or one whose
+    earlier filter half-failed, is cleaned by the next handout.
+
+    Fails CLOSED - an unreadable tree returns False and stops the handout - because the
+    thing being withheld is the kind of thing that must not reach students by accident, and
+    "could not tell" is not "nothing to withhold". A handout blocked by a transient API
+    failure is re-run by the next hourly tick or the next click; answers published to a
+    cohort cannot be taken back."""
+    branch = default_branch(cohort_org, template, fallback="main")
+    try:
+        # Blobs only: `put_files` can delete nothing else, and `from_tree` derives the
+        # directories it needs from the paths themselves.
+        paths = repo_tree(cohort_org, template, branch, kind="blob")
+        # `repo_tree` answers () for a 404 rather than raising, and `default_branch` will
+        # have GUESSED `main` if the repo could not be read - so an empty tree here is not
+        # "nothing to withhold". `_wait_for_content` has just confirmed this repo HAS
+        # content, which makes an empty tree a contradiction, and the safe reading of a
+        # contradiction is "could not tell".
+        if not paths:
+            raise RuntimeError(
+                f"{branch} came back empty, though the repo has content - the branch name "
+                f"may be a guess"
+            )
+        # Inside the guard: `get_file_content` raises on any non-404 failure, and an
+        # unhandled raise here escapes through provision_all into the hourly scheduler and
+        # takes every later cohort's release with it.
+        withheld = excluded_in_tree(
+            paths, lambda p: get_file_content(cohort_org, template, p)
+        )
+    except RuntimeError as exc:
+        log_err(
+            f"  ! could not read {cohort_org}/{template}, so a `{RELEASEIGNORE}` in it "
+            f"could not be applied - handout stopped rather than risk shipping what it "
+            f"withholds. Re-run it: {exc}"
+        )
+        return False
+    if not withheld:
+        return True
+    if not put_files(
+        cohort_org,
+        template,
+        {},
+        f"chore: withhold {len(withheld)} path(s) named in {RELEASEIGNORE}",
+        delete=withheld,
+    ):
+        log_err(
+            f"  ! could not withhold {len(withheld)} path(s) a `{RELEASEIGNORE}` names in "
+            f"{cohort_org}/{template} - handout stopped"
+        )
+        return False
+    log_ok(f"withheld {len(withheld)} path(s) from {cohort_org}/{template}")
+    return True
+
+
 def ensure_cohort_template(
     master_org: str,
     template: str,
@@ -171,6 +237,10 @@ def ensure_cohort_template(
             f"  ! cohort template {cohort_org}/{slug} did not populate in time "
             f"(template-generate is async) - re-run the release"
         )
+        return None
+    # Before `is_template`, which is the moment per-student repos start generating FROM
+    # this: a path withheld after that point is already in somebody's repo.
+    if not withhold_from_template(cohort_org, slug):
         return None
     code, out = gh(
         "api",
@@ -225,12 +295,17 @@ def fetch_solution(master_org: str, template: str, dest: Path) -> Path | None:
 
 
 def push_solution(cohort_org: str, repo: str, sol_dir: Path) -> bool:
-    """Push the solution/ folder into an existing student repo (idempotent overwrite)."""
+    """Push the solution/ folder into an existing student repo (idempotent overwrite).
+
+    Withholds whatever the template's `.releaseignore` files exclude, anchored at the clone
+    root - which is `sol_dir.parent`, by construction in `fetch_solution`. Going through
+    `fs.copy_tree` rather than a bare `copytree` is also what stops a symlink inside a
+    solution folder being followed out of it."""
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "r"
         if not clone(cohort_org, repo, wd):
             return False
-        copy_tree(sol_dir, wd / SOLUTION_DIR)
+        copy_tree(sol_dir, wd / SOLUTION_DIR, deny_for(sol_dir.parent))
         git("-C", str(wd), *GIT_ENV, "add", "-A")
         code, _ = git(
             "-C",

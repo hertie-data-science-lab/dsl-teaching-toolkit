@@ -133,10 +133,36 @@ def test_reading_list_md_inlines_text_lists_binaries_by_name(tmp_path):
     wk.mkdir()
     (wk / "READINGS.md").write_text("# Session 1\n- Smith 2020, ch.1")
     (wk / "paper.pdf").write_bytes(b"%PDF-1.4 copyrighted bytes")
-    md = public_site._reading_list_md(wk)
+    md = public_site._reading_list_md(wk, lambda p: True)
     assert "Smith 2020" in md  # citation text is published
     assert "- paper.pdf" in md  # the PDF is named...
     assert "%PDF" not in md  # ...but its bytes are NOT
+
+
+def test_reading_list_md_drops_a_withheld_reading_before_naming_it(tmp_path):
+    # `reading-list` is the DEFAULT mode and hosts nothing, so it never calls copy_tree and
+    # the copytree ignore hook never runs. Naming a file IS publishing it here, and an
+    # inlined overlay publishes every word - so a withheld reading has to be dropped before
+    # `readings_block` sees it, not filtered out of a copy that never happened.
+    wk = tmp_path / "session-1"
+    wk.mkdir()
+    (wk / "READINGS.md").write_text("# Session 1\n- Smith 2020, ch.1")
+    (wk / "embargoed.pdf").write_bytes(b"%PDF not yet")
+    md = public_site._reading_list_md(wk, lambda p: p.name != "embargoed.pdf")
+    assert "Smith 2020" in md
+    assert "embargoed" not in md
+
+
+def test_reading_list_md_can_withhold_the_overlay_itself(tmp_path):
+    # The worse half of the same hole: the overlay is INLINED, so a withheld one published
+    # its full prose rather than merely its name.
+    wk = tmp_path / "session-1"
+    wk.mkdir()
+    (wk / "READINGS.md").write_text("# Session 1\n- unpublished draft citation")
+    (wk / "paper.pdf").write_bytes(b"%PDF")
+    md = public_site._reading_list_md(wk, lambda p: p.name != "READINGS.md")
+    assert "unpublished draft citation" not in md
+    assert "- paper.pdf" in md
 
 
 def test_public_links_are_site_relative(tmp_path):

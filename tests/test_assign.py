@@ -219,6 +219,174 @@ def test_a_recorded_solution_release_stays_green(tmp_path, monkeypatch):
     assert recorded == [("COHORT", "assignment-1", 1)] and rc == 0
 
 
+def _template_tree(monkeypatch, files: dict[str, str]):
+    """Stub the tree + blob reads `withhold_from_template` does; record the deletes."""
+    deleted: list[tuple[str, ...]] = []
+    monkeypatch.setattr(assign, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(assign, "repo_tree", lambda *a, **k: tuple(files))
+    monkeypatch.setattr(
+        assign, "get_file_content", lambda org, repo, path, **k: files.get(path)
+    )
+    monkeypatch.setattr(
+        assign,
+        "put_files",
+        lambda org, repo, w, msg, delete=(), **k: deleted.append(delete) or True,
+    )
+    return deleted
+
+
+def test_the_cohort_assignment_template_is_filtered_before_it_is_a_template(
+    monkeypatch,
+):
+    # The handout is a SERVER-SIDE copy (generate_from_template), so there is no clone and
+    # no copytree hook - the filter has to be a delete, and it has to land before
+    # `is_template` is set, because that is the moment student repos start coming off it.
+    deleted = _template_tree(
+        monkeypatch,
+        {
+            ".releaseignore": "rubric-draft.md\nnotes/\n",
+            "starter.py": "",
+            "rubric-draft.md": "not for students",
+            "notes/mine.md": "",
+        },
+    )
+    assert assign.withhold_from_template("COHORT", "a1")
+    # The ignore file goes too - it withholds itself.
+    assert deleted == [(".releaseignore", "notes/mine.md", "rubric-draft.md")]
+
+
+def test_a_template_with_no_releaseignore_is_left_alone(monkeypatch):
+    deleted = _template_tree(monkeypatch, {"starter.py": "", "README.md": ""})
+    assert assign.withhold_from_template("COHORT", "a1")
+    assert deleted == []
+
+
+def test_an_empty_template_tree_stops_the_handout(monkeypatch, capsys):
+    # The likeliest failure, and it used to fail OPEN: `default_branch` GUESSES `main` when
+    # it cannot read the repo, `repo_tree` answers () for a 404 rather than raising, so a
+    # template on a differently-named branch yielded "nothing to withhold" and was handed
+    # to every student unfiltered. `_wait_for_content` has just confirmed the repo HAS
+    # content, so an empty tree is a contradiction - and a contradiction is "could not
+    # tell", not "nothing".
+    monkeypatch.setattr(assign, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(assign, "repo_tree", lambda *a, **k: ())
+    assert not assign.withhold_from_template("COHORT", "a1")
+    assert "handout stopped" in capsys.readouterr().err
+
+
+def test_an_unreadable_ignore_blob_stops_the_handout(monkeypatch, capsys):
+    # The tree read was guarded; the per-blob reads were not, and `get_file_content` raises
+    # on any non-404 failure. Unhandled, that escaped through provision_all into the hourly
+    # scheduler and took every later cohort's release with it.
+    monkeypatch.setattr(assign, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(assign, "repo_tree", lambda *a, **k: (".releaseignore", "x.py"))
+
+    def boom(*a, **k):
+        raise RuntimeError("403")
+
+    monkeypatch.setattr(assign, "get_file_content", boom)
+    assert not assign.withhold_from_template("COHORT", "a1")
+    assert "handout stopped" in capsys.readouterr().err
+
+
+def test_the_withheld_count_matches_what_is_actually_deleted(monkeypatch, capsys):
+    # `put_files` can only delete BLOBS, so a tree fetch that also returned directories
+    # made the reported count larger than the work done: one withheld folder of one file
+    # read as "withheld 2 path(s)". Asking for blobs only keeps the two in step.
+    kinds: list[str] = []
+
+    def fake_tree(org, repo, branch, kind=""):
+        kinds.append(kind)
+        return ("notes/mine.md", ".releaseignore")
+
+    monkeypatch.setattr(assign, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(assign, "repo_tree", fake_tree)
+    monkeypatch.setattr(assign, "get_file_content", lambda *a, **k: "notes/\n")
+    deleted: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        assign,
+        "put_files",
+        lambda o, r, w, m, delete=(), **k: deleted.append(delete) or True,
+    )
+    assert assign.withhold_from_template("COHORT", "a1")
+    assert kinds == ["blob"]
+    assert deleted == [(".releaseignore", "notes/mine.md")]
+    assert "withheld 2 path(s)" in capsys.readouterr().out
+
+
+def test_an_unreadable_template_tree_stops_the_handout(monkeypatch, capsys):
+    # Fails CLOSED, unlike most reads in this codebase: "could not tell" is not "nothing to
+    # withhold", and answers published to a cohort cannot be taken back. A transient
+    # failure costs a re-run, which the hourly tick does anyway.
+    monkeypatch.setattr(assign, "default_branch", lambda *a, **k: "main")
+
+    def boom(*a, **k):
+        raise RuntimeError("502")
+
+    monkeypatch.setattr(assign, "repo_tree", boom)
+    assert not assign.withhold_from_template("COHORT", "a1")
+    assert "handout stopped" in capsys.readouterr().err
+
+
+def test_a_failed_withhold_stops_the_handout_too(monkeypatch, capsys):
+    monkeypatch.setattr(assign, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(
+        assign, "repo_tree", lambda *a, **k: (".releaseignore", "x.key")
+    )
+    monkeypatch.setattr(assign, "get_file_content", lambda *a, **k: "*.key\n")
+    monkeypatch.setattr(assign, "put_files", lambda *a, **k: False)
+    assert not assign.withhold_from_template("COHORT", "a1")
+    assert "handout stopped" in capsys.readouterr().err
+
+
+def test_ensure_cohort_template_refuses_when_the_filter_fails(monkeypatch):
+    # Wiring: a failed filter must abort ensure_cohort_template rather than fall through to
+    # `is_template`, which would hand the unfiltered template to every student.
+    monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
+    monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
+    monkeypatch.setattr(assign, "withhold_from_template", lambda *a: False)
+    patched = []
+    monkeypatch.setattr(assign, "gh", lambda *a, **k: patched.append(a) or (0, ""))
+    assert assign.ensure_cohort_template("C", "t", "COHORT", "a1") is None
+    assert patched == []
+
+
+def test_push_solution_withholds_what_the_templates_releaseignore_excludes(
+    tmp_path, monkeypatch
+):
+    # The solution push is the third outbound copy from staging, and used to be a bare
+    # `shutil.copytree` with no filter at all - so a stray key or a scratch notebook beside
+    # the model answer went to every student with it. The patterns anchor at the template
+    # CLONE root, which is the `root` half of the Solution.
+    root = tmp_path / "t"
+    (root / "solution").mkdir(parents=True)
+    (root / ".releaseignore").write_text("*.key\nscratch/\n")
+    (root / "solution" / "answers.ipynb").write_text("the model answer")
+    (root / "solution" / "grader.key").write_text("SECRET")
+    (root / "solution" / "scratch").mkdir()
+    (root / "solution" / "scratch" / "wip.py").write_text("half an idea")
+
+    def fake_clone(org, repo, wd):
+        wd.mkdir(parents=True, exist_ok=True)
+        return True
+
+    monkeypatch.setattr(assign, "clone", fake_clone)
+
+    pushed: list[str] = []
+
+    def fake_git(*args):
+        if "add" in args:
+            wd = Path(args[args.index("-C") + 1])
+            pushed.extend(
+                p.relative_to(wd).as_posix() for p in wd.rglob("*") if p.is_file()
+            )
+        return (0, "")
+
+    monkeypatch.setattr(assign, "git", fake_git)
+    assert assign.push_solution("COHORT", "a1-ada", root / "solution")
+    assert pushed == ["solution/answers.ipynb"]
+
+
 def test_a_failed_solution_push_reaches_the_returned_status(tmp_path, monkeypatch):
     # The root of it: provision_one used to log the failure and return "ok" anyway, so
     # provision_all could not tell. Both the group and individual paths must report it.
@@ -229,10 +397,23 @@ def test_a_failed_solution_push_reaches_the_returned_status(tmp_path, monkeypatc
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
     individual = assign.provision_one(
-        "C", "t", "COHORT", "r", ["ada"], "assignment-1", sol_dir=tmp_path
+        "C",
+        "t",
+        "COHORT",
+        "r",
+        ["ada"],
+        "assignment-1",
+        sol_dir=tmp_path,
     )
     group = assign.provision_one(
-        "C", "t", "COHORT", "r", ["ada"], "assignment-1", sol_dir=tmp_path, team="t-a"
+        "C",
+        "t",
+        "COHORT",
+        "r",
+        ["ada"],
+        "assignment-1",
+        sol_dir=tmp_path,
+        team="t-a",
     )
     assert individual == "failed-solution"
     assert group == "failed-solution"
@@ -516,6 +697,7 @@ def test_ensure_cohort_template_repairs_a_half_created_template(monkeypatch):
     # (idempotent), healing it instead of failing every later handout with "not a template".
     monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
+    monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: True)
     calls: list[tuple[str, ...]] = []
 
@@ -541,6 +723,7 @@ def test_ensure_cohort_template_stamps_the_topic_the_site_gates_on(monkeypatch):
     # does - so dropping the stamp silently blanks every brief on every cohort site.
     monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
+    monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
     stamped: list[tuple] = []
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a: stamped.append(a) or True)
@@ -556,6 +739,7 @@ def test_ensure_cohort_template_says_what_a_failed_topic_stamp_costs(monkeypatch
     # leaves the site withholding a brief the students already hold.
     monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
+    monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(assign, "set_repo_topics", lambda *a: False)
     errs: list[str] = []
@@ -574,6 +758,7 @@ def test_ensure_cohort_template_fails_loudly_when_is_template_patch_fails(monkey
     # goes red rather than fanning out from a repo that isn't actually a template.
     monkeypatch.setattr(assign, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
+    monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     monkeypatch.setattr(assign, "gh", lambda *a, **k: (1, "403 Forbidden"))
     assert (
         assign.ensure_cohort_template(
@@ -699,7 +884,14 @@ def test_the_scheduler_leaves_an_existing_repo_alone_but_the_button_repairs_it(
     pushed = []
     monkeypatch.setattr(assign, "push_solution", lambda *a: pushed.append(a) or True)
     assert assign.provision_one(
-        "C", "t", "K", "a1-ada", ["ada"], "a1", sol_dir=Path("s"), **hourly
+        "C",
+        "t",
+        "K",
+        "a1-ada",
+        ["ada"],
+        "a1",
+        sol_dir=Path("s"),
+        **hourly,
     ) == ("skipped")
     assert len(pushed) == 1
 
@@ -835,7 +1027,14 @@ def test_a_failed_solution_wins_over_a_failed_access_grant(
     monkeypatch.setattr(assign, broken, lambda *a, **k: False)
     team = "t-a" if broken == "grant_team_repo_access" else None
     status = assign.provision_one(
-        "C", "t", "COHORT", "r", ["ada"], "assignment-1", sol_dir=tmp_path, team=team
+        "C",
+        "t",
+        "COHORT",
+        "r",
+        ["ada"],
+        "assignment-1",
+        sol_dir=tmp_path,
+        team=team,
     )
     assert status == "failed-solution"
 
@@ -847,7 +1046,14 @@ def test_a_failed_solution_wins_over_a_team_missing_members(tmp_path, monkeypatc
     monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
     monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: False)
     status = assign.provision_one(
-        "C", "t", "COHORT", "r", ["ada"], "assignment-1", sol_dir=tmp_path, team="t-a"
+        "C",
+        "t",
+        "COHORT",
+        "r",
+        ["ada"],
+        "assignment-1",
+        sol_dir=tmp_path,
+        team="t-a",
     )
     assert status == "failed-solution"
 
@@ -928,6 +1134,7 @@ def _listing_run(tmp_path, monkeypatch, listing):
     monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
+    monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
@@ -1013,6 +1220,7 @@ def test_a_half_created_cohort_template_is_still_repaired_from_the_listing(
     # untopiced. The listing must not read that as "ready" - every later handout would
     # fail with a misleading "not a template", or the site would withhold the brief.
     monkeypatch.setattr(assign, "_wait_for_content", lambda org, name: True)
+    monkeypatch.setattr(assign, "withhold_from_template", lambda *a: True)
     patched: list[tuple] = []
     monkeypatch.setattr(assign, "gh", lambda *a, **k: patched.append(a) or (0, ""))
     stamped: list[tuple] = []

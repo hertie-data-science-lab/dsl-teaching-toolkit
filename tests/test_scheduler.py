@@ -562,6 +562,94 @@ def test_deploy_many_never_copies_a_dot_git_directory(monkeypatch):
     assert not any(".git" in rel for rel in copied_rel)
 
 
+# --------------------------------------------------------- .releaseignore, end to end
+#
+# The matcher's agreement with git is `tests/test_releaseignore.py`'s job. These are about
+# the WIRING: that the release path consults it at all, anchors it at the clone root
+# rather than the copied subpath, and refuses a source path that is itself excluded.
+
+
+def _release(monkeypatch, tree: dict[str, str], deploys, staged: list[str]):
+    """One deploy_many run over `tree`, recording what reached the dest at `git add`."""
+    _no_io(monkeypatch, _clone_with_tree(tree))
+    monkeypatch.setattr(deploy, "git", _git_spying_staged(staged))
+    return deploy.deploy_many("Course-Org", "Cohort-Org", deploys, sync=False)
+
+
+def test_a_whole_repo_release_honours_a_releaseignore(monkeypatch):
+    staged: list[str] = []
+    errors, changed = _release(
+        monkeypatch,
+        {
+            ".releaseignore": "**/solutions.ipynb\n__pycache__/\n",
+            "labs/01.md": "lab one",
+            "labs/solutions.ipynb": "THE ANSWERS",
+            "labs/__pycache__/x.pyc": "junk",
+        },
+        [Deploy("cm", "/", "materials", None)],
+        staged,
+    )
+    assert (errors, changed) == (0, True)
+    # The ignore file itself is NOT released - students have pull on this repo, and its
+    # contents are the list of paths faculty held back (see releaseignore's docstring).
+    assert sorted(staged) == ["labs/01.md"]
+
+
+def test_a_subpath_release_still_obeys_the_ROOT_releaseignore(monkeypatch):
+    # The anchor is the CLONE root, not the folder being copied - a root `.releaseignore`
+    # reaches a `labs/01` release the way a root `.gitignore` reaches a subdirectory.
+    # Getting this wrong is the difference between a rule that works and one that only
+    # works for whole-repo releases.
+    staged: list[str] = []
+    errors, changed = _release(
+        monkeypatch,
+        {
+            ".releaseignore": "solutions.ipynb\n",
+            "labs/01/lab.md": "lab",
+            "labs/01/solutions.ipynb": "THE ANSWERS",
+        },
+        [Deploy("cm", "labs/01", "materials", "week01")],
+        staged,
+    )
+    assert (errors, changed) == (0, True)
+    assert staged == ["week01/lab.md"]
+
+
+def test_naming_an_excluded_path_outright_releases_nothing_and_stays_green(
+    monkeypatch, capsys
+):
+    # `git add <ignored-path>` refuses rather than adding the file, so a named path that
+    # is excluded is a no-op, not a copy. GREEN, though: the hourly scheduler runs through
+    # the same deploy_many, and a permanently red cron is how real failures stop being
+    # noticed (see deploy._warn_withheld_stub).
+    staged: list[str] = []
+    errors, changed = _release(
+        monkeypatch,
+        {".releaseignore": "solutions/\n", "solutions/01.ipynb": "THE ANSWERS"},
+        [Deploy("cm", "solutions", "materials", "week01")],
+        staged,
+    )
+    assert (errors, changed) == (0, False)
+    assert staged == []
+    err = capsys.readouterr().err
+    assert "::warning::" in err
+    assert ".releaseignore" in err
+
+
+def test_an_excluded_single_file_is_refused_too(monkeypatch):
+    # The single-file copy is `shutil.copy2`, which has no ignore hook - so the check in
+    # front of it is the only thing standing there.
+    staged: list[str] = []
+    errors, changed = _release(
+        monkeypatch,
+        {".releaseignore": "*.key\n", "deploy.key": "SECRET"},
+        [Deploy("cm", "deploy.key", "materials", "week01/deploy.key")],
+        staged,
+    )
+    assert (errors, changed) == (0, False)
+    assert staged == []
+
+
 def _git_commit_failing(*args):
     """git fake: staged changes present (diff --cached exits 1), but the commit itself
     fails (exit 1) - a real disk/lock/hook failure, distinct from an empty index."""
