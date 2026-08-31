@@ -53,11 +53,16 @@ Things whose *literal spelling* is depended on from outside Python:
 - **`.github/cohort-courses-pages.yml`** is the cohort registry every dropdown reads, and
   **`.github/.last-refresh`** is the heartbeat that keeps an org's crons from GitHub's 60-day
   inactivity disable.
-- **`releaseignore.RELEASEIGNORE`** (`.releaseignore`) is seeded inert by
-  `scaffold.refreshable_stubs` and is a filename faculty type into their own
-  content repos. A rename silently stops withholding whatever the old name held back - which is
+- **`releaseignore.RELEASEIGNORE`** (`.releaseignore`) is a filename faculty type into their
+  own content repos. A rename silently stops withholding whatever the old name held back -
   worse than an outage, because the release still goes green. Nothing re-spells it: the
   matcher withholds the file itself, so no other module needs to name it.
+  Seeded CREATE-ONLY, in the scaffold's materials skeleton, and deliberately NOT a
+  `dsl-stub:` file: `is_untouched_stub` asks whether the mark is anywhere in the text, and
+  the natural edit to a withhold list is to APPEND a pattern under the seeded comments. A
+  marked file would still read as untouched and be rewritten by the nightly refresh -
+  faculty's patterns gone, and whatever they withheld shipping again on a green run. The
+  price is that its wording cannot be improved in a repo that already has it.
 
 ## File ownership
 

@@ -32,7 +32,7 @@ from .course import (
     pages_repo,
 )
 from .discovery import central_ref_for, discover_assignments, discover_cohorts
-from .gh_contents import STUB_MARK, put_files, refresh_stubs, seed_if_absent
+from .gh_contents import put_files, refresh_stubs, seed_if_absent
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
 from .log import log, log_err, log_ok, log_skip, log_step
 from .readings import READING_OVERLAY_FILE
@@ -228,18 +228,23 @@ RETIRED_STUBS = ("readings/01_session-1/reading.md",)
 
 # Seeded inert - every line a comment - so it withholds nothing until faculty write a
 # pattern. It exists to be FOUND: a withhold list nobody knows about is one nobody uses,
-# and a docs page is only reachable by someone who already suspects it exists. The mark
-# comes FROM `gh_contents`, so a change to it cannot leave this stub unrecognised and
-# therefore never refreshed again.
-_RELEASEIGNORE_STUB = f"""\
-# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+# and a docs page is only reachable by someone who already suspects it exists.
 #
-# {STUB_MARK} still the scaffold's, so the toolkit keeps it current. Write over it and it
-# is yours. Every line here is a comment, so nothing is withheld yet.
+# CREATE-ONLY, and deliberately NOT a `dsl-stub:` file. `is_untouched_stub` asks whether
+# the mark is anywhere in the text, which is right for a prose stub faculty replace
+# wholesale - and exactly wrong here, because the natural edit to a withhold list is to
+# APPEND a pattern under the comments this text invites them to keep. A marked file would
+# still read as untouched, and the next nightly refresh would rewrite it: their patterns
+# gone, and whatever they withheld shipping again on a green run. So this is written once
+# and never touched, and the price is that the wording below cannot be improved in a repo
+# that already has it.
+_RELEASEIGNORE_STUB = f"""\
+# INSTRUCTOR-OWNED - yours. Written once when this repo was scaffolded, and never
+# rewritten by the toolkit, so anything you put here stays.
 #
 # Name a file here and it is never copied out of this repo - not into a cohort's
 # materials, not onto the public site, not with a solution. Same syntax as .gitignore,
-# and you can add another in any subfolder. Examples and the full rules:
+# and you can add another in any subfolder. The full rules:
 # https://github.com/{CENTRAL}/blob/main/docs/08-release-materials-to-cohort.md
 """
 
@@ -254,7 +259,6 @@ def refreshable_stubs(tag: str) -> dict[str, bytes]:
     return {
         "SYLLABUS.md": _SYLLABUS_STUB.format(tag=tag).encode(),
         f"readings/01_session-1/{READING_OVERLAY_FILE}": _READINGS_STUB,
-        RELEASEIGNORE: _RELEASEIGNORE_STUB.encode(),
     }
 
 
@@ -470,6 +474,7 @@ def scaffold_materials(org: str, tag: str) -> int:
         # contents are inlined on the site's Materials tab), and an empty folder gave no
         # sign of that - the tab then reads blank with nothing to explain why.
         "labs/01_session-1/.gitkeep": b"",
+        RELEASEIGNORE: _RELEASEIGNORE_STUB.encode(),
     }
     # One commit for the skeleton: all five carried the same subject anyway, so writing
     # them one at a time opened a repo faculty then author by hand with five identical
