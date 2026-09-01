@@ -5,7 +5,7 @@ silently mis-dates the whole schedule page, or hides a lab inside a lecture row.
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from functools import cache
 from zoneinfo import ZoneInfo
 
@@ -948,12 +948,18 @@ def test_an_assignment_in_the_plan_gets_rows_before_its_template_is_staged(
     # A term written in August names template repos nobody has created yet. Discovery finds
     # none of them, and the site used to render one row for a cohort that had written four
     # - dates published in schedule.yml, nothing on the schedule that publishes them.
+    # Dates derived from TODAY, not pinned to a literal. `_assignment_entry` treats a
+    # handout_datetime that has already fired as handed out, so a hardcoded September 2026
+    # stopped being "a term written in August" the moment the clock reached it - and
+    # `_plan` goes through `sync_site`, which takes no `now` to pin.
+    base = datetime.now(BERLIN).replace(hour=7, minute=0, second=0, microsecond=0)
+    handout = {n: base + timedelta(days=30 + n) for n in (1, 2, 3, 4)}
     sched = Schedule(
         assignments={
             f"assignment-{n}": AssignmentEntry(
                 course_source_repo=f"assignment-{n}-f2026",
-                due_datetime=datetime(2026, 9, 10 + n, 23, 59, tzinfo=BERLIN),
-                handout_datetime=datetime(2026, 9, n, 7, 0, tzinfo=BERLIN),
+                due_datetime=handout[n] + timedelta(days=9, hours=16, minutes=59),
+                handout_datetime=handout[n],
             )
             for n in (1, 2, 3, 4)
         }
@@ -971,7 +977,7 @@ def test_an_assignment_in_the_plan_gets_rows_before_its_template_is_staged(
         "04-assignment-4.md",
     ]
     # each on its own dates, and none of them claiming to be released
-    assert "date: 2026-09-02T07:00:00" in out["02-assignment-2.md"]
+    assert f"date: {handout[2]:%Y-%m-%dT%H:%M:%S}" in out["02-assignment-2.md"]
     assert all("handout_pending: true" in e for e in out.values())
 
 
