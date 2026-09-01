@@ -374,21 +374,22 @@ Needs the course org's `GRAPH_*` secrets, as the button does.
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `send_codes_datetime` | **yes** | - (block dropped without it) | when the window opens |
-| `send_until` | no | `semester_start` + 2 weeks | when it closes; after it, codes go out only by hand |
+| `send_until` | no | `semester_start` + 2 weeks (or `send_codes_datetime` + 2 weeks when the cohort pins no `semester_start`) | when it closes; after it, codes go out only by hand |
 | `show_on_site` | no | **`false`** | `true` raises a schedule row on the opening date - default OFF, unlike `releases:`, because enrolment is administrative |
 | `title` | no | `Enrolment opens` | that row's label, when shown |
 
 ```yaml
 enrolment:
   send_codes_datetime: 2026-08-24T08:00   # opens a fortnight before term
-  send_until: 2026-09-21T00:00            # optional: the default is semester_start + 2 weeks
+  send_until: 2026-09-21T00:00            # optional: default semester_start + 2 weeks (or send_codes_datetime + 2 weeks with no semester_start)
   show_on_site: true                      # optional: default false
   title: Enrolment opens                  # optional
 ```
 
-An open window over an EMPTY `students.csv` sends nothing, so it is reported in the hourly
-cron's digest issue (dated at the window's close, capped at *warning* - it never reddens the
-cron) rather than in a run log nobody reads hourly.
+An open window over an EMPTY `students.csv` sends nothing, and by the time the window is
+open it is nearly too late to fix - so **Check cohort setup** reports it, where it can be
+read beforehand. The hourly cron stays green: it cannot clear the problem, and an hourly red
+X for the length of the window is one nobody reads.
 
 #### Schedule row types
 

@@ -233,7 +233,7 @@ It is a **window**, not a moment, and that is the whole point. Rosters keep movi
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `send_codes_datetime` | **yes** | - | when the window **opens** - the first hourly tick that emails anyone |
-| `send_until` | no | `semester_start` + 2 weeks | when the window **closes**. After it, codes only go out if you press the button |
+| `send_until` | no | `semester_start` + 2 weeks (or `send_codes_datetime` + 2 weeks when the cohort pins no `semester_start`) | when the window **closes**. After it, codes only go out if you press the button |
 | `show_on_site` | no | **`false`** | `true` adds a row to the site's schedule on the opening date |
 | `title` | no | `Enrolment opens` | that row's label - only used when `show_on_site` is `true` |
 
@@ -245,18 +245,9 @@ enrolment:
   title: Enrolment opens                  # optional
 ```
 
-At its shortest, one line does it - the window then closes two weeks after `semester_start`, and nothing appears on the site:
-
-```yaml
-enrolment:
-  send_codes_datetime: 2026-08-24T08:00
-```
-
 NB: **`show_on_site` defaults to `false` here, the opposite of a `releases:` entry.** Enrolment is administrative and the emails are private, so the date earns a row on the student-facing schedule only where you say it does.
 
-NB: **the window needs a roster to send to.** If `students.csv` is still empty while the window is open, nothing is emailed and the run stays green - so it is reported through [the digest issue](#the-digest-issue) instead, as an advisory that escalates to a warning as the window runs out. It never reddens the hourly cron: an empty roster on the first morning is ordinary, and an hourly red X for the length of the window is not a message anyone reads.
-
-NB: emailing needs the `GRAPH_*` secrets on the course org, exactly as the button does. Without them the codes are still written into `students.csv`, nothing is sent, and the run says so.
+NB: **the window needs a roster to send to.** A window standing open over an empty `students.csv` emails nobody, and once it has closed there is nothing to be done about it - so **Check cohort setup** says whether the roster is there, which you can read before the window opens. The hourly cron deliberately stays green and quiet about it: it would have to say it every hour for a fortnight, by which time it is already too late to act on.
 
 ---
 Full schema, field by field, see [here](DEPLOYMENT-CHECKLIST.md#scheduleyml).
@@ -315,8 +306,6 @@ One issue per cohort, titled **"schedule.yml: planned releases cite sources not 
 - it **closes itself** when the last missing source is staged.
 
 Appears, escalates, clears - three notifications over the life of a problem, however many hourly ticks happen in between. A term written months ahead sits entirely at *advisory* and opens no issue at all.
-
-The same issue carries one fault that is not about a source: an [`enrolment:`](#enrolment) window standing open over an empty `students.csv`. It is dated at the window's close, so it escalates as the last chance to mail anyone runs out, and it is capped at *warning* - it never reddens the cron.
 
 A source that cannot be *read* (a rate limit, a permissions blip) is never reported as missing - that would turn every entry in the plan into a phantom typo.
 

@@ -39,7 +39,8 @@ the scheduler mails enrolment codes.
       send_codes_datetime: 2026-09-01T08:00   # enrolment codes. Every tick inside it
       send_until: 2026-09-21T00:00   # sends to whoever still has no code, so a student
       show_on_site: false            # added mid-window is mailed within the hour.
-      title: Enrolment opens         # `send_until` defaults to semester_start + 2 weeks;
+      title: Enrolment opens         # `send_until` defaults to semester_start + 2 weeks
+                                     # (to the OPENING + 2 weeks with no semester_start);
                                      # `show_on_site` to FALSE (see the Enrolment class).
     semester_start: 2026-09-07
     semester_end: 2026-12-18

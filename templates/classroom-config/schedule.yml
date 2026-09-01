@@ -107,6 +107,6 @@
 
 # enrolment:                        # the WINDOW in which enrolment codes are emailed automatically - the scheduled twin of the "Send enrolment codes" button
 #   send_codes_datetime:            # REQUIRED - when the window OPENS. Every hourly tick inside the window emails whoever still has no code, so a student you add to students.csv mid-window is emailed within the hour (nobody is ever emailed twice)
-#   send_until:                     # OPTIONAL - default: semester_start + 2 weeks. When the window CLOSES; after it, codes only go out if you press the button
+#   send_until:                     # OPTIONAL - default: semester_start + 2 weeks (with no semester_start, send_codes_datetime + 2 weeks). When the window CLOSES; after it, codes only go out if you press the button
 #   show_on_site: false             # OPTIONAL - default: FALSE (the opposite of a releases: entry - enrolment is administrative and the emails are private). true = adds a row to the deployed site's Schedule tab
 #   title: Enrolment opens          # OPTIONAL - default: "Enrolment opens". The site row's label; only used when show_on_site is true
