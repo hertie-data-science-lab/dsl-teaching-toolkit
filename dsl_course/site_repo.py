@@ -53,7 +53,7 @@ THEME_REF = "e4b8fdc9e87b4729c9dcef142591551a2361d4b5"
 # every page as a raw ISO timestamp.
 _THEME_CONFIG = {
     "remote_theme": f"{THEME_REPO}@{THEME_REF}",
-    "dateformat": "%m/%d/%Y",
+    "dateformat": "%d/%m/%Y",
 }
 
 # The collections the shipped templates read (`site.lectures`, `site.assignments`,
