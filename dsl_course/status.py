@@ -32,7 +32,7 @@ from .discovery import org_meta
 from .log import log_err
 from .repos import default_branch
 
-ITEMS = ("B1", "B6", "B7", "C2", "C3", "C4", "C5", "C6", "C7")
+ITEMS = ("B1", "B6", "B7", "C2", "C3", "C4", "C5", "C6", "C7", "C8")
 # Rows whose input is marked `[required]` in docs/DEPLOYMENT-CHECKLIST.md;
 # everything else is optional
 # (synthesised/skipped when absent), so an absent optional item is "optional", not
@@ -69,6 +69,31 @@ def _row(
         "detail": detail,
         "edit_url": _edit_url(org, repo, path, branch, present),
     }
+
+
+def _enrolment_detail(
+    window: schedule.Enrolment, students: list[roster.Student] | None
+) -> str:
+    """The enrolment row's detail: when the window mails, and the one thing that would
+    make it mail nobody.
+
+    An `enrolment:` window puts the hourly cron in charge of emailing enrolment codes, and
+    it can only mail rows that are in `students.csv`. A window standing open over an empty
+    roster therefore runs green and silent for a fortnight. The cron deliberately does not
+    shout about it - it would shout every hour, and by then the window is already open -
+    so this is the surface that has to: a person reads it while there is still time to
+    paste the roster in."""
+    bounds = f"{window.opens.isoformat()} -> {window.closes.isoformat()}"
+    shown = ", shown on the site" if window.show_on_site else ""
+    if students is None:
+        # roster.load returns None only when the file could not be read at all, which is a
+        # different fix from an empty one - say which.
+        gap = f" - WARNING: {roster.ROSTER_PATH} cannot be read, so nobody is mailed"
+    elif not students:
+        gap = f" - WARNING: {roster.ROSTER_PATH} is empty, so nobody is mailed"
+    else:
+        gap = ""
+    return f"codes sent {bounds}{shown}{gap}"
 
 
 def render_markdown(course_org: str, cohort_org: str, data: dict[str, dict]) -> str:
@@ -175,7 +200,10 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         tier,
     )
 
-    students = roster.load(cohort_org) or []
+    # `or []` only after C8 has had the raw value: None (unreadable) and [] (no rows
+    # yet) are one thing to a count and two different fixes to the enrolment row.
+    roster_rows = roster.load(cohort_org)
+    students = roster_rows or []
     onboarded = sum(s.onboarded for s in students)
     data["C2"] = _row(
         "C2",
@@ -268,6 +296,24 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         cohort_branch,
         bool(n_instructors),
         f"{n_instructors} active" if n_instructors else "",
+    )
+
+    # Costs nothing: the window comes off the schedule C5/C6 already loaded and the roster
+    # off the one C2 already read, so the row that makes an empty-roster window visible is
+    # free.
+    data["C8"] = _row(
+        "C8",
+        f"Enrolment window ({schedule.SCHEDULE_PATH} -> enrolment)",
+        cohort_org,
+        schedule.CONFIG_REPO,
+        schedule.SCHEDULE_PATH,
+        cohort_branch,
+        sched.enrolment is not None,
+        _enrolment_detail(sched.enrolment, roster_rows) + dropped
+        if sched.enrolment is not None
+        # A block faculty wrote and the parser threw away leaves `enrolment` None, which
+        # would otherwise read as "never set".
+        else dropped.lstrip(" -"),
     )
 
     return data

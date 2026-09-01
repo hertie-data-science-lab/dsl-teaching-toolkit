@@ -16,8 +16,7 @@ import pytest
 import yaml
 
 from dsl_course import collect as collect_mod
-from dsl_course import course, deploy, ghcli, scheduler, seed
-from dsl_course import schedule as schedule_mod
+from dsl_course import course, deploy, enrol_codes, ghcli, scheduler, seed
 from dsl_course.schedule import (
     AssignmentEntry,
     Deploy,
@@ -1446,8 +1445,10 @@ def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsy
 # ------------------------------------------------- the enrolment window (unattended)
 # `enrolment:` puts Send enrolment codes on the hourly clock, for as long as its window is
 # open. What has to be right is the gate (only inside the window), the reuse (the whole
-# send is enrol_codes.run, so `code_sent_at` is what stops a second email), and the one
-# failure that must NOT redden a cron every hour for a fortnight.
+# send is enrol_codes.run, so `code_sent_at` is what stops a second email), and which
+# failures may redden a cron that will re-run every hour for a fortnight.
+
+Outcome = enrol_codes.Outcome
 
 
 def _window(opens_days: float, closes_days: float) -> Schedule:
@@ -1460,15 +1461,17 @@ def _window(opens_days: float, closes_days: float) -> Schedule:
     )
 
 
-def _enrolment(monkeypatch, sched, *, roster_rows=1, rc=0, dry_run=False):
+def _enrolment(monkeypatch, sched, *, outcome=Outcome.SENT, dry_run=False):
     """Drive the enrolment step, capturing the call enrol_codes.run would have had."""
     calls: list[tuple] = []
-    monkeypatch.setattr(scheduler.roster, "load", lambda org: [object()] * roster_rows)
-    monkeypatch.setattr(
-        scheduler.enrol_codes,
-        "run",
-        lambda org, dry_run: calls.append((org, dry_run)) or rc,
-    )
+
+    def fake_run(org, dry_run):
+        calls.append((org, dry_run))
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    monkeypatch.setattr(scheduler.enrol_codes, "run", fake_run)
     errors = scheduler._send_enrolment_codes("Cohort-Org", sched, WHEN, dry_run)
     return errors, calls
 
@@ -1497,94 +1500,53 @@ def test_a_dry_run_scheduler_previews_the_codes_rather_than_sending_them(monkeyp
     assert calls == [("Cohort-Org", True)]
 
 
-def test_a_failed_send_is_counted_as_an_error(monkeypatch):
-    assert _enrolment(monkeypatch, _window(-2, +12), rc=1)[0] == 1
+def test_a_rejected_message_is_counted_as_an_error(monkeypatch):
+    # A send that Graph should have accepted and did not is a real failure, and the one
+    # enrolment outcome that still reds the hourly run.
+    assert _enrolment(monkeypatch, _window(-2, +12), outcome=Outcome.FAILED)[0] == 1
 
 
-def test_an_empty_roster_is_not_mailed_and_does_not_fail_the_run(monkeypatch):
-    # enrol_codes.run returns 1 on an empty roster - correct for a button someone pressed,
-    # wrong for an hourly cron that would then be red for the length of the window.
-    errors, calls = _enrolment(monkeypatch, _window(-2, +12), roster_rows=0)
-    assert errors == 0 and calls == []
-
-
-def test_an_open_window_over_an_empty_roster_is_recorded_as_a_fault(monkeypatch):
-    monkeypatch.setattr(scheduler.roster, "load", lambda org: [])
-    faults = scheduler._enrolment_faults("Cohort-Org", _window(-2, +12), WHEN)
-    assert len(faults) == 1
-    fault = faults[0]
-    assert fault.where == "enrolment"
-    # dated at the window's CLOSE, so it escalates as the last chance to mail runs out
-    assert fault.fires == WHEN + timedelta(days=12)
-    assert "students.csv" in fault.what and "no codes can be sent" in fault.what
-
-
-def test_the_empty_roster_fault_can_never_redden_the_cron(monkeypatch):
-    # Capped at WARNING for the reason a `.releaseignore` fault is: its moment passes and
-    # stays passed, and an ERROR would be an hourly red X nobody reads for a fortnight.
-    monkeypatch.setattr(scheduler.roster, "load", lambda org: [])
-    # A window about to shut is inside SOURCE_ERROR_WINDOW, where any other fault is an
-    # ERROR and the run goes red.
-    shutting = _window(-13, +0.5)
-    assert (
-        scheduler._enrolment_faults("Cohort-Org", shutting, WHEN)[0].severity(WHEN)
-        is schedule_mod.Severity.WARNING
-    )
-
-    monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [])
-    monkeypatch.setattr(scheduler.source_digest, "sync", lambda *a, **k: 0)
-    assert (
-        scheduler._preflight_sources(
-            "Course-Org", "Cohort-Org", _window(-2, +12), WHEN, False
-        )
-        == 0
-    )
-
-
-def test_a_roster_with_rows_raises_no_fault(monkeypatch):
-    monkeypatch.setattr(scheduler.roster, "load", lambda org: [object()])
-    assert scheduler._enrolment_faults("Cohort-Org", _window(-2, +12), WHEN) == []
-    # nor does a closed window, whatever the roster says
-    monkeypatch.setattr(scheduler.roster, "load", lambda org: [])
-    assert scheduler._enrolment_faults("Cohort-Org", _window(+1, +15), WHEN) == []
-
-
-def test_the_empty_roster_fault_reaches_the_same_digest_as_a_missing_source(
-    monkeypatch,
+@pytest.mark.parametrize(
+    "outcome", [Outcome.NO_ROSTER, Outcome.EMPTY_ROSTER, Outcome.NO_TRANSPORT]
+)
+def test_a_configuration_gap_never_reddens_the_hourly_cron(
+    monkeypatch, capsys, outcome
 ):
-    # One issue per cohort, so a person hears about this the way they hear about a lecture
-    # folder nobody staged - once, not once an hour.
-    monkeypatch.setattr(scheduler.roster, "load", lambda org: [])
-    monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [])
-    seen: dict = {}
-    monkeypatch.setattr(
-        scheduler.source_digest,
-        "sync",
-        lambda *a, **k: seen.update(args=a) or 0,
-    )
-    scheduler._preflight_sources(
-        "Course-Org", "Cohort-Org", _window(-2, +12), WHEN, False
-    )
-    assert [f.where for f in seen["args"][2]] == ["enrolment"]
+    # Nothing the cron does can clear any of these, and it would report each of them once
+    # an hour for the length of the window - which is how a red X stops being read at all.
+    # They belong to `status`, which shows them BEFORE the window opens. One run-log line
+    # each, and a green run.
+    errors, calls = _enrolment(monkeypatch, _window(-2, +12), outcome=outcome)
+    assert errors == 0
+    assert calls == [("Cohort-Org", False)]  # the attempt is still made every tick
+    err = capsys.readouterr().err
+    assert outcome.value in err
+    assert "Check cohort setup" in err
 
 
-@pytest.mark.parametrize("dry_run", [False, True])
-def test_the_hourly_run_itself_mails_the_codes_and_honours_dry_run(
-    monkeypatch, dry_run
-):
+def test_a_credential_graph_refuses_does_not_abandon_the_rest_of_the_tick(monkeypatch):
+    # mailer raises rather than returns on a failed token request. Unguarded that escapes
+    # the enrolment step and takes the cohort's releases down with it - for a broken secret
+    # only a person can fix.
+    errors, _calls = _enrolment(
+        monkeypatch, _window(-2, +12), outcome=RuntimeError("token request failed")
+    )
+    assert errors == 0
+
+
+def test_the_hourly_run_itself_mails_the_codes(monkeypatch):
     # The helpers above are unit-level; this is the wiring - a cohort with an open window
     # and nothing else in its plan must still get its codes off the hourly tick.
     sched = _window(-2, +12)
     monkeypatch.setattr(scheduler.schedule, "load", lambda cohort: sched)
-    monkeypatch.setattr(scheduler.roster, "load", lambda org: [object()])
     calls: list[tuple] = []
     monkeypatch.setattr(
         scheduler.enrol_codes,
         "run",
-        lambda org, dry_run: calls.append((org, dry_run)) or 0,
+        lambda org, dry_run: calls.append((org, dry_run)) or Outcome.SENT,
     )
-    assert scheduler.run("Course-Org", "Cohort-Org", WHEN, dry_run=dry_run) == 0
-    assert calls == [("Cohort-Org", dry_run)]
+    assert scheduler.run("Course-Org", "Cohort-Org", WHEN, dry_run=False) == 0
+    assert calls == [("Cohort-Org", False)]
 
 
 # ----------------------------------------------------- source pre-flight (unattended)

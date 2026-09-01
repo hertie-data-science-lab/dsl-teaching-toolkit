@@ -48,7 +48,7 @@ import argparse
 import sys
 from datetime import datetime, timezone
 
-from . import enrol_codes, roster, schedule, site, source_digest
+from . import enrol_codes, schedule, site, source_digest
 from .assign import provision_all, solution_released
 from .collect import (
     SnapshotResult,
@@ -410,36 +410,19 @@ def _handout_releases(
     return out
 
 
-def _enrolment_faults(
-    cohort_org: str, sched: schedule.Schedule, now: datetime
-) -> list[schedule.SourceFault]:
-    """An open enrolment window with nothing to send to, as a digest fault.
-
-    An empty roster is the one way the window can be wide open and still mail nobody, and
-    it is silent: every tick reads the file, finds no rows, and does nothing. It rides the
-    digest rather than the run log for the same reason a missing source does - an hourly
-    channel that shouts on every tick is one nobody reads - and it is capped at WARNING so
-    that it cannot redden the cron for the rest of the window (the ceiling `.releaseignore`
-    faults use, for that same reason).
-
-    It is dated at the window's CLOSE, so it starts as an advisory and escalates as the
-    last chance to mail anyone runs out. An unread roster (not just an empty one) counts:
-    both mean no codes go out, and `roster.load` has already said which it was."""
-    window = sched.enrolment
-    if window is None or not window.is_open(now):
-        return []
-    if roster.load(cohort_org):
-        return []
-    return [
-        schedule.SourceFault(
-            "enrolment",
-            f"the enrolment window is open but {roster.CONFIG_REPO}/"
-            f"{roster.ROSTER_PATH} is empty - no codes can be sent",
-            window.closes,
-            field="send_codes_datetime",
-            ceiling=schedule.Severity.WARNING,
-        )
-    ]
+# The outcomes an unattended hourly run must NOT go red on. Each is a configuration
+# somebody has to go and fix - an empty roster, unset GRAPH_* secrets - so it would be
+# reported identically on every tick for the length of the window, and a cron that has
+# been red for a fortnight is one nobody reads any more. They are reported instead by
+# `status` (the Check cohort setup workflow), which a person can read BEFORE the window
+# opens - the only moment the warning is still actionable.
+_NOT_THE_CRONS_FAULT = frozenset(
+    {
+        enrol_codes.Outcome.NO_ROSTER,
+        enrol_codes.Outcome.EMPTY_ROSTER,
+        enrol_codes.Outcome.NO_TRANSPORT,
+    }
+)
 
 
 def _send_enrolment_codes(
@@ -450,18 +433,32 @@ def _send_enrolment_codes(
 
     The whole send is `enrol_codes.run`, exactly as the button calls it - the codes are
     written to `students.csv` and only rows with a blank `code_sent_at` are mailed, which
-    is what makes an hourly re-run a no-op rather than a second email.
+    is what makes an hourly re-run a no-op rather than a second email. It reads the roster
+    itself and reports what it found, so nothing here reads it a second time to decide
+    whether calling it is worthwhile.
 
-    An empty roster is passed over in silence here: it is real, but `_enrolment_faults`
-    has already recorded it somewhere that does not shout every hour, and `enrol_codes.run`
-    would otherwise fail the cron on it for the length of the window."""
+    A rejected message still reddens the run; a missing roster or a missing transport does
+    not (see `_NOT_THE_CRONS_FAULT`)."""
     window = sched.enrolment
     if window is None or not window.is_open(now):
         return 0
-    if not roster.load(cohort_org):
-        return 0
     log_step(f"  enrolment codes (window open until {window.closes.isoformat()})")
-    return 1 if enrol_codes.run(cohort_org, dry_run=dry_run) else 0
+    try:
+        outcome = enrol_codes.run(cohort_org, dry_run=dry_run)
+    except RuntimeError as exc:
+        # A credential Graph would not accept. Same class as an unset secret - nothing is
+        # achievable until a person fixes it - but it arrives as an exception, and
+        # unguarded it would abandon the rest of this cohort's tick, releases included.
+        log_err(f"no enrolment codes went out for {cohort_org}: {exc}")
+        return 0
+    if outcome in _NOT_THE_CRONS_FAULT:
+        log_err(
+            f"no enrolment codes went out for {cohort_org}: {outcome.value}. That is a "
+            f"configuration gap rather than a failed send, so this run stays green - run "
+            f"Check cohort setup to see it."
+        )
+        return 0
+    return 1 if outcome is enrol_codes.Outcome.FAILED else 0
 
 
 def _preflight_sources(
@@ -478,15 +475,9 @@ def _preflight_sources(
     about to ship nothing. Everything else - a check that could not run, a digest that
     could not be written - is logged and swallowed. The distinction is the point: a
     RELEASE problem is worth a red X on the cron, a NOTIFICATION problem is not worth
-    stopping a release for.
-
-    The open-window-empty-roster fault joins the same list, because it is the same kind of
-    problem told the same way: found on an hourly tick, actionable by a person, and worth
-    exactly one notification rather than one an hour."""
+    stopping a release for."""
     try:
-        faults = schedule.source_faults(sched, course_org) + _enrolment_faults(
-            cohort_org, sched, now
-        )
+        faults = schedule.source_faults(sched, course_org)
     except Exception as exc:
         log_err(f"could not check {cohort_org}'s sources ({type(exc).__name__}): {exc}")
         return 0

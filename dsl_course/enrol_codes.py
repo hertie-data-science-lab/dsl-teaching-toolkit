@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import enum
 import io
 import secrets
 import sys
@@ -208,7 +209,27 @@ def sample_body(welcome_url: str, course_name: str = "") -> str:
     )
 
 
-def run(cohort_org: str, dry_run: bool = False) -> int:
+class Outcome(enum.Enum):
+    """What one `run` came to. Richer than an exit code, because its two callers want
+    different things from the same facts.
+
+    The **Send enrolment codes** button was pressed by a person who is watching, and wants
+    a red X on anything that stopped the send. The **hourly cron** re-runs unattended for
+    the length of an `enrolment:` window, where a red X it cannot clear is an alarm nobody
+    reads by the second day - so it fails only on `FAILED` and lets the states that need a
+    person (no roster, no transport) be reported by `status`, which is readable BEFORE the
+    window opens. Each value is the phrase a log line puts after "no codes went out:".
+    """
+
+    SENT = "the codes were emailed"
+    NOTHING_TO_SEND = "every student who needs a code already has one"
+    NO_ROSTER = "students.csv could not be read"
+    EMPTY_ROSTER = "students.csv has no rows yet"
+    NO_TRANSPORT = "no mail transport is configured (the GRAPH_* secrets)"
+    FAILED = "the send failed"
+
+
+def run(cohort_org: str, dry_run: bool = False) -> Outcome:
     # Fetch the RAW roster text once: we parse it for the students, and (below) edit the same
     # text in place so writing codes back never disturbs columns roster doesn't model.
     read = get_file_with_sha(cohort_org, roster.CONFIG_REPO, roster.ROSTER_PATH)
@@ -217,14 +238,14 @@ def run(cohort_org: str, dry_run: bool = False) -> int:
             f"Could not find {roster.ROSTER_PATH} in {cohort_org}/{roster.CONFIG_REPO} - "
             f"bootstrap the cohort first (bootstrap_course --cohort)."
         )
-        return 1
+        return Outcome.NO_ROSTER
     # The sha is kept so the write below can be refused if anything else commits to the
     # roster while this run is generating and mailing codes (see write_codes).
     raw, raw_sha = read
     students = roster.parse(raw)
     if not students:
         log_err(f"roster in {cohort_org} has no rows yet - no codes to generate.")
-        return 1
+        return Outcome.EMPTY_ROSTER
 
     before = [s.enrol_code for s in students]
     added = assign_codes(students)  # in memory; persisted below unless dry-run
@@ -255,7 +276,7 @@ def run(cohort_org: str, dry_run: bool = False) -> int:
                 f"could not write the enrolment codes to {roster.ROSTER_PATH} in "
                 f"{cohort_org} - nothing emailed, so re-running is safe."
             )
-            return 1
+            return Outcome.FAILED
         log_ok(f"wrote {added} code(s) to {roster.ROSTER_PATH}")
         # Email what the ROSTER holds, never the codes generated in memory: a refused write
         # is re-applied onto a fresh read, and a code that landed in between is left as it
@@ -277,7 +298,7 @@ def run(cohort_org: str, dry_run: bool = False) -> int:
             targets.append(s)
     if not targets:
         log_ok("no not-yet-onboarded students still to be sent a code.")
-        return 0
+        return Outcome.NOTHING_TO_SEND
     # The codes are already committed to students.csv by this point, and
     # load_yaml_config RAISES on a malformed dsl-course.yml or a non-404 read failure -
     # while main() catches only RuntimeError. Unguarded, a bad course file meant a
@@ -293,8 +314,17 @@ def run(cohort_org: str, dry_run: bool = False) -> int:
         messages, dry_run=dry_run, sample=sample_body(welcome_url, course_name)
     )
     if not dry_run and sent and _mark_sent(cohort_org, sent) != 0:
-        return 1
-    return 0 if len(sent) == len(messages) else 1
+        return Outcome.FAILED
+    if len(sent) == len(messages):
+        return Outcome.SENT
+    # Nothing at all went out, and there is no transport it could have gone out on: a
+    # configuration gap rather than a rejected batch, and the hourly cron treats the two
+    # differently. Asked only here, on the failure path, so a send that worked never
+    # re-reads the environment - and only when NOTHING went out, because a partly-sent
+    # batch has already proved the transport works.
+    if not sent and mailer.graph_config_from_env() is None:
+        return Outcome.NO_TRANSPORT
+    return Outcome.FAILED
 
 
 def _mark_sent(cohort_org: str, sent: list[str]) -> int:
@@ -332,6 +362,16 @@ def _mark_sent(cohort_org: str, sent: list[str]) -> int:
     return 1
 
 
+def reds_the_button(outcome: Outcome) -> bool:
+    """Whether **Send enrolment codes** should exit non-zero on this outcome.
+
+    Everything except the two that mean nothing is outstanding: a person pressed the
+    button and is owed a red X for any reason no email went out, a missing roster and
+    unset secrets included. The hourly cron reads the very same values and is deliberately
+    more forgiving - see `Outcome`, and `scheduler._NOT_THE_CRONS_FAULT`."""
+    return outcome not in (Outcome.SENT, Outcome.NOTHING_TO_SEND)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cohort-org", required=True)
@@ -348,7 +388,7 @@ def main() -> int:
     # A read helper (or the mail transport) that couldn't reach its API raises; in an
     # Actions log a one-line error beats a traceback, and the run still goes red.
     try:
-        return run(args.cohort_org, dry_run=args.dry_run)
+        return int(reds_the_button(run(args.cohort_org, dry_run=args.dry_run)))
     except RuntimeError as exc:
         log_err(str(exc))
         return 1

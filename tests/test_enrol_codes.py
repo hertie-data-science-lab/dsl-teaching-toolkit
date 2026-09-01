@@ -415,7 +415,7 @@ def test_the_emails_carry_the_code_the_roster_actually_holds(monkeypatch):
             sent.extend(messages) or [m[0] for m in messages]
         ),
     )
-    assert enrol_codes.run("COHORT") == 0
+    assert enrol_codes.run("COHORT") is enrol_codes.Outcome.SENT
     ada = next(body for to, _subject, body in sent if to == "ada@uni.edu")
     assert "dsl-theirs" in ada  # not the code this run generated for her in memory
 
@@ -462,7 +462,7 @@ def test_a_row_with_no_email_keeps_its_original_index():
 
 
 def _run_with(monkeypatch, roster_text, *, sends=None, writes_ok=True, dry_run=False):
-    """Drive `run` against one roster. Returns (rc, messages sent, roster texts written)."""
+    """Drive `run` against one roster. Returns (outcome, messages sent, texts written)."""
     written: list[str] = []
     sent: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
@@ -487,8 +487,8 @@ def _run_with(monkeypatch, roster_text, *, sends=None, writes_ok=True, dry_run=F
             or [m[0] for m in messages][: len(messages) if sends is None else sends]
         ),
     )
-    rc = enrol_codes.run("COHORT", dry_run=dry_run)
-    return rc, sent, written
+    outcome = enrol_codes.run("COHORT", dry_run=dry_run)
+    return outcome, sent, written
 
 
 def test_a_student_already_marked_sent_is_not_emailed_again(monkeypatch):
@@ -500,8 +500,8 @@ def test_a_student_already_marked_sent_is_not_emailed_again(monkeypatch):
         + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,2026-08-31T09:00:00+00:00\n"
         + "bob@uni.edu,Bob,,,dsl-bbb222,enrolled,\n"
     )
-    rc, sent, _ = _run_with(monkeypatch, text)
-    assert rc == 0
+    outcome, sent, _ = _run_with(monkeypatch, text)
+    assert outcome is enrol_codes.Outcome.SENT
     assert [to for to, _s, _b in sent] == ["bob@uni.edu"]
 
 
@@ -513,11 +513,35 @@ def test_the_sent_marker_is_written_only_for_recipients_that_went_out(monkeypatc
         + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
         + "bob@uni.edu,Bob,,,dsl-bbb222,enrolled,\n"
     )
-    rc, _sent, written = _run_with(monkeypatch, text, sends=1)
-    assert rc == 1  # one of two did not go out
+    outcome, _sent, written = _run_with(monkeypatch, text, sends=1)
+    # one of two did not go out - a rejected message, not a missing transport
+    assert outcome is enrol_codes.Outcome.FAILED
     rows = list(read_csv(written[-1], roster.REQUIRED_FIELDS, roster.ROSTER_PATH))
     stamped = {r["hertie_email"]: bool(r["code_sent_at"].strip()) for r in rows}
     assert stamped == {"ada@uni.edu": True, "bob@uni.edu": False}
+
+
+def test_a_batch_that_went_nowhere_for_want_of_secrets_reads_as_a_missing_transport(
+    monkeypatch,
+):
+    # `send_bulk` answers an unconfigured transport and a wholly rejected batch with the
+    # same empty list, and the hourly cron has to tell them apart: it re-runs for the
+    # length of an enrolment window, and nothing it does can conjure a GRAPH_* secret.
+    for name in mailer.GRAPH_ENV:
+        monkeypatch.delenv(name, raising=False)
+    text = HEADER + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
+    outcome, _sent, _written = _run_with(monkeypatch, text, sends=0)
+    assert outcome is enrol_codes.Outcome.NO_TRANSPORT
+
+
+def test_a_wholly_rejected_batch_on_a_live_transport_is_still_a_failure(monkeypatch):
+    # The other half of the same question: the secrets ARE set, so nothing went out
+    # because Graph refused it. That is a real failure and must red, cron included.
+    for name in mailer.GRAPH_ENV:
+        monkeypatch.setenv(name, "set")
+    text = HEADER + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
+    outcome, _sent, _written = _run_with(monkeypatch, text, sends=0)
+    assert outcome is enrol_codes.Outcome.FAILED
 
 
 def test_a_marker_write_failure_reds_the_run_and_says_re_running_re_emails(
@@ -526,8 +550,8 @@ def test_a_marker_write_failure_reds_the_run_and_says_re_running_re_emails(
     # The one failure that must never be swallowed: the students HAVE their codes and
     # nothing on disk says so, so the next run mails them all over again.
     text = HEADER + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
-    rc, _sent, _written = _run_with(monkeypatch, text, writes_ok=False)
-    assert rc == 1
+    outcome, _sent, _written = _run_with(monkeypatch, text, writes_ok=False)
+    assert outcome is enrol_codes.Outcome.FAILED
     err = capsys.readouterr().err
     assert "re-running WILL email them again" in err
     assert "ada@uni.edu" not in err  # the log is public
@@ -548,12 +572,14 @@ def test_two_roster_rows_sharing_an_email_get_one_code_email(monkeypatch):
 
 def test_a_dry_run_writes_nothing_and_marks_nobody(monkeypatch):
     text = HEADER + "ada@uni.edu,Ada,,,,enrolled,\n"
-    rc, sent, written = _run_with(monkeypatch, text, dry_run=True)
-    assert rc == 0 and written == []
+    outcome, sent, written = _run_with(monkeypatch, text, dry_run=True)
+    assert outcome is enrol_codes.Outcome.SENT and written == []
     assert [to for to, _s, _b in sent] == ["ada@uni.edu"]
 
 
 def test_run_reds_when_the_roster_is_missing(monkeypatch, capsys):
     monkeypatch.setattr(enrol_codes, "get_file_with_sha", lambda org, repo, path: None)
-    assert enrol_codes.run("COHORT") == 1
+    outcome = enrol_codes.run("COHORT")
+    assert outcome is enrol_codes.Outcome.NO_ROSTER
+    assert enrol_codes.reds_the_button(outcome)  # the button still reds
     assert "Could not find students.csv" in capsys.readouterr().err

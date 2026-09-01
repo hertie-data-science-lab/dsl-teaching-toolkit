@@ -5,8 +5,12 @@ where a constant that moved modules goes unnoticed."""
 from __future__ import annotations
 
 import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from dsl_course import grades, roster, schedule, status, sync_faculty, teams
+
+BERLIN = ZoneInfo("Europe/Berlin")
 
 _ROW = {
     "label": "x",
@@ -109,3 +113,66 @@ def test_main_walks_every_row_and_points_c7_at_classroom_config(monkeypatch, cap
     assert set(data) == set(status.ITEMS)
     assert data["C7"]["repo"] == "classroom-config"
     assert data["C7"]["path"] == "people.yml"
+
+
+# ------------------------------------------------------------- C8, the enrolment window
+# The hourly cron mails enrolment codes for as long as an `enrolment:` window is open, and
+# deliberately says nothing when it cannot: it would say it every hour, and by the time
+# the window is open it is already nearly too late. This row is where the same facts are
+# readable BEFORE it opens - so what it says about an empty roster is the whole point.
+
+
+def _window(**kwargs) -> schedule.Enrolment:
+    return schedule.Enrolment(
+        opens=datetime(2026, 8, 24, 8, 0, tzinfo=BERLIN),
+        closes=datetime(2026, 9, 21, 0, 0, tzinfo=BERLIN),
+        **kwargs,
+    )
+
+
+def _collect_with(monkeypatch, sched, students):
+    _stub_every_read(monkeypatch)
+    monkeypatch.setattr(schedule, "load", lambda org: sched)
+    monkeypatch.setattr(roster, "load", lambda org: students)
+    return status.collect("Course", "Cohort-f2026")
+
+
+def test_c8_shows_the_window_bounds_and_points_at_scheduleyml(monkeypatch):
+    row = _collect_with(
+        monkeypatch,
+        schedule.Schedule(enrolment=_window()),
+        [roster.Student("a", "A", "h", "1")],
+    )["C8"]
+    assert row["status"] == "ok"
+    assert row["repo"] == "classroom-config" and row["path"] == "schedule.yml"
+    assert "2026-08-24T08:00" in row["detail"] and "2026-09-21T00:00" in row["detail"]
+    assert "WARNING" not in row["detail"]
+
+
+def test_c8_calls_out_a_window_that_will_open_over_an_empty_roster(monkeypatch):
+    # The failure this row exists for: green, silent, and unrecoverable once the window
+    # has run out.
+    row = _collect_with(monkeypatch, schedule.Schedule(enrolment=_window()), [])["C8"]
+    assert row["status"] == "ok"  # the window is declared; it is the roster that is not
+    assert "students.csv is empty" in row["detail"]
+
+
+def test_c8_tells_an_unreadable_roster_from_an_empty_one(monkeypatch):
+    # Different fix: one wants a roster pasted in, the other wants somebody to look at why
+    # classroom-config cannot be read.
+    row = _collect_with(monkeypatch, schedule.Schedule(enrolment=_window()), None)["C8"]
+    assert "students.csv cannot be read" in row["detail"]
+
+
+def test_c8_is_optional_when_no_window_is_declared(monkeypatch):
+    # Not every cohort automates enrolment - most still press the button.
+    row = _collect_with(monkeypatch, schedule.Schedule(), [])["C8"]
+    assert row["status"] == "optional"
+
+
+def test_c8_says_so_when_the_enrolment_block_was_dropped(monkeypatch):
+    # A block faculty wrote and the parser threw away leaves `enrolment` None, which would
+    # otherwise render identically to never having written one.
+    sched = schedule.Schedule(dropped=["enrolment: no valid `send_codes_datetime`"])
+    row = _collect_with(monkeypatch, sched, [])["C8"]
+    assert "DROPPED" in row["detail"]
