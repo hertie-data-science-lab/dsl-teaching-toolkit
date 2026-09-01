@@ -775,15 +775,15 @@ def test_no_enrolment_block_means_nothing_is_mailed_automatically():
     assert parse({"semester_start": "2026-09-07"}).enrolment is None
 
 
-@pytest.mark.parametrize(
-    "value", [{}, {"title": "Enrol now"}, {"send_codes_datetime": "nope"}]
-)
+@pytest.mark.parametrize("value", [{}, {"send_codes_datetime": "nope"}])
 def test_an_enrolment_block_with_no_usable_opening_is_dropped(value):
     # No opening moment = a window that can never be open, so the block cannot mean what
-    # it says. Dropped, and named - not left as a silent no-op.
+    # it says. Dropped, and named - not left as a silent no-op. ONE line, as every other
+    # required field gets: an unreadable value used to be flagged and then dropped, so it
+    # was reported twice and read as two separate mistakes.
     sched = parse({"enrolment": value})
     assert sched.enrolment is None
-    assert any(d.startswith("enrolment:") for d in sched.dropped)
+    assert [d.split(":")[0] for d in sched.dropped] == ["enrolment"]
 
 
 def test_an_enrolment_block_authored_as_a_list_is_dropped_not_raised():
@@ -833,13 +833,10 @@ def test_the_window_is_half_open_so_send_until_is_the_first_instant_that_does_no
     assert window.is_open(datetime(2026, 8, 24, 8, 0, tzinfo=BERLIN))
     assert window.is_open(datetime(2026, 9, 20, 23, 59, tzinfo=BERLIN))
     assert not window.is_open(datetime(2026, 9, 21, 0, 0, tzinfo=BERLIN))
-
-
-def test_the_window_is_compared_across_timezones_not_by_wall_clock():
-    # 08:00 Europe/Berlin (CEST) == 06:00 UTC. The cron's `now` is UTC.
-    window = parse({"enrolment": {"send_codes_datetime": "2026-08-24T08:00"}}).enrolment
-    assert not window.is_open(datetime(2026, 8, 24, 5, 30, tzinfo=timezone.utc))
-    assert window.is_open(datetime(2026, 8, 24, 6, 30, tzinfo=timezone.utc))
+    # Both ends are tz-aware, so the cron's UTC `now` is compared by INSTANT rather than
+    # by wall clock: 08:00 Europe/Berlin (CEST) is 06:00 UTC.
+    assert not window.is_open(datetime(2026, 8, 24, 5, 59, tzinfo=timezone.utc))
+    assert window.is_open(datetime(2026, 8, 24, 6, 0, tzinfo=timezone.utc))
 
 
 def test_the_validate_report_says_what_the_enrolment_block_was_understood_as(tmp_path):

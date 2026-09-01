@@ -886,7 +886,11 @@ def _parse_enrolment(
     if not isinstance(raw, dict):
         _drop(drops, where, "not a mapping", cost)
         return None
-    opens = _flagged_datetime(raw, "send_codes_datetime", tz, drops, where, cost)
+    # Coerced, not `_flagged_datetime`d: an unusable value here is not a fallback that
+    # needs flagging as well - it is the drop on the next line. Flagging first recorded
+    # the same mistake twice, where every other required field records it once (see
+    # `_parse_events` and its `event_datetime`).
+    opens = _coerce_datetime(raw.get("send_codes_datetime"), tz)
     if opens is None:
         _drop(drops, where, "no valid `send_codes_datetime`", cost)
         return None
