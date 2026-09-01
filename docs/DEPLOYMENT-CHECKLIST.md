@@ -84,9 +84,9 @@ header-only, with a filled `students.csv.sample` next to it). Leave the onboardi
 columns blank (`github_handle`, `github_id`, `enrol_code`). Deleting a row off-boards that student on the next push.
 
 ```csv
-hertie_email,name,github_handle,github_id,enrol_code,role
+hertie_email,name,role,github_handle,github_id,enrol_code
 j.doe@students.hertie-school.org,Jane Doe,,,,
-e.evans@students.hertie-school.org,Eve Evans,,,,auditor
+e.evans@students.hertie-school.org,Eve Evans,auditor,,,
 ```
 
 | Column | Filled by | Notes |

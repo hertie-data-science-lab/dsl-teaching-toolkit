@@ -34,9 +34,9 @@ def _handles(wanted: dict) -> dict[str, set[str]]:
 
 def test_desired_members_splits_enrolled_from_auditors():
     students = _roster(
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
-        "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor",
-        "bob@uni.edu,Bob,bob-b,44,dsl-def,",  # blank role -> enrolled
+        "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+        "eve@uni.edu,Eve,auditor,eve-e,43,dsl-xyz",
+        "bob@uni.edu,Bob,,bob-b,44,dsl-def",  # blank role -> enrolled
     )
     assert _handles(sync_roster.desired_members(students)) == {
         "students": {"ada-l", "bob-b"},
@@ -47,8 +47,8 @@ def test_desired_members_splits_enrolled_from_auditors():
 def test_desired_members_ignores_not_yet_onboarded_rows():
     # no handle yet -> nothing to add to either team (the org invite happens on onboard)
     students = _roster(
-        "ada@uni.edu,Ada,,,dsl-abc,enrolled",
-        "eve@uni.edu,Eve,,,dsl-xyz,auditor",
+        "ada@uni.edu,Ada,enrolled,,,dsl-abc",
+        "eve@uni.edu,Eve,auditor,,,dsl-xyz",
     )
     assert _handles(sync_roster.desired_members(students)) == {
         "students": set(),
@@ -59,7 +59,7 @@ def test_desired_members_ignores_not_yet_onboarded_rows():
 def test_desired_members_covers_both_teams_even_when_one_is_empty():
     # both keys always present, so a pruning sync empties the team it should empty
     # rather than skipping it (a demoted-to-nobody team must still be reconciled).
-    students = _roster("ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    students = _roster("ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     wanted = sync_roster.desired_members(students)
     assert set(wanted) == {sync_roster.TEAM, sync_roster.AUDITOR_TEAM}
     assert wanted[sync_roster.AUDITOR_TEAM] == []
@@ -70,9 +70,9 @@ def test_sync_hands_the_prune_each_teams_own_github_ids(monkeypatch):
     # a role change (students -> auditors) would be protected out of the prune that is
     # meant to carry it out.
     students = _roster(
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
-        "bo@uni.edu,Bo,bo-b,99,dsl-def,auditor",
-        "cy@uni.edu,Cy,,,dsl-ghi,enrolled",  # not onboarded - no id yet
+        "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+        "bo@uni.edu,Bo,auditor,bo-b,99,dsl-def",
+        "cy@uni.edu,Cy,enrolled,,,dsl-ghi",  # not onboarded - no id yet
     )
     monkeypatch.setattr(roster, "load", lambda org: students)
     monkeypatch.setattr(sync_roster, "set_org_membership", lambda *a, **kw: True)
@@ -125,7 +125,7 @@ def test_students_csv_is_read_once_per_cohort_but_each_caller_parses_its_own(
         "get_file_content",
         lambda org, repo, path: (
             reads.append(org)
-            or (HEADER + "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n")
+            or (HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n")
         ),
     )
     first = roster.load("COHORT")
@@ -138,11 +138,11 @@ def test_students_csv_is_read_once_per_cohort_but_each_caller_parses_its_own(
 
 def test_a_role_change_moves_the_handle_between_teams():
     before = _handles(
-        sync_roster.desired_members(_roster("ada@uni.edu,Ada,ada-l,42,dsl-abc,auditor"))
+        sync_roster.desired_members(_roster("ada@uni.edu,Ada,auditor,ada-l,42,dsl-abc"))
     )
     after = _handles(
         sync_roster.desired_members(
-            _roster("ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+            _roster("ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
         )
     )
     # the pruning pass sees ada-l as unwanted in `auditors` and wanted in `students`
@@ -319,7 +319,7 @@ def test_a_pruning_sync_revokes_a_vanished_handles_submission_repos(monkeypatch)
     # exactly the handles still on the roster (casefolded). Deleting the call, or passing
     # the wrong set, left an off-boarded student with maintain on every repo they had ever
     # been handed while every report said they had been removed.
-    students = _roster("ada@uni.edu,Ada,Ada-L,42,dsl-abc,enrolled")
+    students = _roster("ada@uni.edu,Ada,enrolled,Ada-L,42,dsl-abc")
     monkeypatch.setattr(roster, "load", lambda org: students)
     monkeypatch.setattr(sync_roster, "set_org_membership", lambda *a, **kw: True)
     monkeypatch.setattr(sync_roster, "reconcile_team_members", lambda *a, **kw: 0)

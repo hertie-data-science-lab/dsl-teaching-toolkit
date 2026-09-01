@@ -15,9 +15,8 @@ Live example roster: [`example-course/cohort-org/students.csv`](../example-cours
 1. **Add the students to the roster.**
    - Edit `classroom-config/students.csv` in the **cohort** org
    - Editing directly via the web UI is fine, or edit the repo locally, commit & push
-   - one row per student: `hertie_email, name`
-   - Leave `github_handle, github_id, enrol_code` blank - onboarding and step 2 fill them automatically
-   - Set `role: auditor` for anyone who should get the materials but no assignments or grades.
+   - One row per student: fill the first three columns - `hertie_email`, `name`, and optionally `role` (blank means enrolled; `auditor` gets the materials but no assignments or grades)
+   - Leave the rest (`github_handle`, `github_id`, `enrol_code`) blank - onboarding and step 2 fill them in for you
 
 
    >Someone joins late? Add their row, commit & push - then re-run step 2 for their code.

@@ -121,7 +121,7 @@ jobs:
               }
 
               // Read the PRIVATE roster. Columns (dsl_course.roster.FIELDS):
-              // hertie_email,name,github_handle,github_id,enrol_code,role
+              // hertie_email,name,role,github_handle,github_id,enrol_code
               // Re-readable, because the write below retries on a 409 (another student's Join
               // issue landed a row first) and must re-apply this row's edit to the fresh file.
               const readRoster = async () => {

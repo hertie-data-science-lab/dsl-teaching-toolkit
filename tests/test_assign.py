@@ -50,7 +50,7 @@ def test_an_unusable_solution_branch_does_not_block_provisioning(
     # A scheduled handout re-runs every tick, so aborting on a bad solution branch meant NO
     # student who onboarded after solution_datetime ever got a repo. The repos must be
     # handed out regardless; an unusable solution only reddens the run.
-    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     monkeypatch.setattr(assign, "fetch_solution", lambda *a, **k: None)
     monkeypatch.setattr(
         assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
@@ -93,7 +93,7 @@ def test_a_handout_that_skipped_every_repo_syncs_no_site(tmp_path, monkeypatch):
     # Syncing anyway re-rendered a whole cohort website once an hour for the rest of the
     # term - and the `changed` half of the answer is what lets the SCHEDULER decide the
     # same thing for the tick as a whole.
-    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     monkeypatch.setattr(
         assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
     )
@@ -127,7 +127,7 @@ def _marker_run(
     record_ok=True,
 ):
     """provision_all with the network stubbed. Returns (rc, what was recorded)."""
-    rows = [f"s{i}@uni.edu,S{i},sh{i},{i},dsl-{i},enrolled" for i in range(units)]
+    rows = [f"s{i}@uni.edu,S{i},enrolled,sh{i},{i},dsl-{i}" for i in range(units)]
     path = _roster_file(tmp_path, *rows)
     monkeypatch.setattr(assign, "fetch_solution", lambda *a, **k: tmp_path / "sol")
     monkeypatch.setattr(
@@ -423,9 +423,9 @@ def test_provisioning_skips_auditors(tmp_path, capsys, monkeypatch):
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     path = _roster_file(
         tmp_path,
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
-        "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor",
-        "bob@uni.edu,Bob,bob-b,44,dsl-def,",  # blank role -> enrolled
+        "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+        "eve@uni.edu,Eve,auditor,eve-e,43,dsl-xyz",
+        "bob@uni.edu,Bob,,bob-b,44,dsl-def",  # blank role -> enrolled
     )
     rc, _changed = assign.provision_all(
         "COURSE",
@@ -472,8 +472,8 @@ def test_a_dry_run_names_no_student_in_a_public_log(tmp_path, capsys, monkeypatc
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     path = _roster_file(
         tmp_path,
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
-        "bob@uni.edu,Bob,bob-b,43,dsl-def,enrolled",
+        "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+        "bob@uni.edu,Bob,enrolled,bob-b,43,dsl-def",
     )
     rc, _changed = assign.provision_all(
         "COURSE",
@@ -492,9 +492,9 @@ def test_a_dry_run_names_no_student_in_a_public_log(tmp_path, capsys, monkeypatc
 def test_not_yet_onboarded_rows_are_still_skipped_separately(tmp_path, capsys):
     path = _roster_file(
         tmp_path,
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
-        "bob@uni.edu,Bob,,,dsl-def,enrolled",  # no handle yet
-        "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor",
+        "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+        "bob@uni.edu,Bob,enrolled,,,dsl-def",  # no handle yet
+        "eve@uni.edu,Eve,auditor,eve-e,43,dsl-xyz",
     )
     assign.provision_all(
         "COURSE",
@@ -526,9 +526,9 @@ def test_group_none_infers_per_team_from_the_templates_grading_yml(
     )
     path = _roster_file(
         tmp_path,
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
-        "bob@uni.edu,Bob,bob-b,43,dsl-def,enrolled",
-        "cid@uni.edu,Cid,cid-c,44,dsl-ghi,enrolled",
+        "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+        "bob@uni.edu,Bob,enrolled,bob-b,43,dsl-def",
+        "cid@uni.edu,Cid,enrolled,cid-c,44,dsl-ghi",
     )
     rc, _changed = assign.provision_all(
         "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path, dry_run=True
@@ -552,7 +552,7 @@ def test_group_false_forces_individual_even_for_a_group_template(
             AssertionError("must not be read")
         ),
     )
-    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     rc, _changed = assign.provision_all(
         "COURSE",
         "assignment-4-project-f2026",
@@ -645,8 +645,8 @@ def test_group_provisioning_filters_teams_csv_through_the_roster_allowlist(
     )
     path = _roster_file(
         tmp_path,
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
-        "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor",  # an auditor, not a team member
+        "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+        "eve@uni.edu,Eve,auditor,eve-e,43,dsl-xyz",  # an auditor, not a team member
     )
     rc, _changed = assign.provision_all(
         "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path, dry_run=True
@@ -679,7 +679,7 @@ def test_a_rejected_teams_csv_handle_is_not_published_in_the_workflow_log(
         "teams_for",
         lambda rows, slug: {"team-1": ["ada-l", "stranger-x"]},
     )
-    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     assign.provision_all(
         "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path, dry_run=True
     )
@@ -815,7 +815,7 @@ def test_provision_all_records_handout_under_schedule_key_and_survives_site_fail
         raise exc
 
     monkeypatch.setattr(site, "sync_site", boom_site)
-    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     rc, _changed = assign.provision_all(
         "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path, group=False
     )
@@ -935,7 +935,7 @@ def test_group_handout_looks_teams_up_by_key_and_names_repos_by_dest(
             or ({"team-1": ["ada-l"]} if slug == "regression" else {})
         ),
     )
-    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     rc, _changed = assign.provision_all(
         "COURSE", "wk3-regression-f2026", "COHORT", roster_path=path, dry_run=True
     )
@@ -970,7 +970,7 @@ def test_the_granted_team_slug_matches_the_one_sync_teams_reconciles(
         "provision_one",
         lambda *a, **k: granted.append((a[3], k["team"])) or "ok",
     )
-    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     assign.provision_all("COURSE", "wk3-regression-f2026", "COHORT", roster_path=path)
     assert granted == [("wk3-regression-team-1", "regression-team-1")]
     # ... which is exactly what the membership sync materialises from the same CSV.
@@ -992,7 +992,7 @@ def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_fails_on_the_bu
         raise AssertionError("nothing may be provisioned without a team")
 
     monkeypatch.setattr(assign, "ensure_cohort_template", boom)
-    path = _roster_file(tmp_path, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
 
     def run(**kw):
         return assign.provision_all(
@@ -1114,8 +1114,8 @@ def _listing_run(tmp_path, monkeypatch, listing):
     Returns (the orgs listed, the repos generate_from_template was asked to create)."""
     path = _roster_file(
         tmp_path,
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
-        "bob@uni.edu,Bob,bob-b,43,dsl-def,enrolled",
+        "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+        "bob@uni.edu,Bob,enrolled,bob-b,43,dsl-def",
     )
     listed: list[str] = []
 
