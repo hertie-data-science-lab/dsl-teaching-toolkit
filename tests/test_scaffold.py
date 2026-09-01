@@ -452,10 +452,35 @@ def test_the_scaffold_and_refresh_converge_the_same_stub_list():
     # One list, so a stub added to the scaffold is converged everywhere without a second
     # edit somewhere else.
     assert sorted(scaffold.refreshable_stubs("f2026")) == [
-        ".releaseignore",
         "SYLLABUS.md",
         "readings/01_session-1/READINGS.md",
     ]
+
+
+def test_a_refresh_never_rewrites_a_releaseignore(fake):
+    """The bug this shape exists to prevent, pinned end to end.
+
+    `is_untouched_stub` asks whether the mark is anywhere in the text. For a prose stub
+    faculty replace wholesale that is right; for a withhold list it is exactly wrong,
+    because the natural edit is to APPEND a pattern under the seeded comments. A marked
+    file would still read as untouched, so the nightly refresh would rewrite it - deleting
+    the patterns and shipping whatever they withheld, on a green run."""
+    edited = scaffold._RELEASEIGNORE_STUB + "\n**/solutions.ipynb\n"
+    fake.files[("course-materials-f2026", releaseignore.RELEASEIGNORE)] = edited
+
+    assert scaffold.scaffold_materials("Org", "f2026") == 0
+    assert seed._refresh_stubs("Org", "course-materials-f2026") == 0
+
+    kept = fake.files[("course-materials-f2026", releaseignore.RELEASEIGNORE)]
+    assert "**/solutions.ipynb" in kept
+    assert kept == edited
+
+
+def test_the_seeded_releaseignore_is_created_once_not_refreshed():
+    """It is part of the create-only skeleton, so it can never be rewritten - which is
+    also why the wording cannot be improved in a repo that already has it."""
+    assert releaseignore.RELEASEIGNORE not in scaffold.refreshable_stubs("f2026")
+    assert not gh_contents.is_untouched_stub(scaffold._RELEASEIGNORE_STUB)
 
 
 def test_the_seeded_releaseignore_withholds_nothing(tmp_path):
@@ -463,7 +488,7 @@ def test_the_seeded_releaseignore_withholds_nothing(tmp_path):
     that path from every course scaffolded after it - green runs, missing material, and
     nothing to connect the two. Asserted against the real matcher, not by reading the
     text, so an accidentally-uncommented line fails here."""
-    body = scaffold.refreshable_stubs("f2026")[releaseignore.RELEASEIGNORE].decode()
+    body = scaffold._RELEASEIGNORE_STUB
     (tmp_path / releaseignore.RELEASEIGNORE).write_text(body)
     (tmp_path / "solutions.ipynb").write_text("")
     (tmp_path / "drafts").mkdir()
