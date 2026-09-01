@@ -1147,6 +1147,13 @@ MAIL_BUTTONS = ("send_codes", "distribute_grades")
 # `schedule.yml` `enrolment:` window, so it needs the same transport secrets.
 MAIL_SENDERS = MAIL_BUTTONS + ("scheduler",)
 
+# Everything whose job env must carry the transport secrets. Check cohort setup sends
+# nothing - it REPORTS whether a send could (status' mail-transport row reads the very
+# same variables through `mailer.graph_config_from_env`), and a workflow that does not
+# carry them would report "unset" on every org whatever the truth. That is the exact
+# fiction the hourly cron leans on when it stays green over a missing transport.
+MAIL_ENV_CARRIERS = MAIL_SENDERS + ("status",)
+
 
 @pytest.mark.parametrize("name", MAIL_BUTTONS)
 def test_both_mail_buttons_default_to_a_dry_run(name):
@@ -1182,7 +1189,7 @@ def test_the_dry_run_gate_is_fail_closed_under_bash(name, value, tmp_path):
     assert out.strip() == expected
 
 
-@pytest.mark.parametrize("name", MAIL_SENDERS)
+@pytest.mark.parametrize("name", MAIL_ENV_CARRIERS)
 def test_every_mail_sender_carries_every_transport_secret(name):
     # Nothing tied the workflow's env to the names `mailer` actually reads, so a rename
     # reached production as a silently unconfigured org rather than a red CI. The hourly

@@ -8,7 +8,7 @@ import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from dsl_course import grades, roster, schedule, status, sync_faculty, teams
+from dsl_course import grades, mailer, roster, schedule, status, sync_faculty, teams
 
 BERLIN = ZoneInfo("Europe/Berlin")
 
@@ -176,3 +176,63 @@ def test_c8_says_so_when_the_enrolment_block_was_dropped(monkeypatch):
     sched = schedule.Schedule(dropped=["enrolment: no valid `send_codes_datetime`"])
     row = _collect_with(monkeypatch, sched, [])["C8"]
     assert "DROPPED" in row["detail"]
+
+
+# ------------------------------------------------------------- B8, the mail transport
+# The cron mails enrolment codes for the length of a window and stays GREEN when it has no
+# transport to mail on, on the stated grounds that `status` reports it. Nothing in status
+# checked the GRAPH_* secrets, so that was simply not true: an org with them missing (or
+# half-set, the commoner mistake) mailed nobody for a fortnight and every surface said ok.
+
+
+def _transport_row(monkeypatch, **secrets):
+    for name in mailer.GRAPH_ENV:
+        value = secrets.get(name, "set")
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    _stub_every_read(monkeypatch)
+    return status.collect("Course", "Cohort-f2026")["B8"]
+
+
+def test_b8_reads_the_transport_off_the_names_the_mailer_actually_uses(monkeypatch):
+    row = _transport_row(monkeypatch)
+    assert row["status"] == "ok"
+    assert row["org"] == "Course"  # the secrets are the COURSE org's, like B1/B6/B7
+    assert "settings/secrets/actions" in row["edit_url"]
+
+
+def test_b8_flags_an_org_with_no_mail_transport_at_all(monkeypatch):
+    row = _transport_row(monkeypatch, **dict.fromkeys(mailer.GRAPH_ENV))
+    assert row["status"] != "ok"
+    assert "no GRAPH_* secrets set" in row["detail"]
+    assert "enrolment: window mail nobody" in row["detail"]
+
+
+def test_b8_names_the_half_of_a_half_configured_transport_that_is_missing(monkeypatch):
+    # The commoner mistake, and the one a blanket "not configured" cannot be debugged
+    # from: Actions masks the values, so the NAMES are the only thing that helps.
+    row = _transport_row(monkeypatch, GRAPH_CLIENT_CERT=None, GRAPH_SENDER="")
+    assert row["status"] != "ok"
+    assert "GRAPH_CLIENT_CERT" in row["detail"] and "GRAPH_SENDER" in row["detail"]
+    assert "GRAPH_TENANT_ID" not in row["detail"]
+
+
+def test_b8_never_prints_a_secret_value(monkeypatch):
+    # The table is appended to $GITHUB_STEP_SUMMARY of a PUBLIC repo.
+    row = _transport_row(monkeypatch, GRAPH_SENDER="mailbox@example.org")
+    assert "mailbox@example.org" not in row["detail"]
+
+
+def test_c8_says_how_much_of_the_roster_the_window_has_mailed(monkeypatch):
+    # A send CLAIMS `code_sent_at` before it mails, so this is the one figure that tells a
+    # person whether an open window is delivering anything at all.
+    students = [
+        roster.Student(
+            "a@x.edu", "A", "", "", "dsl-a", code_sent_at="2026-08-24T08:00"
+        ),
+        roster.Student("b@x.edu", "B", "", "", "dsl-b"),
+    ]
+    row = _collect_with(monkeypatch, schedule.Schedule(enrolment=_window()), students)
+    assert "1/2 mailed" in row["C8"]["detail"]

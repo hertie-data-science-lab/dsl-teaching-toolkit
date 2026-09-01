@@ -184,7 +184,10 @@ def _run_preamble(minutes: int = _TIMEOUT_DEFAULT) -> str:
 
 # Mail secrets, wired into the env of the workflows that send email (enrolment codes, grade
 # notifications, and the hourly cron, which sends the codes on a schedule.yml `enrolment:`
-# window). A plain string (not the f-string body) so the GitHub `${{ }}` is literal.
+# window) - and of Check cohort setup, which does not send but REPORTS whether a send
+# could: its mail-transport row reads the very same variables, and without them it would
+# report "unset" on every org whatever the truth.
+# A plain string (not the f-string body) so the GitHub `${{ }}` is literal.
 # Derived from the names the mailer actually reads, so a rename cannot leave an org
 # silently unconfigured. GRAPH_CLIENT_CERT holds certificate + private key in one
 # multi-line secret; there is no GRAPH_CLIENT_SECRET.
@@ -856,6 +859,9 @@ def render_status(cohort_orgs: list[str]) -> str:
 
 # A per-cohort glance view of everything configured (and everything still missing),
 # with direct links to fix it. Read-only - this workflow changes nothing.
+# It carries the GRAPH_* secrets to REPORT on them (present/absent only - no value is
+# printed), never to send: this is where a missing mail transport is meant to be caught,
+# before an enrolment: window opens over it.
 
 on:
   workflow_dispatch:
@@ -869,6 +875,7 @@ on:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
           COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+{_MAIL_ENV}
         run: |
           python3 -m dsl_course.status --course-org "$COURSE" --cohort-org "$COHORT_ORG" >> "$GITHUB_STEP_SUMMARY"
 """

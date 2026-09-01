@@ -367,14 +367,16 @@ events:
 
 **`enrolment`** - the window in which the hourly cron emails enrolment codes, instead of
 someone pressing **Send enrolment codes**. Every tick inside the window emails whoever still
-has no code (the send stamps `code_sent_at` on each row it mails and skips a row that has
-one), so a student added mid-window is emailed within the hour and nobody is emailed twice.
+has no code (the send stamps `code_sent_at` on a row just BEFORE mailing it, and skips a
+row that has one), so a student added mid-window is emailed within the hour and nobody is
+emailed twice - not even when the stamp cannot be written, which now means the batch is not
+sent at all rather than sent again on the next tick.
 Needs the course org's `GRAPH_*` secrets, as the button does.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `send_codes_datetime` | **yes** | - (block dropped without it) | when the window opens |
-| `send_until` | no | `semester_start` + 2 weeks (or `send_codes_datetime` + 2 weeks when the cohort pins no `semester_start`) | when it closes; after it, codes go out only by hand |
+| `send_until` | no | `semester_start` + 2 weeks (or `send_codes_datetime` + 2 weeks when the cohort pins no `semester_start`) | when it closes; after it, codes go out only by hand. A close at or before the opening - written, or resolved from a `semester_start` already two weeks past - is flagged and moved to two weeks after the opening |
 | `show_on_site` | no | **`false`** | `true` raises a schedule row on the opening date - default OFF, unlike `releases:`, because enrolment is administrative |
 | `title` | no | `Enrolment opens` | that row's label, when shown |
 
@@ -386,9 +388,9 @@ enrolment:
   title: Enrolment opens                  # optional
 ```
 
-An open window over an EMPTY `students.csv` sends nothing, and by the time the window is
-open it is nearly too late to fix - so **Check cohort setup** reports it, where it can be
-read beforehand. The hourly cron stays green: it cannot clear the problem, and an hourly red
+An open window over an EMPTY `students.csv` - or one with no `GRAPH_*` secrets to mail on -
+sends nothing, and by the time the window is open it is nearly too late to fix, so **Check
+cohort setup** reports both, where they can be read beforehand. The hourly cron stays green: it cannot clear the problem, and an hourly red
 X for the length of the window is one nobody reads.
 
 #### Schedule row types
@@ -419,7 +421,7 @@ fully read goes red and opens an issue naming the bad entry.
 |---------|--------------|
 | `event_datetime:` missing/unparseable | that `releases:`/`events:` entry is dropped |
 | `send_codes_datetime:` missing/unparseable | the whole `enrolment:` block is dropped - no codes are emailed automatically |
-| `send_until:` unparseable, or at or before `send_codes_datetime` | kept - the window closes at its default instead |
+| `send_until:` unparseable, or at or before `send_codes_datetime` (its default included) | kept - the window closes at the default, or two weeks after the opening when the default is itself backwards |
 | `due_datetime:` missing/unparseable | the whole `assignments:` entry is dropped - no grading pin, no site date |
 | `deploy` missing `course_source_repo`/`course_source_path` | that copy is dropped |
 | `solution_datetime:` malformed, or not after `handout_datetime` | dropped - the solution waits for a human |

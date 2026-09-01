@@ -21,18 +21,19 @@ import argparse
 import contextlib
 import io
 import json
+import os
 import sys
 from datetime import date
 
 import yaml
 
-from . import grades, roster, schedule, sync_faculty, teams
+from . import grades, mailer, roster, schedule, sync_faculty, teams
 from .central import CENTRAL_REF, MissingCentralRef, resolve_central_ref
 from .discovery import org_meta
 from .log import log_err
 from .repos import default_branch
 
-ITEMS = ("B1", "B6", "B7", "C2", "C3", "C4", "C5", "C6", "C7", "C8")
+ITEMS = ("B1", "B6", "B7", "B8", "C2", "C3", "C4", "C5", "C6", "C7", "C8")
 # Rows whose input is marked `[required]` in docs/DEPLOYMENT-CHECKLIST.md;
 # everything else is optional
 # (synthesised/skipped when absent), so an absent optional item is "optional", not
@@ -58,7 +59,11 @@ def _row(
     branch: str,
     present: bool,
     detail: str,
+    edit_url: str | None = None,
 ) -> dict:
+    """One checklist row. `edit_url` overrides the file link for a row whose fix is not a
+    file - the mail transport is org SETTINGS, and pointing it at a path nobody can create
+    would be worse than no link."""
     status = "ok" if present else ("missing" if item_id in REQUIRED else "optional")
     return {
         "label": label,
@@ -67,8 +72,40 @@ def _row(
         "path": path,
         "status": status,
         "detail": detail,
-        "edit_url": _edit_url(org, repo, path, branch, present),
+        "edit_url": edit_url or _edit_url(org, repo, path, branch, present),
     }
+
+
+# Where the GRAPH_* secrets are set - an org SETTINGS page, not a file in a repo, which is
+# why the transport row overrides `_row`'s edit link rather than deriving one.
+_SECRETS_URL = "https://github.com/organizations/{org}/settings/secrets/actions"
+
+
+def _transport_detail() -> tuple[bool, str]:
+    """Whether this run can send email at all, and why not. `(usable, detail)`.
+
+    Every mail path in the toolkit - Send enrolment codes, Distribute grades, and the
+    hourly cron for as long as an `enrolment:` window is open - reads the same four
+    `GRAPH_*` org secrets. NOTHING checked them: an org that declared a window with the
+    secrets missing (or half-set, which is the commoner mistake) mailed nobody for the
+    whole fortnight, and the cron stayed green by design because the gap was "reported by
+    status". This is that report.
+
+    Names, never values: the verdict comes from `mailer.graph_config_from_env`, and the
+    names come from `mailer.GRAPH_ENV`, so a renamed secret cannot leave this row lying.
+    The table is appended to the step summary of a PUBLIC repo - not one secret's contents
+    goes into it, `GRAPH_SENDER` included."""
+    unset = [n for n in mailer.GRAPH_ENV if not (os.environ.get(n) or "").strip()]
+    cost = " - Send codes, Distribute grades and any enrolment: window mail nobody"
+    if len(unset) == len(mailer.GRAPH_ENV):
+        return False, f"no GRAPH_* secrets set{cost}"
+    if unset:
+        return False, f"unset or blank: {', '.join(unset)}{cost}"
+    if mailer.graph_config_from_env() is None:
+        # Set, and still unusable - a line break inside a single-line value is what
+        # `gh secret set < file` leaves behind. Named by the helper's own log line.
+        return False, f"the GRAPH_* secrets are set but unusable{cost}"
+    return True, f"all {len(mailer.GRAPH_ENV)} GRAPH_* secrets set"
 
 
 def _enrolment_detail(
@@ -85,6 +122,14 @@ def _enrolment_detail(
     paste the roster in."""
     bounds = f"{window.opens.isoformat()} -> {window.closes.isoformat()}"
     shown = ", shown on the site" if window.show_on_site else ""
+    # How far the window has actually got. A send CLAIMS `code_sent_at` before it mails
+    # (see `enrol_codes.run`), so this is what the roster believes went out - the one
+    # figure that tells a person whether an open window is delivering anything at all.
+    progress = (
+        f", {sum(bool(s.code_sent_at.strip()) for s in students)}/{len(students)} mailed"
+        if students
+        else ""
+    )
     if students is None:
         # roster.load returns None only when the file could not be read at all, which is a
         # different fix from an empty one - say which.
@@ -93,7 +138,7 @@ def _enrolment_detail(
         gap = f" - WARNING: {roster.ROSTER_PATH} is empty, so nobody is mailed"
     else:
         gap = ""
-    return f"codes sent {bounds}{shown}{gap}"
+    return f"codes sent {bounds}{shown}{progress}{gap}"
 
 
 def render_markdown(course_org: str, cohort_org: str, data: dict[str, dict]) -> str:
@@ -198,6 +243,22 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         course_branch,
         tier_ok,
         tier,
+    )
+
+    # Org-level configuration, not per-cohort: the GRAPH_* secrets are read from the
+    # workflow env of the COURSE org, so this row belongs with B1/B6/B7 even though every
+    # mail path it gates is a cohort action.
+    transport_ok, transport = _transport_detail()
+    data["B8"] = _row(
+        "B8",
+        "Mail transport",
+        course_org,
+        ".github",
+        "GRAPH_* org secrets",
+        course_branch,
+        transport_ok,
+        transport,
+        edit_url=_SECRETS_URL.format(org=course_org),
     )
 
     # `or []` only after C8 has had the raw value: None (unreadable) and [] (no rows

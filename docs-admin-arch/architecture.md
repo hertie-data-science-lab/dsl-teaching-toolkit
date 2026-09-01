@@ -348,7 +348,7 @@ send_codes_datetime → send_until`"]
 | `releases.<label>` | `event_datetime`, `deploy[]` of `course_source_repo` + `course_source_path` (required), `cohort_dest_repo` (default `materials`), `cohort_dest_path` (default: mirror), `deploy_datetime` | a deploy per entry |
 | `assignments.<slug>` | `course_source_repo` (**required**), `due_datetime` (**required**; a bare date closes at 23:59:59), `grading_datetime` (default: due), `handout_datetime`, `cohort_dest_repo` (default: the slug), `type`, `max_team_size` | handout, then snapshot + autograde |
 | `events.<label>` | `type` (`exam` \| `special_event`), `title`, `event_datetime` | nothing - display-only site rows |
-| `enrolment` | `send_codes_datetime` (**required**), `send_until` (default: `semester_start` + 2 weeks, or the opening + 2 weeks when no `semester_start` is pinned), `show_on_site` (default **false**), `title` | `enrol_codes.run` on every tick inside the window - idempotent on `code_sent_at`. A missing roster or missing `GRAPH_*` secrets keep the cron GREEN and are reported by `status` instead |
+| `enrolment` | `send_codes_datetime` (**required**), `send_until` (default: `semester_start` + 2 weeks, or the opening + 2 weeks when no `semester_start` is pinned), `show_on_site` (default **false**), `title` | `enrol_codes.run` on every tick inside the window - idempotent on `code_sent_at`. A missing roster or missing `GRAPH_*` secrets keep the cron GREEN and are reported by `status` instead (its roster/enrolment rows and its mail-transport row) |
 
 - **Parsing is total but never silent.** An entry that is valid YAML yet not a valid schedule
   entry is dropped (or kept on a documented fallback) and recorded in `Schedule.dropped`, so the
