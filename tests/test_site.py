@@ -14,7 +14,14 @@ import yaml
 
 from dsl_course import gh_contents, schedule_plan, site, site_repo
 from dsl_course import schedule as schedule_mod
-from dsl_course.schedule import AssignmentEntry, Deploy, Event, Release, Schedule
+from dsl_course.schedule import (
+    AssignmentEntry,
+    Deploy,
+    Enrolment,
+    Event,
+    Release,
+    Schedule,
+)
 
 UTC = ZoneInfo("UTC")
 
@@ -150,6 +157,18 @@ def test_term_date_entry_hides_the_placeholder_time():
     assert "hide_time: true" in out  # a term boundary is a whole day, not a 09:00 slot
     assert 'name: "Term starts"' in out  # the name is the row's only text
     assert 'description: ""' in out
+
+
+def test_enrolment_entry_is_its_own_row_type():
+    out = site._enrolment_entry(
+        "Enrolment opens", datetime(2026, 8, 24, 8, 0, tzinfo=BERLIN)
+    )
+    # its own type, not a special event: it is term admin, and the theme colours it as such
+    assert "type: enrolment" in out
+    assert "date: 2026-08-24T08:00:00" in out
+    assert 'description: "Enrolment opens"' in out
+    # the Event column prints the KIND, so there is nothing for `name` to say
+    assert "name:" not in out
 
 
 def test_assignment_entry_dates_the_released_row_from_the_handout(monkeypatch):
@@ -869,6 +888,32 @@ def test_term_date_rows_only_when_the_schedule_pins_the_bounds(monkeypatch, tmp_
     unbounded = _plan(monkeypatch, tmp_path, Schedule())
     assert "term-start.md" not in unbounded.collections["_events"]
     assert "term-end.md" not in unbounded.collections["_events"]
+
+
+def test_the_enrolment_row_is_opt_in(monkeypatch, tmp_path):
+    # The one `show_on_site` in the schema that defaults to FALSE. Enrolment is
+    # administrative and its emails are private, so a cohort that simply declares the
+    # window must not find its date published to students.
+    opens = datetime(2026, 8, 24, 8, 0, tzinfo=BERLIN)
+    closes = datetime(2026, 9, 21, tzinfo=BERLIN)
+    silent = _plan(
+        monkeypatch, tmp_path, Schedule(enrolment=Enrolment(opens=opens, closes=closes))
+    )
+    assert "enrolment.md" not in silent.collections["_events"]
+
+    shown = _plan(
+        monkeypatch,
+        tmp_path,
+        Schedule(
+            enrolment=Enrolment(
+                opens=opens, closes=closes, show_on_site=True, title="Enrol now"
+            )
+        ),
+    )
+    row = shown.collections["_events"]["enrolment.md"]
+    assert "type: enrolment" in row
+    assert "date: 2026-08-24T08:00:00" in row
+    assert 'description: "Enrol now"' in row
 
 
 # -------------------------------------------------------- dest_repo mismatch (fix 4)

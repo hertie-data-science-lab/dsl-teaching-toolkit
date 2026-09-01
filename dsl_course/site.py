@@ -966,6 +966,23 @@ def _event_entry(event: schedule.Event, fallback: date) -> str:
     )
 
 
+def _enrolment_entry(title: str, when: date | datetime) -> str:
+    """The enrolment window's opening (the theme's schedule_row_enrolment.html), for a
+    cohort whose `enrolment:` block asked to show it.
+
+    Its own row type rather than a special event, because it is not one: it is term
+    admin, and it shares the violet of the term boundaries for that reason (as the
+    handout and due rows share the assignment's blue). `title` goes in `description`, the
+    Title column - the Event column says the KIND, exactly as every other row does."""
+    return (
+        f"---\n"
+        f"type: enrolment\n"
+        f"date: {iso_when(when)}\n"
+        f'description: "{q(title)}"\n'
+        f"---\n"
+    )
+
+
 def _term_date_entry(name: str, when: date) -> str:
     """A semester-boundary row (the theme's schedule_row_term_date.html). `name` fills the
     row's event column and is the only text it shows, so the description stays empty;
@@ -986,7 +1003,8 @@ def sync_site(course_org: str, cohort_org: str) -> int:
     """Regenerate the cohort's student-facing site from the live org state: the term's
     lecture and lab rows (released ones linked into the private content repos, planned
     ones marked not-yet-released), this year's assignments, and the display-only rows of
-    the schedule (exams, special events, term dates)."""
+    the schedule (exams, special events, term dates, and the enrolment window when the
+    cohort shows it)."""
 
     def build(_wd: Path) -> SitePlan:
         # ONE listing of the cohort answers both questions this build asks of it: which
@@ -1125,6 +1143,13 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 "midterm.md": _exam_entry("MidTerm Exam", start + timedelta(weeks=8)),
                 "final.md": _exam_entry("Final Exam", end),
             }
+        # The enrolment window's opening, and only where the cohort asks for it:
+        # `show_on_site` defaults to FALSE here, unlike everywhere else in the plan, because
+        # enrolment is administrative and its emails are private.
+        if sched.enrolment is not None and sched.enrolment.show_on_site:
+            event_entries["enrolment.md"] = _enrolment_entry(
+                sched.enrolment.title, sched.enrolment.opens
+            )
         # The term's own boundaries, when the schedule pins them.
         if sched.semester_start:
             event_entries["term-start.md"] = _term_date_entry(

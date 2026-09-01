@@ -184,7 +184,8 @@ def _assignments() -> dict[str, str]:
 
 
 def _events() -> dict[str, str]:
-    """A dated exam, a TBC one, a special event and the two term boundaries."""
+    """A dated exam, a TBC one, a special event, the enrolment window and the two term
+    boundaries."""
     end = date(2026, 12, 18)
     return {
         "01-midterm-exam.md": site._exam_entry(
@@ -196,6 +197,9 @@ def _events() -> dict[str, str]:
         ),
         "03-resit-exam.md": site._exam_entry(
             "Resit Exam", end, tbc=True, dateless=True
+        ),
+        "enrolment.md": site._enrolment_entry(
+            "Enrolment opens", datetime(2026, 8, 24, 8, 0, tzinfo=BERLIN)
         ),
         "term-start.md": site._term_date_entry("Term starts", date(2026, 9, 7)),
         "term-end.md": site._term_date_entry("Term ends", end),

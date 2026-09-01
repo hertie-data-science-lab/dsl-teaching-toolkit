@@ -1,0 +1,17 @@
+{%- comment -%}
+SYSTEM-OWNED - do not edit. Written by the DSL course sync from templates/site/ in the
+toolkit; every sync rewrites it.
+{%- endcomment -%}
+{%- comment -%}
+The enrolment window's opening. Term admin, so it takes the term rows' violet and, like
+them, has no Details cell - the row is the whole message. It always carries a real time
+(nothing else can open a window), so the time is printed unconditionally.
+{%- endcomment -%}
+<div class="col col-1" style="color: #59468f ;font-weight: bold;" data-label="Event">Enrolment</div>
+<div class="col col-1-2" data-label="Date">
+    {{ include.event.date | date: site.dateformat }}
+    {{ include.event.date | date: "%H:%M" }}
+    <br class="date-spliter" />{{ include.event.date | date: "%A" }}
+</div>
+<div class="col col-2" data-label="Title"><b>{{ include.event.description }}</b></div>
+<div class="col col-4" data-label="Details"></div>

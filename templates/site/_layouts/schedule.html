@@ -44,6 +44,7 @@ layout: default
             {% when "exam" %}{% include schedule_row_exam.html event=event %}
             {% when "special_event" %}{% include schedule_row_special_event.html event=event %}
             {% when "term_date" %}{% include schedule_row_term_date.html event=event %}
+            {% when "enrolment" %}{% include schedule_row_enrolment.html event=event %}
             {% else %}
             <div class="col col-1" data-label="Event">{{ event.type | default: "Event" }}</div>
             <div class="col col-1-2" data-label="Date">{{ event.date | date: site.dateformat }}</div>
