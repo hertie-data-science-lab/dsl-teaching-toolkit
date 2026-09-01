@@ -387,9 +387,9 @@ def send_bulk(
 ) -> list[str]:
     """Preview (dry_run) or send a batch. Returns the recipients previewed/sent.
 
-    dry_run lists masked recipients + subjects and sends nothing. Never a REAL body: the
-    enrolment-code email carries the student's name and a live credential, and this runs
-    in a public repo whose Actions log anyone can read.
+    dry_run lists masked recipients + subjects and sends nothing. Never a REAL body: a
+    grade notification carries the student's name and their marks, and this runs in a
+    public repo whose Actions log anyone can read.
 
     `sample` is the one thing a masked list cannot give a reviewer - the wording. It is a
     body the CALLER rendered from placeholders (`<name>`, `<code>`), never one of

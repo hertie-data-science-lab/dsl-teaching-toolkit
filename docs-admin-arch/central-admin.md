@@ -170,7 +170,7 @@ covers one nightly refresh:
 - [ ] **Refresh actions** green, both the Promote-triggered run and the next nightly cron
 - [ ] one **Scheduled release** tick green (hourly; a dry run is enough if nothing is due)
 - [ ] a **Join** issue with a deliberately wrong code is rejected as usual
-- [ ] **Send enrolment codes** with `dry_run` previews codes and emails, sends nothing, and reports `Graph credential OK` (if it says the preview proves nothing, the org's secrets are unset)
+- [ ] **Check cohort setup**'s mail-transport row reads `all 4 GRAPH_* secrets set` (the codes send has no preview mode - this row is how the credential is checked without mailing a cohort)
 - [ ] no failure issue opened in `hertie-dsl-demo-course-e1234/.github`
 
 ### Rollback

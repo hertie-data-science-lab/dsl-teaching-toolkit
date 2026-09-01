@@ -109,7 +109,7 @@ from:
 | [03](03-add-assignment-to-course.md) assignment `main/` + `solution/` | [`assignment-1`](../example-course/course-org/assignment-1-f2026/) (`.py`), [`assignment-2`](../example-course/course-org/assignment-2-f2026/) (notebook), [`assignment-4-project`](../example-course/course-org/assignment-4-project-f2026/) (**group**) - each with `grading.yml` + hidden `tests/` |
 | [05](05-manage-teaching-team.md) the teaching team, time-boxed | [`people.yml`](../example-course/cohort-org/people.yml) - two TAs with `start`/`end` dates |
 | [06](06-enrol-students-to-cohort.md) roster + project teams | [`students.csv`](../example-course/cohort-org/students.csv) (incl. an auditor), [`teams.csv`](../example-course/cohort-org/teams.csv) |
-| [07](07-schedule-releases.md) the whole term's plan | [`schedule.yml`](../example-course/cohort-org/schedule.yml) - `releases` with `event_datetime`s + `deploy_datetime`s, `assignments` + `grading_datetime`, `events` (exams, a clinic), `enrolment` (the code-sending window) |
+| [07](07-schedule-releases.md) the whole term's plan | [`schedule.yml`](../example-course/cohort-org/schedule.yml) - `releases` with `event_datetime`s + `deploy_datetime`s, `assignments` + `grading_datetime`, `events` (exams, a clinic) |
 | [10](10-grade-and-return-assignments.md) grade tables | [`grades/assignment-1.csv`](../example-course/cohort-org/grades/assignment-1.csv), [`grades/assignment-4-project.csv`](../example-course/cohort-org/grades/assignment-4-project.csv) (team grades) |
 | [08](08-release-materials-to-cohort.md) a growing package | [`lecture-code-f2026/mlpkg/`](../example-course/course-org/lecture-code-f2026/) - disclosed subpackage by subpackage |
 

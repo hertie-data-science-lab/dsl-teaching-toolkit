@@ -26,7 +26,7 @@ Accompanies the e2e [worked example](../example-course/).
 | `[do this first]` | 3. The term plan | cohort | edit [`classroom-config/schedule.yml`](#scheduleyml) | releases, due dates, exams | the hourly cron runs the whole term; site dates; grading deadlines |
 | `[required]` | 4. Roster | cohort | edit [`classroom-config/students.csv`](#studentscsv) | registrar rows | the enrolment + provisioning source of truth |
 | *(optional)* | 5. Teaching team | cohort | edit [`classroom-config/people.yml`](#peopleyml) ([05](05-manage-teaching-team.md)) | handles (+ card fields), optional `start`/`end` | push access for this cohort's instructors/TAs + site cards; time-boxed if dated |
-| `[required]` | 6. Enrol | course workflow, per cohort | course `.github` → **Send enrolment codes** (untick `dry_run`) | `cohort_org` | codes written to the roster + emailed; students join via the `welcome` **Join course** issue |
+| `[required]` | 6. Enrol | *nothing to run* - the roster push does it | - | - | codes written to the roster + emailed within a minute; students join via the `welcome` **Join course** issue |
 | *(optional)* | 7. Ad-hoc release | course workflow, per cohort | **Release materials** / **Release assignment** | see [08](08-release-materials-to-cohort.md)/[09](09-release-assignment-to-cohort.md) | anything out earlier/differently than the schedule says |
 | *(optional)* | 8. Return marks | course workflows + [`grades/<slug>.csv`](#gradesslugcsv) | the [grading runbook](10-grade-and-return-assignments.md) | your marks | private per-student gradebooks |
 | *(optional)* | 9. Check cohort setup | course workflow, per cohort | course `.github` → **Check cohort setup** | `cohort_org` | what's configured, what's missing, an edit link per gap |
@@ -216,8 +216,7 @@ runs, and the **dates** that drive the website and grading. Times are read in `t
 honoured to the hour.
 
 Blocks encode behaviour: **`releases:`** deploys materials, **`assignments:`** runs the
-handout/due/grading lifecycle, **`events:`** is display-only calendar rows, **`enrolment:`**
-is the window in which enrolment codes are emailed automatically. Colour is a
+handout/due/grading lifecycle, **`events:`** is display-only calendar rows. Colour is a
 display concern only - see [row types](#schedule-row-types) below.
 
 **`releases`** - the term calendar and release plan in one block: each entry is a
@@ -365,34 +364,6 @@ events:
     event_datetime: 2026-11-17T10:00
 ```
 
-**`enrolment`** - the window in which the hourly cron emails enrolment codes, instead of
-someone pressing **Send enrolment codes**. Every tick inside the window emails whoever still
-has no code (the send stamps `code_sent_at` on a row just BEFORE mailing it, and skips a
-row that has one), so a student added mid-window is emailed within the hour and nobody is
-emailed twice - not even when the stamp cannot be written, which now means the batch is not
-sent at all rather than sent again on the next tick.
-Needs the course org's `GRAPH_*` secrets, as the button does.
-
-| Field | Required | Default | Meaning |
-|---|---|---|---|
-| `send_codes_datetime` | **yes** | - (block dropped without it) | when the window opens |
-| `send_until` | no | `semester_start` + 2 weeks (or `send_codes_datetime` + 2 weeks when the cohort pins no `semester_start`) | when it closes; after it, codes go out only by hand. A close at or before the opening - written, or resolved from a `semester_start` already two weeks past - is flagged and moved to two weeks after the opening |
-| `show_on_site` | no | **`false`** | `true` raises a schedule row on the opening date - default OFF, unlike `releases:`, because enrolment is administrative |
-| `title` | no | `Enrolment opens` | that row's label, when shown |
-
-```yaml
-enrolment:
-  send_codes_datetime: 2026-08-24T08:00   # opens a fortnight before term
-  send_until: 2026-09-21T00:00            # optional: default semester_start + 2 weeks (or send_codes_datetime + 2 weeks with no semester_start)
-  show_on_site: true                      # optional: default false
-  title: Enrolment opens                  # optional
-```
-
-An open window over an EMPTY `students.csv` - or one with no `GRAPH_*` secrets to mail on -
-sends nothing, and by the time the window is open it is nearly too late to fix, so **Check
-cohort setup** reports both, where they can be read beforehand. The hourly cron stays green: it cannot clear the problem, and an hourly red
-X for the length of the window is one nobody reads.
-
 #### Schedule row types
 
 The cohort site renders one merged, date-sorted schedule table; each row is colour-coded by
@@ -406,7 +377,6 @@ type, and the type is never a field you set - it follows from where the row came
 | exam | an `events:` entry with `type: exam` |
 | special_event | an `events:` entry with no `type` (clinic, guest lecture, revision session) |
 | term_date | the `semester_start` / `semester_end` scalars |
-| enrolment | the `enrolment:` window, when it sets `show_on_site: true` (violet, as the term rows are - it is term admin) |
 
 So lecture vs lab is decided by the deployed section folder, not by the entry label, and a
 week with both a lecture and a lab renders two rows.
@@ -420,8 +390,6 @@ fully read goes red and opens an issue naming the bad entry.
 | Mistake | What happens |
 |---------|--------------|
 | `event_datetime:` missing/unparseable | that `releases:`/`events:` entry is dropped |
-| `send_codes_datetime:` missing/unparseable | the whole `enrolment:` block is dropped - no codes are emailed automatically |
-| `send_until:` unparseable, or at or before `send_codes_datetime` (its default included) | kept - the window closes at the default, or two weeks after the opening when the default is itself backwards |
 | `due_datetime:` missing/unparseable | the whole `assignments:` entry is dropped - no grading pin, no site date |
 | `deploy` missing `course_source_repo`/`course_source_path` | that copy is dropped |
 | `solution_datetime:` malformed, or not after `handout_datetime` | dropped - the solution waits for a human |

@@ -133,8 +133,10 @@ website** 05:30, **Sync membership** and **Sync site** 06:00 daily. Each reports
 because GitHub emails a scheduled-run failure only to whoever last committed the file - the bot.
 
 Every `workflow_dispatch` job sits behind the `check-team` gate (`workflows_render._CHECK_TEAM`),
-which asks for write on the repo the button lives in. The scheduler and refresh are **ungated**: a
-cron has no actor to check, and both only re-call idempotent work.
+which asks for write on the repo the button lives in. The scheduler, refresh and Send enrolment
+codes are **ungated**: neither a cron nor a `repository_dispatch` has an actor to check, and each
+only re-calls idempotent work. Send enrolment codes has no `workflow_dispatch` at all - a push to
+a cohort's `students.csv` is its only trigger, and therefore the only way codes are sent.
 
 `seed refresh` is serialised against itself (`concurrency: seed-refresh`) and **deliberately not
 shared** with the click workflows that end in a refresh. Actions concurrency has no queue - a group
