@@ -228,7 +228,7 @@ events:
 
 Emails every student their enrolment code without anyone pressing a button - the scheduled twin of [**Send enrolment codes**](06-enrol-students-to-cohort.md).
 
-It is a **window**, not a moment, and that is the whole point. Rosters keep moving: a late registration on the Tuesday of week one, a registrar re-export on the Friday. Every hourly tick inside the window emails whoever still has no code, so a student added to `students.csv` at 14:10 has their code by 15:00 - and **nobody is ever emailed twice**, because the send writes a `code_sent_at` stamp against each row it mails and skips any row that already has one.
+It is a **window**, not a moment, and that is the whole point. Rosters keep moving: a late registration on the Tuesday of week one, a registrar re-export on the Friday. Every hourly tick inside the window emails whoever still has no code, so a student added to `students.csv` at 14:10 has their code by 15:00 - and **nobody is ever emailed twice**, because the send writes a `code_sent_at` stamp against each row just before mailing it and skips any row that already has one. If that stamp cannot be written the batch is not sent at all - under-sending once, loudly, beats mailing the same students every hour for a fortnight.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
@@ -247,7 +247,7 @@ enrolment:
 
 NB: **`show_on_site` defaults to `false` here, the opposite of a `releases:` entry.** Enrolment is administrative and the emails are private, so the date earns a row on the student-facing schedule only where you say it does.
 
-NB: **the window needs a roster to send to.** A window standing open over an empty `students.csv` emails nobody, and once it has closed there is nothing to be done about it - so **Check cohort setup** says whether the roster is there, which you can read before the window opens. The hourly cron deliberately stays green and quiet about it: it would have to say it every hour for a fortnight, by which time it is already too late to act on.
+NB: **the window needs a roster to send to, and secrets to send with.** A window standing open over an empty `students.csv`, or over an org with no `GRAPH_*` secrets, emails nobody, and once it has closed there is nothing to be done about it - so **Check cohort setup** says whether the roster and the mail transport are there, which you can read before the window opens. The hourly cron deliberately stays green and quiet about it: it would have to say it every hour for a fortnight, by which time it is already too late to act on.
 
 ---
 Full schema, field by field, see [here](DEPLOYMENT-CHECKLIST.md#scheduleyml).
@@ -328,7 +328,7 @@ An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it 
 | a `deploy` item missing `course_source_repo` or `course_source_path` | that one copy never ships |
 | no valid `send_codes_datetime` on the `enrolment:` block | no enrolment codes are emailed automatically |
 
-Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `handout_datetime` (**nothing is ever handed out**), `grading_datetime` (falls back to `due_datetime`), `deploy_datetime` (the copy ships at the `event_datetime`) or `max_team_size` (no cap); an unknown `type:` on an assignment (treated as individual) or an event (shown as a plain special event); a `send_until:` that is malformed, or at or before `send_codes_datetime` - which would leave a window that never opens (the default close is used instead); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`).
+Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `handout_datetime` (**nothing is ever handed out**), `grading_datetime` (falls back to `due_datetime`), `deploy_datetime` (the copy ships at the `event_datetime`) or `max_team_size` (no cap); an unknown `type:` on an assignment (treated as individual) or an event (shown as a plain special event); a `send_until:` that is malformed, or at or before `send_codes_datetime` - which would leave a window that never opens (the default close is used instead, or two weeks after the opening when the default is itself at or before it, as it is on a cohort set up more than two weeks into term); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`).
 
 An empty `deploy:` - the key written with nothing under it - is flagged too. It parses as "no copies", so the entry becomes a display-only row that ships nothing; if that is what you meant, delete the key (or write `deploy: []`) and the flag goes away.
 

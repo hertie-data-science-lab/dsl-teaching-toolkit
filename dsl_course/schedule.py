@@ -876,10 +876,13 @@ def _parse_enrolment(
     else has a default (see `Enrolment`), and `send_until` resolves HERE because this is
     where `semester_start` is in scope.
 
-    A `send_until` at or before the opening leaves a window that is never open, which
-    sends nothing and says nothing. It is flagged and the default close used instead: the
-    cohort declared that it wants codes mailed from a date, and the way to withdraw that
-    is to delete the block, not to write a range backwards."""
+    A close at or before the opening leaves a window that is never open, which sends
+    nothing and says nothing. It is flagged and a close two weeks after the opening used
+    instead: the cohort declared that it wants codes mailed from a date, and the way to
+    withdraw that is to delete the block, not to write a range backwards. The check runs
+    on the RESOLVED close, because the default can be backwards too - it is anchored on
+    `semester_start`, so a cohort set up after term started (a second intake, a late
+    setup) resolves a close two weeks into a term that has already run."""
     if raw is None:
         return None
     where = "enrolment"
@@ -903,7 +906,7 @@ def _parse_enrolment(
     default_close = (
         _instant(semester_start, tz) if semester_start is not None else opens
     ) + ENROLMENT_WINDOW
-    closes = _flagged_datetime(
+    written = _flagged_datetime(
         raw,
         "send_until",
         tz,
@@ -911,19 +914,26 @@ def _parse_enrolment(
         where,
         "the window closes at the default instead",
     )
-    if closes is not None and closes <= opens:
+    closes = written if written is not None else default_close
+    if closes <= opens:
+        # The default is the first fallback, as it always was - but it is only a fallback
+        # while it is forward of the opening, which is exactly what this branch cannot
+        # assume. The span from the opening is what the schema already uses for a cohort
+        # with no `semester_start` to anchor to, so it is the one close that is impossible
+        # to author backwards.
+        fallback = default_close if default_close > opens else opens + ENROLMENT_WINDOW
         _flag_bad_value(
             drops,
             where,
             "send_until",
-            raw.get("send_until"),
-            "the window would never open (it is at or before "
-            "`send_codes_datetime`) - the default close is used instead",
+            raw.get("send_until") if written is not None else closes.isoformat(),
+            f"the window would never open (it is at or before `send_codes_datetime`) - "
+            f"it closes at {fallback.isoformat()} instead",
         )
-        closes = None
+        closes = fallback
     return Enrolment(
         opens=opens,
-        closes=closes if closes is not None else default_close,
+        closes=closes,
         # Default FALSE, unlike a release's `show_on_site` - see the Enrolment class.
         show_on_site=raw.get("show_on_site") is True,
         title=str(raw.get("title") or "").strip() or ENROLMENT_TITLE,

@@ -820,6 +820,24 @@ def test_a_send_until_that_cannot_close_the_window_falls_back_and_says_so(bad):
     assert any(d.startswith("enrolment.send_until:") for d in sched.dropped)
 
 
+def test_a_default_close_that_lands_before_the_opening_is_flagged_and_moved():
+    # The DEFAULT close is anchored on `semester_start`, and only an AUTHORED `send_until`
+    # was ever checked against the opening - so a cohort configured after term started (a
+    # second intake, a late setup) resolved a close BEHIND its own opening. `is_open` was
+    # then false for ever: nothing was mailed, `--validate` printed the backwards range
+    # without calling it a fault, and the status row read ok.
+    sched = parse(
+        {
+            "semester_start": "2026-09-07",
+            "enrolment": {"send_codes_datetime": "2026-09-25T08:00"},
+        }
+    )
+    window = sched.enrolment
+    assert window.closes == datetime(2026, 10, 9, 8, 0, tzinfo=BERLIN)
+    assert window.is_open(datetime(2026, 9, 26, 9, 0, tzinfo=BERLIN))
+    assert any(d.startswith("enrolment.send_until:") for d in sched.dropped)
+
+
 def test_the_window_is_half_open_so_send_until_is_the_first_instant_that_does_not_send():
     window = parse(
         {
