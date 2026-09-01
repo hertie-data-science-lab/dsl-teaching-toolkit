@@ -159,16 +159,18 @@ def test_term_date_entry_hides_the_placeholder_time():
     assert 'description: ""' in out
 
 
-def test_enrolment_entry_is_its_own_row_type():
+def test_enrolment_entry_is_its_own_row_type_drawn_by_the_term_date_template():
     out = site._enrolment_entry(
         "Enrolment opens", datetime(2026, 8, 24, 8, 0, tzinfo=BERLIN)
     )
     # its own type, not a special event: it is term admin, and the theme colours it as such
     assert "type: enrolment" in out
     assert "date: 2026-08-24T08:00:00" in out
+    # `name` is the Event column's KIND and `description` the row's own text - the split
+    # schedule_row_term_date.html reads. No `hide_time`: a window opens at a real time.
+    assert 'name: "Enrolment"' in out
     assert 'description: "Enrolment opens"' in out
-    # the Event column prints the KIND, so there is nothing for `name` to say
-    assert "name:" not in out
+    assert "hide_time" not in out
 
 
 def test_assignment_entry_dates_the_released_row_from_the_handout(monkeypatch):
@@ -910,10 +912,7 @@ def test_the_enrolment_row_is_opt_in(monkeypatch, tmp_path):
             )
         ),
     )
-    row = shown.collections["_events"]["enrolment.md"]
-    assert "type: enrolment" in row
-    assert "date: 2026-08-24T08:00:00" in row
-    assert 'description: "Enrol now"' in row
+    assert "enrolment.md" in shown.collections["_events"]
 
 
 # -------------------------------------------------------- dest_repo mismatch (fix 4)

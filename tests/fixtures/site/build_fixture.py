@@ -14,8 +14,9 @@ not fetch - are vendored, under `base/`.
 
 The states it covers are the ones that render DIFFERENTLY, one of each: a released
 session, an unreleased one, a lab, a session whose readings are still to come, a
-handed-out assignment and a pending one, a dated exam and a TBC one, a special event, the
-two term boundaries, and an All Materials index nested three directories deep.
+handed-out assignment and a pending one, a dated exam and a TBC one, a special event, an
+enrolment window, the two term boundaries, and an All Materials index nested three
+directories deep.
 
     python3 tests/fixtures/site/build_fixture.py <dest>
 """

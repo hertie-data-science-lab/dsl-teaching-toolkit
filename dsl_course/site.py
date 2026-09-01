@@ -966,18 +966,24 @@ def _event_entry(event: schedule.Event, fallback: date) -> str:
     )
 
 
-def _enrolment_entry(title: str, when: date | datetime) -> str:
-    """The enrolment window's opening (the theme's schedule_row_enrolment.html), for a
-    cohort whose `enrolment:` block asked to show it.
+# The Event column's word for an enrolment row - the KIND, as "Term starts" is for a
+# boundary. The cohort's `title` is the row's own text and goes in `description`.
+ENROLMENT_ROW_NAME = "Enrolment"
 
-    Its own row type rather than a special event, because it is not one: it is term
-    admin, and it shares the violet of the term boundaries for that reason (as the
-    handout and due rows share the assignment's blue). `title` goes in `description`, the
-    Title column - the Event column says the KIND, exactly as every other row does."""
+
+def _enrolment_entry(title: str, when: date | datetime) -> str:
+    """The enrolment window's opening, for a cohort whose `enrolment:` block asked to show
+    it. Its own `type:` - term admin, sharing the violet of the term boundaries, as the
+    handout and due rows share the assignment's blue - but NOT its own template: the
+    theme draws it with `schedule_row_term_date.html`, which already parameterises the
+    two things that differ (`name` for the Event column, `hide_time` for the clock, left
+    unset here because a window opens at a real time). The row class is built from
+    `type:`, so the colour stays separately settable whatever draws the cells."""
     return (
         f"---\n"
         f"type: enrolment\n"
         f"date: {iso_when(when)}\n"
+        f'name: "{ENROLMENT_ROW_NAME}"\n'
         f'description: "{q(title)}"\n'
         f"---\n"
     )
