@@ -2,7 +2,8 @@
 single home for the timed release plan AND the dates other tools display/enforce:
 
 Each block encodes a BEHAVIOUR: `releases` deploy materials, `assignments` have a
-lifecycle, `events` are display-only calendar rows.
+lifecycle, `events` are display-only calendar rows, `enrolment` opens the window in which
+the scheduler mails enrolment codes.
 
     timezone: Europe/Berlin          # optional (default Europe/Berlin) - how naive times
                                      # below are interpreted; GitHub cron itself is UTC
@@ -34,6 +35,12 @@ lifecycle, `events` are display-only calendar rows.
       project-clinic:
         title: Project Clinic
         event_datetime: 2026-10-14T10:00
+    enrolment:                       # the WINDOW in which the hourly scheduler mails
+      send_codes_datetime: 2026-09-01T08:00   # enrolment codes. Every tick inside it
+      send_until: 2026-09-21T00:00   # sends to whoever still has no code, so a student
+      show_on_site: false            # added mid-window is mailed within the hour.
+      title: Enrolment opens         # `send_until` defaults to semester_start + 2 weeks;
+                                     # `show_on_site` to FALSE (see the Enrolment class).
     semester_start: 2026-09-07
     semester_end: 2026-12-18
 
@@ -308,6 +315,43 @@ class Event:
     tbc: bool = False
 
 
+# How long the enrolment window stays open when the cohort names no `send_until`. Two
+# weeks from the start of term is the stretch in which a roster is still moving - late
+# registrations, a registrar re-export - after which an unenrolled student is a case for a
+# person, not for an hourly mailer.
+ENROLMENT_WINDOW = timedelta(weeks=2)
+
+# What the site row is called when the cohort names nothing. Here rather than at the site,
+# because it is a documented schema default, not a rendering choice.
+ENROLMENT_TITLE = "Enrolment opens"
+
+
+@dataclass
+class Enrolment:
+    """The window in which the hourly scheduler mails enrolment codes, `enrolment:` in the
+    YAML. A WINDOW rather than a moment, because a roster keeps filling up after term
+    starts: the send is idempotent (`students.csv`'s `code_sent_at` column marks a row as
+    mailed and a re-run skips it), so every tick inside the window mails whoever is new
+    and nobody else, and a student added on the Tuesday has their code within the hour.
+
+    `opens` is the YAML's `send_codes_datetime` and `closes` its `send_until` - already
+    resolved to its default by `parse`, which is the only place `semester_start` is known.
+    """
+
+    opens: datetime
+    closes: datetime
+    # Default FALSE - the opposite of a `releases:` entry, deliberately. Enrolment is
+    # administrative and its emails are private; the date earns a row on the student-facing
+    # schedule only where faculty say it does.
+    show_on_site: bool = False
+    title: str = ENROLMENT_TITLE  # display-only: the site row's label
+
+    def is_open(self, now: datetime) -> bool:
+        """Whether `now` falls in the window - half-open, so `send_until` is the first
+        instant that no longer sends."""
+        return self.opens <= now < self.closes
+
+
 @dataclass
 class Schedule:
     timezone: str = DEFAULT_TZ
@@ -316,6 +360,7 @@ class Schedule:
     semester_end: date | None = None
     assignments: dict[str, AssignmentEntry] = field(default_factory=dict)
     events: list[Event] = field(default_factory=list)
+    enrolment: Enrolment | None = None  # None = no `enrolment:` block, so nothing mails
     # Everything this parse could not use, one human-readable line each, naming the YAML
     # path and what it costs the cohort: entries thrown away outright (`_drop` - no date,
     # no source), and entries KEPT but not as written (`_flag_unknown_keys` for a stray
@@ -366,7 +411,15 @@ def _require_mapping(
 # (`materials_releases:`) - is silently ignored by the parser and so means something other
 # than what faculty wrote; `_flag_unknown_keys` surfaces it so `--validate` catches it.
 KNOWN_TOP_LEVEL = frozenset(
-    {"timezone", "releases", "semester_start", "semester_end", "assignments", "events"}
+    {
+        "timezone",
+        "releases",
+        "semester_start",
+        "semester_end",
+        "assignments",
+        "events",
+        "enrolment",
+    }
 )
 KNOWN_RELEASE = frozenset(
     {
@@ -402,6 +455,9 @@ KNOWN_ASSIGNMENT = frozenset(
     }
 )
 KNOWN_EVENT = frozenset({"type", "title", "event_datetime", "tbc"})
+KNOWN_ENROLMENT = frozenset(
+    {"send_codes_datetime", "send_until", "show_on_site", "title"}
+)
 
 
 def _flag_unknown_keys(
@@ -809,6 +865,66 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Event]:
     return out
 
 
+def _parse_enrolment(
+    raw: object, tz: ZoneInfo, drops: list[str], semester_start: date | None
+) -> Enrolment | None:
+    """Parse `enrolment:` - the window in which the scheduler mails enrolment codes.
+
+    One entry, not a label -> entry mapping: a cohort enrols once. `send_codes_datetime`
+    is required, because a window with no opening moment can never be open; everything
+    else has a default (see `Enrolment`), and `send_until` resolves HERE because this is
+    where `semester_start` is in scope.
+
+    A `send_until` at or before the opening leaves a window that is never open, which
+    sends nothing and says nothing. It is flagged and the default close used instead: the
+    cohort declared that it wants codes mailed from a date, and the way to withdraw that
+    is to delete the block, not to write a range backwards."""
+    if raw is None:
+        return None
+    where = "enrolment"
+    cost = "no enrolment codes are sent automatically"
+    if not isinstance(raw, dict):
+        _drop(drops, where, "not a mapping", cost)
+        return None
+    opens = _flagged_datetime(raw, "send_codes_datetime", tz, drops, where, cost)
+    if opens is None:
+        _drop(drops, where, "no valid `send_codes_datetime`", cost)
+        return None
+    _flag_unknown_keys(drops, raw, KNOWN_ENROLMENT, where, "that setting is ignored")
+    # The default is anchored on the term, not on the window's own opening: codes
+    # typically go out before teaching starts, and "two weeks into term" is the moment
+    # the roster stops moving. A cohort that pins no `semester_start` has no term to
+    # anchor to, so the same span runs from the opening instead.
+    default_close = (
+        _instant(semester_start, tz) if semester_start is not None else opens
+    ) + ENROLMENT_WINDOW
+    closes = _flagged_datetime(
+        raw,
+        "send_until",
+        tz,
+        drops,
+        where,
+        "the window closes at the default instead",
+    )
+    if closes is not None and closes <= opens:
+        _flag_bad_value(
+            drops,
+            where,
+            "send_until",
+            raw.get("send_until"),
+            "the window would never open (it is at or before "
+            "`send_codes_datetime`) - the default close is used instead",
+        )
+        closes = None
+    return Enrolment(
+        opens=opens,
+        closes=closes if closes is not None else default_close,
+        # Default FALSE, unlike a release's `show_on_site` - see the Enrolment class.
+        show_on_site=raw.get("show_on_site") is True,
+        title=str(raw.get("title") or "").strip() or ENROLMENT_TITLE,
+    )
+
+
 def parse(meta: dict) -> Schedule:
     """Parse a loaded schedule.yml dict into a Schedule. Pure; tolerant of missing/blank
     fields (a cohort with no schedule.yml behaves exactly as before). Anything it has to
@@ -830,16 +946,20 @@ def parse(meta: dict) -> Schedule:
             f"so every naive time below is read in {DEFAULT_TZ}"
         )
     term_cost = "the site synthesises term dates, shifting every session row"
+    # Read before the Schedule is built: the enrolment window's default close is anchored
+    # on it.
+    semester_start = _flagged_date(meta, "semester_start", drops, "", term_cost)
     return Schedule(
         timezone=str(tz_name or DEFAULT_TZ),
         releases=_parse_releases(meta.get("releases"), tz, drops),
         # `01/09/2026` coerces to None exactly like an absent key, and the site then
         # SYNTHESISES term dates from what it does know - so a bad separator quietly
         # shifts every weekly session row. Flag it.
-        semester_start=_flagged_date(meta, "semester_start", drops, "", term_cost),
+        semester_start=semester_start,
         semester_end=_flagged_date(meta, "semester_end", drops, "", term_cost),
         assignments=_parse_assignments(meta.get("assignments"), tz, drops),
         events=_parse_events(meta.get("events"), tz, drops),
+        enrolment=_parse_enrolment(meta.get("enrolment"), tz, drops, semester_start),
         dropped=drops,
     )
 
@@ -1210,6 +1330,13 @@ def _validate_report(sched: Schedule, source: str) -> str:
             f"{len(sched.assignments)} assignment(s) | {len(sched.events)} event(s)"
         ),
     ]
+    if sched.enrolment is not None:
+        window = sched.enrolment
+        lines.append(
+            f"  enrolment codes sent {window.opens.isoformat()} -> "
+            f"{window.closes.isoformat()} "
+            f"({'shown' if window.show_on_site else 'not shown'} on the site)"
+        )
     if sched.dropped:
         lines.append("")
         lines.append(f"  {len(sched.dropped)} ENTRY/IES DROPPED:")
