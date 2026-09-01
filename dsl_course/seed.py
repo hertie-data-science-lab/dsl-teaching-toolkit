@@ -52,7 +52,7 @@ from .discovery import (
     student_repo_names,
     unregister_cohort,
 )
-from .gh_contents import get_file_content, put_file, put_files, refresh_stubs
+from .gh_contents import get_file_content, put_file, put_files
 from .gh_teams import converge_org_settings, create_role_teams
 from .ghcli import bot_token, gh
 from .log import log, log_err, log_ok, log_step
@@ -414,38 +414,6 @@ def _converge_org(
     )
 
 
-def _refresh_stubs(course_org: str, repo: str) -> int:
-    """Bring a content repo's seeded STUBS up to date, without creating any.
-
-    The scaffold's stubs improve over time - the syllabus grew the standard Hertie sections,
-    the reading list grew Required/Optional headings - and were create-only, so a course
-    scaffolded a month ago kept whatever the toolkit first shipped and every later
-    improvement reached new repos only. They now carry a mark, so a stub can be refreshed
-    while it is still ours and is never touched once faculty write over it
-    (`gh_contents.refresh_stubs`).
-
-    `create=False` is the whole reason this is safe to run over EVERY content repo:
-    `discover_content_repos` returns the code and dataset repos too, and seeding a syllabus
-    into `lecture-code-f2026` would be nonsense. Creating stays the scaffold's job, because
-    only the scaffold knows what kind of repo it just made; this only improves what is
-    already there.
-
-    Two reads per stub per repo, so a handful of calls per org per night."""
-    # `course-materials-f2026` -> `f2026`, which is all the stubs interpolate. A repo with
-    # no term tag is not one the materials scaffold made, and rewriting its stub would head
-    # the file `#  syllabus` - so it is left alone rather than refreshed into nonsense.
-    tag = term_tag(repo)
-    if tag is None:
-        return 0
-    return refresh_stubs(
-        course_org,
-        repo,
-        scaffold.refreshable_stubs(tag),
-        "docs: refresh the scaffold stubs",
-        retire=scaffold.RETIRED_STUBS,
-    )
-
-
 def refresh(course_org: str) -> int:
     """Refresh both layers: the run-from-repo content actions in every content repo,
     AND the central org-level workflows in .github; converge each materials repo's
@@ -509,7 +477,6 @@ def refresh(course_org: str) -> int:
                 course_org, repo, cohorts, assignments, central_ref
             )
         )
-        failures += _refresh_stubs(course_org, repo)
         # A no-op on the code and dataset repos this sweep also returns; the gate is
         # inside, so no caller can forget it.
         failures += scaffold.refresh_materials_system_files(course_org, repo)

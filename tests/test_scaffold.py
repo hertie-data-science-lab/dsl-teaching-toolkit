@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import gh_contents, ghcli, releaseignore, scaffold, seed
+from dsl_course import gh_contents, ghcli, releaseignore, scaffold
 
 
 class FakeRepo:
@@ -45,13 +45,6 @@ class FakeRepo:
             self.deletes.append((repo, path))
         return True
 
-    def refresh_stubs(self, *a, **k):
-        """The REAL rule, over this fake's files. It used to be reimplemented here, which
-        meant the stub lifecycle the scaffold actually runs was never the one under test -
-        the copy could drift from it silently. Everything it reaches (get_file_content,
-        put_files, log_skip) is already faked, so delegating tests the real thing."""
-        return gh_contents.refresh_stubs(*a, **k)
-
     def written(self, repo):
         return {path for r, path in self.writes if r == repo}
 
@@ -66,7 +59,6 @@ def fake(monkeypatch):
     monkeypatch.setattr(gh_contents, "get_file_content", f.get_file_content)
     monkeypatch.setattr(gh_contents, "put_file", f.put_file)
     monkeypatch.setattr(gh_contents, "put_files", f.put_files)
-    monkeypatch.setattr(scaffold, "refresh_stubs", f.refresh_stubs)
     monkeypatch.setattr(scaffold, "put_files", f.put_files)
     monkeypatch.setattr(gh_contents, "log_skip", lambda msg: f.skips.append(msg))
     monkeypatch.setattr(scaffold, "log_skip", lambda msg: f.skips.append(msg))
@@ -158,10 +150,14 @@ def test_materials_repo_reds_when_a_user_file_seed_fails(fake, monkeypatch):
     # A USER-owned skeleton whose write FAILS must red the scaffold: the seed returns False
     # only on a real write failure, and that folds into the exit code (a mere skip of a
     # present file is a success, not a failure).
-    monkeypatch.setattr(
-        gh_contents, "put_files", lambda *a, **k: False
-    )  # USER seeds fail
-    monkeypatch.setattr(scaffold, "put_files", lambda *a, **k: True)  # SYSTEM pair ok
+    # Both sets now go through the same create-only writer, so they are told apart by the
+    # commit each makes rather than by which namespace resolves `put_files`.
+    def failing(org, repo, files, message, *a, **k):
+        if message.startswith("init: materials skeleton"):
+            return False
+        return fake.put_files(org, repo, files, message, *a, **k)
+
+    monkeypatch.setattr(scaffold, "put_files", failing)
     assert scaffold.scaffold_materials("Org", "f2026") == 1
 
 
@@ -332,21 +328,9 @@ def test_no_system_file_is_ever_released_to_students():
         assert path in deploy.ROOT_RELEASE_EXCLUDED, path
 
 
-def test_a_stub_is_refreshed_while_it_is_still_ours(fake):
-    # The point of the mark: an improvement reaches the courses ALREADY running, not just
-    # the next repo scaffolded. `SYLLABUS.md` was create-only, so the three live courses
-    # kept the first stub the toolkit ever shipped.
-    fake.files[("course-materials-f2026", "SYLLABUS.md")] = (
-        "# f2026 syllabus\n\nReplace with the real syllabus.\n"  # what we used to seed
-    )
-    assert scaffold.scaffold_materials("Org", "f2026") == 0
-    refreshed = fake.files[("course-materials-f2026", "SYLLABUS.md")]
-    assert "## 1. General information" in refreshed
-    assert "Optional - delete this file" in refreshed
-
-
 def test_a_stub_faculty_have_written_over_is_never_touched_again(fake):
-    # They take ownership by removing the mark, which writing their own does.
+    # Create-only, so a re-run cannot revert their work whatever they left in the file -
+    # they do not have to have removed any marker to be safe.
     mine = "# Machine Learning - syllabus\n\nWritten by faculty.\n"
     fake.files[("course-materials-f2026", "SYLLABUS.md")] = mine
     fake.files[("course-materials-f2026", "readings/01_session-1/READINGS.md")] = (
@@ -360,52 +344,6 @@ def test_a_stub_faculty_have_written_over_is_never_touched_again(fake):
         == "- Mine\n"
     )
     assert "course-materials-f2026/SYLLABUS.md" in fake.skips
-
-
-def test_every_seeded_stub_carries_the_mark_that_makes_it_refreshable(fake):
-    # If a stub ships without the mark it is frozen forever, which is the bug this fixes -
-    # so the mark is asserted on what the scaffold actually writes.
-    assert scaffold.scaffold_materials("Org", "f2026") == 0
-    for path in scaffold.refreshable_stubs("f2026"):
-        assert gh_contents.STUB_MARK in fake.files[("course-materials-f2026", path)], (
-            path
-        )
-
-
-def test_refresh_improves_an_existing_stub_but_never_creates_one(monkeypatch):
-    # The gap this closes: `seed.refresh` runs nightly over every content repo, but the
-    # stubs were only ever written by the scaffold - so a course scaffolded last month kept
-    # whatever the toolkit first shipped. Refresh now converges them.
-    #
-    # `create=False` is what makes that safe over EVERY content repo:
-    # discover_content_repos returns the code and dataset repos too, and seeding a syllabus
-    # into `lecture-code-f2026` would be nonsense.
-
-    f = FakeRepo()
-    monkeypatch.setattr(gh_contents, "get_file_content", f.get_file_content)
-    monkeypatch.setattr(gh_contents, "put_file", f.put_file)
-    monkeypatch.setattr(gh_contents, "put_files", f.put_files)
-    monkeypatch.setattr(gh_contents, "log_skip", lambda msg: f.skips.append(msg))
-    monkeypatch.setattr(seed, "refresh_stubs", f.refresh_stubs)
-    # A materials repo with the stub we used to ship, and a code repo with no stub at all.
-    f.files[("course-materials-f2026", "SYLLABUS.md")] = (
-        "# f2026 syllabus\n\nReplace with the real syllabus.\n"
-    )
-
-    assert seed._refresh_stubs("Org", "course-materials-f2026") == 0
-    assert seed._refresh_stubs("Org", "lecture-code-f2026") == 0
-
-    assert (
-        "## 1. General information"
-        in f.files[("course-materials-f2026", "SYLLABUS.md")]
-    )
-    # Nothing was created anywhere - not the code repo's syllabus, not the materials repo's
-    # missing readings stub.
-    assert ("lecture-code-f2026", "SYLLABUS.md") not in f.files
-    assert (
-        "course-materials-f2026",
-        "readings/01_session-1/READINGS.md",
-    ) not in f.files
 
 
 def test_refresh_backfills_the_system_files_into_a_materials_repo(monkeypatch):
@@ -448,39 +386,30 @@ def test_refresh_reds_when_a_system_file_cannot_be_written(monkeypatch):
     assert scaffold.refresh_materials_system_files("Org", "course-materials-f2026") == 1
 
 
-def test_the_scaffold_and_refresh_converge_the_same_stub_list():
-    # One list, so a stub added to the scaffold is converged everywhere without a second
-    # edit somewhere else.
-    assert sorted(scaffold.refreshable_stubs("f2026")) == [
-        "SYLLABUS.md",
-        "readings/01_session-1/READINGS.md",
-    ]
+def test_no_cron_path_can_rewrite_an_instructor_owned_file(fake):
+    """The whole ownership rule, in one test.
 
-
-def test_a_refresh_never_rewrites_a_releaseignore(fake):
-    """The bug this shape exists to prevent, pinned end to end.
-
-    `is_untouched_stub` asks whether the mark is anywhere in the text. For a prose stub
-    faculty replace wholesale that is right; for a withhold list it is exactly wrong,
-    because the natural edit is to APPEND a pattern under the seeded comments. A marked
-    file would still read as untouched, so the nightly refresh would rewrite it - deleting
-    the patterns and shipping whatever they withheld, on a green run."""
-    edited = scaffold._RELEASEIGNORE_STUB + "\n**/solutions.ipynb\n"
-    fake.files[("course-materials-f2026", releaseignore.RELEASEIGNORE)] = edited
+    Every instructor-owned file in the skeleton is CREATE-ONLY: whatever faculty leave in
+    one, no nightly path rewrites it. Asserted over the real `seed.refresh` write surface,
+    because the bug this replaced was a refresh that looked at a marker and guessed
+    wrong - a withhold list edited by APPENDING kept its marker, read as untouched, and
+    was overwritten, so patterns vanished and withheld files shipped again."""
+    mine = {
+        "SYLLABUS.md": "# My syllabus\n",
+        "readings/01_session-1/READINGS.md": "- Blitzstein, ch. 1.\n",
+        # Appended under the seeded comments, which is how a withhold list is edited.
+        releaseignore.RELEASEIGNORE: scaffold._RELEASEIGNORE_STUB
+        + "\n**/solutions.ipynb\n",
+        "README.md": "# My course\n",
+    }
+    for path, body in mine.items():
+        fake.files[("course-materials-f2026", path)] = body
 
     assert scaffold.scaffold_materials("Org", "f2026") == 0
-    assert seed._refresh_stubs("Org", "course-materials-f2026") == 0
+    assert scaffold.refresh_materials_system_files("Org", "course-materials-f2026") == 0
 
-    kept = fake.files[("course-materials-f2026", releaseignore.RELEASEIGNORE)]
-    assert "**/solutions.ipynb" in kept
-    assert kept == edited
-
-
-def test_the_seeded_releaseignore_is_created_once_not_refreshed():
-    """It is part of the create-only skeleton, so it can never be rewritten - which is
-    also why the wording cannot be improved in a repo that already has it."""
-    assert releaseignore.RELEASEIGNORE not in scaffold.refreshable_stubs("f2026")
-    assert not gh_contents.is_untouched_stub(scaffold._RELEASEIGNORE_STUB)
+    for path, body in mine.items():
+        assert fake.files[("course-materials-f2026", path)] == body, path
 
 
 def test_the_seeded_releaseignore_withholds_nothing(tmp_path):
@@ -495,41 +424,6 @@ def test_the_seeded_releaseignore_withholds_nothing(tmp_path):
     deny = releaseignore.deny_for(tmp_path)
     # `.releaseignore` itself is always withheld; nothing else is.
     assert deny(str(tmp_path), ["solutions.ipynb", "drafts"]) == set()
-
-
-def test_the_renamed_readings_stub_is_retired_not_orphaned(fake):
-    # Stubs are keyed by PATH, so renaming one leaves the old file behind forever: never
-    # refreshed (it is no longer in the set) and never removed. That matters here because
-    # the orphan is no longer the overlay, so the next release ships it to students as a
-    # "reading" whose contents are scaffold instructions addressed to faculty.
-    old = "readings/01_session-1/reading.md"
-    fake.files[("course-materials-f2026", old)] = scaffold._READINGS_STUB.decode()
-
-    assert scaffold.scaffold_materials("Org", "f2026") == 0
-    assert ("course-materials-f2026", old) not in fake.files
-    assert ("course-materials-f2026", old) in fake.deletes
-    assert "readings/01_session-1/READINGS.md" in fake.written("course-materials-f2026")
-
-
-def test_a_readings_file_faculty_wrote_is_never_retired(fake):
-    # The rename must not delete their work. Once the mark is gone the file is theirs, so
-    # it stays exactly where it is - even though the toolkit no longer treats that name as
-    # the overlay. Losing a reading list to a rename would be far worse than an extra file.
-    mine = "## Required Readings\n\n- Blitzstein & Hwang, ch. 1-2.\n"
-    fake.files[("course-materials-f2026", "readings/01_session-1/reading.md")] = mine
-
-    assert scaffold.scaffold_materials("Org", "f2026") == 0
-    assert (
-        fake.files[("course-materials-f2026", "readings/01_session-1/reading.md")]
-        == mine
-    )
-    assert (
-        "course-materials-f2026",
-        "readings/01_session-1/reading.md",
-    ) not in fake.deletes
-
-
-# ------------------------------------------------------------------- site scaffold
 
 
 def _site_gh(monkeypatch, pages_post, pages_put, env_put=(0, ""), seeded=None):

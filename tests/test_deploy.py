@@ -485,7 +485,7 @@ def test_an_unwritten_syllabus_stub_is_withheld_too():
     # showing students "Optional - delete this file", empty tables and faculty instructions.
     from dsl_course import scaffold
 
-    stub = scaffold.refreshable_stubs("f2026")["SYLLABUS.md"].decode()
+    stub = scaffold._SYLLABUS_STUB.format(tag="f2026")
     assert deploy._is_withheld_stub("SYLLABUS.md", stub)
     # Written, so released.
     assert not deploy._is_withheld_stub(
