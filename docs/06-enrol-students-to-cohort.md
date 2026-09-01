@@ -32,7 +32,9 @@ Live example roster: [`example-course/cohort-org/students.csv`](../example-cours
 
    > **If the emailing integration isn't live for any reason** the codes can still be written into `students.csv` by the `Send enrolment codes` workflow → then copy each student's code into an email of your own and send out manually.
 
-   > Emailing is live once the course org has the `GRAPH_*` secrets - set centrally by the DSL team. Only **Send enrolment codes** and **Distribute grades** use them; without them both write their files, send nothing, and say so.
+   > Emailing is live once the course org has the `GRAPH_*` secrets - set centrally by the DSL team. **Send enrolment codes**, **Distribute grades** and the hourly **Scheduled release** cron use them; without them they write their files, send nothing, and say so.
+
+   > **Or skip the button entirely.** Declare an `enrolment:` window in the cohort's [`schedule.yml`](07-schedule-releases.md#enrolment) and the hourly cron does this step for you, for as long as the window is open - which means a student you add to `students.csv` in week one is emailed within the hour, without anyone remembering to re-run anything.
 
 3. **Students self-onboard.**
    - Each student opens a **Join course** issue in the cohort's `welcome` repo and pastes their code.

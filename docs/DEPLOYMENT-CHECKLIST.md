@@ -216,7 +216,8 @@ runs, and the **dates** that drive the website and grading. Times are read in `t
 honoured to the hour.
 
 Blocks encode behaviour: **`releases:`** deploys materials, **`assignments:`** runs the
-handout/due/grading lifecycle, **`events:`** is display-only calendar rows. Colour is a
+handout/due/grading lifecycle, **`events:`** is display-only calendar rows, **`enrolment:`**
+is the window in which enrolment codes are emailed automatically. Colour is a
 display concern only - see [row types](#schedule-row-types) below.
 
 **`releases`** - the term calendar and release plan in one block: each entry is a
@@ -364,6 +365,31 @@ events:
     event_datetime: 2026-11-17T10:00
 ```
 
+**`enrolment`** - the window in which the hourly cron emails enrolment codes, instead of
+someone pressing **Send enrolment codes**. Every tick inside the window emails whoever still
+has no code (the send stamps `code_sent_at` on each row it mails and skips a row that has
+one), so a student added mid-window is emailed within the hour and nobody is emailed twice.
+Needs the course org's `GRAPH_*` secrets, as the button does.
+
+| Field | Required | Default | Meaning |
+|---|---|---|---|
+| `send_codes_datetime` | **yes** | - (block dropped without it) | when the window opens |
+| `send_until` | no | `semester_start` + 2 weeks | when it closes; after it, codes go out only by hand |
+| `show_on_site` | no | **`false`** | `true` raises a schedule row on the opening date - default OFF, unlike `releases:`, because enrolment is administrative |
+| `title` | no | `Enrolment opens` | that row's label, when shown |
+
+```yaml
+enrolment:
+  send_codes_datetime: 2026-08-24T08:00   # opens a fortnight before term
+  send_until: 2026-09-21T00:00            # optional: the default is semester_start + 2 weeks
+  show_on_site: true                      # optional: default false
+  title: Enrolment opens                  # optional
+```
+
+An open window over an EMPTY `students.csv` sends nothing, so it is reported in the hourly
+cron's digest issue (dated at the window's close, capped at *warning* - it never reddens the
+cron) rather than in a run log nobody reads hourly.
+
 #### Schedule row types
 
 The cohort site renders one merged, date-sorted schedule table; each row is colour-coded by
@@ -377,6 +403,7 @@ type, and the type is never a field you set - it follows from where the row came
 | exam | an `events:` entry with `type: exam` |
 | special_event | an `events:` entry with no `type` (clinic, guest lecture, revision session) |
 | term_date | the `semester_start` / `semester_end` scalars |
+| enrolment | the `enrolment:` window, when it sets `show_on_site: true` (violet, as the term rows are - it is term admin) |
 
 So lecture vs lab is decided by the deployed section folder, not by the entry label, and a
 week with both a lecture and a lab renders two rows.
@@ -390,6 +417,8 @@ fully read goes red and opens an issue naming the bad entry.
 | Mistake | What happens |
 |---------|--------------|
 | `event_datetime:` missing/unparseable | that `releases:`/`events:` entry is dropped |
+| `send_codes_datetime:` missing/unparseable | the whole `enrolment:` block is dropped - no codes are emailed automatically |
+| `send_until:` unparseable, or at or before `send_codes_datetime` | kept - the window closes at its default instead |
 | `due_datetime:` missing/unparseable | the whole `assignments:` entry is dropped - no grading pin, no site date |
 | `deploy` missing `course_source_repo`/`course_source_path` | that copy is dropped |
 | `solution_datetime:` malformed, or not after `handout_datetime` | dropped - the solution waits for a human |

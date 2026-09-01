@@ -16,11 +16,12 @@ The schedule file can be updated throughout the semester.
 
 > An example of the automatically generated schedule on the deployed `.github.io` site can also be seen live [here](https://hertie-dsl-demo-f2026.github.io/schedule/). 
 
-Three blocks carry the whole term, and each is defined by what it **does**:
+Four blocks carry the whole term, and each is defined by what it **does**:
 
 - **`releases:`** - the entries that **deploy**: file(s) copied from course org staging -> the cohort org, where students can access them.
 - **`assignments:`** - each assignment's whole lifecycle: hand-out, due date, grading.
 - **`events:`** - **display-only** calendar rows. Nothing deploys; the row simply appears on the cohort site.
+- **`enrolment:`** - the **window** in which enrolment codes are emailed automatically, instead of by pressing a button.
 
 Two scalars sit alongside them - `semester_start:` and `semester_end:` - which bookend the term and render as rows of their own.
 
@@ -223,6 +224,40 @@ events:
                        # sorted end-of-term until a real date replaces
 ```
 
+## `enrolment:`
+
+Emails every student their enrolment code without anyone pressing a button - the scheduled twin of [**Send enrolment codes**](06-enrol-students-to-cohort.md).
+
+It is a **window**, not a moment, and that is the whole point. Rosters keep moving: a late registration on the Tuesday of week one, a registrar re-export on the Friday. Every hourly tick inside the window emails whoever still has no code, so a student added to `students.csv` at 14:10 has their code by 15:00 - and **nobody is ever emailed twice**, because the send writes a `code_sent_at` stamp against each row it mails and skips any row that already has one.
+
+| Field | Required | Default | Meaning |
+|---|---|---|---|
+| `send_codes_datetime` | **yes** | - | when the window **opens** - the first hourly tick that emails anyone |
+| `send_until` | no | `semester_start` + 2 weeks | when the window **closes**. After it, codes only go out if you press the button |
+| `show_on_site` | no | **`false`** | `true` adds a row to the site's schedule on the opening date |
+| `title` | no | `Enrolment opens` | that row's label - only used when `show_on_site` is `true` |
+
+```yaml
+enrolment:
+  send_codes_datetime: 2026-08-24T08:00   # opens a fortnight before teaching starts
+  send_until: 2026-09-21T00:00            # optional: this is also the default here
+  show_on_site: true                      # optional: default false
+  title: Enrolment opens                  # optional
+```
+
+At its shortest, one line does it - the window then closes two weeks after `semester_start`, and nothing appears on the site:
+
+```yaml
+enrolment:
+  send_codes_datetime: 2026-08-24T08:00
+```
+
+NB: **`show_on_site` defaults to `false` here, the opposite of a `releases:` entry.** Enrolment is administrative and the emails are private, so the date earns a row on the student-facing schedule only where you say it does.
+
+NB: **the window needs a roster to send to.** If `students.csv` is still empty while the window is open, nothing is emailed and the run stays green - so it is reported through [the digest issue](#the-digest-issue) instead, as an advisory that escalates to a warning as the window runs out. It never reddens the hourly cron: an empty roster on the first morning is ordinary, and an hourly red X for the length of the window is not a message anyone reads.
+
+NB: emailing needs the `GRAPH_*` secrets on the course org, exactly as the button does. Without them the codes are still written into `students.csv`, nothing is sent, and the run says so.
+
 ---
 Full schema, field by field, see [here](DEPLOYMENT-CHECKLIST.md#scheduleyml).
 
@@ -281,6 +316,8 @@ One issue per cohort, titled **"schedule.yml: planned releases cite sources not 
 
 Appears, escalates, clears - three notifications over the life of a problem, however many hourly ticks happen in between. A term written months ahead sits entirely at *advisory* and opens no issue at all.
 
+The same issue carries one fault that is not about a source: an [`enrolment:`](#enrolment) window standing open over an empty `students.csv`. It is dated at the window's close, so it escalates as the last chance to mail anyone runs out, and it is capped at *warning* - it never reddens the cron.
+
 A source that cannot be *read* (a rate limit, a permissions blip) is never reported as missing - that would turn every entry in the plan into a phantom typo.
 
 By hand: add `--check-sources <course-org>` to either `--validate` form above. Every line names the field to go and edit, not just the entry it sits in:
@@ -300,8 +337,9 @@ An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it 
 | no valid `event_datetime` on a `releases:` or `events:` entry | nothing deploys, and no row appears on the site |
 | no valid `due_datetime` on an `assignments:` entry | no deadline, no submission snapshot, no autograding |
 | a `deploy` item missing `course_source_repo` or `course_source_path` | that one copy never ships |
+| no valid `send_codes_datetime` on the `enrolment:` block | no enrolment codes are emailed automatically |
 
-Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `handout_datetime` (**nothing is ever handed out**), `grading_datetime` (falls back to `due_datetime`), `deploy_datetime` (the copy ships at the `event_datetime`) or `max_team_size` (no cap); an unknown `type:` on an assignment (treated as individual) or an event (shown as a plain special event); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`).
+Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `handout_datetime` (**nothing is ever handed out**), `grading_datetime` (falls back to `due_datetime`), `deploy_datetime` (the copy ships at the `event_datetime`) or `max_team_size` (no cap); an unknown `type:` on an assignment (treated as individual) or an event (shown as a plain special event); a `send_until:` that is malformed, or at or before `send_codes_datetime` - which would leave a window that never opens (the default close is used instead); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`).
 
 An empty `deploy:` - the key written with nothing under it - is flagged too. It parses as "no copies", so the entry becomes a display-only row that ships nothing; if that is what you meant, delete the key (or write `deploy: []`) and the flag goes away.
 
