@@ -453,8 +453,47 @@ def test_blank_issues_are_disabled_so_every_issue_carries_a_routing_label(monkey
         "put_files",
         lambda org, repo, files, msg, **kw: seen.update(files) or True,
     )
+    monkeypatch.setattr(welcome, "ensure_label", lambda *a, **k: True)
     welcome.refresh_welcome_workflows("Org")
     assert ".github/ISSUE_TEMPLATE/config.yml" in seen
+
+
+def test_refresh_seeds_exactly_the_routing_labels_the_forms_declare(monkeypatch):
+    # GitHub silently drops a label an issue form declares when the repo doesn't have it,
+    # and both workflows gate on theirs - so an unseeded label meant every Join issue was
+    # `skipped`: no redaction, no comment, no needs-review, and a green run. The refresh
+    # owes the repo the labels, spelt exactly as the forms request them.
+    from dsl_course import welcome
+
+    declared = set()
+    for rel in ("01-join-course.yml", "02-join-team.yml"):
+        declared.update(
+            yaml.safe_load((WELCOME / "ISSUE_TEMPLATE" / rel).read_text())["labels"]
+        )
+    assert {name for name, _, _ in welcome.WELCOME_LABELS} == declared
+
+    monkeypatch.setattr(welcome, "put_files", lambda *a, **k: True)
+    created = []
+    monkeypatch.setattr(
+        welcome,
+        "ensure_label",
+        lambda org, repo, name, **k: created.append((org, repo, name)) or True,
+    )
+    assert welcome.refresh_welcome_workflows("Org") == 0
+    assert created == [
+        ("Org", "welcome", name) for name, _, _ in welcome.WELCOME_LABELS
+    ]
+
+
+def test_refresh_reds_when_a_routing_label_cannot_be_created(monkeypatch, capsys):
+    # The files landing while the label didn't is the exact bug this guards against: the
+    # workflows exist but never run. A failed label must red the refresh, not log-and-go.
+    from dsl_course import welcome
+
+    monkeypatch.setattr(welcome, "put_files", lambda *a, **k: True)
+    monkeypatch.setattr(welcome, "ensure_label", lambda *a, **k: False)
+    assert welcome.refresh_welcome_workflows("Org") == len(welcome.WELCOME_LABELS)
+    assert "up to date" not in capsys.readouterr().out
 
 
 def test_onboard_throttles_a_student_before_it_touches_the_roster():

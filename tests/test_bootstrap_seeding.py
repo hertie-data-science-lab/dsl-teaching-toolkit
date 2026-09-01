@@ -81,6 +81,7 @@ class FakeOrg:
         self.writes: list[tuple[str, str]] = []
         self.deletes: list[tuple[str, str]] = []
         self.skips: list[str] = []
+        self.labels: list[tuple[str, str]] = []
 
     def get_file_content(self, org, repo, path):
         return self.files.get((repo, path))
@@ -129,6 +130,12 @@ def fake(monkeypatch):
     # seed.refresh can re-push them without importing bootstrap_course), in one commit per
     # set - so its put_files has to be faked too.
     monkeypatch.setattr(welcome, "put_files", f.put_files)
+    # ...and the routing labels it seeds beside them, recorded rather than created.
+    monkeypatch.setattr(
+        welcome,
+        "ensure_label",
+        lambda org, repo, name, **k: f.labels.append((repo, name)) or True,
+    )
     # everything else setup_cohort_extras does is repo-level and safe to re-run; it is
     # stubbed out so these tests stay pure (no gh calls).
     monkeypatch.setattr(bc, "create_repo", lambda *a, **k: True)
@@ -1394,6 +1401,7 @@ def test_a_per_cohort_refresh_reds_on_a_failed_write_and_claims_nothing(
     # job lands as ONE commit the answer is 1, not a per-file tally: nothing partial can
     # land, so there is no count to take.
     monkeypatch.setattr(welcome, "put_files", lambda *a, **k: False)
+    monkeypatch.setattr(welcome, "ensure_label", lambda *a, **k: True)
 
     assert getattr(welcome, job)("Cohort-f2026", *extra_args) == 1
     out = capsys.readouterr()

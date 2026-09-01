@@ -349,6 +349,31 @@ def set_repo_topics(org: str, repo: str, topics: list[str]) -> bool:
     return False
 
 
+def ensure_label(
+    org: str, repo: str, name: str, *, color: str, description: str
+) -> bool:
+    """Create an issue label if the repo doesn't have it. Already-there is success.
+
+    Deliberately create-only: an existing label's colour/description is left alone, and a
+    rename would orphan every issue already carrying the old name. The caller cares that
+    the NAME exists - GitHub silently drops a label an issue form declares when the repo
+    doesn't have it, so a form's `labels:` line is a request, not a guarantee."""
+    code, out = gh(
+        "api",
+        f"repos/{org}/{repo}/labels",
+        "--field",
+        f"name={name}",
+        "--field",
+        f"color={color}",
+        "--field",
+        f"description={description}",
+    )
+    if code == 0 or is_already_exists(out):
+        return True
+    log_err(f"could not create label '{name}' on {org}/{repo}: {out[:160]}")
+    return False
+
+
 def add_collaborator(org: str, repo: str, login: str, permission: str = "push") -> bool:
     """Add a collaborator to a repo. permission: pull | triage | push | maintain | admin."""
     code, out = gh(

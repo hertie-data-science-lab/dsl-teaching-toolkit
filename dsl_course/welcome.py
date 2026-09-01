@@ -19,6 +19,7 @@ from pathlib import Path
 from .central import CENTRAL, pin_central_ref
 from .gh_contents import put_files
 from .log import log_err, log_ok
+from .repos import ensure_label
 from .roster import CONFIG_REPO
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -120,18 +121,31 @@ def example_course_file(rel: str) -> str:
     return (EXAMPLE_COURSE / rel).read_text(encoding="utf-8")
 
 
+# The ROUTING labels: each Join form declares one (`labels:` in its ISSUE_TEMPLATE) and
+# the matching workflow gates on it (`if: contains(github.event.issue.labels.*.name, ...)`).
+# GitHub silently DROPS a form-declared label the repo doesn't have, and nothing else ever
+# created these - so every Join issue skipped both workflows: no redaction, no comment, no
+# needs-review, a green "skipped" run. Seeded by refresh_welcome_workflows below; the
+# names are pinned to the forms and the workflow guards by tests/test_welcome_templates.py.
+WELCOME_LABELS = (
+    ("onboarding", "0e8a16", "Join course issue - routes the Onboard student workflow"),
+    ("team-formation", "1d76db", "Join team issue - routes the Form team workflow"),
+)
+
+
 def refresh_welcome_workflows(org: str) -> int:
     """Re-push a cohort's welcome-repo machinery (onboarding workflows + the issue forms
-    they parse) from the current templates, as ONE commit. Called both at bootstrap and on
-    every refresh, so a fix reaches running cohorts; put_files skips whatever is already
-    identical and commits nothing at all when everything is.
+    they parse) from the current templates, as ONE commit - and ensure the routing labels
+    those forms declare exist in the repo. Called both at bootstrap and on every refresh,
+    so a fix reaches running cohorts; put_files skips whatever is already identical and
+    commits nothing at all when everything is.
 
     A workflow and the form it parses must move together (field ids are a contract between
     them), so one commit is also the honest unit here: the intermediate state where one has
     landed and the other hasn't is not one anybody should be able to check out.
 
-    Returns 1 if that commit didn't land, so a caller (seed.refresh) can go red rather than
-    report an onboarding repo it never managed to converge."""
+    Returns the failure count, so a caller (seed.refresh) can go red rather than report an
+    onboarding repo it never managed to converge."""
     # Everything under .github/ here is SYSTEM-owned: the onboarding workflows and the
     # issue forms they parse (field ids must stay in lockstep with the workflow), so
     # these refresh on every run.
@@ -164,8 +178,18 @@ def refresh_welcome_workflows(org: str) -> int:
         ),
     ):
         log_err(f"welcome-repo files not written in {org}")
-        return 1
-    log_ok("welcome repo workflows + Join forms up to date")
+        failures = 1
+    else:
+        failures = 0
+    # The labels are as load-bearing as the files: without them both workflows are
+    # `skipped` on every Join issue. ensure_label is create-only and idempotent, so a
+    # cohort that has them is written nothing.
+    for name, color, description in WELCOME_LABELS:
+        if not ensure_label(org, "welcome", name, color=color, description=description):
+            failures += 1
+    if failures:
+        return failures
+    log_ok("welcome repo workflows + Join forms + routing labels up to date")
     return 0
 
 
