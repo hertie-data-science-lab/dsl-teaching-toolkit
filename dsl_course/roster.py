@@ -115,11 +115,21 @@ def _roster_text(cohort_org: str) -> str | None:
     """students.csv's text, read ONCE per cohort per process.
 
     A single CLI run asks for the roster several times over - `collect` reads it per
-    assignment, `assign` beside the schedule and teams.csv - and it cannot change under
-    one run: the only writer (`enrol_codes`) is its own workflow. The TEXT is memoised
-    rather than `load`'s rows, so every caller still gets its own parse (nobody can mutate
-    another's list) and the loud "roster missing" line is still printed where it happens.
-    Cleared between tests (tests/conftest.py)."""
+    assignment, `assign` beside the schedule and teams.csv.
+
+    TWO writers can now move the file under a live run: its own `enrol_codes` workflow,
+    and the hourly scheduler, which calls that same code for as long as a cohort's
+    `enrolment:` window is open. Neither invalidates this memo, and neither needs to. Both
+    write only `enrol_code` and `code_sent_at`, and those two columns exist for the benefit
+    of the NEXT send - who already has a code, who has already been emailed. Nothing
+    downstream reads either: provisioning, grading and the site all key on
+    `github_handle`. So a caller holding the pre-send text is not holding anything stale
+    that it looks at. `enrol_codes` itself never comes through here - it reads its own
+    text, with the sha it has to write against.
+
+    The TEXT is memoised rather than `load`'s rows, so every caller still gets its own
+    parse (nobody can mutate another's list) and the loud "roster missing" line is still
+    printed where it happens. Cleared between tests (tests/conftest.py)."""
     return get_file_content(cohort_org, CONFIG_REPO, ROSTER_PATH)
 
 
