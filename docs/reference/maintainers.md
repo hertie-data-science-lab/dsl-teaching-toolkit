@@ -46,8 +46,9 @@ Things whose *literal spelling* is depended on from outside Python:
   name. Change a column and change both sides.
 - **`gh_contents.STUB_MARKS` and `SUPERSEDED_DESCRIPTIONS` / `SUPERSEDED_COHORT_*` / `SUPERSEDED_COURSE_*`**
   are convergence chains matched against *live* state. Rewording a stub or a repo description
-  means **adding a link to the chain**, never editing one: an org on the oldest string must still
-  reach the newest in one pass.
+  means **adding a link to the chain**, never editing one. For the descriptions, an org on the
+  oldest string must still reach the newest in one pass; for `STUB_MARKS`, a repo seeded with an
+  older wording must still be recognised as unwritten, or its placeholder syllabus ships.
 - **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-cohort`, `submission`, `gradebook`,
   `assignment-template`. Discovery reads them; renaming one is a discovery outage.
 - **`.github/cohort-courses-pages.yml`** is the cohort registry every dropdown reads, and
@@ -74,8 +75,13 @@ Seeded files carry their owner on the first line, and the write site enforces it
   rows, enrol codes, the term's schedule). The code comments call this "USER-owned"; the shipped
   stamp says INSTRUCTOR-OWNED. Same thing.
 - **`dsl-stub:`** is the third state: an instructor-owned file we seeded and they have not yet
-  touched. `gh_contents.STUB_MARKS` recognises it and `gh_contents.refresh_stubs` re-pushes it, so an
-  improvement reaches repos that still carry the placeholder and nobody's writing is overwritten.
+  written. `gh_contents.STUB_MARKS` recognises it, and `deploy._is_withheld_stub` reads that to
+  keep an unwritten SYLLABUS.md out of a release - shipping the placeholder would give students
+  faculty instructions and empty tables as their syllabus.
+  It does NOT license a rewrite. Nothing refreshes a seeded stub any more: the marker cannot
+  tell "still ours" from "edited in place", because a file filled in UNDER the marker still
+  carries it, and rewriting that destroys the writing. Every instructor-owned file is
+  create-only, and improving one in a repo that already has it is a deliberate hand-write.
 
 The full rule is the ownership note at the top of `bootstrap_course.py`.
 
