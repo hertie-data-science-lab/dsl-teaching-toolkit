@@ -223,7 +223,7 @@ def refresh_classroom_samples(org: str) -> int:
 
 
 # The SYSTEM-owned half of a cohort's classroom-config: the schema contract faculty read,
-# and the three workflows that make the repo act on what they put in it, as
+# and the four workflows that make the repo act on what they put in it, as
 # `(path in the repo, template file)`.
 #
 # HARD INVARIANT: nothing the cohort edits may join this table. students.csv, teams.csv,
@@ -237,6 +237,10 @@ CLASSROOM_SYSTEM_FILES = (
     (
         ".github/workflows/dispatch-sync-site.yml",
         "classroom-config/dispatch-sync-site.yml",
+    ),
+    (
+        ".github/workflows/dispatch-send-codes.yml",
+        "classroom-config/dispatch-send-codes.yml",
     ),
     (
         ".github/workflows/validate-schedule.yml",

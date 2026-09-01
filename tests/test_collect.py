@@ -1484,9 +1484,9 @@ def test_submission_targets_vets_teams_csv_against_the_roster(monkeypatch, capsy
     # `assign.provision_all` vets a group handout through.
     _roster_of(
         monkeypatch,
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled",
-        "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor",
-        "cy@uni.edu,Cy,,,dsl-ghi,enrolled",  # not onboarded
+        "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+        "eve@uni.edu,Eve,auditor,eve-e,43,dsl-xyz",
+        "cy@uni.edu,Cy,enrolled,,,dsl-ghi",  # not onboarded
     )
     monkeypatch.setattr(collect.teams, "load", lambda org: {})
     monkeypatch.setattr(
@@ -1508,7 +1508,7 @@ def test_submission_targets_looks_teams_up_by_the_schedule_key(monkeypatch):
     # by the name found no teams and the whole group assignment silently had nothing to
     # grade - while the repos it should have graded existed under the name.
     asked: list[str] = []
-    _roster_of(monkeypatch, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    _roster_of(monkeypatch, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     monkeypatch.setattr(collect.teams, "load", lambda org: {})
     monkeypatch.setattr(
         collect.teams,
@@ -1526,7 +1526,7 @@ def test_submission_targets_looks_teams_up_by_the_schedule_key(monkeypatch):
 
 
 def test_submission_targets_defaults_the_teams_key_to_the_name(monkeypatch):
-    _roster_of(monkeypatch, "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled")
+    _roster_of(monkeypatch, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     monkeypatch.setattr(collect.teams, "load", lambda org: {})
     monkeypatch.setattr(
         collect.teams,

@@ -125,8 +125,8 @@ def test_vet_groups_applies_one_allowlist_across_a_whole_map():
     # themselves. A handle good enough to be handed a repo but not good enough to earn a
     # grade row is what a second copy of the rule costs a student.
     students = _students(
-        "ada@uni.edu,Ada,Ada-L,42,,enrolled",
-        "ben@uni.edu,Ben,ben-b,43,,enrolled",
+        "ada@uni.edu,Ada,enrolled,Ada-L,42,",
+        "ben@uni.edu,Ben,enrolled,ben-b,43,",
     )
     assert sync_teams.vet_groups(
         {"wizards": ["ADA-L", "m-stranger"], "alchemists": ["ben-b"]}, students
@@ -138,8 +138,8 @@ def test_vet_groups_applies_one_allowlist_across_a_whole_map():
 
 def test_known_handles_are_the_onboarded_roster_handles():
     students = _students(
-        "ada@uni.edu,Ada,ada-l,42,,enrolled",
-        "eve@uni.edu,Eve,,,,enrolled",  # not onboarded - no handle to add
+        "ada@uni.edu,Ada,enrolled,ada-l,42,",
+        "eve@uni.edu,Eve,enrolled,,,",  # not onboarded - no handle to add
     )
     assert sync_teams.known_handles(students) == {"ada-l"}
     assert sync_teams.known_handles(None) == set()  # roster missing/unreadable
@@ -155,7 +155,7 @@ def test_sync_never_adds_a_handle_that_is_not_on_the_roster(stub_team, monkeypat
         lambda org: {"assignment-4-project": {"wizards": ["ben-baker", "m-stranger"]}},
     )
     monkeypatch.setattr(
-        roster, "load", lambda org: _students("ben@uni.edu,Ben,ben-baker,42,,")
+        roster, "load", lambda org: _students("ben@uni.edu,Ben,,ben-baker,42,")
     )
     errors = sync_teams.sync("org", prune=False)
     assert errors == 1  # the skipped stranger is surfaced, not silently dropped
@@ -188,7 +188,7 @@ def test_sync_matches_roster_handles_case_insensitively(stub_team, monkeypatch):
         lambda org: {"assignment-4-project": {"wizards": ["Ben-Baker"]}},
     )
     monkeypatch.setattr(
-        roster, "load", lambda org: _students("ben@uni.edu,Ben,ben-baker,42,,")
+        roster, "load", lambda org: _students("ben@uni.edu,Ben,,ben-baker,42,")
     )
     errors = sync_teams.sync("org", prune=False)
     assert errors == 0
@@ -223,7 +223,7 @@ def test_a_rejected_teams_csv_handle_is_counted_publicly_and_named_only_when_ver
         lambda org: {"assignment-4-project": {"wizards": ["ben-baker", "m-stranger"]}},
     )
     monkeypatch.setattr(
-        roster, "load", lambda org: _students("ben@uni.edu,Ben,ben-baker,42,,")
+        roster, "load", lambda org: _students("ben@uni.edu,Ben,,ben-baker,42,")
     )
     assert sync_teams.sync("org", prune=False) == 1
     captured = capsys.readouterr()

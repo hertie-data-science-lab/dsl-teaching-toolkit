@@ -343,9 +343,9 @@ def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-student lines are verbose-only
     students = roster.parse(
         ROSTER_HEADER + "\n"
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
-        "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor\n"
-        "bob@uni.edu,Bob,bob-b,44,dsl-def,\n"  # blank role -> enrolled
+        "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
+        "eve@uni.edu,Eve,auditor,eve-e,43,dsl-xyz\n"
+        "bob@uni.edu,Bob,,bob-b,44,dsl-def\n"  # blank role -> enrolled
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     assert grades.sync("COHORT", dry_run=True) == 0
@@ -359,7 +359,7 @@ def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
 def test_gradebook_sync_names_no_student_in_a_public_log(monkeypatch, capsys):
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     students = roster.parse(
-        ROSTER_HEADER + "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+        ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     assert grades.sync("COHORT", dry_run=True) == 0
@@ -421,8 +421,8 @@ def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
     # updated" mail left no trace in the log at all.
     students = roster.parse(
         ROSTER_HEADER + "\n"
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
-        "bob@uni.edu,Bob,bob-b,43,dsl-def,enrolled\n"
+        "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
+        "bob@uni.edu,Bob,enrolled,bob-b,43,dsl-def\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
@@ -440,7 +440,7 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
     # updated" from another, so the body names the course - but a course org that carries
     # no name yet must produce the generic sentence, never a blank or a placeholder.
     students = roster.parse(
-        ROSTER_HEADER + "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+        ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     sent: list[list] = []
@@ -468,7 +468,7 @@ def test_grade_notification_names_the_course_and_falls_back_when_unnamed(monkeyp
 
 def test_grade_notification_dry_run_carries_a_placeholder_sample(monkeypatch):
     students = roster.parse(
-        ROSTER_HEADER + "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+        ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "Deep Learning")
@@ -550,7 +550,7 @@ def test_build_gradebooks_folds_one_student_written_two_ways():
 
 def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
     students = roster.parse(
-        ROSTER_HEADER + "\nada@uni.edu,Ada,Ada-L,42,dsl-abc,enrolled\n"
+        ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,Ada-L,42,dsl-abc\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
@@ -579,7 +579,7 @@ def _distribute_with(
     notified: str | None = None,
     marker: list | None = None,
     dry_run: bool = False,
-    roster_rows: str | None = "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n",
+    roster_rows: str | None = "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n",
 ):
     """`distribute` against a local classroom-config clone, pushing to nothing.
 
@@ -724,7 +724,7 @@ def _sync_run(monkeypatch, listing, handles=("ada-l", "bob-b")):
         ROSTER_HEADER
         + "\n"
         + "".join(
-            f"{h}@uni.edu,{h},{h},4{i},dsl-{h},enrolled\n"
+            f"{h}@uni.edu,{h},enrolled,{h},4{i},dsl-{h}\n"
             for i, h in enumerate(handles)
         )
     )
@@ -781,7 +781,7 @@ def test_a_failed_listing_falls_back_to_probing_each_gradebook(monkeypatch):
 def test_a_dry_run_lists_nothing(monkeypatch):
     # Nothing is created, so nothing needs to know what exists.
     students = roster.parse(
-        ROSTER_HEADER + "\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+        ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(
@@ -878,7 +878,7 @@ def test_gradebooks_with_no_roster_row_are_counted_not_fatal(
             monkeypatch,
             tmp_path,
             sent=0,
-            roster_rows="\nbo@uni.edu,Bo,bo-b,7,dsl-x,enrolled\n",
+            roster_rows="\nbo@uni.edu,Bo,enrolled,bo-b,7,dsl-x\n",
         )
         == 0
     )

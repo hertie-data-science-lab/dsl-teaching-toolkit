@@ -30,19 +30,19 @@ def test_role_defaults_to_enrolled_when_the_column_is_absent():
 
 
 def test_blank_role_cell_is_enrolled():
-    (student,) = roster.parse(f"{HEADER}\nada@uni.edu,Ada,ada-l,42,dsl-abc,\n")
+    (student,) = roster.parse(f"{HEADER}\nada@uni.edu,Ada,,ada-l,42,dsl-abc\n")
     assert student.role == roster.ROLE_ENROLLED and student.is_enrolled
 
 
 def test_auditor_role_is_recognised_case_and_space_insensitively():
-    text = f"{HEADER}\neve@uni.edu,Eve,eve-e,43,dsl-xyz, Auditor \n"
+    text = f"{HEADER}\neve@uni.edu,Eve, Auditor ,eve-e,43,dsl-xyz\n"
     (student,) = roster.parse(text)
     assert student.role == roster.ROLE_AUDITOR
     assert student.is_auditor and not student.is_enrolled
 
 
 def test_unknown_role_falls_back_to_enrolled_and_warns(capsys):
-    (student,) = roster.parse(f"{HEADER}\nada@uni.edu,Ada,ada-l,42,dsl-abc,guest\n")
+    (student,) = roster.parse(f"{HEADER}\nada@uni.edu,Ada,guest,ada-l,42,dsl-abc\n")
     assert student.role == roster.ROLE_ENROLLED
     assert "guest" in capsys.readouterr().err  # a typo must be visible, not silent
 
@@ -51,7 +51,7 @@ def test_parse_tolerates_a_utf8_bom_from_excel():
     # Excel exports a UTF-8 BOM; left in, csv.DictReader reads the first header as
     # "﻿hertie_email" and every `hertie_email` lookup misses - and that column is the
     # enrolment match key, so every row silently drops out of the roster.
-    text = "﻿" + f"{HEADER}\nada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
+    text = "﻿" + f"{HEADER}\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     (student,) = roster.parse(text)
     assert student.hertie_email == "ada@uni.edu"
     assert student.github_handle == "ada-l"
@@ -61,9 +61,9 @@ def test_parse_tolerates_a_utf8_bom_from_excel():
 def test_enrolled_and_auditors_partition_the_roster():
     students = roster.parse(
         f"{HEADER}\n"
-        "ada@uni.edu,Ada,ada-l,42,dsl-abc,enrolled\n"
-        "eve@uni.edu,Eve,eve-e,43,dsl-xyz,auditor\n"
-        "bob@uni.edu,Bob,,,dsl-def,\n"
+        "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
+        "eve@uni.edu,Eve,auditor,eve-e,43,dsl-xyz\n"
+        "bob@uni.edu,Bob,,,,dsl-def\n"
     )
     assert [s.name for s in roster.enrolled(students)] == ["Ada", "Bob"]
     assert [s.name for s in students if s.is_auditor] == ["Eve"]
@@ -97,3 +97,20 @@ def test_a_semicolon_delimited_roster_is_refused_not_read_as_empty():
     text = "hertie_email;name;github_handle;github_id;enrol_code;role\na@x;A;ada;1;;\n"
     with pytest.raises(RuntimeError, match="semicolon"):
         roster.parse(text)
+
+
+def test_the_roster_columns_run_instructor_filled_then_system_filled():
+    # The order faculty see when they open students.csv: the three columns THEY fill,
+    # then the four the engine fills. Every reader and writer here addresses cells by
+    # name, so nothing breaks if this drifts - which is exactly why it needs pinning: the
+    # seeded scaffold, the worked sample, the docs and onboard.yml's comment all quote
+    # this order, and a silent reshuffle leaves faculty filling the wrong cells.
+    assert roster.FIELDS == (
+        "hertie_email",
+        "name",
+        "role",
+        "github_handle",
+        "github_id",
+        "enrol_code",
+        "code_sent_at",
+    )

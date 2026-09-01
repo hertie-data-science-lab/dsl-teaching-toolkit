@@ -3,7 +3,7 @@
 The single durable roster artifact is a PRIVATE per-cohort `students.csv`, kept in
 the cohort org's `classroom-config` repo. Columns:
 
-    hertie_email,name,github_handle,github_id,enrol_code,role,code_sent_at
+    hertie_email,name,role,github_handle,github_id,enrol_code,code_sent_at
 
 These are the columns the engine READS; a roster may carry any others faculty want
 (a registrar id, a lecture section, a notes column) and they are carried through
@@ -37,13 +37,19 @@ from .log import log_err
 ROSTER_PATH = "students.csv"
 ROLE_ENROLLED = "enrolled"
 ROLE_AUDITOR = "auditor"
+# Instructor-filled columns first, system-filled after: a faculty member opening
+# students.csv fills the left of the row and leaves the right of it alone. Order is
+# presentational only - every reader and writer here addresses cells by NAME - but it is
+# the order the seeded scaffold and the worked sample ship in, so it is what faculty see.
+# The dataclass below keeps its own declaration order (defaults have to come last), which
+# is why the two lists differ.
 FIELDS = (
     "hertie_email",
     "name",
+    "role",
     "github_handle",
     "github_id",
     "enrol_code",
-    "role",
     "code_sent_at",
 )
 # The columns no roster may lack. `enrol_code` and `role` were added later and stay

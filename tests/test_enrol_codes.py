@@ -314,9 +314,9 @@ def test_a_semicolon_export_is_refused_rather_than_written_back_mangled():
 
 
 HEADER = ROSTER_HEADER + "\n"
-STALE = HEADER + "ada@uni.edu,Ada,,,,enrolled\nbob@uni.edu,Bob,,,,enrolled\n"
+STALE = HEADER + "ada@uni.edu,Ada,enrolled,,,\nbob@uni.edu,Bob,enrolled,,,\n"
 # What the roster looks like after a Join issue bound Ada's handle mid-run.
-FRESH = HEADER + "ada@uni.edu,Ada,ada-l,42,,enrolled\nbob@uni.edu,Bob,,,,enrolled\n"
+FRESH = HEADER + "ada@uni.edu,Ada,enrolled,ada-l,42,\nbob@uni.edu,Bob,enrolled,,,\n"
 
 
 def _codes():
@@ -366,7 +366,7 @@ def test_the_retry_gives_up_after_a_bounded_number_of_attempts(monkeypatch):
 def test_a_code_that_arrived_in_between_is_left_alone(monkeypatch):
     # Another run (or a faculty edit) already filled Ada's cell. Ours must not replace it.
     theirs = (
-        HEADER + "ada@uni.edu,Ada,,,dsl-theirs,enrolled\nbob@uni.edu,Bob,,,,enrolled\n"
+        HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-theirs\nbob@uni.edu,Bob,enrolled,,,\n"
     )
     written: list[str] = []
 
@@ -389,7 +389,7 @@ def test_the_emails_carry_the_code_the_roster_actually_holds(monkeypatch):
     # `dsl-theirs` in place. Emailing the code THIS run generated in memory gave Ada one
     # that enrols nobody: the Join issue rejected her, with no sign anything went wrong.
     theirs = (
-        HEADER + "ada@uni.edu,Ada,,,dsl-theirs,enrolled\nbob@uni.edu,Bob,,,,enrolled\n"
+        HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-theirs\nbob@uni.edu,Bob,enrolled,,,\n"
     )
     # First read is the stale roster; every read after it sees theirs - the retry's
     # re-read, and then the sent-marker's.
@@ -424,7 +424,7 @@ def test_the_emails_carry_the_code_the_roster_actually_holds(monkeypatch):
 def test_rows_are_relocated_by_email_not_by_their_original_index():
     # A row inserted above shifts every index below it; the email is what identifies the
     # student the code was generated for.
-    shifted = HEADER + "zoe@uni.edu,Zoe,,,,enrolled\n" + STALE[len(HEADER) :]
+    shifted = HEADER + "zoe@uni.edu,Zoe,enrolled,,,\n" + STALE[len(HEADER) :]
     assert enrol_codes.rows_for_values(shifted, _codes()) == {
         1: "dsl-aaa111",
         2: "dsl-bbb222",
@@ -438,9 +438,9 @@ def test_two_rows_sharing_an_email_each_keep_their_own_code():
     # on a green run. A non-unique email re-locates nothing; those rows keep their index.
     text = (
         HEADER
-        + "ada@uni.edu,Ada,,,,enrolled\n"
-        + "dept@uni.edu,First,,,,enrolled\n"
-        + "dept@uni.edu,Second,,,,enrolled\n"
+        + "ada@uni.edu,Ada,enrolled,,,\n"
+        + "dept@uni.edu,First,enrolled,,,\n"
+        + "dept@uni.edu,Second,enrolled,,,\n"
     )
     codes = [
         (0, "ada@uni.edu", "dsl-aaa111"),
@@ -455,7 +455,7 @@ def test_two_rows_sharing_an_email_each_keep_their_own_code():
 
 
 def test_a_row_with_no_email_keeps_its_original_index():
-    text = HEADER + ",Anonymous,,,,enrolled\n"
+    text = HEADER + ",Anonymous,enrolled,,,\n"
     assert enrol_codes.rows_for_values(text, [(0, "", "dsl-zzz")]) == {0: "dsl-zzz"}
 
 
@@ -517,8 +517,8 @@ def test_a_student_already_marked_sent_is_not_emailed_again(monkeypatch):
     # every run, including runs that assigned no new codes at all.
     text = (
         HEADER
-        + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,2026-08-31T09:00:00+00:00\n"
-        + "bob@uni.edu,Bob,,,dsl-bbb222,enrolled,\n"
+        + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,2026-08-31T09:00:00+00:00\n"
+        + "bob@uni.edu,Bob,enrolled,,,dsl-bbb222,\n"
     )
     outcome, sent, _ = _run_with(monkeypatch, text)
     assert outcome is enrol_codes.Outcome.SENT
@@ -533,8 +533,8 @@ def test_the_sent_marker_is_written_only_for_recipients_that_went_out(monkeypatc
     # the release the tail of every throttled batch would be stamped and never mailed.
     text = (
         HEADER
-        + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
-        + "bob@uni.edu,Bob,,,dsl-bbb222,enrolled,\n"
+        + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
+        + "bob@uni.edu,Bob,enrolled,,,dsl-bbb222,\n"
     )
     outcome, _sent, written = _run_with(monkeypatch, text, sends=1)
     # one of two did not go out - a rejected message, not a missing transport
@@ -552,7 +552,7 @@ def test_a_batch_that_went_nowhere_for_want_of_secrets_reads_as_a_missing_transp
     # length of an enrolment window, and nothing it does can conjure a GRAPH_* secret.
     for name in mailer.GRAPH_ENV:
         monkeypatch.delenv(name, raising=False)
-    text = HEADER + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
+    text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
     outcome, sent, written = _run_with(monkeypatch, text, sends=0, transport=False)
     assert outcome is enrol_codes.Outcome.NO_TRANSPORT
     # And nothing was CLAIMED: the roster of an org whose secrets were never set would
@@ -563,7 +563,7 @@ def test_a_batch_that_went_nowhere_for_want_of_secrets_reads_as_a_missing_transp
 def test_a_wholly_rejected_batch_on_a_live_transport_is_still_a_failure(monkeypatch):
     # The other half of the same question: the secrets ARE set, so nothing went out
     # because Graph refused it. That is a real failure and must red, cron included.
-    text = HEADER + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
+    text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
     outcome, _sent, written = _run_with(monkeypatch, text, sends=0)
     assert outcome is enrol_codes.Outcome.FAILED
     # The claim it never spent is given back, so the next run tries Ada again.
@@ -580,7 +580,7 @@ def test_a_roster_that_cannot_be_stamped_mails_nobody_however_often_it_is_run(
     # scope) meant the batch went out with `code_sent_at` still blank. The button printed
     # "re-running WILL email them again" to a human, who stopped; the hourly cron does not
     # stop, and mailed the same students on every tick for the length of the window.
-    text = HEADER + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
+    text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
     for tick in range(3):  # the cron does not read the log and does not give up
         outcome, sent, written = _run_with(monkeypatch, text, writes_ok=False)
         assert outcome is enrol_codes.Outcome.FAILED, tick
@@ -594,7 +594,7 @@ def test_a_transport_that_raises_gives_the_claim_back_before_it_propagates(monke
     # A credential Graph refuses raises out of `send_bulk`, and the scheduler catches it
     # and stays green. Unreleased, the claim would leave a whole cohort marked as emailed
     # by a run that sent nothing, with no tick ever retrying them.
-    text = HEADER + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
+    text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
     _transport(monkeypatch, True)
     written: list[str] = []
     monkeypatch.setattr(
@@ -628,7 +628,7 @@ def test_a_claim_that_cannot_be_released_names_the_exact_stamp_to_clear(
     # were never mailed, so nothing retries them. It has to be loud, and it has to be
     # actionable without naming anyone - the stamp is shared by the whole batch, so
     # "clear this timestamp" identifies every row to fix.
-    text = HEADER + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
+    text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
     _transport(monkeypatch, True)
     written: list[str] = []
 
@@ -660,15 +660,15 @@ def test_two_roster_rows_sharing_an_email_get_one_code_email(monkeypatch):
     # one of which binds - with nothing to say which.
     text = (
         HEADER
-        + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
-        + "ada@uni.edu,Ada,,,dsl-bbb222,enrolled,\n"
+        + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
+        + "ada@uni.edu,Ada,enrolled,,,dsl-bbb222,\n"
     )
     _rc, sent, _written = _run_with(monkeypatch, text)
     assert [to for to, _s, _b in sent] == ["ada@uni.edu"]
 
 
 def test_a_dry_run_writes_nothing_and_marks_nobody(monkeypatch):
-    text = HEADER + "ada@uni.edu,Ada,,,,enrolled,\n"
+    text = HEADER + "ada@uni.edu,Ada,enrolled,,,,\n"
     outcome, sent, written = _run_with(monkeypatch, text, dry_run=True)
     assert outcome is enrol_codes.Outcome.SENT and written == []
     assert [to for to, _s, _b in sent] == ["ada@uni.edu"]
@@ -680,3 +680,80 @@ def test_run_reds_when_the_roster_is_missing(monkeypatch, capsys):
     assert outcome is enrol_codes.Outcome.NO_ROSTER
     assert enrol_codes.reds_the_button(outcome)  # the button still reds
     assert "Could not find students.csv" in capsys.readouterr().err
+
+
+# ------------------------- the dispatched path's trust boundary (--dispatched-by)
+
+
+def _dispatched(monkeypatch, cohort, registered, course="Course-Org"):
+    """main() as the roster-push dispatcher invokes it. Returns (rc, cohorts run for)."""
+    ran: list[str] = []
+    monkeypatch.setattr(enrol_codes, "discover_cohorts", lambda org: registered)
+    monkeypatch.setattr(
+        enrol_codes,
+        "run",
+        lambda org, dry_run=False: ran.append(org) or enrol_codes.Outcome.SENT,
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "enrol_codes",
+            "--cohort-org",
+            cohort,
+            "--no-dry-run",
+            "--dispatched-by",
+            course,
+        ],
+    )
+    return enrol_codes.main(), ran
+
+
+def test_a_dispatched_send_refuses_a_cohort_this_course_org_does_not_own(
+    monkeypatch, capsys
+):
+    # A client_payload is written by whoever holds a COHORT's bot token - a lower trust
+    # tier than the course org - so naming someone else's cohort would have this run
+    # generate codes into that cohort's roster and email its students. The registry is the
+    # authority, and a name absent from it is refused before anything is read.
+    rc, ran = _dispatched(monkeypatch, "Someone-Elses-f2026", ["Cohort-f2026"])
+    assert (rc, ran) == (1, [])
+    err = capsys.readouterr().err
+    assert "Someone-Elses-f2026 is not registered under Course-Org" in err
+    assert "Cohort-f2026" in err  # what IS registered, so the fix is obvious
+
+
+def test_an_empty_registry_authorises_no_dispatched_cohort(monkeypatch, capsys):
+    # The bug this exists to prevent: short-circuiting on an empty registry let a course
+    # org that had never registered a cohort accept any org name a dispatch cared to name.
+    rc, ran = _dispatched(monkeypatch, "Cohort-f2026", [])
+    assert (rc, ran) == (1, [])
+    assert "lists nothing" in capsys.readouterr().err
+
+
+def test_a_dispatched_send_accepts_a_registered_cohort_whatever_its_casing(monkeypatch):
+    # GitHub org names are case-insensitive, and the registry's spelling need not match
+    # the dispatch's - refusing on case alone would break the automatic path for real.
+    assert _dispatched(monkeypatch, "cohort-F2026", ["Cohort-f2026"]) == (
+        0,
+        ["cohort-F2026"],
+    )
+
+
+def test_the_manual_button_never_consults_the_registry(monkeypatch):
+    # No --dispatched-by: the button is behind check-team and a dropdown the course org
+    # rendered itself, and the hourly scheduler only ever walks the registry. Neither has
+    # untrusted input to check, so neither pays for a registry read.
+    def boom(org):
+        raise AssertionError("the manual path must not read the cohort registry")
+
+    ran: list[str] = []
+    monkeypatch.setattr(enrol_codes, "discover_cohorts", boom)
+    monkeypatch.setattr(
+        enrol_codes,
+        "run",
+        lambda org, dry_run=False: ran.append(org) or enrol_codes.Outcome.SENT,
+    )
+    monkeypatch.setattr(
+        "sys.argv", ["enrol_codes", "--cohort-org", "Cohort-f2026", "--no-dry-run"]
+    )
+    assert (enrol_codes.main(), ran) == (0, ["Cohort-f2026"])

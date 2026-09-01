@@ -10,7 +10,7 @@ first-run guard - the guard has to be per file. These tests pin the split:
   rewritten - a rewrite destroyed a live roster (enrol codes + onboarded handles) in
   hertie-dsl-demo-f2026.
 - SYSTEM-owned (welcome's onboard/team-formation workflows + the issue forms they parse,
-  classroom-config's dispatch-sync*.yml, its README contract and `*.sample` worked
+  classroom-config's dispatch-*.yml, its README contract and `*.sample` worked
   examples, the cohort's generated dsl-course.yml pointer): re-pushed on every run so
   fixes reach running cohorts.
 
@@ -60,6 +60,7 @@ USER_OWNED = {*welcome.CLASSROOM_SCAFFOLDS, "grades/.gitkeep"}
 SYSTEM_OWNED = {
     ".github/workflows/dispatch-sync.yml",
     ".github/workflows/dispatch-sync-site.yml",
+    ".github/workflows/dispatch-send-codes.yml",
     ".github/workflows/validate-schedule.yml",
     "README.md",
     *welcome.CLASSROOM_SAMPLES,
@@ -1433,6 +1434,7 @@ def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypat
         "README.md",
         ".github/workflows/dispatch-sync.yml",
         ".github/workflows/dispatch-sync-site.yml",
+        ".github/workflows/dispatch-send-codes.yml",
         ".github/workflows/validate-schedule.yml",
     }, (
         "the nightly refresh may only re-push SYSTEM-owned classroom-config files; a "
