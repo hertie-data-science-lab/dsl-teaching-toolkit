@@ -252,7 +252,6 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: ["materials-f2026"])
     monkeypatch.setattr(seed, "discover_assignments", lambda org: [])
     monkeypatch.setattr(seed, "push_content_workflows", renders("content-workflows"))
-    monkeypatch.setattr(seed, "_refresh_stubs", lambda org, repo: 0)
     monkeypatch.setattr(
         seed.scaffold, "refresh_materials_system_files", lambda org, repo: 0
     )

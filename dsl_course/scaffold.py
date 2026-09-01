@@ -32,7 +32,7 @@ from .course import (
     pages_repo,
 )
 from .discovery import central_ref_for, discover_assignments, discover_cohorts
-from .gh_contents import put_files, refresh_stubs, seed_if_absent
+from .gh_contents import put_files, seed_if_absent
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
 from .log import log, log_err, log_ok, log_skip, log_step
 from .readings import READING_OVERLAY_FILE
@@ -219,25 +219,9 @@ def _notebook(title_lines: list[str], code: str) -> str:
     return json.dumps(nb, indent=1) + "\n"
 
 
-# Where the readings stub used to live, before it was renamed to `READINGS.md` and the
-# prose-vs-file rule stopped keying on extension. Declared so `refresh_stubs` can retire the
-# old copy in repos scaffolded earlier: keyed by path, a rename otherwise leaves it behind
-# forever, and as a non-overlay file it would then ship to students as a "reading" whose
-# contents are scaffold instructions addressed to faculty.
-RETIRED_STUBS = ("readings/01_session-1/reading.md",)
-
 # Seeded inert - every line a comment - so it withholds nothing until faculty write a
 # pattern. It exists to be FOUND: a withhold list nobody knows about is one nobody uses,
 # and a docs page is only reachable by someone who already suspects it exists.
-#
-# CREATE-ONLY, and deliberately NOT a `dsl-stub:` file. `is_untouched_stub` asks whether
-# the mark is anywhere in the text, which is right for a prose stub faculty replace
-# wholesale - and exactly wrong here, because the natural edit to a withhold list is to
-# APPEND a pattern under the comments this text invites them to keep. A marked file would
-# still read as untouched, and the next nightly refresh would rewrite it: their patterns
-# gone, and whatever they withheld shipping again on a green run. So this is written once
-# and never touched, and the price is that the wording below cannot be improved in a repo
-# that already has it.
 _RELEASEIGNORE_STUB = f"""\
 # INSTRUCTOR-OWNED - yours. Written once when this repo was scaffolded, and never
 # rewritten by the toolkit, so anything you put here stays.
@@ -247,19 +231,6 @@ _RELEASEIGNORE_STUB = f"""\
 # and you can add another in any subfolder. The full rules:
 # https://github.com/{CENTRAL}/blob/main/docs/08-release-materials-to-cohort.md
 """
-
-
-def refreshable_stubs(tag: str) -> dict[str, bytes]:
-    """The seeded files that are stubs rather than skeletons - improvable later, while they
-    still carry the mark (see `gh_contents.refresh_stubs`).
-
-    Named here, where they are written, and read by `seed.refresh` so the nightly
-    convergence reaches repos scaffolded before a stub improved. One list rather than two
-    that drift: a stub added here is converged everywhere without a second edit."""
-    return {
-        "SYLLABUS.md": _SYLLABUS_STUB.format(tag=tag).encode(),
-        f"readings/01_session-1/{READING_OVERLAY_FILE}": _READINGS_STUB,
-    }
 
 
 def _actions_table(org: str) -> str:
@@ -351,7 +322,7 @@ def materials_system_files(org: str, repo: str) -> dict[str, bytes]:
 
     Named here, where they are written, and pushed by `refresh_materials_system_files`
     from both the scaffold and the nightly refresh - one list rather than two that drift,
-    the same contract as `refreshable_stubs` for the other half of the ownership split."""
+    the SYSTEM-owned half of the ownership split; the skeleton above is the other."""
     return {
         SYLLABUS_SAMPLE_FILE: _syllabus_sample().encode(),
         "MAINTAINING.md": _maintaining(org, repo).encode(),
@@ -372,7 +343,7 @@ def refresh_materials_system_files(org: str, repo: str) -> int:
     repo was made is the point - so it is gated on the repo NAME, and the gate lives here
     rather than at the call site because no caller may skip it: `discover_content_repos`
     hands the nightly sweep the code and dataset repos too, and a materials-repo
-    maintainer guide in `lecture-code-f2026` is the nonsense `seed._refresh_stubs`'
+    maintainer guide in `lecture-code-f2026` is the nonsense the scaffold's own gate
     `create=False` exists to avoid. Every materials repo is named `course-materials-<tag>`
     by `scaffold_materials`, from a workflow that takes only the tag, so the prefix is a
     toolkit guarantee rather than a convention.
@@ -396,12 +367,10 @@ def materials_readme(org: str) -> str:
     """The materials repo's student-facing README placeholder.
 
     Module-level, not inline in scaffold_materials, so it can be rendered WITHOUT creating
-    a repo. The file is create-only, so a wording fix reaches a repo that already exists
-    only by writing it deliberately, after checking the placeholder is still untouched
-    (deploy.UNEDITED_README_MARKERS) - which is done by hand, per the create-only file
-    rules. TODO: it belongs on the nightly path instead, the way SYLLABUS.md already is
-    via refresh_stubs; that needs refresh_stubs to accept the README's own predicate,
-    since the README predates the `dsl-stub:` mark its gate keys on.
+    a repo. The file is create-only, like every other instructor-owned file in the
+    skeleton, so a wording fix reaches a repo that already exists only by writing it
+    deliberately, after checking the placeholder is still untouched
+    (deploy.UNEDITED_README_MARKERS).
 
     Release materials with the README toggle copies this file into the cohort's materials
     repo, where enrolled students read it - so it is written for them. How the source repo
@@ -451,34 +420,25 @@ def scaffold_materials(org: str, tag: str) -> int:
     readme = materials_readme(org)
     failures = 0
     failures += refresh_materials_system_files(org, repo)
-    # USER-owned skeletons: create-only, so a re-run against a repo faculty have since
-    # authored must not revert their README/SYLLABUS to the stub or resurrect a deleted
-    # starter directory. A failed seed (an absent file whose write failed) reds the scaffold.
-    # Stubs that REFRESH while they are still ours (see gh_contents.refresh_stubs): the
-    # improvement then reaches the courses already running, not just the next repo
-    # scaffolded. Written before the create-only set below so a re-run's log reads in the
-    # order the rules apply.
-    failures += refresh_stubs(
-        org,
-        repo,
-        refreshable_stubs(tag),
-        "init: scaffold stubs",
-        create=True,
-        retire=RETIRED_STUBS,
-    )
-
+    # INSTRUCTOR-OWNED, every one of them, and all CREATE-ONLY: written when the repo is
+    # scaffolded and never again. A re-run against a repo faculty have since authored must
+    # not revert their work, and neither must the nightly refresh - see the note on
+    # `_SYLLABUS_STUB` for why "is it still ours?" is not a question this can ask safely.
+    # A failed seed (an absent file whose write failed) reds the scaffold.
     user_files = {
         "README.md": readme.encode(),
+        "SYLLABUS.md": _SYLLABUS_STUB.format(tag=tag).encode(),
         "lectures/01_session-1/.gitkeep": b"",
         # A stub, not a .gitkeep: a text file here IS the published reading list (its
         # contents are inlined on the site's Materials tab), and an empty folder gave no
         # sign of that - the tab then reads blank with nothing to explain why.
+        f"readings/01_session-1/{READING_OVERLAY_FILE}": _READINGS_STUB,
         "labs/01_session-1/.gitkeep": b"",
         RELEASEIGNORE: _RELEASEIGNORE_STUB.encode(),
     }
-    # One commit for the skeleton: all five carried the same subject anyway, so writing
-    # them one at a time opened a repo faculty then author by hand with five identical
-    # `init: materials skeleton` lines.
+    # One commit for the skeleton: they all carried the same subject anyway, so writing
+    # them one at a time opened a repo faculty then author by hand with a column of
+    # identical `init: materials skeleton` lines.
     if not put_files(
         org, repo, user_files, "init: materials skeleton", create_only=True
     ):
