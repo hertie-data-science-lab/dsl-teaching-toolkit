@@ -17,9 +17,11 @@ import yaml
 
 from dsl_course import collect as collect_mod
 from dsl_course import course, deploy, ghcli, scheduler, seed
+from dsl_course import schedule as schedule_mod
 from dsl_course.schedule import (
     AssignmentEntry,
     Deploy,
+    Enrolment,
     Release,
     Schedule,
     SourceFault,
@@ -1439,6 +1441,150 @@ def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsy
     assert scheduler.main() == 1
     assert seen == ["Cohort-A", "Cohort-B"]
     assert "Cohort-A" in capsys.readouterr().err
+
+
+# ------------------------------------------------- the enrolment window (unattended)
+# `enrolment:` puts Send enrolment codes on the hourly clock, for as long as its window is
+# open. What has to be right is the gate (only inside the window), the reuse (the whole
+# send is enrol_codes.run, so `code_sent_at` is what stops a second email), and the one
+# failure that must NOT redden a cron every hour for a fortnight.
+
+
+def _window(opens_days: float, closes_days: float) -> Schedule:
+    """A schedule whose enrolment window opens/closes that many days around WHEN."""
+    return Schedule(
+        enrolment=Enrolment(
+            opens=WHEN + timedelta(days=opens_days),
+            closes=WHEN + timedelta(days=closes_days),
+        )
+    )
+
+
+def _enrolment(monkeypatch, sched, *, roster_rows=1, rc=0, dry_run=False):
+    """Drive the enrolment step, capturing the call enrol_codes.run would have had."""
+    calls: list[tuple] = []
+    monkeypatch.setattr(scheduler.roster, "load", lambda org: [object()] * roster_rows)
+    monkeypatch.setattr(
+        scheduler.enrol_codes,
+        "run",
+        lambda org, dry_run: calls.append((org, dry_run)) or rc,
+    )
+    errors = scheduler._send_enrolment_codes("Cohort-Org", sched, WHEN, dry_run)
+    return errors, calls
+
+
+def test_codes_are_sent_on_every_tick_inside_the_window(monkeypatch):
+    errors, calls = _enrolment(monkeypatch, _window(-2, +12))
+    assert errors == 0
+    assert calls == [("Cohort-Org", False)]
+
+
+@pytest.mark.parametrize("window", [(+1, +15), (-20, -6)])
+def test_nothing_is_sent_before_the_window_opens_or_after_it_closes(
+    monkeypatch, window
+):
+    assert _enrolment(monkeypatch, _window(*window))[1] == []
+
+
+def test_a_cohort_with_no_enrolment_block_is_never_mailed(monkeypatch):
+    assert _enrolment(monkeypatch, Schedule())[1] == []
+
+
+def test_a_dry_run_scheduler_previews_the_codes_rather_than_sending_them(monkeypatch):
+    # The whole safety rail on an unattended run that emails a cohort: --dry-run has to
+    # reach enrol_codes, which is the only thing that knows how to preview instead of send.
+    _, calls = _enrolment(monkeypatch, _window(-2, +12), dry_run=True)
+    assert calls == [("Cohort-Org", True)]
+
+
+def test_a_failed_send_is_counted_as_an_error(monkeypatch):
+    assert _enrolment(monkeypatch, _window(-2, +12), rc=1)[0] == 1
+
+
+def test_an_empty_roster_is_not_mailed_and_does_not_fail_the_run(monkeypatch):
+    # enrol_codes.run returns 1 on an empty roster - correct for a button someone pressed,
+    # wrong for an hourly cron that would then be red for the length of the window.
+    errors, calls = _enrolment(monkeypatch, _window(-2, +12), roster_rows=0)
+    assert errors == 0 and calls == []
+
+
+def test_an_open_window_over_an_empty_roster_is_recorded_as_a_fault(monkeypatch):
+    monkeypatch.setattr(scheduler.roster, "load", lambda org: [])
+    faults = scheduler._enrolment_faults("Cohort-Org", _window(-2, +12), WHEN)
+    assert len(faults) == 1
+    fault = faults[0]
+    assert fault.where == "enrolment"
+    # dated at the window's CLOSE, so it escalates as the last chance to mail runs out
+    assert fault.fires == WHEN + timedelta(days=12)
+    assert "students.csv" in fault.what and "no codes can be sent" in fault.what
+
+
+def test_the_empty_roster_fault_can_never_redden_the_cron(monkeypatch):
+    # Capped at WARNING for the reason a `.releaseignore` fault is: its moment passes and
+    # stays passed, and an ERROR would be an hourly red X nobody reads for a fortnight.
+    monkeypatch.setattr(scheduler.roster, "load", lambda org: [])
+    # A window about to shut is inside SOURCE_ERROR_WINDOW, where any other fault is an
+    # ERROR and the run goes red.
+    shutting = _window(-13, +0.5)
+    assert (
+        scheduler._enrolment_faults("Cohort-Org", shutting, WHEN)[0].severity(WHEN)
+        is schedule_mod.Severity.WARNING
+    )
+
+    monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [])
+    monkeypatch.setattr(scheduler.source_digest, "sync", lambda *a, **k: 0)
+    assert (
+        scheduler._preflight_sources(
+            "Course-Org", "Cohort-Org", _window(-2, +12), WHEN, False
+        )
+        == 0
+    )
+
+
+def test_a_roster_with_rows_raises_no_fault(monkeypatch):
+    monkeypatch.setattr(scheduler.roster, "load", lambda org: [object()])
+    assert scheduler._enrolment_faults("Cohort-Org", _window(-2, +12), WHEN) == []
+    # nor does a closed window, whatever the roster says
+    monkeypatch.setattr(scheduler.roster, "load", lambda org: [])
+    assert scheduler._enrolment_faults("Cohort-Org", _window(+1, +15), WHEN) == []
+
+
+def test_the_empty_roster_fault_reaches_the_same_digest_as_a_missing_source(
+    monkeypatch,
+):
+    # One issue per cohort, so a person hears about this the way they hear about a lecture
+    # folder nobody staged - once, not once an hour.
+    monkeypatch.setattr(scheduler.roster, "load", lambda org: [])
+    monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [])
+    seen: dict = {}
+    monkeypatch.setattr(
+        scheduler.source_digest,
+        "sync",
+        lambda *a, **k: seen.update(args=a) or 0,
+    )
+    scheduler._preflight_sources(
+        "Course-Org", "Cohort-Org", _window(-2, +12), WHEN, False
+    )
+    assert [f.where for f in seen["args"][2]] == ["enrolment"]
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_the_hourly_run_itself_mails_the_codes_and_honours_dry_run(
+    monkeypatch, dry_run
+):
+    # The helpers above are unit-level; this is the wiring - a cohort with an open window
+    # and nothing else in its plan must still get its codes off the hourly tick.
+    sched = _window(-2, +12)
+    monkeypatch.setattr(scheduler.schedule, "load", lambda cohort: sched)
+    monkeypatch.setattr(scheduler.roster, "load", lambda org: [object()])
+    calls: list[tuple] = []
+    monkeypatch.setattr(
+        scheduler.enrol_codes,
+        "run",
+        lambda org, dry_run: calls.append((org, dry_run)) or 0,
+    )
+    assert scheduler.run("Course-Org", "Cohort-Org", WHEN, dry_run=dry_run) == 0
+    assert calls == [("Cohort-Org", dry_run)]
 
 
 # ----------------------------------------------------- source pre-flight (unattended)

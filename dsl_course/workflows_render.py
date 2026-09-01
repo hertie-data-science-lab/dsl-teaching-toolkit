@@ -183,7 +183,8 @@ def _run_preamble(minutes: int = _TIMEOUT_DEFAULT) -> str:
 
 
 # Mail secrets, wired into the env of the workflows that send email (enrolment codes, grade
-# notifications). A plain string (not the f-string body) so the GitHub `${{ }}` is literal.
+# notifications, and the hourly cron, which sends the codes on a schedule.yml `enrolment:`
+# window). A plain string (not the f-string body) so the GitHub `${{ }}` is literal.
 # Derived from the names the mailer actually reads, so a rename cannot leave an org
 # silently unconfigured. GRAPH_CLIENT_CERT holds certificate + private key in one
 # multi-line secret; there is no GRAPH_CLIENT_SECRET.
@@ -803,10 +804,11 @@ on:
 
 
 def render_scheduler() -> str:
-    """Hourly cron that snapshots + autogrades each passed grading deadline and releases
-    whatever each cohort's schedule says is now due, across every registered cohort. No
-    check-team gate: scheduled runs have no actor, and every action is either idempotent or
-    fire-once (manual dispatch still needs write)."""
+    """Hourly cron that snapshots + autogrades each passed grading deadline, mails
+    enrolment codes while a cohort's window is open, and releases whatever each cohort's
+    schedule says is now due, across every registered cohort. No check-team gate: scheduled
+    runs have no actor, and every action is either idempotent or fire-once (manual dispatch
+    still needs write)."""
     return f"""name: Scheduled release
 
 # Reads each cohort's classroom-config/schedule.yml and, every hour: freezes the submission
@@ -815,6 +817,9 @@ def render_scheduler() -> str:
 # `releases:` release whose `when` datetime has arrived. Releases are idempotent, so
 # re-releasing on the next hour is a no-op; grading is not re-run. On the cron it releases for
 # real; manual runs default to dry-run.
+# It also mails enrolment codes for as long as an `enrolment:` window is open - only to rows
+# with no `code_sent_at` yet, so an hourly re-run mails nobody twice. Needs the GRAPH_*
+# secrets, exactly as the Send enrolment codes button does.
 # Hourly so a `when` time-of-day is honoured to the hour (GitHub cron is UTC and best-effort).
 
 on:
@@ -834,6 +839,7 @@ on:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
+{_MAIL_ENV}
         run: |
           gh auth setup-git
           args=(--course-org "$COURSE" --all-cohorts)

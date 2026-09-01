@@ -15,6 +15,12 @@ Assignment handouts are declared with the rest of the assignment's lifecycle -
 solution rides on that same release once `assignments.<slug>.solution_datetime` has
 passed - Release assignment's `include_solution` tick, on a clock.
 
+The same hourly run also mails enrolment codes, for as long as the cohort's `enrolment:`
+window is open (`enrol_codes`, the scheduled twin of the Send enrolment codes button).
+That is a window and not a moment because the roster keeps filling up after term starts:
+the send is idempotent on `students.csv`'s `code_sent_at` column, so every tick inside the
+window mails whoever is new and nobody else.
+
 The same hourly run also drives each assignment's grading deadline (`grading_datetime`,
 else `due_datetime`), whether or not the cohort uses `releases` at all:
 
@@ -42,7 +48,7 @@ import argparse
 import sys
 from datetime import datetime, timezone
 
-from . import schedule, site, source_digest
+from . import enrol_codes, roster, schedule, site, source_digest
 from .assign import provision_all, solution_released
 from .collect import (
     SnapshotResult,
@@ -404,6 +410,60 @@ def _handout_releases(
     return out
 
 
+def _enrolment_faults(
+    cohort_org: str, sched: schedule.Schedule, now: datetime
+) -> list[schedule.SourceFault]:
+    """An open enrolment window with nothing to send to, as a digest fault.
+
+    An empty roster is the one way the window can be wide open and still mail nobody, and
+    it is silent: every tick reads the file, finds no rows, and does nothing. It rides the
+    digest rather than the run log for the same reason a missing source does - an hourly
+    channel that shouts on every tick is one nobody reads - and it is capped at WARNING so
+    that it cannot redden the cron for the rest of the window (the ceiling `.releaseignore`
+    faults use, for that same reason).
+
+    It is dated at the window's CLOSE, so it starts as an advisory and escalates as the
+    last chance to mail anyone runs out. An unread roster (not just an empty one) counts:
+    both mean no codes go out, and `roster.load` has already said which it was."""
+    window = sched.enrolment
+    if window is None or not window.is_open(now):
+        return []
+    if roster.load(cohort_org):
+        return []
+    return [
+        schedule.SourceFault(
+            "enrolment",
+            f"the enrolment window is open but {roster.CONFIG_REPO}/"
+            f"{roster.ROSTER_PATH} is empty - no codes can be sent",
+            window.closes,
+            field="send_codes_datetime",
+            ceiling=schedule.Severity.WARNING,
+        )
+    ]
+
+
+def _send_enrolment_codes(
+    cohort_org: str, sched: schedule.Schedule, now: datetime, dry_run: bool
+) -> int:
+    """Mail enrolment codes while the cohort's `enrolment:` window is open. Returns the
+    error count.
+
+    The whole send is `enrol_codes.run`, exactly as the button calls it - the codes are
+    written to `students.csv` and only rows with a blank `code_sent_at` are mailed, which
+    is what makes an hourly re-run a no-op rather than a second email.
+
+    An empty roster is passed over in silence here: it is real, but `_enrolment_faults`
+    has already recorded it somewhere that does not shout every hour, and `enrol_codes.run`
+    would otherwise fail the cron on it for the length of the window."""
+    window = sched.enrolment
+    if window is None or not window.is_open(now):
+        return 0
+    if not roster.load(cohort_org):
+        return 0
+    log_step(f"  enrolment codes (window open until {window.closes.isoformat()})")
+    return 1 if enrol_codes.run(cohort_org, dry_run=dry_run) else 0
+
+
 def _preflight_sources(
     course_org: str,
     cohort_org: str,
@@ -418,9 +478,15 @@ def _preflight_sources(
     about to ship nothing. Everything else - a check that could not run, a digest that
     could not be written - is logged and swallowed. The distinction is the point: a
     RELEASE problem is worth a red X on the cron, a NOTIFICATION problem is not worth
-    stopping a release for."""
+    stopping a release for.
+
+    The open-window-empty-roster fault joins the same list, because it is the same kind of
+    problem told the same way: found on an hourly tick, actionable by a person, and worth
+    exactly one notification rather than one an hour."""
     try:
-        faults = schedule.source_faults(sched, course_org)
+        faults = schedule.source_faults(sched, course_org) + _enrolment_faults(
+            cohort_org, sched, now
+        )
     except Exception as exc:
         log_err(f"could not check {cohort_org}'s sources ({type(exc).__name__}): {exc}")
         return 0
@@ -482,6 +548,10 @@ def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) 
     # needs catching. Never fatal to the run: an undelivered warning must not stop a
     # release (see source_digest.sync).
     errors += _preflight_sources(course_org, cohort_org, sched, now, dry_run)
+
+    # Independent of the release plan, and of `dry_run`, which `enrol_codes.run` honours
+    # itself: a dry-run scheduler previews the codes and the emails and sends nothing.
+    errors += _send_enrolment_codes(cohort_org, sched, now, dry_run)
 
     if dry_run:
         for release in due:

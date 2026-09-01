@@ -1142,6 +1142,11 @@ def test_a_renamed_org_is_corrected_even_with_no_repo_table_markers():
 
 MAIL_BUTTONS = ("send_codes", "distribute_grades")
 
+# Everything that can put an email on the wire. The scheduler is not a BUTTON - it has no
+# dry-run gate of the buttons' shape and no check-team - but it sends enrolment codes on a
+# `schedule.yml` `enrolment:` window, so it needs the same transport secrets.
+MAIL_SENDERS = MAIL_BUTTONS + ("scheduler",)
+
 
 @pytest.mark.parametrize("name", MAIL_BUTTONS)
 def test_both_mail_buttons_default_to_a_dry_run(name):
@@ -1177,10 +1182,12 @@ def test_the_dry_run_gate_is_fail_closed_under_bash(name, value, tmp_path):
     assert out.strip() == expected
 
 
-@pytest.mark.parametrize("name", MAIL_BUTTONS)
-def test_the_mail_buttons_carry_every_transport_secret(name):
+@pytest.mark.parametrize("name", MAIL_SENDERS)
+def test_every_mail_sender_carries_every_transport_secret(name):
     # Nothing tied the workflow's env to the names `mailer` actually reads, so a rename
-    # reached production as a silently unconfigured org rather than a red CI.
+    # reached production as a silently unconfigured org rather than a red CI. The hourly
+    # cron is here for a worse version of the same failure: without the secrets a
+    # scheduled enrolment window runs green every hour and mails nobody.
     env = workflow_jobs(ALL_RENDERED[name])
     step_env: dict = {}
     for job in env.values():
