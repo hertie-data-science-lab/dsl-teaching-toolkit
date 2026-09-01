@@ -267,7 +267,7 @@ def seed_github_workflows(course_org: str, central_ref: str) -> int:
         ".github/workflows/sync-site.yml": render_sync_site(cohorts),
         ".github/workflows/publish-site.yml": render_publish_site(source_repos),
         ".github/workflows/sync-membership.yml": render_sync_membership(cohorts),
-        ".github/workflows/send-codes.yml": render_send_codes(cohorts),
+        ".github/workflows/send-codes.yml": render_send_codes(),
         ".github/workflows/sync-gradebooks.yml": render_sync_gradebooks(cohorts),
         ".github/workflows/render-grades.yml": render_render_grades(cohorts),
         ".github/workflows/distribute-grades.yml": render_distribute_grades(cohorts),
