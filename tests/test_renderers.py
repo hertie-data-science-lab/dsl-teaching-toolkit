@@ -585,6 +585,53 @@ def test_classroom_config_site_dispatcher_fires_on_schedule_or_people_change():
     assert "sync-site" in tmpl  # dispatches the sync-site event
 
 
+def test_send_codes_auto_sends_on_a_roster_push():
+    # A roster edit must reach the new students' inboxes without a manual click, so the
+    # cohort's dispatcher fires this workflow. That path is UNGATED (check-team has no
+    # actor to check on a repository_dispatch) and it sends FOR REAL - nobody is there to
+    # untick a dry run. The button keeps its gate and its dry-run default.
+    rendered = workflows_render.render_send_codes(["Cohort-f2026"])
+    doc = yaml.safe_load(rendered)
+    trigger = doc.get("on", doc.get(True))
+    assert trigger["repository_dispatch"]["types"] == ["send-codes"]
+    assert "workflow_dispatch" in trigger
+    jobs = doc["jobs"]
+    assert jobs["send-codes-auto"]["if"] == "github.event_name != 'workflow_dispatch'"
+    assert "check-team" not in str(jobs["send-codes-auto"].get("needs", ""))
+    assert jobs["send-codes"]["needs"] == "check-team"
+    auto = jobs["send-codes-auto"]["steps"][-1]
+    assert auto["env"]["DISPATCH_COHORT"] == (
+        "${{ github.event.client_payload.cohort_org }}"
+    )
+    assert "--no-dry-run" in auto["run"]
+    assert "--dry-run" not in auto["run"].replace("--no-dry-run", "")
+    # The trust boundary: a client_payload is written by whoever holds a COHORT's bot
+    # token, so the cohort it names is checked against this course org's registry.
+    assert '--dispatched-by "$COURSE"' in auto["run"]
+    assert auto["env"]["COURSE"] == "${{ github.repository_owner }}"
+    # The manual path is unchanged - gated, and never claiming to be dispatched.
+    manual = jobs["send-codes"]["steps"][-1]
+    assert "--dispatched-by" not in manual["run"]
+
+
+def test_classroom_config_roster_dispatcher_fires_send_codes_on_students_csv():
+    # students.csv is the only file that feeds the codes email, and this dispatcher is
+    # what makes the button a fallback rather than the only way in. It fires the same
+    # event type the rendered workflow listens for; loop-safety is the send's own
+    # `code_sent_at` idempotence, documented in the template.
+    tmpl = (
+        ROOT / "templates" / "classroom-config" / "dispatch-send-codes.yml"
+    ).read_text()
+    doc = yaml.safe_load(tmpl)
+    trigger = doc.get("on", doc.get(True))
+    assert trigger["push"]["paths"] == ["students.csv"]
+    assert trigger["push"]["branches"] == ["main"]
+    assert doc["permissions"] == {}
+    assert "event_type=send-codes" in tmpl
+    # The course org is read from THIS cohort's own pointer, never baked in at bootstrap.
+    assert "contents/dsl-course.yml" in tmpl
+
+
 def test_new_assignment_button_exposes_format_and_type():
     # The grading.yml vocabulary (type: individual/group) is chosen
     # on the button and recorded by the scaffold - not hand-edited in afterwards.
@@ -1013,8 +1060,13 @@ SERIALISED_WRITERS = {
     "render_grades": "render-grades",
     "distribute_grades": "distribute-grades",
     # Two overlapping Send-codes runs generate two codes for the same blank cell: one is
-    # written and the other is emailed, so that student's code enrols nobody.
-    "send_codes": "send-codes",
+    # written and the other is emailed, so that student's code enrols nobody. Scoped PER
+    # COHORT, because that raced state is one cohort's students.csv: a roster push in one
+    # cohort must not drop a queued send in another (a group holds one pending run, and a
+    # third arrival cancels the second). Only one of the two expressions is ever set.
+    "send_codes": (
+        "send-codes-${{ inputs.cohort_org || github.event.client_payload.cohort_org }}"
+    ),
     "sync_membership": "sync-membership",
     "sync_site": "sync-site",
     "publish_site": "publish-course-website",

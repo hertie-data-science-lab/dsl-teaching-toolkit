@@ -19,10 +19,11 @@ Live example roster: [`example-course/cohort-org/students.csv`](../example-cours
    - Leave the rest (`github_handle`, `github_id`, `enrol_code`) blank - onboarding and step 2 fill them in for you
 
 
-   >Someone joins late? Add their row, commit & push - then re-run step 2 for their code.
+   >Someone joins late? Add their row, commit & push - the push sends them their code.
    >Someone drops? Delete their row - the commit & push off-boards them.
 
 2. **Send enrolment codes.**
+   - Usually already done: any push to `students.csv` sends the codes for that cohort straight away, so the button below is the fallback - for a deliberate re-send, or when an automatic run went red.
    - In your **course** org → `.github` → **Actions** → **Send enrolment codes**: pick the cohort.
    - This workflow writes an `enrol_code` onto every roster row that lacks one and emails each not-yet-onboarded student at their `hertie_email`.
    - NB: `dry_run` defaults to `true`. It lists masked recipients and subjects, plus one sample body rendered from placeholders - never a real code or name, because the run log is public. It also checks the mail credential, so a green preview means a real send will authenticate. Untick it to write and send.

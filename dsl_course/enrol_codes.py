@@ -13,9 +13,17 @@ Excel -> Power Automate -> Outlook mail-merge. Reuses dsl_course.mailer.
 Every roster row gets a code, auditors included - the code is how anyone onboards at all;
 their `role` column is what routes them to the read-only `auditors` team on the way in.
 
+Three callers: the **Send enrolment codes** button, the hourly scheduler while a cohort's
+`enrolment:` window is open, and a push to a cohort's own students.csv, which its
+classroom-config dispatcher turns into a `send-codes` repository_dispatch. Only that last
+one passes `--dispatched-by`, because only that one's cohort name is untrusted input (see
+`refuse_unregistered`).
+
 Usage:
     python3 -m dsl_course.enrol_codes --cohort-org hertie-dsl-demo-f2026 --dry-run
     python3 -m dsl_course.enrol_codes --cohort-org hertie-dsl-demo-f2026
+    python3 -m dsl_course.enrol_codes --cohort-org hertie-dsl-demo-f2026 --no-dry-run \\
+        --dispatched-by hertie-dsl-demo-course-e1234
 """
 
 from __future__ import annotations
@@ -29,7 +37,7 @@ import sys
 from datetime import UTC, datetime
 
 from . import mailer, roster
-from .discovery import course_name_for_cohort
+from .discovery import COHORTS_PATH, course_name_for_cohort, discover_cohorts
 from .gh_contents import get_file_with_sha, put_file, read_csv
 from .log import log_err, log_ok, log_person, log_step
 
@@ -465,9 +473,50 @@ def reds_the_button(outcome: Outcome) -> bool:
     return outcome not in (Outcome.SENT, Outcome.NOTHING_TO_SEND)
 
 
+def refuse_unregistered(cohort_org: str, course_org: str) -> bool:
+    """Whether a DISPATCHED send must be refused because `course_org` does not own
+    `cohort_org`. True means refuse.
+
+    A dispatched cohort name reaches here straight from a `repository_dispatch`'s
+    `client_payload.cohort_org`, which is written by whoever holds a cohort's DSL_BOT_TOKEN
+    - a LOWER trust tier than the course org. Naming SOMEONE ELSE'S cohort would have this
+    run generate codes into that cohort's roster and email its students. The registry is
+    the authority on which cohorts a course org owns, so a name that is not in it is
+    refused rather than acted on. Compared casefold: GitHub org names are case-insensitive,
+    and the registry's spelling need not match the dispatch's.
+
+    An EMPTY registry authorises nothing - the same rule, and the same reason, as
+    sync_membership.sync: a course org that has never registered a cohort must not accept
+    any org name a dispatch cares to name.
+
+    Only the dispatched path asks (`--dispatched-by`). The button is behind check-team and
+    a cohort dropdown this course org rendered, and the hourly scheduler only ever walks
+    the registry itself, so neither has untrusted input to check."""
+    registered = discover_cohorts(course_org)
+    if cohort_org.casefold() in {c.casefold() for c in registered}:
+        return False
+    listed = ", ".join(sorted(registered)) or "nothing"
+    log_err(
+        f"{cohort_org} is not registered under {course_org} "
+        f"({COHORTS_PATH} lists {listed}) - refusing to send its enrolment codes. "
+        f"Register the cohort first if this is genuinely its course org."
+    )
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cohort-org", required=True)
+    parser.add_argument(
+        "--dispatched-by",
+        default=None,
+        metavar="COURSE_ORG",
+        help=(
+            "This run came from a repository_dispatch in COURSE_ORG: refuse unless "
+            "--cohort-org is registered under it (see refuse_unregistered). Omitted by "
+            "the manual button and the hourly scheduler, whose cohort is not untrusted."
+        ),
+    )
     # Default ON, and the rendered workflow passes --dry-run / --no-dry-run explicitly.
     # `store_true` meant a bare `python3 -m dsl_course.enrol_codes --cohort-org X` sent
     # for real, with no confirmation step - the safe default lived only in the YAML.
@@ -481,6 +530,10 @@ def main() -> int:
     # A read helper (or the mail transport) that couldn't reach its API raises; in an
     # Actions log a one-line error beats a traceback, and the run still goes red.
     try:
+        if args.dispatched_by and refuse_unregistered(
+            args.cohort_org, args.dispatched_by
+        ):
+            return 1
         return int(reds_the_button(run(args.cohort_org, dry_run=args.dry_run)))
     except RuntimeError as exc:
         log_err(str(exc))

@@ -742,16 +742,51 @@ on:
 """
 
 
+# Which cohort a Send-codes run is FOR, whichever trigger named it: a manual click's
+# dropdown, or the roster dispatcher's payload. Only one of the two is ever set - `inputs`
+# is empty on a repository_dispatch and `client_payload` is null on a workflow_dispatch -
+# so `||` picks the one that exists. Used to scope the concurrency group PER COHORT: the
+# state two runs race each other over is one cohort's students.csv, and a repo-wide group
+# would have a roster push in one cohort drop a queued send in another (Actions holds one
+# pending run per group and a third arrival cancels the second).
+_SEND_CODES_COHORT = (
+    "${{ inputs.cohort_org || github.event.client_payload.cohort_org }}"
+)
+
+
 def render_send_codes(cohort_orgs: list[str]) -> str:
-    """Generate a non-PII enrolment code per student and email each their code."""
+    """Generate a non-PII enrolment code per student and email each their code.
+
+    Three ways in, and only the first is a person:
+
+    - workflow_dispatch -> the manual button, gated by check-team, `dry_run` defaulting
+      to true (a person who is watching can untick it);
+    - repository_dispatch (from a cohort's classroom-config dispatcher, on a push to its
+      students.csv) -> ungated, and it SENDS: there is nobody there to untick anything,
+      and the whole point is that a roster edit reaches the new students' inboxes without
+      a click. Same routing as Sync membership's automatic path;
+    - the hourly scheduler, which is a different workflow entirely (an `enrolment:` window
+      in schedule.yml) and calls the same CLI.
+
+    The dispatched path carries `--dispatched-by`, which refuses a cohort this course org
+    does not own: a `client_payload` is written by whoever holds a cohort's bot token, a
+    lower trust tier than the course org (see enrol_codes.refuse_unregistered).
+    """
     return f"""name: Send enrolment codes
 
 # Generates a random enrolment code per student (into classroom-config/students.csv) and
 # emails each not-yet-onboarded student their code to their hertie email address. Students paste
 # the code into the welcome Join course issue - no personal data in the public repo. dry_run
 # previews the codes + emails without writing or sending. Needs the GRAPH_* secrets.
+#
+# A push to a cohort's students.csv fires this automatically (its classroom-config
+# dispatch-send-codes.yml dispatches `send-codes`), and that path sends for real - so the
+# button is the fallback for a re-send, not the normal way in. Re-running is safe either
+# way: a row is mailed only while its `code_sent_at` is blank.
 
 on:
+  repository_dispatch:
+    types: [send-codes]
   workflow_dispatch:
     inputs:
 {_cohort_dropdown(cohort_orgs)}
@@ -760,7 +795,7 @@ on:
         type: boolean
         default: true
 
-{_concurrency("send-codes")}
+{_concurrency("send-codes-" + _SEND_CODES_COHORT)}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   send-codes:
 {_run_preamble()}      - name: Send enrolment codes
@@ -773,6 +808,27 @@ on:
           args=(--cohort-org "$COHORT_ORG")
 {_DRY_RUN_GATE}
           python3 -m dsl_course.enrol_codes "${{args[@]}}"
+
+  send-codes-auto:
+    if: github.event_name != 'workflow_dispatch'
+{_ungated_preamble()}      - name: Send enrolment codes for the cohort that pushed its roster
+        env:
+          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
+          COURSE: ${{{{ github.repository_owner }}}}
+          DISPATCH_COHORT: ${{{{ github.event.client_payload.cohort_org }}}}
+{_MAIL_ENV}
+        run: |
+          # A payload with no cohort names nothing to send for. Fail loudly rather than
+          # let an empty --cohort-org reach the CLI and be refused for the wrong reason.
+          if [ -z "$DISPATCH_COHORT" ]; then
+            echo "::error::the send-codes dispatch carried no client_payload.cohort_org - nothing to send."
+            exit 1
+          fi
+          # --dispatched-by names the course org whose registry authorises this cohort:
+          # the payload comes from a cohort's bot token, so the cohort it names is
+          # untrusted input. --no-dry-run because nobody is watching to untick a preview.
+          python3 -m dsl_course.enrol_codes --cohort-org "$DISPATCH_COHORT" \\
+            --no-dry-run --dispatched-by "$COURSE"
 """
 
 

@@ -680,3 +680,80 @@ def test_run_reds_when_the_roster_is_missing(monkeypatch, capsys):
     assert outcome is enrol_codes.Outcome.NO_ROSTER
     assert enrol_codes.reds_the_button(outcome)  # the button still reds
     assert "Could not find students.csv" in capsys.readouterr().err
+
+
+# ------------------------- the dispatched path's trust boundary (--dispatched-by)
+
+
+def _dispatched(monkeypatch, cohort, registered, course="Course-Org"):
+    """main() as the roster-push dispatcher invokes it. Returns (rc, cohorts run for)."""
+    ran: list[str] = []
+    monkeypatch.setattr(enrol_codes, "discover_cohorts", lambda org: registered)
+    monkeypatch.setattr(
+        enrol_codes,
+        "run",
+        lambda org, dry_run=False: ran.append(org) or enrol_codes.Outcome.SENT,
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "enrol_codes",
+            "--cohort-org",
+            cohort,
+            "--no-dry-run",
+            "--dispatched-by",
+            course,
+        ],
+    )
+    return enrol_codes.main(), ran
+
+
+def test_a_dispatched_send_refuses_a_cohort_this_course_org_does_not_own(
+    monkeypatch, capsys
+):
+    # A client_payload is written by whoever holds a COHORT's bot token - a lower trust
+    # tier than the course org - so naming someone else's cohort would have this run
+    # generate codes into that cohort's roster and email its students. The registry is the
+    # authority, and a name absent from it is refused before anything is read.
+    rc, ran = _dispatched(monkeypatch, "Someone-Elses-f2026", ["Cohort-f2026"])
+    assert (rc, ran) == (1, [])
+    err = capsys.readouterr().err
+    assert "Someone-Elses-f2026 is not registered under Course-Org" in err
+    assert "Cohort-f2026" in err  # what IS registered, so the fix is obvious
+
+
+def test_an_empty_registry_authorises_no_dispatched_cohort(monkeypatch, capsys):
+    # The bug this exists to prevent: short-circuiting on an empty registry let a course
+    # org that had never registered a cohort accept any org name a dispatch cared to name.
+    rc, ran = _dispatched(monkeypatch, "Cohort-f2026", [])
+    assert (rc, ran) == (1, [])
+    assert "lists nothing" in capsys.readouterr().err
+
+
+def test_a_dispatched_send_accepts_a_registered_cohort_whatever_its_casing(monkeypatch):
+    # GitHub org names are case-insensitive, and the registry's spelling need not match
+    # the dispatch's - refusing on case alone would break the automatic path for real.
+    assert _dispatched(monkeypatch, "cohort-F2026", ["Cohort-f2026"]) == (
+        0,
+        ["cohort-F2026"],
+    )
+
+
+def test_the_manual_button_never_consults_the_registry(monkeypatch):
+    # No --dispatched-by: the button is behind check-team and a dropdown the course org
+    # rendered itself, and the hourly scheduler only ever walks the registry. Neither has
+    # untrusted input to check, so neither pays for a registry read.
+    def boom(org):
+        raise AssertionError("the manual path must not read the cohort registry")
+
+    ran: list[str] = []
+    monkeypatch.setattr(enrol_codes, "discover_cohorts", boom)
+    monkeypatch.setattr(
+        enrol_codes,
+        "run",
+        lambda org, dry_run=False: ran.append(org) or enrol_codes.Outcome.SENT,
+    )
+    monkeypatch.setattr(
+        "sys.argv", ["enrol_codes", "--cohort-org", "Cohort-f2026", "--no-dry-run"]
+    )
+    assert (enrol_codes.main(), ran) == (0, ["Cohort-f2026"])
