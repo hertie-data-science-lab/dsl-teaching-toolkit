@@ -30,7 +30,7 @@ One row per student. Leave `github_handle`, `github_id` & `enrol_code` blank - t
 
 Any OTHER column you add (a registrar id, a lecture section, notes) is yours: the engine never reads it, and never drops it when it writes back.
 
-A push to this file triggers **Sync membership** automatically, reconciling the `students` and `auditors` teams to match this SSOT file (a deleted row revokes access on that same push). It also triggers **Send enrolment codes**, for real - so adding a row is all it takes to get that student their code. Nobody is ever mailed twice: only rows with a blank `code_sent_at` go out.
+A push to this file triggers **Sync membership** automatically, reconciling the `students` and `auditors` teams to match this SSOT file (a deleted row revokes access on that same push). It also triggers **Send enrolment codes** - the only way codes are sent, so adding a row is all it takes to get that student their code, within a minute or so. Nobody is ever mailed twice: only rows with a blank `code_sent_at` go out.
 
 ## `grades/<assignment>.csv` - marks (optional, when returning grades)
 

@@ -966,29 +966,6 @@ def _event_entry(event: schedule.Event, fallback: date) -> str:
     )
 
 
-# The Event column's word for an enrolment row - the KIND, as "Term starts" is for a
-# boundary. The cohort's `title` is the row's own text and goes in `description`.
-ENROLMENT_ROW_NAME = "Enrolment"
-
-
-def _enrolment_entry(title: str, when: date | datetime) -> str:
-    """The enrolment window's opening, for a cohort whose `enrolment:` block asked to show
-    it. Its own `type:` - term admin, sharing the violet of the term boundaries, as the
-    handout and due rows share the assignment's blue - but NOT its own template: the
-    theme draws it with `schedule_row_term_date.html`, which already parameterises the
-    two things that differ (`name` for the Event column, `hide_time` for the clock, left
-    unset here because a window opens at a real time). The row class is built from
-    `type:`, so the colour stays separately settable whatever draws the cells."""
-    return (
-        f"---\n"
-        f"type: enrolment\n"
-        f"date: {iso_when(when)}\n"
-        f'name: "{ENROLMENT_ROW_NAME}"\n'
-        f'description: "{q(title)}"\n'
-        f"---\n"
-    )
-
-
 def _term_date_entry(name: str, when: date) -> str:
     """A semester-boundary row (the theme's schedule_row_term_date.html). `name` fills the
     row's event column and is the only text it shows, so the description stays empty;
@@ -1009,8 +986,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
     """Regenerate the cohort's student-facing site from the live org state: the term's
     lecture and lab rows (released ones linked into the private content repos, planned
     ones marked not-yet-released), this year's assignments, and the display-only rows of
-    the schedule (exams, special events, term dates, and the enrolment window when the
-    cohort shows it)."""
+    the schedule (exams, special events and term dates)."""
 
     def build(_wd: Path) -> SitePlan:
         # ONE listing of the cohort answers both questions this build asks of it: which
@@ -1149,13 +1125,6 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 "midterm.md": _exam_entry("MidTerm Exam", start + timedelta(weeks=8)),
                 "final.md": _exam_entry("Final Exam", end),
             }
-        # The enrolment window's opening, and only where the cohort asks for it:
-        # `show_on_site` defaults to FALSE here, unlike everywhere else in the plan, because
-        # enrolment is administrative and its emails are private.
-        if sched.enrolment is not None and sched.enrolment.show_on_site:
-            event_entries["enrolment.md"] = _enrolment_entry(
-                sched.enrolment.title, sched.enrolment.opens
-            )
         # The term's own boundaries, when the schedule pins them.
         if sched.semester_start:
             event_entries["term-start.md"] = _term_date_entry(

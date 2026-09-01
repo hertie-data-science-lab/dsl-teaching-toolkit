@@ -33,7 +33,7 @@ from .discovery import org_meta
 from .log import log_err
 from .repos import default_branch
 
-ITEMS = ("B1", "B6", "B7", "B8", "C2", "C3", "C4", "C5", "C6", "C7", "C8")
+ITEMS = ("B1", "B6", "B7", "B8", "C2", "C3", "C4", "C5", "C6", "C7")
 # Rows whose input is marked `[required]` in docs/DEPLOYMENT-CHECKLIST.md;
 # everything else is optional
 # (synthesised/skipped when absent), so an absent optional item is "optional", not
@@ -84,10 +84,9 @@ _SECRETS_URL = "https://github.com/organizations/{org}/settings/secrets/actions"
 def _transport_detail() -> tuple[bool, str]:
     """Whether this run can send email at all, and why not. `(usable, detail)`.
 
-    Every mail path in the toolkit - Send enrolment codes, Distribute grades, and the
-    hourly cron for as long as an `enrolment:` window is open - reads the same four
-    `GRAPH_*` org secrets. NOTHING checked them: an org that declared a window with the
-    secrets missing (or half-set, which is the commoner mistake) mailed nobody for the
+    Both mail paths in the toolkit - the codes send a roster push fires, and Distribute
+    grades - read the same four `GRAPH_*` org secrets. NOTHING checked them: an org whose
+    secrets were missing (or half-set, which is the commoner mistake) mailed nobody for the
     whole fortnight, and the cron stayed green by design because the gap was "reported by
     status". This is that report.
 
@@ -96,7 +95,7 @@ def _transport_detail() -> tuple[bool, str]:
     The table is appended to the step summary of a PUBLIC repo - not one secret's contents
     goes into it, `GRAPH_SENDER` included."""
     unset = [n for n in mailer.GRAPH_ENV if not (os.environ.get(n) or "").strip()]
-    cost = " - Send codes, Distribute grades and any enrolment: window mail nobody"
+    cost = " - Send codes and Distribute grades mail nobody"
     if len(unset) == len(mailer.GRAPH_ENV):
         return False, f"no GRAPH_* secrets set{cost}"
     if unset:
@@ -106,39 +105,6 @@ def _transport_detail() -> tuple[bool, str]:
         # `gh secret set < file` leaves behind. Named by the helper's own log line.
         return False, f"the GRAPH_* secrets are set but unusable{cost}"
     return True, f"all {len(mailer.GRAPH_ENV)} GRAPH_* secrets set"
-
-
-def _enrolment_detail(
-    window: schedule.Enrolment, students: list[roster.Student] | None
-) -> str:
-    """The enrolment row's detail: when the window mails, and the one thing that would
-    make it mail nobody.
-
-    An `enrolment:` window puts the hourly cron in charge of emailing enrolment codes, and
-    it can only mail rows that are in `students.csv`. A window standing open over an empty
-    roster therefore runs green and silent for a fortnight. The cron deliberately does not
-    shout about it - it would shout every hour, and by then the window is already open -
-    so this is the surface that has to: a person reads it while there is still time to
-    paste the roster in."""
-    bounds = f"{window.opens.isoformat()} -> {window.closes.isoformat()}"
-    shown = ", shown on the site" if window.show_on_site else ""
-    # How far the window has actually got. A send CLAIMS `code_sent_at` before it mails
-    # (see `enrol_codes.run`), so this is what the roster believes went out - the one
-    # figure that tells a person whether an open window is delivering anything at all.
-    progress = (
-        f", {sum(bool(s.code_sent_at.strip()) for s in students)}/{len(students)} mailed"
-        if students
-        else ""
-    )
-    if students is None:
-        # roster.load returns None only when the file could not be read at all, which is a
-        # different fix from an empty one - say which.
-        gap = f" - WARNING: {roster.ROSTER_PATH} cannot be read, so nobody is mailed"
-    elif not students:
-        gap = f" - WARNING: {roster.ROSTER_PATH} is empty, so nobody is mailed"
-    else:
-        gap = ""
-    return f"codes sent {bounds}{shown}{progress}{gap}"
 
 
 def render_markdown(course_org: str, cohort_org: str, data: dict[str, dict]) -> str:
@@ -261,10 +227,7 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         edit_url=_SECRETS_URL.format(org=course_org),
     )
 
-    # `or []` only after C8 has had the raw value: None (unreadable) and [] (no rows
-    # yet) are one thing to a count and two different fixes to the enrolment row.
-    roster_rows = roster.load(cohort_org)
-    students = roster_rows or []
+    students = roster.load(cohort_org) or []
     onboarded = sum(s.onboarded for s in students)
     data["C2"] = _row(
         "C2",
@@ -357,24 +320,6 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         cohort_branch,
         bool(n_instructors),
         f"{n_instructors} active" if n_instructors else "",
-    )
-
-    # Costs nothing: the window comes off the schedule C5/C6 already loaded and the roster
-    # off the one C2 already read, so the row that makes an empty-roster window visible is
-    # free.
-    data["C8"] = _row(
-        "C8",
-        f"Enrolment window ({schedule.SCHEDULE_PATH} -> enrolment)",
-        cohort_org,
-        schedule.CONFIG_REPO,
-        schedule.SCHEDULE_PATH,
-        cohort_branch,
-        sched.enrolment is not None,
-        _enrolment_detail(sched.enrolment, roster_rows) + dropped
-        if sched.enrolment is not None
-        # A block faculty wrote and the parser threw away leaves `enrolment` None, which
-        # would otherwise read as "never set".
-        else dropped.lstrip(" -"),
     )
 
     return data

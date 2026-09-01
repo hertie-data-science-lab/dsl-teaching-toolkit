@@ -334,8 +334,8 @@ _WHEN_INCLUDE = re.compile(
 def test_a_schedule_row_template_exists_for_every_type_the_sync_emits(documents):
     # The schedule dispatches on `type`, so a row kind added to site.py without a branch
     # renders as the neutral fallback row - silently, on the live schedule. What each
-    # branch includes is its own business: `enrolment` and `term_date` are one row with a
-    # different label, and share a template.
+    # branch includes is its own business, so this checks only that the branch exists and
+    # that the template it names ships.
     emitted = {doc["type"] for doc in documents if doc.get("type")}
     emitted |= {doc["due_event"]["type"] for doc in documents if doc.get("due_event")}
     branches = {
