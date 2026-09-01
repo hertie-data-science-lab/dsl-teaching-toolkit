@@ -182,11 +182,10 @@ def _run_preamble(minutes: int = _TIMEOUT_DEFAULT) -> str:
     return f"    needs: check-team\n{_ungated_preamble(minutes)}"
 
 
-# Mail secrets, wired into the env of the workflows that send email (enrolment codes, grade
-# notifications, and the hourly cron, which sends the codes on a schedule.yml `enrolment:`
-# window) - and of Check cohort setup, which does not send but REPORTS whether a send
-# could: its mail-transport row reads the very same variables, and without them it would
-# report "unset" on every org whatever the truth.
+# Mail secrets, wired into the env of the workflows that send email (enrolment codes and
+# grade notifications) - and of Check cohort setup, which does not send but REPORTS
+# whether a send could: its mail-transport row reads the very same variables, and without
+# them it would report "unset" on every org whatever the truth.
 # A plain string (not the f-string body) so the GitHub `${{ }}` is literal.
 # Derived from the names the mailer actually reads, so a rename cannot leave an org
 # silently unconfigured. GRAPH_CLIENT_CERT holds certificate + private key in one
@@ -196,8 +195,9 @@ _MAIL_ENV = "\n".join(
 )
 
 # Fail CLOSED: only an explicit `false` sends. Any other value - "True", "1", a blank from
-# a renamed input - previews. Shared by the two buttons that email a whole cohort; the
-# other dry-run gates in this module are not send paths and keep the simpler spelling.
+# a renamed input - previews. Distribute grades is the one button left that emails a whole
+# cohort; the other dry-run gates in this module are not send paths and keep the simpler
+# spelling.
 _DRY_RUN_GATE = (
     '          if [ "$DRY_RUN" = "false" ]; '
     "then args+=(--no-dry-run); else args+=(--dry-run); fi"
@@ -742,75 +742,45 @@ on:
 """
 
 
-# Which cohort a Send-codes run is FOR, whichever trigger named it: a manual click's
-# dropdown, or the roster dispatcher's payload. Only one of the two is ever set - `inputs`
-# is empty on a repository_dispatch and `client_payload` is null on a workflow_dispatch -
-# so `||` picks the one that exists. Used to scope the concurrency group PER COHORT: the
-# state two runs race each other over is one cohort's students.csv, and a repo-wide group
-# would have a roster push in one cohort drop a queued send in another (Actions holds one
-# pending run per group and a third arrival cancels the second).
-_SEND_CODES_COHORT = (
-    "${{ inputs.cohort_org || github.event.client_payload.cohort_org }}"
-)
+# Which cohort a Send-codes run is FOR: the roster dispatcher's payload, its only
+# trigger. Used to scope the concurrency group PER COHORT - the state two runs race each
+# other over is one cohort's students.csv, and a repo-wide group would have a roster push
+# in one cohort drop a queued send in another (Actions holds one pending run per group and
+# a third arrival cancels the second).
+_SEND_CODES_COHORT = "${{ github.event.client_payload.cohort_org }}"
 
 
-def render_send_codes(cohort_orgs: list[str]) -> str:
+def render_send_codes() -> str:
     """Generate a non-PII enrolment code per student and email each their code.
 
-    Three ways in, and only the first is a person:
+    One way in, and it is not a person: a push to a cohort's students.csv, which its
+    classroom-config dispatcher turns into a `send-codes` repository_dispatch. So the job
+    is UNGATED - a dispatch has no actor to check - and it sends for real, because the
+    whole point is that a roster edit reaches the new students' inboxes without a click.
+    Same routing as Sync membership's automatic path.
 
-    - workflow_dispatch -> the manual button, gated by check-team, `dry_run` defaulting
-      to true (a person who is watching can untick it);
-    - repository_dispatch (from a cohort's classroom-config dispatcher, on a push to its
-      students.csv) -> ungated, and it SENDS: there is nobody there to untick anything,
-      and the whole point is that a roster edit reaches the new students' inboxes without
-      a click. Same routing as Sync membership's automatic path;
-    - the hourly scheduler, which is a different workflow entirely (an `enrolment:` window
-      in schedule.yml) and calls the same CLI.
-
-    The dispatched path carries `--dispatched-by`, which refuses a cohort this course org
-    does not own: a `client_payload` is written by whoever holds a cohort's bot token, a
-    lower trust tier than the course org (see enrol_codes.refuse_unregistered).
+    It carries `--dispatched-by`, which refuses a cohort this course org does not own: a
+    `client_payload` is written by whoever holds a cohort's bot token, a lower trust tier
+    than the course org (see enrol_codes.refuse_unregistered).
     """
     return f"""name: Send enrolment codes
 
 # Generates a random enrolment code per student (into classroom-config/students.csv) and
-# emails each not-yet-onboarded student their code to their hertie email address. Students paste
-# the code into the welcome Join course issue - no personal data in the public repo. dry_run
-# previews the codes + emails without writing or sending. Needs the GRAPH_* secrets.
+# emails each not-yet-onboarded student their code to their hertie email address. Students
+# paste the code into the welcome Join course issue - no personal data in the public repo.
+# Needs the GRAPH_* secrets.
 #
-# A push to a cohort's students.csv fires this automatically (its classroom-config
-# dispatch-send-codes.yml dispatches `send-codes`), and that path sends for real - so the
-# button is the fallback for a re-send, not the normal way in. Re-running is safe either
-# way: a row is mailed only while its `code_sent_at` is blank.
+# There is no button: a push to a cohort's students.csv is what fires this (its
+# classroom-config dispatch-send-codes.yml dispatches `send-codes`), so the roster is the
+# only thing anyone edits. Re-running is safe - a row is mailed only while its
+# `code_sent_at` is blank - so a re-send is a fresh push to the roster.
 
 on:
   repository_dispatch:
     types: [send-codes]
-  workflow_dispatch:
-    inputs:
-{_cohort_dropdown(cohort_orgs)}
-      dry_run:
-        description: "Preview the codes + emails - write nothing, send nothing"
-        type: boolean
-        default: true
 
 {_concurrency("send-codes-" + _SEND_CODES_COHORT)}
-{_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  send-codes:
-{_run_preamble()}      - name: Send enrolment codes
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
-{_MAIL_ENV}
-        run: |
-          args=(--cohort-org "$COHORT_ORG")
-{_DRY_RUN_GATE}
-          python3 -m dsl_course.enrol_codes "${{args[@]}}"
-
-  send-codes-auto:
-    if: github.event_name != 'workflow_dispatch'
+{_PERMISSIONS_JOBS}  send-codes:
 {_ungated_preamble()}      - name: Send enrolment codes for the cohort that pushed its roster
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
@@ -826,9 +796,9 @@ on:
           fi
           # --dispatched-by names the course org whose registry authorises this cohort:
           # the payload comes from a cohort's bot token, so the cohort it names is
-          # untrusted input. --no-dry-run because nobody is watching to untick a preview.
+          # untrusted input.
           python3 -m dsl_course.enrol_codes --cohort-org "$DISPATCH_COHORT" \\
-            --no-dry-run --dispatched-by "$COURSE"
+            --dispatched-by "$COURSE"
 """
 
 
@@ -863,11 +833,10 @@ on:
 
 
 def render_scheduler() -> str:
-    """Hourly cron that snapshots + autogrades each passed grading deadline, mails
-    enrolment codes while a cohort's window is open, and releases whatever each cohort's
-    schedule says is now due, across every registered cohort. No check-team gate: scheduled
-    runs have no actor, and every action is either idempotent or fire-once (manual dispatch
-    still needs write)."""
+    """Hourly cron that snapshots + autogrades each passed grading deadline and releases
+    whatever each cohort's schedule says is now due, across every registered cohort. No
+    check-team gate: scheduled runs have no actor, and every action is either idempotent or
+    fire-once (manual dispatch still needs write)."""
     return f"""name: Scheduled release
 
 # Reads each cohort's classroom-config/schedule.yml and, every hour: freezes the submission
@@ -876,9 +845,6 @@ def render_scheduler() -> str:
 # `releases:` release whose `when` datetime has arrived. Releases are idempotent, so
 # re-releasing on the next hour is a no-op; grading is not re-run. On the cron it releases for
 # real; manual runs default to dry-run.
-# It also mails enrolment codes for as long as an `enrolment:` window is open - only to rows
-# with no `code_sent_at` yet, so an hourly re-run mails nobody twice. Needs the GRAPH_*
-# secrets, exactly as the Send enrolment codes button does.
 # Hourly so a `when` time-of-day is honoured to the hour (GitHub cron is UTC and best-effort).
 
 on:
@@ -898,7 +864,6 @@ on:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
-{_MAIL_ENV}
         run: |
           gh auth setup-git
           args=(--course-org "$COURSE" --all-cohorts)
@@ -917,7 +882,7 @@ def render_status(cohort_orgs: list[str]) -> str:
 # with direct links to fix it. Read-only - this workflow changes nothing.
 # It carries the GRAPH_* secrets to REPORT on them (present/absent only - no value is
 # printed), never to send: this is where a missing mail transport is meant to be caught,
-# before an enrolment: window opens over it.
+# before a roster push tries to mail a cohort its codes.
 
 on:
   workflow_dispatch:

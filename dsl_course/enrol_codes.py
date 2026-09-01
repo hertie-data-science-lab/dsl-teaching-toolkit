@@ -5,7 +5,7 @@ Join issue, so no personal data ever touches the public repo - and because the c
 unguessable, a classmate can't bind your roster row to their account. This one action:
 
     1. fills blank `enrol_code` cells in classroom-config/students.csv (idempotent), then
-    2. emails each not-yet-onboarded student their code (preview with --dry-run).
+    2. emails each not-yet-onboarded student their code.
 
 Email reaches the student's UNIVERSITY inbox (the roster `hertie_email`), replacing the
 Excel -> Power Automate -> Outlook mail-merge. Reuses dsl_course.mailer.
@@ -13,16 +13,15 @@ Excel -> Power Automate -> Outlook mail-merge. Reuses dsl_course.mailer.
 Every roster row gets a code, auditors included - the code is how anyone onboards at all;
 their `role` column is what routes them to the read-only `auditors` team on the way in.
 
-Three callers: the **Send enrolment codes** button, the hourly scheduler while a cohort's
-`enrolment:` window is open, and a push to a cohort's own students.csv, which its
-classroom-config dispatcher turns into a `send-codes` repository_dispatch. Only that last
-one passes `--dispatched-by`, because only that one's cohort name is untrusted input (see
-`refuse_unregistered`).
+One caller, and it is not a person: a push to a cohort's own students.csv, which its
+classroom-config dispatcher turns into a `send-codes` repository_dispatch at the course
+org. That path passes `--dispatched-by`, because its cohort name is untrusted input (see
+`refuse_unregistered`). Every send is therefore unattended and for real - there is no
+preview mode, and re-sending means pushing the roster again with `code_sent_at` cleared.
 
 Usage:
-    python3 -m dsl_course.enrol_codes --cohort-org hertie-dsl-demo-f2026 --dry-run
     python3 -m dsl_course.enrol_codes --cohort-org hertie-dsl-demo-f2026
-    python3 -m dsl_course.enrol_codes --cohort-org hertie-dsl-demo-f2026 --no-dry-run \\
+    python3 -m dsl_course.enrol_codes --cohort-org hertie-dsl-demo-f2026 \\
         --dispatched-by hertie-dsl-demo-course-e1234
 """
 
@@ -212,28 +211,11 @@ def code_message(
     return (student.hertie_email, subject, body)
 
 
-def sample_body(welcome_url: str, course_name: str = "") -> str:
-    """The code email rendered with PLACEHOLDERS, for the dry-run preview.
-
-    `code_message` with `<name>`/`<code>` where a student's name and a live credential
-    would go - see `mailer.sample_of`."""
-    return mailer.sample_of(
-        lambda student: code_message(student, welcome_url, course_name),
-        enrol_code="<code>",
-    )
-
-
 class Outcome(enum.Enum):
-    """What one `run` came to. Richer than an exit code, because its two callers want
-    different things from the same facts.
-
-    The **Send enrolment codes** button was pressed by a person who is watching, and wants
-    a red X on anything that stopped the send. The **hourly cron** re-runs unattended for
-    the length of an `enrolment:` window, where a red X it cannot clear is an alarm nobody
-    reads by the second day - so it fails only on `FAILED` and lets the states that need a
-    person (no roster, no transport) be reported by `status` instead: `status.collect`
-    carries a roster row and a mail-transport row, both readable BEFORE the window opens.
-    Each value is the phrase a log line puts after "no codes went out:".
+    """What one `run` came to. Richer than an exit code, because the reasons a send did
+    not happen are not interchangeable: two of them mean nothing is outstanding, and the
+    rest are each a different thing for a person to go and fix. Each value is the phrase a
+    log line puts after "no codes went out:" (see `reds_the_run`).
     """
 
     SENT = "the codes were emailed"
@@ -244,7 +226,7 @@ class Outcome(enum.Enum):
     FAILED = "the send failed"
 
 
-def run(cohort_org: str, dry_run: bool = False) -> Outcome:
+def run(cohort_org: str) -> Outcome:
     # Fetch the RAW roster text once: we parse it for the students, and (below) edit the same
     # text in place so writing codes back never disturbs columns roster doesn't model.
     read = get_file_with_sha(cohort_org, roster.CONFIG_REPO, roster.ROSTER_PATH)
@@ -263,12 +245,12 @@ def run(cohort_org: str, dry_run: bool = False) -> Outcome:
         return Outcome.EMPTY_ROSTER
 
     before = [s.enrol_code for s in students]
-    added = assign_codes(students)  # in memory; persisted below unless dry-run
+    added = assign_codes(students)  # in memory; persisted below
     log_step(
         f"Enrolment codes for {cohort_org}: {added} new code(s), "
         f"emailing not-yet-onboarded students"
     )
-    if added and not dry_run:
+    if added:
         # Write ONLY the newly filled enrol_code cells back into the raw CSV, preserving
         # every other column and each cell's raw text (see fill_enrol_codes_in_csv). Row
         # order matches roster.parse, so index i lines up with students[i] - and
@@ -317,9 +299,8 @@ def run(cohort_org: str, dry_run: bool = False) -> Outcome:
     # Asked BEFORE anything is claimed below, not inferred afterwards from an empty batch:
     # the claim stamps the roster, and an org whose GRAPH_* secrets were never set would
     # otherwise have its whole roster marked as emailed by a run that could never have
-    # emailed anybody. A dry run has no transport to want - it is a documented offline
-    # preview - and `send_bulk`'s own preflight is what proves the credential there.
-    if not dry_run and mailer.graph_config_from_env() is None:
+    # emailed anybody.
+    if mailer.graph_config_from_env() is None:
         log_err(f"no mail transport for {cohort_org} - nothing claimed, nothing sent.")
         return Outcome.NO_TRANSPORT
     # The codes are already committed to students.csv by this point, and
@@ -338,42 +319,35 @@ def run(cohort_org: str, dry_run: bool = False) -> Outcome:
     # raises - so send-then-stamp left the one ordering an unattended caller cannot
     # survive: a roster that cannot be written (an archived classroom-config, a new branch
     # ruleset, a token that lost write scope, a run of 5xx) meant the batch went out with
-    # `code_sent_at` still blank, and the hourly cron mailed the very same students again
-    # on the next tick, and the one after that, for the length of the window. Stamping
-    # first makes a write failure mean NOTHING WAS MAILED, which the next tick simply
-    # retries. Both callers share the ordering: the button's human read "re-running WILL
-    # email them again" and stopped, but a second press does the same damage, and two
-    # orderings through the most delicate lines in this module is the worse bug.
+    # `code_sent_at` still blank, so the next push to the roster - and the send fills its
+    # own blank cells, so it triggers one - mailed the very same students again. Stamping
+    # first makes a write failure mean NOTHING WAS MAILED, which the next push retries.
     stamp = datetime.now(UTC).isoformat(timespec="seconds")
-    if not dry_run and not _claim_sent(cohort_org, recipients, stamp):
+    if not _claim_sent(cohort_org, recipients, stamp):
         log_err(
             f"could not stamp code_sent_at in {roster.ROSTER_PATH} for {cohort_org} - "
             f"nothing emailed, so re-running is safe. Fix the roster write."
         )
         return Outcome.FAILED
     try:
-        sent = mailer.send_bulk(
-            messages, dry_run=dry_run, sample=sample_body(welcome_url, course_name)
-        )
+        sent = mailer.send_bulk(messages)
     except Exception:
         # A transport that RAISED (a credential Graph refused) sent nothing at all, and
         # the claim above must not outlive it - unreleased, it is a whole cohort silently
         # marked as emailed. The release logs its own failure and never raises, so the
         # original exception is what reaches the caller.
-        if not dry_run:
-            _release_unsent(cohort_org, recipients, stamp)
+        _release_unsent(cohort_org, recipients, stamp)
         raise
-    if not dry_run:
-        # A partly-delivered batch is ROUTINE, not exotic: `send_bulk` stops at its own
-        # time budget and says "re-run to continue". Releasing the claims it did not spend
-        # is what keeps that true - without it, the tail of every throttled batch would be
-        # stamped as emailed and never mailed at all.
-        went_out = set(sent)
-        unsent = [to for to in recipients if to not in went_out]
-        if unsent:
-            _release_unsent(cohort_org, unsent, stamp)
-            return Outcome.FAILED
-        log_ok(f"emailed {len(sent)} code(s), all of them recorded")
+    # A partly-delivered batch is ROUTINE, not exotic: `send_bulk` stops at its own time
+    # budget and says "re-run to continue". Releasing the claims it did not spend is what
+    # keeps that true - without it, the tail of every throttled batch would be stamped as
+    # emailed and never mailed at all.
+    went_out = set(sent)
+    unsent = [to for to in recipients if to not in went_out]
+    if unsent:
+        _release_unsent(cohort_org, unsent, stamp)
+        return Outcome.FAILED
+    log_ok(f"emailed {len(sent)} code(s), all of them recorded")
     return Outcome.SENT
 
 
@@ -463,13 +437,12 @@ def _release_unsent(cohort_org: str, unsent: list[str], stamp: str) -> None:
         log_person(f"  not emailed, still claimed: {to}")
 
 
-def reds_the_button(outcome: Outcome) -> bool:
+def reds_the_run(outcome: Outcome) -> bool:
     """Whether **Send enrolment codes** should exit non-zero on this outcome.
 
-    Everything except the two that mean nothing is outstanding: a person pressed the
-    button and is owed a red X for any reason no email went out, a missing roster and
-    unset secrets included. The hourly cron reads the very same values and is deliberately
-    more forgiving - see `Outcome`, and `scheduler._NOT_THE_CRONS_FAULT`."""
+    Everything except the two that mean nothing is outstanding: the run was fired by a
+    roster edit somebody had just made, and they are owed a red X for any reason no email
+    went out - a missing roster and unset secrets included."""
     return outcome not in (Outcome.SENT, Outcome.NOTHING_TO_SEND)
 
 
@@ -489,9 +462,9 @@ def refuse_unregistered(cohort_org: str, course_org: str) -> bool:
     sync_membership.sync: a course org that has never registered a cohort must not accept
     any org name a dispatch cares to name.
 
-    Only the dispatched path asks (`--dispatched-by`). The button is behind check-team and
-    a cohort dropdown this course org rendered, and the hourly scheduler only ever walks
-    the registry itself, so neither has untrusted input to check."""
+    Every send comes through the dispatched path, so `--dispatched-by` is always passed
+    in production; it stays a flag rather than a required argument so a maintainer can
+    still run the CLI by hand against a cohort they already know."""
     registered = discover_cohorts(course_org)
     if cohort_org.casefold() in {c.casefold() for c in registered}:
         return False
@@ -513,18 +486,9 @@ def main() -> int:
         metavar="COURSE_ORG",
         help=(
             "This run came from a repository_dispatch in COURSE_ORG: refuse unless "
-            "--cohort-org is registered under it (see refuse_unregistered). Omitted by "
-            "the manual button and the hourly scheduler, whose cohort is not untrusted."
+            "--cohort-org is registered under it (see refuse_unregistered). Omitted "
+            "only by a maintainer running the CLI by hand."
         ),
-    )
-    # Default ON, and the rendered workflow passes --dry-run / --no-dry-run explicitly.
-    # `store_true` meant a bare `python3 -m dsl_course.enrol_codes --cohort-org X` sent
-    # for real, with no confirmation step - the safe default lived only in the YAML.
-    parser.add_argument(
-        "--dry-run",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Preview the codes + emails; write nothing, send nothing (default).",
     )
     args = parser.parse_args()
     # A read helper (or the mail transport) that couldn't reach its API raises; in an
@@ -534,7 +498,7 @@ def main() -> int:
             args.cohort_org, args.dispatched_by
         ):
             return 1
-        return int(reds_the_button(run(args.cohort_org, dry_run=args.dry_run)))
+        return int(reds_the_run(run(args.cohort_org)))
     except RuntimeError as exc:
         log_err(str(exc))
         return 1

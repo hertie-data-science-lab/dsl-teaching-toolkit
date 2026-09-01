@@ -57,7 +57,7 @@ ALL_RENDERED = {
         ["Cohort-f2026"], ["assignment-1-f2026"]
     ),
     "sync_membership": workflows_render.render_sync_membership(["Cohort-f2026"]),
-    "send_codes": workflows_render.render_send_codes(["Cohort-f2026"]),
+    "send_codes": workflows_render.render_send_codes(),
     "sync_gradebooks": workflows_render.render_sync_gradebooks(["Cohort-f2026"]),
     "render_grades": workflows_render.render_render_grades(["Cohort-f2026"]),
     "distribute_grades": workflows_render.render_distribute_grades(["Cohort-f2026"]),
@@ -74,9 +74,10 @@ ALL_RENDERED = {
     "scheduler": workflows_render.render_scheduler(),
 }
 
-# The renderers with no check-team gate: cron runs have no actor to check, and both jobs
-# only re-call idempotent functions (the scheduler's releases, refresh's re-seeding).
-UNGATED = {"scheduler", "refresh"}
+# The renderers with no check-team gate: neither a cron run nor a repository_dispatch has
+# an actor to check, and each job only re-calls idempotent functions (the scheduler's
+# releases, refresh's re-seeding, the codes send's `code_sent_at` idempotence).
+UNGATED = {"scheduler", "refresh", "send_codes"}
 
 # The seeded crons. Nobody watches them, and GitHub emails a scheduled-run failure only to
 # whoever last committed the cron file - the bot - so each has to report itself.
@@ -115,7 +116,6 @@ DATED_RENDERED = {
         COHORTS_2, ASSIGNMENTS_2
     ),
     "sync_membership": workflows_render.render_sync_membership(COHORTS_2),
-    "send_codes": workflows_render.render_send_codes(COHORTS_2),
     "sync_gradebooks": workflows_render.render_sync_gradebooks(COHORTS_2),
     "render_grades": workflows_render.render_render_grades(COHORTS_2),
     "distribute_grades": workflows_render.render_distribute_grades(COHORTS_2),
@@ -585,40 +585,39 @@ def test_classroom_config_site_dispatcher_fires_on_schedule_or_people_change():
     assert "sync-site" in tmpl  # dispatches the sync-site event
 
 
-def test_send_codes_auto_sends_on_a_roster_push():
-    # A roster edit must reach the new students' inboxes without a manual click, so the
-    # cohort's dispatcher fires this workflow. That path is UNGATED (check-team has no
-    # actor to check on a repository_dispatch) and it sends FOR REAL - nobody is there to
-    # untick a dry run. The button keeps its gate and its dry-run default.
-    rendered = workflows_render.render_send_codes(["Cohort-f2026"])
+def test_send_codes_only_ever_runs_off_a_roster_push():
+    # A roster edit is the ONLY way codes go out: no button, no cohort dropdown, no
+    # dry_run. The job is ungated (a repository_dispatch has no actor for check-team to
+    # ask about) and it sends for real, because nobody is watching it.
+    rendered = workflows_render.render_send_codes()
     doc = yaml.safe_load(rendered)
     trigger = doc.get("on", doc.get(True))
-    assert trigger["repository_dispatch"]["types"] == ["send-codes"]
-    assert "workflow_dispatch" in trigger
+    assert trigger == {"repository_dispatch": {"types": ["send-codes"]}}
     jobs = doc["jobs"]
-    assert jobs["send-codes-auto"]["if"] == "github.event_name != 'workflow_dispatch'"
-    assert "check-team" not in str(jobs["send-codes-auto"].get("needs", ""))
-    assert jobs["send-codes"]["needs"] == "check-team"
-    auto = jobs["send-codes-auto"]["steps"][-1]
-    assert auto["env"]["DISPATCH_COHORT"] == (
+    assert set(jobs) == {"send-codes"}
+    assert "check-team" not in str(jobs["send-codes"].get("needs", ""))
+    step = jobs["send-codes"]["steps"][-1]
+    assert step["env"]["DISPATCH_COHORT"] == (
         "${{ github.event.client_payload.cohort_org }}"
     )
-    assert "--no-dry-run" in auto["run"]
-    assert "--dry-run" not in auto["run"].replace("--no-dry-run", "")
+    assert "dry-run" not in rendered and "dry_run" not in rendered
     # The trust boundary: a client_payload is written by whoever holds a COHORT's bot
     # token, so the cohort it names is checked against this course org's registry.
-    assert '--dispatched-by "$COURSE"' in auto["run"]
-    assert auto["env"]["COURSE"] == "${{ github.repository_owner }}"
-    # The manual path is unchanged - gated, and never claiming to be dispatched.
-    manual = jobs["send-codes"]["steps"][-1]
-    assert "--dispatched-by" not in manual["run"]
+    assert '--dispatched-by "$COURSE"' in step["run"]
+    assert step["env"]["COURSE"] == "${{ github.repository_owner }}"
+    # Per cohort, off the payload alone: two cohorts pushing rosters at once must not
+    # drop each other's queued send.
+    assert (
+        "send-codes-${{ github.event.client_payload.cohort_org }}"
+        in doc["concurrency"]["group"]
+    )
 
 
 def test_classroom_config_roster_dispatcher_fires_send_codes_on_students_csv():
-    # students.csv is the only file that feeds the codes email, and this dispatcher is
-    # what makes the button a fallback rather than the only way in. It fires the same
-    # event type the rendered workflow listens for; loop-safety is the send's own
-    # `code_sent_at` idempotence, documented in the template.
+    # students.csv is the only file that feeds the codes email, and this dispatcher is the
+    # only thing that fires it. It dispatches the same event type the rendered workflow
+    # listens for; loop-safety is the send's own `code_sent_at` idempotence, documented in
+    # the template.
     tmpl = (
         ROOT / "templates" / "classroom-config" / "dispatch-send-codes.yml"
     ).read_text()
@@ -1063,10 +1062,8 @@ SERIALISED_WRITERS = {
     # written and the other is emailed, so that student's code enrols nobody. Scoped PER
     # COHORT, because that raced state is one cohort's students.csv: a roster push in one
     # cohort must not drop a queued send in another (a group holds one pending run, and a
-    # third arrival cancels the second). Only one of the two expressions is ever set.
-    "send_codes": (
-        "send-codes-${{ inputs.cohort_org || github.event.client_payload.cohort_org }}"
-    ),
+    # third arrival cancels the second).
+    "send_codes": "send-codes-${{ github.event.client_payload.cohort_org }}",
     "sync_membership": "sync-membership",
     "sync_site": "sync-site",
     "publish_site": "publish-course-website",
@@ -1190,33 +1187,30 @@ def test_a_renamed_org_is_corrected_even_with_no_repo_table_markers():
     assert "old-org-f2026" not in out
 
 
-# ------------------------------------------------------ the two buttons that send email
+# --------------------------------------------------------- the workflows that send email
 
-MAIL_BUTTONS = ("send_codes", "distribute_grades")
-
-# Everything that can put an email on the wire. The scheduler is not a BUTTON - it has no
-# dry-run gate of the buttons' shape and no check-team - but it sends enrolment codes on a
-# `schedule.yml` `enrolment:` window, so it needs the same transport secrets.
-MAIL_SENDERS = MAIL_BUTTONS + ("scheduler",)
+# Everything that can put an email on the wire: the codes send, off a roster push, and
+# Distribute grades, the one button left that emails a whole cohort.
+MAIL_SENDERS = ("send_codes", "distribute_grades")
 
 # Everything whose job env must carry the transport secrets. Check cohort setup sends
 # nothing - it REPORTS whether a send could (status' mail-transport row reads the very
 # same variables through `mailer.graph_config_from_env`), and a workflow that does not
 # carry them would report "unset" on every org whatever the truth. That is the exact
-# fiction the hourly cron leans on when it stays green over a missing transport.
+# fiction an unattended codes send leans on when it says a person will read the row.
 MAIL_ENV_CARRIERS = MAIL_SENDERS + ("status",)
 
 
-@pytest.mark.parametrize("name", MAIL_BUTTONS)
-def test_both_mail_buttons_default_to_a_dry_run(name):
+def test_the_one_mail_button_left_defaults_to_a_dry_run():
     # The entire safety rail on a button that emails a whole cohort, and until now it was
-    # asserted nowhere: a renderer edit flipping it would have been green.
-    dry_run = workflow_inputs(ALL_RENDERED[name])["dry_run"]
+    # asserted nowhere: a renderer edit flipping it would have been green. Send enrolment
+    # codes has no button and no preview at all - a roster push is what fires it.
+    dry_run = workflow_inputs(ALL_RENDERED["distribute_grades"])["dry_run"]
     assert dry_run["type"] == "boolean"
     assert dry_run["default"] is True
 
 
-@pytest.mark.parametrize("name", MAIL_BUTTONS)
+@pytest.mark.parametrize("name", ["distribute_grades"])
 @pytest.mark.parametrize(
     "value", ["", "true", "True", "TRUE", "yes", "1", " false", "false"]
 )
@@ -1244,9 +1238,9 @@ def test_the_dry_run_gate_is_fail_closed_under_bash(name, value, tmp_path):
 @pytest.mark.parametrize("name", MAIL_ENV_CARRIERS)
 def test_every_mail_sender_carries_every_transport_secret(name):
     # Nothing tied the workflow's env to the names `mailer` actually reads, so a rename
-    # reached production as a silently unconfigured org rather than a red CI. The hourly
-    # cron is here for a worse version of the same failure: without the secrets a
-    # scheduled enrolment window runs green every hour and mails nobody.
+    # reached production as a silently unconfigured org rather than a red CI. The codes
+    # send is here for a worse version of the same failure: without the secrets an
+    # unattended run off a roster push goes green and mails nobody.
     env = workflow_jobs(ALL_RENDERED[name])
     step_env: dict = {}
     for job in env.values():

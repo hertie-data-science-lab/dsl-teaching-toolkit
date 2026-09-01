@@ -14,9 +14,8 @@ not fetch - are vendored, under `base/`.
 
 The states it covers are the ones that render DIFFERENTLY, one of each: a released
 session, an unreleased one, a lab, a session whose readings are still to come, a
-handed-out assignment and a pending one, a dated exam and a TBC one, a special event, an
-enrolment window, the two term boundaries, and an All Materials index nested three
-directories deep.
+handed-out assignment and a pending one, a dated exam and a TBC one, a special event,
+the two term boundaries, and an All Materials index nested three directories deep.
 
     python3 tests/fixtures/site/build_fixture.py <dest>
 """
@@ -185,8 +184,7 @@ def _assignments() -> dict[str, str]:
 
 
 def _events() -> dict[str, str]:
-    """A dated exam, a TBC one, a special event, the enrolment window and the two term
-    boundaries."""
+    """A dated exam, a TBC one, a special event and the two term boundaries."""
     end = date(2026, 12, 18)
     return {
         "01-midterm-exam.md": site._exam_entry(
@@ -198,9 +196,6 @@ def _events() -> dict[str, str]:
         ),
         "03-resit-exam.md": site._exam_entry(
             "Resit Exam", end, tbc=True, dateless=True
-        ),
-        "enrolment.md": site._enrolment_entry(
-            "Enrolment opens", datetime(2026, 8, 24, 8, 0, tzinfo=BERLIN)
         ),
         "term-start.md": site._term_date_entry("Term starts", date(2026, 9, 7)),
         "term-end.md": site._term_date_entry("Term ends", end),

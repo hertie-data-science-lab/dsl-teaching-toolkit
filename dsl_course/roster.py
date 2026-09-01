@@ -16,7 +16,7 @@ issue fills them); a row with a blank handle is enrolled-but-not-yet-onboarded a
 skipped by provisioning.
 
 `code_sent_at` is SYSTEM-owned and records when that row's enrolment code was emailed.
-Blank means "not yet emailed", which is what Send enrolment codes selects on - without it,
+Blank means "not yet emailed", which is what the codes send selects on - without it,
 every re-run re-mailed every student who had not yet opened a Join issue.
 
 `role` splits the cohort into `enrolled` (the default - full participants) and `auditor`
@@ -120,22 +120,21 @@ def enrolled(students: list[Student]) -> list[Student]:
 def _roster_text(cohort_org: str) -> str | None:
     """students.csv's text, read ONCE per cohort per process.
 
-    A single CLI run asks for the roster several times over - `collect` reads it per
-    assignment, `assign` beside the schedule and teams.csv.
+        A single CLI run asks for the roster several times over - `collect` reads it per
+        assignment, `assign` beside the schedule and teams.csv.
 
-    TWO writers can now move the file under a live run: its own `enrol_codes` workflow,
-    and the hourly scheduler, which calls that same code for as long as a cohort's
-    `enrolment:` window is open. Neither invalidates this memo, and neither needs to. Both
-    write only `enrol_code` and `code_sent_at`, and those two columns exist for the benefit
-    of the NEXT send - who already has a code, who has already been emailed. Nothing
-    downstream reads either: provisioning, grading and the site all key on
-    `github_handle`. So a caller holding the pre-send text is not holding anything stale
-    that it looks at. `enrol_codes` itself never comes through here - it reads its own
-    text, with the sha it has to write against.
+    One writer can move the file under a live run: the `enrol_codes` workflow a roster
+        push fires. It does not invalidate this memo, and does not need to. It writes only
+        `enrol_code` and `code_sent_at`, and those two columns exist for the benefit of the
+        NEXT send - who already has a code, who has already been emailed. Nothing downstream
+        reads either: provisioning, grading and the site all key on `github_handle`. So a
+        caller holding the pre-send text is not holding anything stale that it looks at.
+        `enrol_codes` itself never comes through here - it reads its own text, with the sha it
+        has to write against.
 
-    The TEXT is memoised rather than `load`'s rows, so every caller still gets its own
-    parse (nobody can mutate another's list) and the loud "roster missing" line is still
-    printed where it happens. Cleared between tests (tests/conftest.py)."""
+        The TEXT is memoised rather than `load`'s rows, so every caller still gets its own
+        parse (nobody can mutate another's list) and the loud "roster missing" line is still
+        printed where it happens. Cleared between tests (tests/conftest.py)."""
     return get_file_content(cohort_org, CONFIG_REPO, ROSTER_PATH)
 
 

@@ -85,37 +85,11 @@ def test_mailer_dry_run_previews_without_config(capsys):
     assert "a***@x.edu" in out and "Subj" in out
 
 
-def test_dry_run_prints_one_placeholder_sample_and_no_real_body(capsys):
-    # The wording is the one thing a masked recipient list cannot show a reviewer, so a
-    # dry run prints ONE body - rendered from placeholders, never a student's own.
-    msgs = [
-        ("ada@x.edu", "Subj", "Hello Ada, your code is dsl-abc123"),
-        ("bo@x.edu", "Subj", "Hello Bo, your code is dsl-def456"),
-    ]
-    sample = enrol_codes.sample_body("https://github.com/org/welcome/issues")
-    assert mailer.send_bulk(msgs, dry_run=True, sample=sample) == [
-        "ada@x.edu",
-        "bo@x.edu",
-    ]
-    out = capsys.readouterr().out
-    assert out.count(mailer.SAMPLE_HEADER) == 1
-    assert "<code>" in out and "<name>" in out
-    assert "dsl-abc123" not in out and "Ada" not in out and "Bo" not in out
-
-
 def test_a_real_send_never_prints_the_sample(capsys, monkeypatch):
     monkeypatch.setattr(mailer, "graph_config_from_env", lambda: None)
     mailer.send_bulk([("ada@x.edu", "Subj", "Body")], sample="SHOULD NOT APPEAR")
     captured = capsys.readouterr()
     assert "SHOULD NOT APPEAR" not in captured.out + captured.err
-
-
-def test_sample_body_names_the_course_like_a_real_message():
-    named = enrol_codes.sample_body(
-        "https://github.com/org/welcome/issues", "Deep Learning"
-    )
-    assert "To join the Deep Learning course on GitHub" in named
-    assert "<code>" in named and "<name>" in named
 
 
 def test_mask_email_keeps_one_character_and_the_domain():
@@ -472,15 +446,7 @@ def _transport(monkeypatch, configured: bool) -> None:
             monkeypatch.delenv(name, raising=False)
 
 
-def _run_with(
-    monkeypatch,
-    roster_text,
-    *,
-    sends=None,
-    writes_ok=True,
-    dry_run=False,
-    transport=True,
-):
+def _run_with(monkeypatch, roster_text, *, sends=None, writes_ok=True, transport=True):
     """Drive `run` against one roster. Returns (outcome, messages sent, texts written)."""
     _transport(monkeypatch, transport)
     written: list[str] = []
@@ -507,7 +473,7 @@ def _run_with(
             or [m[0] for m in messages][: len(messages) if sends is None else sends]
         ),
     )
-    outcome = enrol_codes.run("COHORT", dry_run=dry_run)
+    outcome = enrol_codes.run("COHORT")
     return outcome, sent, written
 
 
@@ -548,8 +514,8 @@ def test_a_batch_that_went_nowhere_for_want_of_secrets_reads_as_a_missing_transp
     monkeypatch,
 ):
     # `send_bulk` answers an unconfigured transport and a wholly rejected batch with the
-    # same empty list, and the hourly cron has to tell them apart: it re-runs for the
-    # length of an enrolment window, and nothing it does can conjure a GRAPH_* secret.
+    # same empty list, and the two are not the same fix: nothing a re-push of the roster
+    # does can conjure a GRAPH_* secret.
     for name in mailer.GRAPH_ENV:
         monkeypatch.delenv(name, raising=False)
     text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
@@ -562,7 +528,7 @@ def test_a_batch_that_went_nowhere_for_want_of_secrets_reads_as_a_missing_transp
 
 def test_a_wholly_rejected_batch_on_a_live_transport_is_still_a_failure(monkeypatch):
     # The other half of the same question: the secrets ARE set, so nothing went out
-    # because Graph refused it. That is a real failure and must red, cron included.
+    # because Graph refused it. That is a real failure and must red.
     text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
     outcome, _sent, written = _run_with(monkeypatch, text, sends=0)
     assert outcome is enrol_codes.Outcome.FAILED
@@ -577,11 +543,10 @@ def test_a_roster_that_cannot_be_stamped_mails_nobody_however_often_it_is_run(
     # THE invariant, and the bug that motivated it. `write_column` reports a refused write
     # by RETURNING - it never raises - so under send-then-stamp a roster that could not be
     # written (an archived classroom-config, a new branch ruleset, a token that lost write
-    # scope) meant the batch went out with `code_sent_at` still blank. The button printed
-    # "re-running WILL email them again" to a human, who stopped; the hourly cron does not
-    # stop, and mailed the same students on every tick for the length of the window.
+    # scope) meant the batch went out with `code_sent_at` still blank - and the next push
+    # to the roster, which the send's own write-back provokes, mailed them all again.
     text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
-    for tick in range(3):  # the cron does not read the log and does not give up
+    for tick in range(3):  # nobody reads the log, and the roster keeps being pushed
         outcome, sent, written = _run_with(monkeypatch, text, writes_ok=False)
         assert outcome is enrol_codes.Outcome.FAILED, tick
         assert sent == [] and written == [], tick
@@ -591,9 +556,9 @@ def test_a_roster_that_cannot_be_stamped_mails_nobody_however_often_it_is_run(
 
 
 def test_a_transport_that_raises_gives_the_claim_back_before_it_propagates(monkeypatch):
-    # A credential Graph refuses raises out of `send_bulk`, and the scheduler catches it
-    # and stays green. Unreleased, the claim would leave a whole cohort marked as emailed
-    # by a run that sent nothing, with no tick ever retrying them.
+    # A credential Graph refuses raises out of `send_bulk`. Unreleased, the claim would
+    # leave a whole cohort marked as emailed by a run that sent nothing, with no later
+    # push to the roster ever retrying them.
     text = HEADER + "ada@uni.edu,Ada,enrolled,,,dsl-aaa111,\n"
     _transport(monkeypatch, True)
     written: list[str] = []
@@ -667,18 +632,11 @@ def test_two_roster_rows_sharing_an_email_get_one_code_email(monkeypatch):
     assert [to for to, _s, _b in sent] == ["ada@uni.edu"]
 
 
-def test_a_dry_run_writes_nothing_and_marks_nobody(monkeypatch):
-    text = HEADER + "ada@uni.edu,Ada,enrolled,,,,\n"
-    outcome, sent, written = _run_with(monkeypatch, text, dry_run=True)
-    assert outcome is enrol_codes.Outcome.SENT and written == []
-    assert [to for to, _s, _b in sent] == ["ada@uni.edu"]
-
-
 def test_run_reds_when_the_roster_is_missing(monkeypatch, capsys):
     monkeypatch.setattr(enrol_codes, "get_file_with_sha", lambda org, repo, path: None)
     outcome = enrol_codes.run("COHORT")
     assert outcome is enrol_codes.Outcome.NO_ROSTER
-    assert enrol_codes.reds_the_button(outcome)  # the button still reds
+    assert enrol_codes.reds_the_run(outcome)  # nothing is outstanding only if it sent
     assert "Could not find students.csv" in capsys.readouterr().err
 
 
@@ -690,20 +648,11 @@ def _dispatched(monkeypatch, cohort, registered, course="Course-Org"):
     ran: list[str] = []
     monkeypatch.setattr(enrol_codes, "discover_cohorts", lambda org: registered)
     monkeypatch.setattr(
-        enrol_codes,
-        "run",
-        lambda org, dry_run=False: ran.append(org) or enrol_codes.Outcome.SENT,
+        enrol_codes, "run", lambda org: ran.append(org) or enrol_codes.Outcome.SENT
     )
     monkeypatch.setattr(
         "sys.argv",
-        [
-            "enrol_codes",
-            "--cohort-org",
-            cohort,
-            "--no-dry-run",
-            "--dispatched-by",
-            course,
-        ],
+        ["enrol_codes", "--cohort-org", cohort, "--dispatched-by", course],
     )
     return enrol_codes.main(), ran
 
@@ -739,21 +688,16 @@ def test_a_dispatched_send_accepts_a_registered_cohort_whatever_its_casing(monke
     )
 
 
-def test_the_manual_button_never_consults_the_registry(monkeypatch):
-    # No --dispatched-by: the button is behind check-team and a dropdown the course org
-    # rendered itself, and the hourly scheduler only ever walks the registry. Neither has
-    # untrusted input to check, so neither pays for a registry read.
+def test_a_hand_run_without_dispatched_by_never_consults_the_registry(monkeypatch):
+    # A maintainer naming a cohort on the command line has no untrusted input to check, so
+    # it pays for no registry read. Every production send passes --dispatched-by.
     def boom(org):
-        raise AssertionError("the manual path must not read the cohort registry")
+        raise AssertionError("a hand run must not read the cohort registry")
 
     ran: list[str] = []
     monkeypatch.setattr(enrol_codes, "discover_cohorts", boom)
     monkeypatch.setattr(
-        enrol_codes,
-        "run",
-        lambda org, dry_run=False: ran.append(org) or enrol_codes.Outcome.SENT,
+        enrol_codes, "run", lambda org: ran.append(org) or enrol_codes.Outcome.SENT
     )
-    monkeypatch.setattr(
-        "sys.argv", ["enrol_codes", "--cohort-org", "Cohort-f2026", "--no-dry-run"]
-    )
+    monkeypatch.setattr("sys.argv", ["enrol_codes", "--cohort-org", "Cohort-f2026"])
     assert (enrol_codes.main(), ran) == (0, ["Cohort-f2026"])
