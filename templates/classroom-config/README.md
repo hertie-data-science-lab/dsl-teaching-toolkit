@@ -26,7 +26,7 @@ One row per student. Leave `github_handle`, `github_id` & `enrol_code` blank - t
 | `enrol_code` | **Send enrolment codes** workflow | random non-PII token, automatically emailed to the student; they paste it into the "Join course" issue. Leave blank - the workflow owns this. *NB it fills blanks only and never rewrites an issued code, so it is idempotent: re-run it when students are added later* |
 | `github_handle` | onboarding | blank until the student enrols via the `welcome` repo's "Join" issue - system-owned, do not hand-edit |
 | `github_id` | onboarding | blank until the student enrols via the `welcome` repo's "Join" issue - the immutable numeric id, which survives a handle rename. System-owned, do not hand-edit |
-| `code_sent_at` | **Send enrolment codes** workflow | when that row's code email went out. Blank means not yet emailed, and that is what the workflow selects on - so a re-run mails only the students who still need a code. System-owned, do not hand-edit; clear a cell to deliberately re-send |
+| `code_sent_at` | **Send enrolment codes** workflow | when that row's code email went out - written just BEFORE the send, so a roster that cannot be written means nothing is mailed rather than mailed twice. Blank means not yet emailed, and that is what the workflow selects on - so a re-run mails only the students who still need a code. System-owned, do not hand-edit; clear a cell to deliberately re-send |
 
 Any OTHER column you add (a registrar id, a lecture section, notes) is yours: the engine never reads it, and never drops it when it writes back.
 

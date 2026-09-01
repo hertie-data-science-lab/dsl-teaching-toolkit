@@ -31,7 +31,7 @@ from datetime import UTC, datetime
 from . import mailer, roster
 from .discovery import course_name_for_cohort
 from .gh_contents import get_file_with_sha, put_file, read_csv
-from .log import log_err, log_ok, log_step
+from .log import log_err, log_ok, log_person, log_step
 
 # No ambiguous characters (0/O, 1/l/I) so a student can read the code off an email.
 _ALPHABET = "abcdefghjkmnpqrstuvwxyz23456789"
@@ -41,7 +41,9 @@ def make_code() -> str:
     return "dsl-" + "".join(secrets.choice(_ALPHABET) for _ in range(6))
 
 
-def fill_column_in_csv(text: str, column: str, values_by_row: dict[int, str]) -> str:
+def fill_column_in_csv(
+    text: str, column: str, values_by_row: dict[int, str], replacing: str = ""
+) -> str:
     """Surgically write one column into the RAW students.csv, preserving everything else.
 
     `values_by_row` maps a 0-based DATA-row index (matching `roster.parse` order) to the
@@ -53,8 +55,11 @@ def fill_column_in_csv(text: str, column: str, values_by_row: dict[int, str]) ->
     rewrote
     `role`, silently dropping unknown columns and mangling role text on every code write.
 
-    Blank cells only, which is what makes both callers idempotent: a code already issued is
-    never rotated, and a row already marked as emailed is never re-stamped. The column is
+    Only cells whose current text is `replacing` are written, which is what makes every
+    caller idempotent: the default (blank) means a code already issued is never rotated and
+    a row already marked as emailed is never re-stamped. The one caller that passes
+    anything else is the release of a claim that could not be spent (`_release_unsent`),
+    which blanks the cells still holding ITS OWN stamp and nobody else's. The column is
     appended if the roster predates it, so a deployed cohort needs no migration."""
     # read_csv, not a bare DictReader: this path bypasses `roster.parse`, and a
     # `;`-delimited Excel export was written straight back with a code column bolted on -
@@ -65,7 +70,7 @@ def fill_column_in_csv(text: str, column: str, values_by_row: dict[int, str]) ->
         fieldnames.append(column)
     rows = list(reader)
     for i, row in enumerate(rows):
-        if i in values_by_row and not (row.get(column) or "").strip():
+        if i in values_by_row and (row.get(column) or "").strip() == replacing:
             row[column] = values_by_row[i]
     out = io.StringIO()
     writer = csv.DictWriter(out, fieldnames=fieldnames)
@@ -114,6 +119,7 @@ def write_column(
     column: str,
     items: list[tuple[int, str, str]],
     message: str,
+    replacing: str = "",
 ) -> str | None:
     """Commit one column into students.csv without clobbering a concurrent edit.
     Returns the roster text AS COMMITTED, or None if no attempt was accepted.
@@ -130,7 +136,7 @@ def write_column(
     a retry the roster can hold a different code from the one this run generated, and the
     caller must email what the roster holds."""
     for attempt in range(1, WRITE_ATTEMPTS + 1):
-        body = fill_column_in_csv(raw, column, rows_for_values(raw, items))
+        body = fill_column_in_csv(raw, column, rows_for_values(raw, items), replacing)
         if put_file(
             cohort_org,
             roster.CONFIG_REPO,
@@ -217,8 +223,9 @@ class Outcome(enum.Enum):
     a red X on anything that stopped the send. The **hourly cron** re-runs unattended for
     the length of an `enrolment:` window, where a red X it cannot clear is an alarm nobody
     reads by the second day - so it fails only on `FAILED` and lets the states that need a
-    person (no roster, no transport) be reported by `status`, which is readable BEFORE the
-    window opens. Each value is the phrase a log line puts after "no codes went out:".
+    person (no roster, no transport) be reported by `status` instead: `status.collect`
+    carries a roster row and a mail-transport row, both readable BEFORE the window opens.
+    Each value is the phrase a log line puts after "no codes went out:".
     """
 
     SENT = "the codes were emailed"
@@ -299,6 +306,14 @@ def run(cohort_org: str, dry_run: bool = False) -> Outcome:
     if not targets:
         log_ok("no not-yet-onboarded students still to be sent a code.")
         return Outcome.NOTHING_TO_SEND
+    # Asked BEFORE anything is claimed below, not inferred afterwards from an empty batch:
+    # the claim stamps the roster, and an org whose GRAPH_* secrets were never set would
+    # otherwise have its whole roster marked as emailed by a run that could never have
+    # emailed anybody. A dry run has no transport to want - it is a documented offline
+    # preview - and `send_bulk`'s own preflight is what proves the credential there.
+    if not dry_run and mailer.graph_config_from_env() is None:
+        log_err(f"no mail transport for {cohort_org} - nothing claimed, nothing sent.")
+        return Outcome.NO_TRANSPORT
     # The codes are already committed to students.csv by this point, and
     # load_yaml_config RAISES on a malformed dsl-course.yml or a non-404 read failure -
     # while main() catches only RuntimeError. Unguarded, a bad course file meant a
@@ -310,56 +325,134 @@ def run(cohort_org: str, dry_run: bool = False) -> Outcome:
         log_err(f"could not read the course name ({exc}) - mailing without it")
         course_name = ""
     messages = [code_message(s, welcome_url, course_name) for s in targets]
-    sent = mailer.send_bulk(
-        messages, dry_run=dry_run, sample=sample_body(welcome_url, course_name)
-    )
-    if not dry_run and sent and _mark_sent(cohort_org, sent) != 0:
+    recipients = [s.hertie_email for s in targets]
+    # CLAIM, then send. `write_column` reports a refused write by RETURNING - it never
+    # raises - so send-then-stamp left the one ordering an unattended caller cannot
+    # survive: a roster that cannot be written (an archived classroom-config, a new branch
+    # ruleset, a token that lost write scope, a run of 5xx) meant the batch went out with
+    # `code_sent_at` still blank, and the hourly cron mailed the very same students again
+    # on the next tick, and the one after that, for the length of the window. Stamping
+    # first makes a write failure mean NOTHING WAS MAILED, which the next tick simply
+    # retries. Both callers share the ordering: the button's human read "re-running WILL
+    # email them again" and stopped, but a second press does the same damage, and two
+    # orderings through the most delicate lines in this module is the worse bug.
+    stamp = datetime.now(UTC).isoformat(timespec="seconds")
+    if not dry_run and not _claim_sent(cohort_org, recipients, stamp):
+        log_err(
+            f"could not stamp code_sent_at in {roster.ROSTER_PATH} for {cohort_org} - "
+            f"nothing emailed, so re-running is safe. Fix the roster write."
+        )
         return Outcome.FAILED
-    if len(sent) == len(messages):
-        return Outcome.SENT
-    # Nothing at all went out, and there is no transport it could have gone out on: a
-    # configuration gap rather than a rejected batch, and the hourly cron treats the two
-    # differently. Asked only here, on the failure path, so a send that worked never
-    # re-reads the environment - and only when NOTHING went out, because a partly-sent
-    # batch has already proved the transport works.
-    if not sent and mailer.graph_config_from_env() is None:
-        return Outcome.NO_TRANSPORT
-    return Outcome.FAILED
-
-
-def _mark_sent(cohort_org: str, sent: list[str]) -> int:
-    """Stamp `code_sent_at` on the rows that were actually emailed. 0 on success.
-
-    Re-reads first: the code write above moved the sha, and a Join issue can land during
-    the several minutes a throttled batch takes."""
-    read = get_file_with_sha(cohort_org, roster.CONFIG_REPO, roster.ROSTER_PATH)
-    if read is not None:
-        raw, sha = read
-        stamp = datetime.now(UTC).isoformat(timespec="seconds")
+    try:
+        sent = mailer.send_bulk(
+            messages, dry_run=dry_run, sample=sample_body(welcome_url, course_name)
+        )
+    except Exception:
+        # A transport that RAISED (a credential Graph refused) sent nothing at all, and
+        # the claim above must not outlive it - unreleased, it is a whole cohort silently
+        # marked as emailed. The release logs its own failure and never raises, so the
+        # original exception is what reaches the caller.
+        if not dry_run:
+            _release_unsent(cohort_org, recipients, stamp)
+        raise
+    if not dry_run:
+        # A partly-delivered batch is ROUTINE, not exotic: `send_bulk` stops at its own
+        # time budget and says "re-run to continue". Releasing the claims it did not spend
+        # is what keeps that true - without it, the tail of every throttled batch would be
+        # stamped as emailed and never mailed at all.
         went_out = set(sent)
-        marks = [
-            (i, s.hertie_email.strip(), stamp)
-            for i, s in enumerate(roster.parse(raw))
-            if s.hertie_email in went_out
-        ]
-        if marks and write_column(
+        unsent = [to for to in recipients if to not in went_out]
+        if unsent:
+            _release_unsent(cohort_org, unsent, stamp)
+            return Outcome.FAILED
+        log_ok(f"emailed {len(sent)} code(s), all of them recorded")
+    return Outcome.SENT
+
+
+def _claim_sent(cohort_org: str, recipients: list[str], stamp: str) -> bool:
+    """Stamp `code_sent_at` on the rows about to be emailed. True if it was committed.
+
+    Re-reads first: the code write above moved the sha, and a Join issue can land between
+    the two writes.
+
+    A claim, not a record - it is written BEFORE the send (see `run`), so what it really
+    asserts is "nobody else will mail these rows". `_release_unsent` gives back whatever
+    the send then failed to spend."""
+    read = get_file_with_sha(cohort_org, roster.CONFIG_REPO, roster.ROSTER_PATH)
+    if read is None:
+        return False
+    raw, sha = read
+    want = set(recipients)
+    marks = [
+        (i, s.hertie_email.strip(), stamp)
+        for i, s in enumerate(roster.parse(raw))
+        if s.hertie_email in want
+    ]
+    return bool(marks) and bool(
+        write_column(
             cohort_org,
             raw,
             sha,
             "code_sent_at",
             marks,
-            f"roster: record {len(marks)} enrolment code email(s) sent",
-        ):
-            log_ok(f"recorded {len(marks)} code email(s) as sent")
-            return 0
-    # The one failure that must never be swallowed: the students HAVE their codes, and
-    # nothing on disk says so.
-    log_err(
-        f"{len(sent)} student(s) were emailed but {roster.ROSTER_PATH} in {cohort_org} "
-        f"could not record it - re-running WILL email them again. Fix the roster write, "
-        f"or fill code_sent_at by hand."
+            f"roster: claim {len(marks)} enrolment code email(s)",
+        )
     )
-    return 1
+
+
+def _release_unsent(cohort_org: str, unsent: list[str], stamp: str) -> None:
+    """Blank the `code_sent_at` claims the send did not spend, so a later run retries them.
+
+    Only cells still holding THIS run's exact `stamp` are blanked (`replacing=stamp`), so a
+    row somebody else stamped in between is left exactly as it is.
+
+    Never raises: it runs on the failure path, including from an `except` block where a
+    raise of its own would replace the exception the caller has to see."""
+    try:
+        read = get_file_with_sha(cohort_org, roster.CONFIG_REPO, roster.ROSTER_PATH)
+        released: str | None = None
+        if read is not None:
+            raw, sha = read
+            want = set(unsent)
+            marks = [
+                (i, s.hertie_email.strip(), "")
+                for i, s in enumerate(roster.parse(raw))
+                if s.hertie_email in want and s.code_sent_at.strip() == stamp
+            ]
+            released = (
+                write_column(
+                    cohort_org,
+                    raw,
+                    sha,
+                    "code_sent_at",
+                    marks,
+                    f"roster: release {len(marks)} unsent enrolment code claim(s)",
+                    replacing=stamp,
+                )
+                if marks
+                # Nothing still carries our stamp, so there is no claim left to give back.
+                else ""
+            )
+        if released is not None:
+            log_err(
+                f"{len(unsent)} student(s) in {cohort_org} were not emailed - their "
+                f"code_sent_at claim was released, so the next run retries them."
+            )
+            return
+    except Exception as exc:  # a failed release must still be REPORTED, not raised
+        log_err(f"releasing the unsent enrolment claims in {cohort_org} failed: {exc}")
+    # The one failure that must never be swallowed: the roster says these students were
+    # emailed and they were not, so nothing will ever retry them. No address here - this
+    # line lands in a world-readable Actions log - but the stamp is exact, and every row
+    # carrying it is a row to clear.
+    log_err(
+        f"{len(unsent)} student(s) in {roster.ROSTER_PATH} in {cohort_org} are stamped "
+        f"code_sent_at={stamp} but were never emailed, and the stamp could not be "
+        f"cleared - delete that exact timestamp from those rows by hand, or they never "
+        f"receive a code."
+    )
+    for to in unsent:
+        log_person(f"  not emailed, still claimed: {to}")
 
 
 def reds_the_button(outcome: Outcome) -> bool:

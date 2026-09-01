@@ -415,7 +415,11 @@ def _handout_releases(
 # reported identically on every tick for the length of the window, and a cron that has
 # been red for a fortnight is one nobody reads any more. They are reported instead by
 # `status` (the Check cohort setup workflow), which a person can read BEFORE the window
-# opens - the only moment the warning is still actionable.
+# opens - the only moment the warning is still actionable: `status.collect` builds the
+# roster row (C2, and the enrolment row C8 that names an empty roster) and the mail
+# transport row (B8, off `mailer.GRAPH_ENV`), and `workflows_render.render_status` puts
+# those secrets in that workflow's env so B8 reads the truth. Staying green here is only
+# defensible for as long as all three of those hold.
 _NOT_THE_CRONS_FAULT = frozenset(
     {
         enrol_codes.Outcome.NO_ROSTER,
@@ -433,9 +437,11 @@ def _send_enrolment_codes(
 
     The whole send is `enrol_codes.run`, exactly as the button calls it - the codes are
     written to `students.csv` and only rows with a blank `code_sent_at` are mailed, which
-    is what makes an hourly re-run a no-op rather than a second email. It reads the roster
-    itself and reports what it found, so nothing here reads it a second time to decide
-    whether calling it is worthwhile.
+    is what makes an hourly re-run a no-op rather than a second email. `run` CLAIMS that
+    stamp before it mails, so a roster it cannot write means nothing goes out and this
+    tick reds, rather than a batch going out un-stamped and every tick after it mailing
+    the same students again. It reads the roster itself and reports what it found, so
+    nothing here reads it a second time to decide whether calling it is worthwhile.
 
     A rejected message still reddens the run; a missing roster or a missing transport does
     not (see `_NOT_THE_CRONS_FAULT`)."""
