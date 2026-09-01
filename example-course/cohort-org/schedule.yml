@@ -156,3 +156,9 @@ events:
   guest-lecture:
     title: Guest lecture (industry speaker)
     event_datetime: tbc
+
+enrolment:
+  send_codes_datetime: 2026-08-24T08:00   # the window OPENS - codes go out a fortnight before teaching starts
+  send_until: 2026-09-21T00:00            # NB optional: this IS the default (semester_start + 2 weeks; without a semester_start, send_codes_datetime + 2 weeks), spelled out here
+  show_on_site: true                      # NB optional, default false - enrolment is administrative, so the row is opt-in
+  title: Enrolment opens                  # NB if empty, default -> would display as this anyway

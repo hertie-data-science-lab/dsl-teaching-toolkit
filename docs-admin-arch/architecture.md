@@ -318,7 +318,7 @@ fan-out. A typo'd or squatted handle is an error, not an invitation into the pri
 
 ## The schedule
 
-Each cohort's `classroom-config/schedule.yml` is the single home for its timed plan. Three
+Each cohort's `classroom-config/schedule.yml` is the single home for its timed plan. Four
 top-level blocks, each encoding a **behaviour**, plus `timezone`, `semester_start`,
 `semester_end`.
 
@@ -331,12 +331,16 @@ label → event_datetime + deploy list`"]
 slug → handout / due / grading`"]
   s --> e["`events:
 exam · special_event`"]
+  s --> n["`enrolment:
+send_codes_datetime → send_until`"]
   r -->|"deploy_datetime"| dep["deploy.deploy_many"]
   a -->|"handout_datetime"| asg["assign"]
   a -->|"grading_datetime"| col["snapshot → autograde"]
+  n -->|"every tick in the window"| enr["enrol_codes.run"]
   r --> site["site rows"]
   a --> site
   e --> site
+  n -.->|"show_on_site"| site
 ```
 
 | Block | Key fields | Fires |
@@ -344,6 +348,7 @@ exam · special_event`"]
 | `releases.<label>` | `event_datetime`, `deploy[]` of `course_source_repo` + `course_source_path` (required), `cohort_dest_repo` (default `materials`), `cohort_dest_path` (default: mirror), `deploy_datetime` | a deploy per entry |
 | `assignments.<slug>` | `course_source_repo` (**required**), `due_datetime` (**required**; a bare date closes at 23:59:59), `grading_datetime` (default: due), `handout_datetime`, `cohort_dest_repo` (default: the slug), `type`, `max_team_size` | handout, then snapshot + autograde |
 | `events.<label>` | `type` (`exam` \| `special_event`), `title`, `event_datetime` | nothing - display-only site rows |
+| `enrolment` | `send_codes_datetime` (**required**), `send_until` (default: `semester_start` + 2 weeks, or the opening + 2 weeks when no `semester_start` is pinned), `show_on_site` (default **false**), `title` | `enrol_codes.run` on every tick inside the window - idempotent on `code_sent_at`. A missing roster or missing `GRAPH_*` secrets keep the cron GREEN and are reported by `status` instead (its roster/enrolment rows and its mail-transport row) |
 
 - **Parsing is total but never silent.** An entry that is valid YAML yet not a valid schedule
   entry is dropped (or kept on a documented fallback) and recorded in `Schedule.dropped`, so the
@@ -598,9 +603,11 @@ call `sync_site` in-process when they change something.
 **Row types.** The three collections are rebuilt from scratch each run, so a de-released row
 disappears. Each row carries its own `type`, and the theme picks a template - and therefore a
 colour - from it alone: `lecture`, `lab`, `assignment` (with a nested `due` event), `exam`,
-`special_event`, `term_date`. Lecture vs lab is decided by the **released section directory**
-(`labs/`), never by a faculty declaration; term rows are synthesised from `semester_start` /
-`semester_end`; undated entries sort to the end of term and render as TBC.
+`special_event`, `term_date`, `enrolment`. Lecture vs lab is decided by the **released section
+directory** (`labs/`), never by a faculty declaration; term rows are synthesised from
+`semester_start` / `semester_end`; the enrolment row appears only where `enrolment:` sets
+`show_on_site` (it defaults to false); undated entries sort to the end of term and render as
+TBC.
 
 **The plan is public; the payload is gated.** Every dated entry in `schedule.yml` gets its row
 the day it is written, whether or not it has shipped - so the schedule publishes the whole term.
@@ -689,8 +696,9 @@ Self-contained - workflows and their Python implementation both live in this rep
     - `welcome` - the SYSTEM-owned cohort seeding (onboarding workflows, issue forms,
       `classroom-config` scaffolds, samples and system files), split out so `seed.refresh` can
       re-push it without importing `bootstrap_course` back.
-  - `scheduler` - the hourly cron: freeze passed deadlines, autograde, then fire due releases.
-  - `schedule` - parse and validate `schedule.yml` (the three blocks, timezone normalisation,
+  - `scheduler` - the hourly cron: freeze passed deadlines, autograde, mail enrolment codes
+    while a cohort's window is open, then fire due releases.
+  - `schedule` - parse and validate `schedule.yml` (the four blocks, timezone normalisation,
     dropped-entry reporting, write-once handout records).
   - `deploy` - the single release executor (`deploy_many`): copy each source path into its
     cohort repo additively, cloning every repo once per run. Shared by the button and the scheduler.

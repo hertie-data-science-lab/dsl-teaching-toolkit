@@ -364,8 +364,9 @@ def test_every_shipped_sample_parses_with_the_real_parser():
     sched, error = schedule.load_file(str(welcome.EXAMPLE_COHORT / "schedule.yml"))
     assert error is None, error
     assert sched.dropped == [], "\n".join(sched.dropped)
-    # the current three-block schema, all three blocks exercised
+    # the current four-block schema, every block exercised
     assert sched.releases and sched.assignments and sched.events
+    assert sched.enrolment is not None
 
     faculty = sync_faculty.parse_faculty_from_meta(
         yaml.safe_load(welcome.example_cohort_file("people.yml")) or {}

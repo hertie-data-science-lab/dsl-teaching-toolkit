@@ -7,7 +7,7 @@ default).
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -722,6 +722,154 @@ def test_the_plan_is_read_once_per_cohort_and_a_handout_reopens_it(monkeypatch):
     schedule.record_handout("Cohort-f2026", "assignment-1", "2026-09-22T14:05")
     schedule.load("Cohort-f2026")
     assert len(reads) == 3, "the memo survived a write to schedule.yml"
+
+
+# ------------------------------------------------------------- the enrolment window
+# `enrolment:` is a WINDOW, not a moment: every hourly tick inside it mails whoever still
+# has no code. So the two ends of it, and the defaults that supply the missing one, are
+# what decides whether a cohort is mailed at all - and for how long.
+
+
+def test_an_enrolment_window_defaults_its_close_to_two_weeks_into_term():
+    sched = parse(
+        {
+            "semester_start": "2026-09-07",
+            "enrolment": {"send_codes_datetime": "2026-08-24T08:00"},
+        }
+    )
+    window = sched.enrolment
+    assert window.opens == datetime(2026, 8, 24, 8, 0, tzinfo=BERLIN)
+    assert window.closes == datetime(2026, 9, 21, 0, 0, tzinfo=BERLIN)
+    # the two defaults faculty are most likely to be surprised by
+    assert window.show_on_site is False
+    assert window.title == "Enrolment opens"
+    assert sched.dropped == []
+
+
+def test_an_enrolment_window_takes_every_field_as_written():
+    sched = parse(
+        {
+            "semester_start": "2026-09-07",
+            "enrolment": {
+                "send_codes_datetime": "2026-08-24T08:00",
+                "send_until": "2026-10-01T00:00",
+                "show_on_site": True,
+                "title": "Enrol now",
+            },
+        }
+    )
+    window = sched.enrolment
+    assert window.closes == datetime(2026, 10, 1, 0, 0, tzinfo=BERLIN)
+    assert window.show_on_site is True and window.title == "Enrol now"
+    assert sched.dropped == []
+
+
+def test_a_cohort_with_no_term_dates_still_gets_a_bounded_window():
+    # `semester_start` is optional everywhere else, so the default close cannot depend on
+    # it being there - an unbounded window would mail for the rest of the year.
+    window = parse({"enrolment": {"send_codes_datetime": "2026-08-24T08:00"}}).enrolment
+    assert window.closes == datetime(2026, 9, 7, 8, 0, tzinfo=BERLIN)
+
+
+def test_no_enrolment_block_means_nothing_is_mailed_automatically():
+    assert parse({"semester_start": "2026-09-07"}).enrolment is None
+
+
+@pytest.mark.parametrize("value", [{}, {"send_codes_datetime": "nope"}])
+def test_an_enrolment_block_with_no_usable_opening_is_dropped(value):
+    # No opening moment = a window that can never be open, so the block cannot mean what
+    # it says. Dropped, and named - not left as a silent no-op. ONE line, as every other
+    # required field gets: an unreadable value used to be flagged and then dropped, so it
+    # was reported twice and read as two separate mistakes.
+    sched = parse({"enrolment": value})
+    assert sched.enrolment is None
+    assert [d.split(":")[0] for d in sched.dropped] == ["enrolment"]
+
+
+def test_an_enrolment_block_authored_as_a_list_is_dropped_not_raised():
+    # `parse` must never raise: `load` sits under the hourly cron AND the site sync.
+    sched = parse({"enrolment": [{"send_codes_datetime": "2026-08-24T08:00"}]})
+    assert sched.enrolment is None
+    assert any("not a mapping" in d for d in sched.dropped)
+
+
+def test_a_typod_enrolment_key_is_flagged_but_the_window_survives():
+    sched = parse(
+        {
+            "enrolment": {
+                "send_codes_datetime": "2026-08-24T08:00",
+                "send_codes_until": "2026-09-21",  # the near-miss for `send_until`
+            }
+        }
+    )
+    assert sched.enrolment is not None
+    assert any(d.startswith("enrolment.send_codes_until:") for d in sched.dropped)
+
+
+@pytest.mark.parametrize("bad", ["2026-08-01", "2026-08-24T08:00", "next tuesday"])
+def test_a_send_until_that_cannot_close_the_window_falls_back_and_says_so(bad):
+    # Before the opening, ON it, or unreadable: all three leave a window that never opens,
+    # which sends nothing and looks fine. The default close is used and the value flagged.
+    sched = parse(
+        {
+            "semester_start": "2026-09-07",
+            "enrolment": {"send_codes_datetime": "2026-08-24T08:00", "send_until": bad},
+        }
+    )
+    assert sched.enrolment.closes == datetime(2026, 9, 21, 0, 0, tzinfo=BERLIN)
+    assert any(d.startswith("enrolment.send_until:") for d in sched.dropped)
+
+
+def test_a_default_close_that_lands_before_the_opening_is_flagged_and_moved():
+    # The DEFAULT close is anchored on `semester_start`, and only an AUTHORED `send_until`
+    # was ever checked against the opening - so a cohort configured after term started (a
+    # second intake, a late setup) resolved a close BEHIND its own opening. `is_open` was
+    # then false for ever: nothing was mailed, `--validate` printed the backwards range
+    # without calling it a fault, and the status row read ok.
+    sched = parse(
+        {
+            "semester_start": "2026-09-07",
+            "enrolment": {"send_codes_datetime": "2026-09-25T08:00"},
+        }
+    )
+    window = sched.enrolment
+    assert window.closes == datetime(2026, 10, 9, 8, 0, tzinfo=BERLIN)
+    assert window.is_open(datetime(2026, 9, 26, 9, 0, tzinfo=BERLIN))
+    assert any(d.startswith("enrolment.send_until:") for d in sched.dropped)
+
+
+def test_the_window_is_half_open_so_send_until_is_the_first_instant_that_does_not_send():
+    window = parse(
+        {
+            "enrolment": {
+                "send_codes_datetime": "2026-08-24T08:00",
+                "send_until": "2026-09-21T00:00",
+            }
+        }
+    ).enrolment
+    assert not window.is_open(datetime(2026, 8, 24, 7, 59, tzinfo=BERLIN))
+    assert window.is_open(datetime(2026, 8, 24, 8, 0, tzinfo=BERLIN))
+    assert window.is_open(datetime(2026, 9, 20, 23, 59, tzinfo=BERLIN))
+    assert not window.is_open(datetime(2026, 9, 21, 0, 0, tzinfo=BERLIN))
+    # Both ends are tz-aware, so the cron's UTC `now` is compared by INSTANT rather than
+    # by wall clock: 08:00 Europe/Berlin (CEST) is 06:00 UTC.
+    assert not window.is_open(datetime(2026, 8, 24, 5, 59, tzinfo=timezone.utc))
+    assert window.is_open(datetime(2026, 8, 24, 6, 0, tzinfo=timezone.utc))
+
+
+def test_the_validate_report_says_what_the_enrolment_block_was_understood_as(tmp_path):
+    # The report is what a faculty member reads on their own commit; a block silently not
+    # read is exactly what it exists to catch.
+    f = tmp_path / "schedule.yml"
+    f.write_text(
+        "semester_start: 2026-09-07\nenrolment:\n  send_codes_datetime: 2026-08-24T08:00\n"
+    )
+    sched, error = schedule.load_file(str(f))
+    assert error is None
+    report = schedule._validate_report(sched, "schedule.yml")
+    assert "enrolment codes sent 2026-08-24T08:00" in report
+    assert "2026-09-21T00:00" in report
+    assert "not shown on the site" in report
 
 
 # --------------------------------------------------------- a file that does not parse

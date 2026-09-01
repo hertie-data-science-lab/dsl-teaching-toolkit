@@ -15,6 +15,12 @@ Assignment handouts are declared with the rest of the assignment's lifecycle -
 solution rides on that same release once `assignments.<slug>.solution_datetime` has
 passed - Release assignment's `include_solution` tick, on a clock.
 
+The same hourly run also mails enrolment codes, for as long as the cohort's `enrolment:`
+window is open (`enrol_codes`, the scheduled twin of the Send enrolment codes button).
+That is a window and not a moment because the roster keeps filling up after term starts:
+the send is idempotent on `students.csv`'s `code_sent_at` column, so every tick inside the
+window mails whoever is new and nobody else.
+
 The same hourly run also drives each assignment's grading deadline (`grading_datetime`,
 else `due_datetime`), whether or not the cohort uses `releases` at all:
 
@@ -42,7 +48,7 @@ import argparse
 import sys
 from datetime import datetime, timezone
 
-from . import schedule, site, source_digest
+from . import enrol_codes, schedule, site, source_digest
 from .assign import provision_all, solution_released
 from .collect import (
     SnapshotResult,
@@ -404,6 +410,63 @@ def _handout_releases(
     return out
 
 
+# The outcomes an unattended hourly run must NOT go red on. Each is a configuration
+# somebody has to go and fix - an empty roster, unset GRAPH_* secrets - so it would be
+# reported identically on every tick for the length of the window, and a cron that has
+# been red for a fortnight is one nobody reads any more. They are reported instead by
+# `status` (the Check cohort setup workflow), which a person can read BEFORE the window
+# opens - the only moment the warning is still actionable: `status.collect` builds the
+# roster row (C2, and the enrolment row C8 that names an empty roster) and the mail
+# transport row (B8, off `mailer.GRAPH_ENV`), and `workflows_render.render_status` puts
+# those secrets in that workflow's env so B8 reads the truth. Staying green here is only
+# defensible for as long as all three of those hold.
+_NOT_THE_CRONS_FAULT = frozenset(
+    {
+        enrol_codes.Outcome.NO_ROSTER,
+        enrol_codes.Outcome.EMPTY_ROSTER,
+        enrol_codes.Outcome.NO_TRANSPORT,
+    }
+)
+
+
+def _send_enrolment_codes(
+    cohort_org: str, sched: schedule.Schedule, now: datetime, dry_run: bool
+) -> int:
+    """Mail enrolment codes while the cohort's `enrolment:` window is open. Returns the
+    error count.
+
+    The whole send is `enrol_codes.run`, exactly as the button calls it - the codes are
+    written to `students.csv` and only rows with a blank `code_sent_at` are mailed, which
+    is what makes an hourly re-run a no-op rather than a second email. `run` CLAIMS that
+    stamp before it mails, so a roster it cannot write means nothing goes out and this
+    tick reds, rather than a batch going out un-stamped and every tick after it mailing
+    the same students again. It reads the roster itself and reports what it found, so
+    nothing here reads it a second time to decide whether calling it is worthwhile.
+
+    A rejected message still reddens the run; a missing roster or a missing transport does
+    not (see `_NOT_THE_CRONS_FAULT`)."""
+    window = sched.enrolment
+    if window is None or not window.is_open(now):
+        return 0
+    log_step(f"  enrolment codes (window open until {window.closes.isoformat()})")
+    try:
+        outcome = enrol_codes.run(cohort_org, dry_run=dry_run)
+    except RuntimeError as exc:
+        # A credential Graph would not accept. Same class as an unset secret - nothing is
+        # achievable until a person fixes it - but it arrives as an exception, and
+        # unguarded it would abandon the rest of this cohort's tick, releases included.
+        log_err(f"no enrolment codes went out for {cohort_org}: {exc}")
+        return 0
+    if outcome in _NOT_THE_CRONS_FAULT:
+        log_err(
+            f"no enrolment codes went out for {cohort_org}: {outcome.value}. That is a "
+            f"configuration gap rather than a failed send, so this run stays green - run "
+            f"Check cohort setup to see it."
+        )
+        return 0
+    return 1 if outcome is enrol_codes.Outcome.FAILED else 0
+
+
 def _preflight_sources(
     course_org: str,
     cohort_org: str,
@@ -482,6 +545,10 @@ def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) 
     # needs catching. Never fatal to the run: an undelivered warning must not stop a
     # release (see source_digest.sync).
     errors += _preflight_sources(course_org, cohort_org, sched, now, dry_run)
+
+    # Independent of the release plan, and of `dry_run`, which `enrol_codes.run` honours
+    # itself: a dry-run scheduler previews the codes and the emails and sends nothing.
+    errors += _send_enrolment_codes(cohort_org, sched, now, dry_run)
 
     if dry_run:
         for release in due:

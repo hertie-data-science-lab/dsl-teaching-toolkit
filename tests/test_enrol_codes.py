@@ -407,6 +407,7 @@ def test_the_emails_carry_the_code_the_roster_actually_holds(monkeypatch):
         ),
     )
     monkeypatch.setattr(enrol_codes, "course_name_for_cohort", lambda org: "Test")
+    _transport(monkeypatch, True)
     sent: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
         enrol_codes.mailer,
@@ -415,7 +416,7 @@ def test_the_emails_carry_the_code_the_roster_actually_holds(monkeypatch):
             sent.extend(messages) or [m[0] for m in messages]
         ),
     )
-    assert enrol_codes.run("COHORT") == 0
+    assert enrol_codes.run("COHORT") is enrol_codes.Outcome.SENT
     ada = next(body for to, _subject, body in sent if to == "ada@uni.edu")
     assert "dsl-theirs" in ada  # not the code this run generated for her in memory
 
@@ -461,8 +462,27 @@ def test_a_row_with_no_email_keeps_its_original_index():
 # ------------------------------------------------ run(): who gets mailed, and who does not
 
 
-def _run_with(monkeypatch, roster_text, *, sends=None, writes_ok=True, dry_run=False):
-    """Drive `run` against one roster. Returns (rc, messages sent, roster texts written)."""
+def _transport(monkeypatch, configured: bool) -> None:
+    """Set (or clear) every GRAPH_* secret. `run` asks BEFORE it stamps anything, so a
+    test that wants a send at all has to have a transport for it to go out on."""
+    for name in mailer.GRAPH_ENV:
+        if configured:
+            monkeypatch.setenv(name, "set")
+        else:
+            monkeypatch.delenv(name, raising=False)
+
+
+def _run_with(
+    monkeypatch,
+    roster_text,
+    *,
+    sends=None,
+    writes_ok=True,
+    dry_run=False,
+    transport=True,
+):
+    """Drive `run` against one roster. Returns (outcome, messages sent, texts written)."""
+    _transport(monkeypatch, transport)
     written: list[str] = []
     sent: list[tuple[str, str, str]] = []
     monkeypatch.setattr(
@@ -487,8 +507,8 @@ def _run_with(monkeypatch, roster_text, *, sends=None, writes_ok=True, dry_run=F
             or [m[0] for m in messages][: len(messages) if sends is None else sends]
         ),
     )
-    rc = enrol_codes.run("COHORT", dry_run=dry_run)
-    return rc, sent, written
+    outcome = enrol_codes.run("COHORT", dry_run=dry_run)
+    return outcome, sent, written
 
 
 def test_a_student_already_marked_sent_is_not_emailed_again(monkeypatch):
@@ -500,36 +520,137 @@ def test_a_student_already_marked_sent_is_not_emailed_again(monkeypatch):
         + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,2026-08-31T09:00:00+00:00\n"
         + "bob@uni.edu,Bob,,,dsl-bbb222,enrolled,\n"
     )
-    rc, sent, _ = _run_with(monkeypatch, text)
-    assert rc == 0
+    outcome, sent, _ = _run_with(monkeypatch, text)
+    assert outcome is enrol_codes.Outcome.SENT
     assert [to for to, _s, _b in sent] == ["bob@uni.edu"]
 
 
 def test_the_sent_marker_is_written_only_for_recipients_that_went_out(monkeypatch):
     # A marker written off a COUNT would stamp the wrong rows and the students whose mail
-    # failed would never be retried.
+    # failed would never be retried. Since the stamp is CLAIMED before the send, the same
+    # end state now depends on the claims a partial batch did not spend being released -
+    # `send_bulk` stops at its own time budget and says "re-run to continue", and without
+    # the release the tail of every throttled batch would be stamped and never mailed.
     text = (
         HEADER
         + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
         + "bob@uni.edu,Bob,,,dsl-bbb222,enrolled,\n"
     )
-    rc, _sent, written = _run_with(monkeypatch, text, sends=1)
-    assert rc == 1  # one of two did not go out
+    outcome, _sent, written = _run_with(monkeypatch, text, sends=1)
+    # one of two did not go out - a rejected message, not a missing transport
+    assert outcome is enrol_codes.Outcome.FAILED
     rows = list(read_csv(written[-1], roster.REQUIRED_FIELDS, roster.ROSTER_PATH))
     stamped = {r["hertie_email"]: bool(r["code_sent_at"].strip()) for r in rows}
     assert stamped == {"ada@uni.edu": True, "bob@uni.edu": False}
 
 
-def test_a_marker_write_failure_reds_the_run_and_says_re_running_re_emails(
+def test_a_batch_that_went_nowhere_for_want_of_secrets_reads_as_a_missing_transport(
+    monkeypatch,
+):
+    # `send_bulk` answers an unconfigured transport and a wholly rejected batch with the
+    # same empty list, and the hourly cron has to tell them apart: it re-runs for the
+    # length of an enrolment window, and nothing it does can conjure a GRAPH_* secret.
+    for name in mailer.GRAPH_ENV:
+        monkeypatch.delenv(name, raising=False)
+    text = HEADER + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
+    outcome, sent, written = _run_with(monkeypatch, text, sends=0, transport=False)
+    assert outcome is enrol_codes.Outcome.NO_TRANSPORT
+    # And nothing was CLAIMED: the roster of an org whose secrets were never set would
+    # otherwise be marked as emailed in full by a run that could never email anybody.
+    assert sent == [] and written == []
+
+
+def test_a_wholly_rejected_batch_on_a_live_transport_is_still_a_failure(monkeypatch):
+    # The other half of the same question: the secrets ARE set, so nothing went out
+    # because Graph refused it. That is a real failure and must red, cron included.
+    text = HEADER + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
+    outcome, _sent, written = _run_with(monkeypatch, text, sends=0)
+    assert outcome is enrol_codes.Outcome.FAILED
+    # The claim it never spent is given back, so the next run tries Ada again.
+    rows = list(read_csv(written[-1], roster.REQUIRED_FIELDS, roster.ROSTER_PATH))
+    assert rows[0]["code_sent_at"].strip() == ""
+
+
+def test_a_roster_that_cannot_be_stamped_mails_nobody_however_often_it_is_run(
     monkeypatch, capsys
 ):
-    # The one failure that must never be swallowed: the students HAVE their codes and
-    # nothing on disk says so, so the next run mails them all over again.
+    # THE invariant, and the bug that motivated it. `write_column` reports a refused write
+    # by RETURNING - it never raises - so under send-then-stamp a roster that could not be
+    # written (an archived classroom-config, a new branch ruleset, a token that lost write
+    # scope) meant the batch went out with `code_sent_at` still blank. The button printed
+    # "re-running WILL email them again" to a human, who stopped; the hourly cron does not
+    # stop, and mailed the same students on every tick for the length of the window.
     text = HEADER + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
-    rc, _sent, _written = _run_with(monkeypatch, text, writes_ok=False)
-    assert rc == 1
+    for tick in range(3):  # the cron does not read the log and does not give up
+        outcome, sent, written = _run_with(monkeypatch, text, writes_ok=False)
+        assert outcome is enrol_codes.Outcome.FAILED, tick
+        assert sent == [] and written == [], tick
     err = capsys.readouterr().err
-    assert "re-running WILL email them again" in err
+    assert "nothing emailed, so re-running is safe" in err
+    assert "ada@uni.edu" not in err  # the log is public
+
+
+def test_a_transport_that_raises_gives_the_claim_back_before_it_propagates(monkeypatch):
+    # A credential Graph refuses raises out of `send_bulk`, and the scheduler catches it
+    # and stays green. Unreleased, the claim would leave a whole cohort marked as emailed
+    # by a run that sent nothing, with no tick ever retrying them.
+    text = HEADER + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
+    _transport(monkeypatch, True)
+    written: list[str] = []
+    monkeypatch.setattr(
+        enrol_codes,
+        "get_file_with_sha",
+        lambda org, repo, path: (written[-1] if written else text, "sha"),
+    )
+    monkeypatch.setattr(
+        enrol_codes,
+        "put_file",
+        lambda org, repo, path, content, message, expected_sha=None: (
+            written.append(content.decode()) or True
+        ),
+    )
+    monkeypatch.setattr(enrol_codes, "course_name_for_cohort", lambda org: "Test")
+    monkeypatch.setattr(
+        enrol_codes.mailer,
+        "send_bulk",
+        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("token request failed")),
+    )
+    with pytest.raises(RuntimeError):
+        enrol_codes.run("COHORT")
+    rows = list(read_csv(written[-1], roster.REQUIRED_FIELDS, roster.ROSTER_PATH))
+    assert rows[0]["code_sent_at"].strip() == ""
+
+
+def test_a_claim_that_cannot_be_released_names_the_exact_stamp_to_clear(
+    monkeypatch, capsys
+):
+    # The price of claiming first is a bounded UNDER-send: these students are stamped and
+    # were never mailed, so nothing retries them. It has to be loud, and it has to be
+    # actionable without naming anyone - the stamp is shared by the whole batch, so
+    # "clear this timestamp" identifies every row to fix.
+    text = HEADER + "ada@uni.edu,Ada,,,dsl-aaa111,enrolled,\n"
+    _transport(monkeypatch, True)
+    written: list[str] = []
+
+    def fake_put_file(org, repo, path, content, message, expected_sha=None):
+        if "release" in message:  # the claim commits; giving it back does not
+            return False
+        written.append(content.decode())
+        return True
+
+    monkeypatch.setattr(
+        enrol_codes,
+        "get_file_with_sha",
+        lambda org, repo, path: (written[-1] if written else text, "sha"),
+    )
+    monkeypatch.setattr(enrol_codes, "put_file", fake_put_file)
+    monkeypatch.setattr(enrol_codes, "course_name_for_cohort", lambda org: "Test")
+    monkeypatch.setattr(enrol_codes.mailer, "send_bulk", lambda *a, **k: [])
+    assert enrol_codes.run("COHORT") is enrol_codes.Outcome.FAILED
+    err = capsys.readouterr().err
+    stamped = next(read_csv(written[-1], roster.REQUIRED_FIELDS, roster.ROSTER_PATH))
+    assert f"code_sent_at={stamped['code_sent_at']}" in err
+    assert "by hand" in err
     assert "ada@uni.edu" not in err  # the log is public
 
 
@@ -548,12 +669,14 @@ def test_two_roster_rows_sharing_an_email_get_one_code_email(monkeypatch):
 
 def test_a_dry_run_writes_nothing_and_marks_nobody(monkeypatch):
     text = HEADER + "ada@uni.edu,Ada,,,,enrolled,\n"
-    rc, sent, written = _run_with(monkeypatch, text, dry_run=True)
-    assert rc == 0 and written == []
+    outcome, sent, written = _run_with(monkeypatch, text, dry_run=True)
+    assert outcome is enrol_codes.Outcome.SENT and written == []
     assert [to for to, _s, _b in sent] == ["ada@uni.edu"]
 
 
 def test_run_reds_when_the_roster_is_missing(monkeypatch, capsys):
     monkeypatch.setattr(enrol_codes, "get_file_with_sha", lambda org, repo, path: None)
-    assert enrol_codes.run("COHORT") == 1
+    outcome = enrol_codes.run("COHORT")
+    assert outcome is enrol_codes.Outcome.NO_ROSTER
+    assert enrol_codes.reds_the_button(outcome)  # the button still reds
     assert "Could not find students.csv" in capsys.readouterr().err

@@ -326,15 +326,25 @@ def test_every_image_a_template_renders_carries_alt_text(rel):
         assert re.search(r'\balt="[^"]+"', tag.group(0)), f"{rel}: {tag.group(0)}"
 
 
+_WHEN_INCLUDE = re.compile(
+    r'{%\s*when\s+"(?P<kind>[^"]+)"\s*%}{%\s*include\s+(?P<include>\S+)'
+)
+
+
 def test_a_schedule_row_template_exists_for_every_type_the_sync_emits(documents):
-    # The schedule dispatches on `type`, so a row kind added to site.py without its
-    # template renders as the neutral fallback row - silently, on the live schedule.
+    # The schedule dispatches on `type`, so a row kind added to site.py without a branch
+    # renders as the neutral fallback row - silently, on the live schedule. What each
+    # branch includes is its own business: `enrolment` and `term_date` are one row with a
+    # different label, and share a template.
     emitted = {doc["type"] for doc in documents if doc.get("type")}
     emitted |= {doc["due_event"]["type"] for doc in documents if doc.get("due_event")}
-    schedule_layout = _templates()["_layouts/schedule.html"]
+    branches = {
+        m["kind"]: m["include"]
+        for m in _WHEN_INCLUDE.finditer(_templates()["_layouts/schedule.html"])
+    }
     for kind in sorted(emitted):
-        assert f"_includes/schedule_row_{kind}.html" in _templates(), kind
-        assert f'{{% when "{kind}" %}}' in schedule_layout, kind
+        assert kind in branches, kind
+        assert f"_includes/{branches[kind]}" in _templates(), kind
 
 
 @pytest.mark.parametrize("rel", sorted(_liquid_templates()))
