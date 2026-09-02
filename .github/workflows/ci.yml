@@ -86,6 +86,30 @@ jobs:
           done
           exit $missing
 
+      - name: Check the Updates box announces only what released
+        # The home page's box is sorted newest-first over the WHOLE term, so an unfiltered
+        # one announces the last week of term as "New Lab is up" before week one has
+        # happened - which is what two live cohort sites showed all term. The fixture holds
+        # a released session 2 beside an unreleased session 3, and a handed-out assignment
+        # 1 beside a pending assignment 2, so the box is checked in both directions.
+        run: |
+          box=$(sed -n '/<h2>Updates<\/h2>/,/<\/ul>/p' "$RUNNER_TEMP/build/index.html")
+          printf '%s\n' "$box"
+          missing=0
+          for needle in "Session 1" "Session 2" "Lab 1" "Assignment 1"; do
+            if ! printf '%s' "$box" | grep -qF -- "$needle"; then
+              echo "::error::the Updates box does not announce $needle, which released"
+              missing=1
+            fi
+          done
+          for needle in "Session 3" "Assignment 2"; do
+            if printf '%s' "$box" | grep -qF -- "$needle"; then
+              echo "::error::the Updates box announces $needle, which has not released"
+              missing=1
+            fi
+          done
+          exit $missing
+
   jekyll-theme-seam:
     # The same fixture, built against the REAL theme at the ref `site_repo.THEME_REF`
     # pins - the one seam the offline job above stubs out. The course stylesheet used to
