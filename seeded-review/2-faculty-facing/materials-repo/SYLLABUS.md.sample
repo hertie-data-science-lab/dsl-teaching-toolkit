@@ -2,9 +2,9 @@
 
 *Optional - a worked example to copy from; delete it if you do not want it.*
 
-<!-- A FILLED example, kept current by the toolkit - copy from it, do not edit it (your
-     edits are overwritten). Your own syllabus is SYLLABUS.md beside this file. This file
-     is never released to students. -->
+<!-- SYSTEM-OWNED - do not edit, edits here are overwritten. A FILLED example, kept
+     current by the toolkit: copy from it. Your own syllabus is SYLLABUS.md beside this
+     file. This file is never released to students. -->
 
 ## 1. General information
 
@@ -21,7 +21,7 @@
 
 ### Course contents
 
-An applied introduction to Deep Learning for public policy. We build up from linear
+An applied introduction to deep learning for public policy. We build up from linear
 models to neural networks, and spend as much time on what a model cannot tell you as on
 what it can.
 
@@ -39,8 +39,8 @@ MDS students in their second year. Prior ML experience required.
 
 ### Prerequisites
 
-ML or equivalent; comfort writing a function and reading a data frame in Python
-or R.
+Machine Learning or equivalent; comfort writing a function and reading a data frame in
+Python or R.
 
 ## 3. Grading and assignments
 
@@ -64,4 +64,5 @@ No required textbook. Both of these are free and used throughout:
 
 ## 5. Course sessions and readings
 
-...
+Published on the course website, generated from `classroom-config/schedule.yml` and each
+session's `readings/` folder.

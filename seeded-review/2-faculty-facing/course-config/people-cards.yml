@@ -1,0 +1,16 @@
+  # Instructor website cards (optional, DISPLAY ONLY - no GitHub access) for the
+  # OPTIONAL public open-courseware course website. TAs are NOT listed here - a
+  # cohort's own teaching team (instructors & TAs) goes in that cohort's
+  # classroom-config/people.yml instead. Uncomment and fill:
+  # instructors:
+  #   - github_handle: "janedoe"
+  #     name:  "Prof. Dr. Jane Doe"
+  #     title: "Professor of Data Science"
+  #     photo: "/_images/pp/jane.jpg"             # square image: EITHER a path to a
+  #                                               # file committed into the site repo
+  #                                               # under _images/pp/, OR an absolute
+  #                                               # URL on a host that allows
+  #                                               # hotlinking (e.g. a GitHub avatar
+  #                                               # link - many institutional sites
+  #                                               # 403 off-site requests instead)
+  #     url:   "https://.../profile/jane-doe"     # bio / profile link

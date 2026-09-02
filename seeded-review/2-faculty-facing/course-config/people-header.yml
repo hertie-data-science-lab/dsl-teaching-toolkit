@@ -1,0 +1,18 @@
+# ---------------------------------------------------------------------------
+# People. Two DIFFERENT things live under the `people:` key below - don't
+# confuse them:
+#
+#   course_admins        GRANTS ACCESS. The single source of truth for course-wide
+#                        admin rights - the `course-admin` team here, mirrored into
+#                        every cohort org. A handle added any other way is reverted
+#                        on the next sync unless it's declared here; removing a
+#                        handle here revokes their access.
+#
+#   instructors          DISPLAY ONLY - website cards (name/photo/title/link) for
+#                        the OPTIONAL public open-courseware course website (the
+#                        "Publish course website" action). They grant NO GitHub
+#                        access. TAs are NOT declared here - they change every
+#                        cohort, so a cohort's whole teaching team (instructors &
+#                        TAs, their GitHub access AND their cohort-site cards) is
+#                        declared PER COHORT in that cohort's classroom-config/people.yml.
+# ---------------------------------------------------------------------------

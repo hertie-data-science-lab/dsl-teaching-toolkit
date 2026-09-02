@@ -1,0 +1,7 @@
+# Uncomment and fill in at least one course admin (if you passed --admins at
+# bootstrap, this is already filled in for you):
+# people:
+#   course_admins:
+#     - github_handle: "adminhandle"    # required - grants the `course-admin` team
+#       start: "2026-09-01"             # optional - no start = active immediately
+#       end: "2027-06-30"               # optional - no end = indefinite

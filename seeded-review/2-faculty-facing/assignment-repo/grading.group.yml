@@ -1,0 +1,8 @@
+# How the Grade assignment workflow autogrades this assignment (after the grading_deadline
+# set in schedule.yml). Delete this file (or set autograde: false) for a purely
+# manually-graded assignment.
+type: group      # individual (one repo per student) or group (one repo per team)
+autograde: true       # false -> skip autograding (all-manual)
+tests: tests          # path (on THIS solution branch) holding the hidden tests
+                      # `autograde_score` in grades/<slug>.csv records how many of them
+                      # passed; you own the mark the student actually gets (`final_grade`)
