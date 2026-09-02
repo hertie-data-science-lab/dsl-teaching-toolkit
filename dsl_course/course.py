@@ -88,6 +88,19 @@ COHORT_TEAMS = (
 ROLE_TEAMS = frozenset(slug for slug, _, _ in (*FACULTY_TEAMS, *COHORT_TEAMS))
 
 
+def course_phrase(course_name: str) -> str:
+    """How student-facing prose names the course inside a sentence: "the X course", or
+    plain "the course" when the name could not be resolved.
+
+    One spelling, imported by both student emails (the enrolment code and the grades
+    notification), because they land in one inbox and must not name the same course two
+    ways. The article and the noun are supplied HERE, not glued on at each call site: a
+    display name is a title, not a noun phrase, so a caller that adds only the article
+    writes "your grades for the Deep Learning (Demo)". And a course carrying no name yet
+    must still read as ordinary English, never as a blank or a literal placeholder."""
+    return f"the {course_name} course" if course_name else "the course"
+
+
 def submission_repo(slug: str, suffix: str) -> str:
     """A submission repo's name: `<slug>-<handle>` individually, `<slug>-<team>` for a
     group. One composition, so the provisioner, the grader and the "your repo is called"
