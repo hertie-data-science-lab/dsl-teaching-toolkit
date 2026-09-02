@@ -114,7 +114,7 @@ GRADE_FIELDS = (
 # `render_readme` on the first distribute.
 _STARTER_README = (
     "# Your gradebook\n\n"
-    "This private repository is accessible only to you. Grades and feedback for each "
+    "This private repository is viewable only by you. Grades and feedback for each "
     "piece of assessment appear in `grades.yml` as the course progresses.\n\n"
     "## What each field means\n\n"
     "| Field | Meaning |\n"
