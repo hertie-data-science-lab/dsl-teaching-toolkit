@@ -1,3 +1,3 @@
 # Assignment 1
 
-TODO: LET'S JUST LEAVE THIS AS A BLANK STUP SAYING SOMETHING LIKE "WRITE INSTRUCTIONS HERE"
+_Write the assignment instructions here._

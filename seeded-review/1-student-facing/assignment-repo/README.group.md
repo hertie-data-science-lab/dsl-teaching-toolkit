@@ -1,3 +1,3 @@
 # Assignment 4-project
 
-TODO: LET'S JUST LEAVE THIS AS A BLANK STUP SAYING SOMETHING LIKE "WRITE GROUP INSTRUCTIONS HERE"
+_Write the group assignment instructions here._

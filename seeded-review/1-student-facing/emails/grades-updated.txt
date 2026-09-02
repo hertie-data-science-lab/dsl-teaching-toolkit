@@ -1,8 +1,15 @@
+=== course name resolved ===
+Subject: Your grades for Deep Learning (Demo) have been updated
+----------------------------------------------------------------------
+Hello Alex Beispiel,
+
+Your grades for the Deep Learning (Demo) course have been updated. View them in your private gradebook:
+  https://github.com/hertie-dsl-demo-f2026/grades-alexbeispiel
+
+=== course name UNRESOLVED - the degraded wording a real send produces ===
 Subject: Your grades have been updated
 ----------------------------------------------------------------------
 Hello Alex Beispiel,
 
-Your grades for the {INSERT COURSE NAME} have been updated. View them in your private gradebook:
+Your grades for the course have been updated. View them in your private gradebook:
   https://github.com/hertie-dsl-demo-f2026/grades-alexbeispiel
-
-TODO: PROGRAMMATICALLY INSERT COURSE NAME ABOVE
