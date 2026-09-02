@@ -872,7 +872,8 @@ def render_send_codes() -> str:
 # There is no button: a push to a cohort's students.csv is what fires this (its
 # classroom-config dispatch-send-codes.yml dispatches `send-codes`), so the roster is the
 # only thing anyone edits. Re-running is safe - a row is mailed only while its
-# `code_sent_at` is blank - so a re-send is a fresh push to the roster.
+# `code_sent_at` is blank - which is also why pushing again does not re-send: to send a
+# row a second time, clear its `code_sent_at` and push that.
 
 on:
   repository_dispatch:
@@ -956,8 +957,9 @@ def render_scheduler() -> str:
 # by `repository_dispatch` from an external dispatcher (every 15 minutes, off-box), and each
 # driver covers the other's outage. Both arrive here as an ordinary run; nothing downstream
 # cares which, because every action is dated and fire-once. The off-peak minutes stay as they
-# are - see the cron-minute rules above for why `0 * * * *` was delivered 6 times a day, not
-# 24 - and an idle tick is ~30s of reads, so the cost of arriving twice is negligible.
+# are - GitHub drops scheduled runs at the top of the hour, so `0 * * * *` was delivered 6
+# times a day, not 24 - and an idle tick is ~30s of reads, so the cost of arriving twice is
+# negligible.
 #
 # TWO JOBS, because a grading pass can run for two hours and must not hold up a release due
 # meanwhile. `release` walks every cohort (fast: dated copies and repo provisioning);
