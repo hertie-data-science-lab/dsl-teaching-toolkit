@@ -194,7 +194,7 @@ Further out - listed so the picture is complete, not to be acted on yet.
   _due Sat 14 Nov 2026, 09:00_
 
 ---
-Field reference: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/{central_ref}/docs/07-schedule-releases.md
+Field reference: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/release/docs/07-schedule-releases.md
 
 <!-- dsl-source-state: {"assignments.assignment-4-project.course_source_repo": "advisory", "releases.lecture-5.course_source_path": "error", "releases.lecture-9.course_source_path": "warning", "releases.readings-6.course_source_path": "advisory"} -->
 ```
