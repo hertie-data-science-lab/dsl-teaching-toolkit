@@ -427,6 +427,11 @@ New Assignment released: [Assignment 1]
 plus, for a hand-written `_announcements/` entry, its own text. Exams, special events and
 term dates are deliberately excluded - they are not news, and several carry no text to show.
 
+The whole term is on the schedule from the day the plan is written, so the box lists only
+what has actually reached students: a session written `unreleased: true` and an assignment
+written `handout_pending: true` are filtered out before the seven-entry limit, not inside
+the loop. Unfiltered, the box announced the last week of term before week one had happened.
+
 ### 3.4 Seeded once, instructor-owned - rendered copies under `site-repo/`
 
 | File | What a student reads |
