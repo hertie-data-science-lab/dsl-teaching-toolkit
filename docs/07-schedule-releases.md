@@ -1,6 +1,6 @@
 # Schedule releases
 
-Write the term's plan into the cohort's `classroom-config/schedule.yml` once, and the hourly cron runs the term for you - every materials release, every assignment hand-out, every autograde run. 
+Write the term's plan into the cohort's `classroom-config/schedule.yml` once, and the scheduled cron runs the term for you - every materials release, every assignment hand-out, every autograde run. 
 
 The schedule file can be updated throughout the semester.
 
@@ -233,7 +233,7 @@ Full schema, field by field, see [here](DEPLOYMENT-CHECKLIST.md#scheduleyml).
 
 ## Changing dates mid-term
 
-Just commit the edit to `classroom-config/schedule.yml` on `main` - the **GitHub web UI is the recommended way** (or edit a local clone → commit → push). The hourly cron reads whatever is on `main` at each tick, so the change takes effect within the hour; there is nothing to re-arm or re-deploy. 
+Just commit the edit to `classroom-config/schedule.yml` on `main` - the **GitHub web UI is the recommended way** (or edit a local clone → commit → push). The scheduled cron reads whatever is on `main` at each tick, so the change takes effect within about 15 minutes; there is nothing to re-arm or re-deploy. 
 
 The one caveat: already-fired **one-shot** actions don't rewind - a release already shipped stays shipped, and a snapshot/autograde that already ran re-runs only if you delete its marker (`snapshots/<slug>.csv` / the `_graded.json` or `_skipped.json` record in `autograde/<slug>/` - deleting the whole folder works too).
 
@@ -261,25 +261,25 @@ Three other ways to check, none of them required:
 
 A dropped entry is a fault in the *file*. The other way a term quietly fails is a perfectly valid entry pointing at a folder that isn't there - `lectures/04_lecture` when the repo has `lectures/04_week-4`. Nothing detects that until the deploy fires and ships nothing.
 
-So the sources are checked against the course org in two places: **Validate schedule**, whenever you commit a change to `schedule.yml`, and the **hourly cron**, which is the one that catches a plan written in August and forgotten. Because a term written up front legitimately names folders nobody has authored yet, how loud that is depends on how close the deploy is:
+So the sources are checked against the course org in two places: **Validate schedule**, whenever you commit a change to `schedule.yml`, and the **scheduled cron**, which is the one that catches a plan written in August and forgotten. Because a term written up front legitimately names folders nobody has authored yet, how loud that is depends on how close the deploy is:
 
 | Distance to the deploy | Severity | What you see |
 |---|---|---|
 | more than 7 days | advisory | a line in the run summary and a yellow annotation against `schedule.yml` in the commit. Nobody is emailed |
 | 7 days or less | warning | the above, plus a **digest issue** in `classroom-config` - so it reaches your inbox rather than waiting to be found |
-| 48 hours or less, or already passed | **error** | the digest issue comments to say it escalated, and the **hourly cron goes red** |
+| 48 hours or less, or already passed | **error** | the digest issue comments to say it escalated, and the **scheduled cron goes red** |
 
 **Validate schedule never goes red for a missing source, at any rung.** Its red X means one thing - an entry you wrote is not in your plan - and it clears when the file next parses cleanly. A missing source is not a broken file and doesn't clear when the file is edited, so it gets its own channel: annotations on the commit, and the digest issue below.
 
 ### The digest issue
 
-One issue per cohort, titled **"schedule.yml: planned releases cite sources not staged in the course org"**, kept current by the hourly cron:
+One issue per cohort, titled **"schedule.yml: planned releases cite sources not staged in the course org"**, kept current by the scheduled cron:
 
-- its **body** is rewritten every run and always lists everything currently missing, grouped by severity, each line naming the exact field to edit (`releases.lecture_02` → `course_source_path`). Editing a body doesn't email anyone, so this is free to happen hourly.
+- its **body** is rewritten every run and always lists everything currently missing, grouped by severity, each line naming the exact field to edit (`releases.lecture_02` → `course_source_path`). Editing a body doesn't email anyone, so this is free to happen on every tick.
 - it **comments** only when something crosses a rung - a fault appears at warning or above, or escalates. Comments *do* email, and they `cc @<cohort-org>/instructors`, so you hear the transitions and nothing else.
 - it **closes itself** when the last missing source is staged.
 
-Appears, escalates, clears - three notifications over the life of a problem, however many hourly ticks happen in between. A term written months ahead sits entirely at *advisory* and opens no issue at all.
+Appears, escalates, clears - three notifications over the life of a problem, however many ticks happen in between. A term written months ahead sits entirely at *advisory* and opens no issue at all.
 
 A source that cannot be *read* (a rate limit, a permissions blip) is never reported as missing - that would turn every entry in the plan into a phantom typo.
 
@@ -319,14 +319,14 @@ Full details of this are in [10-grade-and-return-assignments.md](10-grade-and-re
 
 > **Autograded ≠ released to students.** The scores land only in the private `classroom-config` - faculty review them (and the whole-class `cohort-gradebook.csv`) and nothing reaches a student until the separate **Distribute grades** workflow: [three gates](10-grade-and-return-assignments.md).
 
-Each assignment's **grading deadline** is `grading_datetime` if you set it, else `due_datetime`. Shortly after it passes, the hourly run does two things, once each:
+Each assignment's **grading deadline** is `grading_datetime` if you set it, else `due_datetime`. Shortly after it passes, the scheduled run does two things, once each:
 
 1. **Freezes** each submission repo's HEAD into `classroom-config/snapshots/<slug>.csv`, using the **server's** clock.
 2. **Autogrades** it (optional).
 
 ### Releasing the model solution
 
-`solution_datetime` is separate from all of the above, and has no default - a solution released the moment submissions close rewards anyone who pushes late, so you name the moment or it never fires. At that datetime the hourly run pushes the template's `solution/` folder into every student/team repo, which is exactly what **Release assignment** with `include_solution` does by hand. Both are idempotent, so doing one after the other changes nothing.
+`solution_datetime` is separate from all of the above, and has no default - a solution released the moment submissions close rewards anyone who pushes late, so you name the moment or it never fires. At that datetime the scheduled run pushes the template's `solution/` folder into every student/team repo, which is exactly what **Release assignment** with `include_solution` does by hand. Both are idempotent, so doing one after the other changes nothing.
 
 It needs `handout_datetime` set: the schedule can only push a solution into repos the schedule provisioned. If you hand out manually, release the solution manually too.
 

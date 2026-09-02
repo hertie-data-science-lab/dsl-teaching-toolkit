@@ -86,10 +86,12 @@ _SEED_REFRESH_CONCURRENCY = """concurrency:
   cancel-in-progress: false
 """
 
-# The scheduler runs hourly and can outlive its slot (it clones and grades submissions
-# across every cohort), so it can overlap itself. Its actions are fire-once, guarded by
-# markers written as they complete - so two concurrent passes can double-release or
-# double-grade whatever the first has not yet marked. Queue instead.
+# The scheduler runs every 15 minutes and can outlive its slot easily (it clones and grades
+# submissions across every cohort, on a 120-minute budget), so it can overlap itself. Its
+# actions are fire-once, guarded by markers written as they complete - so two concurrent
+# passes can double-release or double-grade whatever the first has not yet marked. Queue
+# instead: a tick that arrives mid-pass waits, and GitHub keeps just one run pending per
+# group, so a long grading pass collapses the ticks it spans instead of stacking them.
 _SCHEDULED_RELEASE_CONCURRENCY = """concurrency:
   group: scheduled-release
   cancel-in-progress: false
@@ -149,11 +151,35 @@ _CHECK_TEAM = """  check-team:
 # 30 is the ordinary budget - a handful of API calls, or one repo cloned.
 # 60 covers Bootstrap cohort: it creates and configures a whole org, then converges it.
 # 120 covers the two jobs that grade: collect budgets 300s PER submission subprocess and
-#     walks a cohort serially, and the hourly scheduler does that for every cohort (its own
+#     walks a cohort serially, and the scheduler does that for every cohort (its own
 #     concurrency comment says a pass can outlive its slot).
 _TIMEOUT_DEFAULT = 30
 _TIMEOUT_BOOTSTRAP = 60
 _TIMEOUT_GRADING = 120
+
+
+# Cron minutes, chosen ONCE here because two rules govern every schedule below and neither
+# is visible from a single cron line.
+#
+# 1. Never minute 0, 15, 30 or 45. GitHub delivers `schedule` events best-effort and drops
+#    the most contended minutes first - those four are where everyone puts their crons. On
+#    `0 * * * *` the seeded scheduler was delivered 6 of 24 ticks a day, identically across
+#    all four course orgs, so a release pinned to a class time landed hours late. Odd
+#    off-peak minutes cost nothing and are the single biggest win available here.
+# 2. The daily jobs form a CHAIN and must not share a minute. Refresh actions converges
+#    workflows and secrets first; Sync membership mirrors the teams that Sync site then
+#    reads for gating. Sync membership and Sync site were both `0 6 * * *` in one repo
+#    under one token, i.e. racing, which is how a site could sync against teams that had
+#    not been written yet.
+#
+#   05:27  Refresh actions          converge workflows + secrets
+#   05:58  Publish course website   public open-courseware site
+#   06:13  Sync membership          teams from people.yml
+#   06:41  Sync site                cohort sites (reads those teams)
+#
+# Spacing is nominal only - a late delivery can still overlap - so it is the per-workflow
+# `concurrency` groups, not these minutes, that keep a workflow from overlapping ITSELF.
+# The minutes buy ordering in the common case and keep the token's budget unbunched.
 
 
 # The head of any job that runs toolkit code: a runner, the central repo checked out at
@@ -263,9 +289,9 @@ _CRON_NOTICE = (
             gh issue create --repo "$REPO" --title "$title" --body "$body"
             exit 0
           fi
-          # Already open. The hourly scheduler fails EVERY hour while a fault stands, and
-          # a comment per run buried the thread and mentioned course-admin 24 times a day
-          # about one fault. So comment only once the thread has been quiet for six hours,
+          # Already open. The scheduler fails on EVERY tick while a fault stands, and a
+          # comment per run buried the thread and mentioned course-admin dozens of times a
+          # day about one fault. So comment only once the thread has been quiet for six hours,
           # and without the cc - whoever it reached the first time is already subscribed.
           # An unparseable timestamp reads as epoch, i.e. "long overdue": the point of the
           # issue is that somebody hears about the failure.
@@ -516,7 +542,7 @@ def render_grade_assignment(
     """Faculty-side autograder workflow: run hidden tests after the deadline, record scores."""
     return f"""name: Grade assignment
 
-# Faculty-side autograder, by hand. The hourly cron already grades each assignment ONCE at
+# Faculty-side autograder, by hand. The Scheduled release cron already grades each ONCE at
 # its grading deadline - this workflow is for a deliberate re-grade. Clones each submission as
 # of the cohort schedule's grading deadline (`grading_datetime`, else `due_datetime` -
 # SSOT, no input here), runs the HIDDEN tests from the template's solution branch, archives
@@ -601,7 +627,7 @@ on:
   repository_dispatch:
     types: [sync-membership]
   schedule:
-    - cron: "0 6 * * *"
+    - cron: "13 6 * * *"
   workflow_dispatch:
     inputs:
 {_cohort_dropdown(cohort_orgs, optional=True)}
@@ -833,23 +859,29 @@ on:
 
 
 def render_scheduler() -> str:
-    """Hourly cron that snapshots + autogrades each passed grading deadline and releases
-    whatever each cohort's schedule says is now due, across every registered cohort. No
-    check-team gate: scheduled runs have no actor, and every action is either idempotent or
+    """Quarter-hourly cron that snapshots + autogrades each passed grading deadline and
+    releases whatever each cohort's schedule says is now due, across every registered cohort.
+    No check-team gate: scheduled runs have no actor, and every action is either idempotent or
     fire-once (manual dispatch still needs write)."""
     return f"""name: Scheduled release
 
-# Reads each cohort's classroom-config/schedule.yml and, every hour: freezes the submission
+# Reads each cohort's classroom-config/schedule.yml and, on every tick: freezes the submission
 # snapshot for each assignment whose grading deadline has passed, autogrades that assignment
 # ONCE (marker: classroom-config/autograde/<slug>/ - delete it to re-grade), then fires every
 # `releases:` release whose `when` datetime has arrived. Releases are idempotent, so
-# re-releasing on the next hour is a no-op; grading is not re-run. On the cron it releases for
+# re-releasing on the next tick is a no-op; grading is not re-run. On the cron it releases for
 # real; manual runs default to dry-run.
-# Hourly so a `when` time-of-day is honoured to the hour (GitHub cron is UTC and best-effort).
+#
+# THE cadence-critical schedule: this is the only cron a student can be waiting on, since a
+# release's `when` is usually a class time. Four off-peak ticks an hour rather than one on the
+# hour - see the cron-minute rules above for why `0 * * * *` was delivered 6 times a day, not
+# 24. An idle tick is ~30s and reads a handful of paths, so the cost of the extra ticks is a
+# few hundred REST calls an hour against the bot token's 5000; releasing or grading is what
+# takes real time, and that only happens on the tick where something is actually due.
 
 on:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
     inputs:
       dry_run:
@@ -1084,7 +1116,7 @@ on:
   repository_dispatch:
     types: [sync-site]
   schedule:
-    - cron: "0 6 * * *"
+    - cron: "41 6 * * *"
   workflow_dispatch:
     inputs:
 {_choice_input("cohort_org", "Cohort whose site to regenerate from the org structure", cohort_orgs)}
@@ -1154,7 +1186,7 @@ def render_publish_site(source_repos: list[str]) -> str:
 
 on:
   schedule:
-    - cron: "30 5 * * *"
+    - cron: "58 5 * * *"
   workflow_dispatch:
     inputs:
 {_choice_input("source_repo", "Materials repo to publish - the site is REBUILT from it; defaults to the latest course-materials-* repo", source_repos, default)}

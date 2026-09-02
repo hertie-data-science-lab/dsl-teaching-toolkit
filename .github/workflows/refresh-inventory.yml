@@ -7,7 +7,7 @@ name: Refresh Course Orgs Inventory
 
 on:
   schedule:
-    - cron: "0 6 * * 1"  # Mondays at 06:00 UTC
+    - cron: "31 6 * * 1"  # Mondays at 06:31 UTC (off minute 0 - GitHub drops contended minutes)
   workflow_dispatch:
 
 permissions: {}

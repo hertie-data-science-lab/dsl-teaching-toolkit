@@ -1175,13 +1175,15 @@ def test_main_all_cohorts_with_none_registered_is_a_noop(monkeypatch):
     assert scheduler.main() == 0
 
 
-def test_scheduler_workflow_hourly_and_ungated():
+def test_scheduler_workflow_quarter_hourly_and_ungated():
     doc = yaml.safe_load(seed.render_scheduler())
     assert doc.get("name") == "Scheduled release"
     # cron trigger present (YAML 1.1: `on:` may parse to True)
     trigger = doc.get("on", doc.get(True))
     assert "schedule" in trigger
-    assert trigger["schedule"][0]["cron"] == "0 * * * *"  # hourly (was daily)
+    # Four off-peak ticks an hour: a release's `when` is usually a class time, and on
+    # `0 * * * *` GitHub delivered 6 of 24 ticks a day, so releases landed hours late.
+    assert trigger["schedule"][0]["cron"] == "7,22,37,52 * * * *"
     # deliberately NOT gated by check-team (no actor on a scheduled run)
     assert "check-team" not in doc["jobs"]
 

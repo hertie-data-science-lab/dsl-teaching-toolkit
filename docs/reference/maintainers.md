@@ -128,9 +128,15 @@ Four places, in order - miss the last and every org keeps two buttons for one jo
 
 ## Crons and gates
 
-Five seeded crons: **Scheduled release** hourly; **Refresh actions** 05:27, **Publish course
-website** 05:30, **Sync membership** and **Sync site** 06:00 daily. Each reports its own failures,
-because GitHub emails a scheduled-run failure only to whoever last committed the file - the bot.
+Five seeded crons: **Scheduled release** at :07/:22/:37/:52 every hour; **Refresh actions**
+05:27, **Publish course website** 05:58, **Sync membership** 06:13, **Sync site** 06:41 daily.
+Each reports its own failures, because GitHub emails a scheduled-run failure only to whoever
+last committed the file - the bot.
+
+No cron may sit on minute 0/15/30/45 and no two daily ones may share a slot - GitHub drops the
+most contended minutes first (on `0 * * * *` the scheduler was delivered 6 ticks a day, not 24),
+and membership must write the teams that Sync site then reads. Both rules are enforced by
+`tests/test_renderers.py`; the reasoning sits above the cron literals in `workflows_render`.
 
 Every `workflow_dispatch` job sits behind the `check-team` gate (`workflows_render._CHECK_TEAM`),
 which asks for write on the repo the button lives in. The scheduler, refresh and Send enrolment

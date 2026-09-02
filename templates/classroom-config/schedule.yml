@@ -6,15 +6,18 @@
 # - see reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/schedule.yml
 # - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/schedule/
 #
-# Times are Europe/Berlin unless you set `timezone:`; the Scheduled release cron runs hourly, so times are honoured to the hour.
+# Times are Europe/Berlin unless you set `timezone:`. The Scheduled release cron runs four
+# times an hour and GitHub delivers scheduled runs best-effort, so a time is honoured to
+# roughly the quarter-hour, not to the minute. Pin a release AHEAD of the class that needs
+# it (see `deploy_datetime` below) rather than at its start time.
 #
 # Each block encodes BEHAVIOUR:
 #   releases:     entries that DEPLOY materials (course org -> this cohort org)
 #   assignments:  each assignment's handout / due / grading lifecycle
 #   events:       display-only calendar rows - nothing deploys
 #
-# Changing a date later? Just commit the edit to this file on main; the hourly cron reads
-# whatever is on main at each tick, so the change simply takes effect within the hour.
+# Changing a date later? Just commit the edit to this file on main; the cron reads
+# whatever is on main at each tick, so the change simply takes effect on the next one.
 #
 # Already-fired ONE-SHOT actions don't rewind: a release already shipped stays
 # shipped, and a snapshot/autograde that already ran needs its marker deleted to redo.

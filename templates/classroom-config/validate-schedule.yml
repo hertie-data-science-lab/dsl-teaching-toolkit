@@ -14,7 +14,7 @@ name: Validate schedule
 #      only works if someone looks. The issue is closed automatically by the next commit
 #      that parses clean, so it tracks the current state rather than accumulating.
 #
-# Validation runs the SAME parser the hourly scheduler uses (dsl_course.schedule), checked
+# Validation runs the SAME parser the scheduler uses (dsl_course.schedule), checked
 # out from the public central repo. A second implementation - a JSON schema, a hand-rolled
 # checker - could drift, and its failure mode is the worst one available: passing a file
 # the scheduler will silently drop entries from.
@@ -23,7 +23,7 @@ name: Validate schedule
 # also checks whether the plan's sources exist in the course org, but that answer changes
 # week to week (a lecture nobody has written yet is normal in August), so it is reported as
 # ::warning:: annotations on a green run and never touches the exit code. Escalating one of
-# those to a failure is the hourly scheduler's job, which files its own, separately-titled
+# those to a failure is the scheduler's job, which files its own, separately-titled
 # digest issue - routing it through here would name the fault "entries the scheduler cannot
 # read" and close it on the next clean parse, staged or not.
 
