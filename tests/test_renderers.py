@@ -804,6 +804,64 @@ def test_repo_table_drops_submission_and_gradebook_repos():
     assert "| [assignment-1]" not in rows
 
 
+def _cohort_org_repos():
+    org = "cohort-f2026"
+    return [
+        {"name": n, "url": "u", "visibility": v, "description": "d", "topics": []}
+        for n, v in (
+            ("classroom-config", "PRIVATE"),
+            (f"{org}.github.io", "PUBLIC"),
+            ("labs", "PRIVATE"),
+            ("materials", "PRIVATE"),
+            ("welcome", "PUBLIC"),
+        )
+    ]
+
+
+def test_cohort_table_names_the_audience_not_githubs_visibility():
+    from dsl_course.profile_readme import _cohort_repo_table
+
+    # "private" is the answer to a question nobody landing on the students' page is
+    # asking: it does not say whether enrolling will let them in.
+    cells = [
+        row.split("|")[2].strip()
+        for row in _cohort_repo_table(_cohort_org_repos()).splitlines()
+    ]
+    assert cells == [
+        "public (students join here)",
+        "enrolled students & auditors only",
+        "private",  # a repo we did not seed claims no grant we did not make
+        "instructor-only",
+        "public",
+    ]
+
+
+def test_cohort_table_runs_students_first_then_config_then_the_site():
+    from dsl_course.profile_readme import _cohort_repo_table
+
+    names = [
+        row.split("[")[1].split("]")[0]
+        for row in _cohort_repo_table(_cohort_org_repos()).splitlines()
+    ]
+    assert names == [
+        "welcome",
+        "materials",
+        "labs",
+        "classroom-config",
+        "cohort-f2026.github.io",
+    ]
+
+
+def test_course_table_keeps_bare_visibility():
+    from dsl_course.profile_readme import _repo_table
+
+    # Faculty read that one, and they can already open everything - what they want is
+    # which repos a release would expose.
+    rows = _repo_table(_cohort_org_repos())
+    assert "| private |" in rows and "| public |" in rows
+    assert "instructor-only" not in rows
+
+
 def _readme_run(monkeypatch, put_ok):
     from dsl_course import profile_readme as P
 

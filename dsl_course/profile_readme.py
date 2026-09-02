@@ -25,6 +25,7 @@ seed._converge_org_metadata.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 
 from .central import CENTRAL
 from .course import COURSE_CONFIG
@@ -40,8 +41,8 @@ from .gh_contents import get_file_content, put_files
 from .log import log, log_err, log_ok
 
 
-def _repo_table(repos: list[dict]) -> str:
-    """Clickable repo table, with `welcome` first (most logical landing repo).
+def _visible_repos(repos: list[dict]) -> list[dict]:
+    """The repos a landing page names: everything bar `.github` and per-person machinery.
 
     Machinery is dropped, not just `.github`: a cohort org holds one submission repo per
     student per assignment and one gradebook each, and listing them named every
@@ -51,15 +52,70 @@ def _repo_table(repos: list[dict]) -> str:
     anyway, and faculty need the "do not touch" row.
     """
     students = student_repo_names(repos)
-    visible = [r for r in repos if r["name"] != ".github" and r["name"] not in students]
-    visible.sort(key=lambda r: (r["name"].lower() != "welcome", r["name"].lower()))
-    rows = []
-    for r in visible:
-        desc = (r.get("description") or "").replace("|", "\\|").strip()
-        rows.append(
-            f"| [{r['name']}]({r['url']}) | {r['visibility'].lower()} | {desc} |"
-        )
+    return [r for r in repos if r["name"] != ".github" and r["name"] not in students]
+
+
+def _desc(repo: dict) -> str:
+    """A repo's own GitHub description, safe to drop into a table cell."""
+    return (repo.get("description") or "").replace("|", "\\|").strip()
+
+
+def _rows(repos: list[dict], middle: Callable[[dict], str]) -> str:
+    """Clickable table body for `repos`, in the order given.
+
+    `middle` fills the cell between each repo's link and its own GitHub description - the
+    two pages want different things there, and the description is the same in both."""
+    rows = [f"| [{r['name']}]({r['url']}) | {middle(r)} | {_desc(r)} |" for r in repos]
     return "\n".join(rows) or "| _(no repos yet)_ | | |"
+
+
+def _repo_table(repos: list[dict]) -> str:
+    """The COURSE org's repo table: GitHub visibility, `welcome` first then alphabetical.
+
+    Faculty read this one, and they are the people for whom "private" is the whole answer
+    - they can see every repo in the org, and what they want to know is which of them
+    students could reach if a release went out."""
+    visible = sorted(
+        _visible_repos(repos),
+        key=lambda r: (r["name"].lower() != "welcome", r["name"].lower()),
+    )
+    return _rows(visible, lambda r: r["visibility"].lower())
+
+
+# What each repo a cohort org seeds gets in the students' table: where it sorts, and who
+# can actually OPEN it. The AUDIENCE, not GitHub's `visibility`: "private" is the answer
+# to a question nobody landing here is asking, and it tells a student nothing about
+# whether enrolling will let them in - which is what this page exists to say. Order runs
+# students-first: the way in, then the content, then what instructors configure, then the
+# generated site.
+_COHORT_ROWS = {
+    "welcome": (0, "public (students join here)"),
+    "materials": (1, "enrolled students & auditors only"),
+    "classroom-config": (3, "instructor-only"),
+}
+# A repo we did not seed - a second released-content repo, or something an instructor made
+# - sorts with the content and claims no grant we did not make: it gets its bare
+# visibility rather than a guess at who was given read.
+_UNSEEDED_RANK = 2
+# The generated site, last and public. Matched on the suffix, not on `<org>.github.io`:
+# renaming an org leaves the site repo under the old name (see site_repo), and the row
+# still has to say "do not touch".
+_SITE_ROW = (4, "public")
+
+
+def _cohort_row(repo: dict) -> tuple[int, str]:
+    """`(rank, audience)` for one row of the cohort table."""
+    if repo["name"].endswith(".github.io"):
+        return _SITE_ROW
+    return _COHORT_ROWS.get(repo["name"], (_UNSEEDED_RANK, repo["visibility"].lower()))
+
+
+def _cohort_repo_table(repos: list[dict]) -> str:
+    """The COHORT org's repo table - who can see each repo, students' repos first."""
+    visible = sorted(
+        _visible_repos(repos), key=lambda r: (_cohort_row(r)[0], r["name"].lower())
+    )
+    return _rows(visible, lambda r: _cohort_row(r)[1])
 
 
 # The one generated region of the otherwise instructor-owned COHORT landing page. Matched
@@ -75,10 +131,11 @@ def _repo_table_block(repos: list[dict]) -> str:
         f"{TABLE_START} - AUTO-GENERATED from this org's live repo list.\n"
         "     Edits between these markers are overwritten on the next refresh. The\n"
         "     \"What it's for\" column is each repo's own GitHub description - to change\n"
-        "     what a row says, edit that. -->\n"
-        "| Repo | Visibility | What it's for |\n"
+        '     what a row says, edit that. "Who can see it" is derived from the repo,\n'
+        "     and is the audience rather than GitHub's public/private. -->\n"
+        "| Repo | Who can see it | What it's for |\n"
         "| --- | --- | --- |\n"
-        f"{_repo_table(repos)}\n"
+        f"{_cohort_repo_table(repos)}\n"
         f"{TABLE_END}"
     )
 
@@ -191,9 +248,12 @@ def render_profile_readme(
     the faculty page links into the docs at it, so an org on `staging` reads the staging docs
     rather than a runbook for engine code it is not running."""
     if is_cohort:
-        return f"""<!-- INSTRUCTOR-OWNED - this is the page students land on, so it is yours to word.
-     It is seeded ONCE and every edit you make survives the nightly refresh. The one
-     exception is the repo table below, between the dsl:repo-table markers. -->
+        return f"""<!-- INSTRUCTOR-OWNED - this is the page students land on, so it is yours to word,
+     and write it for THEM rather than for staff. It is seeded ONCE and your edits
+     survive the nightly refresh. Two exceptions: the repo table below, between the
+     dsl:repo-table markers, is regenerated from this org's live repo list; and if this
+     org is renamed, its former name is replaced throughout, so the Join link below
+     keeps resolving. -->
 
 # {course_name}
 
@@ -202,16 +262,17 @@ Welcome! This is the course organisation for **{course_name}**.
 ## Course website
 
 **[{course_name} - course website](https://{org.lower()}.github.io/)** - schedule,
-lectures, assignments, and the teaching team. Auto-generated and kept in sync with this
-org; updates on every release.
+lectures, assignments, and the teaching team. This is the recommended way to navigate
+this organisation once enrolled.
 
 ## Getting started
 
 1. Open a **Join course** issue in
    [`welcome`](https://github.com/{org}/welcome/issues/new/choose) to enrol - your
    GitHub handle is captured automatically.
-2. Once you're enrolled, course **materials** open up here session by session, and your
-   own assignment repositories appear in this org.
+2. Once you're enrolled, course materials open up here session by session, and your own
+   assignment repositories appear in this org. Everything is automatically deployed to
+   and updated on the live website.
 
 ## Where things are
 
