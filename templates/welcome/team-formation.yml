@@ -196,7 +196,7 @@ jobs:
                 'needs-review');
               if (lock === null) return fail(
                 `Thanks @${handle} - \`${assignment}\` isn't an assignment in this cohort yet. ` +
-                `Check the slug with the teaching team, or ask them to add it to classroom-config/schedule.yml.`,
+                `Check the slug with the teaching team.`,
                 'needs-review');
               if (lock.formation === 'none') return fail(
                 `Thanks @${handle} - \`${assignment}\` is an individual assignment - no teams.`,
