@@ -1,0 +1,59 @@
+# SYSTEM-OWNED - do not edit, edits here are overwritten. This workflow is re-seeded
+# from the central DSL teaching toolkit by 'Refresh actions' (nightly).
+name: Dispatch enrolment codes
+
+# Seeded into a cohort's private classroom-config repo as
+# .github/workflows/dispatch-send-codes.yml (third of the dispatchers, beside
+# dispatch-sync.yml for membership and dispatch-sync-site.yml for the website). Its only
+# job: fire the course org's Send enrolment codes whenever students.csv changes here, so a
+# roster edit is ALL it takes - add a late enrolee, commit, and their code reaches their
+# inbox minutes later. It is also the only way codes are sent: Send enrolment codes has no
+# button and no schedule, so a roster nobody pushes is a roster nobody is mailed from.
+#
+# LOOP-SAFE, which is what lets a push trigger fire a job that writes back to the very
+# file it watches. The send is idempotent: it fills only BLANK enrol_code cells and mails
+# only rows with no `code_sent_at`. So its own write-back triggers exactly ONE further
+# run, which finds nobody left to mail and stops. There is no runaway to rate-limit.
+#
+# students.csv also fires dispatch-sync.yml (event_type sync-membership). The two are
+# independent - different workflows, different event types, different targets (the codes
+# email vs the org teams) - so both running on one push is expected and harmless.
+#
+# Reads the course org from THIS cohort's own .github/dsl-course.yml `course:` pointer
+# (single source of truth - no course-org name baked in at bootstrap time). Fires a
+# repository_dispatch, the one trigger Send enrolment codes listens for, and that send is
+# FOR REAL - there is no preview mode, because there is no human here to ask. Runs under
+# secrets.DSL_BOT_TOKEN, which needs Contents read here (to read dsl-course.yml) and
+# Actions write on the course org's .github (to dispatch) - both already granted by
+# bootstrap.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - students.csv
+
+# Everything here authenticates with DSL_BOT_TOKEN (reading this org's dsl-course.yml, and
+# dispatching to the course org - neither of which the ambient token can do), so the
+# ambient GITHUB_TOKEN is dropped to zero scopes.
+permissions: {}
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger Send enrolment codes in the course org
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          COHORT_ORG: ${{ github.repository_owner }}
+        run: |
+          course_org=$(gh api "repos/$COHORT_ORG/.github/contents/dsl-course.yml" \
+            --jq '.content | @base64d' | grep '^course:' | cut -d: -f2- | xargs)
+          if [ -z "$course_org" ]; then
+            echo "::error::no 'course:' line in $COHORT_ORG/.github/dsl-course.yml - can't find the course org to dispatch to."
+            exit 1
+          fi
+          gh api "repos/$course_org/.github/dispatches" \
+            -f event_type=send-codes \
+            -f "client_payload[cohort_org]=$COHORT_ORG"

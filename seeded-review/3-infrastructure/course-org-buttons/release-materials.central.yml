@@ -1,3 +1,5 @@
+# SYSTEM-OWNED - do not edit, edits here are overwritten. This workflow is
+# re-rendered from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Release materials
 
 # Central copy: pick the SOURCE repo in this course org, then the path(s) to copy into
@@ -28,10 +30,15 @@ on:
           - hertie-dsl-demo-f2026
       cohort_dest_repo:
         description: "4. repo to release to in the cohort org; created if missing"
+        default: "materials"
         required: true
       cohort_dest_path:
         description: "5. within-repo destination path (blank mirrors box 2's path(s)); created if missing"
         required: false
+
+concurrency:
+  group: ${{ github.repository }}-release-materials
+  cancel-in-progress: false
 
 permissions: {}
 
@@ -63,7 +70,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           repository: hertie-data-science-lab/dsl-teaching-toolkit
-          ref: main
+          ref: release
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
           python-version: "3.12"
