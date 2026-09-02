@@ -1,11 +1,23 @@
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
+#
 org: hertie-dsl-demo-course-e1234
 org_name: DSL Demo Course
 course_name: Deep Learning (Demo)
-course_code: GRAD-DEMO
+course_code: E1234
+# central_ref: staging   # OPTIONAL: which tier of the central toolkit this course's
+#   # workflows run - `release` (the default, and where every real course belongs),
+#   # `staging` (the soak tier), `main`, or a full 40-character commit SHA. Cohorts
+#   # inherit this; setting it in a cohort's own file does nothing.
 # course_description: One or two sentences, on ONE line - the blurb on every cohort site.
+# site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the COHORT sites, link ONLY
+#   # these file types. Default (unset): each session's root files, plus one link per
+#   # subfolder - so a rendered deck lists the deck, not its hundreds of assets. Either way
+#   # everything you release still ships, and the folder itself is always one click away.
+#   # (The public open-courseware site always lists root files - it hosts what it lists.)
 
-# `course_name`, `course_code` and `course_description` are what reach the cohort websites
-# (`org_name` does not - it names the org). Editing them here re-syncs every cohort site.
+# `course_name`, `course_code` and `course_description` are what reach the cohort
+# websites. Editing them here re-syncs every cohort site already bootstrapped from this
+# course org.
 #
 # This is the persistent COURSE org - it spans many cohorts (years). Cohorts are
 # registered separately in .github/cohort-courses-pages.yml.
@@ -16,10 +28,9 @@ course_code: GRAD-DEMO
 #
 #   course_admins        GRANTS ACCESS. The single source of truth for course-wide
 #                        admin rights - the `course-admin` team here, mirrored into
-#                        every cohort org. "Sync membership" reconciles that team
-#                        FROM this list: a handle added any other way (Teams UI, a
-#                        gh call) is reverted on the next sync unless it's declared
-#                        here, and removing a handle here revokes their access.
+#                        every cohort org. A handle added any other way is reverted
+#                        on the next sync unless it's declared here; removing a
+#                        handle here revokes their access.
 #
 #   instructors          DISPLAY ONLY - website cards (name/photo/title/link) for
 #                        the OPTIONAL public open-courseware course website (the
@@ -50,10 +61,7 @@ course_code: GRAD-DEMO
   #                                               # file committed into the site repo
   #                                               # under _images/pp/, OR an absolute
   #                                               # URL on a host that allows
-  #                                               # hotlinking (many institutional
-  #                                               # sites 403 off-site requests and
-  #                                               # render as a broken image)
+  #                                               # hotlinking (e.g. a GitHub avatar
+  #                                               # link - many institutional sites
+  #                                               # 403 off-site requests instead)
   #     url:   "https://.../profile/jane-doe"     # bio / profile link
-
-
-# TODO - HOW IS THIS DIFFERENT FROM seeded-review/2-faculty-facing/course-config/dsl-course.with-admins.yml ? I MADE THE EDITS I WANT THERE
