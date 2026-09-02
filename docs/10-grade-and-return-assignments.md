@@ -28,7 +28,7 @@ private `grades-<handle>` repo, never in their assignment repo.
 
 ## 1. Grade assignment (for autograde only)
 
-**This runs itself.** At each assignment's grading deadline the hourly cron autogrades it
+**This runs itself.** At each assignment's grading deadline the scheduled cron autogrades it
 **once**, with no manual run required. Run the workflow only for a deliberate re-grade.
 
 Course `.github` → **Actions** → **Grade assignment**: `cohort_org`, `course_source_repo`, plus `group`
@@ -43,7 +43,7 @@ and `dry_run` (both default **off**). It runs the hidden tests and writes into
 - `autograde/<slug>/_graded.json` (a completed run) or `_skipped.json` (a decision not to
   grade) → the **fire-once marker**. While either record exists the cron will not grade this
   assignment again; the folder alone is not the marker, so an aborted run still re-grades.
-  Delete the folder to let the next hourly tick re-grade.
+  Delete the folder to let the next tick re-grade.
 
 There is **no deadline input**: the deadline is the cohort schedule's
 `assignments.<slug>.grading_datetime` (default: the `due_datetime`), and the graded commit is the one frozen into
@@ -161,7 +161,7 @@ version, so a re-run reaches exactly the students a failure left out.
   > ℹ️ **Autograding fires once**, at each assignment's grading deadline, and never again -
   > the `_graded.json` / `_skipped.json` record inside `autograde/<slug>/` is the marker. To
   > re-grade: delete that folder (the next
-  > hourly tick regrades) or press **Grade assignment**. Either way, clear the `autograde_score`
+  > next tick regrades) or press **Grade assignment**. Either way, clear the `autograde_score`
   > cells you want recomputed first - they are write-once and are otherwise left
   > exactly as you left them.
 

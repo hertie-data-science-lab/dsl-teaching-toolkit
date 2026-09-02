@@ -222,7 +222,7 @@ def test_publish_site_cron_resyncs_from_persisted_settings():
     rendered = workflows_render.render_publish_site(["course-materials-f2026"])
     doc = yaml.safe_load(rendered)
     trigger = doc.get("on", doc.get(True))
-    assert trigger["schedule"] == [{"cron": "30 5 * * *"}]
+    assert trigger["schedule"] == [{"cron": "58 5 * * *"}]
     assert "workflow_dispatch" in trigger
     jobs = workflow_jobs(rendered)
     resync = jobs["resync"]
@@ -563,7 +563,7 @@ def test_sync_site_auto_resyncs_on_sourced_changes():
     trigger = doc.get("on", doc.get(True))
     assert "dsl-course.yml" in trigger["push"]["paths"]
     assert trigger["repository_dispatch"]["types"] == ["sync-site"]
-    assert trigger["schedule"][0]["cron"] == "0 6 * * *"
+    assert trigger["schedule"][0]["cron"] == "41 6 * * *"
     assert "workflow_dispatch" in trigger
     jobs = doc["jobs"]
     # the ungated auto job runs for non-manual events; the gated one needs check-team
@@ -953,6 +953,36 @@ def test_the_cron_set_is_exactly_what_declares_a_schedule():
     # Keeps CRONS honest: a renderer that grows a `schedule:` must pass the notification
     # test below, not quietly join the set of unwatched jobs.
     assert {n for n, r in ALL_RENDERED.items() if "schedule" in _trigger(r)} == CRONS
+
+
+@pytest.mark.parametrize("name", sorted(CRONS))
+def test_no_cron_sits_on_a_contended_minute(name):
+    # GitHub delivers `schedule` best-effort and drops the most contended minutes first.
+    # Minutes 0/15/30/45 are where everyone puts their crons: on `0 * * * *` the scheduler
+    # was delivered 6 ticks a day rather than 24, identically across all four course orgs,
+    # so a release pinned to a class time landed hours late. Odd minutes cost nothing.
+    for entry in _trigger(ALL_RENDERED[name])["schedule"]:
+        for minute in entry["cron"].split()[0].split(","):
+            assert minute.isdigit(), (
+                f"{name}: {entry['cron']} - spell the minutes out; a step like */15 "
+                "puts a tick back on minute 0"
+            )
+            assert int(minute) not in (0, 15, 30, 45), f"{name}: {entry['cron']}"
+
+
+def test_the_daily_crons_each_own_their_own_minute():
+    # The daily jobs are a CHAIN: refresh converges workflows and secrets, then sync
+    # membership mirrors the teams that sync site reads for gating. Membership and site
+    # were both `0 6 * * *` in one repo under one token, i.e. racing - which is how a site
+    # syncs against teams that have not been written yet. Distinct slots order the chain.
+    slots = [
+        (name, entry["cron"])
+        for name in sorted(CRONS)
+        for entry in _trigger(ALL_RENDERED[name])["schedule"]
+        if entry["cron"].split()[1] != "*"  # daily, not the quarter-hourly scheduler
+    ]
+    when = [tuple(cron.split()[:2]) for _, cron in slots]
+    assert len(set(when)) == len(when), slots
 
 
 @pytest.mark.parametrize("name", sorted(CRONS))

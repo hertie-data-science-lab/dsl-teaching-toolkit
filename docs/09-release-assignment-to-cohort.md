@@ -17,7 +17,7 @@ A `handout_datetime:` datetime under `assignments.<slug>` in the cohort's `sched
 
 This is the recommended method for releasing assignments, as it involves a one-time setup cost and also creates an entry in the deployed `<course>.github.io` site, so students can clearly understand the course plan in advance.
 
-> NB: a manual release stays compatible with the schedule: on success the workflow **records the release moment into `schedule.yml`** (`assignments.<slug>.handout_datetime`, write-once - a scheduled value is never touched), so the schedule remains the one record of when every assignment went out - and late onboarders get their repo on the next hourly tick.
+> NB: a manual release stays compatible with the schedule: on success the workflow **records the release moment into `schedule.yml`** (`assignments.<slug>.handout_datetime`, write-once - a scheduled value is never touched), so the schedule remains the one record of when every assignment went out - and late onboarders get their repo on the next tick.
 
 ## Release assignment via manual dispatch
 
@@ -92,11 +92,11 @@ assignments:
 - **The date students see** (cohort site + the brief's "due" event) is `assignments[slug].due_datetime`
   (23:59 that day). Edit → commit to `main` - **Sync site** fires automatically on the push.
 - **The grading deadline** is `grading_datetime` if set, else `due_datetime`.
-  - At that moment the hourly cron freezes the snapshot and runs the autograder automatically.
+  - At that moment the scheduled cron freezes the snapshot and runs the autograder automatically.
 - **The commit that is considered submitted for grading** is frozen right after the grading deadline passes, into
 `classroom-config/snapshots/<slug>.csv`. It is **write-once** - later pushes can't move the
   pin. To deliberately re-freeze (e.g. repos provisioned late), delete the CSV and the next
-  hourly tick rebuilds it.
+  scheduled tick rebuilds it.
 
 ## Next
 
