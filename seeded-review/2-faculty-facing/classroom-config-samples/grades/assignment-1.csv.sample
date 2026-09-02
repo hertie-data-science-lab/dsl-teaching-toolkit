@@ -1,0 +1,11 @@
+github_handle,team,auto,manual,team_grade,adjustment,final,comments,team_comments
+anna-adams,,70,18,,,88,"Clear, correct solution. Watch vectorised edge cases.",
+ben-baker,,60,14,,,74,"Right idea; the proof in Q3 is incomplete.",
+carla-cohen,,75,16,,,91,Excellent throughout.,
+dan-davies,,68,15,,,83,Solid. Tighten the write-up next time.,
+amara-okonjo,,72,17,,,89,"Clean implementation; good use of the provided fixtures.",
+jonas-bergstrom,,58,12,,,70,"Passes the basic cases; misses the empty-input branch.",
+k-nowak-weiss,,80,18,,,98,"Best submission in the cohort - concise and fully tested.",
+miguel-santos,,65,15,,,80,"Correct, but the complexity discussion is hand-wavy.",
+priya-raman,,71,16,,,87,Strong work; minor style issues only.,
+tomas-havel,,63,13,,,76,"Works, but the Q2 helper duplicates library behaviour.",

@@ -1,0 +1,77 @@
+name: New assignment
+
+on:
+  workflow_dispatch:
+    inputs:
+      number:
+        description: "Assignment number (e.g. 1)"
+        required: true
+      tag:
+        description: "Year tag, e.g. f2026 or s2026 - creates assignment-<number>-<tag>"
+        required: true
+      format:
+        description: "Starter format - a .py script or a Jupyter notebook"
+        required: true
+        type: choice
+        default: py
+        options:
+          - py
+          - notebook
+      type:
+        description: "individual = one repo per student; group = one repo per team (teams.csv)"
+        required: true
+        type: choice
+        default: individual
+        options:
+          - individual
+          - group
+
+permissions: {}
+
+jobs:
+  check-team:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify the user may run actions for THIS repo
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Faculty & instructors have write+ on the course repos; students never do (and triggering a
+          # workflow_dispatch already requires write), so repo permission is the gate.
+          perm=$(gh api "repos/$REPO/collaborators/$ACTOR/permission" --jq '.permission' 2>/tmp/gherr || true)
+          case "$perm" in admin|write|maintain) exit 0 ;; esac
+          echo "::error::@$ACTOR lacks write on $REPO (permission='$perm'). gh api said:"
+          cat /tmp/gherr || true
+          exit 1
+
+  scaffold:
+    needs: check-team
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          repository: hertie-data-science-lab/dsl-teaching-toolkit
+          ref: main
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Scaffold assignment
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          DSL_BOT_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          ORG: ${{ github.repository_owner }}
+          NUMBER: ${{ inputs.number }}
+          TAG: ${{ inputs.tag }}
+          FORMAT: ${{ inputs.format }}
+          TYPE: ${{ inputs.type }}
+        run: |
+          gh auth setup-git
+          python3 -m dsl_course.scaffold assignment --org "$ORG" --number "$NUMBER" \
+            --tag "$TAG" --format "$FORMAT" --type "$TYPE"
+          python3 -m dsl_course.seed refresh --course-org "$ORG"

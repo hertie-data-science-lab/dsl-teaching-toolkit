@@ -1,0 +1,92 @@
+# This cohort's schedule + auto-release plan. Instructors edit directly. 
+#
+# Times are Europe/Berlin unless you set `timezone:`; the Scheduled release cron runs hourly, so times are honoured to the hour.
+#
+# Each block encodes BEHAVIOUR:
+#   releases:     entries that DEPLOY materials (course org -> this cohort org)
+#   assignments:  each assignment's handout / due / grading lifecycle
+#   events:       display-only calendar rows - nothing deploys
+#
+# Changing a date later? Just commit the edit to this file on main; the hourly cron reads
+# whatever is on main at each tick, so the change simply takes effect within the hour.
+#
+# NB already-fired actions don't rewind: a release already shipped stays
+# shipped, and a snapshot/autograde that already ran needs its marker deleted to redo.
+# Rewrite git history and force push to remove these releases.
+#
+# What follows is a SKELETON: uncomment and fill what you want. For a full worked term -
+# a real release plan, a group project, exams - see `schedule.yml.sample`.
+
+# timezone: Europe/Berlin           
+# semester_start: 
+# semester_end: 
+
+# releases:                         
+#   lecture-1:                      
+#     event_datetime:               # what the site's schedule shows
+#     title:                        # OPTIONAL: the session's name, displayed on the Lectures tab (default: prettified label of the key, here "Lecture 1")
+#     description:                  # OPTIONAL: a sentence about it, displayed on the Lectures tab
+#     tbc: false                    # OPTIONAL: site marks it "(TBC)" next to the event_datetime (default: false)
+#     deploy:
+#       - course_source_repo:       # REQUIRED
+#         course_source_path:       # REQUIRED - folder or file to copy
+#         cohort_dest_repo:         # OPTIONAL - default: materials
+#         cohort_dest_path:         # OPTIONAL - default: mirrors course_source_path
+#         deploy_datetime:          # OPTIONAL - default: the event_datetime
+#       - course_source_repo:       # this session's READINGS - one line per session, and TODO - I THINK MAIN MOVED THIS OUT NO?????
+#         course_source_path: readings/01_session-1  # they ship on the same clock as anything
+#                                   # else. Every file in that folder is listed and linked
+#                                   # for enrolled students; the optional READINGS.md beside
+#                                   # them is published publicly as the citation list.
+#                                   # Omit this and the session's readings never ship.
+#       - course_source_repo:       # a THIRD copy on its own clock - e.g. lab solutions
+#         course_source_path:       # staged OUTSIDE the folder released above, else the
+#         cohort_dest_path:         # first copy ships them too
+#         deploy_datetime:          # after the lab, so students work the empty scripts first
+#
+#   lab-1: 
+#     event_datetime:               
+#     title:
+#     description:
+#     deploy:
+#       - course_source_repo:
+#         course_source_path:
+#         cohort_dest_repo:
+#         cohort_dest_path:
+#         deploy_datetime: 
+# 
+#   readings-1:    # TODO: NEED TO ADD FUNCTIONALITY VIA A SEPARATE PR THAT ALLOWS TOGGLING ON/OFF OF SITE-DISPLAY -> READINGS ARE JUST SILENTLY RELEASED, DON'T NEED AN EVENT ROW IN THE SITE'S DEPLOYED SCHEDULE. WE NEED TO ADD THIS THEN THEN UPDATE THESE SAMPLE & STUB DOCS WITH THE TOGGLE (DEFAULT IS IT DISPLAYS, OPT OUT)... TO DO THIS IS ALREADY DONE???? NEED TO REBASE ON MAIN AND CHECK
+#     event_datetime:               
+#     title:
+#     description:
+#     deploy:
+#       - course_source_repo:
+#         course_source_path:
+#         cohort_dest_repo:
+#         cohort_dest_path:
+#         deploy_datetime:       
+#
+# assignments:                      
+#   assignment-1:
+#     course_source_repo:           # REQUIRED 
+#     cohort_dest_repo:             # OPTIONAL (default: the slug (here would be assignment-1))
+#     handout_datetime:             # Omit  if you hand out via the manual "Release assignment" button (which auto-records it here for you)
+#     due_datetime:                 # a bare date -> end of that day (23:59:59)
+#     grading_datetime:             # OPTIONAL: snapshot freezes + autograder fires (default: due_datetime). Not shown to students
+#     type: group                   # OPTIONAL: group | individual (also settable in the template's grading.yml; default: individual)
+#     max_team_size:                # OPTIONAL, group only: the welcome "Join team" flow  refuses a member beyond this (default: 5)
+
+# events:                           # DISPLAY-ONLY calendar rows - nothing deploys
+#   midterm-exam:
+#     type: exam                    # OPTIONAL: exam | special_event (default:  special_event). `exam` colours the row as an exam
+#     title: Midterm exam           # OPTIONAL row label (default: prettified label)
+#     event_datetime:               # bare date -> whole day;
+#                                   # `event_datetime: tbc` -> an undated TBC row
+#   final-exam:
+#     type: exam                                            
+#     event_datetime: 
+#
+#   clinic-drop-in:
+#     type: special_event
+#     title: "Clinic drop-in"
+#     event_datetime: 

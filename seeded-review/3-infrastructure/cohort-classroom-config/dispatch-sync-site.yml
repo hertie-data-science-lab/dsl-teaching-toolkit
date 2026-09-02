@@ -1,0 +1,50 @@
+name: Dispatch site sync
+
+# Seeded into a cohort's private classroom-config repo as
+# .github/workflows/dispatch-sync-site.yml (companion to dispatch-sync.yml, which handles
+# membership). Its only job: fire the course org's Sync site whenever schedule.yml or
+# people.yml changes here, so the cohort website - which reads its release plan, session
+# dates, due dates and exams from schedule.yml, and its staff cards from people.yml -
+# refreshes immediately without a manual click.
+#
+# people.yml also fires dispatch-sync.yml (event_type sync-membership). The two are
+# independent: different workflows, different event types, different targets (teams vs the
+# site repo), so both running on one push is expected and harmless.
+#
+# Reads the course org from THIS cohort's own .github/dsl-course.yml `course:` pointer
+# (single source of truth). Fires a repository_dispatch (not workflow_dispatch) so Sync
+# site's ungated automatic path picks it up. Runs under secrets.DSL_BOT_TOKEN, which
+# classroom-config already carries (an infra repo) - unlike the content repos, so a direct
+# edit to a released content repo is instead caught by Sync site's daily cron.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - schedule.yml
+      - people.yml
+
+# Everything here authenticates with DSL_BOT_TOKEN (reading this org's dsl-course.yml, and
+# dispatching to the course org - neither of which the ambient token can do), so the
+# ambient GITHUB_TOKEN is dropped to zero scopes.
+permissions: {}
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger Sync site in the course org
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          COHORT_ORG: ${{ github.repository_owner }}
+        run: |
+          course_org=$(gh api "repos/$COHORT_ORG/.github/contents/dsl-course.yml" \
+            --jq '.content | @base64d' | grep '^course:' | cut -d: -f2- | xargs)
+          if [ -z "$course_org" ]; then
+            echo "::error::no 'course:' line in $COHORT_ORG/.github/dsl-course.yml - can't find the course org to dispatch to."
+            exit 1
+          fi
+          gh api "repos/$course_org/.github/dispatches" \
+            -f event_type=sync-site \
+            -f "client_payload[cohort_org]=$COHORT_ORG"

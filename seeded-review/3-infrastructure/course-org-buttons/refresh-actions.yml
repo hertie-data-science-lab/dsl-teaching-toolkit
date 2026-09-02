@@ -1,0 +1,73 @@
+name: Refresh actions
+
+# Every seeded workflow is frozen at the moment it was seeded, while the engine it calls is
+# always checked out from central main - so an org left alone drifts, until a stale button
+# calls engine code that has since moved. This re-seeds the org daily, so every org
+# converges on central within 24h with nobody pressing anything. The refresh is idempotent
+# and skips files whose content is unchanged, so a night with no central changes is silent.
+
+on:
+  schedule:
+    - cron: "27 5 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: seed-refresh
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          repository: hertie-data-science-lab/dsl-teaching-toolkit
+          ref: main
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Refresh
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          DSL_BOT_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          COURSE: ${{ github.repository_owner }}
+        run: |
+          python3 -m dsl_course.seed refresh --course-org "$COURSE"
+      - name: Report an unattended failure as an issue
+        if: (failure() || cancelled()) && github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          WORKFLOW: ${{ github.workflow }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="$WORKFLOW is failing"
+          # A filed issue emails only the repo's watchers, which in practice is nobody.
+          # The mention makes a red cron land in the admins' inbox; course-admin, not
+          # instructors, because broken infrastructure is not the teaching staff's problem.
+          body=$(printf 'The unattended run failed or was cancelled (a timeout counts): %s\n\nNothing retries it before the next scheduled run. This issue closes itself once a run succeeds.\n\ncc @%s/course-admin\n' "$RUN_URL" "${REPO%%/*}")
+          # The step runs under `bash -e`, so an unguarded capture would abort the step on a
+          # transient search failure - before the `gh issue create` that is the whole point.
+          # No dedupe hit just means we file a fresh issue.
+          existing=$(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number --jq '.[0].number') || true
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --repo "$REPO" --body "$body"
+          else
+            gh issue create --repo "$REPO" --title "$title" --body "$body"
+          fi
+      - name: Close the failure issue once a run succeeds
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          WORKFLOW: ${{ github.workflow }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          title="$WORKFLOW is failing"
+          for n in $(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number --jq '.[].number'); do
+            gh issue close "$n" --repo "$REPO" --comment "Recovered: $RUN_URL"
+          done

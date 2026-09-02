@@ -1,0 +1,7 @@
+# How the Grade assignment button autogrades this assignment (after the grading_deadline in schedule.yml).
+# Delete this file (or set autograde: false) for a purely manually-graded one.
+type: individual      # individual (one repo per student) or group (one repo per team)
+format: notebook      # py or notebook
+autograde: true       # false -> skip autograding (all-manual)
+max_auto: 0           # points the hidden tests are worth (0 = informational)
+tests: tests          # path (on THIS solution branch) holding the hidden tests

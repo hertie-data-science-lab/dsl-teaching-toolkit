@@ -1,0 +1,17 @@
+name: Join course
+description: Enrol in this course with the code the teaching team emailed you
+title: "Join course"
+labels: ["onboarding"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This matches your GitHub handle to the course-registered Hertie email address. You will be automatically assigned as either an enrolled student or auditor, based on assignment by your instructors.
+  - type: input
+    id: enrol_code
+    attributes:
+      label: Enrolment code
+      description: The code emailed to your university address (looks like dsl-xxxxxx).
+      placeholder: "dsl-ab3k9m"
+    validations:
+      required: true

@@ -1,0 +1,50 @@
+org: hertie-dsl-demo-course-e1234
+org_name: DSL Demo Course
+course_name: Deep Learning (Demo)
+course_code: GRAD-DEMO
+# course_description: One or two sentences, on ONE line - the blurb on every cohort site.
+
+# `course_name`, `course_code` and `course_description` are what reach the cohort websites
+# Editing them here re-syncs every associated/boostrapped cohort site.
+#
+# This is the persistent COURSE org - it spans many cohorts (years). Cohorts are
+# registered separately in .github/cohort-courses-pages.yml.
+
+# ---------------------------------------------------------------------------
+# People. Two DIFFERENT things live under the `people:` key below - don't
+# confuse them:
+#
+#   course_admins        GRANTS ACCESS. The single source of truth for course-wide
+#                        admin rights - the `course-admin` team here, mirrored into
+#                        every cohort org. A handle added any other way is reverted 
+#                        on the next sync unless it's declared here; removing a
+#                        handle here revokes their access.
+#
+#   instructors          DISPLAY ONLY - website cards (name/photo/title/link) for
+#                        the OPTIONAL public open-courseware course website (the
+#                        "Publish course website" action). They grant NO GitHub
+#                        access. TAs are NOT declared here - they change every
+#                        cohort, so a cohort's whole teaching team (instructors &
+#                        TAs, their GitHub access AND their cohort-site cards) is
+#                        declared PER COHORT in that cohort's classroom-config/people.yml.
+# ---------------------------------------------------------------------------
+people:
+  course_admins:
+    - github_handle: "demo-admin-placeholder"    # grants the `course-admin` team
+
+  # Instructor website cards (optional, DISPLAY ONLY - no GitHub access) for the
+  # OPTIONAL public open-courseware course website. TAs are NOT listed here - a
+  # cohort's own teaching team (instructors & TAs) goes in that cohort's
+  # classroom-config/people.yml instead. Uncomment and fill:
+  # instructors:
+  #   - github_handle: "janedoe"
+  #     name:  "Prof. Dr. Jane Doe"
+  #     title: "Professor of Data Science"
+  #     photo: "/_images/pp/jane.jpg"             # square image: EITHER a path to a
+  #                                               # file committed into the site repo
+  #                                               # under _images/pp/, OR an absolute
+  #                                               # URL on a host that allows
+  #                                               # hotlinking (e.g. GH avatar links)
+  #     url:   "https://.../profile/jane-doe"     # bio / profile link
+
+# TODO: IF THIS IS NOT SOMETHING INSTRUCTORS ARE EXPECTED TO HAND EDIT (I.E. IT IS HANDLED BY WORKFLOW ADD THIS AS A LINE COMMENT AT THE TOP - SAME FOR ALL FILES INSTRUCTORS ARE/AREN'T EXPECTED TO TOUCH)
