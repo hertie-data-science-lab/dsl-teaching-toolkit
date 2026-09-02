@@ -19,7 +19,7 @@
 # Changing a date later? Just commit the edit to this file on main; the cron reads
 # whatever is on main at each tick, so the change simply takes effect on the next one.
 #
-# Already-fired ONE-SHOT actions don't rewind: a release already shipped stays
+# NB already-fired ONE-SHOT actions don't rewind: a release already shipped stays
 # shipped, and a snapshot/autograde that already ran needs its marker deleted to redo.
 # Unshipping a release means rewriting the cohort repo's git history and force-pushing.
 #
@@ -40,7 +40,7 @@
 #
 #   lecture-1:                      
 #     event_datetime:               # REQUIRED - what the site's schedule shows (no valid date = the whole entry is dropped)
-#     title:                        # OPTIONAL - default: the label, prettified (here "Lecture 1")
+#     title:                        # OPTIONAL - the session's name, shown beside its ordinal ("Session 1 / Probability Theory") on the Schedule, Lectures, Materials and Labs tabs. NO default: without it the row reads just "Session 1"
 #     description:                  # OPTIONAL - a sentence about it, displays on the deployed site's Lectures tab
 #     tbc: false                    # OPTIONAL - default: false. true = site marks it "(TBC)" next to the event_datetime on the deployed site
 #     deploy:                       # OPTIONAL - omit it for a display-only row (a session with nothing to ship yet)
@@ -72,13 +72,13 @@
 #
 #   readings-1:                     # each session's readings can optionally get their own entry, on their own clock (recommended)- they usually go out ahead of the session. (Could also be released as part of the lecture block above).
 #     event_datetime:               # REQUIRED
-#     show_on_site: false           # OPTIONAL - default: true
+#     show_on_site: false           # OPTIONAL - default: true. Recommended false here: the readings still list on the session's own row, but the entry adds no row of its own to the Schedule tab and cannot pull that row's date or name back to the day the files went up
 #     deploy:
 #       - course_source_repo:       # REQUIRED
 #         course_source_path: readings/01_session-1   # NB including an optional READINGS.md alongside the files themselves serves as a clean citation list (published publicly, whereas the files themeselves remain behind enrolment gating)
-#         cohort_dest_repo:         
-#         cohort_dest_path:         
-#         deploy_datetime:          
+#         cohort_dest_repo:         # OPTIONAL - default: materials
+#         cohort_dest_path:         # OPTIONAL - default: mirrors course_source_path
+#         deploy_datetime:          # OPTIONAL - default: the event_datetime
 #                                   
 # assignments:                      
 #   assignment-1:
