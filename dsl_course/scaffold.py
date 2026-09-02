@@ -130,9 +130,10 @@ def _syllabus_sample() -> str:
 # an online reading goes - the tab read blank with nothing to explain why.
 _READINGS_STUB = (
     b"# Session 1 readings\n\n"
-    b"<!-- dsl-stub: still the scaffold's, so the toolkit keeps it up to date.\n"
-    b"     Write over it and it is yours. This file is OPTIONAL - delete it and the\n"
-    b"     files you put in this folder are still listed. -->\n\n"
+    b"<!-- dsl-stub: this comment marks the reading list as still the scaffold's.\n"
+    b"     Write over it and it is yours - the toolkit never rewrites this file\n"
+    b"     either way. It is OPTIONAL: delete it and the files you put in this\n"
+    b"     folder are still listed. -->\n\n"
     b"Drop the readings themselves into this folder - PDFs, slides, URLs as text\n"
     b"files, notebooks - anything. Every file here is listed and linked for enrolled\n"
     b"students and auditors automatically; you do not have to name them here as\n"

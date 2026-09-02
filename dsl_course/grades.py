@@ -2917,7 +2917,7 @@ def _course_name(cohort_org: str) -> str:
 def _email_updates(
     cohort_org: str, handles: list[str], dry_run: bool = False
 ) -> tuple[int, list[str]]:
-    """Email each student a 'grades updated' notification to their hertie email address,
+    """Email each student a 'grades updated' notification to their Hertie email address,
     linking to their private gradebook repo (the grade's source of truth).
 
     Returns `(how many FAILED, which handles were told)`. `distribute` exits on the first

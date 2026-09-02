@@ -865,7 +865,7 @@ def render_send_codes() -> str:
     return f"""name: Send enrolment codes
 
 # Generates a random enrolment code per student (into classroom-config/students.csv) and
-# emails each not-yet-onboarded student their code to their hertie email address. Students
+# emails each not-yet-onboarded student their code to their Hertie email address. Students
 # paste the code into the welcome Join course issue - no personal data in the public repo.
 # Needs the GRAPH_* secrets.
 #
