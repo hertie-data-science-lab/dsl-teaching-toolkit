@@ -1,0 +1,91 @@
+name: Grade assignment
+
+# Faculty-side autograder, by hand. The hourly cron already grades each assignment ONCE at
+# its grading deadline - this button is for a deliberate re-grade. Clones each submission as
+# of the cohort schedule's grading deadline (`grading_datetime`, else `due_datetime` -
+# SSOT, no input here), runs the HIDDEN tests from the template's solution branch, archives
+# result.json, and fills the machine score into the private grades CSV (faculty & instructors
+# then add manual marks; Render + Distribute send them).
+#
+# WRITE-ONCE: an `auto`/`team`/`team_grade` cell that already holds a value is never
+# overwritten, so re-running does NOT refresh scores - it only fills cells still empty. For a
+# fresh machine score, clear those cells first (and delete classroom-config/autograde/<slug>/
+# to let the cron regrade). Nothing is written to student repos. dry_run lists what would be
+# graded.
+
+on:
+  workflow_dispatch:
+    inputs:
+      cohort_org:
+        description: "Cohort org (submissions)"
+        required: true
+        type: choice
+        default: "hertie-dsl-demo-f2026"
+        options:
+          - hertie-dsl-demo-f2026
+      course_source_repo:
+        description: "Course-org repo to hand out from"
+        required: true
+        type: choice
+        options:
+          - assignment-1
+          - assignment-2-project
+      group:
+        description: "Group assignment - grade one repo per team"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Preview only - list the repos that WOULD be graded"
+        type: boolean
+        default: false
+
+permissions: {}
+
+jobs:
+  check-team:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Verify the user may run actions for THIS repo
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          ACTOR: ${{ github.actor }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Faculty & instructors have write+ on the course repos; students never do (and triggering a
+          # workflow_dispatch already requires write), so repo permission is the gate.
+          perm=$(gh api "repos/$REPO/collaborators/$ACTOR/permission" --jq '.permission' 2>/tmp/gherr || true)
+          case "$perm" in admin|write|maintain) exit 0 ;; esac
+          echo "::error::@$ACTOR lacks write on $REPO (permission='$perm'). gh api said:"
+          cat /tmp/gherr || true
+          exit 1
+
+  grade:
+    needs: check-team
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          repository: hertie-data-science-lab/dsl-teaching-toolkit
+          ref: main
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - name: Grade
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          MASTER_ORG: ${{ github.repository_owner }}
+          COHORT_ORG: ${{ inputs.cohort_org }}
+          COURSE_SOURCE_REPO: ${{ inputs.course_source_repo }}
+          GROUP: ${{ inputs.group }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          gh auth setup-git
+          pip install --quiet pytest nbconvert
+          args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG")
+          [ "$GROUP" = "true" ] && args+=(--group)
+          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          python3 -m dsl_course.collect "${args[@]}"
