@@ -52,14 +52,14 @@ _SYLLABUS_STUB = """\
 
 *Optional - delete this file if your course does not need it.*
 
-<!-- dsl-stub: still the scaffold's, so the toolkit keeps it up to date. Delete this
-     comment (or just write over the file) and it is yours - never touched again.
+<!-- dsl-stub: this comment is what tells the toolkit the syllabus is still unwritten,
+     so a release withholds it rather than shipping these instructions to students. Delete
+     this comment (or just write over the file) and it is yours - the toolkit never
+     rewrites this file either way.
 
-     FACULTY & INSTRUCTORS: this is the students' syllabus, and it is yours to write - the
-     headings below are the standard Hertie shape, so delete what your course does not use.
-     Release it by naming this file as the release path (see MAINTAINING.md); the name and
-     its capitalisation must match exactly, and any format works - rename this to
-     SYLLABUS.pdf and release that instead if you author in Word.
+     FACULTY & INSTRUCTORS: this is the students' syllabus - the headings below are the
+     standard Hertie shape, so delete what your course does not use.
+     Release it by naming this file in the release path (see MAINTAINING.md).
      A filled example sits beside this file in SYLLABUS.md.sample. -->
 
 ## 1. General information
@@ -71,7 +71,6 @@ _SYLLABUS_STUB = """\
 | Office hours | |
 | Term | {tag} |
 | Sessions | |
-| Language of instruction | English |
 
 ## 2. Course contents and learning objectives
 
@@ -93,11 +92,9 @@ _SYLLABUS_STUB = """\
 
 ## 5. Course sessions and readings
 
-<!-- The course website publishes this session by session, built from
+<!-- Alternatively, the course website can publish this session by session, built from
      `classroom-config/schedule.yml` (each session's title and learning objectives) and
-     each session's `readings/NN_.../` folder (its reading list). If you also list the
-     sessions here - Hertie syllabi normally do - keep the two in step, or students will
-     read one and see the other. -->
+     each session's `readings/NN_.../` folder (its reading list). -->
 """
 
 # The filled syllabus faculty copy from, seeded beside their own SYLLABUS.md as
@@ -136,20 +133,21 @@ _READINGS_STUB = (
     b"<!-- dsl-stub: still the scaffold's, so the toolkit keeps it up to date.\n"
     b"     Write over it and it is yours. This file is OPTIONAL - delete it and the\n"
     b"     files you put in this folder are still listed. -->\n\n"
-    b"Drop the readings themselves into this folder - PDFs, slides, notebooks,\n"
-    b"anything. Every file here is listed and linked for enrolled students and\n"
-    b"auditors automatically; you do not have to name them here as well.\n\n"
-    b"This file is for what a file cannot say: a link to read online, or a proper\n"
-    b"citation. Anything goes - a bare URL on its own line is fine.\n\n"
+    b"Drop the readings themselves into this folder - PDFs, slides, URLs as text\n"
+    b"files, notebooks - anything. Every file here is listed and linked for enrolled\n"
+    b"students and auditors automatically; you do not have to name them here as\n"
+    b"well.\n\n"
+    b"This file is for what a file cannot represent: explanations & directions,\n"
+    b"chapters & references, a link to read online, a proper citation format.\n\n"
     b"## Required Readings\n\n"
     b"- Author, *Title*, ch. 1.\n"
     b"- https://example.org/an-online-reading\n\n"
     b"## Optional Readings\n\n"
     b"- Author, *Title*, ch. 2.\n\n"
     b"What you write here is PUBLIC (it is a citation list). The files beside it\n"
-    b"stay behind the enrolled-student/auditor gate, unless the course runs a\n"
+    b"stay behind the enrolled-student/auditor gate (unless the course runs a\n"
     b"public open-courseware site in `actual-readings` mode, which serves them\n"
-    b"too. The session's learning objectives come from `description:` in\n"
+    b"too). The session's learning objectives come from `description:` in\n"
     b"schedule.yml.\n"
 )
 

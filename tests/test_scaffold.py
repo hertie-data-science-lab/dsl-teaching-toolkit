@@ -311,10 +311,13 @@ def test_the_syllabus_stub_carries_the_standard_sections(fake):
         "## 5. Course sessions and readings",
     ):
         assert heading in stub
-    # It must say that the name, and its capitalisation, is what releases it - the trap the
-    # sample schedule used to set - and that a PDF releases just as readily, which is what
-    # ITDS actually uses.
-    assert "capitalisation" in stub and "SYLLABUS.pdf" in stub
+    # The stub points at MAINTAINING.md for how to release it, and that is where the two
+    # facts a course team gets wrong have to be found: the release path is case sensitive -
+    # the trap the sample schedule used to set - and a PDF releases just as readily, which
+    # is what ITDS actually uses.
+    assert "MAINTAINING.md" in stub
+    guide = scaffold._maintaining("Org", "course-materials-f2026")
+    assert "case sensitive" in guide and "SYLLABUS.pdf" in guide
 
 
 def test_no_system_file_is_ever_released_to_students():
