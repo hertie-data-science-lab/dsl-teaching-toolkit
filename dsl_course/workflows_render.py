@@ -799,7 +799,8 @@ def render_send_codes() -> str:
 # There is no button: a push to a cohort's students.csv is what fires this (its
 # classroom-config dispatch-send-codes.yml dispatches `send-codes`), so the roster is the
 # only thing anyone edits. Re-running is safe - a row is mailed only while its
-# `code_sent_at` is blank - so a re-send is a fresh push to the roster.
+# `code_sent_at` is blank - which is also why pushing again does not re-send: to send a
+# row a second time, clear its `code_sent_at` and push that.
 
 on:
   repository_dispatch:
@@ -874,8 +875,8 @@ def render_scheduler() -> str:
 #
 # THE cadence-critical schedule: this is the only cron a student can be waiting on, since a
 # release's `when` is usually a class time. Four off-peak ticks an hour rather than one on the
-# hour - see the cron-minute rules above for why `0 * * * *` was delivered 6 times a day, not
-# 24. An idle tick is ~30s and reads a handful of paths, so the cost of the extra ticks is a
+# hour, because GitHub drops scheduled runs at the top of the hour: `0 * * * *` was delivered
+# 6 times a day, not 24. An idle tick is ~30s and reads a handful of paths, so the cost of the extra ticks is a
 # few hundred REST calls an hour against the bot token's 5000; releasing or grading is what
 # takes real time, and that only happens on the tick where something is actually due.
 
