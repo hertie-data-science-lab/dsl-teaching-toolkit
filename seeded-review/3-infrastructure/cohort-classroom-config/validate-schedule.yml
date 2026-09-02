@@ -1,9 +1,11 @@
+# SYSTEM-OWNED - do not edit, edits here are overwritten. This workflow is re-seeded
+# from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Validate schedule
 
 # Seeded into a cohort's private classroom-config repo as
 # .github/workflows/validate-schedule.yml. Checks schedule.yml the moment it changes, in
 # the repo it lives in - faculty edit here, so the verdict belongs here rather than behind
-# a button in the course org.
+# a workflow in the course org.
 #
 # It CANNOT block the commit: workflows run after the push has landed, and branch
 # protection needs a paid plan on a private repo. So it does the two things it can:
@@ -12,7 +14,7 @@ name: Validate schedule
 #      only works if someone looks. The issue is closed automatically by the next commit
 #      that parses clean, so it tracks the current state rather than accumulating.
 #
-# Validation runs the SAME parser the hourly scheduler uses (dsl_course.schedule), checked
+# Validation runs the SAME parser the scheduler uses (dsl_course.schedule), checked
 # out from the public central repo. A second implementation - a JSON schema, a hand-rolled
 # checker - could drift, and its failure mode is the worst one available: passing a file
 # the scheduler will silently drop entries from.
@@ -21,7 +23,7 @@ name: Validate schedule
 # also checks whether the plan's sources exist in the course org, but that answer changes
 # week to week (a lecture nobody has written yet is normal in August), so it is reported as
 # ::warning:: annotations on a green run and never touches the exit code. Escalating one of
-# those to a failure is the hourly scheduler's job, which files its own, separately-titled
+# those to a failure is the scheduler's job, which files its own, separately-titled
 # digest issue - routing it through here would name the fault "entries the scheduler cannot
 # read" and close it on the next clean parse, staged or not.
 
@@ -55,8 +57,8 @@ jobs:
           path: cohort
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
-          repository: __CENTRAL__
-          ref: __CENTRAL_REF__
+          repository: hertie-data-science-lab/dsl-teaching-toolkit
+          ref: release
           path: central
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
         with:
@@ -130,8 +132,8 @@ jobs:
         run: |
           title="schedule.yml has entries the scheduler cannot read"
           existing=$(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number --jq '.[0].number')
-          body=$(printf '%s\n\n```\n%s\n```\n\nCommit: %s\nRun: %s\n\nA dropped entry is silently absent from the term plan - no release, or no deadline, snapshot or autograding. Fix `schedule.yml` on `main` and this issue closes itself.\n\nField reference: https://github.com/%s/blob/main/docs/07-schedule-releases.md' \
-            "Validation of \`schedule.yml\` failed." "$REPORT" "$SHA" "$RUN_URL" "__CENTRAL__")
+          body=$(printf '%s\n\n```\n%s\n```\n\nCommit: %s\nRun: %s\n\nA dropped entry is silently absent from the term plan - no release, or no deadline, snapshot or autograding. Fix `schedule.yml` on `main` and this issue closes itself.\n\nField reference: https://github.com/%s/blob/release/docs/07-schedule-releases.md' \
+            "Validation of \`schedule.yml\` failed." "$REPORT" "$SHA" "$RUN_URL" "hertie-data-science-lab/dsl-teaching-toolkit")
           if [ -n "$existing" ]; then
             gh issue comment "$existing" --repo "$REPO" --body "$body"
           else
