@@ -11,8 +11,8 @@ name: Scheduled release
 #
 # THE cadence-critical schedule: this is the only cron a student can be waiting on, since a
 # release's `when` is usually a class time. Four off-peak ticks an hour rather than one on the
-# hour - see the cron-minute rules above for why `0 * * * *` was delivered 6 times a day, not
-# 24. An idle tick is ~30s and reads a handful of paths, so the cost of the extra ticks is a
+# hour, because GitHub drops scheduled runs at the top of the hour: `0 * * * *` was delivered
+# 6 times a day, not 24. An idle tick is ~30s and reads a handful of paths, so the cost of the extra ticks is a
 # few hundred REST calls an hour against the bot token's 5000; releasing or grading is what
 # takes real time, and that only happens on the tick where something is actually due.
 
