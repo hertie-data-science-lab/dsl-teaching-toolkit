@@ -16,7 +16,7 @@ Three idempotent stages, each a faculty & instructors workflow:
                classroom-config/gradebook/<handle>.yml  -- opened as ONE PR (the preview)
                      |  distribute (after the PR merges)
                      v
-               cohort/grades-<handle>/grades.yml + an email to the student's hertie email address
+               cohort/grades-<handle>/grades.yml + an email to the student's Hertie email address
 
 `classroom-config` keeps the full grade archive (private source of truth); the PR diff is
 the all-students-at-once preview that the Power Automate flow never gave.
@@ -610,7 +610,7 @@ def render(cohort_org: str) -> int:
 
 def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> int:
     """Fan the merged gradebook/<handle>.yml files out into each private grades-<handle>,
-    then (unless silenced) email each student a notification to their hertie email address.
+    then (unless silenced) email each student a notification to their Hertie email address.
 
     Clone classroom-config once and read the files locally (rather than an API GET per
     student); the only per-student call left is the unavoidable write to each repo.
@@ -801,7 +801,7 @@ def sample_body(cohort_org: str, course_name: str = "") -> str:
 def _email_updates(
     cohort_org: str, handles: list[str], dry_run: bool = False
 ) -> tuple[int, list[str]]:
-    """Email each student a 'grades updated' notification to their hertie email address,
+    """Email each student a 'grades updated' notification to their Hertie email address,
     linking to their private gradebook repo (the grade's source of truth).
 
     Returns `(how many FAILED, which handles were told)`. `distribute` exits on the first

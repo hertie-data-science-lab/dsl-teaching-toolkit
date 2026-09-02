@@ -208,7 +208,7 @@ jobs:
               const cap = await teamCap(assignment);
               if (cap === null) return fail(
                 `Thanks @${handle} - \`${assignment}\` isn't an assignment in this cohort's schedule yet. ` +
-                `Check the slug with the teaching team, or ask them to add it to classroom-config/schedule.yml.`,
+                `Check the slug with the teaching team - they can add it to the cohort's schedule.`,
                 'needs-review');
 
               // Read-modify-write, retried on a 409. Many Join-team issues are in flight at
