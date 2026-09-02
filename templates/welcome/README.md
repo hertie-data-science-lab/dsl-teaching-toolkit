@@ -4,10 +4,10 @@
 
 **Start here.** To join, open a
 **[Join course](https://github.com/{org}/welcome/issues/new/choose)** issue in this repo
-(the *New issue* button) and paste the enrolment code that was emailed to your
-hertie email address.
+(the *New issue* button) and paste the enrolment code emailed to your Hertie address.
 
-Your course materials and your own assignment repositories then appear in this organisation.
+Your course materials and your own assignment repositories then become accessible to you
+in this organisation.
 
-If this course has group assignments, use this repo to open a **Join team** issue the same
-way once you've joined.
+If this course has self-serve group assignments, open a **Join team** issue the same way
+once you've joined.
