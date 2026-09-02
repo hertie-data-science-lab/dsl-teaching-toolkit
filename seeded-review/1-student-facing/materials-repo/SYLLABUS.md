@@ -2,11 +2,13 @@
 
 *Optional - delete this file if your course does not need it.*
 
-<!-- when left as a raw syste-owned stub the toolkit will keep it up to date. Delete this
-     comment (or just write over the file) and it is yours - never touched again by the system updates.
+<!-- dsl-stub: this comment is what tells the toolkit the syllabus is still unwritten,
+     so a release withholds it rather than shipping these instructions to students. Delete
+     this comment (or just write over the file) and it is yours - the toolkit never
+     rewrites this file either way.
 
-     FACULTY & INSTRUCTORS: this is the students' syllabus - the
-     headings below are the standard Hertie shape, so delete what your course does not use.
+     FACULTY & INSTRUCTORS: this is the students' syllabus - the headings below are the
+     standard Hertie shape, so delete what your course does not use.
      Release it by naming this file in the release path (see MAINTAINING.md).
      A filled example sits beside this file in SYLLABUS.md.sample. -->
 
