@@ -10,7 +10,8 @@ name: Send enrolment codes
 # There is no button: a push to a cohort's students.csv is what fires this (its
 # classroom-config dispatch-send-codes.yml dispatches `send-codes`), so the roster is the
 # only thing anyone edits. Re-running is safe - a row is mailed only while its
-# `code_sent_at` is blank - so a re-send is a fresh push to the roster.
+# `code_sent_at` is blank - which is also why pushing again does not re-send: to send a
+# row a second time, clear its `code_sent_at` and push that.
 
 on:
   repository_dispatch:
