@@ -1,7 +1,9 @@
-# This cohort's own instructors/TAs 
+# INSTRUCTOR-OWNED - yours to edit freely; edits here are not overwritten.
 #
-# - the SSOT for their GitHub access & permissions 
-# - supplies the deployed .github.io site's staff cards (name/title/photo/url). 
+# This cohort's own instructors/TAs
+#
+# - the SSOT for their GitHub access & permissions
+# - supplies the deployed .github.io site's staff cards (name/title/photo/url).
 # - see reference: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/05-manage-teaching-team.md
 # - see deployed reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/people.yml
 # - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/
@@ -10,14 +12,14 @@
 #
 # people:
 #   instructors:
-#     - github_handle: "janedoe"      # REQUIRED 
-#       name: "Prof. Jane Doe"        # optional 
+#     - github_handle: "janedoe"      # REQUIRED
+#       name: "Prof. Jane Doe"        # optional
 #       title: "Professor of ..."     # optional
-#       photo: "/_images/pp/jane.jpg" # optional. Either (1) a relative path to an image committed under `_images/pp/` in this cohort's site repo.
-#                                     # OR (2)an absolute URL on a host that allows hotlinking (NB: GitHub avatars always do).
+#       photo: "/_images/pp/jane.jpg" # optional. Either (1) a relative path to an image committed under `_images/pp/` in this cohort's site repo,
+#                                     # OR (2) an absolute URL on a host that allows hotlinking (NB: GitHub avatars always do).
 #       url: "https://.../profile/jane"  # optional
-#       start: "YYYY-MM-DD"           # optional - no start = active immediately
-#       end: "YYYY-MM-DD"             # optional - no end = indefinite
+#       start: "2026-09-01"         # optional - no start = active immediately
+#       end: "2027-01-31"      # optional - no end = indefinite
 #   teaching_assistants:
 #     - github_handle: "anOther"
 #       name: "..."
