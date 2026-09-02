@@ -44,6 +44,7 @@ from .course import (
     FEEDBACK_ISSUE_TITLE,
     GRADEBOOK_PREFIX,
     SOLUTION_BRANCH,
+    course_phrase,
     feedback_issue_body,
     receipt_body,
     resolve_is_group,
@@ -2864,14 +2865,14 @@ def update_message(
 
     The course goes in the SUBJECT as well as the body: the inbox list is where a student
     taking several of these actually tells them apart, and by the time they have opened it
-    the body is redundant. A course that carries no name yet keeps the generic wording
-    rather than emailing a blank."""
+    the body is redundant. A course with no name yet degrades to `course_phrase`'s plain
+    "the course" in the body, and to the generic subject - never a blank, and never a
+    literal placeholder."""
     url = f"https://github.com/{cohort_org}/{GRADEBOOK_PREFIX}{student.github_handle}"
-    course_suffix = f" for {course_name}" if course_name else ""
     body = (
         f"Hello {student.name or 'there'},\n\n"
-        f"Your grades{course_suffix} have been updated. View them in your private "
-        f"gradebook:\n"
+        f"Your grades for {course_phrase(course_name)} have been updated. View them in "
+        f"your private gradebook:\n"
         f"  {url}\n"
     )
     subject = (
