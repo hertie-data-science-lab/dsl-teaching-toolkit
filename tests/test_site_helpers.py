@@ -15,7 +15,7 @@ import pytest
 import yaml
 
 from dsl_course import gh_contents, public_site, repos, schedule_plan, site, site_repo
-from tests.conftest import repo_row
+from tests.conftest import entry_links, repo_row
 
 
 def test_semester_label():
@@ -209,8 +209,8 @@ def test_lecture_entry_labels_links_by_repo_or_subpath():
             [("labs", "", "01_intro"), ("materials", "lectures", "01_intro")],
         )
     assert "https://x/1" in entry and "https://x/2" in entry
-    assert 'name: "lab - intro.pdf"' in entry
-    assert 'name: "lecture - slides.pdf"' in entry
+    assert ("lab", "intro.pdf") in entry_links(entry)
+    assert ("lecture", "slides.pdf") in entry_links(entry)
 
 
 def test_public_lecture_entry_actual_readings_mode_links_are_local():
@@ -219,7 +219,8 @@ def test_public_lecture_entry_actual_readings_mode_links_are_local():
     e = public_site._public_lecture_entry(
         "1", date(2025, 1, 1), [("lectures", lec), ("readings", rds)], ""
     )
-    assert "lecture - s.pdf" in e and "reading - r.pdf" in e
+    links = entry_links(e)
+    assert ("lecture", "s.pdf") in links and ("reading", "r.pdf") in links
     assert "github.com" not in e and "raw." not in e
 
 
@@ -235,7 +236,7 @@ def test_public_lecture_entry_renders_a_lab_row_as_its_own_type():
     )
     assert "type: lab" in e
     assert 'title: "Lab 2"' in e
-    assert 'name: "lab - lab.ipynb"' in e
+    assert ("lab", "lab.ipynb") in entry_links(e)
 
 
 def test_row_file_splits_labs_from_lectures():
@@ -255,8 +256,9 @@ def test_public_lecture_entry_labels_any_discovered_section():
         ],
         "",
     )
-    assert 'name: "lab - lab3.ipynb"' in e
-    assert 'name: "faq - faq.md"' in e  # not "fa - faq.md"
+    links = entry_links(e)
+    assert ("lab", "lab3.ipynb") in links
+    assert ("faq", "faq.md") in links  # not section "fa"
 
 
 def test_singular_strips_only_a_real_trailing_s():
