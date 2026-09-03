@@ -422,11 +422,11 @@ def test_shape_links_leaves_a_flat_folder_untouched():
     assert site._shape_links(flat, TREE, frozenset()) == flat
 
 
-def test_shape_links_lists_dotfiles_like_any_other_file():
-    # No name filter, deliberately. The exclusion list this would need cannot be written
-    # honestly: `__pycache__/` and `node_modules/` are clutter and are not dotted, while
-    # `.Rprofile` is course material an R course's students need. So the page says what was
-    # released, and clutter is fixed by not releasing it.
+def test_shape_links_lists_a_dotfile_but_not_a_never_material_name():
+    # The rule is a closed list of NAMES, not a rule about dots: `.Rprofile` is course
+    # material an R course's students need, while `.gitkeep` is only what holds an empty
+    # folder open in git. A live cohort site listed a session's `.gitkeep` as one of its
+    # materials.
     # Path-sorted, as `_session_files` hands them over ('.R' sorts before '.g').
     blobs = [
         (".Rprofile", "https://x/rprofile"),
@@ -436,16 +436,51 @@ def test_shape_links_lists_dotfiles_like_any_other_file():
         ("slides.pdf", "https://x/pdf"),
     ]
     names = [n for n, _ in site._shape_links(blobs, TREE, frozenset())]
-    # `.gitkeep` rides along: the cost of not hiding `.Rprofile`, and it disappears by
-    # itself the moment real content lands in that folder.
-    assert names == [".Rprofile", ".gitkeep", "slides.pdf", "media/ (2 files)"]
+    # ...and the fold counts what it shows: `media/` holds two blobs, one of them junk.
+    assert names == [".Rprofile", "slides.pdf", "media/ (1 file)"]
 
 
-def test_the_index_lists_dotfiles_too(monkeypatch):
+def test_shape_links_drops_junk_from_the_allowlist_shape_too():
+    # The allowlist matches by extension at any depth, so a `.ipynb_checkpoints/` copy of a
+    # notebook is exactly the kind of thing it would otherwise list twice over.
+    blobs = [
+        (".ipynb_checkpoints/lab-checkpoint.ipynb", "https://x/ck"),
+        ("lab.ipynb", "https://x/lab"),
+    ]
+    names = [n for n, _ in site._shape_links(blobs, TREE, frozenset({"ipynb"}))]
+    assert names == ["lab.ipynb", site._BROWSE_ALL]
+
+
+def test_shape_links_matches_a_directory_component_and_ignores_case():
+    # Two of the names are DIRECTORIES, and a listing entry is a `/`-joined string, so the
+    # match has to be component-wise. Case varies in the wild by whichever machine wrote
+    # the file.
+    blobs = [
+        ("__pycache__/helpers.cpython-312.pyc", "https://x/pyc"),
+        (".DS_Store", "https://x/ds"),
+        ("data/.ds_store", "https://x/ds2"),
+        ("data/Thumbs.db", "https://x/th"),
+        ("data/housing.csv", "https://x/csv"),
+    ]
+    names = [n for n, _ in site._shape_links(blobs, TREE, frozenset())]
+    assert names == ["data/ (1 file)"]
+
+
+def test_the_index_applies_the_same_name_rule(monkeypatch):
     # Same rule on the other page, which is the point of not having two.
     repos = {"m": ("01_lab/.Rprofile", "01_lab/lab.R", "01_lab/.gitkeep")}
     entry = _index(monkeypatch, repos)[0]["entries"][0]
-    assert entry["name"] == "01_lab/" and entry["files"] == 3
+    assert entry["name"] == "01_lab/" and entry["files"] == 2
+    assert [e["name"] for e in entry["entries"]] == [".Rprofile", "lab.R"]
+
+
+def test_the_index_folds_away_a_junk_directory_entirely(monkeypatch):
+    # Not just the file: `__pycache__/` would otherwise be a directory entry of its own,
+    # nested and counted, on the page that shows the whole shape of what shipped.
+    repos = {"m": ("01_lab/__pycache__/helpers.cpython-312.pyc", "01_lab/lab.py")}
+    entry = _index(monkeypatch, repos)[0]["entries"][0]
+    assert entry["name"] == "01_lab/" and entry["files"] == 1
+    assert [e["name"] for e in entry["entries"]] == ["lab.py"]
 
 
 def test_ext_reads_the_extension_not_a_dotted_directory():
@@ -678,11 +713,11 @@ def test_index_reads_a_single_materials_repo_cohort(monkeypatch):
     # Each top-level directory is its own section here, and `datasets/` needs no ordinal
     # anywhere to appear. The root SYLLABUS.md takes the repo's name.
     #
-    # `.DS_Store` and `.github/` show up too, which is the deliberate cost of filtering
-    # nothing by name: a rule about dots would also hide `.Rprofile`. Neither can normally
-    # reach a cohort repo - `deploy.ROOT_RELEASE_EXCLUDED` never releases a root `.github`,
-    # and OS cruft only arrives if someone commits it - so if either is here, it was
-    # released on purpose and saying so is right.
+    # `.github/` shows up, which is the deliberate cost of filtering by a closed list of
+    # names rather than by dots: it cannot normally reach a cohort repo at all
+    # (`deploy.ROOT_RELEASE_EXCLUDED` never releases a root `.github`), so if it is here it
+    # was released on purpose and saying so is right. The `.DS_Store` beside it is not -
+    # nobody released that, a file manager wrote it.
     assert got == {
         ".github": ["workflows/"],
         "datasets": ["housing.csv"],
@@ -690,7 +725,7 @@ def test_index_reads_a_single_materials_repo_cohort(monkeypatch):
         "lectures": ["01_lecture/"],
     }
     # The root files are course documents now, not a section named after the repo.
-    assert _docs(monkeypatch, MATHS_REPOS) == [".DS_Store", "SYLLABUS.md"]
+    assert _docs(monkeypatch, MATHS_REPOS) == ["SYLLABUS.md"]
 
 
 def test_index_folds_a_directory_to_one_counted_link(monkeypatch):

@@ -429,6 +429,47 @@ def test_naming_the_faculty_side_explicitly_still_releases_it(tmp_path):
     assert ignore(str(tmp_path), [".git", ".github", "MAINTAINING.md"]) == {".git"}
 
 
+# ------------------------------------------ what is never course material, wherever it is
+# A release copies a session folder wholesale, so whatever a file manager, an interpreter
+# or the scaffold itself left in that folder ships as course material. A cohort's public
+# site listed `labs/01_session-1/.gitkeep`, `lectures/01_session-1/.gitkeep` and a
+# `readings/.DS_Store` among its materials, with the session counts inflated to match.
+
+
+def test_junk_never_travels_with_a_release_at_any_depth(tmp_path):
+    # Unlike the faculty-side exclusions, this one is NOT root-anchored: the junk is in the
+    # session folder, several levels below any root a release names.
+    ignore = deploy._copy_ignore(None)
+    names = [
+        ".DS_Store",
+        ".gitkeep",
+        "Thumbs.db",
+        "desktop.ini",
+        "__pycache__",
+        ".ipynb_checkpoints",
+        "lab.ipynb",
+        ".Rprofile",
+    ]
+    skipped = ignore(str(tmp_path / "labs" / "01_session-1"), names)
+    # `.Rprofile` is course material an R course's students need - the rule is a closed
+    # list of names, never a rule about dots.
+    assert skipped == set(names) - {"lab.ipynb", ".Rprofile"}
+
+
+def test_junk_is_matched_however_the_machine_that_wrote_it_spelled_it(tmp_path):
+    ignore = deploy._copy_ignore(None)
+    assert ignore(str(tmp_path), [".ds_store", "THUMBS.DB", "Desktop.ini"]) == {
+        ".ds_store",
+        "THUMBS.DB",
+        "Desktop.ini",
+    }
+
+
+# The end-to-end half of this - a session folder copied through clone -> copytree ->
+# `git add` - sits at the bottom of the file, with the other tests that need
+# `_stub_deploy_many`.
+
+
 # ----------------------------------------------------- the unedited-README guard
 # The scaffold's README is addressed to FACULTY - "replace this placeholder", a section
 # headed "delete this section before releasing", a link to MAINTAINING.md and the course
