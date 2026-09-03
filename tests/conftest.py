@@ -119,3 +119,13 @@ def workflow_inputs(rendered: str) -> dict:
 
 def workflow_jobs(rendered: str) -> dict:
     return yaml.safe_load(rendered)["jobs"]
+
+
+def entry_links(rendered: str) -> list[tuple[str, str]]:
+    """The (section, name) pairs of a rendered session entry's `links:` block.
+
+    Parsed rather than substring-matched: `name` and `section` are two fields now, so an
+    assertion written against the rendered bytes would be asserting the emitter's line
+    order as much as its content."""
+    front = rendered.split("---\n")[1]
+    return [(l["section"], l["name"]) for l in yaml.safe_load(front).get("links") or []]

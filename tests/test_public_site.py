@@ -17,6 +17,7 @@ import pytest
 import yaml
 
 from dsl_course import gh_contents, ghcli, public_site, site, site_repo
+from tests.conftest import entry_links
 
 COURSE = "Course-Org"
 SOURCE = "course-materials-f2026"
@@ -130,13 +131,13 @@ def test_publishes_every_discovered_section_not_just_lectures(published):
     assert f"{SERVED}/session-1/labs/data/rows.csv" in files  # nested file too
     assert f"{SERVED}/session-2/faq/faq.md" in files
     lab1 = files["_lectures/lab-01.md"]
-    assert 'name: "lab - lab.ipynb"' in lab1
+    assert ("lab", "lab.ipynb") in entry_links(lab1)
     # A nested file is still SERVED (asserted above) but not listed: a rendered deck's
     # assets have to stay reachable at their own paths, and linking each of them is what
     # put 1,641 links on a live site. Jekyll serves no directory index, so - unlike the
     # cohort site - there is no folder link to offer here either.
-    assert 'name: "lab - data/rows.csv"' not in lab1
-    assert 'name: "faq - faq.md"' in files["_lectures/session-02.md"]
+    assert ("lab", "data/rows.csv") not in entry_links(lab1)
+    assert ("faq", "faq.md") in entry_links(files["_lectures/session-02.md"])
 
 
 def test_labs_are_their_own_rows_not_part_of_the_session_row(published):
@@ -147,7 +148,7 @@ def test_labs_are_their_own_rows_not_part_of_the_session_row(published):
     assert 'title: "Lab 2"' in files["_lectures/lab-02.md"]
     session2 = files["_lectures/session-02.md"]  # session 2 also has a faq section
     assert "type: lecture" in session2
-    assert "lab - " not in session2
+    assert not [s for s, _n in entry_links(session2) if s == "lab"]
     # session 1 has ONLY labs (and readings, off here) - so no lecture row at all
     assert "_lectures/session-01.md" not in files
 
@@ -172,7 +173,7 @@ def test_actual_readings_mode_hosts_and_links_readings(published):
     files = published(readings_mode="actual-readings")
     assert f"{SERVED}/session-1/readings/paper.pdf" in files
     s1 = files["_lectures/session-01.md"]
-    assert 'name: "reading - paper.pdf"' in s1
+    assert ("reading", "paper.pdf") in entry_links(s1)
     assert "### Reading list" not in s1  # hosted instead of inlined
     assert "github.com" not in s1  # public links are always site-relative
 

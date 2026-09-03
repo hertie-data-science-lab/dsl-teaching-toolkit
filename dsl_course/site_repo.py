@@ -673,24 +673,38 @@ def row_file(session: str, kind: str) -> str:
 
 
 def _singular(label: str) -> str:
-    """A section label as a single-item noun for a link name: 'lectures' -> 'lecture',
-    'labs' -> 'lab', 'faq' -> 'faq'. Sections are free-form directory names, so a bare
-    `[:-1]` chopped a real character off every label that isn't a plural ('faq' -> 'fa').
+    """A section label as a single-item noun: 'lectures' -> 'lecture', 'labs' -> 'lab',
+    'faq' -> 'faq'. Sections are free-form directory names, so a bare `[:-1]` chopped a
+    real character off every label that isn't a plural ('faq' -> 'fa').
     Deliberately no inflection library: strip one trailing 's', else leave it alone."""
     return label[:-1] if len(label) > 1 and label.endswith("s") else label
 
 
 def links_block(sections: list[tuple[str, list[tuple[str, str]]]]) -> str:
-    """A front-matter `links:` block from `(section-label, [(file-name, url), ...])` pairs
-    in publication order, each link named `<section-singular> - <file>` (both sites label
-    them identically), or `links: []` when there is nothing to link."""
+    r"""A front-matter `links:` block from `(section-label, [(file-name, url), ...])` pairs
+    in publication order, or `links: []` when there is nothing to link.
+
+    `name` is the FILENAME alone and `section` the singular section noun beside it. Both
+    sites emit the same shape. The section used to be glued onto the front of the name
+    (`lecture - slides.pdf`), because a row carries the links of every section that
+    released into it and the Lectures / Labs / Readings pages each show only their own -
+    so the templates recovered it with `contains "lecture - "` and then stripped it back
+    off for display. Two places rendered the name without stripping (the Updates box and
+    the schedule's details cell, both via `lecture_links.html`), which is where the prefix
+    was showing; and a file genuinely named `reading - notes.pdf` released into `lectures/`
+    matched both pages. A field the templates can test is the same routing without either.
+
+    Escaping is per FIELD, not over the pair: `q` escapes `\` and `"`, and a filename
+    carrying a backslash (`\sigma.pdf`) is an invalid YAML escape that fails the whole
+    Jekyll build."""
     rows = []
     for label, pairs in sections:
         for name, url in pairs:
-            # Route the name through q (escapes `\` AND `"`): a filename with a backslash
-            # (`\sigma.pdf`) is an invalid YAML escape and fails the whole Jekyll build.
-            safe = q(f"{_singular(label)} - {name}")
-            rows.append(f'    - url: {url}\n      name: "{safe}"')
+            rows.append(
+                f"    - url: {url}\n"
+                f'      name: "{q(name)}"\n'
+                f'      section: "{q(_singular(label))}"'
+            )
     return ("links:\n" + "\n".join(rows)) if rows else "links: []"
 
 

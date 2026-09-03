@@ -21,6 +21,7 @@ from dsl_course.schedule import (
     Release,
     Schedule,
 )
+from tests.conftest import entry_links
 
 UTC = ZoneInfo("UTC")
 
@@ -761,7 +762,7 @@ def test_a_released_row_replaces_its_placeholder_with_links(monkeypatch, tmp_pat
         files=lambda org, repo, subpath, folder: [("lab.pdf", "https://x/lab.pdf")],
     )
     body = plan.collections["_lectures"]["lab-02.md"]
-    assert 'name: "lab - lab.pdf"' in body
+    assert ("lab", "lab.pdf") in entry_links(body)
     assert "not yet released" not in body
 
 
@@ -823,9 +824,11 @@ def test_the_lecture_row_never_carries_the_weeks_lab_links(monkeypatch, tmp_path
         ],
     )
     session = plan.collections["_lectures"]["session-02.md"]
-    assert 'name: "lecture - lectures.pdf"' in session
-    assert "lab - " not in session
-    assert 'name: "lab - labs.pdf"' in plan.collections["_lectures"]["lab-02.md"]
+    assert ("lecture", "lectures.pdf") in entry_links(session)
+    assert not [s for s, _n in entry_links(session) if s == "lab"]
+    assert ("lab", "labs.pdf") in entry_links(
+        plan.collections["_lectures"]["lab-02.md"]
+    )
 
 
 def test_events_render_as_their_declared_types(monkeypatch, tmp_path):
