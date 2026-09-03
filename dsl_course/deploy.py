@@ -44,12 +44,15 @@ from .gh_contents import is_untouched_stub
 from .ghcli import GIT_ENV, clone, git
 from .log import log, log_err, log_ok, log_step, log_withheld
 from .releaseignore import RELEASEIGNORE, deny_for, excludes
-from .repos import create_repo
+from .repos import create_repo, is_never_material
 from .schedule import Deploy
 from .schedule_plan import deploy_dest
 
 # Never copied, at any depth: a `.git` landing in the dest overwrites its git metadata and
-# redirects the release's own push into the SOURCE repo.
+# redirects the release's own push into the SOURCE repo. That is a mechanical fact about
+# copying a repo into a repo, not a judgement about content - clutter that is never course
+# material is the separate `repos.NEVER_MATERIAL`, which `_copy_ignore` applies alongside
+# this.
 NEVER_COPIED = frozenset({".git"})
 
 # Additionally skipped when the WHOLE repo is released (`course_source_path: /`), and only
@@ -143,9 +146,15 @@ def _resolve_within(base: Path, rel: str) -> Path | None:
 def _copy_ignore(
     whole_repo_root: Path | None, extra_root_skips: frozenset[str] = frozenset()
 ):
-    """A copytree `ignore` filter: NEVER_COPIED at every depth, plus ROOT_RELEASE_EXCLUDED
-    and `extra_root_skips` at `whole_repo_root` when a whole repo is being released (None
-    for a subpath copy).
+    """A copytree `ignore` filter: NEVER_COPIED and `repos.NEVER_MATERIAL` at every depth,
+    plus ROOT_RELEASE_EXCLUDED and `extra_root_skips` at `whole_repo_root` when a whole
+    repo is being released (None for a subpath copy).
+
+    The two every-depth rules answer different questions and are kept apart on purpose.
+    NEVER_COPIED is about this copy working at all; NEVER_MATERIAL is about what a release
+    means - a session folder is copied wholesale, so a `.gitkeep` holding it open and the
+    `.DS_Store` a file manager left in it ship to students as course material unless
+    something drops them here.
 
     Root-anchored deliberately, rather than `shutil.ignore_patterns`, which matches by
     basename at every level of the walk - that would also drop a `labs/.github/`, which is
@@ -157,7 +166,7 @@ def _copy_ignore(
     delete-after-copy stages a deletion of whatever the cohort repo already had there."""
 
     def ignore(dirpath: str, names: list[str]) -> set[str]:
-        skip = {n for n in names if n in NEVER_COPIED}
+        skip = {n for n in names if n in NEVER_COPIED or is_never_material(n)}
         if whole_repo_root is not None and Path(dirpath) == whole_repo_root:
             skip |= {n for n in names if n in ROOT_RELEASE_EXCLUDED | extra_root_skips}
         return skip

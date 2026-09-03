@@ -44,6 +44,12 @@ def _seed_source(root: Path) -> None:
         # What no denylist has any reason to refuse, and faculty withheld by hand. At the
         # CLONE root, while the copies below are session folders deep inside it.
         ".releaseignore": "draft-*\n*.key\n",
+        # What a machine left behind, which no denylist and no faculty `.releaseignore`
+        # would ever think to name. A `.gitkeep` holds an empty folder open in the SOURCE
+        # repo; the rest is a file manager and a notebook editor.
+        "labs/01_first-lab/.gitkeep": "",
+        "labs/01_first-lab/.DS_Store": "\x00bud1",
+        "readings/01_first-lab/.ipynb_checkpoints/paper-checkpoint.pdf": "%PDF stale",
         "labs/01_first-lab/draft-notes.md": "half-written, not for students",
         "labs/01_first-lab/deploy.key": "SECRET",
         "readings/01_first-lab/embargoed.key": "not yet",
@@ -282,6 +288,30 @@ def test_the_public_site_honours_a_faculty_releaseignore(published):
     ):
         assert withheld not in files
     assert "draft-notes" not in files["_lectures/lab-01.md"]
+
+
+def test_junk_a_machine_left_behind_is_never_published_as_material(published):
+    # Neither list above would refuse these: nothing leaks, and no faculty member would
+    # think to write `.DS_Store` into a `.releaseignore`. A session folder is copied
+    # wholesale, so a cohort site listed a `.gitkeep` and a `.DS_Store` among its course
+    # materials and counted them into its session totals.
+    files = published(readings_mode="actual-readings")
+    assert f"{SERVED}/session-1/labs/lab.ipynb" in files  # the material still ships
+    for junk in (
+        f"{SERVED}/session-1/labs/.gitkeep",
+        f"{SERVED}/session-1/labs/.DS_Store",
+        f"{SERVED}/session-1/readings/.ipynb_checkpoints/paper-checkpoint.pdf",
+    ):
+        assert junk not in files
+    assert ".gitkeep" not in files["_lectures/lab-01.md"]
+
+
+def test_reading_list_mode_does_not_name_junk_either(published):
+    # The listing path, which never runs a copytree filter: in `reading-list` mode naming
+    # a file IS publishing it, so the same rule has to hold as a predicate.
+    page = published(readings_mode="reading-list")["_lectures/session-01.md"]
+    assert "Smith 2020" in page  # the citation list still publishes
+    assert "checkpoint" not in page
 
 
 def test_reading_list_mode_does_not_name_a_withheld_reading(published):

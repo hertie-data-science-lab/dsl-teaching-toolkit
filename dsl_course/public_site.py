@@ -33,7 +33,13 @@ from .ghcli import clone
 from .log import log, log_err, log_step
 from .readings import readings_block
 from .releaseignore import deny_for, excludes
-from .repos import has_denied_component, is_denied_publication, repo_exists
+from .repos import (
+    has_denied_component,
+    has_never_material_component,
+    is_denied_publication,
+    is_never_material,
+    repo_exists,
+)
 from .schedule_plan import READINGS_SECTION, row_kind
 from .site_repo import (
     PUBLISH_CONFIG,
@@ -57,8 +63,10 @@ PUBLIC_MATERIALS_DIR = "public-materials"
 
 
 def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:
-    """A `copytree` ignore filter for the PUBLIC site: drop every denylisted name, at any
-    depth (see repos.PUBLICATION_DENYLIST).
+    """A `copytree` ignore filter for the PUBLIC site: drop every denylisted name and every
+    name that is never course material, at any depth (repos.PUBLICATION_DENYLIST and
+    repos.NEVER_MATERIAL - two lists because one is what must not leak and the other is
+    only clutter).
 
     At any depth, unlike `deploy._copy_ignore`, which anchors its exclusions to the repo
     root: the release path excludes plumbing that only ever lives at the root, while the
@@ -68,19 +76,23 @@ def _publication_ignore(dirpath: str, names: list[str]) -> set[str]:
     It filters NAMES, which is why `fs.copy_tree` never follows a symlink: a
     `notes.pdf -> ../solution/answers.pdf` would otherwise be copied in as the answers
     themselves, under a name this filter has no reason to deny."""
-    return {n for n in names if is_denied_publication(n)}
+    return {n for n in names if is_denied_publication(n) or is_never_material(n)}
 
 
 def _withheld_from_site(root: Path, path: Path) -> bool:
     """Whether one path under the clone at `root` must not reach the public site.
 
-    The same two rules `copy_tree`'s filter applies, as a PREDICATE - because the listing
+    The same rules `copy_tree`'s filter applies, as a PREDICATE - because the listing
     paths cannot use a copytree filter. `reading-list` mode (the DEFAULT) hosts nothing, so
     it never calls `copy_tree` and the `ignore` hook never runs: it publishes filenames,
     and inlines the overlay's prose verbatim. Without this, a withheld reading was named on
     the open web and a withheld OVERLAY had its full text published there."""
     rel = path.relative_to(root).as_posix()
-    return has_denied_component(rel) or excludes(root, path)
+    return (
+        has_denied_component(rel)
+        or has_never_material_component(rel)
+        or excludes(root, path)
+    )
 
 
 def _public_links(local_dir: Path, url_prefix: str) -> list[tuple[str, str]]:

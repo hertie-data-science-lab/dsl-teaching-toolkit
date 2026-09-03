@@ -58,6 +58,7 @@ from .readings import demote_headings, is_reading_overlay
 from .repos import (
     default_branch,
     has_denied_component,
+    has_never_material_component,
 )
 from .schedule_plan import (
     READINGS_SECTION,
@@ -211,16 +212,24 @@ def _shape_links(
       plus one "browse the folder" link, so a file the list does not name is still one
       click away instead of invisible.
 
-    Nothing is filtered by NAME, dotfiles included. The exclusion list that would be needed
-    cannot be written honestly: `__pycache__/`, `.ipynb_checkpoints/` and `node_modules/`
-    are all clutter and none of them starts with a dot, while `.Rprofile`, `.env.example`
-    and a `.devcontainer/` are real course material a rule about dots would hide. So the
-    page says what was released, and the remedy for clutter sits where the clutter does -
-    in what the release copies.
+    A rule about DOTS is still refused, for the reason it always was: `__pycache__/`,
+    `.ipynb_checkpoints/` and `node_modules/` are all clutter and none of them starts with
+    a dot, while `.Rprofile`, `.env.example` and a `.devcontainer/` are real course
+    material such a rule would hide. What is filtered is narrower and can be written
+    honestly - the short closed list of NAMES that are never course material in any course
+    (`repos.NEVER_MATERIAL`), dropped before the counts are taken so a folder cannot be
+    listed as "3 files" while showing two.
+
+    The site applies it as well as the release, not instead: a cohort site showed
+    `labs/01_session-1/.gitkeep` and a `readings/.DS_Store` as materials, and neither had
+    passed through a release copy that day or would ever pass through one again. Junk
+    committed straight into a cohort's own content repo never meets the release filter, so
+    a release-only rule leaves it listed for the rest of the term.
 
     `blobs` is (path-relative-to-the-session-folder, url) as `_session_files` returns it;
     `tree_base` is the session folder's own GitHub tree URL. Order follows `blobs` (path
     sorted), files before folders, for a stable diff."""
+    blobs = [(n, u) for n, u in blobs if not has_never_material_component(n)]
     if allow:
         return [(n, u) for n, u in blobs if _ext(n) in allow] + [
             (_BROWSE_ALL, tree_base)
@@ -471,8 +480,11 @@ def _materials_index(
     subfolder rather than open it because a deck's rendered assets would otherwise bury the
     three files a student opens. This index is the one page meant to show the whole shape
     of what shipped, so a directory carries its own children all the way down instead.
-    Nothing is filtered by name (see `_shape_links`): a dotfile can be course material, and
-    most real clutter is not dotted anyway.
+    Filtered by name only where `_shape_links` is - no rule about dots, because a dotfile
+    can be course material and most real clutter is not dotted, but the closed list of
+    names that are never course material anywhere (`repos.NEVER_MATERIAL`) applies here
+    too. Showing the whole shape of what shipped is not a reason to tell a class that a
+    `.gitkeep` is one of their materials.
 
     Directories lead, then files, both alphabetically, at every level: this is a directory
     listing, where the structure is what a reader scans - unlike a session row, which leads
@@ -495,7 +507,11 @@ def _materials_index(
             # material, and this index is the one page that lists everything a release
             # happened to carry - so it was the shortest route from "someone released a
             # folder wholesale" to "the whole class has the answers".
-            if has_denied_component(path):
+            #
+            # The second check is the harmless twin of the first and stays a separate
+            # list: nothing on it leaks anything, it is what a machine drops in a folder
+            # (see `repos.NEVER_MATERIAL`).
+            if has_denied_component(path) or has_never_material_component(path):
                 continue
             if "/" not in path:
                 docs.setdefault(

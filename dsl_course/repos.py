@@ -323,6 +323,62 @@ def has_denied_component(path: str) -> bool:
     return any(is_denied_publication(part) for part in path.split("/") if part)
 
 
+# Artefacts that are never course material, in any course, on any page - matched by NAME,
+# at every depth, case-insensitively. What a file manager drops in a folder it opened
+# (`.DS_Store`, `Thumbs.db`, `desktop.ini`), the empty placeholder that holds an empty
+# folder open in git (`.gitkeep`), and the caches an interpreter and a notebook leave
+# behind (`__pycache__/`, `.ipynb_checkpoints/`). A cohort's public site listed four of
+# these as its course materials and counted them into its sessions - "6 files" over a
+# session holding five, one of which was a `.gitkeep`.
+#
+# Kept apart from PUBLICATION_DENYLIST deliberately, and it is not an oversight that
+# neither list mentions the other. That one is a SECURITY boundary: a `solution/`, a
+# `grading.yml`, a `.env` must not leak, and every entry earns its place by what it would
+# cost to publish. Nothing here leaks anything - it is clutter. Folding the two together
+# would let an edit meant for a list of nuisances widen the list that keeps answers away
+# from a class.
+#
+# NOT a rule about dots, which cannot be written honestly: `.Rprofile`, `.env.example` and
+# a `.devcontainer/` are real course material a dot rule would hide, while `__pycache__/`
+# and `node_modules/` are clutter and are not dotted. A closed list of NAMES is the only
+# form of this rule that is true, which is also why it is short and stays short.
+#
+# The rule is "never copied out to students, never listed on a page" - NOT "never
+# committed". `.gitkeep` still does its job wherever this toolkit writes one (a cohort's
+# empty `grades/`, the site repo's own collections) and in a course's SOURCE repo, where
+# it is what holds an unwritten future session open until someone writes it.
+NEVER_MATERIAL = frozenset(
+    {
+        ".DS_Store",
+        ".gitkeep",
+        "Thumbs.db",
+        "desktop.ini",
+        "__pycache__",
+        ".ipynb_checkpoints",
+    }
+)
+
+_NEVER_MATERIAL_FOLDED = frozenset(n.casefold() for n in NEVER_MATERIAL)
+
+
+def is_never_material(name: str) -> bool:
+    """Whether one path COMPONENT is on NEVER_MATERIAL.
+
+    Case-insensitive: `.DS_Store`, `.ds_store`, `Thumbs.db` and `desktop.ini` all appear in
+    the wild, and which spelling a machine wrote is not a decision about course content."""
+    return name.casefold() in _NEVER_MATERIAL_FOLDED
+
+
+def has_never_material_component(path: str) -> bool:
+    """Whether any component of `path` is on NEVER_MATERIAL.
+
+    Component-wise, because two entries are DIRECTORY names: a copytree filter skipping
+    `__pycache__` skips the subtree with it, but a listing path holds `/`-joined strings,
+    where `__pycache__/lab.cpython-312.pyc` is one entry and only its parent gives it
+    away."""
+    return any(is_never_material(part) for part in path.split("/") if part)
+
+
 def topic_name(text: str) -> str:
     """`text` as GitHub stores a topic: lowercase kebab. Shared by the write and by every
     comparison against a live topic list, which must agree or a repo converges nightly."""
