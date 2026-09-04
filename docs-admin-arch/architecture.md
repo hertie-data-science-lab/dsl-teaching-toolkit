@@ -390,16 +390,16 @@ Each tick, per cohort:
 1. **Freeze passed deadlines** - for every assignment whose grading deadline (`grading_datetime`,
    else `due_datetime`) has passed and has no snapshot yet, record the commit each submission
    repo is at into `classroom-config/snapshots/<name>.csv` (`repo,sha,recorded_at`).
-2. **Autograde those same assignments, once each** - from the course-org template, skipped
-   gracefully when there is no such repo, no `solution` branch, or `autograde: false`.
-3. **Fire every action whose time has arrived** - each deploy at its `deploy_datetime` (else its
+2. **Fire every action whose time has arrived** - each deploy at its `deploy_datetime` (else its
    entry's `event_datetime`), and assignment handouts at `handout_datetime` (synthesised into the
    release plan and re-sorted into time order). Deploys go out as one batch, then handouts, then
    exactly one site sync if anything changed.
+3. **Autograde every frozen assignment, once each** - in the `autograde` job, gated on the
+   snapshot *file* rather than on what this pass just froze, and run from the course-org
+   template; skipped when there is no such repo, no `solution` branch, or `autograde: false`.
 
-Phases 1-2 run before the releases and run whether or not the cohort uses `releases` at all. A
-cohort that raises is caught, logged and OR'd into the exit code, so one bad cohort cannot skip
-the rest.
+Phases 1 and 3 run whether or not the cohort uses `releases` at all. A cohort that raises is
+caught, logged and OR'd into the exit code, so one bad cohort cannot skip the rest.
 
 ## Autograding & containment
 
