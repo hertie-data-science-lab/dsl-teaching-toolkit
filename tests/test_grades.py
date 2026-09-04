@@ -710,6 +710,15 @@ def test_an_unsent_notification_reddens_the_run_and_is_retried(tmp_path, monkeyp
     assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
 
 
+def test_a_gradebook_that_failed_to_write_is_not_emailed_about(tmp_path, monkeypatch):
+    # "Your grades have been updated" over a push that did not land tells a student to go
+    # and read a page that has not changed - and records the telling, so the run that
+    # finally lands the page says nothing at all.
+    out = _distribute(monkeypatch, tmp_path, put_files_ok=False)
+    assert out["rc"] == 1
+    assert out["outbox"] == []
+
+
 def test_no_notify_sends_nothing_and_stays_green(tmp_path, monkeypatch):
     out = _distribute(monkeypatch, tmp_path, notify=False)
     assert out["outbox"] == [] and out["rc"] == 0

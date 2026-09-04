@@ -2131,14 +2131,20 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
 
     # 2. The private gradebook: grades.yml and README.md in ONE commit per student, so a
     #    student never sees a page that disagrees with the data beside it.
+    #
+    #    A handle earns its place in `live` only where the gradebook really does hold that
+    #    content. `live` is what step 3 keys the email on, so a student whose write FAILED
+    #    must not be told to go and read a page that never changed - and, worse, have that
+    #    telling recorded, which would stop them being told when it lands.
     live: dict[str, str] = {}
     for handle in sorted(books):
         files = _gradebook_files(handle, books[handle], titles, timed)
         digest = content_hash("".join(f.decode() for f in files.values()))
-        live[handle] = digest
         if record.get((handle, "", CHANNEL_GRADEBOOK), ("",))[0] == digest:
+            live[handle] = digest
             continue
         if dry_run:
+            live[handle] = digest
             counts["gradebooks"] += 1
             continue
         if put_files(
@@ -2148,6 +2154,7 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
             "grades: update",
         ):
             record[(handle, "", CHANNEL_GRADEBOOK)] = (digest, now)
+            live[handle] = digest
             counts["gradebooks"] += 1
             log_person(f"  [ok] {GRADEBOOK_PREFIX}{handle}")
         else:
