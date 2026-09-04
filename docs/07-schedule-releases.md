@@ -167,7 +167,7 @@ Unlike a `releases:` label, **an assignment's slug is shown to students**: it na
 | `title` | no | - | the assignment's **name**, shown beside the slug on the schedule and the Assignments tab ("Assignment 1 / Fraud detection"). Declare it here and it appears from the day you write the plan; leave it out and the site falls back to the template README's `# ` heading, which only appears at hand-out |
 | `handout_datetime` | no* | - | when repos are provisioned, automatically. |
 | `due_datetime` | **yes** | - | the deadline students see; a bare date closes at **23:59:59** |
-| `grading_datetime` | no | `due_datetime` | when the snapshot freezes and it is [autograded](#deadline-snapshots-and-autograding) |
+| `grading_datetime` | no | `due_datetime` + the template's `late_window_days` | when the snapshot freezes and it is [autograded](#deadline-snapshots-and-autograding) - i.e. the END of the late window, not the deadline it is measured from |
 | `solution_datetime` | no | - | when the template's `solution/` is pushed into every provisioned repo. **No default** - omit it and the solution only ever goes out by hand. Must be **after** `handout_datetime`, and needs it set |
 | `type` | no | `individual` | `individual` or `group`  |
 | `max_team_size` | no | `5` | group assignments only: the welcome repo's Join-team cap |
@@ -182,7 +182,7 @@ assignments:
     cohort_dest_repo: assignment-1-basics # optional: the cohort-side name. Default if undefined: the slug (i.e. assignment-1).
     handout_datetime: 2026-09-22T09:00  
     due_datetime: 2026-10-13            # what students see
-    grading_datetime: 2026-10-15        # snapshot freezes + autograded (default when undefined: mirrors due_datetime)
+    grading_datetime: 2026-10-15        # snapshot freezes + autograded (default when undefined: due_datetime plus the template's late_window_days)
     solution_datetime: 2026-10-16T09:00 # optional: pushes the model solution to every repo. No default - omitted = never
     type: group                         # default: individual 
     max_team_size: 3

@@ -89,7 +89,7 @@ from .collect import (
     template_is_group,
 )
 from .deploy import deploy_many
-from .grades import sheet_path
+from .grades import cutoff_at, load_grading_spec, sheet_path
 from .log import log, log_err, log_ok, log_step
 from .repos import repo_exists
 from .schedule import Release
@@ -124,17 +124,29 @@ def release_order(release: Release) -> tuple[bool, datetime]:
     return (release.when is None, release.when or _EPOCH)
 
 
-def due_snapshots(sched: schedule.Schedule, now: datetime) -> list[tuple[str, str]]:
-    """(slug, grading-deadline ISO) for every scheduled assignment whose grading deadline
-    (`grading_datetime`, else `due_datetime`) has passed at `now` - the assignments whose
-    submissions are ready to be frozen and then graded. Deadline-ordered, so the run log is
-    deterministic. Whether each one has already been snapshotted or graded is a separate,
-    I/O question (see `_snapshot_passed_deadlines` / `_autograde_passed_deadlines`)."""
-    passed = [
-        (slug, at)
-        for slug in sched.assignments
-        if (at := schedule.grading_datetime_at(sched, slug)) is not None and at <= now
-    ]
+def due_snapshots(
+    course_org: str, sched: schedule.Schedule, now: datetime
+) -> list[tuple[str, str]]:
+    """(slug, cutoff ISO) for every scheduled assignment whose CUTOFF has passed at `now` -
+    the assignments whose submissions are ready to be frozen and then graded.
+    Deadline-ordered, so the run log is deterministic.
+
+    The cutoff is `grades.cutoff_at`: an explicit `grading_datetime`, else the due date plus
+    the template's `late_window_days`. Reading the template is what puts the freeze at the
+    END of the late window rather than at the deadline the window is measured from - the
+    sheet's header and every receipt promise work is accepted until then, and a snapshot
+    taken at the due date silently refused all of it.
+
+    Not pure, therefore: it reads each template's `grading_config.yml`. That read is
+    memoised per process (`grades._grading_text`), and both passes below share this answer.
+    Whether each assignment has already been snapshotted or graded is still a separate
+    question (see `_snapshot_passed_deadlines` / `_autograde_passed_deadlines`)."""
+    passed = []
+    for slug, entry in sched.assignments.items():
+        gspec = load_grading_spec(course_org, entry.course_source_repo)
+        at = cutoff_at(sched, slug, gspec)
+        if at is not None and at <= now:
+            passed.append((slug, at))
     return [(slug, at.isoformat()) for slug, at in sorted(passed, key=lambda p: p[1])]
 
 
@@ -215,7 +227,7 @@ def _snapshot_passed_deadlines(
     What was frozen is NOT returned: the snapshot file itself is the handoff to the
     autograde phase, which runs in another job (and so another process) entirely."""
     errors = 0
-    for slug, deadline in due_snapshots(sched, now):
+    for slug, deadline in due_snapshots(course_org, sched, now):
         entry = sched.assignments[slug]
         # every cohort-side artefact keys on the assignment's cohort NAME, not its slug
         name = schedule.cohort_name(slug, entry)
@@ -290,7 +302,7 @@ def _autograde_passed_deadlines(
     are all skips, not failures: plenty of assignments are hand-marked. Group vs individual
     is not guessed here - `collect` resolves it from the cohort schedule / grading.yml."""
     errors = 0
-    for slug, deadline in due_snapshots(sched, now):
+    for slug, deadline in due_snapshots(course_org, sched, now):
         # the fire-once marker is keyed on the cohort NAME - it must agree with what
         # collect writes, or a passed deadline re-grades every tick
         name = schedule.cohort_name(slug, sched.assignments[slug])
@@ -487,7 +499,7 @@ def _refresh_sheets(
     tick rather than never."""
     sealed = {
         schedule.cohort_name(slug, sched.assignments[slug])
-        for slug, _ in due_snapshots(sched, now)
+        for slug, _ in due_snapshots(course_org, sched, now)
     }
     errors = 0
     for slug, entry in sched.assignments.items():

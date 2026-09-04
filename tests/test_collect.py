@@ -1417,6 +1417,7 @@ def test_collect_refuses_an_unparseable_deadline(monkeypatch, capsys):
     # An unparseable --deadline would reach git's approxidate and silently match NO commits,
     # zeroing the whole cohort. Validate up front and fail loudly instead.
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    monkeypatch.setattr(collect.grades, "_grading_text", lambda org, tpl: GRADING_YML)
     assert (
         collect.collect(
             "Course", "assignment-1-f2026", "Cohort", deadline="next friday"

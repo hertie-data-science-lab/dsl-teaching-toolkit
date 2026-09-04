@@ -899,10 +899,14 @@ def entry_for_repo(sched: Schedule, repo: str) -> tuple[str, AssignmentEntry] | 
 
 
 def grading_datetime_at(sched: Schedule, slug: str) -> datetime | None:
-    """The grading pin for `slug` as a tz-aware datetime - the ONE instant at which the
-    submission snapshot freezes and the autograder fires, so both always agree.
+    """The grading pin as far as THIS FILE can tell: an explicit `grading_datetime`, else
+    `due_datetime`. None if unscheduled.
 
-    An explicit `grading_datetime` wins; else `due_datetime`. None if unscheduled."""
+    The spec-less fallback, and only correct for an assignment with no late window. The
+    window lives in the template's `grading_config.yml`, which `schedule` cannot read, so
+    everything that freezes or grades goes through `grades.cutoff_at` instead - answering
+    this question here would shut the door on the due date and refuse every late push the
+    receipts had just promised to accept."""
     entry = sched.assignments.get(slug)
     if entry is None:
         return None

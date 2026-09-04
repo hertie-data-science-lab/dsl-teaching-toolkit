@@ -850,9 +850,16 @@ def _display_long(at: datetime | None, tz_name: str = "") -> str:
     return f"{at:%A} {at.day} {at:%B %Y}, {at:%H:%M}{zone}"
 
 
-def _cutoff_at(sched: schedule.Schedule, key: str, gspec: dict) -> datetime | None:
+def cutoff_at(sched: schedule.Schedule, key: str, gspec: dict) -> datetime | None:
     """When this assignment stops accepting work: an explicit `grading_datetime`, else the
-    due date plus the template's late window."""
+    due date plus the template's late window, else the due date.
+
+    THE cutoff. Everything that has to agree about when the door shuts reads it here - the
+    sheet's header and its late-policy line, the receipts that quote that policy to a
+    student, the snapshot that freezes the pin and the autograder that fires off it. It
+    needs the template's `grading_config.yml` to know the window, which is why it lives
+    beside the spec reader rather than in `schedule`; `schedule.grading_datetime_at` is the
+    same question answered without one, and is only right when there is no window at all."""
     entry = sched.assignments.get(key)
     if entry is None:
         return None
@@ -880,9 +887,9 @@ def sheet_spec(
         late_penalty_per_day=gspec["late_penalty_per_day"],
         autograde=bool(gspec["autograde"]),
         due_display=_display_moment(entry.due_datetime if entry else None),
-        cutoff_display=_display_moment(_cutoff_at(sched, key, gspec)),
+        cutoff_display=_display_moment(cutoff_at(sched, key, gspec)),
         due_long=_display_long(entry.due_datetime if entry else None, sched.timezone),
-        cutoff_long=_display_long(_cutoff_at(sched, key, gspec), sched.timezone),
+        cutoff_long=_display_long(cutoff_at(sched, key, gspec), sched.timezone),
     )
 
 

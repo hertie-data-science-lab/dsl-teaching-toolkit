@@ -318,7 +318,7 @@ assignments:
 | `due_datetime` | **yes** | - (entry dropped without it) | what students see; bare date = 23:59:59 |
 | `title` | no | the template README's `# ` heading | the assignment's name, beside the slug on the site. Declared here it shows from day one; the README fallback only appears at hand-out |
 | `handout_datetime` | no* | - | when repos are provisioned, automatic. *Required for the schedule to release it. If you hand out via the **Release assignment** workflow instead, the workflow records the release moment here for you |
-| `grading_datetime` | no | `due_datetime` | snapshot freezes + autograder fires (once) |
+| `grading_datetime` | no | `due_datetime` + `late_window_days` | snapshot freezes + autograder fires (once) |
 | `type` | no | individual | `group` / `individual` - how handout + grading fan out. Can also be set in the template's `grading.yml` |
 | `max_team_size` | no | 5 | group assignments: Join-team cap |
 | `course_source_repo` | **yes** | - (entry dropped without it) | the course-org repo this hands out from. A name that does not exist is reported loudly |

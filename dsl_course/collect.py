@@ -1032,7 +1032,7 @@ def sync_sheet(
         found = _provisional_pins(
             cohort_org,
             targets,
-            (grades._cutoff_at(sched, key, gspec) or now).isoformat(),
+            (grades.cutoff_at(sched, key, gspec) or now).isoformat(),
         )
         if found is None:
             log_err(f"  ! could not read every submission for {path} - not rewriting")
@@ -1553,14 +1553,19 @@ def collect(
     found = schedule.entry_for_repo(sched, template)
     key = found[0] if found else assignment_slug(template)
     slug = schedule.cohort_name(*found) if found else key
-    # SSOT: default the grading pin to the cohort schedule's grading deadline (explicit
-    # `grading_datetime`, else `due_datetime`); an explicit `deadline` (CLI override)
-    # wins; fall back to today - in the cohort's own timezone, like every other date here -
-    # only if unscheduled.
+    # The assignment's definition, read from the API (memoised) rather than from the clone
+    # below, because the grading SHEET must be frozen at the cutoff on every path - and two
+    # of them never reach a clone: a template with no solution branch, and an all-manual
+    # assignment. Both are ordinary states, not failures, and both still have a deadline.
+    # It is also what the cutoff itself is measured with (`late_window_days`).
+    gspec = load_grading_spec(master_org, template)
+    # SSOT: default the grading pin to the assignment's CUTOFF - an explicit
+    # `grading_datetime`, else the due date plus the template's late window. An explicit
+    # `deadline` (CLI override) wins; fall back to today - in the cohort's own timezone,
+    # like every other date here - only if unscheduled.
+    at = grades.cutoff_at(sched, key, gspec)
     deadline = (
-        deadline
-        or schedule.grading_datetime_iso(sched, key)
-        or _today_in_cohort_tz(sched)
+        deadline or (at.isoformat() if at else None) or _today_in_cohort_tz(sched)
     )
     # Pin the deadline to an explicit instant in the COHORT's timezone, once, here: a bare
     # `--deadline 2026-11-15` means the end of the 15th where the students are, and every
@@ -1579,11 +1584,6 @@ def collect(
         )
         return 1
 
-    # The assignment's definition, read from the API (memoised) rather than from the clone
-    # below, because the grading SHEET must be frozen at the cutoff on every path - and two
-    # of them never reach a clone: a template with no solution branch, and an all-manual
-    # assignment. Both are ordinary states, not failures, and both still have a deadline.
-    gspec = load_grading_spec(master_org, template)
     entry = found[1] if found else None
     # group-vs-individual via the single `resolve_is_group` precedence (force -> cohort
     # schedule `type:` -> template grading.yml -> individual). The entry is the one found

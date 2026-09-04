@@ -18,6 +18,7 @@ import yaml
 
 from dsl_course import collect as collect_mod
 from dsl_course import course, deploy, ghcli, scheduler, seed
+from dsl_course.grades import _DEFAULT_SPEC as DEFAULT_SPEC
 from dsl_course.schedule import (
     AssignmentEntry,
     Deploy,
@@ -71,6 +72,17 @@ def cadence_calls(monkeypatch):
     monkeypatch.setattr(scheduler.cadence, "report_course", _record("report_course", 0))
     monkeypatch.setattr(scheduler.cadence, "report_cohort", _record("report_cohort", 0))
     return calls
+
+
+@pytest.fixture(autouse=True)
+def _grading_spec_defaults(monkeypatch):
+    """The cutoff is read out of each template's grading.yml (`late_window_days`), which is
+    real gh I/O. Answered with the defaults - no window - so every test below keeps
+    measuring the behaviour it was written for; the tests that are ABOUT the window declare
+    their own spec."""
+    monkeypatch.setattr(
+        scheduler, "load_grading_spec", lambda org, template: dict(DEFAULT_SPEC)
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -800,7 +812,7 @@ def test_due_snapshots_only_passed_deadlines_in_deadline_order():
         }
     )
     now = datetime(2026, 10, 21, tzinfo=timezone.utc)
-    assert [slug for slug, _dl in scheduler.due_snapshots(sched, now)] == [
+    assert [slug for slug, _dl in scheduler.due_snapshots("COURSE", sched, now)] == [
         "assignment-1",
         "assignment-2",
     ]
@@ -810,11 +822,13 @@ def test_due_snapshots_uses_the_explicit_grading_datetime_when_set():
     # grading_datetime wins over due_datetime, and snapshot + autograde must agree on it.
     sched = _assignments(**{"assignment-1": _due(13, grading_day=15)})
     assert (
-        scheduler.due_snapshots(sched, datetime(2026, 10, 14, tzinfo=timezone.utc))
+        scheduler.due_snapshots(
+            "COURSE", sched, datetime(2026, 10, 14, tzinfo=timezone.utc)
+        )
         == []
     )
     ((slug, deadline),) = scheduler.due_snapshots(
-        sched, datetime(2026, 10, 16, tzinfo=timezone.utc)
+        "COURSE", sched, datetime(2026, 10, 16, tzinfo=timezone.utc)
     )
     assert slug == "assignment-1"
     assert deadline.startswith("2026-10-15T23:59:59")
@@ -822,9 +836,77 @@ def test_due_snapshots_uses_the_explicit_grading_datetime_when_set():
 
 def test_due_snapshots_empty_without_assignments():
     assert (
-        scheduler.due_snapshots(Schedule(), datetime(2030, 1, 1, tzinfo=timezone.utc))
+        scheduler.due_snapshots(
+            "COURSE", Schedule(), datetime(2030, 1, 1, tzinfo=timezone.utc)
+        )
         == []
     )
+
+
+def _window(monkeypatch, days: int | None) -> None:
+    """Declare a late window in the template's grading.yml, as a real course does."""
+    monkeypatch.setattr(
+        scheduler,
+        "load_grading_spec",
+        lambda org, template: dict(DEFAULT_SPEC, late_window_days=days),
+    )
+
+
+def test_the_freeze_waits_for_the_end_of_the_declared_late_window(monkeypatch):
+    # The sheet's header and every receipt promise work is accepted for seven more days.
+    # Freezing at the due date refused all of it - on a green run, with the promise still
+    # on the student's issue.
+    _window(monkeypatch, 7)
+    sched = _assignments(**{"assignment-1": _due(13)})
+    assert (
+        scheduler.due_snapshots(
+            "COURSE", sched, datetime(2026, 10, 15, tzinfo=timezone.utc)
+        )
+        == []
+    )
+    ((slug, deadline),) = scheduler.due_snapshots(
+        "COURSE", sched, datetime(2026, 10, 21, tzinfo=timezone.utc)
+    )
+    assert slug == "assignment-1"
+    assert deadline.startswith("2026-10-20T23:59:59")
+
+
+def test_an_explicit_grading_datetime_beats_the_declared_window(monkeypatch):
+    _window(monkeypatch, 7)
+    sched = _assignments(**{"assignment-1": _due(13, grading_day=15)})
+    ((_slug, deadline),) = scheduler.due_snapshots(
+        "COURSE", sched, datetime(2026, 10, 16, tzinfo=timezone.utc)
+    )
+    assert deadline.startswith("2026-10-15T23:59:59")
+
+
+def test_no_declared_window_freezes_at_the_due_date(monkeypatch):
+    _window(monkeypatch, None)
+    sched = _assignments(**{"assignment-1": _due(13)})
+    ((_slug, deadline),) = scheduler.due_snapshots(
+        "COURSE", sched, datetime(2026, 10, 14, tzinfo=timezone.utc)
+    )
+    assert deadline.startswith("2026-10-13T23:59:59")
+
+
+def test_the_sheet_refresh_runs_through_the_whole_late_window(monkeypatch):
+    # Between the due date and the cutoff the assignment is NOT frozen, so the refresh pass
+    # owns it - which is what makes a late push move `info:` and earn its receipt.
+    _window(monkeypatch, 7)
+    sched = _assignments(**{"assignment-1": _due(13)})
+    refreshed = _no_sheet_refresh(monkeypatch)
+    _window(monkeypatch, 7)  # _no_sheet_refresh re-stubs the spec reader
+    monkeypatch.setattr(scheduler, "_assignment_template", lambda *a: "assignment-1")
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(scheduler, "snapshot_assignment", lambda *a, **k: None)
+    scheduler._refresh_sheets(
+        "COURSE",
+        "COHORT",
+        sched,
+        datetime(2026, 10, 17, tzinfo=timezone.utc),
+        False,
+    )
+    assert refreshed == [("assignment-1", "assignment-1")]
 
 
 def _stub_autograde(monkeypatch, marked: bool = True):
