@@ -1018,6 +1018,490 @@ def post_receipt(
     return True
 
 
+# ------------------------------------------------------------- what a student is shown
+
+# The ONLY keys that may reach a student, in the order a view writes them. An ALLOWLIST,
+# not a redaction list: a key added to the sheet next term - a fact the toolkit starts
+# recording, a column a grader invents for themselves - is invisible here until someone
+# names it. A denylist would have to be right about every key anyone ever adds; this has
+# to be right about nine.
+#
+# Deliberately absent: `notes_not_shared_with_students`, every `info:` fact but
+# `submitted` and `days_late` (`autograde`, `completion`, `contributions`), and - because
+# a gradebook shows the final grade and never its disaggregation - the team's score and
+# the member's own `adjustment_individual`. Those last two are INPUTS to the number the
+# student sees, not results: the team score is shared with the whole team in the team's
+# own repo (`team_issue_body`), where it is already common knowledge, and the adjustment
+# stays between a member and their grader.
+STUDENT_VIEW_KEYS = (
+    "final_grade",  # derived on output, never stored - the authoritative mark
+    "score",  # individual assignments only: what the grader typed, per question or flat
+    "max_points",  # the declared maxima summed, so a 40 reads as "40 / 50"
+    "feedback",  # feedback_individual
+    "submitted",  # info.submitted, as a person reads a date
+    "days_late",  # info.days_late
+    "penalty",  # what those days cost, e.g. "-20%"
+    "team",  # group assignments only
+    "team_feedback",  # feedback_group
+)
+
+# The month names are the toolkit's own, never the runner's locale: otherwise a
+# German-locale Actions runner writes "Okt" into one cohort's gradebook and "Oct" into
+# the next one's.
+_MONTHS = (
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+)
+
+_PRIVACY_HEADER = (
+    "This gradebook is private to you. It is regenerated each time grades are "
+    "distributed; do not edit it."
+)
+_GRADEBOOK_POINTER = (
+    "Your own final grade and personal feedback are in your private gradebook: "
+    "`grades-<your handle>`."
+)
+_README_COLUMNS = ("Assignment", "Final grade", "Submitted", "Late", "Team")
+_REGISTRAR_FIELDS = ("hertie_email", "name", "github_handle")
+
+
+def _blank(value: object) -> bool:
+    """Whether a cell holds nothing. `0` is a value, not a blank - a student who was 0
+    days late must see that, and dropping it would read as "we never looked"."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    if isinstance(value, dict):
+        return all(_blank(inner) for inner in value.values())
+    return False
+
+
+def _marked(score: object) -> dict:
+    """A per-question score with its unmarked questions dropped ({} for a flat score).
+
+    A blank question is one nobody has marked yet, and `Q3: null` in a student's file
+    reads as a mark of nothing rather than as no mark at all."""
+    if not isinstance(score, dict):
+        return {}
+    return {name: value for name, value in score.items() if not _blank(value)}
+
+
+def _verbatim(score: object) -> str:
+    """A score no arithmetic applies to, exactly as typed - `pass`, `A-`, `see me`.
+
+    Only a flat cell has one: a per-question map with a word in it has no single value to
+    pass through, and the map itself is already in the view."""
+    return "" if isinstance(score, dict) or _blank(score) else str(score).strip()
+
+
+def _max_points(spec: SheetSpec) -> str:
+    """The assignment's total, or "" when the maxima are not all numbers - `questions`
+    holds them as written, and a course may declare `Q1: see rubric`."""
+    maxima = [_decimal(maximum) for maximum in (spec.questions or {}).values()]
+    if not maxima or None in maxima:
+        return ""
+    return _plain(sum(maxima, Decimal(0)))
+
+
+def _penalty_display(rate: Decimal | None, days_late: object) -> str:
+    """What the late days cost, in the words the student is told them in: `-20%`."""
+    days = _decimal(days_late)
+    if rate is None or days is None or days <= 0:
+        return ""
+    return f"-{_plain(rate * days * 100)}%"
+
+
+def _submitted_display(value: object) -> str:
+    """A recorded submission time as a person reads it: `3 Oct 22:14`.
+
+    Anything that does not parse as a timestamp comes back verbatim. `info:` is the
+    toolkit's, but a grader may have typed over it, and their words about their own
+    cohort beat this module's guess at what they meant."""
+    if _blank(value):
+        return ""
+    text = value.isoformat() if isinstance(value, datetime) else str(value).strip()
+    try:
+        moment = datetime.fromisoformat(text)
+    except ValueError:
+        return text
+    day = f"{moment.day} {_MONTHS[moment.month - 1]}"
+    return day if "T" not in text and " " not in text else f"{day} {moment:%H:%M}"
+
+
+def _allowlisted(fields: dict) -> dict:
+    """`fields` reduced to the student-visible keys, in STUDENT_VIEW_KEYS order, blanks
+    dropped. Every student-facing value in this module passes through here."""
+    return {
+        key: fields[key]
+        for key in STUDENT_VIEW_KEYS
+        if key in fields and not _blank(fields[key])
+    }
+
+
+def student_view(
+    spec: SheetSpec, unit_key: str, block: dict | None, handle: str
+) -> dict:
+    """What ONE student may be shown of one submission unit's grading-sheet entry.
+
+    `block` is that unit's entry: `submissions[handle]` on an individual assignment, where
+    `unit_key` IS the handle; `teams[team]` on a group one, where `unit_key` is the team
+    and `handle` picks the member whose view this is. Nothing of any other member is read,
+    and nothing outside STUDENT_VIEW_KEYS is emitted, so the two ways a gradebook leaks -
+    the grader's private notes, and a team-mate's marks - are both closed structurally.
+
+    The final grade is DERIVED here (the score total, the late penalty, then this member's
+    own adjustment) because the sheet has no field for it. A score no arithmetic applies
+    to - `pass`, `A-` - is passed through exactly as typed, and `needs_hand_decision`
+    flags it where a penalty would have applied to a number."""
+    block = block or {}
+    info = block.get(INFO_KEY) or {}
+    person = (
+        ((block.get("members") or {}).get(handle) or {}) if spec.is_group else block
+    )
+    score = block.get(spec.score_key)
+    days_late = info.get("days_late")
+    rate = penalty_rate(spec.late_penalty_per_day)
+    final = final_grade(
+        score_total(score), rate, days_late, person.get("adjustment_individual")
+    )
+    return _allowlisted(
+        {
+            "final_grade": _plain(final) if final is not None else _verbatim(score),
+            # A group's score is the TEAM's: it reaches the team in the team's own repo,
+            # and reaches the member only through the final grade derived from it.
+            "score": None if spec.is_group else (_marked(score) or score),
+            "max_points": _max_points(spec),
+            "feedback": person.get("feedback_individual"),
+            "submitted": _submitted_display(info.get("submitted")),
+            "days_late": days_late,
+            "penalty": _penalty_display(rate, days_late),
+            "team": unit_key if spec.is_group else None,
+            "team_feedback": block.get("feedback_group") if spec.is_group else None,
+        }
+    )
+
+
+def needs_hand_decision(view: dict) -> bool:
+    """Whether this mark needs a person to settle it: a score that is not a number, under
+    a late penalty that cannot be applied to it.
+
+    `pass`, two days late, is not `-20% of pass`. The distribute dry run counts these so
+    that a grader decides them before anything is sent, rather than after a student reads
+    it."""
+    return "penalty" in view and _decimal(view.get("final_grade")) is None
+
+
+def _views_from_sheet(spec: SheetSpec, sheet: dict) -> dict[str, dict]:
+    """Every student's view of one grading sheet, keyed by handle."""
+    views: dict[str, dict] = {}
+    for unit_key, block in ((sheet or {}).get(spec.container_key) or {}).items():
+        if not isinstance(block, dict):
+            continue  # a unit mid-edit; the next run reads a whole block
+        handles = (block.get("members") or {}) if spec.is_group else {unit_key: None}
+        for handle in handles:
+            views[handle] = student_view(spec, unit_key, block, handle)
+    return views
+
+
+def _views_from_grade_rows(rows: list[GradeRow]) -> dict[str, dict]:
+    """The same views off a legacy `grades/<slug>.csv`, so a cohort that began marking
+    before the grading sheet existed still distributes from the table it is using.
+
+    That CSV's `final_grade` is authoritative - it was typed, not derived - so nothing is
+    recomputed from it. Its `team_score` and `individual_adjustment` columns have no
+    student-visible home any more (see STUDENT_VIEW_KEYS) and are not carried over."""
+    return {
+        row.github_handle: _allowlisted(
+            {
+                "final_grade": row.final_grade,
+                "feedback": row.individual_comments,
+                "team": row.team,
+                "team_feedback": row.team_comments,
+            }
+        )
+        for row in rows
+        if row.github_handle
+    }
+
+
+def build_books(
+    sources: dict[str, tuple[SheetSpec, dict] | list[GradeRow]],
+) -> dict[str, dict[str, dict]]:
+    """Pivot every assignment's source into `{handle: {slug: view}}` - one book per
+    student, one entry per assignment they have a mark or a word of feedback on.
+
+    A source is either a grading sheet with the spec that reads it, or a legacy grade
+    CSV's rows. Assignments are folded in sorted order, so a re-run renders byte-identical
+    files and only a gradebook that really changed is committed and emailed. An empty view
+    is not an entry: a student with nothing in the sheet yet has nothing to be told."""
+    books: dict[str, dict[str, dict]] = {}
+    canonical: dict[str, str] = {}  # fold key -> the first spelling seen for it
+    for slug in sorted(sources):
+        source = sources[slug]
+        views = (
+            _views_from_grade_rows(source)
+            if isinstance(source, list)
+            else _views_from_sheet(*source)
+        )
+        for handle, view in views.items():
+            if not view:
+                continue
+            key = canonical.setdefault(handle.casefold(), handle)
+            books.setdefault(key, {})[slug] = view
+    return books
+
+
+def _cell(value: object) -> str:
+    """One value as a Markdown table cell: no `|` to close the column early, no newline to
+    end the row. A grader's feedback is free text and can reach a table either way."""
+    text = "" if _blank(value) else " ".join(str(value).split())
+    return text.replace("|", "\\|")
+
+
+def _over_max(value: object, max_points: object) -> str:
+    """`40 / 50` where the assignment declares a total, `40` where it does not."""
+    text = "" if _blank(value) else str(value).strip()
+    return f"{text} / {max_points}" if text and not _blank(max_points) else text
+
+
+def _late_display(days_late: object) -> str:
+    """`on time`, `1 day late`, `2 days late` - "" where nothing was timed."""
+    days = _decimal(days_late)
+    if days is None:
+        return ""
+    if days <= 0:
+        return "on time"
+    return f"{_plain(days)} day{'' if days == 1 else 's'} late"
+
+
+def _when_clause(days_late: object, submitted: object) -> list[str]:
+    """The clause on a score line that says when the work came in: `submitted on time`,
+    `2 days late`, or - where nothing counted the days - `submitted 3 Oct 22:14`."""
+    late = _late_display(days_late)
+    if late:
+        return [f"submitted {late}" if late == "on time" else late]
+    return [] if _blank(submitted) else [f"submitted {submitted}"]
+
+
+def _questions_clause(score: object) -> str:
+    """` (Q1 14, Q2 13)` - the marks behind a total, or "" for a flat score."""
+    marked = _marked(score)
+    if not marked:
+        return ""
+    return " (" + ", ".join(f"{name} {value}" for name, value in marked.items()) + ")"
+
+
+def _readme_row(title: str, view: dict) -> str:
+    """One assignment's row in the summary table."""
+    values = (
+        title,
+        _over_max(view.get("final_grade", ""), view.get("max_points")),
+        # No `submitted` at all means nothing was ever timed here: the work was handed in
+        # somewhere off GitHub.
+        view.get("submitted") or "external",
+        _late_display(view.get("days_late")),
+        view.get("team", ""),
+    )
+    return "| " + " | ".join(_cell(value) for value in values) + " |"
+
+
+def _readme_section(title: str, view: dict) -> str:
+    """One assignment's section: the final grade, the student's own feedback verbatim, and
+    the team's feedback as a blockquote that says who else has read it."""
+    grade = _over_max(view.get("final_grade", ""), view.get("max_points"))
+    parts = [f"## {title}" + (f"\n**Final grade:** {grade}" if grade else "")]
+    if not _blank(view.get("feedback")):
+        parts.append(str(view["feedback"]).strip())
+    if not _blank(view.get("team_feedback")):
+        label = f"**Team feedback (shared with {view.get('team', 'your team')}):**"
+        lines = str(view["team_feedback"]).strip().split("\n")
+        quoted = [f"> {label} {lines[0]}".rstrip()]
+        quoted += [f"> {line}".rstrip() for line in lines[1:]]
+        parts.append("\n".join(quoted))
+    return "\n\n".join(parts)
+
+
+def render_readme(handle: str, book: dict[str, dict], titles: dict[str, str]) -> str:
+    """One student's gradebook README - the file they actually open.
+
+    The privacy line, one row per assignment, then a section per assignment with their
+    feedback. It gives the final grade and never the sum behind it: the team's score and
+    their own adjustment are their grader's working, and a student reading their own
+    deduction beside their team-mates' shared mark is exactly the conversation this
+    workflow exists to avoid.
+
+    `handle` is the student the book belongs to; the text names nobody - the repo is
+    already private to them - and takes it so that every per-student write reads the
+    same at the call site. `titles` maps a slug to the assignment's name, falling back to
+    the slug rather than rendering an empty heading."""
+    del handle
+    slugs = sorted(book)
+    table = [
+        "| " + " | ".join(_README_COLUMNS) + " |",
+        "|" + "---|" * len(_README_COLUMNS),
+        *(_readme_row(titles.get(slug, slug), book[slug]) for slug in slugs),
+    ]
+    sections = [_readme_section(titles.get(slug, slug), book[slug]) for slug in slugs]
+    return "\n\n".join([_PRIVACY_HEADER, "\n".join(table), *sections]) + "\n"
+
+
+def render_registrar_csv(
+    students: list[roster.Student], books: dict[str, dict[str, dict]]
+) -> str:
+    """The registrar's export: one row per ENROLLED student, one column per assignment,
+    each cell the final grade exactly as that student was told it.
+
+    Every enrolled student is a row, marked or not, and a student who has not onboarded
+    yet is a row with no handle: a missing row reads as somebody who left the course, and
+    this is the file a grade is transcribed from. Auditors are never assessed and are
+    never rows. It lives in the private classroom-config and is never logged."""
+    slugs = sorted({slug for book in books.values() for slug in book})
+    by_handle = {handle.casefold(): book for handle, book in books.items()}
+
+    def row(student: roster.Student) -> list[str]:
+        book = by_handle.get(student.github_handle.casefold()) or {}
+        return [
+            student.hertie_email,
+            student.name,
+            student.github_handle,
+            *(str(book.get(slug, {}).get("final_grade", "")) for slug in slugs),
+        ]
+
+    return dump_csv(
+        [*_REGISTRAR_FIELDS, *slugs],
+        (
+            row(student)
+            for student in sorted(
+                roster.enrolled(students), key=lambda s: s.hertie_email.casefold()
+            )
+        ),
+    )
+
+
+@dataclass(frozen=True)
+class TeamResult:
+    """Everything that may be said in a TEAM's repo, and nothing else.
+
+    A team repo grants the whole team `maintain`, so a comment posted there is read by
+    every member. This type is what enforces that: it carries no member fields at all, so
+    `team_issue_body` cannot name one member's adjustment, feedback or final grade even by
+    mistake. `team_score` is the `score_group` cell as the grader typed it - a per-question
+    map or a flat value - because the comment shows the breakdown beside the total."""
+
+    team: str
+    team_score: object = None
+    max_points: str = ""
+    submitted_display: str = ""
+    days_late: object = None
+    penalty: str = ""
+    feedback_group: str = ""
+
+
+def team_result(spec: SheetSpec, team: str, block: dict | None) -> TeamResult:
+    """One team's shareable result off its grading-sheet entry. `members:` is not read."""
+    block = block or {}
+    info = block.get(INFO_KEY) or {}
+    days_late = info.get("days_late")
+    return TeamResult(
+        team=team,
+        team_score=block.get(spec.score_key),
+        max_points=_max_points(spec),
+        submitted_display=_submitted_display(info.get("submitted")),
+        days_late=days_late,
+        penalty=_penalty_display(penalty_rate(spec.late_penalty_per_day), days_late),
+        feedback_group=block.get(spec.feedback_key) or "",
+    )
+
+
+def _feedback_body(title: str, score_line: str, *blocks: str) -> str:
+    """A feedback comment: the heading with the score line under it, then each block."""
+    heading = f"### Feedback · {title}"
+    return (
+        "\n\n".join(
+            [heading + (f"\n{score_line}" if score_line else "")]
+            + [block for block in blocks if block]
+        )
+        + "\n"
+    )
+
+
+def individual_issue_body(title: str, view: dict) -> str:
+    """The feedback comment for a student's OWN assignment repo.
+
+    Plain where nothing moved the mark (`**Grade:** 9`); where a late penalty applied, the
+    score, the days, the penalty and the grade they produced - the arithmetic done to
+    their work, rather than a number they cannot account for."""
+    final = _over_max(view.get("final_grade", ""), view.get("max_points"))
+    score = view.get("score")
+    when = _when_clause(view.get("days_late"), view.get("submitted"))
+    if "penalty" not in view:
+        clauses = [f"**Grade:** {final}{_questions_clause(score)}", *when]
+    else:
+        total = score_total(score)
+        earned = _plain(total) if total is not None else _verbatim(score)
+        clauses = [
+            (
+                f"**Score:** {_over_max(earned, view.get('max_points'))}"
+                f"{_questions_clause(score)}"
+            ),
+            *when,
+            f"penalty {view['penalty']}",
+            f"**Final grade:** {final}",
+        ]
+    feedback = "" if _blank(view.get("feedback")) else str(view["feedback"]).strip()
+    return _feedback_body(title, _SEP.join(clauses) if final else "", feedback)
+
+
+def team_issue_body(title: str, result: TeamResult) -> str:
+    """The feedback comment for a TEAM's repo - the shared result, and nothing personal.
+
+    No member's final grade appears here, and none can: `TeamResult` has no member fields.
+    The closing line is what stops that reading as an omission."""
+    total = score_total(result.team_score)
+    shown = _plain(total) if total is not None else _verbatim(result.team_score)
+    clauses = [
+        (
+            f"**Team score:** {_over_max(shown, result.max_points)}"
+            f"{_questions_clause(result.team_score)}"
+        ),
+        *_when_clause(result.days_late, result.submitted_display),
+    ]
+    if result.penalty:
+        clauses.append(f"penalty {result.penalty}")
+    feedback = (
+        "" if _blank(result.feedback_group) else str(result.feedback_group).strip()
+    )
+    return _feedback_body(
+        title, _SEP.join(clauses) if shown else "", feedback, _GRADEBOOK_POINTER
+    )
+
+
+def load_sheets(wd: Path) -> dict[str, dict]:
+    """Every grading sheet in a classroom-config checkout, keyed by assignment slug.
+
+    A checkout rather than the API: distribute has the repo cloned already, and reading
+    the sheets out of it costs nothing and cannot half-succeed the way a file-by-file
+    fetch can."""
+    folder = wd / SHEETS_DIR
+    if not folder.is_dir():
+        return {}
+    return {
+        path.stem: parse_sheet(path.read_text(encoding="utf-8"))
+        for path in sorted(folder.glob("*.yml"))
+    }
+
+
 # ---------------------------------------------------------------------- gh/git wiring
 
 
@@ -1040,23 +1524,42 @@ def _human_commit_authors(
     )
 
 
-def load_grade_sources(cohort_org: str) -> dict[str, list[GradeRow]]:
-    """Read every `grades/<assignment>.csv` from the cohort's classroom-config repo."""
+def _config_dir_names(cohort_org: str, folder: str) -> list[str]:
+    """The file names in one folder of the cohort's classroom-config ([] when it has no
+    such folder - which is the normal state of both of these, not a fault)."""
     code, out = gh(
         "api",
-        f"repos/{cohort_org}/{CONFIG_REPO}/contents/{GRADES_DIR}",
+        f"repos/{cohort_org}/{CONFIG_REPO}/contents/{folder}",
         "--jq",
         ".[].name",
     )
-    if code != 0:
+    return sorted(out.splitlines()) if code == 0 else []
+
+
+def load_grade_sources(cohort_org: str) -> dict[str, list[GradeRow] | dict]:
+    """Every source of marks in the cohort's classroom-config, keyed by assignment slug.
+
+    TWO kinds, because a cohort part-way through a term keeps marking where it started:
+    `grading_sheets/<slug>.yml` (the sheet, and where every new assignment goes) parsed to
+    a dict, and the legacy `grades/<slug>.csv` parsed to rows. A slug with both is the
+    sheet's - that is the file a grader was told to type in."""
+    sheets: dict[str, list[GradeRow] | dict] = {}
+    for name in _config_dir_names(cohort_org, SHEETS_DIR):
+        if not name.endswith(".yml"):
+            continue
+        content = get_file_content(cohort_org, CONFIG_REPO, f"{SHEETS_DIR}/{name}")
+        if content is not None:
+            sheets[name[:-4]] = parse_sheet(content)
+    names = _config_dir_names(cohort_org, GRADES_DIR)
+    if not names and not sheets:
         log_err(
-            f"no {GRADES_DIR}/ in {cohort_org}/{CONFIG_REPO} - add a grade CSV first "
-            f"(e.g. {GRADES_DIR}/assignment-1.csv)"
+            f"no {SHEETS_DIR}/ or {GRADES_DIR}/ in {cohort_org}/{CONFIG_REPO} - hand out "
+            f"an assignment (which creates its grading sheet) first"
         )
         return {}
-    per: dict[str, list[GradeRow]] = {}
+    per: dict[str, list[GradeRow] | dict] = {}
     stale = []
-    for name in sorted(out.splitlines()):
+    for name in names:
         if not name.endswith(".csv"):
             continue
         content = get_file_content(cohort_org, CONFIG_REPO, f"{GRADES_DIR}/{name}")
@@ -1078,7 +1581,7 @@ def load_grade_sources(cohort_org: str) -> dict[str, list[GradeRow]]:
             f"header rows before rendering: {', '.join(stale)}"
         )
         return {}
-    return per
+    return per | sheets
 
 
 def _existing_repos(cohort_org: str) -> frozenset[str] | None:
