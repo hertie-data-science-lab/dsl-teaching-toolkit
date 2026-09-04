@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from tests.e2e import allowlist, drive, estate
+from tests.e2e import allowlist, cleanup, drive, estate, schedule_edit
 
 OTHER = "hertie-ml-26-deep"
 COURSE, COHORT = sorted(allowlist.DEMO_ORGS)
@@ -162,3 +162,115 @@ def test_only_unfinished_runs_count_as_busy():
     ]
     assert [r["id"] for r in drive.busy(runs)] == [2, 1]
     assert drive.busy([{"id": 9, "status": "completed"}]) == []
+
+
+# ----------------------------------------------------------- the fenced schedule edit
+
+SCHEDULE = """\
+timezone: Europe/Berlin
+
+assignments:
+  - key: assignment-1
+    course_source_repo: materials
+
+releases:
+  - when: 2026-10-01 09:00
+"""
+
+BLOCK = """\
+  - key: assignment-90-e2eab12cd
+    course_source_repo: materials
+"""
+
+
+def test_the_block_goes_in_under_assignments_and_comes_out_clean():
+    with_block = schedule_edit.insert_block(SCHEDULE, "e2eab12cd", BLOCK)
+    assert "# dsl-e2e:e2eab12cd begin" in with_block
+    # under `assignments:`, not at the end of the file - `releases:` still owns its own item
+    assert with_block.index("assignment-90") < with_block.index("releases:")
+    assert schedule_edit.remove_block(with_block, "e2eab12cd") == SCHEDULE
+
+
+def test_inserting_twice_replaces_rather_than_stacks():
+    once = schedule_edit.insert_block(SCHEDULE, "e2eab12cd", BLOCK)
+    twice = schedule_edit.insert_block(once, "e2eab12cd", BLOCK)
+    assert twice == once
+    assert twice.count("assignment-90-e2eab12cd") == 1
+
+
+def test_removing_a_block_that_is_not_there_changes_nothing():
+    # Cleanup is re-runnable, and an interrupted run may never have inserted anything.
+    assert schedule_edit.remove_block(SCHEDULE, "e2eab12cd") == SCHEDULE
+
+
+def test_one_run_does_not_remove_another_runs_block():
+    both = schedule_edit.insert_block(
+        schedule_edit.insert_block(SCHEDULE, "e2eaaaaaa1", BLOCK), "e2ebbbbbb2", BLOCK
+    )
+    left = schedule_edit.remove_block(both, "e2eaaaaaa1")
+    assert "e2ebbbbbb2 begin" in left and "e2eaaaaaa1" not in left
+
+
+def test_a_schedule_with_no_assignments_key_is_refused():
+    with pytest.raises(ValueError, match="assignments:"):
+        schedule_edit.insert_block("timezone: Europe/Berlin\n", "e2eab12cd", BLOCK)
+
+
+# ------------------------------------------------------------- what cleanup may delete
+
+RUN = "e2eab12cd"
+
+
+@pytest.mark.parametrize(
+    "name,mine",
+    [
+        ("assignment-90-e2eab12cd", True),
+        ("assignment-90-e2eab12cd-template", True),
+        ("assignment-90-e2eab12cd-henrycgbaker", True),
+        ("assignment-90-e2eab12cd2", False),  # a longer id, not a suffix of ours
+        ("assignment-90-e2effffff", False),  # another run
+        ("assignment-9-e2eab12cd", False),  # a real assignment that starts the same way
+        ("assignment-1-regression-henrycgbaker", False),
+        ("classroom-config", False),
+    ],
+)
+def test_only_this_runs_repos_are_deletable(name, mine):
+    assert cleanup.is_run_repo(name, RUN) is mine
+
+
+def test_another_runs_leavings_are_reported_not_deleted():
+    assert cleanup.is_drift("assignment-90-e2effffff-jane", RUN)
+    assert not cleanup.is_drift("assignment-90-e2eab12cd-jane", RUN)
+    assert not cleanup.is_drift("classroom-config", RUN)
+
+
+@pytest.mark.parametrize(
+    "path,mine",
+    [
+        ("snapshots/assignment-90-e2eab12cd.csv", True),
+        ("autograde/assignment-90-e2eab12cd/_graded.json", True),
+        ("grading_sheets/assignment-90-e2eab12cd.yml", True),
+        ("snapshots/assignment-1.csv", False),
+        ("schedule.yml", False),
+        ("autograde/assignment-90-e2effffff/_graded.json", False),
+    ],
+)
+def test_only_this_runs_artefacts_are_dropped(path, mine):
+    assert cleanup._is_artefact(path, RUN) is mine
+
+
+def test_a_run_id_that_is_not_one_is_refused():
+    # It is interpolated into a delete pattern; `.*` would match every repo in the org.
+    for junk in ("", "*", "e2e", "all", "e2eab12cd-extra"):
+        with pytest.raises(ValueError, match="not a run id"):
+            cleanup.slug(junk)
+    assert cleanup.check_run_id(cleanup.new_run_id())
+
+
+def test_cleanup_refuses_without_the_transport_fence(monkeypatch):
+    monkeypatch.delenv("DSL_ORG_ALLOWLIST", raising=False)
+    with pytest.raises(RuntimeError, match="DSL_ORG_ALLOWLIST is not set"):
+        cleanup.cleanup(RUN, dry_run=True)
+    # and as a command it says so and exits 1 rather than traceback-ing - having reached
+    # no `gh` at all, which `conftest._no_live_gh` is what proves
+    assert cleanup.main(["--run-id", RUN, "--dry-run"]) == 1
