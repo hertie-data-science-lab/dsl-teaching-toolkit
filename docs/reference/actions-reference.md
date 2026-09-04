@@ -23,7 +23,7 @@ grants it: [`access-reference.md`](access-reference.md).
 
 | Action | Effect |
 | --- | --- |
-| **Scheduled release** | **Primary** - the cron fires the cohort's `releases` plan and freezes passed deadlines. Manual runs default to `dry_run=true`. See [07](../07-schedule-releases.md). |
+| **Scheduled release** | **Primary** - fires the cohort's `releases` plan and freezes passed deadlines, roughly every 15 minutes. Manual runs default to `dry_run=true`. See [07](../07-schedule-releases.md#what-drives-the-scheduler). |
 | **Release materials** | Copy `course_source_path` (a folder, a file, or a comma-separated list) from a course-org `course_source_repo` into the cohort's `cohort_dest_repo` at `cohort_dest_path` - the same four fields as a `schedule.yml` `deploy`. Covers session folders, datasets, root files and code subpackages alike. _Fallback - see [07](../07-schedule-releases.md), [08](../08-release-materials-to-cohort.md)._ |
 | **Release assignment** | Freeze a cohort template from the chosen `assignment-*`, then generate one private `<slug>-<handle>` repo per onboarded student. `include_solution` and `dry_run` default off; `type` defaults to `auto` (follow `schedule.yml` / the template's `grading.yml`). _Fallback - see [07](../07-schedule-releases.md), [09](../09-release-assignment-to-cohort.md)._ |
 | **Send enrolment codes** | **No button** - it runs only on a push to a cohort's `students.csv`, and it sends for real. Generates an `enrol_code` per roster row, writes it back to `students.csv`, emails each not-yet-onboarded student theirs. Safe on every push: a row's `code_sent_at` stops it being mailed twice (from the first run that sets it), so a re-send means clearing that cell and pushing. |
@@ -55,3 +55,18 @@ org's `course-admin` team, so it reaches an inbox. It comments on
 that same issue while the failure persists, and closes it as soon as a run succeeds - so an
 open one always means "still broken". Don't close it by hand; fix the cause and re-run the
 action.
+
+**Scheduled release** reports per job, because it releases and grades separately: the release
+pass keeps *"Scheduled release is failing"*, and a cohort whose autograding fails gets its own
+*"Scheduled release (autograde &lt;cohort&gt;) is failing"* - so one stuck cohort neither hides
+the others nor delays them.
+
+Two further issues watch the schedule being *kept* rather than a run's exit code. Both also
+close themselves; what they mean is in
+[07](../07-schedule-releases.md#what-drives-the-scheduler):
+
+- *"Scheduled release: driver health"*, in your `.github`, cc `course-admin` - no run from the
+  15-minute driver for two hours (it notes a day's silence from GitHub's cron as well).
+- *"Scheduled release: late delivery"*, in the cohort's private `classroom-config`, cc that
+  cohort's `instructors` - something due shipped more than an hour late, naming the schedule
+  entries and the minutes.

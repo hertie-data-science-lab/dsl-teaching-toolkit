@@ -138,6 +138,35 @@ most contended minutes first (on `0 * * * *` the scheduler was delivered 6 ticks
 and membership must write the teams that Sync site then reads. Both rules are enforced by
 `tests/test_renderers.py`; the reasoning sits above the cron literals in `workflows_render`.
 
+## The scheduler's two drivers
+
+Even off a contended minute GitHub delivers only 2-7% of the fires it promises, with observed
+gaps of 13 hours, so its cron is the **backstop** and not the clock. The primary driver is a
+systemd timer on the lab server ds01 - `dsl-scheduled-release.timer` running
+`scripts/maintenance/dsl-scheduled-release.sh`, both in `henrycgbaker/ds01-infra-full` - which
+POSTs `repository_dispatch: scheduled-release` to the `.github` repo of every `dsl-course-hub`
+org at :00/:15/:30/:45. A push to a cohort's `schedule.yml` dispatches the same event. Each
+driver guards the other, and the workflow is one run per arrival whichever it came from.
+
+Those four minutes are not a breach of the rule above: that rule is about **GitHub's** cron
+scheduler dropping the contended ones. A REST POST is served like any other API call, and the
+offsets deliberately interleave GitHub's :07/:22/:37/:52, so a lost fire costs at most 8 minutes.
+
+`cadence.py` reads the workflow's own run history on every real all-cohorts run (never on a
+dry-run) and files two self-closing issues. A due moment that shipped more than **60 min** late
+opens *Scheduled release: late delivery* in that cohort's private `classroom-config`, which
+closes once the last **8** qualifying gaps are all 20 min or less. No dispatch-driven run in
+**2h** means ds01 is down and opens *Scheduled release: driver health* in the course org's
+`.github`, which also notes a **24h** silence from GitHub's cron. Both stay disarmed until the
+org has seen its first dispatch-driven run, so a freshly bootstrapped or newly promoted org
+never alarms on its way in.
+
+**Break-glass.** If both drivers are down, or Actions itself is out, drive a course org from a
+laptop with a `repo`-scoped token: `GH_TOKEN=<token> python3 -m dsl_course.scheduler
+--course-org <org> --all-cohorts`. Add `--dry-run` first - it prints what would fire and writes
+nothing. It is the code path the workflow runs, and the one-shot markers are what make repeating
+it safe.
+
 Every `workflow_dispatch` job sits behind the `check-team` gate (`workflows_render._CHECK_TEAM`),
 which asks for write on the repo the button lives in. The scheduler, refresh and Send enrolment
 codes are **ungated**: neither a cron nor a `repository_dispatch` has an actor to check, and each
