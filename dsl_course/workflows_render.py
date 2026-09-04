@@ -86,15 +86,29 @@ _SEED_REFRESH_CONCURRENCY = """concurrency:
   cancel-in-progress: false
 """
 
-# The scheduler runs every 15 minutes and can outlive its slot easily (it clones and grades
-# submissions across every cohort, on a 120-minute budget), so it can overlap itself. Its
-# actions are fire-once, guarded by markers written as they complete - so two concurrent
-# passes can double-release or double-grade whatever the first has not yet marked. Queue
-# instead: a tick that arrives mid-pass waits, and GitHub keeps just one run pending per
-# group, so a long grading pass collapses the ticks it spans instead of stacking them.
-_SCHEDULED_RELEASE_CONCURRENCY = """concurrency:
-  group: scheduled-release
-  cancel-in-progress: false
+# The scheduler's concurrency sits on its JOBS, never on the workflow: a workflow-level
+# group is one queue for every action in every cohort, which is how a two-hour grading pass
+# held up a release that was due meanwhile. Each job declares its own instead.
+#
+# Releases are fire-once, guarded by markers written as they complete, so two concurrent
+# passes can double-release whatever the first has not yet marked - hence still a queue of
+# one. A manual DRY-RUN writes nothing and therefore needs no serialisation, and joining the
+# queue is exactly how an operator's preview gets silently dropped (Actions holds ONE
+# pending run per group, so a third arrival cancels the second whatever
+# `cancel-in-progress` says): it gets a group of its own, per run.
+_RELEASE_CONCURRENCY = """    concurrency:
+      group: ${{ inputs.dry_run == true && github.run_id || 'scheduled-release' }}
+      cancel-in-progress: false
+"""
+
+# Grading is queued PER COHORT: the fire-once autograde marker is a cohort-side file, so two
+# passes over the same cohort can double-grade, while a pass over another cohort shares
+# nothing with it and must never wait. A dry-run leg is per run AND per cohort, for the same
+# reason the release job's is: it writes nothing, so it needs no queue, and a queue is what
+# would silently drop an operator's preview.
+_AUTOGRADE_CONCURRENCY = """    concurrency:
+      group: ${{ inputs.dry_run == true && format('{0}-{1}', github.run_id, matrix.cohort) || format('scheduled-autograde-{0}', matrix.cohort) }}
+      cancel-in-progress: false
 """
 
 
@@ -149,12 +163,15 @@ _CHECK_TEAM = """  check-team:
 # healthy run is an outage, not a safety net.
 #
 # 30 is the ordinary budget - a handful of API calls, or one repo cloned.
-# 60 covers Bootstrap cohort: it creates and configures a whole org, then converges it.
+# 60 covers the two jobs that write across MANY repos in series: Bootstrap cohort, which
+#     creates and configures a whole org and then converges it, and the scheduler's release
+#     job, whose `assignment` handout provisions one repo per student for every cohort at
+#     once - so two cohorts handing out on the same tick outlast the ordinary budget.
 # 120 covers the two jobs that grade: collect budgets 300s PER submission subprocess and
-#     walks a cohort serially, and the scheduler does that for every cohort (its own
-#     concurrency comment says a pass can outlive its slot).
+#     walks a cohort serially - the manual Grade assignment button, and the scheduler's
+#     autograde job, which is one matrix leg per cohort.
 _TIMEOUT_DEFAULT = 30
-_TIMEOUT_BOOTSTRAP = 60
+_TIMEOUT_MANY_REPOS = 60
 _TIMEOUT_GRADING = 120
 
 
@@ -249,24 +266,47 @@ _DRY_RUN_GATE = (
 # The issue title is the workflow's OWN name, taken from the ambient `github.workflow`, so
 # each workflow keeps its own issue (a shared title would let one recovery close another's
 # open failure) with no per-renderer string to keep in step with the `name:` above it.
-_CRON_CLOSE = """      - name: Close the failure issue once a run succeeds
+#
+# A workflow whose unattended jobs run CONCURRENTLY has to go further, and `scope` is how:
+# the scheduler releases and grades in two jobs (grading once per cohort), which fail
+# independently, and on a shared title the green one closes the red one's issue - then the
+# next tick files it again, cc-ing course-admin four times an hour about the one fault. A
+# scoped job appends its own suffix and so keeps its own issue. The default, no suffix, is
+# the title every org already has open, so those still self-close.
+#
+# Which is why both lookups below match the title EXACTLY, client-side. `--search` is a
+# WORD match: "<workflow> is failing" also hits "<workflow> (autograde <cohort>) is
+# failing", so the release job's close loop would close every grading leg's open issue on
+# every green tick, the failing leg would refile with a fresh cc, and the 6h throttle would
+# never engage. The search stays as the cheap server-side narrowing; `select(.title == ..)`
+# is the guard. `source_digest._open_issue` matches client-side for the same reason.
+_SCOPE = "__CRON_ISSUE_SCOPE__"  # replaced per job; see _fill_scope
+_SCOPE_ENV = "__CRON_SCOPE_ENV__"  # any env the scope's shell fragment reads
+
+_CRON_CLOSE_TEMPLATE = (
+    """      - name: Close the failure issue once a run succeeds
         if: success()
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           WORKFLOW: ${{ github.workflow }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          title="$WORKFLOW is failing"
-          for n in $(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number --jq '.[].number'); do
+"""
+    + _SCOPE_ENV
+    + """        run: |
+          title="$WORKFLOW"""
+    + _SCOPE
+    + """ is failing"
+          for n in $(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number,title --jq ".[] | select(.title == \\"$title\\") | .number"); do
             gh issue close "$n" --repo "$REPO" --comment "Recovered: $RUN_URL"
           done
 """
+)
 
 # `cancelled()`, not just `failure()`: a job killed by its own `timeout-minutes` is
 # CANCELLED, and a cron that reliably runs out of time is exactly the silent failure this
 # exists to surface.
-_CRON_NOTICE = (
+_CRON_NOTICE_TEMPLATE = (
     """      - name: Report an unattended failure as an issue
         if: (failure() || cancelled()) && github.event_name != 'workflow_dispatch'
         env:
@@ -274,8 +314,12 @@ _CRON_NOTICE = (
           WORKFLOW: ${{ github.workflow }}
           REPO: ${{ github.repository }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          title="$WORKFLOW is failing"
+"""
+    + _SCOPE_ENV
+    + """        run: |
+          title="$WORKFLOW"""
+    + _SCOPE
+    + """ is failing"
           note=$(printf 'The unattended run failed or was cancelled: %s\\n\\nNothing retries it before the next scheduled run. This issue closes itself once a run succeeds.\\n' "$RUN_URL")
           # A filed issue emails only the repo's watchers, which in practice is nobody, so
           # the FIRST report mentions the org's admins; course-admin, not instructors,
@@ -284,7 +328,7 @@ _CRON_NOTICE = (
           # The step runs under `bash -e`, so an unguarded capture would abort the step on a
           # transient search failure - before the `gh issue create` that is the whole point.
           # No dedupe hit just means we file a fresh issue.
-          existing=$(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number,updatedAt --jq '.[0] | select(.) | "\\(.number) \\(.updatedAt)"') || true
+          existing=$(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number,title,updatedAt --jq "map(select(.title == \\"$title\\"))[0] | select(.) | \\"\\(.number) \\(.updatedAt)\\"") || true
           if [ -z "$existing" ]; then
             gh issue create --repo "$REPO" --title "$title" --body "$body"
             exit 0
@@ -302,7 +346,32 @@ _CRON_NOTICE = (
           fi
           gh issue comment "${existing%% *}" --repo "$REPO" --body "$note"
 """
-    + _CRON_CLOSE
+    + _CRON_CLOSE_TEMPLATE
+)
+
+
+def _fill_scope(template: str, scope: str = "", scope_env: str = "") -> str:
+    """Bind one job's issue scope into a reporting template.
+
+    `scope` is a SHELL fragment, so it may name an env var (`$COHORT`) and `scope_env` is
+    where that var comes from - a value must never reach a run block as a `${{ }}`
+    expression, which GitHub substitutes before the shell parses the line."""
+    return template.replace(_SCOPE, f" ({scope})" if scope else "").replace(
+        _SCOPE_ENV, scope_env
+    )
+
+
+# The unscoped pair, for the workflows with a single unattended job.
+_CRON_NOTICE = _fill_scope(_CRON_NOTICE_TEMPLATE)
+_CRON_CLOSE = _fill_scope(_CRON_CLOSE_TEMPLATE)
+
+# The scheduler's grading job reports PER COHORT: its matrix legs run in parallel, so on a
+# shared title a green cohort would close a red cohort's open issue. A cohort org name is
+# not per-person data, so it may be said out loud in a public repo's issue title.
+_AUTOGRADE_NOTICE = _fill_scope(
+    _CRON_NOTICE_TEMPLATE,
+    "autograde $COHORT",
+    "          COHORT: ${{ matrix.cohort }}\n",
 )
 
 
@@ -845,7 +914,7 @@ on:
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   bootstrap-cohort:
-{_run_preamble(_TIMEOUT_BOOTSTRAP)}      - name: Bootstrap + register + refresh
+{_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Bootstrap + register + refresh
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
@@ -859,29 +928,38 @@ on:
 
 
 def render_scheduler() -> str:
-    """Quarter-hourly cron that snapshots + autogrades each passed grading deadline and
-    releases whatever each cohort's schedule says is now due, across every registered cohort.
-    No check-team gate: scheduled runs have no actor, and every action is either idempotent or
-    fire-once (manual dispatch still needs write)."""
+    """Quarter-hourly cron - and an external dispatch - that releases whatever each cohort's
+    schedule says is now due and grades each passed deadline, across every registered cohort.
+    Two jobs, so neither waits on the other. No check-team gate: an unattended run has no
+    actor, and every action is either idempotent or fire-once (manual dispatch still needs
+    write)."""
     return f"""name: Scheduled release
 
 # Reads each cohort's classroom-config/schedule.yml and, on every tick: freezes the submission
-# snapshot for each assignment whose grading deadline has passed, autogrades that assignment
-# ONCE (marker: classroom-config/autograde/<slug>/ - delete it to re-grade), then fires every
-# `releases:` release whose `when` datetime has arrived. Releases are idempotent, so
-# re-releasing on the next tick is a no-op; grading is not re-run. On the cron it releases for
-# real; manual runs default to dry-run.
+# snapshot for each assignment whose grading deadline has passed, fires every `releases:`
+# release whose `when` datetime has arrived, and autogrades each frozen assignment ONCE
+# (marker: classroom-config/autograde/<slug>/ - delete it to re-grade). Releases are
+# idempotent, so re-releasing on the next tick is a no-op; grading is not re-run. Unattended
+# it releases for real; manual runs default to dry-run.
 #
-# THE cadence-critical schedule: this is the only cron a student can be waiting on, since a
-# release's `when` is usually a class time. Four off-peak ticks an hour rather than one on the
-# hour - see the cron-minute rules above for why `0 * * * *` was delivered 6 times a day, not
-# 24. An idle tick is ~30s and reads a handful of paths, so the cost of the extra ticks is a
-# few hundred REST calls an hour against the bot token's 5000; releasing or grading is what
-# takes real time, and that only happens on the tick where something is actually due.
+# TWO DRIVERS, because GitHub delivers `schedule` best-effort and in practice delivers very
+# little of it: measured 2-7% of the fires below, with gaps up to 13h. So this is also fired
+# by `repository_dispatch` from an external dispatcher (every 15 minutes, off-box), and each
+# driver covers the other's outage. Both arrive here as an ordinary run; nothing downstream
+# cares which, because every action is dated and fire-once. The off-peak minutes stay as they
+# are - see the cron-minute rules above for why `0 * * * *` was delivered 6 times a day, not
+# 24 - and an idle tick is ~30s of reads, so the cost of arriving twice is negligible.
+#
+# TWO JOBS, because a grading pass can run for two hours and must not hold up a release due
+# meanwhile. `release` walks every cohort (fast: dated copies and repo provisioning);
+# `autograde` is one matrix leg per cohort, each queued only against itself, and runs even
+# when the release job failed - one cohort's fault is nobody else's wait.
 
 on:
   schedule:
     - cron: "7,22,37,52 * * * *"
+  repository_dispatch:
+    types: [scheduled-release]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -889,19 +967,62 @@ on:
         type: boolean
         default: true
 
-{_SCHEDULED_RELEASE_CONCURRENCY}
-{_PERMISSIONS_JOBS}  scheduled-release:
-{_ungated_preamble(_TIMEOUT_GRADING)}      - name: Run scheduler
+{_PERMISSIONS_JOBS}  release:
+{_RELEASE_CONCURRENCY}    outputs:
+      cohorts: ${{{{ steps.cohorts.outputs.cohorts }}}}
+{_ungated_preamble(_TIMEOUT_MANY_REPOS)}      - name: List the cohorts to grade
+        id: cohorts
+        env:
+          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
+          COURSE: ${{{{ github.repository_owner }}}}
+        run: |
+          # FIRST, so the grading matrix is populated whatever the release pass does: a step
+          # that fails skips the ones after it, and a release fault in one cohort must not
+          # cancel grading in the others. Assigned, not echoed inline: under `bash -e` a
+          # failed substitution inside an echo would write an empty output on a GREEN step,
+          # and grading would then be skipped for the whole course, silently.
+          cohorts=$(python3 -m dsl_course.scheduler --course-org "$COURSE" --list-cohorts)
+          echo "cohorts=$cohorts" >> "$GITHUB_OUTPUT"
+      - name: Release what is due, in every cohort
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
+          EVENT: ${{{{ github.event_name }}}}
+          DRIVER: ${{{{ github.event.client_payload.driver }}}}
         run: |
           gh auth setup-git
-          args=(--course-org "$COURSE" --all-cohorts)
+          # Which driver delivered this tick. The run history is the only record of that,
+          # and it is what says whether both drivers are alive (a dispatch names its
+          # sender in client_payload.driver; the cron has nobody to name).
+          echo "delivered by event=$EVENT driver=${{DRIVER:-none}}"
+          args=(--course-org "$COURSE" --all-cohorts --skip-autograde)
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
           python3 -m dsl_course.scheduler "${{args[@]}}"
-{_CRON_NOTICE}"""
+{_CRON_NOTICE}  autograde:
+    needs: [release]
+    # always(), because grading is gated on the durable snapshot marker, not on this run's
+    # release pass: a red release must not silently skip a cohort's grading. The output test
+    # is the empty-matrix guard - GitHub errors on a matrix with no vectors, and a course org
+    # with no cohorts registered yet is a normal state, not a failure.
+    if: always() && needs.release.outputs.cohorts != '' && needs.release.outputs.cohorts != '[]'
+    strategy:
+      # One cohort's grading failure must not cancel the others' - they share nothing.
+      fail-fast: false
+      matrix:
+        cohort: ${{{{ fromJSON(needs.release.outputs.cohorts) }}}}
+{_AUTOGRADE_CONCURRENCY}{_ungated_preamble(_TIMEOUT_GRADING)}      - name: Autograde every passed deadline
+        env:
+          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
+          COURSE: ${{{{ github.repository_owner }}}}
+          COHORT: ${{{{ matrix.cohort }}}}
+          DRY_RUN: ${{{{ inputs.dry_run }}}}
+        run: |
+          gh auth setup-git
+          args=(--course-org "$COURSE" --cohort-org "$COHORT" --autograde-only)
+          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
+          python3 -m dsl_course.scheduler "${{args[@]}}"
+{_AUTOGRADE_NOTICE}"""
 
 
 def render_status(cohort_orgs: list[str]) -> str:

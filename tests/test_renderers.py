@@ -6,8 +6,10 @@ useful guard is: render -> yaml.safe_load -> assert the contract. No network.
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -90,11 +92,17 @@ SEED_REFRESH_GROUPED = {"refresh"}
 
 # Job time budgets, per workflow, where they differ from the ordinary 30 minutes. A
 # timeout that fires on a HEALTHY run is an outage, not a safety net: grading budgets 300s
-# per submission subprocess and walks a cohort serially (and the hourly scheduler does that
-# for every cohort), and Bootstrap cohort configures a whole org before converging it.
+# per submission subprocess and walks a cohort serially, and Bootstrap cohort configures a
+# whole org before converging it.
 DEFAULT_TIMEOUT = 30
 CHECK_TEAM_TIMEOUT = 5
-JOB_TIMEOUTS = {"grade_assignment": 120, "scheduler": 120, "bootstrap_cohort": 60}
+JOB_TIMEOUTS = {"grade_assignment": 120, "bootstrap_cohort": 60}
+# The scheduler is the one workflow whose jobs carry DIFFERENT budgets: it releases and
+# grades in two jobs precisely so the two-hour one is never in the release's way, and giving
+# the release job that budget back would hide a hung release for two hours. 60 rather than
+# the ordinary 30 for releasing, because a handout provisions one repo per student across
+# every cohort in series.
+PER_JOB_TIMEOUTS = {"scheduler": {"release": 60, "autograde": 120}}
 
 
 def _trigger(rendered: str) -> dict:
@@ -923,9 +931,13 @@ def test_every_workflow_drops_the_ambient_token_and_bounds_its_jobs(name):
     doc = yaml.safe_load(ALL_RENDERED[name])
     assert doc["permissions"] == {}
     work = JOB_TIMEOUTS.get(name, DEFAULT_TIMEOUT)
+    per_job = PER_JOB_TIMEOUTS.get(name, {})
     for job_name, job in doc["jobs"].items():
         want = CHECK_TEAM_TIMEOUT if job_name == "check-team" else work
-        assert job.get("timeout-minutes") == want, f"{name}.{job_name}"
+        assert job.get("timeout-minutes") == per_job.get(job_name, want), (
+            f"{name}.{job_name}"
+        )
+    assert set(per_job) <= set(doc["jobs"]), f"{name}: stale PER_JOB_TIMEOUTS entry"
 
 
 @pytest.mark.parametrize("name", sorted(ALL_RENDERED))
@@ -985,31 +997,23 @@ def test_the_daily_crons_each_own_their_own_minute():
     assert len(set(when)) == len(when), slots
 
 
-@pytest.mark.parametrize("name", sorted(CRONS))
-def test_every_cron_files_and_closes_its_own_failure_issue(name):
-    doc = yaml.safe_load(ALL_RENDERED[name])
-    reporting = [
-        (n, j)
-        for n, j in doc["jobs"].items()
-        if any("failure()" in s.get("if", "") for s in j.get("steps", []))
-    ]
-    assert len(reporting) == 1, f"{name}: exactly the unattended job reports"
-    ((job_name, job),) = reporting
-    # ...and it is the UNGATED job. check-team only runs on workflow_dispatch, so a job
-    # that needs it is SKIPPED on the cron - parking the notice on a trailing gated job
-    # would report nothing at all, silently.
-    assert "check-team" not in str(job.get("needs", "")), (
-        f"{name}: the notice rides {job_name}, which is skipped on the cron"
-    )
-    opener = next(s for s in job["steps"] if "failure()" in s.get("if", ""))
+def _issue_title(step: dict) -> str:
+    """The failure-issue title a reporting step builds, as the shell literal it assigns."""
+    return re.search(r'^ *title=(".*")$', step["run"], re.MULTILINE).group(1)
+
+
+def _assert_reports_a_failure(opener: dict) -> None:
     # An issue is the only channel that reaches a human: the scheduled-failure email goes
     # to the bot. One open issue tracks the current state - opened/commented on failure,
     # closed by the next green run.
     assert "gh issue create" in opener["run"]
     # The title is the workflow's own ambient name, so each keeps its own issue (a shared
     # title would let one recovery close another's open failure) with no mirrored string.
+    # A workflow whose unattended jobs run CONCURRENTLY scopes it further - the scheduler's
+    # grading job names the cohort it grades - because there the sibling that closes the
+    # issue is the one that just went green.
     assert opener["env"]["WORKFLOW"] == "${{ github.workflow }}"
-    assert 'title="$WORKFLOW is failing"' in opener["run"]
+    assert re.fullmatch(r'"\$WORKFLOW( \([^"]+\))? is failing"', _issue_title(opener))
     # An issue emails only the repo's watchers, so the body mentions the org's admins -
     # derived from the owner half of $REPO, and course-admin rather than instructors
     # because broken infrastructure is not the teaching staff's problem.
@@ -1020,9 +1024,9 @@ def test_every_cron_files_and_closes_its_own_failure_issue(name):
     # the mention: whoever it reached the first time is already subscribed to the thread.
     assert opener["run"].count('--body "$body"') == 1
     assert '--body "$note"' in opener["run"]
-    # And a repeat waits for the thread to have been quiet for six hours. The hourly
-    # scheduler fails every hour while a fault stands, so an unthrottled comment buried
-    # the issue and mentioned course-admin 24 times a day about the one fault.
+    # And a repeat waits for the thread to have been quiet for six hours. The scheduler
+    # fails on every tick while a fault stands, so an unthrottled comment buried the
+    # issue and mentioned course-admin dozens of times a day about the one fault.
     assert "updatedAt" in opener["run"]
     assert "21600" in opener["run"]
     # A job killed by its own `timeout-minutes` is CANCELLED, not failed - and a cron that
@@ -1032,9 +1036,129 @@ def test_every_cron_files_and_closes_its_own_failure_issue(name):
     assert "github.event_name != 'workflow_dispatch'" in opener["if"]
     # A transient search failure must not abort the step BEFORE it files anything (the
     # step runs under `bash -e`, so an unguarded capture would).
-    assert "') || true" in opener["run"]
+    assert ") || true" in opener["run"]
     # `permissions: {}` leaves the ambient token unable to file anything.
     assert opener["env"]["GH_TOKEN"] == "${{ secrets.DSL_BOT_TOKEN }}"
+
+
+# Two OPEN issues whose titles the search cannot tell apart: every word of the release
+# job's title is in the grading job's.
+_OPEN_ISSUES = [
+    {
+        "number": 11,
+        "title": "Scheduled release is failing",
+        "updatedAt": "2020-01-01T00:00:00Z",
+    },
+    {
+        "number": 22,
+        "title": "Scheduled release (autograde Cohort-f2026) is failing",
+        "updatedAt": "2020-01-01T00:00:00Z",
+    },
+]
+
+
+def _run_issue_step(
+    step: dict, work: Path, issues: list[dict], **env: str
+) -> list[str]:
+    """Execute a reporting step's script for real, against a fixed set of OPEN issues.
+
+    `gh` is faked, and the fake applies the `--jq` filter itself because that is what gh
+    does - which is the whole point: the matching semantics live in that filter, and a
+    test that only compares title strings cannot see them. Returns the issue commands the
+    script made, in order."""
+    if not shutil.which("jq"):  # pragma: no cover - present on every CI runner
+        pytest.skip("jq is what applies gh's --jq filter")
+    work.mkdir(parents=True, exist_ok=True)
+    (work / "issues.json").write_text(json.dumps(issues))
+    fake = work / "gh"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'case "$1 $2" in\n'
+        '  "issue close"|"issue comment"|"issue create") echo "$2 $3" >>"$LOG"; exit 0 ;;\n'
+        "esac\n"
+        "while [ $# -gt 0 ]; do\n"
+        '  [ "$1" = "--jq" ] && filter="$2"\n'
+        "  shift\n"
+        "done\n"
+        'jq -r "$filter" "$ISSUES"\n'
+    )
+    fake.chmod(0o755)
+    log = work / "gh.log"
+    log.write_text("")
+    subprocess.run(
+        # `bash -e`, which is how GitHub runs a `run:` block.
+        ["bash", "-e", "-c", step["run"]],
+        env={
+            "PATH": f"{work}:{os.environ['PATH']}",
+            "LOG": str(log),
+            "ISSUES": str(work / "issues.json"),
+            "WORKFLOW": "Scheduled release",
+            "REPO": "Course-Org/.github",
+            "RUN_URL": "https://example.invalid/run/1",
+            **env,
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [line for line in log.read_text().splitlines() if line]
+
+
+def test_a_recovery_closes_only_the_issue_its_own_job_filed(tmp_path):
+    # `--search` is a WORD match, so the release job's title is a subset of the grading
+    # job's. Without an exact client-side match every green release tick closed the open
+    # grading issues, the still-failing leg refiled with a fresh cc, and the 6h throttle
+    # never engaged - ~96 mentions a day per faulty cohort.
+    jobs = yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]
+    release_closer = next(
+        s for s in jobs["release"]["steps"] if s.get("if") == "success()"
+    )
+    assert _run_issue_step(release_closer, tmp_path / "r", _OPEN_ISSUES) == ["close 11"]
+    grading_closer = next(
+        s for s in jobs["autograde"]["steps"] if s.get("if") == "success()"
+    )
+    assert _run_issue_step(
+        grading_closer, tmp_path / "a", _OPEN_ISSUES, COHORT="Cohort-f2026"
+    ) == ["close 22"]
+
+
+def test_a_failure_files_its_own_issue_rather_than_commenting_on_a_sibling(tmp_path):
+    # The same match on the dedupe lookup. Reading a sibling's issue as "already open"
+    # would leave the release failure reported nowhere - it would comment on a grading
+    # thread nobody watching releases is subscribed to.
+    opener = next(
+        s
+        for s in yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]["release"]["steps"]
+        if "failure()" in s.get("if", "")
+    )
+    grading_only = [i for i in _OPEN_ISSUES if "autograde" in i["title"]]
+    assert _run_issue_step(opener, tmp_path / "x", grading_only) == ["create --repo"]
+    # ...and it comments on the one that IS its own (an old timestamp, so not throttled).
+    assert _run_issue_step(opener, tmp_path / "y", _OPEN_ISSUES) == ["comment 11"]
+
+
+@pytest.mark.parametrize("name", sorted(CRONS))
+def test_every_cron_files_and_closes_its_own_failure_issue(name):
+    doc = yaml.safe_load(ALL_RENDERED[name])
+    reporting = [
+        (n, j)
+        for n, j in doc["jobs"].items()
+        if any("failure()" in s.get("if", "") for s in j.get("steps", []))
+    ]
+    assert reporting, f"{name}: nothing reports its unattended failures"
+    for job_name, job in reporting:
+        openers = [s for s in job["steps"] if "failure()" in s.get("if", "")]
+        # ONE per job. The scheduler releases and grades in two CONCURRENT jobs, so the
+        # contract is per job now - but two notices in one job still double-file.
+        assert len(openers) == 1, f"{name}.{job_name}"
+        (opener,) = openers
+        # ...and the job is UNGATED. check-team only runs on workflow_dispatch, so a job
+        # that needs it is SKIPPED on the cron - parking the notice on a trailing gated job
+        # would report nothing at all, silently.
+        assert "check-team" not in str(job.get("needs", "")), (
+            f"{name}: the notice rides {job_name}, which is skipped on the cron"
+        )
+        _assert_reports_a_failure(opener)
 
     # "Fix it and re-run" is how a human confirms the recovery, so EVERY job a human can
     # dispatch closes the ticket too - not just the schedule-gated one carrying the notice.
@@ -1049,8 +1173,18 @@ def test_every_cron_files_and_closes_its_own_failure_issue(name):
             s for s in doc["jobs"][closer_job]["steps"] if s.get("if") == "success()"
         )
         assert "gh issue close" in closer["run"]
-        # Same title on both copies, or a manual re-run closes nothing.
-        assert 'title="$WORKFLOW is failing"' in closer["run"]
+        # A job closes exactly the title it FILES, or a recovery closes nothing - and,
+        # worse, on a workflow whose jobs run at once it would close a sibling's
+        # still-standing failure instead of its own.
+        own = dict(reporting).get(closer_job)
+        want = (
+            _issue_title(
+                next(s for s in own["steps"] if "failure()" in s.get("if", ""))
+            )
+            if own
+            else '"$WORKFLOW is failing"'
+        )
+        assert _issue_title(closer) == want, f"{name}.{closer_job}"
 
 
 def test_only_the_nightly_refresh_joins_the_seed_refresh_group():
@@ -1110,40 +1244,115 @@ def test_every_writer_serialises_against_itself_per_repo(name):
 
 
 def test_no_button_joins_the_scheduled_release_group():
-    # The cron's group guards FIRE-ONCE actions across every cohort and can outlive its
-    # slot. A button sharing it would be the third arrival that Actions silently drops -
-    # and a deliberate re-grade that never ran is worse than one that races the cron,
-    # which the autograde marker already makes safe.
+    # The scheduler's group guards FIRE-ONCE actions and can outlive its slot. A button
+    # sharing it would be the third arrival that Actions silently drops - and a deliberate
+    # re-grade that never ran is worse than one that races the cron, which the autograde
+    # marker already makes safe. Job-level groups are swept too: the scheduler moved its
+    # own there, so a workflow-level-only sweep would have stopped seeing them.
     grouped = {
         n
         for n, r in ALL_RENDERED.items()
-        if (yaml.safe_load(r).get("concurrency") or {}).get("group")
-        == "scheduled-release"
+        for group in [
+            (yaml.safe_load(r).get("concurrency") or {}).get("group", ""),
+            *(
+                (j.get("concurrency") or {}).get("group", "")
+                for j in yaml.safe_load(r)["jobs"].values()
+            ),
+        ]
+        if "scheduled-release" in str(group) or "scheduled-autograde" in str(group)
     }
     assert grouped == {"scheduler"}
 
 
-def test_the_hourly_scheduler_serialises_against_itself():
-    # Hourly, and a pass over every cohort can outlive its slot - so it can overlap itself,
-    # double-releasing whatever the running pass has not yet marked as fired.
+def test_the_scheduler_serialises_each_job_and_nothing_more():
+    # No workflow-level group: that was ONE queue for every action in every cohort, and a
+    # two-hour grading pass in one cohort then held up a release due in another. Each job
+    # declares its own instead.
     doc = yaml.safe_load(ALL_RENDERED["scheduler"])
-    assert doc["concurrency"] == {
-        "group": "scheduled-release",
+    assert "concurrency" not in doc
+    jobs = doc["jobs"]
+    # Releases are fire-once, so a tick arriving mid-pass still queues behind one - but a
+    # manual DRY-RUN writes nothing, and joining that queue is how an operator's preview
+    # gets silently dropped (a group holds one pending run; a third arrival cancels it).
+    assert jobs["release"]["concurrency"] == {
+        "group": "${{ inputs.dry_run == true && github.run_id || 'scheduled-release' }}",
         "cancel-in-progress": False,
     }
+    # Grading queues PER COHORT: the fire-once marker is a cohort-side file, and a pass
+    # over another cohort shares nothing with it. A dry-run leg is per run and per cohort,
+    # for the same reason the release job's is.
+    assert jobs["autograde"]["concurrency"] == {
+        "group": (
+            "${{ inputs.dry_run == true && format('{0}-{1}', github.run_id, "
+            "matrix.cohort) || format('scheduled-autograde-{0}', matrix.cohort) }}"
+        ),
+        "cancel-in-progress": False,
+    }
+    for job in jobs.values():
+        assert job["concurrency"]["cancel-in-progress"] is False
+
+
+def test_the_scheduler_grades_every_cohort_without_waiting_on_the_releases():
+    jobs = yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]
+    autograde = jobs["autograde"]
+    # It needs the release job only for the cohort LIST, so it must run whatever became of
+    # the releases: grading is gated on the durable snapshot marker, not on this run.
+    assert autograde["needs"] == ["release"]
+    assert autograde["if"].startswith("always()")
+    # ...but not on an empty list: GitHub errors on a matrix with no vectors, and a course
+    # org with no cohorts registered yet is a normal state, not a failure.
+    assert "needs.release.outputs.cohorts != '[]'" in autograde["if"]
+    assert "needs.release.outputs.cohorts != ''" in autograde["if"]
+    assert jobs["release"]["outputs"] == {
+        "cohorts": "${{ steps.cohorts.outputs.cohorts }}"
+    }
+    steps = jobs["release"]["steps"]
+    lister = next(s for s in steps if s.get("id") == "cohorts")
+    assert "--list-cohorts" in lister["run"]
+    # And it is listed BEFORE the release pass runs: a failed step skips the ones after
+    # it, so listing afterwards would let one cohort's release fault skip everyone's
+    # grading - on a run that has already reported the release failure and moved on.
+    releaser = next(s for s in steps if "--all-cohorts" in str(s.get("run", "")))
+    assert steps.index(lister) < steps.index(releaser)
+    assert autograde["strategy"] == {
+        "fail-fast": False,  # one cohort's grading failure cancels nobody else's
+        "matrix": {"cohort": "${{ fromJSON(needs.release.outputs.cohorts) }}"},
+    }
+    # Each job runs its own half, and only its own half.
+    assert "--skip-autograde" in str(jobs["release"]["steps"])
+    assert "--autograde-only" in str(autograde["steps"])
+
+
+def test_scheduler_accepts_an_external_dispatch():
+    # GitHub delivers a fraction of its `schedule` fires (measured 2-7%, gaps to 13h), so
+    # the same workflow is also driven from outside by repository_dispatch - each driver
+    # covering the other's outage. The cron is untouched.
+    trigger = _trigger(ALL_RENDERED["scheduler"])
+    assert trigger["repository_dispatch"]["types"] == ["scheduled-release"]
+    assert trigger["schedule"] == [{"cron": "7,22,37,52 * * * *"}]
+    assert set(trigger) == {"schedule", "repository_dispatch", "workflow_dispatch"}
+    # Which driver delivered the tick is in the run log, and nowhere else - a dispatch
+    # names its sender, the cron has nobody to name. `inputs.dry_run` is empty on both
+    # unattended paths, so the existing gate leaves them as real runs.
+    step = next(
+        s
+        for s in yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]["release"]["steps"]
+        if "DRIVER" in (s.get("env") or {})
+    )
+    assert step["env"]["DRIVER"] == "${{ github.event.client_payload.driver }}"
+    assert step["env"]["EVENT"] == "${{ github.event_name }}"
+    assert "$EVENT" in step["run"] and "DRIVER" in step["run"]
 
 
 def test_the_scheduler_installs_the_autograder_it_runs():
-    # The hourly cron autogrades at every passed deadline through the SAME preamble as
+    # The scheduler autogrades at every passed deadline through the SAME preamble as
     # every other workflow, which installs requirements.txt and nothing else. When pytest
     # lived only in the manual Grade assignment step, `python -m pytest` was "No module
     # named pytest" on the cron: silent zeros for the whole cohort, no sentinel, and the
     # same red run every hour for the rest of the term.
-    steps = yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]["scheduled-release"][
-        "steps"
-    ]
+    steps = yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]["autograde"]["steps"]
     installs = [s["run"] for s in steps if "pip install -r " in str(s.get("run", ""))]
-    assert installs, "the scheduler job installs nothing - it cannot grade"
+    assert installs, "the grading job installs nothing - it cannot grade"
     for run in installs:
         req = ROOT / run.split("pip install -r ")[1].split()[0]
         pinned = req.read_text()
