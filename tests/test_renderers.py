@@ -19,6 +19,7 @@ from dsl_course import (
     mailer,
     profile_readme,
     seed,
+    welcome,
     workflows_place,
     workflows_render,
 )
@@ -583,6 +584,36 @@ def test_classroom_config_site_dispatcher_fires_on_schedule_or_people_change():
     trigger = doc.get("on", doc.get(True))
     assert sorted(trigger["push"]["paths"]) == ["people.yml", "schedule.yml"]
     assert "sync-site" in tmpl  # dispatches the sync-site event
+
+
+def test_classroom_config_scheduler_dispatcher_fires_on_a_schedule_change():
+    # GitHub delivers only a fraction of `schedule:` cron fires, so the promise that a
+    # schedule.yml edit takes effect within minutes holds only if the edit itself starts a
+    # run. schedule.yml alone: no other file in classroom-config moves a release moment.
+    tmpl = (
+        ROOT / "templates" / "classroom-config" / "dispatch-scheduled-release.yml"
+    ).read_text()
+    doc = yaml.safe_load(tmpl)
+    trigger = doc.get("on", doc.get(True))
+    assert set(trigger) == {"push"}
+    assert trigger["push"]["paths"] == ["schedule.yml"]
+    assert trigger["push"]["branches"] == ["main"]
+    # DSL_BOT_TOKEN does every call here, so the ambient token gets no scopes at all.
+    assert doc["permissions"] == {}
+    # The event type the course org's Scheduled release filters `types:` on.
+    assert "event_type=scheduled-release" in tmpl
+    # The course org is read from THIS cohort's own pointer, never baked in at bootstrap.
+    assert "contents/dsl-course.yml" in tmpl
+    assert tmpl.splitlines()[0].startswith("# SYSTEM-OWNED")
+
+
+def test_the_scheduler_dispatcher_is_seeded_into_every_cohort():
+    # A template nobody registers is a file no cohort ever gets: seed.refresh writes
+    # exactly welcome.CLASSROOM_SYSTEM_FILES into each cohort's classroom-config.
+    assert (
+        ".github/workflows/dispatch-scheduled-release.yml",
+        "classroom-config/dispatch-scheduled-release.yml",
+    ) in welcome.CLASSROOM_SYSTEM_FILES
 
 
 def test_send_codes_only_ever_runs_off_a_roster_push():
