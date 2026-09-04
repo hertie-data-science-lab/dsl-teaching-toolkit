@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import time
 from collections import deque
@@ -138,13 +139,137 @@ def _pace_writes(args: tuple[str, ...]) -> None:
         _sleep(60 - (at - _write_times[0]))
 
 
+# --------------------------------------------------------- the opt-in org allowlist
+
+# An OPT-IN blast-radius fence for the live end-to-end run (tests/e2e), which drives real
+# workflows against real orgs with a maintainer token that can delete repositories.
+# `DSL_ORG_ALLOWLIST=org-a,org-b` means: this process may WRITE to those orgs and nowhere
+# else. UNSET - which is every workflow run, every CLI run and every unit test - is no
+# behaviour change at all; nothing in the toolkit sets it.
+#
+# A refusal RAISES rather than coming back as gh's usual failure pair. A pair is exactly
+# what "this repo is not there" looks like to `utils.repo_exists`, which is optimistic by
+# design, so a refusal handed back that way would be read as absence and the caller would
+# go on to CREATE the thing in the org we just refused to write to. An exception is the
+# one answer nothing can swallow.
+_ORG_ALLOWLIST_ENV = "DSL_ORG_ALLOWLIST"
+
+# The three shapes an owner appears in inside a gh argv: an api path (`repos/<owner>/...`,
+# `orgs/<owner>/...`), a bare `<owner>/<repo>` (which is also what `-R`/`--repo` takes),
+# and the `owner=` field of a create-from-template call, whose PATH names the template's
+# org while the field names the org the new repo lands in.
+#
+# Shape-matched rather than positional, because a `--field content=<base64>` value carries
+# slashes too: no owner has an `=`, a space or a colon in it, and flags are skipped.
+_API_OWNER = re.compile(r"^(?:repos|orgs)/([A-Za-z0-9._-]+)/")
+_NAME_WITH_OWNER = re.compile(r"^([A-Za-z0-9._-]+)/[A-Za-z0-9._-]+$")
+_OWNER_FIELD = re.compile(r"^owner=([A-Za-z0-9._-]+)$")
+
+# `https://github.com/<owner>/<repo>`, `git@github.com:<owner>/<repo>`, and the
+# `https://x-access-token:***@github.com/<owner>/<repo>` form gh's credential helper writes.
+_REMOTE_OWNER = re.compile(r"github\.com[:/]([A-Za-z0-9._-]+)/")
+
+
+def org_allowlist() -> frozenset[str] | None:
+    """The orgs this process may write to, or None when the fence is off (the default)."""
+    raw = os.environ.get(_ORG_ALLOWLIST_ENV, "")
+    names = {n.strip() for n in raw.split(",") if n.strip()}
+    return frozenset(names) if names else None
+
+
+def _argv_owners(args: tuple[str, ...]) -> set[str]:
+    """Every org this argv names as a target."""
+    owners = set()
+    for arg in args:
+        if arg.startswith("-"):
+            continue
+        for pattern in (_API_OWNER, _NAME_WITH_OWNER, _OWNER_FIELD):
+            if match := pattern.match(arg):
+                owners.add(match.group(1))
+                break
+    return owners
+
+
+def _check_gh_allowlist(args: tuple[str, ...]) -> None:
+    """Refuse a write to an org outside the allowlist. Reads always pass.
+
+    A write naming NO org is refused too. Every mutating call in the package names one in
+    its path, so an argv we cannot attribute is a shape this guard has never seen - and a
+    fence that waves through what it does not understand is not a fence."""
+    allowed = org_allowlist()
+    if allowed is None or not _is_mutating(args):
+        return
+    owners = _argv_owners(args)
+    outside = sorted(owners - allowed)
+    if not owners or outside:
+        named = ", ".join(outside) if outside else "no org at all"
+        raise RuntimeError(
+            f"{_ORG_ALLOWLIST_ENV} allows writes to {', '.join(sorted(allowed))} - "
+            f"refusing `gh {' '.join(args[:3])}`, which writes to {named}."
+        )
+
+
+def _git_subcommand(args: tuple[str, ...]) -> str:
+    """`push` out of `-C <wd> -c user.name=x push -q origin HEAD` - the first token that is
+    neither a flag nor the value of git's two pre-command flags."""
+    skip = False
+    for arg in args:
+        if skip:
+            skip = False
+        elif arg in ("-C", "-c"):
+            skip = True
+        elif not arg.startswith("-"):
+            return arg
+    return ""
+
+
+def _push_owner(args: tuple[str, ...], cwd: str | None) -> str:
+    """The org a `git push` would land in, or "" if it cannot be told.
+
+    The remote is nearly always the name `origin`, so the URL has to be resolved out of the
+    working copy - through `git` itself, which recurses no further because `remote get-url`
+    is not a push."""
+    after = args[args.index("push") + 1 :]
+    named = [a for a in after if not a.startswith("-")]
+    remote = named[0] if named else "origin"
+    if "/" not in remote and ":" not in remote:
+        where = cwd
+        if where is None and "-C" in args:
+            where = args[args.index("-C") + 1]
+        code, remote = git("remote", "get-url", remote, cwd=where)
+        if code != 0:
+            return ""
+    match = _REMOTE_OWNER.search(remote)
+    return match.group(1) if match else ""
+
+
+def _check_push_allowlist(args: tuple[str, ...], cwd: str | None) -> None:
+    """Refuse a `git push` to an org outside the allowlist - the other half of the fence.
+
+    Most of what this toolkit writes goes through the Contents API, but assignment
+    handout, the site build and solution pushes all end in a `git push`, so a gh-only
+    guard would fence off the small writes and leave the large ones open."""
+    allowed = org_allowlist()
+    if allowed is None or _git_subcommand(args) != "push":
+        return
+    owner = _push_owner(args, cwd)
+    if owner not in allowed:
+        raise RuntimeError(
+            f"{_ORG_ALLOWLIST_ENV} allows writes to {', '.join(sorted(allowed))} - "
+            f"refusing `git push` to {owner or 'an unreadable remote'}."
+        )
+
+
 def gh(*args: str, stdin: str | None = None, retries: int = 3) -> tuple[int, str]:
     """Run a gh CLI command. Returns (returncode, stdout+stderr).
 
     Retries on GitHub secondary rate limits, on a subprocess timeout, and - for a read
     only - on a transient GitHub fault, with exponential backoff; and paces writes to stay
     under the secondary limit in the first place (see _pace_writes).
+
+    Raises when `DSL_ORG_ALLOWLIST` is set and this is a write to an org outside it.
     """
+    _check_gh_allowlist(args)
     _pace_writes(args)
     code, out, err = _run_gh(args, stdin, retries)
     return code, (out + err).strip()
@@ -189,7 +314,10 @@ GIT_TIMEOUT_SECONDS = 600
 
 def git(*args: str, cwd: str | None = None) -> tuple[int, str]:
     """Run a git command. A timeout comes back as a normal failure pair, so every caller's
-    existing `!= 0` check reports it rather than seeing an exception."""
+    existing `!= 0` check reports it rather than seeing an exception.
+
+    A `push` raises when `DSL_ORG_ALLOWLIST` is set and the remote is outside it."""
+    _check_push_allowlist(args, cwd)
     try:
         result = subprocess.run(
             ["git"] + list(args),

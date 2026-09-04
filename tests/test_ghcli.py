@@ -281,3 +281,137 @@ def test_clone_carries_a_branch_when_one_is_asked_for(monkeypatch):
     assert seen[-1] == ("repo", "clone", "O/R", "/tmp/x", "--", "-q", "-b", "solution")
     ghcli.clone("O", "R", "/tmp/x")
     assert seen[-1] == ("repo", "clone", "O/R", "/tmp/x", "--", "-q")
+
+
+# ------------------------------------------------- the opt-in org allowlist (tests/e2e)
+
+
+class _Ran(list):
+    """The argvs that reached the process boundary, plus canned stdout keyed by a
+    substring of the argv (a list cannot carry the replies dict on its own)."""
+
+    def __init__(self):
+        super().__init__()
+        self.replies: dict[str, str] = {}
+
+
+@pytest.fixture
+def ran(monkeypatch):
+    """Every subprocess argv the wrappers actually reached, with a canned reply.
+
+    Stubbing `subprocess.run` is what the repo's no-live-gh rule asks for everywhere else;
+    here it is also the only honest fake, because ghcli IS the transport - the thing under
+    test is which argvs get as far as the process boundary."""
+    import subprocess
+
+    seen = _Ran()
+
+    def fake_run(cmd, **kwargs):
+        seen.append(list(cmd))
+
+        class R:
+            returncode = 0
+            stdout = next(
+                (v for k, v in seen.replies.items() if k in " ".join(cmd)), ""
+            )
+            stderr = ""
+
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    return seen
+
+
+def test_an_unset_allowlist_changes_nothing(monkeypatch, ran):
+    monkeypatch.delenv("DSL_ORG_ALLOWLIST", raising=False)
+    assert ghcli.gh("api", "--method", "DELETE", "repos/anyone/anything")[0] == 0
+    assert ran[-1][:2] == ["gh", "api"]
+
+
+def test_a_write_to_an_allowed_org_goes_through(monkeypatch, ran):
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-course , demo-f2026")
+    assert (
+        ghcli.gh("api", "--method", "PUT", "repos/demo-f2026/x/contents/a.md")[0] == 0
+    )
+    assert ran, "the call never reached the process boundary"
+
+
+def test_a_write_outside_the_allowlist_raises(monkeypatch, ran):
+    # NOT a failure pair: `utils.repo_exists` reads any failure as absence, so a refusal
+    # returned that way would be heard as "not there yet" and the caller would create it.
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    with pytest.raises(RuntimeError, match="demo-f2026"):
+        ghcli.gh("api", "--method", "DELETE", "repos/hertie-ml-26/live-repo")
+    assert ran == [], "the refused call must not reach the process boundary"
+
+
+def test_a_write_that_names_no_org_is_refused_too(monkeypatch, ran):
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    with pytest.raises(RuntimeError, match="no org at all"):
+        ghcli.gh("api", "--method", "POST", "graphql")
+    assert ran == []
+
+
+def test_the_destination_of_a_template_generate_is_checked(monkeypatch, ran):
+    # The PATH names the template's org; the org the new repo lands in is a `--field`.
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-course")
+    with pytest.raises(RuntimeError, match="hertie-ml-26"):
+        ghcli.gh(
+            "api",
+            "--method",
+            "POST",
+            "repos/demo-course/a-template/generate",
+            "--field",
+            "owner=hertie-ml-26",
+            "--field",
+            "name=a-1",
+        )
+
+
+def test_reads_are_never_fenced(monkeypatch, ran):
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    assert ghcli.gh("api", "repos/hertie-ml-26/live-repo")[0] == 0
+    assert ran, "a read outside the allowlist must still run"
+
+
+def test_a_push_to_an_allowed_remote_goes_through(monkeypatch, ran):
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    ran.replies["remote get-url"] = "https://github.com/demo-f2026/a-1-jane\n"
+    assert ghcli.git("-C", "/tmp/wd", "push", "-q", "origin", "HEAD")[0] == 0
+    assert ran[-1][-2:] == ["origin", "HEAD"]
+
+
+def test_a_push_to_a_remote_outside_the_allowlist_is_refused(monkeypatch, ran):
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    ran.replies["remote get-url"] = "git@github.com:hertie-ml-26/materials.git\n"
+    with pytest.raises(RuntimeError, match="hertie-ml-26"):
+        ghcli.git("-C", "/tmp/wd", "push", "-q", "origin", "HEAD")
+    assert [c for c in ran if "push" in c] == []
+
+
+def test_a_push_whose_remote_cannot_be_read_is_refused(monkeypatch):
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    monkeypatch.setattr(
+        ghcli, "git", ghcli.git
+    )  # the real one; only the URL read fails
+    import subprocess
+
+    def fake_run(cmd, **kwargs):
+        class R:
+            returncode = 1
+            stdout = ""
+            stderr = "fatal: no such remote"
+
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="unreadable remote"):
+        ghcli.git("-C", "/tmp/wd", "push", "-q", "origin", "HEAD")
+
+
+def test_other_git_commands_are_untouched(monkeypatch, ran):
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    assert (
+        ghcli.git("-C", "/tmp/wd", "clone", "https://github.com/hertie-ml-26/m")[0] == 0
+    )
+    assert ran, "the fence is about writes, not about reading somebody else's repo"
