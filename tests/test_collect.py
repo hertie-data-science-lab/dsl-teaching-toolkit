@@ -144,7 +144,7 @@ def test_the_public_log_never_names_a_submission_repo(monkeypatch, capsys):
     # The clone-failure paths log the tag, not the repo.
     monkeypatch.setattr(ghcli, "gh", lambda *a, **k: (1, "clone failed"))
     monkeypatch.setattr(collect, "repo_missing", lambda *a: True)
-    collect._grade_target("COHORT", "assignment-1-ada-l", {}, None, "2026-09-08")
+    collect._grade_target("COHORT", "assignment-1-ada-l", None, "2026-09-08")
     captured = capsys.readouterr()
     out = captured.out + captured.err
     assert "ada-l" not in out and ref in out
@@ -840,7 +840,7 @@ def _stub_collect(monkeypatch, snapshots):
     monkeypatch.setattr(collect, "get_file_with_sha", lambda *a, **k: None)
     seen: dict[str, str | None] = {}
 
-    def fake_grade(cohort_org, repo, spec, tests_src, deadline, snapshot=None):
+    def fake_grade(cohort_org, repo, tests_src, deadline, snapshot=None):
         seen[repo] = snapshot
         return {"score": 1, "max": 2, "tests": []}
 
@@ -1124,7 +1124,7 @@ def test_template_is_group_reads_the_solution_branch_grading_yml(monkeypatch):
         seen.update(org=org, repo=repo, path=path, ref=ref)
         return "type: group\nformat: py\n"
 
-    monkeypatch.setattr(collect, "get_file_content", fake_get)
+    monkeypatch.setattr(collect.grades, "get_file_content", fake_get)
     assert collect.template_is_group("Course-Org", "assignment-4-project-f2026")
     assert seen == {
         "org": "Course-Org",
@@ -1136,7 +1136,7 @@ def test_template_is_group_reads_the_solution_branch_grading_yml(monkeypatch):
 
 def test_template_is_group_defaults_to_individual_without_grading_yml(monkeypatch):
     # No solution branch / no grading.yml -> the contents fetch misses -> individual.
-    monkeypatch.setattr(collect, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(collect.grades, "get_file_content", lambda *a, **k: None)
     assert not collect.template_is_group("Course-Org", "assignment-1-f2026")
 
 
@@ -1599,9 +1599,9 @@ def test_a_zero_is_recorded_only_when_github_says_the_repo_is_gone(monkeypatch):
     # probe used to write a permanent, write-once zero for a student who had submitted.
     monkeypatch.setattr(ghcli, "gh", lambda *a, **k: (1, "clone failed"))
     monkeypatch.setattr(collect, "repo_missing", lambda *a: False)  # a 5xx: cannot tell
-    assert collect._grade_target("K", "a1-ada", {}, None, "2026-09-08") is None
+    assert collect._grade_target("K", "a1-ada", None, "2026-09-08") is None
     monkeypatch.setattr(collect, "repo_missing", lambda *a: True)  # GitHub says 404
-    result = collect._grade_target("K", "a1-ada", {}, None, "2026-09-08")
+    result = collect._grade_target("K", "a1-ada", None, "2026-09-08")
     assert result["score"] == 0 and "does not exist" in result["note"]
 
 

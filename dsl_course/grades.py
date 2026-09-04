@@ -1,30 +1,21 @@
-"""dsl-course grades -- private per-student gradebook repos (the single home for grades).
+"""dsl-course grades -- the grading sheet, and sending what a grader wrote in it.
 
-Every grade, individual or group, is delivered into a PRIVATE per-student repo
-`grades-<handle>` (student = read). Team project repos may be public (showcase /
-open-courseware), so grades NEVER touch them: a group result is split into the shared
-team score (duplicated into each member's gradebook) and that member's private
-adjustment + final grade, all delivered individually.
+A grader fills ONE file per assignment, `classroom-config/grading_sheets/<slug>.yml`, and
+`distribute` fans it out:
 
-Three idempotent stages, each a faculty & instructors workflow:
+    grading_sheets/<slug>.yml   (the grader types here; the toolkit owns only `info:`)
+          |
+          +--> a comment on each submission repo's Feedback issue
+          |      team repos get TEAM-level feedback only - the whole team can read them
+          +--> cohort/grades-<handle>   (private; student = read) grades.yml + README.md
+          +--> classroom-config/cohort-gradebook.csv   (the registrar export, never logged)
+          +--> an email saying there is something new to read (no marks in it)
 
-    sync       cohort/grades-<handle>            (private; student = read) per onboarded student
-                     ^
-    render     classroom-config/grades/<assignment>.csv   (faculty & instructors' table, was Excel)
-                     |  build per-student YAML
-                     v
-               classroom-config/gradebook/<handle>.yml  -- opened as ONE PR (the preview)
-                     |  distribute (after the PR merges)
-                     v
-               cohort/grades-<handle>/grades.yml + an email to the student's hertie email address
-
-`classroom-config` keeps the full grade archive (private source of truth); the PR diff is
-the all-students-at-once preview that the Power Automate flow never gave.
+Nothing is said twice: every comment carries a content hash and every send is recorded in
+`gradebook/distributed.csv`, so a re-run after one correction reaches one student.
 
 Usage:
-    python3 -m dsl_course.grades sync       --cohort-org hertie-dsl-demo-f2026
-    python3 -m dsl_course.grades render     --cohort-org hertie-dsl-demo-f2026
-    python3 -m dsl_course.grades distribute --cohort-org hertie-dsl-demo-f2026
+    python3 -m dsl_course.grades distribute --cohort-org hertie-dsl-demo-f2026 [--dry-run]
 """
 
 from __future__ import annotations
@@ -80,8 +71,10 @@ from .repos import (
     set_repo_topics,
 )
 
-GRADES_DIR = "grades"  # faculty-edited source tables, one CSV per assignment
-GRADEBOOK_DIR = "gradebook"  # rendered per-student YAML staged for the preview PR
+GRADES_DIR = "grades"  # RETIRED: the pre-sheet grade tables, still READ in transition
+GRADEBOOK_DIR = (
+    "gradebook"  # what has been sent (distributed.csv), beside the retired files
+)
 # RETIRED. The old per-student notification marker, named here for one reason only: the
 # migration in `_read_distributed` reads it once and deletes it in the same commit that
 # writes `distributed.csv`, which records every channel rather than just the email.
@@ -112,9 +105,11 @@ GRADE_FIELDS = (
     "team_comments",
 )
 
-# The legend for `grades.yml`. This README is the ONLY place a student is told what the
-# keys in that file mean - there is no other documentation on their side - so every key
-# gradebook_entry can emit is defined here, and the two must be kept in step.
+# What a gradebook says before its student has been marked in anything. The legend names
+# the keys `STUDENT_VIEW_KEYS` allows and no others: this is the first file a student opens,
+# and promising them a team score or their own adjustment - neither of which a gradebook
+# ever shows - contradicts the one thing the page is for. Replaced wholesale by
+# `render_readme` on the first distribute.
 _STARTER_README = (
     "# Your gradebook\n\n"
     "This private repository is accessible only to you. Grades and feedback for each "
@@ -123,11 +118,11 @@ _STARTER_README = (
     "| Field | Meaning |\n"
     "| --- | --- |\n"
     "| `final_grade` | Your mark for that assignment. This is the authoritative one. |\n"
-    "| `individual_comments` | Your marker's feedback on your own work. |\n"
+    "| `score` | Individual assignments only: the marks behind that total. |\n"
+    "| `feedback` | Your marker's feedback on your own work. |\n"
+    "| `submitted`, `days_late`, `penalty` | When your work was recorded, and what any "
+    "late days cost. |\n"
     "| `team` | Group assignments only: the team you submitted with. |\n"
-    "| `team_score` | Group assignments only: the mark the whole team received. |\n"
-    "| `individual_adjustment` | Group assignments only: your own adjustment to the team "
-    "score, up or down. Nobody else on your team sees yours. |\n"
     "| `team_comments` | Group assignments only: feedback shared with the whole team. |\n"
 )
 
@@ -151,9 +146,9 @@ class GradeRow:
 # The pre-rename column names. A CSV still carrying them must never be parsed, because the
 # rename left `github_handle`, `team` and `team_comments` untouched: an old row would parse
 # PARTIALLY, keeping its handle while every renamed cell read blank. Nothing downstream can
-# tell that apart from a legitimately sparse row, so `render` would publish a gradebook with
-# the marks missing and `merge_auto` would write the file back having discarded them - a
-# green run that destroys a marker's work. Refusing to read the file is the only safe answer.
+# tell that apart from a legitimately sparse row, so a distribute would publish a gradebook
+# with the marks missing - a green run that destroys a marker's work. Refusing to read the
+# file is the only safe answer.
 _RETIRED_GRADE_FIELDS = {
     "auto": "autograde_score",
     "manual": "manual_score",
@@ -901,11 +896,12 @@ def late_line(spec) -> str:
 
 
 def penalty_display(spec, days: int) -> str:
-    """`-20%` - what two days at 10% costs, for the receipt. "" when nothing is deducted."""
-    rate = penalty_rate(spec.late_penalty_per_day)
-    if rate is None or days <= 0:
-        return ""
-    return f"-{_plain((rate * days * 100).quantize(Decimal('0.01')))}%"
+    """`-20%` for the receipt - `_penalty_display` under the spec the caller already holds.
+
+    The same function as the gradebook's and the feedback comment's, deliberately: those
+    are the three places one student reads one deduction, and two renderers of it drifted
+    apart above two decimal places the moment one of them rounded."""
+    return _penalty_display(penalty_rate(spec.late_penalty_per_day), days)
 
 
 def receipt(
@@ -1179,11 +1175,15 @@ def _max_points(spec: SheetSpec) -> str:
 
 
 def _penalty_display(rate: Decimal | None, days_late: object) -> str:
-    """What the late days cost, in the words the student is told them in: `-20%`."""
+    """What the late days cost, in the words the student is told them in: `-20%`.
+
+    Rounded to two decimals, because `rate` is a hundredth of whatever the course wrote and
+    the product carries its trailing digits: `3.333%` for three days is a deduction, not
+    `-9.999%`."""
     days = _decimal(days_late)
     if rate is None or days is None or days <= 0:
         return ""
-    return f"-{_plain(rate * days * 100)}%"
+    return f"-{_plain((rate * days * 100).quantize(Decimal('0.01')))}%"
 
 
 def _submitted_display(value: object, external: bool = False) -> str:
@@ -1713,9 +1713,9 @@ def provision_one(
         # (access.converge_faculty_access) owns the floor for every gradebook that already
         # exists - so re-granting on every sync cost two PUTs per student for nothing.
         #
-        # Read, not write: `distribute` rewrites grades.yml from
-        # `classroom-config/grades/<slug>.csv`, so a mark corrected here would be
-        # overwritten on the next run. The CSV is where a mark belongs.
+        # Read, not write: `distribute` rewrites grades.yml from the grading sheet, so a
+        # mark corrected here would be overwritten on the next run. The sheet is where a
+        # mark belongs.
         grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
     if add_collaborator(cohort_org, repo, handle, permission="pull"):
         log_person(f"  [ok]   + @{handle} (read)")

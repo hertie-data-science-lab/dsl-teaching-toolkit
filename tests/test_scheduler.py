@@ -1049,9 +1049,7 @@ def _no_sheet_refresh(monkeypatch) -> list[tuple[str, str]]:
     It sits between the freeze and the autograde and reads the template's grading.yml, so
     every `run()` test would otherwise reach the API for a file it does not care about."""
     refreshed: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        scheduler, "load_grading_spec", lambda org, template: {"type": "individual"}
-    )
+    monkeypatch.setattr(scheduler, "template_is_group", lambda org, template: False)
     monkeypatch.setattr(
         scheduler,
         "sync_sheet",

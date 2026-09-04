@@ -223,8 +223,7 @@ def course_name_for_cohort(cohort_org: str) -> str:
     generic wording. A student must never be emailed a blank or a literal placeholder
     where the course name belongs.
     """
-    pointer = org_meta(cohort_org)
-    return course_name_of(str(pointer.get("course") or ""))
+    return course_name_of(course_org_for_cohort(cohort_org))
 
 
 def course_org_for_cohort(cohort_org: str) -> str:

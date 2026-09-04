@@ -78,11 +78,9 @@ from datetime import datetime, timezone
 from . import cadence, schedule, site, source_digest
 from .assign import provision_all, solution_released
 from .collect import (
-    SheetPhase,
     SnapshotResult,
     collect,
     has_autograde_results,
-    load_grading_spec,
     load_snapshots,
     resolve_is_group,
     snapshot_assignment,
@@ -505,11 +503,16 @@ def _refresh_sheets(
             log(f"    DRY-RUN  refresh {sheet_path(name)}")
             continue
         log_step(f"  grading sheet {name}")
-        gspec = load_grading_spec(course_org, template)
+        # Spelt exactly as the snapshot pass above spells it, including the short-circuit:
+        # a cohort that has declared `type:` never pays for the template read.
         is_group = resolve_is_group(
             force=False,
             schedule_type=entry.type,
-            template_group=gspec["type"] == "group",
+            template_group=(
+                None
+                if entry.type is not None
+                else template_is_group(course_org, template)
+            ),
         )
         if not sync_sheet(
             course_org,
@@ -520,7 +523,6 @@ def _refresh_sheets(
             template,
             is_group=is_group,
             now=now,
-            phase=SheetPhase.OPEN,
         ):
             errors += 1
     return errors

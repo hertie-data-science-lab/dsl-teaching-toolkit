@@ -160,8 +160,8 @@ _GRADING_YML = """\
 type: {kind}      # individual (one repo per student) or group (one repo per team)
 autograde: true       # false -> skip autograding (all-manual)
 tests: tests          # path (on THIS solution branch) holding the hidden tests
-                      # `autograde_score` in grades/<slug>.csv records how many of them
-                      # passed; you own the mark the student actually gets (`final_grade`)
+                      # how many passed is shown to you as `info.autograde` in the grading
+                      # sheet - never a mark by itself, and never something a student sees
 """
 
 _HIDDEN_TEST_PY = """\

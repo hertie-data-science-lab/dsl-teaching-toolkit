@@ -116,7 +116,7 @@ from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
 from .grades import (
     GRADING_FILE,
     load_grading_spec,
-    parse_grading_spec,
+    parse_grading_spec,  # noqa: F401 - re-exported; `collect` no longer parses it itself
     sheet_spec,
 )
 from .log import log, log_err, log_ok, log_person, log_skip, log_step
@@ -193,9 +193,11 @@ _STUDENT_TEST_RIGGING = (
 def template_is_group(master_org: str, template: str) -> bool:
     """Whether an assignment template declares itself group-provisioned: `type: group` in
     the grading.yml on its solution branch (written by the New assignment scaffold). No
-    solution branch / no grading.yml means individual (the parse's default)."""
-    text = get_file_content(master_org, template, GRADING_FILE, ref=SOLUTION_BRANCH)
-    return parse_grading_spec(text or "")["type"] == "group"
+    solution branch / no grading.yml means individual (the parse's default).
+
+    Through `load_grading_spec`, so the scheduler's group resolution shares the memoised
+    read with the sheet refresh and the collection that follow it in the same tick."""
+    return load_grading_spec(master_org, template)["type"] == "group"
 
 
 def assignment_is_group(master_org: str, cohort_org: str, template: str) -> bool:
@@ -502,21 +504,27 @@ def _snapshot_sha(
     return None
 
 
-def _committed_after(committed: str, recorded_at: str) -> bool:
-    """Whether `committed` (a commit's committer date) is later than `recorded_at` (the
-    moment the freeze was taken). Both ISO; either missing or unparseable means no.
+def _parse_iso(stamp: str) -> datetime | None:
+    """An API timestamp as an aware datetime, or None if it is not one.
 
     GitHub answers `...Z` and `datetime.fromisoformat` only learnt to read that in 3.11,
     so the suffix is spelt out rather than left to the runner's Python version - the
-    difference between a warning that fires and one that never does."""
-    if not (committed and recorded_at):
-        return False
+    difference between a warning that fires and one that never does. A naive stamp is read
+    as UTC, which is what the API means by one."""
+    if not stamp:
+        return None
     try:
-        when = datetime.fromisoformat(committed.replace("Z", "+00:00"))
-        taken = datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
+        at = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
     except ValueError:
-        return False
-    return when.tzinfo is not None and taken.tzinfo is not None and when > taken
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+def _committed_after(committed: str, recorded_at: str) -> bool:
+    """Whether `committed` (a commit's committer date) is later than `recorded_at` (the
+    moment the freeze was taken). Both ISO; either missing or unparseable means no."""
+    when, taken = _parse_iso(committed), _parse_iso(recorded_at)
+    return when is not None and taken is not None and when > taken
 
 
 def _warn_if_late_commits_only(cohort_org: str, repo: str, deadline: str) -> None:
@@ -754,16 +762,6 @@ class SheetPhase(Enum):
     FROZEN = "frozen"  # after it: `info:` is copied verbatim, whatever we now think
 
 
-def _parse_iso(stamp: str) -> datetime | None:
-    """An API timestamp as an aware datetime. GitHub answers `...Z`, which
-    `datetime.fromisoformat` only learnt to read in 3.11."""
-    try:
-        at = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
-
-
 def submitted_display(submitted_at: str, tz: str | None) -> str:
     """The pinned commit's time in the COHORT's own clock, to the minute -
     `2026-10-03T22:14+02:00`.
@@ -817,11 +815,15 @@ def _sheet_info(
     is_group: bool,
 ) -> dict[str, dict]:
     """The toolkit's facts, per submission unit: when the pinned commit was made, how late
-    that is, and (for a team) what CONTRIBUTIONS.md said at that commit."""
+    that is, and (for a team) what CONTRIBUTIONS.md said at that commit.
+
+    Only what was DERIVED. The block's shape - which keys exist at all for this assignment
+    - is `grades._fresh_info`'s to declare, and the merge unions the two; stating it here
+    as well is how a key added in one place goes missing in the other."""
     out: dict[str, dict] = {}
     for repo, unit, _members in targets:
         sha, submitted_at = pins.get(repo, ("", ""))
-        info: dict = {"submitted": None, "days_late": None}
+        info: dict = {}
         when = _parse_iso(submitted_at) if (sha and submitted_at) else None
         if when is not None:
             info["submitted"] = submitted_display(submitted_at, tz)
@@ -955,7 +957,6 @@ def sync_sheet(
     phase: SheetPhase = SheetPhase.OPEN,
     units: list[tuple[str, list[str]]] | None = None,
     autograde: dict[str, str] | None = None,
-    receipts: bool = True,
     dry_run: bool = False,
 ) -> bool:
     """Write `grading_sheets/<slug>.yml` for this assignment, creating it if it is not
@@ -1052,7 +1053,7 @@ def sync_sheet(
     # sheet lands first. An unchanged tick posts nothing new to say - only the once-only
     # `due` and `frozen` events, which have to fire whether or not a pin moved (a student
     # who never submitted has an unchanging sheet and is owed both).
-    if derive and receipts:
+    if derive:
         _post_receipts(
             cohort_org,
             spec,
@@ -1404,7 +1405,6 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
 def _grade_target(
     cohort_org: str,
     repo: str,
-    spec: dict,
     tests_src: Path,
     deadline: str,
     snapshot: str | None = None,
@@ -1443,7 +1443,7 @@ def refresh_assignment_sheet(
     master_org: str,
     template: str,
     cohort_org: str,
-    now: datetime | None = None,
+    *,
     group: bool = False,
     dry_run: bool = False,
 ) -> int:
@@ -1476,7 +1476,7 @@ def refresh_assignment_sheet(
         slug,
         template,
         is_group=is_group,
-        now=now or datetime.now(schedule._tz(sched.timezone)),
+        now=datetime.now(schedule._tz(sched.timezone)),
         phase=(
             SheetPhase.FROZEN
             if load_snapshots(cohort_org, slug) is not None
@@ -1599,9 +1599,7 @@ def collect(
                 f"no `{SOLUTION_BRANCH}` branch on {master_org}/{template}",
                 dry_run,
             )
-        spec_path = soldir / GRADING_FILE
-        spec = parse_grading_spec(spec_path.read_text() if spec_path.is_file() else "")
-        if not spec["autograde"]:
+        if not gspec["autograde"]:
             log_ok(
                 f"{slug}: autograde disabled in {GRADING_FILE} - all-manual, nothing to collect."
             )
@@ -1609,10 +1607,10 @@ def collect(
             return _record_skip(
                 cohort_org, slug, f"`autograde: false` in {GRADING_FILE}", dry_run
             )
-        tests_src = soldir / str(spec["tests"])
+        tests_src = soldir / str(gspec["tests"])
         if not tests_src.is_dir():
             log_err(
-                f"{slug}: tests path `{spec['tests']}` not found on the solution branch."
+                f"{slug}: tests path `{gspec['tests']}` not found on the solution branch."
             )
             return 1
 
@@ -1690,7 +1688,6 @@ def collect(
                 result = _grade_target(
                     cohort_org,
                     repo,
-                    spec,
                     tests_src,
                     deadline,
                     snapshot=None if snapshots is None else snapshots[repo],

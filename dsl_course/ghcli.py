@@ -51,9 +51,15 @@ def _run_gh(
     stdout on its own - gh writes advisories (a token nearing expiry, an update notice) to
     stderr, and a joined pair would feed them to the JSON parser.
 
+    THE choke point: this is the one `subprocess.run(["gh", ...])` in the package, so the
+    org fence and the write governor sit here rather than on `gh` - `gh_json` goes straight
+    through this and would otherwise be the one caller running unfenced and unpaced.
+
     Retries on GitHub secondary rate limits, on a subprocess timeout, and - for a
     NON-mutating call only - on a transient GitHub fault (see TRANSIENT_MARKERS), with
     exponential backoff."""
+    _check_gh_allowlist(args)
+    _pace_writes(args)
     delay = 30
     for attempt in range(retries + 1):
         try:
@@ -117,7 +123,10 @@ _sleep = time.sleep
 
 
 # `gh api` sends POST as soon as a field is passed, so an argv with no `--method` at all
-# can still be a write - `repos.ensure_label` is exactly that call.
+# can still be a write. Every call in the package now spells its method out, which is the
+# habit to keep - this is the backstop for the one that forgets, and the reason a READ that
+# passes `-f` must still say `-X GET` (as `collect._snapshot_sha` does) or be paced as a
+# write.
 _FIELD_FLAGS = frozenset({"-f", "-F", "--field", "--raw-field", "--input"})
 
 # The porcelain verbs that write. The toolkit reaches for these wherever the REST shape
@@ -340,10 +349,9 @@ def gh(*args: str, stdin: str | None = None, retries: int = 3) -> tuple[int, str
     only - on a transient GitHub fault, with exponential backoff; and paces writes to stay
     under the secondary limit in the first place (see _pace_writes).
 
-    Raises when `DSL_ORG_ALLOWLIST` is set and this is a write to an org outside it.
+    Raises when `DSL_ORG_ALLOWLIST` is set and this is a write to an org outside it
+    (in `_run_gh`, which every path to the `gh` binary goes through).
     """
-    _check_gh_allowlist(args)
-    _pace_writes(args)
     code, out, err = _run_gh(args, stdin, retries)
     return code, (out + err).strip()
 
