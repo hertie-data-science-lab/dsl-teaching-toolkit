@@ -21,7 +21,7 @@ from dsl_course.grades import (
     SheetSpec,
     TeamResult,
     _cell,
-    build_books,
+    build_gradebooks,
     individual_issue_body,
     load_sheets,
     needs_hand_decision,
@@ -105,7 +105,7 @@ def sentinel_sheet() -> dict:
 
 
 def sentinel_books() -> dict:
-    return build_books({SENTINEL_SLUG: (group_spec(), sentinel_sheet())})
+    return build_gradebooks({SENTINEL_SLUG: (group_spec(), sentinel_sheet())})
 
 
 def sentinel_students() -> list[roster.Student]:
@@ -313,7 +313,7 @@ def spec_example_book() -> dict:
             }
         }
     }
-    return build_books({"assignment-1": (group_spec(), sheet)})
+    return build_gradebooks({"assignment-1": (group_spec(), sheet)})
 
 
 def test_the_gradebook_readme_is_exactly_the_page_the_spec_shows():
@@ -350,7 +350,7 @@ def test_the_gradebook_readme_is_exactly_the_page_the_spec_shows():
 )
 def test_the_submitted_column_tells_the_two_kinds_of_blank_apart(spec, expected):
     sheet = {"submissions": {"ada-l": {"info": {}, "score_individual": 9}}}
-    books = build_books({"assignment-1": (spec, sheet)})
+    books = build_gradebooks({"assignment-1": (spec, sheet)})
     row = render_readme("ada-l", books["ada-l"], {}).splitlines()[4]
     assert row == f"| assignment-1 | 9 | {expected} |  |  |"
 
@@ -358,7 +358,7 @@ def test_the_submitted_column_tells_the_two_kinds_of_blank_apart(spec, expected)
 def test_a_mark_on_a_repo_nothing_was_pushed_to_says_that_in_the_comment():
     # A 0 with no explanation is the one grade a student writes in about.
     sheet = {"submissions": {"ada-l": {"info": {}, "score_individual": 0}}}
-    view = build_books({"assignment-1": (individual_spec(), sheet)})["ada-l"][
+    view = build_gradebooks({"assignment-1": (individual_spec(), sheet)})["ada-l"][
         "assignment-1"
     ]
     assert individual_issue_body("Introduce Yourself", view) == (
@@ -372,7 +372,7 @@ def test_a_mark_on_a_repo_nothing_was_pushed_to_says_that_in_the_comment():
 def test_an_assignment_handed_in_off_github_is_never_called_unsubmitted():
     spec = individual_spec(submit_external=True)
     sheet = {"submissions": {"ada-l": {"score_individual": 9}}}
-    view = build_books({"assignment-1": (spec, sheet)})["ada-l"]["assignment-1"]
+    view = build_gradebooks({"assignment-1": (spec, sheet)})["ada-l"]["assignment-1"]
     body = individual_issue_body("Introduce Yourself", view)
     assert "No submission was recorded." not in body
     assert "submitted external" not in body  # nor does it read as a timestamp
@@ -380,7 +380,7 @@ def test_an_assignment_handed_in_off_github_is_never_called_unsubmitted():
 
 def test_one_row_per_assignment_sorted_by_slug():
     spec = individual_spec()
-    books = build_books(
+    books = build_gradebooks(
         {
             "assignment-2": (spec, {"submissions": {"ada-l": {"score_individual": 8}}}),
             "assignment-1": (spec, {"submissions": {"ada-l": {"score_individual": 9}}}),
@@ -439,7 +439,7 @@ def test_the_registrar_csv_has_a_row_for_every_enrolled_student_and_no_auditor()
 
 def test_the_registrar_csv_has_one_column_per_assignment_sorted():
     spec = individual_spec()
-    books = build_books(
+    books = build_gradebooks(
         {
             "assignment-2": (spec, {"submissions": {"ada-l": {"score_individual": 8}}}),
             "assignment-1": (spec, {"submissions": {"ada-l": {"score_individual": 9}}}),
@@ -528,7 +528,7 @@ def test_a_cohort_still_marking_in_the_legacy_csv_distributes_the_same_way():
             team_comments="Clean derivation.",
         )
     ]
-    view = build_books({"assignment-1": rows})["ben-k"]["assignment-1"]
+    view = build_gradebooks({"assignment-1": rows})["ben-k"]["assignment-1"]
     assert view == {
         "final_grade": "40",
         "feedback": "See the team feedback.",
@@ -541,7 +541,7 @@ def test_a_cohort_still_marking_in_the_legacy_csv_distributes_the_same_way():
 
 def test_a_student_with_nothing_in_the_sheet_yet_has_no_gradebook_entry():
     sheet = {"submissions": {"ada-l": {"score_individual": None}, "ben-k": {}}}
-    assert build_books({"assignment-1": (individual_spec(), sheet)}) == {}
+    assert build_gradebooks({"assignment-1": (individual_spec(), sheet)}) == {}
 
 
 def test_load_sheets_reads_every_sheet_in_a_classroom_config_checkout(tmp_path):

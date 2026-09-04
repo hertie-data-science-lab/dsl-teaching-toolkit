@@ -108,14 +108,15 @@ PY_FILES = sorted((ROOT / "dsl_course").glob("*.py"))
 
 
 def _gradebook() -> str:
-    """One student's rendered gradebook - the `yaml.safe_dump` path (grades.render_yaml)."""
+    """One student's `grades.yml` - the `yaml.safe_dump` path (grades.render_yaml)."""
     rows = {
         "assignment-1": [
             GradeRow(github_handle="janedoe", team="t1", final_grade="15")
         ],
         "assignment-2": [GradeRow(github_handle="janedoe", final_grade="10")],
     }
-    return render_yaml(build_gradebooks(rows)["janedoe"])
+    books = build_gradebooks(rows)
+    return render_yaml({"student": "janedoe", "assignments": books["janedoe"]})
 
 
 def _grading_sheet_dump() -> str:
@@ -158,7 +159,7 @@ def _cohort_registry_dump() -> str:
 # them passes it explicitly. Flow style at the document root is a single braced line with
 # no `- ` at all, so FLOW_ITEM can't see it - assert on the braces/brackets instead.
 DUMPED = {
-    "gradebook/<handle>.yml (grades.render_yaml)": _gradebook,
+    "grades-<handle>/grades.yml (grades.render_yaml)": _gradebook,
     "list_orgs --yaml inventory": _inventory_dump,
     "cohort-courses-pages.yml (discovery)": _cohort_registry_dump,
     "grading_sheets/<slug>.yml (grades.dump_sheet)": _grading_sheet_dump,

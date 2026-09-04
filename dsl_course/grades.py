@@ -70,12 +70,11 @@ from .gh_contents import (
     put_files,
     read_csv,
 )
-from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
+from .ghcli import clone, gh
 from .log import log, log_err, log_ok, log_person, log_step
 from .repos import (
     add_collaborator,
     create_repo,
-    default_branch,
     ensure_label,
     repo_exists,
     set_repo_topics,
@@ -83,15 +82,10 @@ from .repos import (
 
 GRADES_DIR = "grades"  # faculty-edited source tables, one CSV per assignment
 GRADEBOOK_DIR = "gradebook"  # rendered per-student YAML staged for the preview PR
-# Which student has been told about which version of their gradebook. SYSTEM-owned, in the
-# private classroom-config. The notify set is derived from this rather than from the push
-# outcome, which is not durable enough to retry a notification that failed.
-# RETIRED, and read exactly once per cohort: `distributed.csv` below replaces it, and the
-# migration that writes that file deletes this one in the same commit.
+# RETIRED. The old per-student notification marker, named here for one reason only: the
+# migration in `_read_distributed` reads it once and deletes it in the same commit that
+# writes `distributed.csv`, which records every channel rather than just the email.
 NOTIFIED_PATH = f"{GRADEBOOK_DIR}/notified.csv"
-# `{handle: (gradebook sha, when)}`
-Notified = dict[str, tuple[str, str]]
-RENDER_BRANCH = "grades-update"
 COHORT_CSV_NAME = "cohort-gradebook.csv"  # generated wide faculty-only glance view
 
 # One assignment CSV row. `autograde_score` is the machine's passing-test count on both
@@ -117,17 +111,6 @@ GRADE_FIELDS = (
     "individual_comments",
     "team_comments",
 )
-
-# The columns the autograder writes. They are WRITE-ONCE (see merge_auto): once one holds a
-# value - a machine score, or a marker's correction of one - no later run may replace it.
-#
-# `team_score` is deliberately NOT here. It is the marker's shared team mark, and while the
-# group autograder wrote its passing-test count into it the two shared one write-once cell:
-# whichever landed first won, so a team marked before the grading deadline silently lost its
-# autograde and a team marked after it found the cell already taken. The count now goes to
-# `autograde_score`, exactly as it does for an individual assignment, and `team_score` is
-# faculty-owned like `manual_score` beside it.
-MACHINE_FIELDS = ("autograde_score", "team")
 
 # The legend for `grades.yml`. This README is the ONLY place a student is told what the
 # keys in that file mean - there is no other documentation on their side - so every key
@@ -204,139 +187,9 @@ def parse_grades(text: str) -> list[GradeRow]:
     ]
 
 
-def gradebook_entry(row: GradeRow) -> dict:
-    """One assignment's entry for a student. Group fields appear only for group rows; the
-    faculty-internal `autograde_score`/`manual_score` columns are never surfaced (the student
-    sees the authoritative `final_grade`, not the machine/manual split); empty fields are
-    dropped so an individual assignment reads as just final_grade + individual_comments.
-
-    The keys carry the CSV's own names, so the file a student opens and the file their marker
-    fills in use one vocabulary - and `_STARTER_README` beside it defines each one, since this
-    file is the whole of what a student is given."""
-    entry: dict[str, str] = {}
-    if row.team:
-        entry["team"] = row.team
-        if row.team_score:
-            entry["team_score"] = row.team_score
-        if row.individual_adjustment:
-            entry["individual_adjustment"] = row.individual_adjustment
-        if row.team_comments:
-            entry["team_comments"] = row.team_comments
-    if row.final_grade:
-        entry["final_grade"] = row.final_grade
-    if row.individual_comments:
-        entry["individual_comments"] = row.individual_comments
-    return entry
-
-
-def build_gradebooks(per_assignment: dict[str, list[GradeRow]]) -> dict[str, dict]:
-    """Pivot {assignment: [rows]} into {handle: {student, assignments: {assignment: ...}}}.
-
-    Deterministic: assignments are folded in sorted order so the rendered YAML (and thus
-    the preview diff) is stable across runs."""
-    books: dict[str, dict] = {}
-    canonical: dict[str, str] = {}  # fold key -> the first spelling seen for it
-    for assignment in sorted(per_assignment):
-        for row in per_assignment[assignment]:
-            if not row.github_handle:
-                continue
-            handle = canonical.setdefault(
-                row.github_handle.casefold(), row.github_handle
-            )
-            book = books.setdefault(handle, {"student": handle, "assignments": {}})
-            book["assignments"][assignment] = gradebook_entry(row)
-    return books
-
-
 def render_yaml(book: dict) -> str:
     """Serialise one student's gradebook to YAML text (insertion order preserved)."""
     return yaml.safe_dump(book, sort_keys=False, allow_unicode=True)
-
-
-def dump_grades(rows: list[GradeRow]) -> str:
-    """Serialise grade rows back to CSV text (header + one row per GradeRow)."""
-    return dump_csv(GRADE_FIELDS, ([getattr(r, f) for f in GRADE_FIELDS] for r in rows))
-
-
-def render_cohort_csv(per: dict[str, list[GradeRow]]) -> str:
-    """Pivot every assignment's raw grade rows into one wide CSV - one row per student,
-    one column-group per assignment (sorted) - a faculty-only glance view. Generated,
-    never hand-edited; the per-assignment CSVs in GRADES_DIR remain the source of
-    truth. Unlike gradebook_entry (student-facing, redacted), this keeps
-    autograde_score/manual_score/team_score/individual_adjustment too - it never leaves
-    classroom-config."""
-    fields = tuple(f for f in GRADE_FIELDS if f != "github_handle")
-    assignments = sorted(per)
-    by_assignment: dict[str, dict[str, GradeRow]] = {}
-    handle_set: set[str] = set()
-    for a, rows in per.items():
-        by_assignment[a] = {r.github_handle: r for r in rows if r.github_handle}
-        handle_set.update(by_assignment[a])
-    handles = sorted(handle_set)
-
-    def wide_row(handle: str) -> list[str]:
-        row = [handle]
-        for a in assignments:
-            r = by_assignment[a].get(handle)
-            row.extend(getattr(r, f) if r else "" for f in fields)
-        return row
-
-    return dump_csv(
-        ["github_handle"] + [f"{a}_{f}" for a in assignments for f in fields],
-        (wide_row(h) for h in handles),
-    )
-
-
-def merge_auto(text: str, updates: list[tuple[str, dict[str, str]]]) -> str:
-    """Upsert machine-graded fields into a grades CSV, returning new CSV text.
-
-    Each update is (github_handle, {field: value}); the handle's row is updated in place
-    (leaving every column the update does not name exactly as it was) or created and
-    appended if absent. Only MACHINE_FIELDS are write-once - a key outside that set is
-    written unconditionally, so callers must not pass a faculty-owned column such as
-    `team_score` or `manual_score` here. Used by the collector to record `autograde_score` (plus `team` on a
-    group assignment) without disturbing hand-marked scores, comments, or the final grade.
-
-    WRITE-ONCE. A machine-written cell (MACHINE_FIELDS) that already holds a value is NEVER
-    overwritten - this fills EMPTY cells only, on scheduled and manual runs alike. That is
-    what makes a hand-edited `autograde_score` safe: no re-run can silently replace a
-    marker's correction with a recomputed score. To get a fresh machine score, clear those
-    cells (or delete the CSV) first, then re-grade."""
-    rows = parse_grades(text) if text.strip() else []
-    order: list[str] = []
-    by_handle: dict[str, GradeRow] = {}
-    # Fold-keyed: GitHub logins are case-insensitive, so `Ada-L` in a hand-typed CSV and
-    # `ada-l` from the API are one student. Keyed raw, the autograder appended a SECOND row
-    # for the same person and every write-once guard on the first one read as an empty
-    # cell. The row's own spelling - the marker's - is left exactly as written.
-    for r in rows:
-        key = r.github_handle.casefold()
-        if key not in by_handle:
-            by_handle[key] = r
-            order.append(key)
-    preserved = 0
-    for handle, fields in updates:
-        key = handle.casefold()
-        row = by_handle.get(key)
-        if row is None:
-            row = GradeRow(github_handle=handle)
-            by_handle[key] = row
-            order.append(key)
-        kept = 0
-        for field, value in fields.items():
-            if field in MACHINE_FIELDS and getattr(row, field, ""):
-                kept += 1  # already filled (hand-edited or graded before) - leave it
-                continue
-            setattr(row, field, value)
-        if kept:
-            preserved += kept
-            log_person(f"  [keep] {handle}: {kept} existing cell(s) left as they are")
-    if preserved:
-        log_ok(
-            f"{preserved} existing machine-written cell(s) preserved - "
-            f"{'/'.join(MACHINE_FIELDS)} are write-once; clear a cell to have it recomputed"
-        )
-    return dump_grades([by_handle[h] for h in order])
 
 
 # ------------------------------------------------------------------- the grading sheet
@@ -1455,7 +1308,7 @@ def _views_from_grade_rows(rows: list[GradeRow]) -> dict[str, dict]:
     }
 
 
-def build_books(
+def build_gradebooks(
     sources: dict[str, tuple[SheetSpec, dict] | list[GradeRow]],
 ) -> dict[str, dict[str, dict]]:
     """Pivot every assignment's source into `{handle: {slug: view}}` - one book per
@@ -1751,25 +1604,6 @@ def load_sheets(wd: Path) -> dict[str, dict]:
 # ---------------------------------------------------------------------- gh/git wiring
 
 
-RENDER_BOT_NAME = "dsl-bot"  # the author name GIT_ENV stamps on engine-made commits
-
-
-def _human_commit_authors(
-    log_output: str, bot_name: str = RENDER_BOT_NAME
-) -> list[str]:
-    """Author names on the render branch (from `git log --format=%an base..branch`) that are
-    NOT the bot - i.e. a reviewer's own commit on the open preview PR. `render` refuses to
-    force-overwrite the branch when this is non-empty, so a reviewer's correction is never
-    silently discarded by a re-render."""
-    return sorted(
-        {
-            a.strip()
-            for a in log_output.splitlines()
-            if a.strip() and a.strip() != bot_name
-        }
-    )
-
-
 def _config_dir_names(cohort_org: str, folder: str) -> list[str]:
     """The file names in one folder of the cohort's classroom-config ([] when it has no
     such folder - which is the normal state of both of these, not a fault)."""
@@ -1933,140 +1767,13 @@ def ensure_gradebooks(cohort_org: str, dry_run: bool = False) -> int:
 
 
 def sync(cohort_org: str, dry_run: bool = False) -> int:
-    """`ensure_gradebooks` under the name the seeded workflows still call for one term.
+    """`ensure_gradebooks` under the name the seeded workflows still call.
 
-    An org runs whichever toolkit ref its `central_ref` names, so a workflow file written
-    before the rename is live until that org's nightly Refresh replaces it."""
+    UNDOCUMENTED and temporary: an org runs whichever toolkit ref its `central_ref` names,
+    so a `sync-gradebooks.yml` written before the rename keeps invoking this until that
+    org's nightly Refresh replaces the file. Removed in Phase 4, once every org has
+    refreshed past this."""
     return ensure_gradebooks(cohort_org, dry_run=dry_run)
-
-
-def render(cohort_org: str) -> int:
-    """Build per-student gradebook YAML and open it as ONE preview PR in classroom-config."""
-    per = load_grade_sources(cohort_org)
-    if not per:
-        return 1
-    books = build_gradebooks(per)
-    if not books:
-        log_err("no graded students found across the grade CSVs.")
-        return 1
-    log_step(
-        f"Rendering {len(books)} gradebook(s) from {len(per)} assignment table(s) "
-        f"-> preview PR on {cohort_org}/{CONFIG_REPO}"
-    )
-
-    base = default_branch(cohort_org, CONFIG_REPO, fallback="main")
-    with tempfile.TemporaryDirectory() as work:
-        wd = Path(work) / "cfg"
-        if not clone(cohort_org, CONFIG_REPO, wd):
-            log_err(f"could not clone {cohort_org}/{CONFIG_REPO}")
-            return 1
-        # A prior render's branch may carry a reviewer's OWN commit (a grade fixed on the open
-        # preview PR). Rebuilding from base and force-pushing would silently discard it, so
-        # check first: any non-bot commit on `base..RENDER_BRANCH` means human edits are
-        # present - refuse rather than clobber. When the branch has only bot render commits
-        # (or doesn't exist), the reset + force-push below is safe and idempotent as before.
-        if (
-            git(
-                "-C",
-                str(wd),
-                "ls-remote",
-                "--exit-code",
-                "--heads",
-                "origin",
-                RENDER_BRANCH,
-            )[0]
-            == 0
-        ):
-            git(
-                "-C",
-                str(wd),
-                *GIT_ENV,
-                "fetch",
-                "-q",
-                "origin",
-                f"{RENDER_BRANCH}:refs/remotes/origin/{RENDER_BRANCH}",
-            )
-            _code, authors = git(
-                "-C",
-                str(wd),
-                "log",
-                "--format=%an",
-                f"origin/{base}..origin/{RENDER_BRANCH}",
-            )
-            human = _human_commit_authors(authors)
-            if human:
-                log_err(
-                    f"the {RENDER_BRANCH} branch carries commit(s) by {', '.join(human)} - a "
-                    f"reviewer edited the preview. Refusing to overwrite them: merge or close "
-                    f"the open PR (or delete the branch) before re-rendering."
-                )
-                return 1
-        git("-C", str(wd), *GIT_ENV, "checkout", "-q", "-B", RENDER_BRANCH, base)
-        gbdir = wd / GRADEBOOK_DIR
-        gbdir.mkdir(exist_ok=True)
-        for handle in sorted(books):
-            (gbdir / f"{handle}.yml").write_text(render_yaml(books[handle]))
-            log_person(f"  [ok] + {GRADEBOOK_DIR}/{handle}.yml")
-        (wd / COHORT_CSV_NAME).write_text(render_cohort_csv(per))
-        log_ok(f"+ {COHORT_CSV_NAME}")
-
-        git("-C", str(wd), *GIT_ENV, "add", "-A")
-        # `git commit` exits non-zero BOTH when there is nothing staged and when the commit
-        # itself fails (a lock, a full disk, a hook). Reported as "nothing new to render",
-        # a real failure looked like the idempotent no-op: green, no preview PR, and the
-        # marker's grades never distributed. Ask what is staged, then commit.
-        if git("-C", str(wd), "diff", "--cached", "--quiet")[0] == 0:
-            log_ok("nothing new to render (gradebooks already match the source).")
-            return 0
-        code, out = git(
-            "-C",
-            str(wd),
-            *GIT_ENV,
-            "commit",
-            "-q",
-            "--no-verify",
-            "-m",
-            "grades: render gradebooks",
-        )
-        if code != 0:
-            log_err(f"could not commit the rendered gradebooks: {out[:200]}")
-            return 1
-        if (
-            git("-C", str(wd), *GIT_ENV, "push", "-q", "-f", "origin", RENDER_BRANCH)[0]
-            != 0
-        ):
-            log_err("push failed")
-            return 1
-
-    # Open the preview PR (or reuse the open one on this branch).
-    title = "Grades: review before distribution"
-    body = (
-        f"Rendered {len(books)} gradebook(s) from `{GRADES_DIR}/`.\n\n"
-        f"**This is the preview.** Review every student's grades in the diff below, then "
-        f"merge to distribute to each private `grades-<handle>` repo.\n"
-    )
-    code, out = gh(
-        "pr",
-        "create",
-        "--repo",
-        f"{cohort_org}/{CONFIG_REPO}",
-        "--base",
-        base,
-        "--head",
-        RENDER_BRANCH,
-        "--title",
-        title,
-        "--body",
-        body,
-    )
-    if code == 0:
-        log_ok(f"preview PR opened: {out.strip().splitlines()[-1]}")
-    elif is_already_exists(out):
-        log_ok("preview PR already open for this branch (updated).")
-    else:
-        log_err(f"could not open PR: {out[:200]}")
-        return 1
-    return 0
 
 
 # ---------------------------------------------------------------- what was distributed
@@ -2141,9 +1848,15 @@ def _read_distributed(wd: Path) -> tuple[Distributed, bool]:
     old = wd / NOTIFIED_PATH
     if not old.is_file():
         return {}, False
+    # read_csv, not a bare DictReader: the file is machine-written, but it sits in a repo
+    # faculty can edit, so it goes through the same BOM/delimiter guard as the roster.
     return {
-        (handle, "", CHANNEL_EMAIL): (sha, when)
-        for handle, (sha, when) in (_read_notified(wd) or {}).items()
+        ((row.get("github_handle") or "").strip(), "", CHANNEL_EMAIL): (
+            (row.get("grades_sha") or "").strip(),
+            (row.get("notified_at") or "").strip(),
+        )
+        for row in read_csv(old.read_text(), ("github_handle",), NOTIFIED_PATH)
+        if (row.get("github_handle") or "").strip()
     }, True
 
 
@@ -2307,7 +2020,7 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
         # timing, so its README cell is BLANK - "not submitted" there would be this
         # module asserting something it has no source for.
         timed = frozenset(sheets)
-        books = build_books(sources)
+        books = build_gradebooks(sources)
         distributed, migrating = _read_distributed(wd)
         retired = _retired_gradebook_files(wd) if migrating else []
 
@@ -2455,26 +2168,6 @@ def _preview(
     log_ok("DRY-RUN - nothing written, nothing posted, nothing sent")
 
 
-def _read_notified(wd: Path) -> Notified | None:
-    """The marker, or None if the cohort has none yet.
-
-    None is kept distinct from `{}`: a cohort with no marker file has nothing to catch up
-    on, and must NOT be told wholesale that their grades have been updated."""
-    path = wd / NOTIFIED_PATH
-    if not path.is_file():
-        return None
-    return {
-        (row.get("github_handle") or "").strip(): (
-            (row.get("grades_sha") or "").strip(),
-            (row.get("notified_at") or "").strip(),
-        )
-        # read_csv, not a bare DictReader: this file is machine-written, but it sits in a
-        # repo faculty can edit, so it goes through the same BOM/delimiter guard as the
-        # roster.
-        for row in read_csv(path.read_text(), ("github_handle",), NOTIFIED_PATH)
-    }
-
-
 def update_message(
     student: roster.Student, cohort_org: str, course_name: str = ""
 ) -> mailer.Message:
@@ -2583,7 +2276,7 @@ def _email_updates(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
-    for name in ("sync", "render", "distribute"):
+    for name in ("sync", "distribute"):
         p = sub.add_parser(name)
         p.add_argument("--cohort-org", required=True)
         if name == "sync":
@@ -2610,8 +2303,6 @@ def main() -> int:
     try:
         if args.action == "sync":
             return sync(args.cohort_org, dry_run=args.dry_run)
-        if args.action == "render":
-            return render(args.cohort_org)
         return distribute(
             args.cohort_org, notify=not args.no_notify, dry_run=args.dry_run
         )
