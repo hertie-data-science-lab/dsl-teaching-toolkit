@@ -1901,6 +1901,43 @@ def test_the_refresh_writes_nothing_when_nothing_has_changed(monkeypatch):
     assert collect.sync_sheet(*args, **kwargs)
 
 
+def test_a_freeze_with_no_snapshot_keeps_the_facts_the_sheet_already_holds(
+    monkeypatch,
+):
+    # Sealing against a snapshot that is not there would record "nobody submitted" for the
+    # whole cohort, permanently - nothing re-derives a frozen sheet. Only the header moves.
+    recorded = (
+        "submissions:\n"
+        "  ada-l:\n"
+        "    info:\n"
+        "      submitted: '2026-10-06T09:30+02:00'\n"
+        "      days_late: 2\n"
+        "    score_individual: 18\n"
+    )
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        existing=(recorded, "SHA"),
+        rows=None,
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 12, tzinfo=BERLIN),
+        phase=collect.SheetPhase.FREEZING,
+    )
+    ((_path, text),) = written
+    assert "submitted: 2026-10-06T09:30+02:00" in text
+    assert "days_late: 2" in text
+    assert "score_individual: 18" in text
+    assert "# Status: FROZEN" in text
+
+
 def test_the_sheet_is_written_against_the_sha_it_was_read_at(monkeypatch):
     # A grader saving in the browser inside the quarter-hourly tick would otherwise be
     # silently reverted: `put_file` fetches a fresh sha unless it is given one, and that

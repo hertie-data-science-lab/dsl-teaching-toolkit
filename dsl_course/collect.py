@@ -1015,21 +1015,30 @@ def sync_sheet(
         )
     )
     info_updates: dict[str, dict] = {}
-    if derive:
-        if phase is SheetPhase.FREEZING:
-            rows = load_snapshot_rows(cohort_org, slug) or {}
-            pins = {r: (row.sha, row.submitted_at) for r, row in rows.items()}
-        else:
-            pins = _provisional_pins(
-                cohort_org,
-                targets,
-                (grades._cutoff_at(sched, key, gspec) or now).isoformat(),
+    pins: dict[str, tuple[str, str]] = {}
+    if derive and phase is SheetPhase.FREEZING:
+        rows = load_snapshot_rows(cohort_org, slug)
+        if rows is None:
+            # Sealing against a snapshot that is not there would record "nobody submitted"
+            # for the whole cohort, permanently. The facts the sheet already holds are the
+            # last ones anybody looked up, so they stand; only the header moves to FROZEN.
+            log_err(
+                f"  ! no {snapshot_path(slug)} - sealing {path} on the facts it holds"
             )
-            if pins is None:
-                log_err(
-                    f"  ! could not read every submission for {path} - not rewriting"
-                )
-                return False
+            derive = False
+        else:
+            pins = {r: (row.sha, row.submitted_at) for r, row in rows.items()}
+    elif derive:
+        found = _provisional_pins(
+            cohort_org,
+            targets,
+            (grades._cutoff_at(sched, key, gspec) or now).isoformat(),
+        )
+        if found is None:
+            log_err(f"  ! could not read every submission for {path} - not rewriting")
+            return False
+        pins = found
+    if derive:
         info_updates = _sheet_info(
             cohort_org, targets, pins, due, sched.timezone, is_group=is_group
         )
