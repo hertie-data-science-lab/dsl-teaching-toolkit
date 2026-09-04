@@ -3,6 +3,10 @@
 # path so tests run from anywhere without an installed package.
 pythonpath = [".", "tests"]
 testpaths = ["tests"]
+# `tests/e2e` drives real workflows in the demo orgs and is skipped wholesale unless
+# DSL_E2E=1 (tests/e2e/conftest.py). The marker is registered so the suite can be selected
+# or deselected by name, and so `--strict-markers` never turns it into an error.
+markers = ["e2e: live end-to-end run against the demo tier"]
 
 [tool.ruff]
 target-version = "py310"
