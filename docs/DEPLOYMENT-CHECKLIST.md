@@ -22,8 +22,8 @@ Accompanies the e2e [worked example](../example-course/).
 | | Step | Org Level | Where | Input | Output |
 |---|------|-------|-------|-------|--------|
 | `[required]` | 1. Create the cohort org | cohort | GitHub [web UI](https://github.com/account/organizations/new) | name `<course-name>-f/sYYYY`; invite **`hertie-dsl-bot`** as **Owner** (must accept) | an empty org the bot can bootstrap |
-| `[required]` | 2. Bootstrap | course → cohort | course `.github` → **Bootstrap cohort** | `cohort_org` | `welcome` (Join course / Join team issues) + `classroom-config` (all the files below), `students`/`auditors` teams, the cohort site, cohort registered with the cron |
-| `[do this first]` | 3. The term plan | cohort | edit [`classroom-config/schedule.yml`](#scheduleyml) | releases, due dates, exams | the scheduled cron runs the whole term; site dates; grading deadlines |
+| `[required]` | 2. Bootstrap | course → cohort | course `.github` → **Bootstrap cohort** | `cohort_org` | `welcome` (Join course / Join team issues) + `classroom-config` (all the files below), `students`/`auditors` teams, the cohort site, cohort registered with the scheduler |
+| `[do this first]` | 3. The term plan | cohort | edit [`classroom-config/schedule.yml`](#scheduleyml) | releases, due dates, exams | the scheduler runs the whole term; site dates; grading deadlines |
 | `[required]` | 4. Roster | cohort | edit [`classroom-config/students.csv`](#studentscsv) | registrar rows | the enrolment + provisioning source of truth |
 | *(optional)* | 5. Teaching team | cohort | edit [`classroom-config/people.yml`](#peopleyml) ([05](05-manage-teaching-team.md)) | handles (+ card fields), optional `start`/`end` | push access for this cohort's instructors/TAs + site cards; time-boxed if dated |
 | `[required]` | 6. Enrol | *nothing to run* - the roster push does it | - | - | codes written to the roster + emailed within a minute; students join via the `welcome` **Join course** issue |
@@ -209,12 +209,12 @@ solution branch  solution/ + grading.yml + tests/       -> faculty-only; hidden 
 
 Live example: [`example-course/cohort-org/schedule.yml`](../example-course/cohort-org/schedule.yml).
 
-`classroom-config/schedule.yml` - the term plan: the **auto-release plan** the scheduled cron
+`classroom-config/schedule.yml` - the term plan: the **auto-release plan** the scheduler
 runs, and the **dates** that drive the website and grading. Times are read in `timezone`
 (default `Europe/Berlin`) unless given an offset; a bare **release** date = 00:00, a bare
 **due_datetime**/`grading_datetime` date = 23:59:59, a bare **events** date shows as 09:00. Times are
-honoured to within about 15 minutes (the cron runs four times an hour, and GitHub delivers
-scheduled runs on a best-effort basis - so pin a release AHEAD of the class, not at it).
+honoured to within about 15 minutes, so pin a release AHEAD of the class, not at it
+([what drives the scheduler](07-schedule-releases.md#what-drives-the-scheduler)).
 
 Blocks encode behaviour: **`releases:`** deploys materials, **`assignments:`** runs the
 handout/due/grading lifecycle, **`events:`** is display-only calendar rows. Colour is a
@@ -403,7 +403,7 @@ fully read goes red and opens an issue naming the bad entry.
 Verify with `python3 -m dsl_course.schedule --cohort-org <COHORT> --validate`. Full account:
 [Schedule releases -> Dropped entries](07-schedule-releases.md#dropped-entries).
 
-**What happens at the grading deadline.** The scheduled cron freezes each submission repo's
+**What happens at the grading deadline.** The scheduler freezes each submission repo's
 commit into `classroom-config/snapshots/<slug>.csv` (write-once - delete it to re-freeze),
 then autogrades **once** against the `<slug>-<tag>` template (the `_graded.json` / `_skipped.json`
 record in `classroom-config/autograde/<slug>/` is the fired marker - delete it, or the whole

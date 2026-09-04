@@ -51,7 +51,7 @@ autograde → marks → preview → distribute`"]
     E --> F
     E --> S
     F --> G
-    S ==>|"scheduled cron - the primary path"| G
+    S ==>|"the scheduler - the primary path"| G
     G --> I
     G --> J
   end

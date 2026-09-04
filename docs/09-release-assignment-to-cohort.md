@@ -92,7 +92,7 @@ assignments:
 - **The date students see** (cohort site + the brief's "due" event) is `assignments[slug].due_datetime`
   (23:59 that day). Edit → commit to `main` - **Sync site** fires automatically on the push.
 - **The grading deadline** is `grading_datetime` if set, else `due_datetime`.
-  - At that moment the scheduled cron freezes the snapshot and runs the autograder automatically.
+  - At that moment [the scheduler](07-schedule-releases.md#what-drives-the-scheduler) freezes the snapshot and runs the autograder automatically.
 - **The commit that is considered submitted for grading** is frozen right after the grading deadline passes, into
 `classroom-config/snapshots/<slug>.csv`. It is **write-once** - later pushes can't move the
   pin. To deliberately re-freeze (e.g. repos provisioned late), delete the CSV and the next

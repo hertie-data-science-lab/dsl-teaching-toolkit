@@ -6,22 +6,23 @@
 # - see reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/schedule.yml
 # - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/schedule/
 #
-# Times are Europe/Berlin unless you set `timezone:`. The Scheduled release cron runs four
-# times an hour and GitHub delivers scheduled runs best-effort, so a time is honoured to
-# roughly the quarter-hour, not to the minute. Pin a release AHEAD of the class that needs
-# it (see `deploy_datetime` below) rather than at its start time.
+# Times are Europe/Berlin unless you set `timezone:`. Scheduled release is driven from two
+# places, each guarding the other, and ticks about every 15 minutes - so a time is honoured
+# to roughly that, not to the minute. Pin a release AHEAD of the class that needs it (see
+# `deploy_datetime` below) rather than at its start time.
 #
 # Each block encodes BEHAVIOUR:
 #   releases:     entries that DEPLOY materials (course org -> this cohort org)
 #   assignments:  each assignment's handout / due / grading lifecycle
 #   events:       display-only calendar rows - nothing deploys
 #
-# Changing a date later? Just commit the edit to this file on main; the cron reads
-# whatever is on main at each tick, so the change simply takes effect on the next one.
+# Changing a date later? Just commit the edit to this file on main; the push itself fires
+# the scheduler, so the change takes effect straight away.
 #
-# Already-fired ONE-SHOT actions don't rewind: a release already shipped stays
-# shipped, and a snapshot/autograde that already ran needs its marker deleted to redo.
-# Unshipping a release means rewriting the cohort repo's git history and force-pushing.
+# Already-fired ONE-SHOT actions don't rewind: a snapshot, an autograde or a solution push
+# that already ran needs its marker deleted to redo. Everything else is re-applied on every
+# tick - so a release already shipped stays shipped, and unshipping it means rewriting the
+# cohort repo's git history and force-pushing.
 #
 # What follows is a SKELETON: uncomment and fill what you want. For a full worked term -
 # a real release plan, a group project, exams - see `schedule.yml.sample`.

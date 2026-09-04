@@ -110,9 +110,9 @@ writing about that session and always ships.
 ## Live updates to the deployed `<course>.github.io` site
 - Any released materials will automatically show up in the deployed site (i.e. their release triggers a redeploy).
   - Releases trigger **Sync site** for you, as does a push to `classroom-config/schedule.yml` or `people.yml`
-  - Plus there's a daily cron (06:00 UTC)
+  - Plus a daily sync
 - You can also run [Sync site](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/sync-site.yml)
-by hand only when you don't want to wait for the cron to fire - e.g. after editing a file inside an already-released repo.
+by hand only when you don't want to wait - e.g. after editing a file inside an already-released repo.
 
 > What the site shows, what redeploys it, and which files it overwrites:
 > [11 Configure the cohort website](11-configure-cohort-site.md).
