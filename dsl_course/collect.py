@@ -1055,8 +1055,20 @@ def sync_sheet(
     else:
         # The message carries counts, never a handle or a team name: classroom-config is
         # private, but its commit messages are quoted back in public run logs.
+        #
+        # `expected_sha` is the sha this run READ the file at, so GitHub refuses the write
+        # if a grader saved over it in between. Letting `put_file` fetch a fresh sha would
+        # make the call succeed however stale our copy was - and this file is typed into by
+        # hand, in a browser, while the quarter-hourly tick is running: a save landing in
+        # that window would be silently reverted, marks and all. A refusal is counted, and
+        # the next tick re-reads, re-merges and writes.
         written = put_file(
-            cohort_org, CONFIG_REPO, path, content, f"grading sheet: {slug} - {status}"
+            cohort_org,
+            CONFIG_REPO,
+            path,
+            content,
+            f"grading sheet: {slug} - {status}",
+            expected_sha=old_sha,
         )
         if written:
             log_ok(f"{path}: {status}")

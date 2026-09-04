@@ -630,7 +630,7 @@ def _stub_snapshot_write(monkeypatch, pins: dict, existing=None):
     monkeypatch.setattr(
         collect,
         "put_file",
-        lambda org, repo, path, content, msg: (
+        lambda org, repo, path, content, msg, **kw: (
             written.append((path, content.decode())) or True
         ),
     )
@@ -816,7 +816,7 @@ def _captured_writes(monkeypatch) -> list[tuple[str, str]]:
     monkeypatch.setattr(
         collect,
         "put_file",
-        lambda org, repo, path, content, msg: (
+        lambda org, repo, path, content, msg, **kw: (
             written.append((path, content.decode())) or True
         ),
     )
@@ -1776,7 +1776,7 @@ def _sheet_env(
     monkeypatch.setattr(
         collect,
         "put_file",
-        lambda org, repo, path, content, msg: (
+        lambda org, repo, path, content, msg, **kw: (
             written.append((path, content.decode())) or True
         ),
     )
@@ -1899,6 +1899,30 @@ def test_the_refresh_writes_nothing_when_nothing_has_changed(monkeypatch):
         lambda org, repo, path: (first, gh_contents.blob_sha(first.encode())),
     )
     assert collect.sync_sheet(*args, **kwargs)
+
+
+def test_the_sheet_is_written_against_the_sha_it_was_read_at(monkeypatch):
+    # A grader saving in the browser inside the quarter-hourly tick would otherwise be
+    # silently reverted: `put_file` fetches a fresh sha unless it is given one, and that
+    # makes the write succeed however stale this run's copy is.
+    seen: dict = {}
+    _sheet_env(monkeypatch, targets=SOLO_TARGETS, existing=("submissions:\n", "OLDSHA"))
+    monkeypatch.setattr(
+        collect,
+        "put_file",
+        lambda org, repo, path, content, msg, **kw: seen.update(kw) or True,
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 9, 1, tzinfo=BERLIN),
+    )
+    assert seen == {"expected_sha": "OLDSHA"}
 
 
 @pytest.mark.parametrize(
