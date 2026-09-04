@@ -32,13 +32,14 @@ import json
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
 from . import roster, schedule, site, sync_teams, teams
 from .access import FACULTY_READ_ACCESS, grant_faculty, grant_team_repo_access
-from .collect import assignment_is_group
+from .collect import assignment_is_group, sync_sheet
 from .course import (
     CONFIG_REPO,
     SOLUTION_BRANCH,
@@ -652,6 +653,10 @@ def provision_all(
         # into the private cohort org (and granted `maintain` on a repo) by ensure_team.
         # `vet_groups` is that one allowlist; the reporting below is this path's own.
         units = []
+        # What the GRADING SHEET is keyed on: the team NAME from teams.csv (and, below, the
+        # student's handle) - the same key `collect.submission_targets` uses, so the
+        # handout's rows and every later refresh's rows are the same rows.
+        sheet_units: list[tuple[str, list[str]]] = []
         for team, vetted, rejected in sync_teams.vet_groups(groups, participants):
             for m in rejected:
                 # Names a handle a STUDENT typed into teams.csv, and this workflow's log is
@@ -672,12 +677,14 @@ def provision_all(
             units.append(
                 (submission_repo(slug, team), vetted, sync_teams.team_slug(key, team))
             )
+            sheet_units.append((team, vetted))
         what = f"{len(units)} team(s)"
     else:
         units = [
             (submission_repo(slug, s.github_handle), [s.github_handle], None)
             for s in onboarded
         ]
+        sheet_units = [(s.github_handle, [s.github_handle]) for s in onboarded]
         what = f"{len(units)} student(s)"
 
     log_step(
@@ -756,6 +763,31 @@ def provision_all(
     # made it miss the real entry and append a bogus duplicate block (dropping its due date).
 
     schedule.record_handout(cohort_org, key)
+
+    # The grading sheet arrives WITH the handout: every row present, every human field
+    # blank, and a header saying which fields the toolkit fills and when. A sheet that only
+    # appeared once someone had submitted would be one a grader cannot plan around - and a
+    # missing row would be indistinguishable from an ungraded one. Nothing is derived here
+    # (there is nothing to derive before the due date, and a handout must not cost an API
+    # call per student); the hourly refresh takes over from the due date.
+    #
+    # Not fatal, and deliberately not counted: the repos are handed out by this point, and
+    # the refresh pass creates a sheet it finds missing on the next tick.
+    if not sync_sheet(
+        master_org,
+        cohort_org,
+        schedule.load(cohort_org),
+        key,
+        slug,
+        template,
+        is_group=bool(group),
+        now=datetime.now(timezone.utc),
+        units=sheet_units,
+    ):
+        log_err(
+            f"  ! could not write the grading sheet for {slug} - the hourly refresh "
+            f"creates it on a later tick"
+        )
 
     # site.sync_site now RAISES on a genuine tree/team read failure (post-PR2), and a config
     # file that doesn't parse raises yaml.YAMLError - which is NOT a RuntimeError. The repos

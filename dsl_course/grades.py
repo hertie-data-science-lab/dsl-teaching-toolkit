@@ -405,15 +405,21 @@ def _blank_person() -> dict:
     return {"adjustment_individual": None, "feedback_individual": None, NOTES_KEY: None}
 
 
-def _fresh_block(spec: SheetSpec, members: list[str]) -> dict:
+def _fresh_block(spec: SheetSpec, members: list[str], info: dict | None = None) -> dict:
     """One unit's entry, brand new: the toolkit's facts first, then the grader's blanks.
+
+    `info` is what the toolkit knows about this unit RIGHT NOW. A block created during a
+    refresh - a student who onboarded after the handout, or a sheet the toolkit is writing
+    for the first time - must arrive with the facts already derived; created blank and
+    filled "on the next tick", a late onboarder's row would sit empty for a quarter of an
+    hour with no way to tell it from a non-submission.
 
     `submit_external` means the work was handed in somewhere else, so there is no commit to
     time and no `info:` block at all - rather than one full of blanks, which reads as a
     toolkit that tried to fill it and failed."""
     block: dict = {}
     if not spec.submit_external:
-        block[INFO_KEY] = _fresh_info(spec)
+        block[INFO_KEY] = _fresh_info(spec) | (info or {})
     block[spec.score_key] = _blank_score(spec)
     if spec.is_group:
         block[spec.feedback_key] = None
@@ -497,7 +503,7 @@ def merge_sheet(
     for unit, members in units:
         block = old.pop(unit, None)
         blocks[unit] = (
-            _fresh_block(spec, members)
+            _fresh_block(spec, members, info_updates.get(unit))
             if block is None
             else _merged_block(
                 spec, block, members, info_updates.get(unit) or {}, frozen

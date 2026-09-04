@@ -1043,8 +1043,28 @@ def _stub_collect(monkeypatch, marked: set[str], templates: set[str], rc: int = 
     return graded
 
 
+def _no_sheet_refresh(monkeypatch) -> list[tuple[str, str]]:
+    """The grading-sheet pass, stubbed to a recorder of `(slug, cohort name)`.
+
+    It sits between the freeze and the autograde and reads the template's grading.yml, so
+    every `run()` test would otherwise reach the API for a file it does not care about."""
+    refreshed: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        scheduler, "load_grading_spec", lambda org, template: {"type": "individual"}
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "sync_sheet",
+        lambda course, cohort, sched, key, slug, template, **kw: (
+            refreshed.append((key, slug)) or True
+        ),
+    )
+    return refreshed
+
+
 def _only_snapshots_taken(monkeypatch):
     """Snapshots always succeed and are never the subject of these tests."""
+    _no_sheet_refresh(monkeypatch)
     monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: {})
     monkeypatch.setattr(
         scheduler,
@@ -1053,6 +1073,53 @@ def _only_snapshots_taken(monkeypatch):
             scheduler.SnapshotResult.WRITTEN
         ),
     )
+
+
+def test_the_sheet_refresh_runs_from_the_due_date_not_the_cutoff(monkeypatch):
+    # Marking starts at the due date, and the first late push lands then too - so the sheet
+    # has to be current from then, not from the cutoff a week later.
+    refreshed = _no_sheet_refresh(monkeypatch)
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(
+        scheduler,
+        "snapshot_assignment",
+        lambda *a, **k: scheduler.SnapshotResult.FAILED,
+    )
+    monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
+    monkeypatch.setattr(scheduler, "has_autograde_results", lambda org, slug: True)
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "load",
+        lambda cohort: _assignments(
+            **{
+                "assignment-1": _due(13, grading_day=20),  # due passed, cutoff has not
+                "assignment-2": _due(30),  # not due yet
+            }
+        ),
+    )
+    scheduler.run(
+        "Course-Org", "Cohort-f2026", datetime(2026, 10, 14, tzinfo=timezone.utc)
+    )
+    assert refreshed == [("assignment-1", "assignment-1")]
+
+
+def test_a_frozen_assignments_sheet_is_left_to_the_cutoff(monkeypatch):
+    # `collect` seals the sheet at the cutoff. Refreshing it in the same tick would
+    # re-derive facts the freeze has already settled - and would do it FIRST, since this
+    # pass runs before the autograde.
+    refreshed = _no_sheet_refresh(monkeypatch)
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: {})  # frozen
+    monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
+    monkeypatch.setattr(scheduler, "has_autograde_results", lambda org, slug: True)
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "load",
+        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+    )
+    scheduler.run(
+        "Course-Org", "Cohort-f2026", datetime(2026, 10, 14, tzinfo=timezone.utc)
+    )
+    assert refreshed == []
 
 
 def test_run_autogrades_a_passed_deadline_with_no_marker(monkeypatch):

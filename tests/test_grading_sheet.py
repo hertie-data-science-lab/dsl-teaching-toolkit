@@ -235,6 +235,27 @@ def test_a_member_who_joins_a_team_later_gets_a_blank_row():
     assert members["chen-w"] == dict.fromkeys(PERSON_KEYS)
 
 
+def test_a_unit_seen_for_the_first_time_arrives_with_the_facts_already_derived():
+    # A late onboarder, or the very first write of a sheet during the late window. Created
+    # blank and filled "next tick", their row would sit empty for fifteen minutes with
+    # nothing to distinguish it from a non-submission.
+    spec = individual()
+    merged = merge_sheet(
+        None,
+        spec,
+        SOLO,
+        {"ada-l": {"submitted": "2026-10-03T22:14+02:00", "days_late": 0}},
+    )
+    assert merged["submissions"]["ada-l"]["info"] == {
+        "submitted": "2026-10-03T22:14+02:00",
+        "days_late": 0,
+    }
+    assert merged["submissions"]["ben-k"]["info"] == {
+        "submitted": None,
+        "days_late": None,
+    }
+
+
 def test_merging_into_nothing_is_the_same_as_a_fresh_sheet():
     spec = individual()
     assert merge_sheet(None, spec, SOLO, {}) == new_sheet(spec, SOLO)

@@ -85,7 +85,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from functools import cache
 from pathlib import Path
@@ -101,7 +101,15 @@ from .course import (
     submission_repo,
 )
 from .fs import copy_tree
-from .gh_contents import dump_csv, file_exists, get_file_content, put_file
+from .gh_contents import (
+    blob_sha,
+    dump_csv,
+    file_exists,
+    get_file_content,
+    get_file_with_sha,
+    is_untouched_stub,
+    put_file,
+)
 from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
 from .log import log, log_err, log_ok, log_skip, log_step
 from .repos import repo_missing
@@ -172,23 +180,98 @@ _STUDENT_TEST_RIGGING = (
     "pytest.py",
 )
 
+# The assignment's own definition. `type`/`autograde`/`tests` drive the autograder;
+# everything below them drives the grading sheet - its shape, its maxima, its header - so a
+# course states each fact once, in the file that already holds the others.
 _DEFAULT_SPEC = {
     "type": "individual",
     "autograde": True,
     "tests": "tests",
+    "title": "",
+    "submit_via": "github",
+    "questions": None,
+    "late_window_days": None,
+    "late_penalty_per_day": None,
 }
+
+SUBMIT_VIA = (
+    "github",
+    "external",
+)  # `external` = handed in off GitHub (Moodle, Kaggle)
 
 
 # --------------------------------------------------------------------------- pure core
 
 
+def _one_of(value: object, allowed: tuple[str, ...], field: str, default: str) -> str:
+    """A closed vocabulary, or the default with a warning. Never the raw value: an
+    unrecognised `submit_via` would silently turn late arithmetic off for a cohort."""
+    text = str(value or "").strip().lower()
+    if text in allowed:
+        return text
+    log_err(
+        f"  ! {GRADING_FILE}: `{field}: {value}` is not one of "
+        f"{'/'.join(allowed)} - using `{default}`"
+    )
+    return default
+
+
+def _questions(value: object) -> dict[str, str] | None:
+    """`questions:` as {name: maximum AS TEXT}.
+
+    Text, because the maxima are only ever DISPLAYED - beside each blank in the sheet, and
+    in its header - and a course that writes `1.5` must read back what it wrote. Anything
+    that is not a mapping is dropped with a warning rather than half-read."""
+    if not isinstance(value, dict):
+        log_err(
+            f"  ! {GRADING_FILE}: `questions:` must be a mapping of name -> points - ignored"
+        )
+        return None
+    questions = {
+        str(name).strip(): ("" if points is None else str(points).strip())
+        for name, points in value.items()
+        if str(name).strip()
+    }
+    return questions or None
+
+
+def _whole_days(value: object) -> int | None:
+    """`late_window_days` as a whole number of days, or None with a warning."""
+    try:
+        return max(0, int(str(value).strip()))
+    except (TypeError, ValueError):
+        log_err(
+            f"  ! {GRADING_FILE}: `late_window_days: {value}` is not a whole number of "
+            f"days - ignored"
+        )
+        return None
+
+
 def parse_grading_spec(text: str) -> dict:
-    """Parse a grading.yml (missing keys fall back to defaults; extras ignored)."""
+    """Parse a grading.yml (missing keys fall back to defaults; extras ignored).
+
+    A malformed VALUE is logged and dropped, never raised and never passed through: this
+    file is hand-edited by faculty and read by an hourly cron, so one bad line costs the
+    field it sits on and nothing else."""
     data = yaml.safe_load(text) if text.strip() else {}
     if not isinstance(data, dict):
         data = {}
     spec = dict(_DEFAULT_SPEC)
-    spec.update({k: data[k] for k in _DEFAULT_SPEC if k in data})
+    spec.update({k: data[k] for k in ("type", "autograde", "tests") if k in data})
+    if "title" in data:
+        spec["title"] = str(data["title"] or "").strip()
+    if "submit_via" in data:
+        spec["submit_via"] = _one_of(
+            data["submit_via"], SUBMIT_VIA, "submit_via", "github"
+        )
+    if "questions" in data:
+        spec["questions"] = _questions(data["questions"])
+    if "late_window_days" in data:
+        spec["late_window_days"] = _whole_days(data["late_window_days"])
+    if "late_penalty_per_day" in data:
+        spec["late_penalty_per_day"] = (
+            str(data["late_penalty_per_day"] or "").strip() or None
+        )
     return spec
 
 
@@ -621,12 +704,50 @@ def mark_graded(cohort_org: str, slug: str) -> bool:
     )
 
 
+@cache
+def _grading_text(course_org: str, template: str) -> str | None:
+    """The template's grading.yml, read ONCE per template per process.
+
+    An hourly tick asks the same template the same question from the scheduler, the sheet
+    refresh and the collection that follows them. Memoising the TEXT (like
+    `schedule._schedule_text`) means every caller still parses its own dict - nothing
+    shared to mutate - and still sees its own warnings. tests/conftest.py clears it."""
+    return get_file_content(course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH)
+
+
+def load_grading_spec(course_org: str, template: str) -> dict:
+    """The assignment's definition from the course template's `solution` branch.
+
+    NEVER raises: it sits under the hourly cron, and a template with no solution branch, no
+    grading.yml, or one that does not parse must leave the rest of the tick running on the
+    defaults rather than take the cohort down with it."""
+    try:
+        text = _grading_text(course_org, template)
+    except RuntimeError as exc:
+        log_err(f"  ! could not read {template}/{GRADING_FILE}: {exc}")
+        return dict(_DEFAULT_SPEC)
+    try:
+        return parse_grading_spec(text or "")
+    except yaml.YAMLError as exc:
+        log_err(
+            f"  ! {template}/{GRADING_FILE} is not valid YAML - using defaults: {exc}"
+        )
+        return dict(_DEFAULT_SPEC)
+
+
 def load_snapshots(cohort_org: str, slug: str) -> dict[str, str] | None:
     """{repo: sha} from this assignment's snapshot CSV, or None if no snapshot was ever
     taken (the two are different: a recorded blank sha means "no submission", while no
     file at all means grading has to fall back to client-supplied commit dates)."""
     content = get_file_content(cohort_org, CONFIG_REPO, snapshot_path(slug))
     return parse_snapshots(content) if content is not None else None
+
+
+def load_snapshot_rows(cohort_org: str, slug: str) -> dict[str, SnapshotRow] | None:
+    """The frozen snapshot in full - the pin AND when it was submitted - or None if no
+    snapshot was ever taken. What the cutoff's grading-sheet write reads."""
+    content = get_file_content(cohort_org, CONFIG_REPO, snapshot_path(slug))
+    return parse_snapshot_rows(content) if content is not None else None
 
 
 class SnapshotResult(Enum):
@@ -727,6 +848,272 @@ def snapshot_assignment(
         f"on/before {deadline}"
     )
     return SnapshotResult.WRITTEN
+
+
+# ------------------------------------------------------------------- the grading sheet
+
+# The sheet is created at handout, filled at the due date, refreshed through the late
+# window and frozen at the cutoff. Only the toolkit's own `info:` moves; see
+# `grades.merge_sheet` for what that guarantees the grader.
+CONTRIBUTIONS_FILE = "CONTRIBUTIONS.md"
+
+
+class SheetPhase(Enum):
+    """Where in the assignment's life this write falls.
+
+    OPEN and FROZEN differ in who owns `info:`; FREEZING is the single write that moves it
+    from one to the other, and it still DERIVES (off the frozen snapshot) - it is the last
+    derivation there will ever be."""
+
+    OPEN = "open"  # before the cutoff: `info:` is re-derived on every write
+    FREEZING = "freezing"  # the cutoff write: derive once more, then stop
+    FROZEN = "frozen"  # after it: `info:` is copied verbatim, whatever we now think
+
+
+def _display_moment(at: datetime | None) -> str:
+    """`Sun 4 Oct 2026 23:59` - a date a grader reads, not one a machine parses. Built by
+    hand rather than with `%-d`, which is a glibc/BSD extension."""
+    if at is None:
+        return ""
+    return f"{at:%a} {at.day} {at:%b} {at.year} {at:%H:%M}"
+
+
+def _cutoff_at(sched: schedule.Schedule, key: str, gspec: dict) -> datetime | None:
+    """When this assignment stops accepting work: an explicit `grading_datetime`, else the
+    due date plus the template's late window."""
+    entry = sched.assignments.get(key)
+    if entry is None:
+        return None
+    if entry.grading_datetime is not None:
+        return entry.grading_datetime
+    days = gspec.get("late_window_days")
+    return entry.due_datetime + timedelta(days=days) if days else entry.due_datetime
+
+
+def sheet_spec(
+    sched: schedule.Schedule, key: str, slug: str, gspec: dict, is_group: bool
+) -> grades.SheetSpec:
+    """What the sheet needs to know about this assignment, gathered from the two files
+    that own it: `grading.yml` on the template's solution branch, and the cohort's
+    `schedule.yml`. Nothing here is written into the sheet as data - it reaches the grader
+    as the comment header, which is regenerated on every write."""
+    entry = sched.assignments.get(key)
+    return grades.SheetSpec(
+        slug=slug,
+        title=gspec["title"] or (entry.title if entry else "") or slug,
+        is_group=is_group,
+        submit_external=gspec["submit_via"] == "external",
+        questions=gspec["questions"],
+        late_window_days=gspec["late_window_days"],
+        late_penalty_per_day=gspec["late_penalty_per_day"],
+        autograde=bool(gspec["autograde"]),
+        due_display=_display_moment(entry.due_datetime if entry else None),
+        cutoff_display=_display_moment(_cutoff_at(sched, key, gspec)),
+    )
+
+
+def _parse_iso(stamp: str) -> datetime | None:
+    """An API timestamp as an aware datetime. GitHub answers `...Z`, which
+    `datetime.fromisoformat` only learnt to read in 3.11."""
+    try:
+        at = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+def submitted_display(submitted_at: str, tz: str | None) -> str:
+    """The pinned commit's time in the COHORT's own clock, to the minute -
+    `2026-10-03T22:14+02:00`.
+
+    To the MINUTE deliberately: with seconds it matches YAML 1.1's timestamp pattern, and
+    `safe_load` would hand the next writer a `datetime` where the grader's file has a
+    string - so the sheet would re-type its own field and churn a commit."""
+    at = _parse_iso(submitted_at)
+    if at is None:
+        return ""
+    return at.astimezone(schedule._tz(tz)).isoformat(timespec="minutes")
+
+
+def days_late(submitted: datetime, due: datetime) -> int:
+    """Whole days started past the due date, floored at 0. A minute late is one day late -
+    the Hertie wording is "per day started", and rounding the other way would make the
+    penalty a function of the hour a student pushed at."""
+    seconds = (submitted - due).total_seconds()
+    return int(-(-seconds // 86400)) if seconds > 0 else 0
+
+
+def _contributions(cohort_org: str, repo: str, ref: str) -> str | None:
+    """CONTRIBUTIONS.md as it stood AT THE PIN - not as it stands now, which is a file the
+    team can still edit after the deadline. Blank when there is nothing to show: no pin, no
+    file, or the seeded stub nobody has written into yet."""
+    if not ref:
+        return None
+    try:
+        text = get_file_content(cohort_org, repo, CONTRIBUTIONS_FILE, ref=ref)
+    except RuntimeError:
+        return None  # a read failure is not a fact about the team
+    if not text or not text.strip() or is_untouched_stub(text):
+        return None
+    return text
+
+
+def _sheet_info(
+    cohort_org: str,
+    targets: list[tuple[str, str, list[str]]],
+    pins: dict[str, tuple[str, str]],
+    due: datetime | None,
+    tz: str | None,
+    *,
+    is_group: bool,
+) -> dict[str, dict]:
+    """The toolkit's facts, per submission unit: when the pinned commit was made, how late
+    that is, and (for a team) what CONTRIBUTIONS.md said at that commit."""
+    out: dict[str, dict] = {}
+    for repo, unit, _members in targets:
+        sha, submitted_at = pins.get(repo, ("", ""))
+        info: dict = {"submitted": None, "days_late": None}
+        when = _parse_iso(submitted_at) if (sha and submitted_at) else None
+        if when is not None:
+            info["submitted"] = submitted_display(submitted_at, tz)
+            info["days_late"] = days_late(when, due) if due is not None else None
+        if is_group:
+            info["contributions"] = _contributions(cohort_org, repo, sha)
+        out[unit] = info
+    return out
+
+
+def _provisional_pins(
+    cohort_org: str, targets: list[tuple[str, str, list[str]]], deadline: str
+) -> dict[str, tuple[str, str]] | None:
+    """Each repo's last commit on or before the cutoff, read WITHOUT writing a snapshot.
+
+    The snapshot file stays write-once and stays the cutoff's job: these pins move with
+    every push through the late window, which is the whole point of refreshing the sheet.
+    None if any lookup failed - a half-read cohort must not rewrite the file."""
+    pins: dict[str, tuple[str, str]] = {}
+    for repo, _unit, _members in targets:
+        pin = _snapshot_sha(cohort_org, repo, deadline)
+        if pin is None:
+            return None
+        pins[repo] = (pin.sha, pin.committed)
+    return pins
+
+
+def _status_line(
+    spec: grades.SheetSpec, phase: SheetPhase, total: int, submitted: int, derived: bool
+) -> str:
+    """The one line of the header that changes hour to hour. It says what a grader wants
+    to know before opening the file: is it worth marking yet, and can it still move?"""
+    if phase is not SheetPhase.OPEN:
+        return f"FROZEN {spec.cutoff_display}".strip()
+    if spec.submit_external:
+        return "OPEN - submitted outside GitHub"
+    line = f"OPEN - {submitted} of {total} submitted"
+    if derived:
+        line += "; late pushes still update `info:` until the cutoff."
+    return line
+
+
+def sync_sheet(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule,
+    key: str,
+    slug: str,
+    template: str,
+    *,
+    is_group: bool,
+    now: datetime,
+    phase: SheetPhase = SheetPhase.OPEN,
+    units: list[tuple[str, list[str]]] | None = None,
+    autograde: dict[str, str] | None = None,
+    dry_run: bool = False,
+) -> bool:
+    """Write `grading_sheets/<slug>.yml` for this assignment, creating it if it is not
+    there and leaving it exactly as it is when nothing has changed.
+
+    ONE function for all three moments - handout, refresh, freeze - because they differ
+    only in what `info:` may say. A separate creator would be a second definition of the
+    sheet's shape, and the two would drift the first time a field was added.
+
+    Nothing is derived before the due date (there is nothing to derive, and a handout must
+    not cost an API call per student), nothing at all for an externally submitted
+    assignment, and nothing once the sheet is FROZEN. The write itself is skipped when the
+    rendered text hashes to what the repo already holds, so the hourly tick is free."""
+    gspec = load_grading_spec(course_org, template)
+    spec = sheet_spec(sched, key, slug, gspec, is_group)
+    path = grades.sheet_path(slug)
+    entry = sched.assignments.get(key)
+    due = entry.due_datetime if entry else None
+
+    targets: list[tuple[str, str, list[str]]] = []
+    if units is None:
+        targets = submission_targets(cohort_org, slug, is_group, key)
+        units = [(unit, members) for _repo, unit, members in targets]
+    if not units:
+        # Nobody onboarded, or no teams yet. `submission_targets` has said which.
+        log(f"  [skip] {path} - no submission units yet; a later tick creates it")
+        return True
+
+    derive = (
+        bool(targets)
+        and not spec.submit_external
+        and (
+            phase is SheetPhase.FREEZING
+            or (phase is SheetPhase.OPEN and due is not None and now >= due)
+        )
+    )
+    info_updates: dict[str, dict] = {}
+    if derive:
+        if phase is SheetPhase.FREEZING:
+            rows = load_snapshot_rows(cohort_org, slug) or {}
+            pins = {r: (row.sha, row.submitted_at) for r, row in rows.items()}
+        else:
+            pins = _provisional_pins(
+                cohort_org, targets, (_cutoff_at(sched, key, gspec) or now).isoformat()
+            )
+            if pins is None:
+                log_err(
+                    f"  ! could not read every submission for {path} - not rewriting"
+                )
+                return False
+        info_updates = _sheet_info(
+            cohort_org, targets, pins, due, sched.timezone, is_group=is_group
+        )
+    for unit, count in (autograde or {}).items():
+        info_updates.setdefault(unit, {})["autograde"] = count
+
+    submitted = sum(1 for info in info_updates.values() if info.get("submitted"))
+    status = _status_line(spec, phase, len(units), submitted, derive)
+    try:
+        found = get_file_with_sha(cohort_org, CONFIG_REPO, path)
+    except RuntimeError as exc:
+        log_err(f"  ! could not read {path}: {exc}")
+        return False
+    old_text, old_sha = found if found else ("", "")
+    sheet = grades.merge_sheet(
+        grades.parse_sheet(old_text) if old_text else None,
+        spec,
+        units,
+        info_updates,
+        frozen=phase is SheetPhase.FROZEN,
+    )
+    content = grades.dump_sheet(sheet, spec, status).encode()
+    if old_sha and blob_sha(content) == old_sha:
+        log_skip(f"{path} (unchanged)")
+        return True
+    if dry_run:
+        log(f"    DRY-RUN  {path} ({status})")
+        return True
+    # The message carries counts, never a handle or a team name: classroom-config is
+    # private, but its commit messages are quoted back in public run logs.
+    if not put_file(
+        cohort_org, CONFIG_REPO, path, content, f"grading sheet: {slug} - {status}"
+    ):
+        return False
+    log_ok(f"{path}: {status}")
+    return True
 
 
 def _pin_commit(
@@ -1100,6 +1487,54 @@ def _grade_target(
         return result
 
 
+def refresh_assignment_sheet(
+    master_org: str,
+    template: str,
+    cohort_org: str,
+    now: datetime | None = None,
+    group: bool = False,
+    dry_run: bool = False,
+) -> int:
+    """Bring one assignment's grading sheet up to date, without freezing anything.
+
+    What the **Collect submissions** button does, and what the hourly refresh does for
+    every assignment past its due date. The snapshot stays the cutoff's job: this only ever
+    re-derives `info:`, so a grader who presses the button an hour after a late push sees
+    it immediately instead of waiting for the tick.
+
+    A sheet whose snapshot already exists is past its cutoff and is written in the FROZEN
+    phase - the facts it holds are the ones the freeze recorded, and no later press may
+    move them."""
+    sched = schedule.load(cohort_org)
+    found = schedule.entry_for_repo(sched, template)
+    key = found[0] if found else assignment_slug(template)
+    slug = schedule.cohort_name(*found) if found else key
+    entry = found[1] if found else None
+    gspec = load_grading_spec(master_org, template)
+    is_group = resolve_is_group(
+        force=group,
+        schedule_type=entry.type if entry else None,
+        template_group=gspec["type"] == "group",
+    )
+    ok = sync_sheet(
+        master_org,
+        cohort_org,
+        sched,
+        key,
+        slug,
+        template,
+        is_group=is_group,
+        now=now or datetime.now(schedule._tz(sched.timezone)),
+        phase=(
+            SheetPhase.FROZEN
+            if load_snapshots(cohort_org, slug) is not None
+            else SheetPhase.OPEN
+        ),
+        dry_run=dry_run,
+    )
+    return 0 if ok else 1
+
+
 def _today_in_cohort_tz(sched: schedule.Schedule) -> str:
     """Today's date in the COHORT's timezone (schedule.yml `timezone`, default
     Europe/Berlin) - the last-resort grading pin for an unscheduled assignment. The
@@ -1160,6 +1595,41 @@ def collect(
         )
         return 1
 
+    # The assignment's definition, read from the API (memoised) rather than from the clone
+    # below, because the grading SHEET must be frozen at the cutoff on every path - and two
+    # of them never reach a clone: a template with no solution branch, and an all-manual
+    # assignment. Both are ordinary states, not failures, and both still have a deadline.
+    gspec = load_grading_spec(master_org, template)
+    entry = found[1] if found else None
+    # group-vs-individual via the single `resolve_is_group` precedence (force -> cohort
+    # schedule `type:` -> template grading.yml -> individual). The entry is the one found
+    # above by course_source_repo - `slug` is the cohort-side NAME, which is
+    # `cohort_dest_repo` when that is set and so is not a key into `sched.assignments`.
+    is_group = resolve_is_group(
+        force=group,
+        schedule_type=entry.type if entry else None,
+        template_group=gspec["type"] == "group",
+    )
+    cutoff = local_deadline(deadline, sched.timezone)
+
+    def freeze_sheet(counts: dict[str, str] | None = None) -> bool:
+        """Seal the grading sheet: one last derivation, off the write-once snapshot, and
+        `info:` is never touched again. Every path out of a passed cutoff runs it, because
+        a sheet left OPEN after the deadline tells a grader marks can still move."""
+        return sync_sheet(
+            master_org,
+            cohort_org,
+            sched,
+            key,
+            slug,
+            template,
+            is_group=is_group,
+            now=cutoff,
+            phase=SheetPhase.FREEZING,
+            autograde=counts,
+            dry_run=dry_run,
+        )
+
     with tempfile.TemporaryDirectory() as sd:
         soldir = Path(sd) / "sol"
         if not clone(master_org, template, soldir, branch=SOLUTION_BRANCH):
@@ -1168,7 +1638,9 @@ def collect(
                 f"tests to run; nothing to collect."
             )
             # Hand-marked, then: say so once in the archive rather than re-deciding it
-            # on every hourly tick (see FIRE-ONCE above).
+            # on every hourly tick (see FIRE-ONCE above). The sheet is still frozen - the
+            # deadline passed whether or not anything machine-grades.
+            freeze_sheet()
             return _record_skip(
                 cohort_org,
                 slug,
@@ -1181,19 +1653,10 @@ def collect(
             log_ok(
                 f"{slug}: autograde disabled in {GRADING_FILE} - all-manual, nothing to collect."
             )
+            freeze_sheet()
             return _record_skip(
                 cohort_org, slug, f"`autograde: false` in {GRADING_FILE}", dry_run
             )
-        # group-vs-individual via the single `resolve_is_group` precedence (force -> cohort
-        # schedule `type:` -> template grading.yml -> individual). The entry is the one found
-        # above by course_source_repo - `slug` is the cohort-side NAME, which is
-        # `cohort_dest_repo` when that is set and so is not a key into `sched.assignments`.
-        entry = found[1] if found else None
-        is_group = resolve_is_group(
-            force=group,
-            schedule_type=entry.type if entry else None,
-            template_group=spec["type"] == "group",
-        )
         tests_src = soldir / str(spec["tests"])
         if not tests_src.is_dir():
             log_err(
@@ -1232,7 +1695,9 @@ def collect(
             f"{'team(s)' if is_group else 'student(s)'} as of {deadline}"
         )
 
-        updates: list[tuple[str, dict[str, str]]] = []
+        # `{unit key: "passed/total"}` - what `info.autograde` shows a grader at the
+        # cutoff. Per UNIT, not per member: a team is graded once, on one commit.
+        scores: dict[str, str] = {}
         # The per-target result archives are held here and written only AFTER the grades CSV
         # is durable (see below), with the `_graded.json` sentinel written last of all. Writing
         # archives mid-loop is what let an aborted run un-grade everyone back when bare
@@ -1293,24 +1758,20 @@ def collect(
                     f"autograde: {slug}/{target_key}",
                 )
             )
-            score = str(result["score"])
-            if is_group:
-                # The team's passing-test count goes in `autograde_score`, the same column
-                # an individual assignment uses - NOT in `team_score`. `team_score` is the
-                # marker's shared team mark, and writing a count there put a machine number
-                # and a human mark in one write-once cell: whichever landed first won, so a
-                # team marked before the grading deadline silently lost its autograde and a
-                # team marked after it found the cell already taken. Every member carries
-                # the team's count, which is what they were graded on.
-                updates += [
-                    (m, {"team": target_key, "autograde_score": score}) for m in members
-                ]
-            else:
-                updates.append((target_key, {"autograde_score": score}))
+            # A count, shown to the grader for information - never a mark by itself, and
+            # never a field a student sees. It reaches them, if at all, through whatever
+            # the grader then types into `score_*`.
+            #
+            # Only a unit with someone to give the mark to counts as graded: a team whose
+            # every handle was rejected by the roster allowlist has nobody, and recording
+            # its count would make the assignment look graded when no student can receive
+            # it. The per-target archive above is still written - the run DID examine it.
+            if members:
+                scores[target_key] = f"{result['score']}/{result['max']}"
 
         if dry_run:
             return 0
-        if not updates and unreachable:
+        if not scores and unreachable:
             # Nothing graded because nothing could be READ - a repo that is not there yet,
             # or an API having a bad afternoon. The run is genuinely unfinished, so it goes
             # red and no record is written: the next tick must be free to try again, and
@@ -1320,7 +1781,7 @@ def collect(
                 f"(tagged above) - nothing graded, and nothing recorded; the next run retries"
             )
             return 1
-        if not updates:
+        if not scores:
             # Every target WAS examined and none of them yielded a grade. Not a failure: the
             # snapshot is frozen, so an hourly retry would see exactly what this run saw and
             # go red for ever. Record the skip and stay green - a deliberate re-grade is
@@ -1349,26 +1810,13 @@ def collect(
             )
             return 1
 
-        path = f"{grades.GRADES_DIR}/{slug}.csv"
-        existing = get_file_content(cohort_org, CONFIG_REPO, path) or ""
-        new_csv = grades.merge_auto(existing, updates)
-        if not put_file(
-            cohort_org,
-            CONFIG_REPO,
-            path,
-            new_csv.encode(),
-            f"autograde: record auto scores for {slug}",
-        ):
-            log_err(f"could not write {path}")
-            return 1
-        # The scores are durably recorded. Only now do the per-target archives go out - and
-        # only if EVERY target was reachable. The `_graded.json` sentinel written after them is
-        # the fire-once marker, so holding it back on any unreachable repo keeps the assignment
-        # eligible for a retry: the next tick regrades (write-once merge_auto leaves the
-        # scores already recorded untouched) and picks up the repo(s) that couldn't be read.
+        # Only if EVERY target was reachable does anything permanent get written. The
+        # `_graded.json` sentinel below is the fire-once marker, so holding it back on any
+        # unreachable repo keeps the assignment eligible for a retry: the next tick regrades
+        # and picks up the repo(s) that could not be read.
         if unreachable:
             log_err(
-                f"{slug}: recorded {len(updates)} score(s), but {len(unreachable)} "
+                f"{slug}: graded {len(scores)} target(s), but {len(unreachable)} "
                 f"submission repo(s) could not be read (tagged above) - NOT marking {slug} "
                 f"machine-graded; the next run retries the missing one(s)"
             )
@@ -1382,16 +1830,22 @@ def collect(
             if not put_file(cohort_org, CONFIG_REPO, apath, acontent, amsg):
                 log_err(f"could not write {apath}")
                 archive_ok = False
-        if not (archive_ok and mark_graded(cohort_org, slug)):
+        # The grading sheet is the record, and freezing it is the LAST write before the
+        # fire-once sentinel. Order matters both ways round: a sentinel written over an
+        # unfrozen sheet would leave the cutoff's facts unrecorded for ever (nothing
+        # re-derives them), and a frozen sheet with no sentinel is simply re-frozen next
+        # tick to identical bytes, which writes nothing.
+        if not (archive_ok and freeze_sheet(scores) and mark_graded(cohort_org, slug)):
             log_err(
-                f"{slug}: recorded {len(updates)} score(s) but a result archive or the "
-                f"fire-once sentinel failed to write - NOT marking machine-graded; retrying"
+                f"{slug}: graded {len(scores)} target(s) but a result archive, the grading "
+                f"sheet or the fire-once sentinel failed to write - NOT marking "
+                f"machine-graded; retrying"
             )
             return 1
     log_ok(
-        f"recorded {len(updates)} auto score(s) -> {path}; "
+        f"graded {len(scores)} target(s) into {grades.sheet_path(slug)}; "
         f"{len(failed_to_run)} failed to run, {len(unreachable)} unreachable "
-        f"(per-target detail in {autograde_path(slug)}/) - faculty add manual marks, then render"
+        f"(per-target detail in {autograde_path(slug)}/) - faculty mark in the sheet"
     )
     return 0
 
@@ -1416,8 +1870,21 @@ def main() -> int:
     parser.add_argument(
         "--group", action="store_true", help="Group assignment (one repo per team)"
     )
+    parser.add_argument(
+        "--refresh-only",
+        action="store_true",
+        help="Refresh the grading sheet now and stop - no snapshot, no grading, no freeze",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if args.refresh_only:
+        return refresh_assignment_sheet(
+            args.master_org,
+            args.template,
+            args.cohort_org,
+            group=args.group,
+            dry_run=args.dry_run,
+        )
     return collect(
         args.master_org,
         args.template,

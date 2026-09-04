@@ -78,16 +78,20 @@ from datetime import datetime, timezone
 from . import cadence, schedule, site, source_digest
 from .assign import provision_all, solution_released
 from .collect import (
+    SheetPhase,
     SnapshotResult,
     collect,
     has_autograde_results,
+    load_grading_spec,
     load_snapshots,
     resolve_is_group,
     snapshot_assignment,
     snapshot_path,
+    sync_sheet,
     template_is_group,
 )
 from .deploy import deploy_many
+from .grades import sheet_path
 from .log import log, log_err, log_ok, log_step
 from .repos import repo_exists
 from .schedule import Release
@@ -466,6 +470,62 @@ def _preflight_sources(
     return 0
 
 
+def _refresh_sheets(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule,
+    now: datetime,
+    dry_run: bool,
+) -> int:
+    """Keep every open assignment's grading sheet current: one pass, after the freeze.
+
+    Runs from the DUE date, not the cutoff, because that is when a grader starts marking
+    and when the first late push lands. An assignment whose cutoff has PASSED is left
+    alone: the freeze pass above owns it and `collect` seals its sheet, so re-deriving
+    here would move facts the freeze has already settled.
+
+    A sheet that does not exist yet is CREATED - an assignment handed out before this pass
+    shipped (or one whose handout ran before the sheet had rows) gets one on the next
+    tick rather than never."""
+    sealed = {
+        schedule.cohort_name(slug, sched.assignments[slug])
+        for slug, _ in due_snapshots(sched, now)
+    }
+    errors = 0
+    for slug, entry in sched.assignments.items():
+        if entry.due_datetime is None or entry.due_datetime > now:
+            continue
+        name = schedule.cohort_name(slug, entry)
+        if name in sealed:
+            continue
+        template = _assignment_template(course_org, slug, entry)
+        if not template:
+            continue  # no template to read the assignment's definition from
+        if dry_run:
+            log(f"    DRY-RUN  refresh {sheet_path(name)}")
+            continue
+        log_step(f"  grading sheet {name}")
+        gspec = load_grading_spec(course_org, template)
+        is_group = resolve_is_group(
+            force=False,
+            schedule_type=entry.type,
+            template_group=gspec["type"] == "group",
+        )
+        if not sync_sheet(
+            course_org,
+            cohort_org,
+            sched,
+            slug,
+            name,
+            template,
+            is_group=is_group,
+            now=now,
+            phase=SheetPhase.OPEN,
+        ):
+            errors += 1
+    return errors
+
+
 def _release_phase(
     course_org: str,
     cohort_org: str,
@@ -474,8 +534,9 @@ def _release_phase(
     dry_run: bool,
     verdict: cadence.Verdict | None = None,
 ) -> int:
-    """Snapshot every passed deadline, pre-flight the plan's sources, and fire everything
-    now due. Returns the error count. No grading: see `_autograde_passed_deadlines`.
+    """Snapshot every passed deadline, refresh every open grading sheet, pre-flight the
+    plan's sources, and fire everything now due. Returns the error count. No grading: see
+    `_autograde_passed_deadlines`.
 
     `verdict` is the cadence reading `main` took once for the whole course; None means this
     invocation does not report lateness at all (see `main`)."""
@@ -518,6 +579,10 @@ def _release_phase(
     # snapshot. Independent of the release plan - a cohort can pin due dates without
     # scheduling a single release.
     errors += _snapshot_passed_deadlines(course_org, cohort_org, sched, now, dry_run)
+    # Then the sheets, in the same pass and straight after: the freeze has just settled
+    # every assignment past its cutoff, and everything else that is past its DUE date
+    # gets its `info:` refreshed here.
+    errors += _refresh_sheets(course_org, cohort_org, sched, now, dry_run)
     # Look AHEAD as well as at what is due: a deploy whose source was never staged fails
     # at its moment, which is far too late to write the thing. This is the only unattended
     # surface that notices - the commit-time validator only ever runs when someone edits

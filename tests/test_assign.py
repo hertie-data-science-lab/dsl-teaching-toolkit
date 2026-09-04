@@ -39,6 +39,92 @@ def _empty_cohort_listing(monkeypatch):
     monkeypatch.setattr(assign, "list_org_repos", lambda org: [])
 
 
+@pytest.fixture(autouse=True)
+def sheet_writes(monkeypatch):
+    """provision_all creates the assignment's grading sheet once the handout has landed.
+
+    Recorded rather than written: what the sheet CONTAINS has its own tests
+    (tests/test_collect.py); what matters here is that a handout produces one, keyed on the
+    same units the repos were made for."""
+    written: list[dict] = []
+    monkeypatch.setattr(
+        assign,
+        "sync_sheet",
+        lambda course, cohort, sched, key, slug, template, **kw: (
+            written.append({"key": key, "slug": slug, "template": template, **kw})
+            or True
+        ),
+    )
+    return written
+
+
+def test_the_grading_sheet_is_created_at_handout_with_one_row_per_student(
+    tmp_path, monkeypatch, sheet_writes
+):
+    # The sheet arrives WITH the repos, complete and blank. Created later - at the first
+    # submission, say - a missing row would be indistinguishable from an unmarked one, and
+    # a grader could not tell who had yet to hand in.
+    path = _roster_file(
+        tmp_path,
+        "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+        "ben@uni.edu,Ben,enrolled,ben-k,43,dsl-def",
+    )
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: "ok")
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+
+    assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
+    )
+
+    ((sheet,),) = (sheet_writes,)
+    assert (sheet["key"], sheet["slug"]) == ("assignment-1", "assignment-1")
+    assert sheet["template"] == "assignment-1-f2026"
+    assert sheet["is_group"] is False
+    # One unit per onboarded student, keyed on the handle - the same key
+    # `collect.submission_targets` uses, so every later refresh writes the same rows.
+    assert sheet["units"] == [("ada-l", ["ada-l"]), ("ben-k", ["ben-k"])]
+
+
+def test_the_handout_sheet_for_a_group_assignment_is_keyed_on_the_team_name(
+    tmp_path, monkeypatch, sheet_writes
+):
+    # NOT on the GitHub team slug the repo grant uses: teams.csv writes the name, and the
+    # name is what `submission_targets` (and therefore every refresh) keys the sheet on.
+    path = _roster_file(
+        tmp_path,
+        "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc",
+        "ben@uni.edu,Ben,enrolled,ben-k,43,dsl-def",
+    )
+    monkeypatch.setattr(
+        assign.teams, "load", lambda org: {"assignment-1": {"alpha": ["ada-l"]}}
+    )
+    monkeypatch.setattr(
+        assign.sync_teams,
+        "vet_groups",
+        lambda groups, participants: [
+            (team, members, []) for team, members in groups.items()
+        ],
+    )
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: "ok")
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+
+    assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=True
+    )
+
+    ((sheet,),) = (sheet_writes,)
+    assert sheet["is_group"] is True
+    assert sheet["units"] == [("alpha", ["ada-l"])]
+
+
 def test_assignment_slug_drops_the_cohort_suffix():
     assert assign.assignment_slug("assignment-1-f2026") == "assignment-1"
     assert assign.assignment_slug("assignment-4-project") == "assignment-4-project"
