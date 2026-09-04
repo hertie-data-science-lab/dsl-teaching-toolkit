@@ -6,8 +6,10 @@ useful guard is: render -> yaml.safe_load -> assert the contract. No network.
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -97,8 +99,10 @@ CHECK_TEAM_TIMEOUT = 5
 JOB_TIMEOUTS = {"grade_assignment": 120, "bootstrap_cohort": 60}
 # The scheduler is the one workflow whose jobs carry DIFFERENT budgets: it releases and
 # grades in two jobs precisely so the two-hour one is never in the release's way, and giving
-# the release job that budget back would hide a hung release for two hours.
-PER_JOB_TIMEOUTS = {"scheduler": {"release": 30, "autograde": 120}}
+# the release job that budget back would hide a hung release for two hours. 60 rather than
+# the ordinary 30 for releasing, because a handout provisions one repo per student across
+# every cohort in series.
+PER_JOB_TIMEOUTS = {"scheduler": {"release": 60, "autograde": 120}}
 
 
 def _trigger(rendered: str) -> dict:
@@ -1032,9 +1036,105 @@ def _assert_reports_a_failure(opener: dict) -> None:
     assert "github.event_name != 'workflow_dispatch'" in opener["if"]
     # A transient search failure must not abort the step BEFORE it files anything (the
     # step runs under `bash -e`, so an unguarded capture would).
-    assert "') || true" in opener["run"]
+    assert ") || true" in opener["run"]
     # `permissions: {}` leaves the ambient token unable to file anything.
     assert opener["env"]["GH_TOKEN"] == "${{ secrets.DSL_BOT_TOKEN }}"
+
+
+# Two OPEN issues whose titles the search cannot tell apart: every word of the release
+# job's title is in the grading job's.
+_OPEN_ISSUES = [
+    {
+        "number": 11,
+        "title": "Scheduled release is failing",
+        "updatedAt": "2020-01-01T00:00:00Z",
+    },
+    {
+        "number": 22,
+        "title": "Scheduled release (autograde Cohort-f2026) is failing",
+        "updatedAt": "2020-01-01T00:00:00Z",
+    },
+]
+
+
+def _run_issue_step(
+    step: dict, work: Path, issues: list[dict], **env: str
+) -> list[str]:
+    """Execute a reporting step's script for real, against a fixed set of OPEN issues.
+
+    `gh` is faked, and the fake applies the `--jq` filter itself because that is what gh
+    does - which is the whole point: the matching semantics live in that filter, and a
+    test that only compares title strings cannot see them. Returns the issue commands the
+    script made, in order."""
+    if not shutil.which("jq"):  # pragma: no cover - present on every CI runner
+        pytest.skip("jq is what applies gh's --jq filter")
+    work.mkdir(parents=True, exist_ok=True)
+    (work / "issues.json").write_text(json.dumps(issues))
+    fake = work / "gh"
+    fake.write_text(
+        "#!/bin/sh\n"
+        'case "$1 $2" in\n'
+        '  "issue close"|"issue comment"|"issue create") echo "$2 $3" >>"$LOG"; exit 0 ;;\n'
+        "esac\n"
+        "while [ $# -gt 0 ]; do\n"
+        '  [ "$1" = "--jq" ] && filter="$2"\n'
+        "  shift\n"
+        "done\n"
+        'jq -r "$filter" "$ISSUES"\n'
+    )
+    fake.chmod(0o755)
+    log = work / "gh.log"
+    log.write_text("")
+    subprocess.run(
+        # `bash -e`, which is how GitHub runs a `run:` block.
+        ["bash", "-e", "-c", step["run"]],
+        env={
+            "PATH": f"{work}:{os.environ['PATH']}",
+            "LOG": str(log),
+            "ISSUES": str(work / "issues.json"),
+            "WORKFLOW": "Scheduled release",
+            "REPO": "Course-Org/.github",
+            "RUN_URL": "https://example.invalid/run/1",
+            **env,
+        },
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [line for line in log.read_text().splitlines() if line]
+
+
+def test_a_recovery_closes_only_the_issue_its_own_job_filed(tmp_path):
+    # `--search` is a WORD match, so the release job's title is a subset of the grading
+    # job's. Without an exact client-side match every green release tick closed the open
+    # grading issues, the still-failing leg refiled with a fresh cc, and the 6h throttle
+    # never engaged - ~96 mentions a day per faulty cohort.
+    jobs = yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]
+    release_closer = next(
+        s for s in jobs["release"]["steps"] if s.get("if") == "success()"
+    )
+    assert _run_issue_step(release_closer, tmp_path / "r", _OPEN_ISSUES) == ["close 11"]
+    grading_closer = next(
+        s for s in jobs["autograde"]["steps"] if s.get("if") == "success()"
+    )
+    assert _run_issue_step(
+        grading_closer, tmp_path / "a", _OPEN_ISSUES, COHORT="Cohort-f2026"
+    ) == ["close 22"]
+
+
+def test_a_failure_files_its_own_issue_rather_than_commenting_on_a_sibling(tmp_path):
+    # The same match on the dedupe lookup. Reading a sibling's issue as "already open"
+    # would leave the release failure reported nowhere - it would comment on a grading
+    # thread nobody watching releases is subscribed to.
+    opener = next(
+        s
+        for s in yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]["release"]["steps"]
+        if "failure()" in s.get("if", "")
+    )
+    grading_only = [i for i in _OPEN_ISSUES if "autograde" in i["title"]]
+    assert _run_issue_step(opener, tmp_path / "x", grading_only) == ["create --repo"]
+    # ...and it comments on the one that IS its own (an old timestamp, so not throttled).
+    assert _run_issue_step(opener, tmp_path / "y", _OPEN_ISSUES) == ["comment 11"]
 
 
 @pytest.mark.parametrize("name", sorted(CRONS))
@@ -1179,9 +1279,13 @@ def test_the_scheduler_serialises_each_job_and_nothing_more():
         "cancel-in-progress": False,
     }
     # Grading queues PER COHORT: the fire-once marker is a cohort-side file, and a pass
-    # over another cohort shares nothing with it.
+    # over another cohort shares nothing with it. A dry-run leg is per run and per cohort,
+    # for the same reason the release job's is.
     assert jobs["autograde"]["concurrency"] == {
-        "group": "scheduled-autograde-${{ matrix.cohort }}",
+        "group": (
+            "${{ inputs.dry_run == true && format('{0}-{1}', github.run_id, "
+            "matrix.cohort) || format('scheduled-autograde-{0}', matrix.cohort) }}"
+        ),
         "cancel-in-progress": False,
     }
     for job in jobs.values():

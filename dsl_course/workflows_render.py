@@ -103,9 +103,11 @@ _RELEASE_CONCURRENCY = """    concurrency:
 
 # Grading is queued PER COHORT: the fire-once autograde marker is a cohort-side file, so two
 # passes over the same cohort can double-grade, while a pass over another cohort shares
-# nothing with it and must never wait.
+# nothing with it and must never wait. A dry-run leg is per run AND per cohort, for the same
+# reason the release job's is: it writes nothing, so it needs no queue, and a queue is what
+# would silently drop an operator's preview.
 _AUTOGRADE_CONCURRENCY = """    concurrency:
-      group: scheduled-autograde-${{ matrix.cohort }}
+      group: ${{ inputs.dry_run == true && format('{0}-{1}', github.run_id, matrix.cohort) || format('scheduled-autograde-{0}', matrix.cohort) }}
       cancel-in-progress: false
 """
 
@@ -162,11 +164,12 @@ _CHECK_TEAM = """  check-team:
 #
 # 30 is the ordinary budget - a handful of API calls, or one repo cloned.
 # 60 covers Bootstrap cohort: it creates and configures a whole org, then converges it.
+# 60 also covers the scheduler's release job: an `assignment` handout provisions one repo
+#     per student, in series, for every cohort at once, so two cohorts handing out on the
+#     same tick can outlast the ordinary budget.
 # 120 covers the two jobs that grade: collect budgets 300s PER submission subprocess and
 #     walks a cohort serially - the manual Grade assignment button, and the scheduler's
-#     autograde job, which is one matrix leg per cohort. The scheduler's release job keeps
-#     the ordinary 30: it copies paths and provisions repos, and the pass that used to need
-#     two hours needed them for the grading that is now its own job.
+#     autograde job, which is one matrix leg per cohort.
 _TIMEOUT_DEFAULT = 30
 _TIMEOUT_BOOTSTRAP = 60
 _TIMEOUT_GRADING = 120
@@ -270,6 +273,13 @@ _DRY_RUN_GATE = (
 # next tick files it again, cc-ing course-admin four times an hour about the one fault. A
 # scoped job appends its own suffix and so keeps its own issue. The default, no suffix, is
 # the title every org already has open, so those still self-close.
+#
+# Which is why both lookups below match the title EXACTLY, client-side. `--search` is a
+# WORD match: "<workflow> is failing" also hits "<workflow> (autograde <cohort>) is
+# failing", so the release job's close loop would close every grading leg's open issue on
+# every green tick, the failing leg would refile with a fresh cc, and the 6h throttle would
+# never engage. The search stays as the cheap server-side narrowing; `select(.title == ..)`
+# is the guard. `source_digest._open_issue` matches client-side for the same reason.
 _SCOPE = "__CRON_ISSUE_SCOPE__"  # replaced per job; see _cron_notice
 _SCOPE_ENV = "__CRON_SCOPE_ENV__"  # any env the scope's shell fragment reads
 
@@ -287,7 +297,7 @@ _CRON_CLOSE_TEMPLATE = (
           title="$WORKFLOW"""
     + _SCOPE
     + """ is failing"
-          for n in $(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number --jq '.[].number'); do
+          for n in $(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number,title --jq ".[] | select(.title == \\"$title\\") | .number"); do
             gh issue close "$n" --repo "$REPO" --comment "Recovered: $RUN_URL"
           done
 """
@@ -318,7 +328,7 @@ _CRON_NOTICE_TEMPLATE = (
           # The step runs under `bash -e`, so an unguarded capture would abort the step on a
           # transient search failure - before the `gh issue create` that is the whole point.
           # No dedupe hit just means we file a fresh issue.
-          existing=$(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number,updatedAt --jq '.[0] | select(.) | "\\(.number) \\(.updatedAt)"') || true
+          existing=$(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number,title,updatedAt --jq "map(select(.title == \\"$title\\"))[0] | select(.) | \\"\\(.number) \\(.updatedAt)\\"") || true
           if [ -z "$existing" ]; then
             gh issue create --repo "$REPO" --title "$title" --body "$body"
             exit 0
@@ -969,7 +979,7 @@ on:
 {_PERMISSIONS_JOBS}  release:
 {_RELEASE_CONCURRENCY}    outputs:
       cohorts: ${{{{ steps.cohorts.outputs.cohorts }}}}
-{_ungated_preamble()}      - name: List the cohorts to grade
+{_ungated_preamble(_TIMEOUT_BOOTSTRAP)}      - name: List the cohorts to grade
         id: cohorts
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
