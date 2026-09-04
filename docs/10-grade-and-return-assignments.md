@@ -28,8 +28,9 @@ private `grades-<handle>` repo, never in their assignment repo.
 
 ## 1. Grade assignment (for autograde only)
 
-**This runs itself.** At each assignment's grading deadline the scheduled cron autogrades it
-**once**, with no manual run required. Run the workflow only for a deliberate re-grade.
+**This runs itself.** At each assignment's grading deadline
+[the scheduler](07-schedule-releases.md#what-drives-the-scheduler) autogrades it **once**, with
+no manual run required. Run the workflow only for a deliberate re-grade.
 
 Course `.github` → **Actions** → **Grade assignment**: `cohort_org`, `course_source_repo`, plus `group`
 (a force-override - an assignment declared `type: group` grades per team anyway)
@@ -41,7 +42,7 @@ and `dry_run` (both default **off**). It runs the hidden tests and writes into
   so your hand-edits stand. For fresh machine scores, blank those cells first.
 - `autograde/<slug>/<handle-or-team>.json` → the raw per-test result, for appeals.
 - `autograde/<slug>/_graded.json` (a completed run) or `_skipped.json` (a decision not to
-  grade) → the **fire-once marker**. While either record exists the cron will not grade this
+  grade) → the **fire-once marker**. While either record exists the scheduler will not grade this
   assignment again; the folder alone is not the marker, so an aborted run still re-grades.
   Delete the folder to let the next tick re-grade.
 

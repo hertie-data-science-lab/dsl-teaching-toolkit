@@ -368,33 +368,38 @@ exam · special_event`"]
 
 ## The scheduler
 
-The intended operating mode: fill `schedule.yml` once and the hourly **Scheduled release** cron
-runs the term. It calls the *same* idempotent functions the manual buttons do, so re-running a
-*release* is a no-op and there is no "already released" state to track. Grading is the exception:
-it must not repeat, so its state lives in the artefacts it writes (see
-[Autograding](#autograding--containment)). Manual `workflow_dispatch` runs default to
-`dry_run=true`; the cron passes no inputs and so releases for real. Like the other crons it is
-ungated - a scheduled run has no actor. It is serialised against itself
-(`concurrency: scheduled-release`, queued not cancelled) because a pass can outlive its hour and
-two overlapping passes could double-fire whatever the first has not yet marked. A course org with
-**no registered cohorts** is a quiet no-op that exits 0 - the normal state between bootstrapping
-a course org and its first cohort.
+The intended operating mode: fill `schedule.yml` once and **Scheduled release** runs the term. It
+calls the *same* idempotent functions the manual buttons do, so re-running a *release* is a no-op
+and there is no "already released" state to track. Grading is the exception: it must not repeat,
+so its state lives in the artefacts it writes (see [Autograding](#autograding--containment)).
+Manual `workflow_dispatch` runs default to `dry_run=true`; a driver-fired run passes no inputs and
+so releases for real. Like the other crons it is ungated - neither a cron nor a
+`repository_dispatch` has an actor to check. A course org with **no registered cohorts** is a
+quiet no-op that exits 0 - the normal state between bootstrapping a course org and its first
+cohort.
 
-Each hourly tick, per cohort:
+It is two jobs, and the concurrency sits on each of them rather than on the workflow. `release`
+holds the group `scheduled-release` (queued, not cancelled), because a pass can outlive a tick and
+two overlapping passes could double-fire whatever the first has not yet marked; a manual dry-run
+takes a per-run group instead, so a queued real run can never cancel it. `autograde` fans out per
+cohort behind `scheduled-autograde-<cohort>`, so a two-hour grading pass holds up neither that
+cohort's releases nor any other cohort's.
+
+Each tick, per cohort:
 
 1. **Freeze passed deadlines** - for every assignment whose grading deadline (`grading_datetime`,
    else `due_datetime`) has passed and has no snapshot yet, record the commit each submission
    repo is at into `classroom-config/snapshots/<name>.csv` (`repo,sha,recorded_at`).
-2. **Autograde those same assignments, once each** - from the course-org template, skipped
-   gracefully when there is no such repo, no `solution` branch, or `autograde: false`.
-3. **Fire every action whose time has arrived** - each deploy at its `deploy_datetime` (else its
+2. **Fire every action whose time has arrived** - each deploy at its `deploy_datetime` (else its
    entry's `event_datetime`), and assignment handouts at `handout_datetime` (synthesised into the
    release plan and re-sorted into time order). Deploys go out as one batch, then handouts, then
    exactly one site sync if anything changed.
+3. **Autograde every frozen assignment, once each** - in the `autograde` job, gated on the
+   snapshot *file* rather than on what this pass just froze, and run from the course-org
+   template; skipped when there is no such repo, no `solution` branch, or `autograde: false`.
 
-Phases 1-2 run before the releases and run whether or not the cohort uses `releases` at all. A
-cohort that raises is caught, logged and OR'd into the exit code, so one bad cohort cannot skip
-the rest.
+Phases 1 and 3 run whether or not the cohort uses `releases` at all. A cohort that raises is
+caught, logged and OR'd into the exit code, so one bad cohort cannot skip the rest.
 
 ## Autograding & containment
 
@@ -407,7 +412,7 @@ success only:
 | autograde | `autograde/<name>/_graded.json` | graded - never again |
 | autograde | `autograde/<name>/_skipped.json` | deliberately not machine-graded, with the reason |
 
-A `_skipped.json` stops a hand-marked assignment being re-cloned and re-decided every hour; both
+A `_skipped.json` stops a hand-marked assignment being re-cloned and re-decided every tick; both
 sentinels are **withheld** when any target was unreachable or an archive write failed, so a
 transient outage retries instead of permanently marking the assignment done. Re-grading means
 deleting the marker.
@@ -695,7 +700,8 @@ Self-contained - workflows and their Python implementation both live in this rep
     - `welcome` - the SYSTEM-owned cohort seeding (onboarding workflows, issue forms,
       `classroom-config` scaffolds, samples and system files), split out so `seed.refresh` can
       re-push it without importing `bootstrap_course` back.
-  - `scheduler` - the hourly cron: freeze passed deadlines, autograde, then fire due releases.
+  - `scheduler` - each tick: freeze passed deadlines, then fire due releases; autograde runs in a
+    separate per-cohort job.
   - `schedule` - parse and validate `schedule.yml` (the three blocks, timezone normalisation,
     dropped-entry reporting, write-once handout records).
   - `cadence` - the scheduler's own watchdog: reads that workflow's run history and files a

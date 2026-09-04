@@ -1,6 +1,6 @@
 # Schedule releases
 
-Write the term's plan into the cohort's `classroom-config/schedule.yml` once, and the scheduled cron runs the term for you - every materials release, every assignment hand-out, every autograde run. 
+Write the term's plan into the cohort's `classroom-config/schedule.yml` once, and the scheduler runs the term for you - every materials release, every assignment hand-out, every autograde run. 
 
 The schedule file can be updated throughout the semester.
 
@@ -231,11 +231,30 @@ Full schema, field by field, see [here](DEPLOYMENT-CHECKLIST.md#scheduleyml).
 ---
 
 
+## What drives the scheduler
+
+**Scheduled release**, in the course org's `.github`, is the workflow that runs your plan. Three things start it:
+
+- a timer on the DSL lab server, which dispatches every course org roughly every 15 minutes - the primary driver;
+- GitHub's own cron at :07/:22/:37/:52, which GitHub delivers only some of the time - a backstop, not the clock;
+- a push to `classroom-config/schedule.yml`, which fires a tick straight away.
+
+The two drivers guard each other, so a time in the plan is honoured to within about 15 minutes: **pin a release ahead of the class that needs it**, not at its start time. The button is there too, for a run on demand. Releasing and grading are separate jobs, grading one per cohort, so a long autograding pass never holds up anyone's release.
+
+If a driver stops, or something due ships late, the scheduler files an issue and closes it again once things recover:
+
+- **Scheduled release: driver health**, in the course org's `.github` - the lab server has stopped dispatching, so only GitHub's unreliable cron is left; tell whoever runs the infrastructure. It ccs your `course-admin` team.
+- **Scheduled release: late delivery**, in the cohort's private `classroom-config` - something due shipped more than an hour late, naming the schedule entries and by how many minutes. It ccs the cohort's `instructors`.
+
+A newly bootstrapped org raises neither until it has seen its first dispatched run. Thresholds and timing: [maintainers.md](reference/maintainers.md#the-schedulers-two-drivers).
+
 ## Changing dates mid-term
 
-Just commit the edit to `classroom-config/schedule.yml` on `main` - the **GitHub web UI is the recommended way** (or edit a local clone → commit → push). The scheduled cron reads whatever is on `main` at each tick, so the change takes effect within about 15 minutes; there is nothing to re-arm or re-deploy. 
+Just commit the edit to `classroom-config/schedule.yml` on `main` - the **GitHub web UI is the recommended way** (or edit a local clone → commit → push). The push fires the scheduler itself, so the change takes effect within minutes; there is nothing to re-arm or re-deploy. 
 
-The one caveat: already-fired **one-shot** actions don't rewind - a release already shipped stays shipped, and a snapshot/autograde that already ran re-runs only if you delete its marker (`snapshots/<slug>.csv` / the `_graded.json` or `_skipped.json` record in `autograde/<slug>/` - deleting the whole folder works too).
+The one caveat: already-fired **one-shot** actions don't rewind. A deadline snapshot, an autograde and a model-solution push each happen once, and re-doing one means deleting its marker - `snapshots/<slug>.csv`, `solutions/<slug>.json`, or the `_graded.json` / `_skipped.json` record in `autograde/<slug>/` (deleting the whole folder works too). A `handout_datetime` the scheduler recorded is likewise never rewritten.
+
+Everything else is **cumulative**: material deploys, assignment handouts, the site sync and the source digest are re-applied at every tick, so a late or lost tick heals itself. A release already shipped stays shipped, because unshipping it would mean rewriting the cohort repo's git history.
 
 ## Verifying your schedule
 
@@ -255,25 +274,25 @@ Three other ways to check, none of them required:
 
 1. **Read the counts.** **Check cohort setup** reports the release plan and term dates, and flags `N entry/ies DROPPED`.
 2. **Validate by hand.** `python3 -m dsl_course.schedule --cohort-org hertie-dsl-demo-f2026 --validate`, or `--file schedule.yml --validate` against a local copy. Without `--validate` it prints the schedule *as parsed*, as JSON.
-3. **Dry-run the cron.** Run **Scheduled release** by hand; `dry_run` defaults to **`true`**, so it lists what *would* open and releases nothing.
+3. **Dry-run it.** Run **Scheduled release** by hand; `dry_run` defaults to **`true`**, so it lists what *would* open and releases nothing.
 
 ## Sources that do not exist yet
 
 A dropped entry is a fault in the *file*. The other way a term quietly fails is a perfectly valid entry pointing at a folder that isn't there - `lectures/04_lecture` when the repo has `lectures/04_week-4`. Nothing detects that until the deploy fires and ships nothing.
 
-So the sources are checked against the course org in two places: **Validate schedule**, whenever you commit a change to `schedule.yml`, and the **scheduled cron**, which is the one that catches a plan written in August and forgotten. Because a term written up front legitimately names folders nobody has authored yet, how loud that is depends on how close the deploy is:
+So the sources are checked against the course org in two places: **Validate schedule**, whenever you commit a change to `schedule.yml`, and the **scheduler**, which is the one that catches a plan written in August and forgotten. Because a term written up front legitimately names folders nobody has authored yet, how loud that is depends on how close the deploy is:
 
 | Distance to the deploy | Severity | What you see |
 |---|---|---|
 | more than 7 days | advisory | a line in the run summary and a yellow annotation against `schedule.yml` in the commit. Nobody is emailed |
 | 7 days or less | warning | the above, plus a **digest issue** in `classroom-config` - so it reaches your inbox rather than waiting to be found |
-| 48 hours or less, or already passed | **error** | the digest issue comments to say it escalated, and the **scheduled cron goes red** |
+| 48 hours or less, or already passed | **error** | the digest issue comments to say it escalated, and the **scheduled run goes red** |
 
 **Validate schedule never goes red for a missing source, at any rung.** Its red X means one thing - an entry you wrote is not in your plan - and it clears when the file next parses cleanly. A missing source is not a broken file and doesn't clear when the file is edited, so it gets its own channel: annotations on the commit, and the digest issue below.
 
 ### The digest issue
 
-One issue per cohort, titled **"schedule.yml: planned releases cite sources not staged in the course org"**, kept current by the scheduled cron:
+One issue per cohort, titled **"schedule.yml: planned releases cite sources not staged in the course org"**, kept current by the scheduler:
 
 - its **body** is rewritten every run and always lists everything currently missing, grouped by severity, each line naming the exact field to edit (`releases.lecture_02` → `course_source_path`). Editing a body doesn't email anyone, so this is free to happen on every tick.
 - it **comments** only when something crosses a rung - a fault appears at warning or above, or escalates. Comments *do* email, and they `cc @<cohort-org>/instructors`, so you hear the transitions and nothing else.
