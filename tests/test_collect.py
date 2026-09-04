@@ -2059,12 +2059,38 @@ def test_a_teams_contributions_are_read_at_the_pin_and_a_stub_reads_blank(monkey
     assert list(team["members"]) == ["ada-l", "ben-k"]
 
 
-def test_an_unwritten_contributions_stub_is_left_blank(monkeypatch):
+def test_an_unwritten_contributions_stub_says_so_rather_than_reading_blank(monkeypatch):
+    # A team that submitted and never wrote the file is a fact a grader acts on (it is
+    # what an individual adjustment turns on). Blank would read as "the toolkit did not
+    # look", so blank is reserved for exactly that.
     written = _sheet_env(
         monkeypatch,
         targets=[("assignment-1-alpha", "alpha", ["ada-l"])],
         pins={"assignment-1-alpha": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
         contributions=f"{gh_contents.STUB_MARKS[0]}\nWho did what?\n",
+    )
+    collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=True,
+        now=datetime(2026, 10, 6, tzinfo=BERLIN),
+    )
+    ((_path, text),) = written
+    assert (
+        grades.parse_sheet(text)["teams"]["alpha"]["info"]["contributions"]
+        == collect.CONTRIBUTIONS_UNFILLED
+    )
+
+
+def test_a_team_with_nothing_pinned_has_a_blank_contributions_cell(monkeypatch):
+    # Nothing was submitted, so there was nothing to have read - which is not the same as
+    # a team that submitted and left the file as we seeded it.
+    written = _sheet_env(
+        monkeypatch, targets=[("assignment-1-alpha", "alpha", ["ada-l"])]
     )
     collect.sync_sheet(
         "Course",
@@ -2344,6 +2370,30 @@ def test_a_dry_run_carries_the_flag_all_the_way_to_the_issue(monkeypatch):
     posted = _receipt_env(monkeypatch)
     _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN), dry_run=True)
     assert all(dry for _repo, _body, dry in posted)
+
+
+def test_an_unchanged_tick_posts_no_updated_receipt(monkeypatch):
+    # The refresh runs four times an hour. When the merged sheet is byte-identical to what
+    # the repo already holds, nothing has moved and there is nothing to tell anyone - but
+    # the once-only `due` receipt still has to reach the student who never submitted.
+    pins = {"assignment-1-ada-l": collect.Pin(SHA, "2026-10-03T20:14:00Z")}
+    written = _sheet_env(monkeypatch, targets=SOLO_TARGETS, pins=pins)
+    _receipt_env(monkeypatch)
+    _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
+    ((_path, settled),) = written
+
+    written.clear()
+    _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS,
+        pins=pins,
+        existing=(settled, gh_contents.blob_sha(settled.encode())),
+    )
+    posted = _receipt_env(monkeypatch)
+    _refresh(monkeypatch, now=datetime(2026, 10, 5, 0, 15, tzinfo=BERLIN))
+    assert written == []  # nothing rewritten
+    assert [repo for repo, _b, _d in posted] == ["assignment-1-ben-k"]
+    assert posted[0][1].startswith("**No submission recorded**")
 
 
 def test_the_public_log_counts_receipts_and_names_no_submission_repo(

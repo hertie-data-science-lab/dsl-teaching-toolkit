@@ -806,18 +806,31 @@ _FEEDBACK_LABEL_DESCRIPTION = (
 )
 
 
+def late_policy(spec) -> str:
+    """`accepted until Sunday 11 October 2026, 23:59 (Europe/Berlin), at 10% of your grade
+    per day started.` - or "" when nothing is accepted after the deadline.
+
+    ONE sentence for both places a student meets the policy - the Feedback issue at handout
+    and every receipt after it. Two spellings of the same rule is how a student ends up
+    reading two different deadlines.
+
+    The rate TRAILS the date rather than bracketing it: `cutoff_long` already ends in the
+    cohort's timezone, and two parentheticals in a row read as a typo."""
+    if spec.submit_external or not (spec.late_window_days and spec.cutoff_long):
+        return ""
+    rate = (
+        f", at {spec.late_penalty_per_day} of your grade per day started"
+        if spec.late_penalty_per_day
+        else ""
+    )
+    return f"accepted until {spec.cutoff_long}{rate}."
+
+
 def feedback_body(
     spec, team: str = "", members: tuple[str, ...] | list[str] = ()
 ) -> str:
     """The Feedback issue's body for one submission repo, from the assignment's own spec."""
-    late = ""
-    if not spec.submit_external and spec.late_window_days and spec.cutoff_long:
-        rate = (
-            f", at {spec.late_penalty_per_day} of your grade per day started"
-            if spec.late_penalty_per_day
-            else ""
-        )
-        late = f"accepted until {spec.cutoff_long}{rate}."
+    late = late_policy(spec)
     # Handles, not names: this body is written from the provisioning path, which knows the
     # repo's collaborators and not the roster's display names - and a handle is what the
     # repo shows the team anyway.
@@ -834,14 +847,8 @@ def feedback_body(
 
 def late_line(spec) -> str:
     """The late policy as the sentence a receipt carries, or "" when there is no window."""
-    if spec.submit_external or not (spec.late_window_days and spec.cutoff_long):
-        return ""
-    # The rate TRAILS the date rather than bracketing it: `cutoff_long` already ends in
-    # the cohort's timezone, and two parentheticals in a row read as a typo.
-    rate = (
-        f", at {spec.late_penalty_per_day} per day" if spec.late_penalty_per_day else ""
-    )
-    return f"Late work is accepted until {spec.cutoff_long}{rate}."
+    policy = late_policy(spec)
+    return f"Late work is {policy}" if policy else ""
 
 
 def penalty_display(spec, days: int) -> str:

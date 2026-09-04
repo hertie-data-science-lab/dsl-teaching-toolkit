@@ -56,6 +56,20 @@ def test_the_issue_body_for_an_individual_repo():
     ]
 
 
+def test_the_issue_and_the_receipts_quote_one_late_policy():
+    # Two spellings of one rule is how a student ends up reading two different deadlines.
+    policy = "accepted until Sunday 11 October 2026, 23:59 (Europe/Berlin), at 10% of your grade per day started."
+    assert grades.late_policy(spec()) == policy
+    assert f"**Late work:** {policy}" in grades.feedback_body(spec())
+    assert grades.late_line(spec()) == f"Late work is {policy}"
+
+
+def test_an_assignment_with_no_late_window_quotes_no_policy():
+    assert grades.late_policy(spec(late_window_days=None)) == ""
+    assert grades.late_line(spec(late_window_days=None)) == ""
+    assert "**Late work:**" not in grades.feedback_body(spec(late_window_days=None))
+
+
 def test_the_issue_body_for_a_team_repo_names_the_team_and_asks_for_contributions():
     body = grades.feedback_body(
         spec(is_group=True), "team-alpha", ["ada-l", "ben-k", "chen-w"]

@@ -955,10 +955,17 @@ def days_late(submitted: datetime, due: datetime) -> int:
     return int(-(-seconds // 86400)) if seconds > 0 else 0
 
 
+CONTRIBUTIONS_UNFILLED = "(not filled in)"
+
+
 def _contributions(cohort_org: str, repo: str, ref: str) -> str | None:
     """CONTRIBUTIONS.md as it stood AT THE PIN - not as it stands now, which is a file the
-    team can still edit after the deadline. Blank when there is nothing to show: no pin, no
-    file, or the seeded stub nobody has written into yet."""
+    team can still edit after the deadline.
+
+    A team that submitted but never wrote the file gets `(not filled in)`, not a blank: the
+    blank would read as "the toolkit did not look", and whether the team said who did what
+    is exactly the thing a grader is deciding an individual adjustment on. Blank is reserved
+    for "there is nothing to have read" - no pin, or a read that failed."""
     if not ref:
         return None
     try:
@@ -966,7 +973,7 @@ def _contributions(cohort_org: str, repo: str, ref: str) -> str | None:
     except RuntimeError:
         return None  # a read failure is not a fact about the team
     if not text or not text.strip() or is_untouched_stub(text):
-        return None
+        return CONTRIBUTIONS_UNFILLED
     return text
 
 
@@ -1041,6 +1048,7 @@ def _post_receipts(
     tz: str | None,
     due: datetime | None,
     dry_run: bool,
+    changed: bool = True,
 ) -> None:
     """Tell each student what we recorded for them, in their own repo's Feedback issue.
 
@@ -1060,7 +1068,7 @@ def _post_receipts(
         shown = submitted_display(submitted_at, tz) if when is not None else ""
         was = ((previous.get(unit) or {}).get(grades.INFO_KEY) or {}).get("submitted")
         event = _receipt_event(phase, sha, was, shown)
-        if event is None:
+        if event is None or (not changed and event == course.RECEIPT_UPDATED):
             continue
         body = grades.receipt(
             spec,
@@ -1181,18 +1189,6 @@ def sync_sheet(
         info_updates = _sheet_info(
             cohort_org, targets, pins, due, sched.timezone, is_group=is_group
         )
-    if derive and receipts:
-        _post_receipts(
-            cohort_org,
-            spec,
-            targets,
-            pins,
-            previous,
-            phase,
-            sched.timezone,
-            due,
-            dry_run,
-        )
     for unit, count in (autograde or {}).items():
         info_updates.setdefault(unit, {})["autograde"] = count
 
@@ -1206,20 +1202,38 @@ def sync_sheet(
         frozen=phase is SheetPhase.FROZEN,
     )
     content = grades.dump_sheet(sheet, spec, status).encode()
-    if old_sha and blob_sha(content) == old_sha:
+    changed = not (old_sha and blob_sha(content) == old_sha)
+    written = True
+    if not changed:
         log_skip(f"{path} (unchanged)")
-        return True
-    if dry_run:
+    elif dry_run:
         log(f"    DRY-RUN  {path} ({status})")
-        return True
-    # The message carries counts, never a handle or a team name: classroom-config is
-    # private, but its commit messages are quoted back in public run logs.
-    if not put_file(
-        cohort_org, CONFIG_REPO, path, content, f"grading sheet: {slug} - {status}"
-    ):
-        return False
-    log_ok(f"{path}: {status}")
-    return True
+    else:
+        # The message carries counts, never a handle or a team name: classroom-config is
+        # private, but its commit messages are quoted back in public run logs.
+        written = put_file(
+            cohort_org, CONFIG_REPO, path, content, f"grading sheet: {slug} - {status}"
+        )
+        if written:
+            log_ok(f"{path}: {status}")
+    # AFTER the record: a receipt promises something the sheet is supposed to hold, so the
+    # sheet lands first. An unchanged tick posts nothing new to say - only the once-only
+    # `due` and `frozen` events, which have to fire whether or not a pin moved (a student
+    # who never submitted has an unchanging sheet and is owed both).
+    if derive and receipts:
+        _post_receipts(
+            cohort_org,
+            spec,
+            targets,
+            pins,
+            previous,
+            phase,
+            sched.timezone,
+            due,
+            dry_run,
+            changed=changed,
+        )
+    return written
 
 
 def _pin_commit(
