@@ -163,15 +163,15 @@ _CHECK_TEAM = """  check-team:
 # healthy run is an outage, not a safety net.
 #
 # 30 is the ordinary budget - a handful of API calls, or one repo cloned.
-# 60 covers Bootstrap cohort: it creates and configures a whole org, then converges it.
-# 60 also covers the scheduler's release job: an `assignment` handout provisions one repo
-#     per student, in series, for every cohort at once, so two cohorts handing out on the
-#     same tick can outlast the ordinary budget.
+# 60 covers the two jobs that write across MANY repos in series: Bootstrap cohort, which
+#     creates and configures a whole org and then converges it, and the scheduler's release
+#     job, whose `assignment` handout provisions one repo per student for every cohort at
+#     once - so two cohorts handing out on the same tick outlast the ordinary budget.
 # 120 covers the two jobs that grade: collect budgets 300s PER submission subprocess and
 #     walks a cohort serially - the manual Grade assignment button, and the scheduler's
 #     autograde job, which is one matrix leg per cohort.
 _TIMEOUT_DEFAULT = 30
-_TIMEOUT_BOOTSTRAP = 60
+_TIMEOUT_MANY_REPOS = 60
 _TIMEOUT_GRADING = 120
 
 
@@ -280,7 +280,7 @@ _DRY_RUN_GATE = (
 # every green tick, the failing leg would refile with a fresh cc, and the 6h throttle would
 # never engage. The search stays as the cheap server-side narrowing; `select(.title == ..)`
 # is the guard. `source_digest._open_issue` matches client-side for the same reason.
-_SCOPE = "__CRON_ISSUE_SCOPE__"  # replaced per job; see _cron_notice
+_SCOPE = "__CRON_ISSUE_SCOPE__"  # replaced per job; see _fill_scope
 _SCOPE_ENV = "__CRON_SCOPE_ENV__"  # any env the scope's shell fragment reads
 
 _CRON_CLOSE_TEMPLATE = (
@@ -350,7 +350,7 @@ _CRON_NOTICE_TEMPLATE = (
 )
 
 
-def _fill_scope(template: str, scope: str, scope_env: str) -> str:
+def _fill_scope(template: str, scope: str = "", scope_env: str = "") -> str:
     """Bind one job's issue scope into a reporting template.
 
     `scope` is a SHELL fragment, so it may name an env var (`$COHORT`) and `scope_env` is
@@ -361,26 +361,17 @@ def _fill_scope(template: str, scope: str, scope_env: str) -> str:
     )
 
 
-def _cron_notice(scope: str = "", scope_env: str = "") -> str:
-    """The report-and-close pair for one unattended job."""
-    return _fill_scope(_CRON_NOTICE_TEMPLATE, scope, scope_env)
-
-
-def _cron_close(scope: str = "", scope_env: str = "") -> str:
-    """The close half alone - for a manually-runnable job whose workflow's notice lives in
-    a schedule-gated one."""
-    return _fill_scope(_CRON_CLOSE_TEMPLATE, scope, scope_env)
-
-
 # The unscoped pair, for the workflows with a single unattended job.
-_CRON_NOTICE = _cron_notice()
-_CRON_CLOSE = _cron_close()
+_CRON_NOTICE = _fill_scope(_CRON_NOTICE_TEMPLATE)
+_CRON_CLOSE = _fill_scope(_CRON_CLOSE_TEMPLATE)
 
 # The scheduler's grading job reports PER COHORT: its matrix legs run in parallel, so on a
 # shared title a green cohort would close a red cohort's open issue. A cohort org name is
 # not per-person data, so it may be said out loud in a public repo's issue title.
-_AUTOGRADE_NOTICE = _cron_notice(
-    "autograde $COHORT", "          COHORT: ${{ matrix.cohort }}\n"
+_AUTOGRADE_NOTICE = _fill_scope(
+    _CRON_NOTICE_TEMPLATE,
+    "autograde $COHORT",
+    "          COHORT: ${{ matrix.cohort }}\n",
 )
 
 
@@ -923,7 +914,7 @@ on:
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   bootstrap-cohort:
-{_run_preamble(_TIMEOUT_BOOTSTRAP)}      - name: Bootstrap + register + refresh
+{_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Bootstrap + register + refresh
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
@@ -979,7 +970,7 @@ on:
 {_PERMISSIONS_JOBS}  release:
 {_RELEASE_CONCURRENCY}    outputs:
       cohorts: ${{{{ steps.cohorts.outputs.cohorts }}}}
-{_ungated_preamble(_TIMEOUT_BOOTSTRAP)}      - name: List the cohorts to grade
+{_ungated_preamble(_TIMEOUT_MANY_REPOS)}      - name: List the cohorts to grade
         id: cohorts
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}

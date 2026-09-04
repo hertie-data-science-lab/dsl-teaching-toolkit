@@ -92,8 +92,8 @@ SEED_REFRESH_GROUPED = {"refresh"}
 
 # Job time budgets, per workflow, where they differ from the ordinary 30 minutes. A
 # timeout that fires on a HEALTHY run is an outage, not a safety net: grading budgets 300s
-# per submission subprocess and walks a cohort serially (and the hourly scheduler does that
-# for every cohort), and Bootstrap cohort configures a whole org before converging it.
+# per submission subprocess and walks a cohort serially, and Bootstrap cohort configures a
+# whole org before converging it.
 DEFAULT_TIMEOUT = 30
 CHECK_TEAM_TIMEOUT = 5
 JOB_TIMEOUTS = {"grade_assignment": 120, "bootstrap_cohort": 60}
