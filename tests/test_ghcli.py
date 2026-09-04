@@ -183,8 +183,32 @@ def test_reads_are_never_paced(monkeypatch):
         (("api", "--method", "POST", "orgs/O/repos"), True),
         (("api", "-X", "delete", "repos/O/R/collaborators/x"), True),
         (("api", "--method", "PATCH", "repos/O/R"), True),
+        (("api", "--method=PUT", "repos/O/R/contents/a.md"), True),
         (("api", "--paginate", "repos/O/R/collaborators"), False),
         (("repo", "clone", "O/R"), False),
+        # gh sends POST as soon as a field is passed: `repos.ensure_label` writes a label
+        # with no `--method` anywhere in its argv.
+        (("api", "repos/O/R/labels", "--field", "name=x"), True),
+        (("api", "repos/O/R/labels", "-f", "name=x"), True),
+        (("api", "repos/O/R/issues", "--input", "-"), True),
+        # ... but a method that is spelt out wins over the fields beside it.
+        (("api", "--method", "GET", "repos/O/R", "-f", "per_page=1"), False),
+        # Porcelain verbs, which carry no method at all.
+        (("issue", "comment", "5", "--repo", "O/R", "--body", "hi"), True),
+        (("issue", "create", "--repo", "O/R"), True),
+        (("workflow", "run", "deploy.yml", "--repo", "O/R"), True),
+        (("secret", "set", "X", "--org", "O"), True),
+        (("repo", "delete", "O/R", "--yes"), True),
+        (("label", "create", "dsl-feedback", "-R", "O/R"), True),
+        (("team", "list"), True),  # every verb on these two nouns writes
+        (("org", "list"), True),
+        (("issue", "list", "--repo", "O/R"), False),
+        (("repo", "view", "O/R"), False),
+        (("run", "view", "12", "-R", "O/R", "--log"), False),
+        (("workflow", "view", "deploy.yml", "-R", "O/R"), False),
+        # One endpoint, both directions - the document decides.
+        (("api", "graphql", "-f", "query=query { viewer { login } }"), False),
+        (("api", "graphql", "-f", "query=mutation { addStar }"), True),
     ],
 )
 def test_which_argv_shapes_count_as_a_write(args, mutating):
@@ -415,3 +439,65 @@ def test_other_git_commands_are_untouched(monkeypatch, ran):
         ghcli.git("-C", "/tmp/wd", "clone", "https://github.com/hertie-ml-26/m")[0] == 0
     )
     assert ran, "the fence is about writes, not about reading somebody else's repo"
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("api", "repos/{org}/r/labels", "--field", "name=dsl-feedback"),
+        ("issue", "comment", "5", "--repo", "{org}/r", "--body", "graded"),
+        ("workflow", "run", "deploy.yml", "--repo", "{org}/site"),
+        ("secret", "set", "DSL_BOT_TOKEN", "--org", "{org}"),
+        ("repo", "delete", "{org}/r", "--yes"),
+    ],
+)
+def test_the_fence_reaches_every_write_shape(monkeypatch, ran, args):
+    # Each of these used to slip past both the fence and the write pacer, because neither
+    # could see a write that does not spell `--method`.
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    assert ghcli.gh(*(a.format(org="demo-f2026") for a in args))[0] == 0
+    assert ran, "an allowed write never reached the process boundary"
+    assert len(ghcli._write_times) == 1, "the write pacer did not count it"
+    with pytest.raises(RuntimeError, match="hertie-ml-26"):
+        ghcli.gh(*(a.format(org="hertie-ml-26") for a in args))
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("api", "repos/hertie-ml-26/r/labels"),
+        ("api", "--method", "GET", "repos/hertie-ml-26/r"),
+        ("issue", "list", "--repo", "hertie-ml-26/r"),
+        ("repo", "view", "hertie-ml-26/r"),
+        ("run", "view", "12", "-R", "hertie-ml-26/r", "--log"),
+        ("api", "graphql", "-f", "query=query { viewer { login } }"),
+    ],
+)
+def test_read_shapes_still_pass_the_fence(monkeypatch, ran, args):
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    assert ghcli.gh(*args)[0] == 0
+    assert ran, "a read outside the allowlist must still run"
+    assert not ghcli._write_times, "a read must not be paced"
+
+
+def test_an_org_named_only_by_a_flag_is_still_attributed():
+    # `gh secret set --org <name>` is the one write whose target has no `/` in it, so the
+    # positional owner patterns cannot see it - and an unattributed write is refused.
+    assert ghcli._argv_owners(("secret", "set", "X", "--org", "demo-f2026")) == {
+        "demo-f2026"
+    }
+    assert ghcli._argv_owners(("issue", "comment", "5", "-R", "demo-f2026/r")) == {
+        "demo-f2026"
+    }
+    assert ghcli._argv_owners(("repo", "view", "--repo=demo-f2026/r")) == {"demo-f2026"}
+
+
+def test_a_graphql_mutation_is_refused_because_it_names_no_org(monkeypatch, ran):
+    # A GraphQL document names its target inside the query text, not in the argv, so the
+    # fence cannot attribute it - and an unattributable write is refused rather than
+    # waved through. Nothing in the toolkit sends one; if something ever does, this is
+    # where it will be told to say which org it means.
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    with pytest.raises(RuntimeError, match="no org at all"):
+        ghcli.gh("api", "graphql", "-f", "query=mutation { addStar }")
+    assert ran == []

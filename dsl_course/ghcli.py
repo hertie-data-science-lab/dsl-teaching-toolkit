@@ -116,12 +116,75 @@ _now = time.monotonic
 _sleep = time.sleep
 
 
+# `gh api` sends POST as soon as a field is passed, so an argv with no `--method` at all
+# can still be a write - `repos.ensure_label` is exactly that call.
+_FIELD_FLAGS = frozenset({"-f", "-F", "--field", "--raw-field", "--input"})
+
+# The porcelain verbs that write. The toolkit reaches for these wherever the REST shape
+# would be worse (an issue comment, a workflow dispatch, a secret), and they carry no
+# `--method` for the check above to see. Everything absent from this table - `list`,
+# `view`, `download`, `clone` - is a read.
+_WRITE_VERBS = {
+    "issue": frozenset({"create", "comment", "close", "reopen", "edit", "delete"}),
+    "repo": frozenset({"create", "delete", "edit", "fork", "rename"}),
+    "workflow": frozenset({"run", "enable", "disable"}),
+    "secret": frozenset({"set", "delete"}),
+    "variable": frozenset({"set", "delete"}),
+    "release": frozenset({"create", "delete"}),
+    "pr": frozenset({"create", "merge", "close", "edit"}),
+    "label": frozenset({"create", "edit", "delete"}),
+}
+
+# Two nouns where every verb is treated as a write: membership and team shape are the
+# permissions of the estate, and a read misfiled here costs a pause, not a repo.
+_ALWAYS_WRITE = frozenset({"team", "org"})
+
+
+def _split_flags(args: tuple[str, ...]) -> tuple[str, ...]:
+    """`--method=PUT` as two tokens, so one pass reads either spelling.
+
+    Only FLAGS are split: `--field name=x` leaves `name=x` alone, which is what the owner
+    patterns and the mutating-method test both need to see whole."""
+    out: list[str] = []
+    for arg in args:
+        head, sep, value = arg.partition("=")
+        out.extend([head, value] if sep and head.startswith("-") else [arg])
+    return tuple(out)
+
+
+def _api_is_mutating(flat: tuple[str, ...], words: list[str]) -> bool:
+    """Whether a `gh api` argv writes."""
+    declared = [v.upper() for f, v in pairwise(flat) if f in ("--method", "-X")]
+    if declared:
+        return any(method in _MUTATING_METHODS for method in declared)
+    if words[1:2] == ["graphql"]:
+        # One endpoint, both directions: what a GraphQL call does is in the document, not
+        # in the verb. A read whose text happens to say `mutation` is refused, which is
+        # the safe way round.
+        return any("mutation" in arg for arg in flat)
+    return any(arg in _FIELD_FLAGS for arg in flat)
+
+
 def _is_mutating(args: tuple[str, ...]) -> bool:
-    """Whether this argv is a write - `gh api --method`/`-X` naming a mutating verb."""
-    return any(
-        flag in ("--method", "-X") and value.upper() in _MUTATING_METHODS
-        for flag, value in pairwise(args)
-    )
+    """Whether this argv is a write - the one test the pacer and the org fence share.
+
+    Three shapes, because `gh` has three ways of writing: an `api` call with a mutating
+    `--method` (or with fields and no method at all, which gh sends as POST), a porcelain
+    subcommand whose verb writes, and a `graphql` document containing a mutation. It used
+    to ask only about `--method`, so a `gh issue comment` was neither paced nor fenced.
+
+    Pure: argv in, verdict out, no environment read."""
+    flat = _split_flags(args)
+    words = [arg for arg in flat if not arg.startswith("-")]
+    if not words:
+        return False
+    command = words[0]
+    if command == "api":
+        return _api_is_mutating(flat, words)
+    if command in _ALWAYS_WRITE:
+        return True
+    verb = words[1] if len(words) > 1 else ""
+    return verb in _WRITE_VERBS.get(command, frozenset())
 
 
 def _pace_writes(args: tuple[str, ...]) -> None:
@@ -164,6 +227,7 @@ _ORG_ALLOWLIST_ENV = "DSL_ORG_ALLOWLIST"
 _API_OWNER = re.compile(r"^(?:repos|orgs)/([A-Za-z0-9._-]+)/")
 _NAME_WITH_OWNER = re.compile(r"^([A-Za-z0-9._-]+)/[A-Za-z0-9._-]+$")
 _OWNER_FIELD = re.compile(r"^owner=([A-Za-z0-9._-]+)$")
+_OWNER_NAME = re.compile(r"[A-Za-z0-9._-]+")
 
 # `https://github.com/<owner>/<repo>`, `git@github.com:<owner>/<repo>`, and the
 # `https://x-access-token:***@github.com/<owner>/<repo>` form gh's credential helper writes.
@@ -180,7 +244,16 @@ def org_allowlist() -> frozenset[str] | None:
 def _argv_owners(args: tuple[str, ...]) -> set[str]:
     """Every org this argv names as a target."""
     owners = set()
-    for arg in args:
+    flat = _split_flags(args)
+    for flag, value in pairwise(flat):
+        # `-R <owner>/<repo>` is already read positionally by the loop below; it is spelt
+        # out here so the intent survives a change to the patterns. `--org <name>` is the
+        # one that is NOT, having no `/` in it - `gh secret set --org` is a real write.
+        if flag in ("-R", "--repo") and (match := _NAME_WITH_OWNER.match(value)):
+            owners.add(match.group(1))
+        elif flag == "--org" and _OWNER_NAME.fullmatch(value):
+            owners.add(value)
+    for arg in flat:
         if arg.startswith("-"):
             continue
         for pattern in (_API_OWNER, _NAME_WITH_OWNER, _OWNER_FIELD):
