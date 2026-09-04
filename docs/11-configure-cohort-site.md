@@ -57,7 +57,7 @@ every site pins at a fixed ref.
 |---|---|
 | Push to `classroom-config/schedule.yml` or `people.yml` | immediate |
 | **Release materials** / **Release assignment** workflow | immediate, in the same run |
-| A scheduled release firing | within that tick ([the scheduler](07-schedule-releases.md#what-drives-the-scheduler)) |
+| A scheduled release firing | within that tick ([about every 15 minutes](07-schedule-releases.md#what-drives-the-scheduler)) |
 | Push to course org `.github/dsl-course.yml` | immediate - and re-syncs **every** cohort site |
 | **Sync site** workflow, course org `.github` | on demand |
 | Anything else (e.g. editing a file inside an already-released repo) | the daily cron, **06:41 UTC** |

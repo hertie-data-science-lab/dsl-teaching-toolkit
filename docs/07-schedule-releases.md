@@ -237,24 +237,24 @@ Full schema, field by field, see [here](DEPLOYMENT-CHECKLIST.md#scheduleyml).
 
 - a timer on the DSL lab server, which dispatches every course org roughly every 15 minutes - the primary driver;
 - GitHub's own cron at :07/:22/:37/:52, which GitHub delivers only some of the time - a backstop, not the clock;
-- a push to `classroom-config/schedule.yml`, which fires that cohort's next tick straight away.
+- a push to `classroom-config/schedule.yml`, which fires a tick straight away.
 
-The two drivers are independent and each guards the other. A time in the plan is honoured to within about 15 minutes, so **pin a release ahead of the class that needs it**, not at its start time. The button is there too; manual runs default to `dry_run=true`.
+The two drivers guard each other, so a time in the plan is honoured to within about 15 minutes: **pin a release ahead of the class that needs it**, not at its start time. The button is there too, for a run on demand. Releasing and grading are separate jobs, grading one per cohort, so a long autograding pass never holds up anyone's release.
 
-Each tick releases first and grades separately, per cohort, so a long autograding pass never holds up anyone's release.
+If a driver stops, or something due ships late, the scheduler files an issue and closes it again once things recover:
 
-If a driver stops, or something due ships late, the scheduler files it as an issue and closes it again once things recover:
-
-- **Scheduled release: driver health**, in the course org's `.github` - no timer-driven run for two hours, so the lab server is down; it notes a 24-hour silence from GitHub's cron too. It ccs your `course-admin` team.
+- **Scheduled release: driver health**, in the course org's `.github` - nothing has dispatched a run for two hours, so the lab server is down; it notes a 24-hour silence from GitHub's cron too. It ccs your `course-admin` team.
 - **Scheduled release: late delivery**, in the cohort's private `classroom-config` - something due shipped more than an hour late, naming the schedule entries and by how many minutes. It ccs the cohort's `instructors`.
 
-A newly bootstrapped org raises neither until it has seen its first timer-driven run.
+A newly bootstrapped org raises neither until it has seen its first dispatched run.
 
 ## Changing dates mid-term
 
 Just commit the edit to `classroom-config/schedule.yml` on `main` - the **GitHub web UI is the recommended way** (or edit a local clone → commit → push). The push fires the scheduler itself, so the change takes effect within minutes; there is nothing to re-arm or re-deploy. 
 
-The one caveat: already-fired **one-shot** actions don't rewind. A deadline snapshot, an autograde, a model-solution push and the `handout_datetime` written back into `schedule.yml` each happen once, and re-doing one means deleting its marker (`snapshots/<slug>.csv`, `solutions/<slug>.json`, or the `_graded.json` / `_skipped.json` record in `autograde/<slug>/` - deleting the whole folder works too). Everything else is **cumulative**: material deploys, assignment handouts, the site sync and the source digest are re-applied at every tick, so a late or lost tick heals itself - and a release already shipped stays shipped, because unshipping it would mean rewriting the cohort repo's git history.
+The one caveat: already-fired **one-shot** actions don't rewind. A deadline snapshot, an autograde and a model-solution push each happen once, and re-doing one means deleting its marker - `snapshots/<slug>.csv`, `solutions/<slug>.json`, or the `_graded.json` / `_skipped.json` record in `autograde/<slug>/` (deleting the whole folder works too). A `handout_datetime` the scheduler recorded is likewise never rewritten.
+
+Everything else is **cumulative**: material deploys, assignment handouts, the site sync and the source digest are re-applied at every tick, so a late or lost tick heals itself. A release already shipped stays shipped, because unshipping it would mean rewriting the cohort repo's git history.
 
 ## Verifying your schedule
 

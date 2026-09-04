@@ -61,12 +61,10 @@ pass keeps *"Scheduled release is failing"*, and a cohort whose autograding fail
 *"Scheduled release (autograde &lt;cohort&gt;) is failing"* - so one stuck cohort neither hides
 the others nor delays them.
 
-Two further issues watch the schedule being *kept* rather than a run's exit code. Both also
-close themselves; what they mean is in
+Two further issues watch the schedule being *kept* rather than a run's exit code, and also close
+themselves. What opens each one is in
 [07](../07-schedule-releases.md#what-drives-the-scheduler):
 
-- *"Scheduled release: driver health"*, in your `.github`, cc `course-admin` - no run from the
-  15-minute driver for two hours (it notes a day's silence from GitHub's cron as well).
+- *"Scheduled release: driver health"*, in your `.github`, cc `course-admin`.
 - *"Scheduled release: late delivery"*, in the cohort's private `classroom-config`, cc that
-  cohort's `instructors` - something due shipped more than an hour late, naming the schedule
-  entries and the minutes.
+  cohort's `instructors`.
