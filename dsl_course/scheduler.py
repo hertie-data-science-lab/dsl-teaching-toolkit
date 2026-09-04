@@ -286,7 +286,7 @@ def _autograde_passed_deadlines(
     classroom-config is the marker. Absent means never machine-graded, so grade now; present
     means graded already, so never again - which is what stops an hourly re-run from recomputing
     scores a marker has since hand-edited. A deliberate re-grade = delete `autograde/<slug>/`
-    (or use the Grade assignment workflow).
+    (delete `autograde/<slug>/` to let a later tick regrade).
 
     A missing template repo, a template with no `solution` branch, and `autograde: false`
     are all skips, not failures: plenty of assignments are hand-marked. Group vs individual

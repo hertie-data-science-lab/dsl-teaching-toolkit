@@ -540,7 +540,7 @@ def test_every_example_assignment_parses_with_the_real_grading_reader():
         assert spec_file.is_file(), f"{a.name}: no solution/{collect.GRADING_FILE}"
         spec = collect.parse_grading_spec(spec_file.read_text())
         kinds[a.name] = spec["type"]
-        # the hidden tests the Grade assignment workflow runs live where the file says
+        # the hidden tests the autograder runs live where the file says
         assert (a / "solution" / spec["tests"]).is_dir(), (
             f"{a.name}: `tests: {spec['tests']}` names no directory"
         )

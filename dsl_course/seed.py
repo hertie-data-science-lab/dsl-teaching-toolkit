@@ -69,19 +69,17 @@ from .workflows_render import (
     for_placement,
     render_bootstrap_cohort,
     render_central_release,
+    render_collect_submissions,
     render_distribute_grades,
     render_generate_syllabus,
-    render_grade_assignment,
     render_new_assignment,
     render_new_materials,
     render_provision,
     render_publish_site,
     render_refresh,
-    render_render_grades,
     render_scheduler,
     render_send_codes,
     render_status,
-    render_sync_gradebooks,
     render_sync_membership,
     render_sync_site,
 )
@@ -256,7 +254,7 @@ def seed_github_workflows(course_org: str, central_ref: str) -> int:
         ".github/workflows/release-assignment.yml": render_provision(
             cohorts, assignments
         ),
-        ".github/workflows/grade-assignment.yml": render_grade_assignment(
+        ".github/workflows/collect-submissions.yml": render_collect_submissions(
             cohorts, assignments
         ),
         ".github/workflows/new-materials.yml": render_new_materials(),
@@ -268,8 +266,6 @@ def seed_github_workflows(course_org: str, central_ref: str) -> int:
         ".github/workflows/publish-site.yml": render_publish_site(source_repos),
         ".github/workflows/sync-membership.yml": render_sync_membership(cohorts),
         ".github/workflows/send-codes.yml": render_send_codes(),
-        ".github/workflows/sync-gradebooks.yml": render_sync_gradebooks(cohorts),
-        ".github/workflows/render-grades.yml": render_render_grades(cohorts),
         ".github/workflows/distribute-grades.yml": render_distribute_grades(cohorts),
         ".github/workflows/bootstrap-cohort.yml": render_bootstrap_cohort(),
         ".github/workflows/check-cohort-setup.yml": render_status(cohorts),
@@ -290,11 +286,16 @@ def seed_github_workflows(course_org: str, central_ref: str) -> int:
         # Retired workflows - remove any copies already seeded into orgs bootstrapped before
         # the change, so faculty never see two workflows for one job. sync-enrolment/sync-teams
         # were consolidated into sync-membership.yml; status.yml was renamed to
-        # check-cohort-setup.yml (same workflow, a name that says what it checks).
+        # check-cohort-setup.yml (same workflow, a name that says what it checks); and the
+        # three grading buttons became two - Collect submissions refreshes the grading sheet,
+        # Distribute grades sends what a grader typed into it, and the preview PR is gone.
         delete=(
             ".github/workflows/sync-enrolment.yml",
             ".github/workflows/sync-teams.yml",
             ".github/workflows/status.yml",
+            ".github/workflows/grade-assignment.yml",
+            ".github/workflows/sync-gradebooks.yml",
+            ".github/workflows/render-grades.yml",
         ),
     ):
         log_err(f"org workflows not written to {course_org}/.github")

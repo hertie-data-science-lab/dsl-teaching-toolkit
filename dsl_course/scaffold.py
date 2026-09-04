@@ -154,7 +154,7 @@ _READINGS_STUB = (
 )
 
 _GRADING_YML = """\
-# How the Grade assignment workflow autogrades this assignment (after the grading_deadline
+# How the autograder marks this assignment (at the cutoff
 # set in schedule.yml). Delete this file (or set autograde: false) for a purely
 # manually-graded assignment.
 type: {kind}      # individual (one repo per student) or group (one repo per team)
@@ -165,7 +165,7 @@ tests: tests          # path (on THIS solution branch) holding the hidden tests
 """
 
 _HIDDEN_TEST_PY = """\
-# HIDDEN tests - run faculty-side by the Grade assignment workflow, never shipped to students.
+# HIDDEN tests - run faculty-side at the cutoff, never shipped to students.
 # They import the student's submission (the repo root) and check it.
 # Replace this placeholder with the real grading tests.
 from starter import solve
@@ -176,7 +176,7 @@ def test_solve_runs():
 """
 
 _HIDDEN_TEST_NOTEBOOK = """\
-# HIDDEN tests - run faculty-side by the Grade assignment workflow, never shipped to students.
+# HIDDEN tests - run faculty-side at the cutoff, never shipped to students.
 # The submitted notebook is nbconvert'd to starter.py first; this imports it and checks it.
 # Replace this placeholder with the real grading tests.
 from starter import solve
@@ -480,7 +480,7 @@ def scaffold_assignment(
     starter_name = "starter.ipynb" if fmt == "notebook" else "starter.py"
     brief = "group assignment" if kind == "group" else "assignment"
     # main: starter only (what students receive on generate). No tests, no autograder -
-    # grading runs faculty-side from the solution branch (see Grade assignment). Create-only:
+    # grading runs faculty-side from the solution branch. Create-only:
     # a re-run against a repo whose starter faculty have since authored must not revert it.
     # Count a failed create-only seed (not a skip of a live file) so a half-written starter
     # reds the scaffold, matching scaffold_materials rather than reporting a green "ready".
@@ -569,7 +569,7 @@ def scaffold_assignment(
             "Both do the same thing, idempotently, so a scheduled release you then "
             "re-run by hand changes nothing.\n"
         )
-        # grading.yml + hidden tests for the faculty-side Grade assignment workflow. The
+        # grading.yml + hidden tests for the faculty-side autograder. The
         # type chosen at scaffold time is recorded here - edit this file to change it
         # later. `fmt` is NOT: the grader converts whatever notebooks a submission holds,
         # so it only picks which starter and hidden-test stub are written below.

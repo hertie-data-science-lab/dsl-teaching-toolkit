@@ -55,13 +55,11 @@ ALL_RENDERED = {
     "provision": workflows_render.render_provision(
         ["Cohort-f2026"], ["assignment-1-f2026"]
     ),
-    "grade_assignment": workflows_render.render_grade_assignment(
+    "collect_submissions": workflows_render.render_collect_submissions(
         ["Cohort-f2026"], ["assignment-1-f2026"]
     ),
     "sync_membership": workflows_render.render_sync_membership(["Cohort-f2026"]),
     "send_codes": workflows_render.render_send_codes(),
-    "sync_gradebooks": workflows_render.render_sync_gradebooks(["Cohort-f2026"]),
-    "render_grades": workflows_render.render_render_grades(["Cohort-f2026"]),
     "distribute_grades": workflows_render.render_distribute_grades(["Cohort-f2026"]),
     "bootstrap_cohort": workflows_render.render_bootstrap_cohort(),
     "refresh": workflows_render.render_refresh(),
@@ -99,7 +97,7 @@ CHECK_TEAM_TIMEOUT = 5
 # Distribute grades walks every submission repo and every gradebook in the cohort, so
 # it is bounded like the other grading jobs rather than by the 30-minute default.
 JOB_TIMEOUTS = {
-    "grade_assignment": 120,
+    "collect_submissions": 120,
     "distribute_grades": 120,
     "bootstrap_cohort": 60,
 }
@@ -126,12 +124,10 @@ DATED_RENDERED = {
     "release": workflows_render.render_release(COHORTS_2, "course-materials-f2026"),
     "central_release": workflows_render.render_central_release(REPOS_2, COHORTS_2),
     "provision": workflows_render.render_provision(COHORTS_2, ASSIGNMENTS_2),
-    "grade_assignment": workflows_render.render_grade_assignment(
+    "collect_submissions": workflows_render.render_collect_submissions(
         COHORTS_2, ASSIGNMENTS_2
     ),
     "sync_membership": workflows_render.render_sync_membership(COHORTS_2),
-    "sync_gradebooks": workflows_render.render_sync_gradebooks(COHORTS_2),
-    "render_grades": workflows_render.render_render_grades(COHORTS_2),
     "distribute_grades": workflows_render.render_distribute_grades(COHORTS_2),
     "sync_site": workflows_render.render_sync_site(COHORTS_2),
     "publish_site": workflows_render.render_publish_site(REPOS_2),
@@ -279,16 +275,18 @@ def test_provision_type_choice_defaults_to_auto():
     assert '--type "$TYPE"' in rendered
 
 
-def test_grade_assignment_calls_collect_with_no_deadline_input():
-    # SSOT: the grading deadline comes from the cohort schedule, so the button has no
-    # deadline input and never passes --deadline (collect derives it).
-    rendered = workflows_render.render_grade_assignment(
+def test_collect_submissions_refreshes_the_sheet_and_freezes_nothing():
+    # The button is the on-demand half of the quarter-hourly refresh; the FREEZE belongs to
+    # the cron, at the assignment's grading deadline. A button that could freeze early
+    # would move what a cohort is marked on, so it passes --refresh-only and no deadline.
+    rendered = workflows_render.render_collect_submissions(
         ["Cohort-f2026"], ["assignment-1-f2026"]
     )
     inp = workflow_inputs(rendered)
-    assert "deadline" not in inp and inp["group"]["type"] == "boolean"
-    assert "dsl_course.collect" in rendered
-    assert "--group" in rendered and "--deadline" not in rendered
+    assert set(inp) == {"cohort_org", "course_source_repo", "dry_run"}
+    assert inp["dry_run"]["default"] is False
+    assert "dsl_course.collect" in rendered and "--refresh-only" in rendered
+    assert "--deadline" not in rendered
 
 
 def test_sync_membership_is_a_consolidated_reconcile():
@@ -528,12 +526,15 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
     assert len(commits) == 1
     repo, files, deleted = commits[0]
     assert repo == ".github"
-    assert len(files) == 17  # + Generate syllabus
+    assert len(files) == 15  # three grading buttons became two
     assert all(path.startswith(".github/workflows/") for path in files)
     assert deleted == [
         ".github/workflows/sync-enrolment.yml",
         ".github/workflows/sync-teams.yml",
         ".github/workflows/status.yml",
+        ".github/workflows/grade-assignment.yml",
+        ".github/workflows/sync-gradebooks.yml",
+        ".github/workflows/render-grades.yml",
     ]
 
 
@@ -1246,8 +1247,7 @@ SERIALISED_WRITERS = {
     "release": "release-materials",
     "central_release": "release-materials",
     "provision": "release-assignment",
-    "grade_assignment": "grade-assignment",
-    "render_grades": "render-grades",
+    "collect_submissions": "collect-submissions",
     "distribute_grades": "distribute-grades",
     # Two overlapping Send-codes runs generate two codes for the same blank cell: one is
     # written and the other is emailed, so that student's code enrols nobody. Scoped PER
@@ -1374,7 +1374,7 @@ def test_scheduler_accepts_an_external_dispatch():
 def test_the_scheduler_installs_the_autograder_it_runs():
     # The scheduler autogrades at every passed deadline through the SAME preamble as
     # every other workflow, which installs requirements.txt and nothing else. When pytest
-    # lived only in the manual Grade assignment step, `python -m pytest` was "No module
+    # lived only in the manual grading step, `python -m pytest` was "No module
     # named pytest" on the cron: silent zeros for the whole cohort, no sentinel, and the
     # same red run every hour for the rest of the term.
     steps = yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]["autograde"]["steps"]

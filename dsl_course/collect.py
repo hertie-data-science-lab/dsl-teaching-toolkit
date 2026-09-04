@@ -52,7 +52,7 @@ cost of a template clone, every hour for ever. `has_autograde_results` tests for
 record, never bare directory existence, so a stray early write into the directory can no
 longer be mistaken for a completed grade. Machine-written grade cells are write-once too (see
 `grades.merge_auto`), so a marker's hand-edit is never clobbered. To re-grade deliberately,
-delete `autograde/<slug>/` (the next tick regrades) or run the Grade assignment workflow -
+delete `autograde/<slug>/` and let the next tick regrade -
 and clear the `autograde_score` cells you want recomputed.
 
 grading.yml (on the template's solution branch):
@@ -551,7 +551,7 @@ def has_autograde_results(cohort_org: str, slug: str) -> bool:
     The scheduler grades an assignment only while neither record is present, so a machine score
     is written once and never silently refreshed under a marker's hand-edits. A deliberate
     re-grade means deleting `autograde/<slug>/` (the next tick then regrades) or running the
-    Grade assignment workflow."""
+    autograder."""
     return any(
         file_exists(cohort_org, CONFIG_REPO, f"{autograde_path(slug)}/{record}")
         for record in (GRADED_RECORD, SKIP_RECORD)
