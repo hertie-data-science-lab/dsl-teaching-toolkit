@@ -296,11 +296,8 @@ def _autograde_passed_deadlines(
         # dates (student-controlled), and when no submission repo exists at all it would
         # record a permanent write-once ZERO for every student and mark the assignment
         # graded - on a green run. A snapshot that failed, or was skipped because nothing
-        # was handed out yet, simply means: not now. The next tick looks again.
-        #
-        # The gate is the snapshot FILE, not what the release phase froze a moment ago:
-        # this phase is its own job, so there is nothing in memory to inherit, and the file
-        # is the same answer one tick later at worst.
+        # was handed out yet, simply means: not now. The next tick looks again. The FILE is
+        # the gate, re-read here rather than inherited: this phase is its own job.
         if load_snapshots(cohort_org, name) is None:
             log(f"  [wait] autograde {slug} - no completed snapshot yet, not grading")
             continue
