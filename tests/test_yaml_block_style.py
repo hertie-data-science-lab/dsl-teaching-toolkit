@@ -27,7 +27,14 @@ import pytest
 import yaml
 
 from dsl_course import bootstrap_course, welcome
-from dsl_course.grades import GradeRow, build_gradebooks, render_yaml
+from dsl_course.grades import (
+    GradeRow,
+    SheetSpec,
+    build_gradebooks,
+    dump_sheet,
+    new_sheet,
+    render_yaml,
+)
 from dsl_course.scaffold import _GRADING_YML
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -111,6 +118,26 @@ def _gradebook() -> str:
     return render_yaml(build_gradebooks(rows)["janedoe"])
 
 
+def _grading_sheet_dump() -> str:
+    """One assignment's grading sheet - the `_SheetDumper` path (grades.dump_sheet). It has
+    its own dumper, so PyYAML's default is not what keeps this one block style."""
+    spec = SheetSpec(
+        slug="assignment-1",
+        title="Neural networks from scratch",
+        is_group=True,
+        questions={"Q1": "15", "Q2": "10"},
+        late_window_days=7,
+        late_penalty_per_day="10%",
+        due_display="Sun 4 Oct 2026 23:59",
+        cutoff_display="Sun 11 Oct 2026 23:59",
+    )
+    return dump_sheet(
+        new_sheet(spec, [("team-alpha", ["ada-l", "ben-k"])]),
+        spec,
+        "OPEN - 0 of 1 teams have submitted",
+    )
+
+
 def _inventory_dump() -> str:
     """`list_orgs --yaml`: dict of course/cohort lists, the shape flow style would show up in."""
     return yaml.safe_dump(
@@ -134,6 +161,7 @@ DUMPED = {
     "gradebook/<handle>.yml (grades.render_yaml)": _gradebook,
     "list_orgs --yaml inventory": _inventory_dump,
     "cohort-courses-pages.yml (discovery)": _cohort_registry_dump,
+    "grading_sheets/<slug>.yml (grades.dump_sheet)": _grading_sheet_dump,
 }
 
 # Every runtime-generated faculty-facing artefact rendered from templates or string

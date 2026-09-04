@@ -33,8 +33,10 @@ import argparse
 import json
 import sys
 import tempfile
+import textwrap
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 import yaml
@@ -316,6 +318,462 @@ def merge_auto(text: str, updates: list[tuple[str, dict[str, str]]]) -> str:
             f"{'/'.join(MACHINE_FIELDS)} are write-once; clear a cell to have it recomputed"
         )
     return dump_grades([by_handle[h] for h in order])
+
+
+# ------------------------------------------------------------------- the grading sheet
+
+# `classroom-config/grading_sheets/<slug>.yml` is the ONE place a grader types. One file per
+# assignment, one block per submission unit, created at handout and refreshed until the
+# cutoff freezes it; the toolkit then distributes what it holds everywhere a grade goes.
+#
+# Declared vs derived is STRUCTURAL rather than conventional: everything the toolkit owns
+# sits under `info:` or in the regenerated comment header, and everything else belongs to
+# the grader, who may type it, retype it or delete it and never have it touched. Nothing
+# from `grading_config.yml` or `schedule.yml` is copied in as data for the same reason - a
+# fact a grader can edit but the toolkit ignores is worse than no fact at all - so the
+# assignment's definition reaches the sheet only as comments, re-emitted on every write.
+SHEETS_DIR = "grading_sheets"
+INFO_KEY = "info"  # the toolkit-owned block inside a unit's entry
+NOTES_KEY = "notes_not_shared_with_students"
+INFO_COMMENT = "toolkit-owned, shown for information only - nothing is declared here"
+_SCORE_COMMENT = "yours: the question names and maxima come from grading_config.yml"
+_SEP = " · "  # what separates the facts on one header line
+# Inline comments line up at one column across the whole sheet, so the maxima read as a
+# column beside the marks rather than as ragged trailing text.
+_COMMENT_COLUMN = 32
+_HEADER_WIDTH = 93  # the ruled line, and the width the header prose wraps to
+
+
+def sheet_path(slug: str) -> str:
+    """Where this assignment's grading sheet lives in `classroom-config`."""
+    return f"{SHEETS_DIR}/{slug}.yml"
+
+
+@dataclass(frozen=True)
+class SheetSpec:
+    """What the sheet needs to know about one assignment: its `grading_config.yml`
+    definition, plus the two `schedule.yml` moments already rendered for a human to read.
+
+    `questions` maps a question name to its maximum AS WRITTEN - text, never a number. The
+    maxima are a display, and a course that writes `1.5` must see back what it wrote rather
+    than this module's idea of how to print it."""
+
+    slug: str
+    title: str
+    is_group: bool
+    submit_external: bool = False
+    questions: dict[str, str] | None = None
+    late_window_days: int | None = None
+    late_penalty_per_day: str | None = None
+    autograde: bool = False
+    due_display: str = ""
+    cutoff_display: str = ""
+
+    @property
+    def container_key(self) -> str:
+        """The sheet's top-level key: teams submit, or students do."""
+        return "teams" if self.is_group else "submissions"
+
+    @property
+    def score_key(self) -> str:
+        return "score_group" if self.is_group else "score_individual"
+
+    @property
+    def feedback_key(self) -> str:
+        return "feedback_group" if self.is_group else "feedback_individual"
+
+
+def _fresh_info(spec: SheetSpec) -> dict:
+    """A blank `info:` block: every fact this assignment's toolkit will fill, and no other.
+    `contributions` exists only where CONTRIBUTIONS.md does and `autograde` only where
+    tests will run - an always-blank key is a question a grader keeps re-asking."""
+    info: dict = {"submitted": None, "days_late": None}
+    if spec.is_group:
+        info["contributions"] = None
+    if spec.autograde:
+        info["autograde"] = None
+    return info
+
+
+def _blank_score(spec: SheetSpec):
+    """The score cell: one blank per declared question, else a single blank scalar."""
+    return {question: None for question in spec.questions} if spec.questions else None
+
+
+def _blank_person() -> dict:
+    """The three fields every individual carries, in both sheet shapes."""
+    return {"adjustment_individual": None, "feedback_individual": None, NOTES_KEY: None}
+
+
+def _fresh_block(spec: SheetSpec, members: list[str]) -> dict:
+    """One unit's entry, brand new: the toolkit's facts first, then the grader's blanks.
+
+    `submit_external` means the work was handed in somewhere else, so there is no commit to
+    time and no `info:` block at all - rather than one full of blanks, which reads as a
+    toolkit that tried to fill it and failed."""
+    block: dict = {}
+    if not spec.submit_external:
+        block[INFO_KEY] = _fresh_info(spec)
+    block[spec.score_key] = _blank_score(spec)
+    if spec.is_group:
+        block[spec.feedback_key] = None
+        block["members"] = {handle: _blank_person() for handle in members}
+    else:
+        block.update(_blank_person())
+    return block
+
+
+def new_sheet(spec: SheetSpec, units: list[tuple[str, list[str]]]) -> dict:
+    """A brand-new sheet: every unit present from the moment of handout, every human field
+    blank. A sheet that arrives complete is one a grader can start typing into as soon as
+    anything is in, and one whose missing row is visibly missing.
+
+    `units` is `[(unit key, member handles)]`: for an individual assignment the key IS the
+    handle and the list holds only it; for a group one the key is the team name."""
+    return {
+        spec.container_key: {
+            unit: _fresh_block(spec, members) for unit, members in units
+        }
+    }
+
+
+def _merged_people(existing: object, members: list[str]) -> object:
+    """A team's `members:` mapping brought up to date: everyone already there is kept
+    exactly as found, and a member who joined the team since the last write is appended
+    blank. Left alone entirely if the grader turned it into something else."""
+    if not isinstance(existing, dict):
+        return existing
+    old = dict(existing)
+    people = {
+        handle: (old.pop(handle) if handle in old else _blank_person())
+        for handle in members
+    }
+    people.update(old)  # a member who left the team keeps their marks, at the end
+    return people
+
+
+def _merged_block(
+    spec: SheetSpec, block: dict, members: list[str], info: dict, frozen: bool
+) -> dict:
+    """One existing unit's entry, refreshed. `info:` is replaced wholesale; every other key
+    is carried over untouched, in the order the grader's file had it."""
+    merged: dict = {}
+    if frozen:
+        if INFO_KEY in block:
+            merged[INFO_KEY] = block[INFO_KEY]  # the cutoff's facts, now permanent
+    elif not spec.submit_external:
+        merged[INFO_KEY] = _fresh_info(spec) | info
+    for key, value in block.items():
+        if key == INFO_KEY:
+            continue
+        merged[key] = _merged_people(value, members) if key == "members" else value
+    return merged
+
+
+def merge_sheet(
+    existing: dict | None,
+    spec: SheetSpec,
+    units: list[tuple[str, list[str]]],
+    info_updates: dict[str, dict],
+    frozen: bool = False,
+) -> dict:
+    """The sheet on disk brought up to date without touching a word the grader wrote.
+
+    `info:` is the toolkit's: it is RE-DERIVED from `info_updates` on every write, so a late
+    push moves `submitted` and `days_late` under marks that are already there. Once `frozen`
+    the cutoff's facts stand and an existing block is copied verbatim - that is what makes
+    the freeze mean something.
+
+    Everything else is the grader's and is kept exactly as found: their marks, their
+    feedback, keys they invented, and blocks for units that have since left the cohort (a
+    withdrawn student's marks are not ours to delete). Deleted keys are not re-added either
+    - a grader who removed `notes_not_shared_with_students` meant it, and a file that grows
+    the key back on every tick is one nobody can tidy.
+
+    A unit the sheet has never seen gets a fresh blank block, so a late onboarder appears.
+    Order follows `units`, with anything left over kept at the end."""
+    old = dict((existing or {}).get(spec.container_key) or {})
+    blocks: dict[str, dict] = {}
+    for unit, members in units:
+        block = old.pop(unit, None)
+        blocks[unit] = (
+            _fresh_block(spec, members)
+            if block is None
+            else _merged_block(
+                spec, block, members, info_updates.get(unit) or {}, frozen
+            )
+        )
+    blocks.update(old)
+    return {spec.container_key: blocks}
+
+
+def parse_sheet(text: str) -> dict:
+    """A grading sheet's YAML into a dict ({} when the file is empty)."""
+    return yaml.safe_load(text) or {}
+
+
+class _SheetDumper(yaml.SafeDumper):
+    """The grading sheet's own dumper.
+
+    A SUBCLASS, deliberately: several modules here call `yaml.safe_dump`, and a representer
+    registered on the shared `yaml.SafeDumper` would quietly change what all of them
+    emit."""
+
+
+def _represent_sheet_str(dumper: yaml.SafeDumper, data: str):
+    """Multi-line text as a literal block (`|`), so the paragraph a grader typed comes back
+    as a paragraph rather than one escaped line they can neither read nor edit."""
+    style = "|" if "\n" in data else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style=style)
+
+
+def _represent_sheet_none(dumper: yaml.SafeDumper, _data: None):
+    """A blank cell as `key:`, never `key: null`. This file is typed into by hand, and
+    `null` reads as a value that has to be deleted before a mark can be written."""
+    return dumper.represent_scalar("tag:yaml.org,2002:null", "")
+
+
+_SheetDumper.add_representer(str, _represent_sheet_str)
+_SheetDumper.add_representer(type(None), _represent_sheet_none)
+
+
+def _wrapped(text: str) -> list[str]:
+    """`text` as comment lines, wrapped to the header width."""
+    return [
+        f"# {line}"
+        for line in textwrap.wrap(
+            text, _HEADER_WIDTH, break_long_words=False, break_on_hyphens=False
+        )
+    ]
+
+
+def _points_clause(questions: dict[str, str]) -> str:
+    """`50 points (Q1 15, Q2 15, Q3 10, Q4 10)` - with the total only when every maximum is
+    a number, since `questions` holds whatever the course wrote."""
+    listed = ", ".join(f"{name} {maximum}" for name, maximum in questions.items())
+    maxima = [_decimal(maximum) for maximum in questions.values()]
+    if None in maxima:
+        return f"({listed})"
+    return f"{_plain(sum(maxima, Decimal(0)))} points ({listed})"
+
+
+def _config_facts(spec: SheetSpec) -> list[str]:
+    """The assignment's definition as the two lines a grader reads before marking. Every
+    one of them is edited in `grading_config.yml` or `schedule.yml`, never here."""
+    shape = ["group assignment" if spec.is_group else "individual assignment"]
+    if spec.questions:
+        shape.append(_points_clause(spec.questions))
+    if spec.submit_external:
+        shape.append("submitted outside GitHub")
+    shape.append("autograde on" if spec.autograde else "autograde off")
+    timing = [f"due {spec.due_display}"] if spec.due_display else []
+    if spec.submit_external:
+        timing.append("no late arithmetic")
+    elif spec.late_window_days and spec.cutoff_display:
+        rate = spec.late_penalty_per_day
+        timing.append(
+            f"late work to {spec.cutoff_display}" + (f" at {rate}/day" if rate else "")
+        )
+    else:
+        timing.append("no late work accepted")
+    return [_SEP.join(line) for line in (shape, timing) if line]
+
+
+def _auto_filled_sentence(spec: SheetSpec) -> str:
+    """Which fields the toolkit fills, and WHEN - the first question every grader asks of
+    one of these, which is why it is answered in the file rather than in the docs."""
+    if spec.submit_external:
+        return (
+            "Auto-filled by the toolkit: nothing. This assignment is submitted outside "
+            "GitHub, so there is no `info:` block and no late arithmetic."
+        )
+    clauses = [
+        "`submitted` and `days_late` fill at the due date and refresh after each late push"
+    ]
+    if spec.is_group:
+        clauses.append(
+            "`contributions` is read from CONTRIBUTIONS.md at the same moments"
+        )
+    if spec.autograde:
+        clauses.append("`autograde` fills once at the cutoff")
+    return (
+        "Auto-filled by the toolkit (you never type these): every `info:` block. "
+        + "; ".join(clauses)
+        + ". All of them freeze at the cutoff."
+    )
+
+
+def _you_fill_in_sentence(spec: SheetSpec) -> str:
+    """The human keys of THIS sheet's shape, named in the order they appear in it."""
+    qualifier = (
+        " (one value per question; max points shown beside each)"
+        if spec.questions
+        else ""
+    )
+    fields = [f"{spec.score_key}{qualifier}"]
+    if spec.is_group:
+        fields.append(spec.feedback_key)
+    fields += ["adjustment_individual", "feedback_individual", NOTES_KEY]
+    return (
+        f"You fill in: {', '.join(fields)}. Anything you type is never touched. Nothing "
+        f"reaches a student until you run Distribute grades."
+    )
+
+
+def _sheet_header(spec: SheetSpec, status_line: str) -> str:
+    """The comment block at the top of the sheet, regenerated on every write so that it is
+    still true after `grading_config.yml` changes under a sheet that already has marks."""
+    rule = "# " + "-" * (_HEADER_WIDTH - 2)
+    title = _SEP.join(["GRADING SHEET", spec.slug, spec.title, "INSTRUCTOR-OWNED"])
+    lines = [
+        rule,
+        f"# {title}",
+        "#",
+        "# From grading_config.yml / schedule.yml (edit THERE, not here):",
+        *(f"#   {fact}" for fact in _config_facts(spec)),
+        f"# Status: {status_line}",
+        "#",
+        *_wrapped(_auto_filled_sentence(spec)),
+        *_wrapped(_you_fill_in_sentence(spec)),
+        rule,
+    ]
+    return "\n".join(lines) + "\n"
+
+
+def _with_comment(line: str, text: str) -> str:
+    """`line` with `# text` at the sheet's comment column (two spaces at the very least)."""
+    return f"{line}{' ' * max(_COMMENT_COLUMN - len(line), 2)}# {text}"
+
+
+def _annotate(body: str, spec: SheetSpec) -> str:
+    """Re-emit the inline comments a YAML dumper cannot carry: what `info:` is, and each
+    question's maximum beside its blank.
+
+    A post-dump text pass on purpose. These are comments, not data - carrying the maxima as
+    values would invite a grader to edit them where nothing reads them - and re-deriving
+    them on every write is what keeps them true when `grading_config.yml` changes under a
+    sheet that is already half marked."""
+    out: list[str] = []
+    score_indent: int | None = None
+    for line in body.splitlines():
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        if score_indent is not None and indent <= score_indent:
+            score_indent = None
+        if stripped == f"{INFO_KEY}:":
+            line = _with_comment(line, INFO_COMMENT)
+        elif stripped == f"{spec.score_key}:" and spec.questions:
+            line = _with_comment(line, _SCORE_COMMENT)
+            score_indent = indent
+        elif score_indent is not None:
+            question = stripped.split(":", 1)[0].strip("'\"")
+            if question in (spec.questions or {}):
+                line = _with_comment(line, f"/{spec.questions[question]}")
+        out.append(line)
+    return "\n".join(out) + "\n"
+
+
+def dump_sheet(sheet: dict, spec: SheetSpec, status_line: str) -> str:
+    """The sheet as the file that gets written: the regenerated comment header, the YAML,
+    and the inline comments annotated back on.
+
+    Deterministic - the same sheet, spec and status give byte-identical text - because the
+    write path compares blob shas, and text that churned would commit on every tick."""
+    body = yaml.dump(
+        sheet,
+        Dumper=_SheetDumper,
+        sort_keys=False,
+        allow_unicode=True,
+        default_flow_style=False,
+        # Never fold a long line: the grader's own wrapping is the readable one, and a fold
+        # that moved with the text would churn the file.
+        width=10**6,
+    )
+    return _sheet_header(spec, status_line) + _annotate(body, spec)
+
+
+def _decimal(value: object) -> Decimal | None:
+    """`value` as a Decimal, or None when it is blank or not a number.
+
+    Grades are free text and stay that way: `pass`, `A-` and `see me` are legitimate marks
+    that no arithmetic applies to, so they come back None and are passed through verbatim
+    rather than coerced into a number nobody typed."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, Decimal):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        return None
+
+
+def _plain(number: Decimal) -> str:
+    """A Decimal with no exponent and no trailing zeros - `50`, not `5E+1` or `50.0`."""
+    return format(number.normalize(), "f")
+
+
+def score_total(score: object) -> Decimal | None:
+    """What a `score_group`/`score_individual` cell adds up to: the scalar itself, or the
+    sum of a per-question map.
+
+    None when there is nothing to add - the cell is blank, the map is entirely blank, or a
+    value is not a number. A PARTLY filled map still totals, so the running total is right
+    while marking is in progress; one non-numeric question, though, makes the whole total a
+    guess, and a guess is exactly what must not reach a student."""
+    if not isinstance(score, dict):
+        return _decimal(score)
+    total, marked = Decimal(0), False
+    for value in score.values():
+        if value is None or not str(value).strip():
+            continue
+        number = _decimal(value)
+        if number is None:
+            return None
+        total += number
+        marked = True
+    return total if marked else None
+
+
+def penalty_rate(text: object) -> Decimal | None:
+    """`late_penalty_per_day` as a fraction: `10%` and `0.1` both give 0.10.
+
+    A BARE `10` is REFUSED (None), read neither as 1000% nor silently as 10%. The two
+    spellings a course actually writes are the percentage and the fraction; guessing
+    between them on a number that multiplies every late mark is not a guess worth
+    making."""
+    if text is None:
+        return None
+    raw = str(text).strip()
+    if not raw:
+        return None
+    if raw.endswith("%"):
+        rate = _decimal(raw[:-1])
+        return None if rate is None else rate / 100
+    rate = _decimal(raw)
+    return None if rate is None or rate >= 1 else rate
+
+
+def final_grade(
+    total: object, rate: object, days_late: object, adjustment: object
+) -> Decimal | None:
+    """`total x (1 - rate x days_late) + adjustment`, floored at 0.
+
+    Derived on OUTPUT and never stored: the sheet has no `final_grade` field, so there is
+    no stale cell for this to disagree with. A blank adjustment is 0 and a blank rate or
+    day count is no penalty, so an assignment with no late policy needs no special case.
+    A total that is not a number gets no arithmetic at all and comes back None - the caller
+    distributes the mark exactly as the grader typed it."""
+    earned = _decimal(total)
+    if earned is None:
+        return None
+    penalty, days = _decimal(rate), _decimal(days_late)
+    if penalty is not None and days is not None and days > 0:
+        earned *= Decimal(1) - penalty * days
+    return max(Decimal(0), earned + (_decimal(adjustment) or Decimal(0)))
 
 
 # ---------------------------------------------------------------------- gh/git wiring
