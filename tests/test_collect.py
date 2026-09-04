@@ -1901,6 +1901,41 @@ def test_the_refresh_writes_nothing_when_nothing_has_changed(monkeypatch):
     assert collect.sync_sheet(*args, **kwargs)
 
 
+@pytest.mark.parametrize(
+    "broken",
+    [
+        "submissions:\n  ada-l:\n   score_individual: 3\n  bad: [\n",
+        "submissions: ada-l\n",
+    ],
+    ids=["unparseable", "container-is-not-a-mapping"],
+)
+def test_a_sheet_the_grader_broke_mid_edit_is_left_exactly_as_it_is(
+    monkeypatch, broken
+):
+    # The sheet is the RECORD and it is hand-typed in a browser, so a broken save is
+    # ordinary. Rewriting one - or tracebacking out of the quarter-hourly cron - are both
+    # worse than saying so and waiting for the next tick.
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS,
+        existing=(broken, gh_contents.blob_sha(broken.encode())),
+    )
+    monkeypatch.setattr(
+        collect, "put_file", lambda *a, **k: pytest.fail("wrote over a broken sheet")
+    )
+    assert not collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 6, tzinfo=BERLIN),
+    )
+    assert written == []
+
+
 def test_a_refresh_whose_lookups_failed_leaves_the_sheet_alone(monkeypatch):
     # A half-read cohort must not rewrite the file: every unread repo would read as "no
     # submission", and a grader would see marks vanish from the status line.

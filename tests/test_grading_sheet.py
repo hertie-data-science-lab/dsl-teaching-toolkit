@@ -18,6 +18,7 @@ from dsl_course.grades import (
     INFO_COMMENT,
     NOTES_KEY,
     SheetSpec,
+    SheetUnreadable,
     dump_sheet,
     final_grade,
     merge_sheet,
@@ -396,6 +397,43 @@ def test_an_empty_file_parses_as_an_empty_sheet():
     assert parse_sheet("") == {}
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "submissions:\n  ada-l:\n   score_individual: 3\n  bad: [\n",  # mid-edit
+        "- ada-l\n- ben-k\n",  # not a mapping at all
+    ],
+)
+def test_a_sheet_that_does_not_parse_is_refused_never_read_as_empty(text):
+    # The one file a grader types into by hand, in a repo they edit in the browser. Read
+    # as `{}` it would look like an assignment with no rows, and the next tick would
+    # rebuild it blank over their marking - so the parse says so instead.
+    with pytest.raises(SheetUnreadable):
+        parse_sheet(text)
+
+
+def test_a_unit_the_grader_turned_into_something_else_is_kept_verbatim():
+    # `team-alpha: TODO` used to be an AttributeError out of the quarter-hourly cron.
+    spec = group()
+    merged = merge_sheet({"teams": {"team-alpha": "TODO"}}, spec, TEAMS, {})
+    assert merged["teams"]["team-alpha"] == "TODO"
+    assert merged["teams"]["team-beta"]["score_group"] is None
+
+
+def test_the_merge_keeps_a_key_that_lost_its_container():
+    # A block that lost its indentation lands beside `teams:`, not inside it. Dropping it
+    # would delete that team's marks on the next tick, silently and for good.
+    stray = {"team-gamma": {"score_group": 41}}
+    merged = merge_sheet({"teams": {}, **stray}, group(), TEAMS, {})
+    assert merged["team-gamma"] == stray["team-gamma"]
+    assert next(iter(merged)) == "teams"
+
+
+def test_a_container_that_is_not_a_mapping_is_refused_rather_than_rebuilt():
+    with pytest.raises(SheetUnreadable):
+        merge_sheet({"teams": "team-alpha"}, group(), TEAMS, {})
+
+
 # --------------------------------------------------------------------- the arithmetic
 
 
@@ -453,6 +491,14 @@ def test_final_grade_is_floored_at_zero():
 def test_final_grade_needs_no_late_policy():
     assert final_grade(37, None, None, None) == Decimal(37)
     assert final_grade(37, penalty_rate("10%"), None, None) == Decimal(37)
+
+
+@pytest.mark.parametrize("typed", ["nan", "NaN", "Infinity", "-inf"])
+def test_a_score_that_is_not_a_FINITE_number_gets_no_arithmetic(typed):
+    # `Decimal` accepts these and then RAISES on the comparison that floors the grade, so
+    # one of them typed into a score cell took the whole distribution down.
+    assert score_total(typed) is None
+    assert final_grade(typed, penalty_rate("10%"), 2, None) is None
 
 
 def test_a_non_numeric_grade_gets_no_arithmetic():

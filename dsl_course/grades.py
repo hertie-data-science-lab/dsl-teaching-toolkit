@@ -211,6 +211,14 @@ _COMMENT_COLUMN = 32
 _HEADER_WIDTH = 93  # the ruled line, and the width the header prose wraps to
 
 
+class SheetUnreadable(Exception):
+    """A grading sheet whose YAML nobody can read - a grader mid-edit.
+
+    Its own class because the answer to it is specific and is the same everywhere: LEAVE
+    THE FILE ALONE. A parse that came back empty instead would read as "this assignment
+    has no rows", and the next write would rebuild the sheet blank over a term's marking."""
+
+
 def sheet_path(slug: str) -> str:
     """Where this assignment's grading sheet lives in `classroom-config`."""
     return f"{SHEETS_DIR}/{slug}.yml"
@@ -369,25 +377,51 @@ def merge_sheet(
     the key back on every tick is one nobody can tidy.
 
     A unit the sheet has never seen gets a fresh blank block, so a late onboarder appears.
-    Order follows `units`, with anything left over kept at the end."""
-    old = dict((existing or {}).get(spec.container_key) or {})
-    blocks: dict[str, dict] = {}
+    Order follows `units`, with anything left over kept at the end.
+
+    "Kept exactly as found" is meant literally, and covers the two shapes a grader's file
+    takes while they are still typing in it: a unit whose entry is not a mapping at all
+    (`team-alpha: TODO`) is copied through rather than merged into, and any key beside the
+    container - a block that lost its indentation, a note somebody left at the top - is
+    carried to the end instead of being dropped on the next tick."""
+    container = (existing or {}).get(spec.container_key) or {}
+    if not isinstance(container, dict):
+        raise SheetUnreadable(f"`{spec.container_key}:` is not a mapping of units")
+    old = dict(container)
+    blocks: dict = {}
     for unit, members in units:
         block = old.pop(unit, None)
-        blocks[unit] = (
-            _fresh_block(spec, members, info_updates.get(unit))
-            if block is None
-            else _merged_block(
+        if block is None:
+            blocks[unit] = _fresh_block(spec, members, info_updates.get(unit))
+        elif isinstance(block, dict):
+            blocks[unit] = _merged_block(
                 spec, block, members, info_updates.get(unit) or {}, frozen
             )
-        )
+        else:
+            blocks[unit] = block  # not ours to interpret, and not ours to delete
     blocks.update(old)
-    return {spec.container_key: blocks}
+    kept = {
+        key: value
+        for key, value in (existing or {}).items()
+        if key != spec.container_key
+    }
+    return {spec.container_key: blocks, **kept}
 
 
 def parse_sheet(text: str) -> dict:
-    """A grading sheet's YAML into a dict ({} when the file is empty)."""
-    return yaml.safe_load(text) or {}
+    """A grading sheet's YAML into a dict ({} when the file is empty).
+
+    Raises `SheetUnreadable` rather than returning anything for a file that does not parse
+    or is not a mapping. This is hand-typed YAML in a repo a grader edits in the browser,
+    so a broken save is ordinary; what must never happen is the toolkit reading one as an
+    empty sheet and writing a blank file back over it."""
+    try:
+        data = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        raise SheetUnreadable(" ".join(str(exc).split())) from exc
+    if not isinstance(data, dict):
+        raise SheetUnreadable("the file is not a mapping")
+    return data
 
 
 class _SheetDumper(yaml.SafeDumper):
@@ -584,9 +618,13 @@ def _decimal(value: object) -> Decimal | None:
     if not text:
         return None
     try:
-        return Decimal(text)
+        number = Decimal(text)
     except InvalidOperation:
         return None
+    # `Decimal` accepts `nan` and `Infinity`, and comparing either of them RAISES - so a
+    # grader who typed one into a score cell would take the whole distribution down rather
+    # than have that one mark passed through as the text it is.
+    return number if number.is_finite() else None
 
 
 def _plain(number: Decimal) -> str:
@@ -1591,14 +1629,21 @@ def load_sheets(wd: Path) -> dict[str, dict]:
 
     A checkout rather than the API: distribute has the repo cloned already, and reading
     the sheets out of it costs nothing and cannot half-succeed the way a file-by-file
-    fetch can."""
+    fetch can.
+
+    Raises `SheetUnreadable`, naming the file, if one of them does not parse."""
     folder = wd / SHEETS_DIR
     if not folder.is_dir():
         return {}
-    return {
-        path.stem: parse_sheet(path.read_text(encoding="utf-8"))
-        for path in sorted(folder.glob("*.yml"))
-    }
+    sheets: dict[str, dict] = {}
+    for path in sorted(folder.glob("*.yml")):
+        try:
+            sheets[path.stem] = parse_sheet(path.read_text(encoding="utf-8"))
+        except SheetUnreadable as exc:
+            raise SheetUnreadable(
+                f"{SHEETS_DIR}/{path.name} is not valid YAML: {exc}"
+            ) from exc
+    return sheets
 
 
 # ---------------------------------------------------------------------- gh/git wiring
@@ -1996,7 +2041,14 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
         if not clone(cohort_org, CONFIG_REPO, wd):
             log_err(f"could not clone {cohort_org}/{CONFIG_REPO}")
             return 1
-        sheets = load_sheets(wd)
+        try:
+            sheets = load_sheets(wd)
+        except SheetUnreadable as exc:
+            # Nothing goes out, rather than everything but this one: a grader fixes the
+            # file and presses the button again, where a partial send would have to be
+            # reconciled student by student.
+            log_err(f"{exc} - nothing distributed; fix the file and run this again")
+            return 1
         legacy = load_legacy_grades(wd)
         if not sheets and not legacy:
             log_err(

@@ -991,9 +991,20 @@ def sync_sheet(
         log_err(f"  ! could not read {path}: {exc}")
         return False
     old_text, old_sha = found if found else ("", "")
-    previous = (grades.parse_sheet(old_text) if old_text else {}).get(
-        spec.container_key
-    ) or {}
+    try:
+        on_disk = grades.parse_sheet(old_text) if old_text else {}
+    except grades.SheetUnreadable as exc:
+        # A grader mid-edit. The file is theirs and it is the record, so the tick reports
+        # and stops; the next one picks it up the moment the YAML parses again.
+        log_err(f"  ! {path} cannot be read ({exc}) - leaving it exactly as it is")
+        return False
+    previous = on_disk.get(spec.container_key) or {}
+    if not isinstance(previous, dict):
+        log_err(
+            f"  ! {path}: `{spec.container_key}:` is not a mapping of units - "
+            f"leaving it exactly as it is"
+        )
+        return False
 
     derive = (
         bool(targets)
@@ -1028,7 +1039,7 @@ def sync_sheet(
     submitted = sum(1 for info in info_updates.values() if info.get("submitted"))
     status = _status_line(spec, phase, len(units), submitted, derive)
     sheet = grades.merge_sheet(
-        {spec.container_key: previous} if previous else None,
+        on_disk or None,
         spec,
         units,
         info_updates,

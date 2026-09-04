@@ -547,6 +547,19 @@ def test_a_dry_run_writes_nothing_posts_nothing_and_sends_nothing(
     assert "<handle>" in printed  # the sample email, from placeholders
 
 
+def test_a_sheet_that_does_not_parse_sends_nothing_at_all(tmp_path, monkeypatch):
+    # Not "everything except that one": a partial distribution has to be reconciled
+    # student by student, where a refused one is fixed in the file and pressed again.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _SHEET, "assignment-2": "submissions:\n  bad: [\n"},
+    )
+    assert out["rc"] == 1
+    assert out["comments"] == [] and out["gradebooks"] == []
+    assert out["config"] == [] and out["outbox"] == []
+
+
 def test_a_re_run_says_nothing_twice(tmp_path, monkeypatch):
     first = _distribute(monkeypatch, tmp_path)
     ((_cfg, cfg_files, _d),) = first["config"]
