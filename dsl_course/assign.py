@@ -794,6 +794,8 @@ def provision_all(
 
     schedule.record_handout(cohort_org, key)
 
+    changed = any(k != "skipped" for k in results)
+
     # The grading sheet arrives WITH the handout: every row present, every human field
     # blank, and a header saying which fields the toolkit fills and when. A sheet that only
     # appeared once someone had submitted would be one a grader cannot plan around - and a
@@ -801,9 +803,14 @@ def provision_all(
     # (there is nothing to derive before the due date, and a handout must not cost an API
     # call per student); the hourly refresh takes over from the due date.
     #
+    # Only when this pass actually provisioned something, for the same reason the site sync
+    # below is: `due_releases` is cumulative, so the scheduler re-fires every handed-out
+    # assignment on every tick, and a pass that skipped every repo has nothing new to put
+    # in the sheet - it would only rewrite the header a live refresh had just filled in.
+    #
     # Not fatal, and deliberately not counted: the repos are handed out by this point, and
     # the refresh pass creates a sheet it finds missing on the next tick.
-    if not sync_sheet(
+    if changed and not sync_sheet(
         master_org,
         cohort_org,
         sched,
@@ -825,7 +832,6 @@ def provision_all(
     # traceback and misreport the whole handout as failed: log it, count it (so the run goes
     # red and the next Sync site / tick refreshes the site), and return normally.
     site_failed = False
-    changed = any(k != "skipped" for k in results)
     try:
         # A tick that created or changed nothing has nothing to show the site: skipping the
         # sync here is what stops every handed-out assignment re-rendering the site hourly.

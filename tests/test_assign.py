@@ -109,6 +109,28 @@ def test_the_grading_sheet_is_created_at_handout_with_one_row_per_student(
     assert sheet["units"] == [("ada-l", ["ada-l"]), ("ben-k", ["ben-k"])]
 
 
+def test_a_handout_that_provisioned_nothing_does_not_rewrite_the_sheet(
+    tmp_path, monkeypatch, sheet_writes
+):
+    # `due_releases` is cumulative, so the scheduler re-fires every handed-out assignment
+    # on every tick and almost every one of those provisions nothing. Such a pass derives
+    # nothing either, so writing the sheet could only undo what the refresh pass - which
+    # runs EARLIER in the same tick - had just put in it.
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: "skipped")
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+
+    assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
+    )
+
+    assert sheet_writes == []
+
+
 def test_the_handout_sheet_for_a_group_assignment_is_keyed_on_the_team_name(
     tmp_path, monkeypatch, sheet_writes
 ):

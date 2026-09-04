@@ -339,14 +339,22 @@ def _merged_people(existing: object, members: list[str]) -> object:
 
 
 def _merged_block(
-    spec: SheetSpec, block: dict, members: list[str], info: dict, frozen: bool
+    spec: SheetSpec, block: dict, members: list[str], info: dict | None, frozen: bool
 ) -> dict:
-    """One existing unit's entry, refreshed. `info:` is replaced wholesale; every other key
-    is carried over untouched, in the order the grader's file had it."""
+    """One existing unit's entry, refreshed. `info:` is replaced wholesale by what this
+    write DERIVED; every other key is carried over untouched, in the order the grader's
+    file had it.
+
+    `info is None` means this write derived nothing for this unit - a handout, any write
+    before the due date, a unit that was not among this pass's targets. That is not the
+    same as deriving blanks: the facts on the file are the last ones anybody looked up, and
+    a write that did not look must not erase them. It used to, and the scheduler re-fires
+    every handed-out assignment on every tick, so a sheet's `info:` was blanked four times
+    an hour - permanently, once the cutoff had passed and nothing re-derived it."""
     merged: dict = {}
-    if frozen:
+    if frozen or info is None:
         if INFO_KEY in block:
-            merged[INFO_KEY] = block[INFO_KEY]  # the cutoff's facts, now permanent
+            merged[INFO_KEY] = block[INFO_KEY]  # nothing looked; nothing to replace it
     elif not spec.submit_external:
         merged[INFO_KEY] = _fresh_info(spec) | info
     for key, value in block.items():
@@ -395,7 +403,7 @@ def merge_sheet(
             blocks[unit] = _fresh_block(spec, members, info_updates.get(unit))
         elif isinstance(block, dict):
             blocks[unit] = _merged_block(
-                spec, block, members, info_updates.get(unit) or {}, frozen
+                spec, block, members, info_updates.get(unit), frozen
             )
         else:
             blocks[unit] = block  # not ours to interpret, and not ours to delete

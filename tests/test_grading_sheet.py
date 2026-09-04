@@ -176,8 +176,26 @@ def test_the_merge_re_derives_info_until_the_sheet_is_frozen():
         "days_late": 2,
         "contributions": None,
     }
-    later = merge_sheet(sheet, spec, TEAMS, {})
-    assert later["teams"]["team-alpha"]["info"]["submitted"] is None
+    # A pass that LOOKED and found nothing pinned does blank it: `{}` for that unit is a
+    # derivation, and its answer is "no submission".
+    looked = merge_sheet(sheet, spec, TEAMS, {"team-alpha": {}})
+    assert looked["teams"]["team-alpha"]["info"]["submitted"] is None
+
+
+def test_a_write_that_derived_nothing_leaves_the_recorded_facts_alone():
+    # The handout is re-fired by the scheduler on EVERY tick (`due_releases` is
+    # cumulative), and it derives nothing - it has no pins and no targets. Blanking `info:`
+    # on those writes wiped the refresh's work four times an hour, and permanently once the
+    # cutoff had passed and nothing re-derived it.
+    spec = group()
+    sheet = merge_sheet(
+        new_sheet(spec, TEAMS),
+        spec,
+        TEAMS,
+        {"team-alpha": {"submitted": "2026-10-06T09:30+02:00", "days_late": 2}},
+    )
+    again = merge_sheet(sheet, spec, TEAMS, {})
+    assert again["teams"]["team-alpha"]["info"] == sheet["teams"]["team-alpha"]["info"]
 
 
 def test_a_frozen_sheet_keeps_the_info_the_cutoff_recorded():
