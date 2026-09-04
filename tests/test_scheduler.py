@@ -2120,7 +2120,7 @@ def _real_snapshot_then_autograde(monkeypatch, targets):
     monkeypatch.setattr(
         collect_mod,
         "_snapshot_sha",
-        lambda org, repo, deadline, at="": collect_mod._REPO_ABSENT,
+        lambda org, repo, deadline, at="": collect_mod.Pin(absent=True),
     )
 
     def no_write(*a, **k):

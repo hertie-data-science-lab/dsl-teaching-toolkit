@@ -22,9 +22,12 @@ entirely client-supplied (`GIT_COMMITTER_DATE`), so late work backdated to befor
 deadline passes a `rev-list --before` pin. The hourly scheduler therefore freezes each
 assignment shortly after its grading deadline, writing one row per submission repo into
 
-    classroom-config/snapshots/<slug>.csv     repo,sha,recorded_at
+    classroom-config/snapshots/<slug>.csv
+        repo,sha,recorded_at,submitted_at,submitted_source
 
-and never rewriting it. Grading pins to the recorded sha; a blank sha means "nothing had
+and never rewriting it. `submitted_at` is WHEN that pinned commit was made and
+`submitted_source` says where that time came from - `commit` for the committer date the
+API reports, which the student supplies and can backdate. Grading pins to the recorded sha; a blank sha means "nothing had
 been pushed by the deadline" and scores zero. Only with no snapshot at all does grading
 fall back to the date-based pin, loudly.
 
@@ -81,6 +84,7 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from functools import cache
@@ -106,7 +110,13 @@ AUTOGRADE_DIR = "autograde"  # classroom-config/autograde/<slug>/<key>.json
 GRADED_RECORD = "_graded.json"  # fire-once sentinel: a successful run's LAST write
 SKIP_RECORD = "_skipped.json"  # the same marker, for an assignment nothing grades
 SNAPSHOT_DIR = "snapshots"  # classroom-config/snapshots/<slug>.csv
-SNAPSHOT_FIELDS = ("repo", "sha", "recorded_at")
+SNAPSHOT_FIELDS = ("repo", "sha", "recorded_at", "submitted_at", "submitted_source")
+# Where a row's `submitted_at` came from. Only `commit` is written today: the committer
+# date the commits API reports, which is the STUDENT's to set (`GIT_COMMITTER_DATE`) and
+# can therefore be backdated. A server-timed rung (`push`, from the repository-activity
+# API) comes later; recording the provenance now is what lets a marker - and the code -
+# tell a client-supplied time from a server-observed one in a file that is never rewritten.
+SUBMITTED_SOURCE_COMMIT = "commit"
 GRADING_FILE = "grading.yml"  # on the template's solution branch
 RUN_TIMEOUT = 300  # wall-clock seconds per graded subprocess
 # The note on the one zero that means "the RUNNER broke", not "the student didn't submit".
@@ -133,10 +143,6 @@ RLIMIT_CPU_SECONDS = RUN_TIMEOUT * 2
 RLIMIT_NPROC_MAX = 2048
 # Bytes per file: caps a disk-fill bomb (512 MiB).
 RLIMIT_FSIZE_BYTES = 512 * 1024**2
-
-# `_snapshot_sha` sentinel: the repo is ABSENT (404), distinct from a reachable-but-empty repo
-# (""). Can't collide with a real sha (40 hex) or "". Recorded as "" if the snapshot is frozen.
-_REPO_ABSENT = "\x00absent"
 
 # Belt-and-suspenders removal of files a student could commit to hijack their own grading:
 # a pre-baked report, pytest plugin/config-by-name, or an interpreter site-hook. The PRIMARY
@@ -275,23 +281,55 @@ def autograde_path(slug: str) -> str:
     return f"{AUTOGRADE_DIR}/{slug}"
 
 
-def dump_snapshots(rows: list[tuple[str, str, str]]) -> str:
-    """Serialise (repo, sha, recorded_at) rows to snapshot CSV text, repo-sorted so the
-    file is stable and diffable."""
+def dump_snapshots(rows: list[tuple[str, str, str, str, str]]) -> str:
+    """Serialise (repo, sha, recorded_at, submitted_at, submitted_source) rows to snapshot
+    CSV text, repo-sorted so the file is stable and diffable."""
     return dump_csv(SNAPSHOT_FIELDS, sorted(rows))
 
 
-def parse_snapshots(text: str) -> dict[str, str]:
-    """Parse snapshot CSV text into {repo: sha}. A blank sha is meaningful - it records
-    "nothing had been pushed to this repo by the deadline" - so it is kept, not dropped.
+@dataclass(frozen=True)
+class SnapshotRow:
+    """One repo's row in a frozen snapshot. Blank fields are records, not gaps: a blank
+    `sha` says "nothing had been pushed by the deadline", and blank submission fields say
+    the same, or that this row predates them."""
+
+    repo: str
+    sha: str = ""
+    recorded_at: str = ""
+    submitted_at: str = ""
+    submitted_source: str = ""
+
+
+def parse_snapshot_rows(text: str) -> dict[str, SnapshotRow]:
+    """Parse snapshot CSV text into {repo: SnapshotRow} - every recorded column, for the
+    callers that want the submission time as well as the pin.
+
+    Keyed by NAME, not position: a snapshot frozen before `submitted_at` and
+    `submitted_source` were recorded has three columns, and the file is write-once, so it
+    is never backfilled. It must therefore still parse - with those two blank - rather than
+    strand the cohort that owns it.
 
     A bare DictReader, not gh_contents.read_csv: `dump_snapshots` above wrote this file,
     so it has no BOM and no `;` delimiter to guard against."""
-    return {
-        repo: (row.get("sha") or "").strip()
-        for row in csv.DictReader(io.StringIO(text))
-        if (repo := (row.get("repo") or "").strip())
-    }
+    rows: dict[str, SnapshotRow] = {}
+    for row in csv.DictReader(io.StringIO(text)):
+        if not (repo := (row.get("repo") or "").strip()):
+            continue
+        rows[repo] = SnapshotRow(
+            repo=repo,
+            sha=(row.get("sha") or "").strip(),
+            recorded_at=(row.get("recorded_at") or "").strip(),
+            submitted_at=(row.get("submitted_at") or "").strip(),
+            submitted_source=(row.get("submitted_source") or "").strip(),
+        )
+    return rows
+
+
+def parse_snapshots(text: str) -> dict[str, str]:
+    """Parse snapshot CSV text into {repo: sha} - the pin, which is all grading needs. A
+    blank sha is meaningful - it records "nothing had been pushed to this repo by the
+    deadline" - so it is kept, not dropped."""
+    return {repo: row.sha for repo, row in parse_snapshot_rows(text).items()}
 
 
 # ---------------------------------------------------------------------- gh/git wiring
@@ -395,19 +433,35 @@ def _until_param(deadline: str, tz: str | None = None) -> str:
     )
 
 
+@dataclass(frozen=True)
+class Pin:
+    """What the freeze found for one submission repo: the sha to grade, that commit's
+    committer date, and whether the repo was ABSENT (404).
+
+    `absent` is a field rather than another spelling of a blank sha because the two mean
+    opposite things to `snapshot_assignment`: a reachable-but-empty repo is a real "nobody
+    submitted" and IS frozen, while an absent one may still be provisioned and must not
+    be."""
+
+    sha: str = ""
+    committed: str = ""
+    absent: bool = False
+
+
 def _snapshot_sha(
     cohort_org: str, repo: str, deadline: str, recorded_at: str = ""
-) -> str | None:
-    """The sha to freeze `repo` at: its last commit on or before `deadline`, read from the
-    API (no clone - this runs for every repo of every assignment, hourly).
+) -> Pin | None:
+    """The commit to freeze `repo` at: its last commit on or before `deadline`, read from
+    the API (no clone - this runs for every repo of every assignment, hourly).
 
     "On or before" is judged on the COMMITTER DATE, which the student supplies
     (`GIT_COMMITTER_DATE`). Freezing does not change that - it only stops the pin moving
     afterwards. `recorded_at` is the moment of this freeze: a chosen commit dated after it
     cannot have existed when we looked, so it is a skewed or doctored clock and is logged.
 
-    Returns "" when there is nothing to grade: no commit that early, an empty repo, or no
-    such repo at all (an on-time submission cannot live in a repo that does not exist).
+    Returns a bare `Pin()` when there is nothing to grade - no commit that early, or an
+    empty repo - and `Pin(absent=True)` when there is no such repo at all (an on-time
+    submission cannot live in a repo that does not exist).
     Returns None when the API call itself failed - the caller then abandons the whole
     snapshot so the next cron tick retries, rather than baking a transient error into a
     record that is never rewritten."""
@@ -427,24 +481,25 @@ def _snapshot_sha(
         sha, _, committed = out.strip().partition(" ")
         if not sha:
             _warn_if_late_commits_only(cohort_org, repo, deadline)
-        elif _committed_after(committed, recorded_at):
+            return Pin()  # the repo is reachable; no commit on/before the deadline
+        if _committed_after(committed, recorded_at):
             # Tag, never the handle: this log is public.
             log(
                 f"  [warn] {target_ref(repo)} is pinned to a commit dated after this "
                 f"freeze was taken ({committed} > {recorded_at}) - a committer date is "
                 f"client-supplied, so check for a skewed clock before marking"
             )
-        return sha  # a sha, or "" (repo reachable, no commit on/before the deadline)
+        return Pin(sha, committed)
     # A 409 is an EMPTY repo: it exists but has no commits, so "" is a real recorded
     # non-submission (we freeze it, closing the backdating window for it).
     if "HTTP 409" in out:
-        return ""
+        return Pin()
     # A 404 means the repo ISN'T THERE (not generated yet, a handout typo, or a private-repo
     # blip). That is NOT the same as an existing-but-empty repo: an absent repo may still be
     # provisioned, so if EVERY target is absent the caller skips the freeze rather than pinning
     # "nobody submitted" for ever. A precise marker match, not a loose `"empty" in out`.
     if is_missing_resource(out):
-        return _REPO_ABSENT
+        return Pin(absent=True)
     log_err(f"  ! could not read commits for {target_ref(repo)}: {out[:160]}")
     return None
 
@@ -626,18 +681,26 @@ def snapshot_assignment(
         )
         return SnapshotResult.NOTHING_TO_FREEZE
     recorded_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    rows: list[tuple[str, str, str]] = []
+    rows: list[tuple[str, str, str, str, str]] = []
     any_present = False
     for repo, _key, _members in targets:
-        sha = _snapshot_sha(cohort_org, repo, deadline, recorded_at)
-        if sha is None:
+        pin = _snapshot_sha(cohort_org, repo, deadline, recorded_at)
+        if pin is None:
             log_err(f"  ! abandoning the {slug} snapshot - will retry on the next run")
             return SnapshotResult.FAILED
-        if sha == _REPO_ABSENT:
-            rows.append((repo, "", recorded_at))  # not there -> blank iff we freeze
+        if not pin.absent:
+            any_present = True  # a sha, or a reachable-but-empty repo that EXISTS
+        if pin.sha:
+            # The pinned commit's committer date, recorded with WHERE it came from - the
+            # student supplied it, so it is a claim, not an observation (see the module
+            # docstring). The snapshot is write-once, so it is recorded now or never.
+            rows.append(
+                (repo, pin.sha, recorded_at, pin.committed, SUBMITTED_SOURCE_COMMIT)
+            )
         else:
-            any_present = True  # a sha, or a reachable-but-empty ("") repo that EXISTS
-            rows.append((repo, sha, recorded_at))
+            # Absent, or reachable with nothing pushed by the deadline. Either way there is
+            # no submission, so there is no submission time: both cells stay blank.
+            rows.append((repo, "", recorded_at, "", ""))
     if not any_present:
         # EVERY target repo is ABSENT (404): not generated yet, or a handout typo. This is
         # NOT the same as reachable-but-empty repos (a real "nobody submitted", which we DO
@@ -658,7 +721,7 @@ def snapshot_assignment(
         f"snapshot: {slug} pinned commits as of {deadline}",
     ):
         return SnapshotResult.FAILED
-    pinned = sum(1 for _repo, sha, _at in rows if sha)
+    pinned = sum(1 for row in rows if row[1])
     log_ok(
         f"snapshot {snapshot_path(slug)}: {pinned}/{len(rows)} repo(s) with a commit "
         f"on/before {deadline}"

@@ -129,21 +129,48 @@ def test_snapshot_csv_round_trips_and_keeps_a_blank_sha():
     # it and grading falls back to the student-datable pin for exactly the repos where a
     # backdated commit would be most valuable.
     rows = [
-        ("assignment-1-ben", "", "2026-10-16T00:04:12+00:00"),
-        ("assignment-1-anna", SHA, "2026-10-16T00:04:12+00:00"),
+        ("assignment-1-ben", "", "2026-10-16T00:04:12+00:00", "", ""),
+        (
+            "assignment-1-anna",
+            SHA,
+            "2026-10-16T00:04:12+00:00",
+            "2026-10-15T21:40:00Z",
+            "commit",
+        ),
     ]
     text = collect.dump_snapshots(rows)
-    assert text.splitlines()[0] == "repo,sha,recorded_at"
+    assert text.splitlines()[0] == "repo,sha,recorded_at,submitted_at,submitted_source"
     assert text.splitlines()[1].startswith("assignment-1-anna,")  # repo-sorted, stable
     assert collect.parse_snapshots(text) == {
         "assignment-1-anna": SHA,
         "assignment-1-ben": "",
     }
+    assert collect.parse_snapshot_rows(text)[
+        "assignment-1-anna"
+    ] == collect.SnapshotRow(
+        repo="assignment-1-anna",
+        sha=SHA,
+        recorded_at="2026-10-16T00:04:12+00:00",
+        submitted_at="2026-10-15T21:40:00Z",
+        submitted_source="commit",
+    )
+
+
+def test_parse_snapshot_rows_reads_a_snapshot_written_before_the_two_new_columns():
+    # The snapshot is WRITE-ONCE, so a file frozen by an older toolkit is never rewritten
+    # with the new columns. Parsing by name (not position) is what keeps that cohort
+    # gradable: the submission fields come back blank rather than raising.
+    text = f"repo,sha,recorded_at\nassignment-1-anna,{SHA},2026-10-16T00:04:12+00:00\n"
+    row = collect.parse_snapshot_rows(text)["assignment-1-anna"]
+    assert (row.sha, row.recorded_at) == (SHA, "2026-10-16T00:04:12+00:00")
+    assert (row.submitted_at, row.submitted_source) == ("", "")
+    assert collect.parse_snapshots(text) == {"assignment-1-anna": SHA}
 
 
 def test_parse_snapshots_skips_rows_without_a_repo():
     text = "repo,sha,recorded_at\n,deadbeef,2026-10-16T00:00:00+00:00\n"
     assert collect.parse_snapshots(text) == {}
+    assert collect.parse_snapshot_rows(text) == {}
 
 
 def test_snapshot_path_lives_under_snapshots():
@@ -484,13 +511,14 @@ def test_submission_targets_group_without_teams_is_empty(monkeypatch):
 @pytest.mark.parametrize(
     "response,expected",
     [
-        ((0, SHA), SHA),
-        ((0, ""), ""),  # repo exists, no commit that early -> recorded non-submission
+        ((0, f"{SHA} 2026-10-12T08:00:00Z"), collect.Pin(SHA, "2026-10-12T08:00:00Z")),
+        # repo exists, no commit that early -> recorded non-submission
+        ((0, ""), collect.Pin()),
         # 404: the repo ISN'T THERE - distinct from empty, so an all-absent set can be skipped
-        ((1, "gh: Not Found (HTTP 404)"), collect._REPO_ABSENT),
+        ((1, "gh: Not Found (HTTP 404)"), collect.Pin(absent=True)),
         (
             (1, "Git Repository is empty (HTTP 409)"),
-            "",
+            collect.Pin(),
         ),  # exists but empty -> freeze as zero
         ((1, "server error (HTTP 500)"), None),  # transient -> the caller must retry
     ],
@@ -519,15 +547,12 @@ def test_snapshot_sha_flags_a_commit_dated_after_the_freeze(monkeypatch, capsys)
     monkeypatch.setattr(
         collect, "gh", lambda *a, **k: (0, f"{SHA} 2026-10-16T10:00:00Z")
     )
-    assert (
-        collect._snapshot_sha(
-            "Cohort",
-            "assignment-1-anna",
-            "2026-10-16",
-            "2026-10-16T09:00:00+00:00",
-        )
-        == SHA
-    )
+    assert collect._snapshot_sha(
+        "Cohort",
+        "assignment-1-anna",
+        "2026-10-16",
+        "2026-10-16T09:00:00+00:00",
+    ) == collect.Pin(SHA, "2026-10-16T10:00:00Z")
     out = capsys.readouterr().out
     assert "dated after this freeze was taken" in out
     assert "anna" not in out, "the public log must carry the tag, not the handle"
@@ -543,7 +568,7 @@ def test_snapshot_sha_says_nothing_about_an_ordinary_commit(monkeypatch, capsys)
     assert "dated after" not in capsys.readouterr().out
 
 
-def _stub_snapshot_write(monkeypatch, shas: dict[str, str | None], existing=None):
+def _stub_snapshot_write(monkeypatch, pins: dict, existing=None):
     """Wire snapshot_assignment onto stubs; returns the (path, text) writes it makes."""
     written: list[tuple[str, str]] = []
     monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: existing)
@@ -551,11 +576,11 @@ def _stub_snapshot_write(monkeypatch, shas: dict[str, str | None], existing=None
         collect,
         "submission_targets",
         lambda org, slug, is_group=False, teams_key=None: [
-            (r, r.split("-")[-1], []) for r in shas
+            (r, r.split("-")[-1], []) for r in pins
         ],
     )
     monkeypatch.setattr(
-        collect, "_snapshot_sha", lambda org, repo, deadline, at="": shas[repo]
+        collect, "_snapshot_sha", lambda org, repo, deadline, at="": pins[repo]
     )
     monkeypatch.setattr(
         collect,
@@ -569,7 +594,11 @@ def _stub_snapshot_write(monkeypatch, shas: dict[str, str | None], existing=None
 
 def test_snapshot_assignment_records_one_row_per_repo(monkeypatch):
     written = _stub_snapshot_write(
-        monkeypatch, {"assignment-1-anna": SHA, "assignment-1-ben": ""}
+        monkeypatch,
+        {
+            "assignment-1-anna": collect.Pin(SHA, "2026-10-15T21:40:00Z"),
+            "assignment-1-ben": collect.Pin(),
+        },
     )
     assert (
         collect.snapshot_assignment(
@@ -584,8 +613,45 @@ def test_snapshot_assignment_records_one_row_per_repo(monkeypatch):
         "assignment-1-ben": "",
     }
     # recorded_at is the SERVER's clock, not anything the schedule or a student supplied
-    stamps = {row.split(",")[2] for row in text.splitlines()[1:]}
+    stamps = {row.recorded_at for row in collect.parse_snapshot_rows(text).values()}
     assert len(stamps) == 1 and stamps.pop().endswith("+00:00")
+
+
+def test_snapshot_assignment_records_when_the_pinned_commit_was_made(monkeypatch):
+    # The submission time has to be recorded AT the freeze: the snapshot is write-once, and
+    # the pinned commit's committer date is the only time we have in Phase 1 - so the row
+    # says where it came from rather than presenting a client-supplied claim as an
+    # observation. No sha means no submission, so no submission time either.
+    written = _stub_snapshot_write(
+        monkeypatch,
+        {
+            "assignment-1-anna": collect.Pin(SHA, "2026-10-15T21:40:00Z"),
+            "assignment-1-ben": collect.Pin(),  # reachable, nothing pushed in time
+            "assignment-1-cara": collect.Pin(absent=True),  # no such repo
+        },
+    )
+    collect.snapshot_assignment(
+        "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+    )
+    ((_path, text),) = written
+    rows = collect.parse_snapshot_rows(text)
+    assert (
+        rows["assignment-1-anna"].submitted_at,
+        rows["assignment-1-anna"].submitted_source,
+    ) == (
+        "2026-10-15T21:40:00Z",
+        collect.SUBMITTED_SOURCE_COMMIT,
+    )
+    for repo in ("assignment-1-ben", "assignment-1-cara"):
+        assert (
+            rows[repo].sha,
+            rows[repo].submitted_at,
+            rows[repo].submitted_source,
+        ) == (
+            "",
+            "",
+            "",
+        )
 
 
 def test_snapshot_assignment_never_overwrites_an_existing_snapshot(monkeypatch):
@@ -608,7 +674,7 @@ def test_snapshot_assignment_writes_nothing_when_a_lookup_fails(monkeypatch):
     # A transient API failure must not be frozen into a never-rewritten record: abandon
     # the whole file so the next hourly tick rebuilds it.
     written = _stub_snapshot_write(
-        monkeypatch, {"assignment-1-anna": SHA, "assignment-1-ben": None}
+        monkeypatch, {"assignment-1-anna": collect.Pin(SHA), "assignment-1-ben": None}
     )
     assert (
         collect.snapshot_assignment(
@@ -1218,8 +1284,8 @@ def test_snapshot_assignment_skips_when_every_repo_is_absent(monkeypatch, capsys
     _stub_snapshot_write(
         monkeypatch,
         {
-            "assignment-1-anna": collect._REPO_ABSENT,
-            "assignment-1-ben": collect._REPO_ABSENT,
+            "assignment-1-anna": collect.Pin(absent=True),
+            "assignment-1-ben": collect.Pin(absent=True),
         },
     )
 
@@ -1241,7 +1307,8 @@ def test_snapshot_assignment_freezes_reachable_empty_repos_as_zero(monkeypatch):
     # shas recorded) to CLOSE the backdating window, rather than leaving it open for a later
     # push backdated before the deadline. Distinct from all-absent, which is skipped above.
     written = _stub_snapshot_write(
-        monkeypatch, {"assignment-1-anna": "", "assignment-1-ben": ""}
+        monkeypatch,
+        {"assignment-1-anna": collect.Pin(), "assignment-1-ben": collect.Pin()},
     )
     assert (
         collect.snapshot_assignment(
