@@ -307,12 +307,16 @@ def test_the_block_the_harness_really_inserts_is_valid_yaml(monkeypatch):
     indentation slip here would not fail the harness, it would fail the cohort."""
     module = _pipeline_module(monkeypatch)
     when = datetime(2026, 9, 4, 14, 0)
-    block = module._schedule_block("assignment-90-e2eab12cd", when, when)
+    later = datetime(2026, 9, 4, 15, 0)
+    block = module._schedule_block("assignment-90-e2eab12cd", when, when, later)
     doc = yaml.safe_load(schedule_edit.insert_block(SCHEDULE, "e2eab12cd", block))
     assert set(doc) == {"timezone", "assignments", "events"}
     entry = doc["assignments"]["assignment-90-e2eab12cd"]
     assert entry["course_source_repo"] == "assignment-90-e2eab12cd"
     assert set(entry) <= schedule.KNOWN_ASSIGNMENT | {"title"}
+    # The due date and the cutoff are separate instants: collapsing them would skip the
+    # refresh pass entirely, which is most of what the live run is there to exercise.
+    assert entry["due_datetime"] != entry["grading_datetime"]
 
 
 def test_every_live_test_module_carries_the_gate():

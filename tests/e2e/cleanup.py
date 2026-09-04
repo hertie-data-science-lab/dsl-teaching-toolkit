@@ -20,7 +20,16 @@ import argparse
 import re
 import secrets
 
-from dsl_course import collect, course, discovery, gh_contents, ghcli, repos, schedule
+from dsl_course import (
+    collect,
+    course,
+    discovery,
+    gh_contents,
+    ghcli,
+    grades,
+    repos,
+    schedule,
+)
 from dsl_course.log import log, log_err, log_ok, log_person, log_step
 
 from . import allowlist, schedule_edit
@@ -36,9 +45,9 @@ _RUN_ID = re.compile(r"^e2e[0-9a-z]{6}$")
 # nobody wrote down), which a human has to look at before anything removes them.
 _DRIFT = re.compile(rf"^assignment-{ASSIGNMENT_NUMBER}-|e2e[0-9a-z]{{6}}")
 
-# `grading_sheets` is a literal until Phase 1 lands a constant for it; the other two are
-# the engine's own names, so a rename there cannot leave artefacts uncollected here.
-ARTEFACT_DIRS = (collect.SNAPSHOT_DIR, collect.AUTOGRADE_DIR, "grading_sheets")
+# The engine's own names, every one of them, so a rename there cannot leave artefacts
+# uncollected here.
+ARTEFACT_DIRS = (collect.SNAPSHOT_DIR, collect.AUTOGRADE_DIR, grades.SHEETS_DIR)
 
 
 def new_run_id() -> str:
@@ -138,6 +147,23 @@ def _is_artefact(path: str, run_id: str) -> bool:
         return False
     mine = slug(run_id)
     return rest == mine or rest.startswith((f"{mine}/", f"{mine}."))
+
+
+def restore_files(org: str, repo: str, before: dict[str, str | None]) -> int:
+    """Put shared files back exactly as they were found, in ONE commit.
+
+    Distribute writes two files no run id owns - `cohort-gradebook.csv` and
+    `gradebook/distributed.csv` - plus the test student's own gradebook. They cannot be
+    swept by namespace, so the harness records them before the run and hands them back
+    here. A path recorded as None was absent and is deleted."""
+    writes = {path: text.encode() for path, text in before.items() if text is not None}
+    delete = [path for path, text in before.items() if text is None]
+    if not gh_contents.put_files(
+        org, repo, writes, "e2e: restore shared grading files", delete=delete
+    ):
+        log_err(f"could not restore the shared files in {org}/{repo}")
+        return 1
+    return 0
 
 
 def cleanup(run_id: str, *, dry_run: bool = False) -> int:

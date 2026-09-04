@@ -237,7 +237,12 @@ Everything a run creates is namespaced `assignment-90-<run id>`. If it dies half
 which deletes only repos matching `assignment-90-<run id>(-.+)?`, removes only its own
 `# dsl-e2e:<run id>` fenced block from schedule.yml, and drops only its own snapshot /
 autograde / grading-sheet artefacts. Anything else that drifted is REPORTED, never deleted.
-Budget 15-25 minutes of wall clock, ~13 runs, all in public repos and therefore free.
+Budget 20-30 minutes of wall clock, ~16 runs, all in public repos and therefore free.
+Three Scheduled-release dispatches are needed, not two: the pass that hands out cannot
+also collect, and the DUE date and the CUTOFF drive different passes (refresh, then
+freeze). One-off setup: run **Sync gradebooks** once so the test student's
+`grades-<handle>` repo already exists - a repo the run created is drift the teardown
+cannot take back.
 
 ## Working conventions
 
