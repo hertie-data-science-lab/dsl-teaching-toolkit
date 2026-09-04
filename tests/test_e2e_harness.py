@@ -8,10 +8,17 @@ it was found. Those are pure functions, and they are tested here, in the ordinar
 
 from __future__ import annotations
 
-import pytest
+import importlib
+from datetime import datetime
+from pathlib import Path
 
+import pytest
+import yaml
+
+from dsl_course import schedule
 from tests.e2e import allowlist, cleanup, drive, estate, schedule_edit
 
+GATE = 'pytest.skip("live e2e - set DSL_E2E=1", allow_module_level=True)'
 OTHER = "hertie-ml-26-deep"
 COURSE, COHORT = sorted(allowlist.DEMO_ORGS)
 
@@ -170,16 +177,19 @@ SCHEDULE = """\
 timezone: Europe/Berlin
 
 assignments:
-  - key: assignment-1
-    course_source_repo: materials
+  assignment-1:
+    course_source_repo: assignment-1-f2026
+    due_datetime: 2026-10-13
 
-releases:
-  - when: 2026-10-01 09:00
+events:
+  final-exam:
+    event_datetime: 2026-12-01
 """
 
 BLOCK = """\
-  - key: assignment-90-e2eab12cd
-    course_source_repo: materials
+  assignment-90-e2eab12cd:
+    course_source_repo: assignment-90-e2eab12cd
+    due_datetime: 2026-09-04T23:59
 """
 
 
@@ -187,7 +197,7 @@ def test_the_block_goes_in_under_assignments_and_comes_out_clean():
     with_block = schedule_edit.insert_block(SCHEDULE, "e2eab12cd", BLOCK)
     assert "# dsl-e2e:e2eab12cd begin" in with_block
     # under `assignments:`, not at the end of the file - `releases:` still owns its own item
-    assert with_block.index("assignment-90") < with_block.index("releases:")
+    assert with_block.index("assignment-90") < with_block.index("events:")
     assert schedule_edit.remove_block(with_block, "e2eab12cd") == SCHEDULE
 
 
@@ -195,7 +205,7 @@ def test_inserting_twice_replaces_rather_than_stacks():
     once = schedule_edit.insert_block(SCHEDULE, "e2eab12cd", BLOCK)
     twice = schedule_edit.insert_block(once, "e2eab12cd", BLOCK)
     assert twice == once
-    assert twice.count("assignment-90-e2eab12cd") == 1
+    assert twice.count("  assignment-90-e2eab12cd:") == 1
 
 
 def test_removing_a_block_that_is_not_there_changes_nothing():
@@ -274,3 +284,42 @@ def test_cleanup_refuses_without_the_transport_fence(monkeypatch):
     # and as a command it says so and exits 1 rather than traceback-ing - having reached
     # no `gh` at all, which `conftest._no_live_gh` is what proves
     assert cleanup.main(["--run-id", RUN, "--dry-run"]) == 1
+
+
+def _pipeline_module(monkeypatch):
+    """The live pipeline module, imported past its own gate.
+
+    Importing it is the point: it never RUNS in CI, so a typo in it would surface only
+    mid-run, after the harness had already made repos in a real org. Without the env var
+    the import raises `Skipped` and the test that wanted it is quietly skipped too - which
+    is exactly the hole this closes."""
+    monkeypatch.setenv("DSL_E2E", "1")
+    return importlib.import_module("tests.e2e.test_assignment_pipeline")
+
+
+def test_the_live_pipeline_module_imports(monkeypatch):
+    module = _pipeline_module(monkeypatch)
+    assert {module.COURSE_ORG, module.COHORT_ORG} == set(allowlist.DEMO_ORGS)
+
+
+def test_the_block_the_harness_really_inserts_is_valid_yaml(monkeypatch):
+    """The fenced text goes into a file the scheduler parses every fifteen minutes: an
+    indentation slip here would not fail the harness, it would fail the cohort."""
+    module = _pipeline_module(monkeypatch)
+    when = datetime(2026, 9, 4, 14, 0)
+    block = module._schedule_block("assignment-90-e2eab12cd", when, when)
+    doc = yaml.safe_load(schedule_edit.insert_block(SCHEDULE, "e2eab12cd", block))
+    assert set(doc) == {"timezone", "assignments", "events"}
+    entry = doc["assignments"]["assignment-90-e2eab12cd"]
+    assert entry["course_source_repo"] == "assignment-90-e2eab12cd"
+    assert set(entry) <= schedule.KNOWN_ASSIGNMENT | {"title"}
+
+
+def test_every_live_test_module_carries_the_gate():
+    """The gate is per-module rather than in the e2e conftest (which says why), so a new
+    module that forgot it would drive real orgs from CI. Text, not behaviour, because the
+    whole point is that the line must be there BEFORE anything imports the module."""
+    modules = sorted((Path(__file__).parent / "e2e").glob("test_*.py"))
+    assert modules, "the live harness has no test modules"
+    for path in modules:
+        assert GATE in path.read_text(), f"{path.name} is not gated on DSL_E2E"
