@@ -234,7 +234,7 @@ def evaluate(now: datetime, runs: list[dict], own_run_id: str | None) -> Verdict
     The drivers are dated by ANY conclusion, because a cancelled or still-queued run proves
     the fire arrived; the cadence is measured only over runs that executed, because a
     cancelled one shipped nothing."""
-    fired: dict[str, list[datetime]] = {}
+    fired: dict[str, datetime] = {}  # newest fire per driver
     executed: list[datetime] = []
     for run in runs:
         if str(run.get("id")) == str(own_run_id):
@@ -243,13 +243,17 @@ def evaluate(now: datetime, runs: list[dict], own_run_id: str | None) -> Verdict
         if at is None:
             continue
         event = str(run.get("event") or "")
-        fired.setdefault(event, []).append(at)
-        if event in _DRIVERS and run.get("conclusion") in _EXECUTED:
+        # Only the two drivers date anything. `workflow_dispatch` is a human at the button,
+        # which is neither a cadence nor evidence that one is being kept.
+        if event not in _DRIVERS:
+            continue
+        fired[event] = max(at, fired.get(event, at))
+        if run.get("conclusion") in _EXECUTED:
             executed.append(at)
 
-    last_dispatch = max(fired.get(DISPATCH_EVENT) or [], default=None)
-    last_schedule = max(fired.get(CRON_EVENT) or [], default=None)
-    executed.sort()
+    last_dispatch = fired.get(DISPATCH_EVENT)
+    last_schedule = fired.get(CRON_EVENT)
+    executed.sort()  # the API's order is not promised, and every answer below assumes one
     gaps = [later - earlier for earlier, later in pairwise(executed)]
     return Verdict(
         armed=last_dispatch is not None,
@@ -270,6 +274,8 @@ def _entry_label(release: Release, sched: Schedule) -> str:
         if release.label.endswith(HANDOUT_SUFFIX)
         else ""
     )
+    # The empty slug is doing double duty on purpose: it covers both "this label is not a
+    # handout" and "the suffix is the whole label", neither of which names an assignment.
     if slug and slug in sched.assignments:
         return f"assignments.{slug} handout"
     return f"releases.{release.label}"
@@ -308,7 +314,6 @@ def late_items(
     for release in releases:
         label = _entry_label(release, sched)
         for i, dep in enumerate(release.deploy):
-            # A deploy ships on its own clock when it carries one, else at the entry's.
             at = dep.deploy_datetime or release.when
             if at is not None:
                 moments.append((f"{label} -> deploy[{i}]", at))
