@@ -265,6 +265,9 @@ def test_a_score_no_arithmetic_applies_to_is_passed_through_as_typed():
     [
         {"info": {"days_late": 0}, "score_individual": "pass"},  # nothing to apply
         {"info": {"days_late": 2}, "score_individual": 20},  # a number: just arithmetic
+        # Late and NOT YET MARKED. There is no decision to take about a mark nobody has
+        # written, and counting it as one told a grader to go looking for nothing.
+        {"info": {"days_late": 2}, "score_individual": None},
     ],
 )
 def test_a_mark_nobody_has_to_decide_is_not_flagged(block):

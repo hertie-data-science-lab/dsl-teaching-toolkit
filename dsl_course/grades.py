@@ -1318,8 +1318,16 @@ def needs_hand_decision(view: dict) -> bool:
 
     `pass`, two days late, is not `-20% of pass`. The distribute dry run counts these so
     that a grader decides them before anything is sent, rather than after a student reads
-    it."""
-    return "penalty" in view and _decimal(view.get("final_grade")) is None
+    it.
+
+    A row with NOTHING typed in it yet is not one of them - there is no decision to take
+    about a mark nobody has written. It carries a penalty (the toolkit counted the days)
+    and no `final_grade`, which is how the two are told apart."""
+    return (
+        "penalty" in view
+        and "final_grade" in view
+        and _decimal(view["final_grade"]) is None
+    )
 
 
 def _views_from_sheet(spec: SheetSpec, sheet: dict) -> dict[str, dict]:
@@ -2213,8 +2221,12 @@ def _preview(
         spec = specs[slug]
         units = (sheets[slug] or {}).get(spec.container_key) or {}
         views = [book[slug] for book in books.values() if slug in book]
-        derived = sum(1 for v in views if not needs_hand_decision(v))
-        hand = sum(1 for v in views if needs_hand_decision(v))
+        # Only rows that have been MARKED are counted as grades: an unmarked one is
+        # neither a grade this run would derive nor a decision anybody has to take, and
+        # counting it as either told a grader the sheet was further on than it is.
+        marked = [v for v in views if "final_grade" in v]
+        derived = sum(1 for v in marked if not needs_hand_decision(v))
+        hand = sum(1 for v in marked if needs_hand_decision(v))
         team_clause = f" in {len(units)} team(s)" if spec.is_group else ""
         log(
             f"  {slug}: {len(views)} student(s){team_clause} · {derived} final grade(s) "
