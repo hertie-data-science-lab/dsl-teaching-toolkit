@@ -7,6 +7,7 @@ hourly and has NO check-team gate - scheduled runs have no actor).
 
 from __future__ import annotations
 
+import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -1426,7 +1427,7 @@ def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsy
     )
     seen: list[str] = []
 
-    def fake_run(course, cohort, now, dry_run=False):
+    def fake_run(course, cohort, now, dry_run=False, release=True, autograde=True):
         seen.append(cohort)
         if cohort == "Cohort-A":
             raise RuntimeError("Cohort-A: gh: HTTP 502")
@@ -1441,6 +1442,146 @@ def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsy
     assert scheduler.main() == 1
     assert seen == ["Cohort-A", "Cohort-B"]
     assert "Cohort-A" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------- the two phase flags
+
+
+def _phase_spies(monkeypatch, sched: Schedule):
+    """Record which phases a run reaches, with none of their I/O."""
+    calls: list[str] = []
+    monkeypatch.setattr(scheduler.schedule, "load", lambda cohort: sched)
+    monkeypatch.setattr(
+        scheduler,
+        "_snapshot_passed_deadlines",
+        lambda *a: calls.append("snapshot") or 0,
+    )
+    monkeypatch.setattr(
+        scheduler, "_preflight_sources", lambda *a: calls.append("preflight") or 0
+    )
+    monkeypatch.setattr(
+        scheduler, "_run_releases", lambda *a: calls.append("release") or 0
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "_autograde_passed_deadlines",
+        lambda *a: calls.append("autograde") or 0,
+    )
+    return calls
+
+
+_DUE_RELEASE = Schedule(
+    releases=[_r("wk1", WHEN, deploy=[Deploy("cm", "lectures/01", "materials", None)])]
+)
+
+
+def test_skip_autograde_releases_without_grading(monkeypatch):
+    # The release job's invocation. Grading is the slow half (two hours, a clone per
+    # submission); leaving it in this job is what made a queued release wait on it.
+    calls = _phase_spies(monkeypatch, _DUE_RELEASE)
+    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "scheduler",
+            "--course-org",
+            "Course-Org",
+            "--all-cohorts",
+            "--skip-autograde",
+            "--now",
+            WHEN.isoformat(),
+        ],
+    )
+    assert scheduler.main() == 0
+    assert calls == ["snapshot", "preflight", "release"]
+
+
+def test_autograde_only_grades_without_releasing_anything(monkeypatch):
+    # The grading job's invocation, one cohort per matrix leg. It must not re-snapshot
+    # (the freeze is deadline-pinned in the release job) and must release nothing.
+    calls = _phase_spies(monkeypatch, _DUE_RELEASE)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "scheduler",
+            "--course-org",
+            "Course-Org",
+            "--cohort-org",
+            "Cohort-A",
+            "--autograde-only",
+            "--now",
+            WHEN.isoformat(),
+        ],
+    )
+    assert scheduler.main() == 0
+    assert calls == ["autograde"]
+
+
+def test_autograde_only_waits_for_the_snapshot_file(monkeypatch):
+    # The phases run in different jobs, so the handoff is the snapshot FILE. Absent means
+    # "not frozen yet": grading then would pin on student-controlled committer dates, or
+    # write permanent zeros for a cohort whose repos do not exist yet.
+    graded = _stub_collect(monkeypatch, marked=set(), templates={"assignment-1-f2026"})
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "load",
+        lambda cohort: _assignments(**{"assignment-1": _due(13)}),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "scheduler",
+            "--course-org",
+            "Course-Org",
+            "--cohort-org",
+            "Cohort-A",
+            "--autograde-only",
+            "--now",
+            "2026-11-01",
+        ],
+    )
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name: None)
+    assert scheduler.main() == 0
+    assert graded == []
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name: {"anna": "sha"})
+    assert scheduler.main() == 0
+    assert len(graded) == 1
+
+
+def test_the_two_phase_flags_are_refused_together(monkeypatch):
+    # They ask for opposite halves of the same run, so honouring both would silently do
+    # nothing at all - on a green run, four times an hour.
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "scheduler",
+            "--course-org",
+            "Course-Org",
+            "--all-cohorts",
+            "--skip-autograde",
+            "--autograde-only",
+        ],
+    )
+    assert scheduler.main() == 1
+
+
+def test_list_cohorts_prints_json_and_nothing_else(monkeypatch, capsys):
+    # It IS the grading matrix: the workflow captures stdout and hands it to fromJSON, so
+    # one stray log line on stdout would take grading out for the whole course.
+    monkeypatch.setattr(
+        scheduler, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["scheduler", "--course-org", "Course-Org", "--list-cohorts"],
+    )
+    assert scheduler.main() == 0
+    assert json.loads(capsys.readouterr().out) == ["Cohort-A", "Cohort-B"]
 
 
 # ----------------------------------------------------- source pre-flight (unattended)
@@ -1683,9 +1824,10 @@ def test_withholding_the_stub_is_visible_without_failing_the_run(monkeypatch, ca
     assert "Write it for students, then release again." in captured.err
 
 
-def test_the_snapshot_pass_hands_autograde_what_it_froze(monkeypatch):
-    # Both passes walk the same passed deadlines, so asking the snapshot file's state
-    # twice was a read per passed deadline per tick for an answer the first pass had.
+def test_the_snapshot_pass_reads_each_passed_deadline_once(monkeypatch):
+    # One read per passed deadline: the pass asks whether the snapshot file is there, and
+    # freezes the ones it isn't. A failed freeze is counted and writes nothing, so the
+    # autograde phase (which asks the same file, in its own job) still refuses it.
     reads: list[str] = []
     monkeypatch.setattr(
         scheduler, "load_snapshots", lambda org, name: reads.append(name) or None
@@ -1705,15 +1847,16 @@ def test_the_snapshot_pass_hands_autograde_what_it_froze(monkeypatch):
         **{"assignment-1": _due(13), "assignment-2": _due(14)},
     )
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
-    errors, frozen = scheduler._snapshot_passed_deadlines("C", "K", sched, now, False)
-    assert errors == 1
-    assert frozen == frozenset({"assignment-1"}), "a failed freeze counted as frozen"
+    assert scheduler._snapshot_passed_deadlines("C", "K", sched, now, False) == 1
     assert reads == ["assignment-1", "assignment-2"], "one read per passed deadline"
 
 
 def _real_snapshot_then_autograde(monkeypatch, targets):
     """Both deadline phases over the REAL snapshot_assignment, with `targets` as the
-    assignment's submission units. Returns the (course_org, template, ...) collect got."""
+    assignment's submission units. Returns the (course_org, template, ...) collect got.
+
+    `load_snapshots` stays None throughout, which is the truth here: nothing was frozen,
+    so the file the autograde phase gates on is still absent."""
     graded: list[tuple] = []
     monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name: None)
     monkeypatch.setattr(collect_mod, "load_snapshots", lambda org, name: None)
@@ -1738,27 +1881,25 @@ def _real_snapshot_then_autograde(monkeypatch, targets):
     monkeypatch.setattr(scheduler, "collect", lambda *a, **k: graded.append(a) or 0)
     sched = _assignments(**{"assignment-1": _due(13)})
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
-    errors, frozen = scheduler._snapshot_passed_deadlines("C", "K", sched, now, False)
-    errors += scheduler._autograde_passed_deadlines("C", "K", sched, now, False, frozen)
-    return errors, frozen, graded
+    errors = scheduler._snapshot_passed_deadlines("C", "K", sched, now, False)
+    errors += scheduler._autograde_passed_deadlines("C", "K", sched, now, False)
+    return errors, graded
 
 
 def test_a_snapshot_that_froze_nothing_does_not_licence_autograding(monkeypatch):
-    # Nobody onboarded yet: snapshot_assignment writes nothing and is green. Counting that
-    # as frozen let the same tick autograde, and collect then wrote write-once ZEROS for
-    # the whole cohort and marked the assignment graded - green, and unrecoverable.
-    errors, frozen, graded = _real_snapshot_then_autograde(monkeypatch, targets=[])
-    assert (errors, frozen, graded) == (0, frozenset(), [])
+    # Nobody onboarded yet: snapshot_assignment writes nothing and is green. Reading that
+    # as frozen let the tick autograde, and collect then wrote write-once ZEROS for the
+    # whole cohort and marked the assignment graded - green, and unrecoverable.
+    assert _real_snapshot_then_autograde(monkeypatch, targets=[]) == (0, [])
 
 
 def test_a_snapshot_whose_repos_are_all_absent_does_not_licence_autograding(
     monkeypatch,
 ):
     # Same, one step later: the repos are declared but not generated yet (every target 404s).
-    errors, frozen, graded = _real_snapshot_then_autograde(
+    assert _real_snapshot_then_autograde(
         monkeypatch, targets=[("assignment-1-anna", "anna", ["anna"])]
-    )
-    assert (errors, frozen, graded) == (0, frozenset(), [])
+    ) == (0, [])
 
 
 def test_autograde_waits_for_a_completed_snapshot(monkeypatch):
@@ -1771,20 +1912,11 @@ def test_autograde_waits_for_a_completed_snapshot(monkeypatch):
     monkeypatch.setattr(scheduler, "collect", lambda *a, **k: graded.append(a) or 0)
     sched = _assignments(**{"assignment-1": _due(13)})
     now = datetime(2026, 11, 1, tzinfo=timezone.utc)
-    # `frozen` is what the snapshot pass just established for this same tick - read, not
-    # re-fetched, so a passed deadline costs one snapshot read per tick rather than two.
-    nothing_frozen = frozenset()
-    assert (
-        scheduler._autograde_passed_deadlines(
-            "C", "K", sched, now, False, nothing_frozen
-        )
-        == 0
-    )
+    # The gate is the DURABLE marker - the snapshot file - not what the release phase
+    # froze a moment ago: this phase is its own job, in its own process.
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name: None)
+    assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
     assert graded == []
-    assert (
-        scheduler._autograde_passed_deadlines(
-            "C", "K", sched, now, False, frozenset({"assignment-1"})
-        )
-        == 0
-    )
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name: {"anna": "sha"})
+    assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
     assert len(graded) == 1

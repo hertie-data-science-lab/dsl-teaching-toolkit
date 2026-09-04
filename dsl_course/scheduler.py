@@ -6,8 +6,29 @@ cohort's own `classroom-config/schedule.yml` `releases:` plan (see
 actions - `deploy` (copy a source path from a COURSE-org repo into a COHORT-org repo) and
 `assignment` (provision one student repo per enrolled student from a template). Grading is
 NOT one of them: it is driven off each assignment's own deadline, below, not off a
-`releases:` entry. An hourly cron fires every release whose `when` has arrived. Because every release is idempotent, re-runs are no-ops and there is
-no "already released" state to track. Grading is the exception - see AUTOGRADE below.
+`releases:` entry. A tick fires every release whose `when` has arrived. Because every
+release is idempotent, re-runs are no-ops and there is no "already released" state to
+track. Grading is the exception - see AUTOGRADE below.
+
+TWO DRIVERS deliver those ticks (see `workflows_render.render_scheduler`): GitHub's own
+cron, which is best-effort and in practice delivers a small fraction of its fires, and an
+external dispatcher that fires the same workflow by `repository_dispatch`. Nothing here
+needs to know which arrived: every action is dated and either idempotent or fire-once, so
+an extra tick costs a few reads and a missed one is picked up by the next.
+
+TWO PHASES, which the workflow runs as separate jobs so that neither waits on the other
+(`--skip-autograde` runs the first, `--autograde-only` the second; passing neither runs
+both, which is what a local invocation wants):
+
+1. RELEASE - snapshot every passed grading deadline, pre-flight the plan's sources, then
+   fire every due release, for every cohort in one pass. Minutes at most.
+2. AUTOGRADE - grade every passed deadline once, for ONE cohort. This is the slow half (it
+   clones and runs every submission, on a 120-minute budget), which is why it is per cohort
+   and out of the release path: a cohort mid-grading must not delay a release due meanwhile.
+
+The two phases talk to each other only through the snapshot file, never in memory - so the
+autograde phase is correct a tick later, in another process, or after a release pass that
+failed.
 
 Assignment handouts are declared with the rest of the assignment's lifecycle -
 `assignments.<slug>.handout_datetime` - and synthesised into releases here
@@ -15,22 +36,26 @@ Assignment handouts are declared with the rest of the assignment's lifecycle -
 solution rides on that same release once `assignments.<slug>.solution_datetime` has
 passed - Release assignment's `include_solution` tick, on a clock.
 
-The same hourly run also drives each assignment's grading deadline (`grading_datetime`,
-else `due_datetime`), whether or not the cohort uses `releases` at all:
+Every tick also drives each assignment's grading deadline (`grading_datetime`, else
+`due_datetime`), whether or not the cohort uses `releases` at all:
 
-1. FREEZE. For every assignment whose grading deadline has gone by and that has no snapshot
-   yet, record the commit each submission repo is graded at into
+1. FREEZE (release phase). For every assignment whose grading deadline has gone by and that
+   has no snapshot yet, record the commit each submission repo is graded at into
    `classroom-config/snapshots/<slug>.csv` (see `dsl_course.collect`). That timestamp is the
    server's, not the student's, which is the only reason the pin can be trusted.
-2. AUTOGRADE, ONCE. Then run the autograder for those same assignments - template
-   `<slug>-<tag>` in the course org. The fire-once marker is the `autograde/<slug>/_graded.json`
-   sentinel (or the `_skipped.json` record): present means already graded, so never again.
+2. AUTOGRADE, ONCE (autograde phase). Run the autograder for every frozen assignment -
+   template `<slug>-<tag>` in the course org. The fire-once marker is the
+   `autograde/<slug>/_graded.json` sentinel (or the `_skipped.json` record): present means
+   already graded, so never again.
 
 Sources are always read from the course org and destinations always written to the cohort
 org - the two orgs come from the invocation (`--course-org` / `--cohort-org`), never from
 the schedule, which names repos only.
 
-Usage (the cron passes the course org and iterates its cohorts; --now is for testing):
+Usage (the workflow's two jobs are the first two lines; --now is for testing):
+    python3 -m dsl_course.scheduler --course-org COURSE --all-cohorts --skip-autograde
+    python3 -m dsl_course.scheduler --course-org COURSE --cohort-org COHORT --autograde-only
+    python3 -m dsl_course.scheduler --course-org COURSE --list-cohorts
     python3 -m dsl_course.scheduler --course-org COURSE --all-cohorts
     python3 -m dsl_course.scheduler --course-org COURSE --cohort-org COHORT --dry-run
     python3 -m dsl_course.scheduler --course-org COURSE --cohort-org COHORT --now 2026-09-15T14:00
@@ -39,6 +64,7 @@ Usage (the cron passes the course org and iterates its cohorts; --now is for tes
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime, timezone
 
@@ -172,24 +198,20 @@ def _snapshot_passed_deadlines(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-) -> tuple[int, frozenset[str]]:
+) -> int:
     """Freeze every passed-deadline assignment that has no snapshot yet. Write-once: an
     assignment already frozen is skipped silently, so this is a no-op on every tick after
-    the first.
+    the first. Returns the error count.
 
-    Returns `(error count, the cohort names that HAVE a snapshot afterwards)` - already
-    frozen or frozen by this pass. Autograding refuses to grade what was never frozen, and
-    asking again there was a second read of the same file for every passed deadline on
-    every tick; this pass has just established the answer."""
+    What was frozen is NOT returned: the snapshot file itself is the handoff to the
+    autograde phase, which runs in another job (and so another process) entirely."""
     errors = 0
-    frozen: set[str] = set()
     for slug, deadline in due_snapshots(sched, now):
         entry = sched.assignments[slug]
         # every cohort-side artefact keys on the assignment's cohort NAME, not its slug
         name = schedule.cohort_name(slug, entry)
         if load_snapshots(cohort_org, name) is not None:
             # already frozen - never re-snapshot, a late push must not move it
-            frozen.add(name)
             continue
         if dry_run:
             log(f"    DRY-RUN  snapshot {snapshot_path(name)} (deadline {deadline})")
@@ -212,17 +234,15 @@ def _snapshot_passed_deadlines(
             force=False, schedule_type=entry.type, template_group=template_group
         )
         # `name` names the repos, `slug` (the schedule key) is what teams.csv is keyed on.
+        # A FAILED freeze counts; NOTHING_TO_FREEZE (nobody handed out yet) does not, and
+        # neither writes a snapshot file - which is what keeps the autograde phase off an
+        # assignment that would otherwise score write-once zeros for the whole cohort.
         result = snapshot_assignment(
             cohort_org, name, deadline, is_group=is_group, teams_key=slug
         )
         if result is SnapshotResult.FAILED:
             errors += 1
-        elif result is not SnapshotResult.NOTHING_TO_FREEZE:
-            # NOTHING_TO_FREEZE wrote no snapshot, so the assignment is NOT frozen and must
-            # not be graded this tick - autograding it would write write-once zeros for a
-            # cohort that has not been handed out yet.
-            frozen.add(name)
-    return errors, frozenset(frozen)
+    return errors
 
 
 def _assignment_template(
@@ -247,15 +267,9 @@ def _autograde_passed_deadlines(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
-    frozen: frozenset[str],
 ) -> int:
     """Autograde every passed-deadline assignment exactly once - zero config. Returns the
     error count.
-
-    `frozen` is `_snapshot_passed_deadlines`' answer for this same tick: the cohort names
-    that have a snapshot. It is read rather than re-fetched, because the snapshot pass ran
-    immediately before over the same deadlines and is the only thing that could have
-    changed it.
 
     Fire-once: the `autograde/<slug>/_graded.json` sentinel (or the `_skipped.json` record) in
     classroom-config is the marker. Absent means never machine-graded, so grade now; present
@@ -280,9 +294,13 @@ def _autograde_passed_deadlines(
         # Never grade what was never frozen. Without a snapshot `collect` pins on committer
         # dates (student-controlled), and when no submission repo exists at all it would
         # record a permanent write-once ZERO for every student and mark the assignment
-        # graded - on a green run. A snapshot that failed this tick, or was skipped because
-        # nothing was handed out yet, simply means: not now. The next tick looks again.
-        if name not in frozen:
+        # graded - on a green run. A snapshot that failed, or was skipped because nothing
+        # was handed out yet, simply means: not now. The next tick looks again.
+        #
+        # The gate is the snapshot FILE, not what the release phase froze a moment ago:
+        # this phase is its own job, so there is nothing in memory to inherit, and the file
+        # is the same answer one tick later at worst.
+        if load_snapshots(cohort_org, name) is None:
             log(f"  [wait] autograde {slug} - no completed snapshot yet, not grading")
             continue
         if dry_run:
@@ -444,14 +462,15 @@ def _preflight_sources(
     return 0
 
 
-def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) -> int:
-    sched = schedule.load(cohort_org)
-    # A plan that could not be read AS A PLAN is not an empty one. `load` deliberately
-    # falls back to an empty Schedule so one cohort's typo cannot freeze the cron - but
-    # while it stands, nothing is released, handed out, snapshotted or graded for this
-    # cohort, and an hourly GREEN tick is exactly how that goes unnoticed. `load` has
-    # already logged what is wrong and where; this is what makes anyone look.
-    # (Individually DROPPED entries stay advisory, as before - the rest of the plan runs.)
+def _release_phase(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule,
+    now: datetime,
+    dry_run: bool,
+) -> int:
+    """Snapshot every passed deadline, pre-flight the plan's sources, and fire everything
+    now due. Returns the error count. No grading: see `_autograde_passed_deadlines`."""
     # Re-sorted, not just concatenated: the synthesised handouts carry their own datetimes
     # and would otherwise land after every scheduled release whatever their date.
     releases = sorted(
@@ -465,16 +484,9 @@ def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) 
     )
 
     # Freeze passed deadlines FIRST: server-timed, and before anything grades against the
-    # snapshot. Then autograde those same assignments, once each. Both are independent of
-    # the release plan - a cohort can pin due dates without scheduling a single release.
-    errors = int(sched.unparseable)
-    snapshot_errors, frozen = _snapshot_passed_deadlines(
-        course_org, cohort_org, sched, now, dry_run
-    )
-    errors += snapshot_errors
-    errors += _autograde_passed_deadlines(
-        course_org, cohort_org, sched, now, dry_run, frozen
-    )
+    # snapshot. Independent of the release plan - a cohort can pin due dates without
+    # scheduling a single release.
+    errors = _snapshot_passed_deadlines(course_org, cohort_org, sched, now, dry_run)
     # Look AHEAD as well as at what is due: a deploy whose source was never staged fails
     # at its moment, which is far too late to write the thing. This is the only unattended
     # surface that notices - the commit-time validator only ever runs when someone edits
@@ -487,7 +499,7 @@ def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) 
         for release in due:
             for line in describe(release, now):
                 log(f"    DRY-RUN  [{release.label}] {line}")
-        return int(sched.unparseable)
+        return errors
 
     if not releases:
         log(
@@ -499,7 +511,40 @@ def run(course_org: str, cohort_org: str, now: datetime, dry_run: bool = False) 
         log_ok("nothing due.")
     else:
         errors += _run_releases(course_org, cohort_org, due, now)
+    return errors
 
+
+def run(
+    course_org: str,
+    cohort_org: str,
+    now: datetime,
+    dry_run: bool = False,
+    *,
+    release: bool = True,
+    autograde: bool = True,
+) -> int:
+    """One cohort, one or both phases. The workflow's two jobs each ask for one phase
+    (`--skip-autograde` / `--autograde-only`); a local run asks for both."""
+    sched = schedule.load(cohort_org)
+    # A plan that could not be read AS A PLAN is not an empty one. `load` deliberately
+    # falls back to an empty Schedule so one cohort's typo cannot freeze the cron - but
+    # while it stands, nothing is released, handed out, snapshotted or graded for this
+    # cohort, and a GREEN tick is exactly how that goes unnoticed. `load` has already
+    # logged what is wrong and where; this is what makes anyone look.
+    # (Individually DROPPED entries stay advisory, as before - the rest of the plan runs.)
+    errors = int(sched.unparseable)
+    if release:
+        errors += _release_phase(course_org, cohort_org, sched, now, dry_run)
+    if autograde:
+        log_step(f"Autograde {course_org} -> {cohort_org} as of {now.isoformat()}")
+        errors += _autograde_passed_deadlines(
+            course_org, cohort_org, sched, now, dry_run
+        )
+
+    if dry_run:
+        # A preview reports only what it could not READ: nothing was written, so the
+        # errors above are the state of the org, not of this run.
+        return int(sched.unparseable)
     if errors:
         log_err(f"{errors} action(s) failed")
         return 1
@@ -528,7 +573,22 @@ def main() -> int:
     parser.add_argument(
         "--all-cohorts",
         action="store_true",
-        help="Run every cohort registered with the course org (the hourly cron).",
+        help="Run every cohort registered with the course org (the release job).",
+    )
+    parser.add_argument(
+        "--skip-autograde",
+        action="store_true",
+        help="Release phase only - snapshot, pre-flight and release, never grade.",
+    )
+    parser.add_argument(
+        "--autograde-only",
+        action="store_true",
+        help="Autograde phase only - grade every frozen passed deadline, release nothing.",
+    )
+    parser.add_argument(
+        "--list-cohorts",
+        action="store_true",
+        help="Print the course org's registered cohorts as a JSON list, and exit.",
     )
     parser.add_argument(
         "--now", default=None, help="Override 'now' (ISO date/datetime) - for testing."
@@ -536,6 +596,25 @@ def main() -> int:
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     now = _parse_now(args.now)
+
+    if args.skip_autograde and args.autograde_only:
+        log_err(
+            "--skip-autograde and --autograde-only ask for opposite halves of a run."
+        )
+        return 1
+
+    if args.list_cohorts:
+        # The grading job's matrix, and the ONLY thing this prints: the workflow captures
+        # stdout and hands it to fromJSON. Registry reads are silent when they succeed and
+        # raise (having logged to stderr) when the file is malformed, so a green run's
+        # stdout is the JSON and nothing else.
+        print(json.dumps(discover_cohorts(args.course_org)))
+        return 0
+
+    phases = {
+        "release": not args.autograde_only,
+        "autograde": not args.skip_autograde,
+    }
 
     if args.all_cohorts:
         cohorts = discover_cohorts(args.course_org)
@@ -554,7 +633,7 @@ def main() -> int:
             # releases - log it, mark the batch failed, and carry on. The same per-cohort
             # isolation PR #151/#146 applied to the nightly refresh.
             try:
-                rc |= run(args.course_org, cohort, now, dry_run=args.dry_run)
+                rc |= run(args.course_org, cohort, now, dry_run=args.dry_run, **phases)
             except Exception as exc:
                 log_err(f"scheduler run for {cohort} failed: {exc}")
                 rc |= 1  # accumulate, don't clobber prior cohorts' status bits
@@ -563,7 +642,7 @@ def main() -> int:
     if not args.cohort_org:
         log_err("pass --cohort-org or --all-cohorts.")
         return 1
-    return run(args.course_org, args.cohort_org, now, dry_run=args.dry_run)
+    return run(args.course_org, args.cohort_org, now, dry_run=args.dry_run, **phases)
 
 
 if __name__ == "__main__":
