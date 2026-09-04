@@ -61,4 +61,4 @@ example-course/
 
 > NB: **Assignment layout:** each `assignment-*/` splits into `main/` (→ the repo's `main` branch,
 > what students get) and `solution/` (→ the `solution` branch: model solution, `grading.yml`, and
-> the HIDDEN `tests/` that **Grade assignment** runs). Student repos never get `solution/`.
+> the HIDDEN `tests/` the autograder runs at the cutoff). Student repos never get `solution/`.

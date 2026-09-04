@@ -39,7 +39,7 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
      that isn't there.
    - For a partially machine-marked assignment set `autograde: true` in `grading.yml`:
       - put the hidden tests in `tests/` (path configurable via `grading.yml`'s `tests:` field) plain pytest files that `from starter import ...` and check the submission, run faculty-side only, never shipped to students. 
-     - `autograde_score` in `grades/<slug>.csv` then records how many of them each submission passed - a count for you to mark against, not the mark itself.
+     - `info.autograde` in the grading sheet then shows how many of them each submission passed - a count for you to mark against, never the mark itself, and never shown to a student.
      - Full grading flow: [Grade and return assignments](10-grade-and-return-assignments.md).
 
 3. **Run Refresh actions** so the assignment dropdowns update.

@@ -336,12 +336,13 @@ An empty `deploy:` - the key written with nothing under it - is flagged too. It 
 
 Full details of this are in [10-grade-and-return-assignments.md](10-grade-and-return-assignments.md); below is as it pertains to the `schedule.yml`.
 
-> **Autograded ≠ released to students.** The scores land only in the private `classroom-config` - faculty review them (and the whole-class `cohort-gradebook.csv`) and nothing reaches a student until the separate **Distribute grades** workflow: [three gates](10-grade-and-return-assignments.md).
+> **Marked ≠ released to students.** Everything lands in the private `classroom-config` and nothing reaches a student until you run **Distribute grades**: [Grade and return assignments](10-grade-and-return-assignments.md).
 
-Each assignment's **grading deadline** is `grading_datetime` if you set it, else `due_datetime`. Shortly after it passes, the scheduled run does two things, once each:
+Each assignment's **cutoff** is `grading_datetime` if you set it, else `due_datetime` plus the template's `late_window_days`. From the **due date** the cron refreshes the grading sheet (and posts submission receipts) every quarter of an hour; at the cutoff it does three things, once each:
 
 1. **Freezes** each submission repo's HEAD into `classroom-config/snapshots/<slug>.csv`, using the **server's** clock.
-2. **Autogrades** it (optional).
+2. **Freezes** the grading sheet - its `info:` never moves again.
+3. **Autogrades** it (optional).
 
 ### Releasing the model solution
 

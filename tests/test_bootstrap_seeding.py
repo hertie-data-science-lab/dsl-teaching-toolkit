@@ -347,8 +347,8 @@ def test_the_sample_set_is_the_whole_worked_example_cohort():
         "teams.csv.sample",
         "schedule.yml.sample",
         "people.yml.sample",
-        "grades/assignment-1.csv.sample",
-        "grades/assignment-4-project.csv.sample",
+        "grading_sheets/assignment-1.yml.sample",
+        "grading_sheets/assignment-4-project.yml.sample",
     }
     for path, source in welcome.CLASSROOM_SAMPLES.items():
         assert (welcome.EXAMPLE_COHORT / source).is_file(), f"{path} <- {source}"
@@ -381,16 +381,26 @@ def test_every_shipped_sample_parses_with_the_real_parser():
     )
     assert faculty["instructors"] and faculty["teaching_assistants"]
 
-    # both grade tables: the individual case, and the team-graded one the derived set
-    # restored (a group assignment fills team/team_grade/team_comments instead)
-    individual = grades.parse_grades(
-        welcome.example_cohort_file("grades/assignment-1.csv")
+    # both grading sheets: the individual case, and the group one (which nests `members:`
+    # inside each team). Parsed by the very function the toolkit reads a live sheet with.
+    individual = grades.parse_sheet(
+        welcome.example_cohort_file("grading_sheets/assignment-1.yml")
     )
-    project = grades.parse_grades(
-        welcome.example_cohort_file("grades/assignment-4-project.csv")
+    project = grades.parse_sheet(
+        welcome.example_cohort_file("grading_sheets/assignment-4-project.yml")
     )
-    assert individual and not any(r.team for r in individual)
-    assert project and all(r.team and r.team_score for r in project)
+    assert set(individual) == {"submissions"}
+    assert all(
+        "score_individual" in block for block in individual["submissions"].values()
+    )
+    assert set(project) == {"teams"}
+    assert all(
+        {"info", "score_group", "feedback_group", "members"} <= set(block)
+        for block in project["teams"].values()
+    )
+    # A sample is what a grader copies from, so it must not teach them to type a note that
+    # reaches a student: the private keys are present and the allowlist has never seen them.
+    assert grades.NOTES_KEY not in grades.STUDENT_VIEW_KEYS
 
 
 def test_scaffold_and_sample_carry_the_engines_current_column_sets():

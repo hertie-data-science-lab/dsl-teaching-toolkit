@@ -99,7 +99,7 @@ Two teams carry every faculty grant: `instructors` (this org's teaching team) an
 | cohort released content, submission repos, `grades-<handle>` | **read** | admin |
 
 Read on everything a cohort *receives*: a re-release overwrites released material, and marks
-live in `classroom-config/grades/<slug>.csv` (**Distribute grades** rewrites gradebooks from it),
+live in `classroom-config/grading_sheets/<slug>.yml` (**Distribute grades** rewrites gradebooks from it),
 so an edit in the received copy would silently vanish. `.github` keeps push because GitHub
 requires write to trigger a `workflow_dispatch`.
 

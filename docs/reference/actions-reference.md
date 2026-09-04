@@ -35,10 +35,8 @@ Full flow: [Grade and return assignments](../10-grade-and-return-assignments.md)
 
 | Action | Effect |
 | --- | --- |
-| **Grade assignment** | Faculty-side autograder: pins each submission to the frozen deadline snapshot, runs the template's hidden tests, writes `autograde_score` (and `team`, on a group assignment) into `classroom-config/grades/<slug>.csv`. Nothing is written to student repos. |
-| **Sync gradebooks** | Ensure every onboarded, enrolled student has a private `grades-<handle>` repo (student = read). Idempotent. |
-| **Render grades (preview)** | Pivot the grade CSVs into `gradebook/<handle>.yml` + a wide `cohort-gradebook.csv`, and open **one** PR in `classroom-config` - that diff is the preview. |
-| **Distribute grades** | After merging that PR: push each gradebook to the student's private repo and email the students whose grades changed. Re-run to retry a notification that failed. **`dry_run` defaults to `true`**; `silent` pushes without emailing. |
+| **Collect submissions** | Refresh one assignment's grading sheet now instead of waiting for the cron: re-read each submission, refill `info:`, post any receipt still owed. It never freezes anything - the cutoff does that. |
+| **Distribute grades** | Send what the grading sheet holds: a feedback comment on each submission repo's Feedback issue, each student's private `grades-<handle>` repo (`grades.yml` + `README.md`), `cohort-gradebook.csv`, and an email. Nothing is said twice, so a re-run after one correction reaches one student. **`dry_run` defaults to `true`**; `silent` sends without emailing. |
 
 ## Optional: public course website
 

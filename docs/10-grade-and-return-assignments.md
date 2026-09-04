@@ -1,170 +1,109 @@
 # Grade and return assignments
 
-> **This workflow is a prototype - and entirely optional.** It works best where parts of the
-> grading are automatable (hidden tests against code submissions). If it doesn't suit how you
-> plan to grade your course, skip it and grade as you always have. Feedback is very welcome,
-> and we're happy to customise it to your course's needs - just get in touch with the DSL team.
+One file to fill in, one button to send it. Everything else is the toolkit's.
 
-Autograde (optional) → add your marks → preview → distribute. Marks land in each student's
-private `grades-<handle>` repo, never in their assignment repo.
+## The shape of it
 
-> **Nothing reaches students until you Distribute.** The pipeline has three gates, and only
-> the last is student-visible:
-> 1. **Autograde** writes machine scores into the private `classroom-config` only
->    (`grades/<slug>.csv` + per-test detail in `autograde/<slug>/`).
-> 2. **Review**: you see exactly what the class scored before anything goes out -
->    `grades/<slug>.csv` per assignment, and after **Render grades** the read-only
->    `cohort-gradebook.csv` (one row per student, the whole-class glance view). Add
->    `manual_score`/`individual_adjustment`/`final_grade`/`individual_comments` at leisure; machine cells are write-once, so
->    your corrections stand.
-> 3. **Distribute grades** is the only step that pushes anything to students (with its own
->    `dry_run`, and email notify optional).
+```
+HANDOUT ─────► DUE ─────► late window ─────► CUTOFF ─────► DISTRIBUTE
+(cron)         (cron)     (cron refreshes)   (cron)        (button)
+   │             │              │               │              │
+sheet created  sheet        sheet refreshed   sheet         feedback comment
+(empty, dated) filled       as late work      frozen        + gradebook + email
+                            arrives
+```
 
-## Prerequisites
+Marking can start the moment anything is in. The sheet exists from handout; only the
+machine facts move during the late window.
 
-- An assignment [released](09-release-assignment-to-cohort.md) to the cohort.
-- *(autograding only)* hidden tests + `grading.yml` on the template's `solution` branch. Without
-  them (or with `autograde: false`), skip step 1 and grade entirely by hand.
+## `classroom-config/grading_sheets/<slug>.yml`
 
-## 1. Grade assignment (for autograde only)
+The one place a grader types. It arrives with every row present and a header saying which
+fields the toolkit fills and when. Two shapes - individual and group - and worked examples
+of both ship as `grading_sheets/*.yml.sample` in your `classroom-config`.
 
-**This runs itself.** At each assignment's grading deadline
-[the scheduler](07-schedule-releases.md#what-drives-the-scheduler) autogrades it **once**, with
-no manual run required. Run the workflow only for a deliberate re-grade.
+```yaml
+teams:
+  team-alpha:
+    info:                       # toolkit-owned, shown for information only
+      submitted: 2026-11-15T22:14+01:00
+      days_late: 0
+      contributions: |
+        Anna: model architecture. Ben: training loop.
+    score_group:                # yours
+      Q1: 14                    # /15
+      Q2: 13                    # /15
+    feedback_group: |
+      Excellent model design; the evaluation section is thin.
+    members:
+      anna-adams:
+        adjustment_individual: +4
+        feedback_individual:
+        notes_not_shared_with_students:
+```
 
-Course `.github` → **Actions** → **Grade assignment**: `cohort_org`, `course_source_repo`, plus `group`
-(a force-override - an assignment declared `type: group` grades per team anyway)
-and `dry_run` (both default **off**). It runs the hidden tests and writes into
-`classroom-config`:
+| Field | Owner | Student sees |
+| --- | --- | --- |
+| `info.submitted`, `info.days_late`, `info.contributions`, `info.autograde` | toolkit, refreshed until frozen | `submitted`, `days_late` |
+| `score_group` / `score_individual` (per question, or one value) | you | as the total, plus the breakdown |
+| `feedback_group`, `feedback_individual` | you | yes (own + team) |
+| `adjustment_individual` | you - the ONLY override, in both shapes | their own |
+| `notes_not_shared_with_students` | you | **never** |
+| final grade | derived on output, never stored | yes |
 
-- `grades/<slug>.csv` → the `autograde_score` column, on group assignments as well as individual ones (every member of a team carries the team's count, plus `team`). **Write-once:**
-  a cell that already holds a value is never overwritten - re-running fills empty cells only,
-  so your hand-edits stand. For fresh machine scores, blank those cells first.
-- `autograde/<slug>/<handle-or-team>.json` → the raw per-test result, for appeals.
-- `autograde/<slug>/_graded.json` (a completed run) or `_skipped.json` (a decision not to
-  grade) → the **fire-once marker**. While either record exists the scheduler will not grade this
-  assignment again; the folder alone is not the marker, so an aborted run still re-grades.
-  Delete the folder to let the next tick re-grade.
+The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 0. A
+non-numeric score (`pass`, `A-`) is passed through verbatim with no arithmetic; the dry run
+counts those as "needs a hand decision". The question names, the `# /N` maxima and the whole
+header come from `grading.yml` and `schedule.yml` and are re-emitted on every write - so
+edit them **there**, never in the sheet.
 
-There is **no deadline input**: the deadline is the cohort schedule's
-`assignments.<slug>.grading_datetime` (default: the `due_datetime`), and the graded commit is the one frozen into
-`classroom-config/snapshots/<slug>.csv` (see
-[Release assignment → Deadlines](09-release-assignment-to-cohort.md#deadlines)). A blank sha
-there means nothing was pushed by the deadline, and that scores zero.
+An assignment whose `grading.yml` says `submit_via: external` has no `info:` block at all:
+there is no commit to time.
 
-Nothing is written to any student repo. Auditors are never graded.
+## Marking, step by step
 
-The run log is public, so it names each submission by a per-run `#tag`, not by handle. The tag
-is recorded beside the repo in `classroom-config/autograde/<slug>/*.json`; scores are in
-`classroom-config/grades/<slug>.csv`.
+1. **Handout.** The sheet appears with one row per student or team, and every submission
+   repo gets a **Feedback** issue.
+2. **The due date.** `info:` fills, and each student gets a submission receipt on that
+   issue. Late pushes refresh both, quarter-hourly, until the cutoff.
+3. **Collect submissions** (button) does that refresh now instead of waiting. It never
+   freezes anything.
+4. **Type the marks.** Anything you write is kept forever - including keys you invent, and
+   rows for students who have left. Delete a key and it stays deleted.
+5. **The cutoff** (`grading_datetime`, else the due date plus the late window) freezes the
+   pin and the sheet. Its header then reads `FROZEN`.
+6. **Distribute grades** (button), `dry_run` first. The dry run reads everything, writes
+   nothing, and prints the counts.
 
-### What autograde guarantees
+## What Distribute sends
 
-- **The graded commit is the frozen one.** Grading pins to the snapshot sha, never to a
-  client-supplied commit date. A late push, a backdated commit, or a force-push that rewrites
-  history after the deadline cannot move the pin: if the frozen commit can't be recovered, the
-  target scores zero rather than grading the rewritten history.
-- **Student-committed files can't rig the score.** The hidden tests run in a sandbox outside
-  the checkout; a committed `report.xml`, `conftest.py`, `pytest.ini`, `sitecustomize.py`, or a
-  module shadowing a standard-library name cannot change which tests run or the score they
-  produce. The bot credential is removed from the checkout before any submission code runs.
-- **A failed run is safe to retry.** The fire-once marker is written only after every score is
-  recorded and every repo was read. If a run is interrupted, or any submission repo can't be
-  read, no marker is written and the next tick re-grades - already-recorded scores are left
-  untouched (write-once). A snapshot is likewise never frozen while **every** target repo is
-  still absent (404 - not provisioned yet), so a late hand-out isn't locked in as "nobody
-  submitted". A repo that exists but is empty is a real non-submission and *is* frozen, as a
-  zero - that closes the backdating window.
+- **A feedback comment** on each submission repo's Feedback issue. A team repo grants the
+  whole team `maintain`, so a team comment carries the team score and the team feedback and
+  **nothing personal** - no member's adjustment, feedback or final grade can appear there.
+- **The private gradebook** `grades-<handle>`: `grades.yml` and a rendered `README.md`, in
+  one commit. The student sees their final grade, never the sum behind it.
+- **`cohort-gradebook.csv`** in `classroom-config` - the registrar export, one row per
+  enrolled student including the ungraded. Private, never logged.
+- **An email** with a link and no marks in it.
 
-## 2. Add your marks (on top of / instead of autograde)
+Nothing is said twice: every comment carries a content hash and every send is recorded in
+`gradebook/distributed.csv`, so a re-run after one correction reaches one student. `silent`
+skips the email.
 
-Live example: [`example-course/cohort-org/grades/assignment-1.csv`](../example-course/cohort-org/grades/assignment-1.csv).
+## Autograding (optional)
 
-Edit `classroom-config/grades/<slug>.csv` (directly editing via web UI is fine; otherwise edit a local copy of the repo, commit & push)
+`autograde: true` in the template's `grading.yml` runs the hidden tests from its `solution`
+branch at the cutoff, against the frozen pin, in a sandbox with the token stripped. The
+count lands in `info.autograde` (`7/9`) for your information only - it is never a mark by
+itself and a student never sees it. Per-test detail goes to `classroom-config/autograde/`.
+To regrade, delete `autograde/<slug>/`.
 
-> **Where does the CSV come from?** Step 1 creates it. If you're not autograding, create it
-> yourself: `classroom-config/grades/<slug>.csv` (the folder is seeded empty), with the header
-> row below and one row per student handle. Any column you leave out is treated as blank.
+## Still on the grade CSVs?
 
-| Column | You fill? | The student sees it? | What it's for |
-|--------|-----------|----------------------|---------------|
-| `github_handle` | no - roster | - | which student the row is |
-| `team` | no - autograder | yes (group only) | their team, on group assignments |
-| `autograde_score` | no - autograder | **no** | how many hidden tests passed (a count, not a mark). On a group assignment every member carries the team's |
-| `manual_score` | yes | **no** | your hand-marked part - a working column |
-| `team_score` | yes (group) | yes | the shared team mark - yours, never machine-written |
-| `individual_adjustment` | yes (group) | only their own | that member's individual adjustment |
-| `final_grade` | **yes** | **yes** | **the mark. Nothing computes it for you** |
-| `individual_comments` | yes | yes | feedback for that student |
-| `team_comments` | yes (group) | yes | feedback shared with the whole team |
+A cohort that began marking in `grades/<slug>.csv` keeps distributing from it: those marks
+reach gradebooks, the registrar export and the email, but not the Feedback issues, and the
+gradebook's Submitted column stays blank because a CSV records no timing. New assignments
+get a sheet.
 
-- **For group projects**:
-  - `team_score` (shared), each member's private `individual_adjustment`, shared
-  `team_comments`, plus each member's own `final_grade`.
-  - No one sees another member's adjustment.
-- **For no-autograde**: A hand-marked assignment just needs `final_grade` + `individual_comments`.
-- `autograde_score` and `manual_score` are faculty-internal and never shown to the student.
-- `final_grade` is what the student sees, and you own it - nothing sums `autograde_score` + `manual_score` for you.
-- Values stay as you type them - a letter, a percentage, `+4` - nothing is coerced or rounded.
-
-## 3. Sync gradebooks
-
-Course `.github` → **Actions** → **Sync gradebooks**: pick `cohort_org`, plus `dry_run`
-(defaults **off**).
-
-- Gives every onboarded, enrolled student a **private** `grades-<handle>` repo, with that
-  student added as a read-only collaborator. Auditors get none.
-- Idempotent - re-run after late enrolments.
-
-## 4. Render grades (preview)
-
-Course `.github` → **Actions** → **Render grades (preview)**: pick `cohort_org`. No other
-inputs - it never sends anything.
-
-- Opens **one** PR in `classroom-config` (branch `grades-update`, "Grades: review before
-  distribution") holding a `gradebook/<handle>.yml` per student - what that student will
-  receive in step 5.
-- **That diff is the preview.** Only `final_grade`, `individual_comments` and, for group work, `team`,
-  `team_score`, that member's own `individual_adjustment` and `team_comments` are copied into a student's
-  file. `autograde_score` and `manual_score` never are.
-- It also regenerates `cohort-gradebook.csv` at the repo root - a wide all-students view for
-  you, which stays in `classroom-config` and is never distributed.
-- Review, then **merge**. Nothing reaches a student until you do.
-
-> **Everything here is private.** `classroom-config` and every `grades-<handle>` repo are
-> private; a student is a read-only collaborator on their own gradebook repo and has no access
-> to `classroom-config`, so they can't see the source CSVs, the preview PR, or anyone else's
-> marks.
-
-## 5. Distribute grades
-
-Course `.github` → **Actions** → **Distribute grades**: pick `cohort_org`, plus `dry_run` and
-`silent`. Run it **after merging step 4's PR** - it distributes what was merged.
-
-Copies each merged gradebook to `grades-<handle>/grades.yml` and emails the student a "your grades have been updated" link (no marks in the email). 
-
-> NB: email is configured centrally by the DSL team. Where it is not live the grades still reach each student's repo; only the notification is skipped.
-
-**`dry_run` defaults to `true`** - it pushes nothing and sends nothing until you untick it.
-A dry run lists the **masked** recipient and subject of each message, plus one sample body
-rendered from placeholders - never a real student's, because this log is public. `silent`
-pushes the grades without emailing.
-
-Only students whose gradebook actually changed are emailed, and a notification that failed is
-retried by simply re-running: `gradebook/notified.csv` records who has been told about which
-version, so a re-run reaches exactly the students a failure left out.
-
-## Next
-
-- Repeat 2-5 per assignment as deadlines pass. Step 1 has already run itself -
-  [Schedule releases](07-schedule-releases.md).
-
-  > ℹ️ **Autograding fires once**, at each assignment's grading deadline, and never again -
-  > the `_graded.json` / `_skipped.json` record inside `autograde/<slug>/` is the marker. To
-  > re-grade: delete that folder (the next
-  > next tick regrades) or press **Grade assignment**. Either way, clear the `autograde_score`
-  > cells you want recomputed first - they are write-once and are otherwise left
-  > exactly as you left them.
-
----
-**Demo:** per-student `grades-<handle>` repos in [`hertie-dsl-demo-f2026`](https://github.com/hertie-dsl-demo-f2026).
+See also: [Release an assignment](09-release-assignment-to-cohort.md) ·
+[Schedule releases](07-schedule-releases.md)
