@@ -17,15 +17,27 @@ Two alarms, in two places, because they have two audiences:
 
 - DRIVER HEALTH, in the course org's public `.github`, for whoever runs the infrastructure:
   no external dispatch in DS01_DEAD means the dispatcher is down and only GitHub's unreliable
-  cron is left. This is the dead-man's switch.
+  cron is left. This is the dead-man's switch, and the dispatcher is the ONLY thing it is
+  about - GitHub's own cron is listed for information and never alarms, because dropping
+  most of its fires is its measured normal state.
 - LATE DELIVERY, in each cohort's private `classroom-config`, for that cohort's instructors:
   these named moments passed more than GAP_SLO before the tick that shipped them. This is
   the SLO, and it is per cohort because the plan that was late is theirs.
 
-DISARMED until an external dispatch run has ever been seen. Nothing opens and nothing closes
-before then - the whole point of the alarm is that a dispatch every 15 minutes is expected,
-and until the dispatcher exists a course org would be told, four times an hour, that a driver
-it never had is missing.
+DISARMED until an external dispatch run appears in the window. Nothing opens and nothing
+closes before then - the whole point of the alarm is that a dispatch every 15 minutes is
+expected, and until the dispatcher exists a course org would be told, four times an hour,
+that a driver it never had is missing. Being disarmed is a statement about the WINDOW, not
+about history, so an org whose dispatcher died long enough ago for its last run to scroll
+out of the window would otherwise fall quiet with its alarm still standing: an OPEN
+driver-health issue is the second half of the evidence, and `report_course` keeps watching
+whenever it finds one.
+
+Both issues CLOSE on hysteresis, never on a single good sign: the driver has to be back on
+cadence (a dispatch inside HEALTHY_GAP), and a cohort's delivery has to have held for
+HEALTHY_GAPS consecutive ticks - counting the gap this very tick arrived on. Closing on a
+first good tick and reopening on the next late moment is the same cry-wolf failure from the
+other direction.
 
 Every line either module publishes carries workflow names, timestamps, minutes, schedule
 labels and counts - never a handle, a student repo, or a `describe()` line (which names
@@ -44,7 +56,13 @@ from itertools import pairwise
 from .ghcli import gh_json
 from .issues import close_issues_titled, find_issue, upsert_issue
 from .log import log, log_err, log_step, log_withheld
-from .schedule import CONFIG_REPO, Release, Schedule, grading_datetime_at
+from .schedule import (
+    CONFIG_REPO,
+    HANDOUT_SUFFIX,
+    Release,
+    Schedule,
+    grading_datetime_at,
+)
 
 # How late one dated moment may ship before its cohort is told. A tick arrives every 15
 # minutes and a release's `when` is usually a class time, so the first hour is ordinary
@@ -53,25 +71,25 @@ GAP_SLO = timedelta(minutes=60)
 # No external dispatch for this long = the dispatcher is dead. It fires every 15 minutes, so
 # this is eight consecutive misses - long enough that a reboot or a VPN blip stays quiet.
 DS01_DEAD = timedelta(hours=2)
-# GitHub's own cron is best-effort by design (6 of 24 delivered on `0 * * * *`, gaps to 13h),
-# so only a whole day of silence says anything at all - and it is informational: this
-# threshold never opens an issue on its own.
-GH_CRON_DEAD = timedelta(hours=24)
-# How many consecutive healthy gaps close a late-delivery issue. Eight quarter-hourly ticks
-# is two hours of proven cadence, so a recovery has to HOLD rather than merely happen once -
-# otherwise the issue closes on the first good tick after an outage and reopens on the next.
+# How many consecutive healthy gaps close a late-delivery issue - the gap THIS tick arrived
+# on plus the ones before it. Eight quarter-hourly ticks is two hours of proven cadence, so
+# a recovery has to HOLD rather than merely happen once; otherwise the issue closes on the
+# first good tick after an outage and reopens on the next.
 HEALTHY_GAPS = 8
 # What "healthy" means for one gap: a quarter-hourly driver plus a few minutes of runner
-# queue. Anything under this is the system working as designed.
+# queue. Anything at or under this is the system working as designed. It is also the
+# driver-health close rule - "the dispatcher is back on cadence", not "was seen once".
 HEALTHY_GAP = timedelta(minutes=20)
 
 # The scheduler's own workflow file, exactly as `seed.seed_github_workflows` writes it into
 # every course org's `.github`. Renaming it there and not here leaves a course whose cadence
 # check reads a 404 - loudly (the read raises), but only in the logs.
 WORKFLOW_FILE = "scheduled-release.yml"
-# ~5 hours of quarter-hourly ticks: enough history for HEALTHY_GAPS and for both dead-man
-# thresholds, in ONE request. Everything this module says is bounded by this window, and the
-# bodies say so rather than implying knowledge of anything older.
+# ~5 hours of quarter-hourly ticks: enough history for HEALTHY_GAPS and for the dead-man
+# threshold, in ONE request. EVERYTHING this module says is bounded by this window - which
+# is why there is no "no cron fire in 24h" rule (a 24h-old run cannot be in a 5h window, so
+# such a rule could only ever read as false) and why the bodies say "in the last 20 runs"
+# rather than implying knowledge of anything older.
 RUNS_PAGE = 20
 
 # The two drivers, as GitHub names them in a run's `event`.
@@ -89,11 +107,12 @@ LATE_TITLE = "Scheduled release: late delivery"
 
 _STATE_RE = re.compile(r"<!-- dsl-cadence-state: (\{.*?\}) -->", re.DOTALL)
 
-# How `scheduler._handout_releases` labels the releases it synthesises from
-# `assignments.<slug>.handout_datetime`. They arrive here mixed into the `releases:` plan, and
-# a late handout must be reported against the field faculty would edit to fix it - the
-# assignment's block, not a `releases.<slug>-handout` entry that exists in no file.
-_HANDOUT_SUFFIX = "-handout"
+# The two ways the dispatcher can be missing, as the driver-health body records them. They
+# are a real transition - "we have not seen it AT ALL in the window" is worse news than "we
+# saw it, too long ago" - and that transition is the one thing that earns a second email on
+# a standing alarm.
+DISPATCH_STALE = "stale"
+DISPATCH_UNSEEN = "none-in-window"
 
 
 # --------------------------------------------------------------------------- pure core
@@ -107,20 +126,23 @@ class Verdict:
     RUNS_PAGE runs", which is a weaker statement than "never", and the bodies word it that
     way."""
 
-    # False until an external dispatch run has EVER been seen. Nothing is opened or closed
-    # while this is False (see the module docstring).
+    # Whether an external dispatch run is in the WINDOW - not whether one ever existed.
+    # False both before the dispatcher ships and once a long-dead one has scrolled out of
+    # the last RUNS_PAGE runs, which is why `report_course` also treats an open issue as
+    # evidence that this org was armed (see the module docstring).
     armed: bool
     last_dispatch_at: datetime | None
+    # GitHub's own cron, INFORMATIONAL only: it is printed in the body and never compared
+    # to a threshold. It drops most of its fires by design, and a window this short cannot
+    # tell "quiet for a day" from "crowded out by the dispatcher's four fires an hour".
     last_schedule_at: datetime | None
-    # No external dispatch for DS01_DEAD. The dead-man's switch, and the only thing that
-    # opens the driver-health issue.
+    # The dispatcher was seen, and longer ago than DS01_DEAD. The dead-man's switch, and
+    # the ONLY thing that opens (or holds open) the driver-health issue.
     ds01_dead: bool
-    # No GitHub cron fire for GH_CRON_DEAD. Informational: reported in the body, never a
-    # reason to open on its own (GitHub's cron missing fires is its normal state).
-    gh_cron_stale: bool
     # The last run that actually executed - what "the previous tick" means for lateness.
     prev_executed_at: datetime | None
-    # Gaps between consecutive executed runs, newest first. Hysteresis for the close rule.
+    # Gaps between consecutive executed runs, newest first. This tick's own gap is NOT in
+    # here (it has not executed yet) - `healthy` puts it back.
     recent_gaps: list[timedelta]
     now: datetime
 
@@ -133,11 +155,35 @@ class Verdict:
 
     @property
     def healthy(self) -> bool:
-        """Whether the last HEALTHY_GAPS gaps are ALL within HEALTHY_GAP - the close rule
-        for a late-delivery issue. Requiring a full run of them is what stops the issue
-        closing on the first good tick after an outage and reopening on the next."""
-        return len(self.recent_gaps) >= HEALTHY_GAPS and all(
-            g <= HEALTHY_GAP for g in self.recent_gaps[:HEALTHY_GAPS]
+        """Whether the last HEALTHY_GAPS gaps - THIS tick's included - are all within
+        HEALTHY_GAP. The close rule for a late-delivery issue.
+
+        This tick's own gap has to count, or a tick arriving three hours after the last one
+        closes the issue on the strength of the eight punctual gaps before the outage - and
+        says, in the closing comment, that eight consecutive ticks arrived on time. No
+        previous tick at all means no evidence, which is not the same as good news."""
+        gap = self.gap
+        if gap is None:
+            return False
+        gaps = [gap, *self.recent_gaps]
+        return len(gaps) >= HEALTHY_GAPS and all(
+            g <= HEALTHY_GAP for g in gaps[:HEALTHY_GAPS]
+        )
+
+    @property
+    def dispatch_state(self) -> str:
+        """How the dispatcher is missing - DISPATCH_UNSEEN or DISPATCH_STALE. Only
+        meaningful while the alarm stands."""
+        return DISPATCH_STALE if self.last_dispatch_at else DISPATCH_UNSEEN
+
+    @property
+    def dispatch_on_cadence(self) -> bool:
+        """Whether the dispatcher is back on cadence, which is the driver-health CLOSE rule.
+        Deliberately stricter than "not dead": a single dispatch after a three-hour outage
+        closes an issue that the next missed fire reopens."""
+        return (
+            self.last_dispatch_at is not None
+            and self.now - self.last_dispatch_at <= HEALTHY_GAP
         )
 
 
@@ -210,11 +256,6 @@ def evaluate(now: datetime, runs: list[dict], own_run_id: str | None) -> Verdict
         last_dispatch_at=last_dispatch,
         last_schedule_at=last_schedule,
         ds01_dead=last_dispatch is not None and now - last_dispatch > DS01_DEAD,
-        # A window this short cannot see a schedule run 24h old, so "none in the window" is
-        # ignorance, not staleness - and reading it as staleness would hold the
-        # driver-health issue open for ever once the dispatcher (4 fires an hour) crowds
-        # GitHub's occasional one out of the last RUNS_PAGE runs.
-        gh_cron_stale=last_schedule is not None and now - last_schedule > GH_CRON_DEAD,
         prev_executed_at=executed[-1] if executed else None,
         recent_gaps=list(reversed(gaps)),
         now=now,
@@ -222,10 +263,11 @@ def evaluate(now: datetime, runs: list[dict], own_run_id: str | None) -> Verdict
 
 
 def _entry_label(release: Release, sched: Schedule) -> str:
-    """The YAML path faculty would edit to move this entry's moment."""
+    """The YAML path faculty would edit to move this entry's moment. A synthesised handout
+    is reported against its assignment block, which is the file it actually came from."""
     slug = (
-        release.label[: -len(_HANDOUT_SUFFIX)]
-        if release.label.endswith(_HANDOUT_SUFFIX)
+        release.label[: -len(HANDOUT_SUFFIX)]
+        if release.label.endswith(HANDOUT_SUFFIX)
         else ""
     )
     if slug and slug in sched.assignments:
@@ -250,9 +292,18 @@ def late_items(
     `releases` is the merged plan the scheduler is about to fire - `releases:` entries plus
     the handouts synthesised from `assignments.<slug>.handout_datetime` - so an assignment
     whose template repo does not exist (and which therefore synthesised no release, and
-    could not have shipped) is not reported as late."""
+    could not have shipped) is not reported as late.
+
+    `prev_at` is the previous run's `created_at`: when GitHub accepted the fire, not when
+    the run reached the release. A moment that a long-queued run shipped some minutes after
+    that timestamp therefore falls inside this tick's window too and can be reported once
+    more - the body's state marker is what stops it emailing anyone twice."""
     if prev_at is None:
         return []
+    # The handouts the scheduler actually synthesised. An assignment with no template repo
+    # in the course org gets none, and its SOLUTION rides on that same release
+    # (`_handout_releases`), so without one neither could have shipped.
+    synthesised = {r.label for r in releases if r.label.endswith(HANDOUT_SUFFIX)}
     moments: list[tuple[str, datetime]] = []
     for release in releases:
         label = _entry_label(release, sched)
@@ -265,11 +316,14 @@ def late_items(
             moments.append((label, release.when))
     for slug, entry in sched.assignments.items():
         # The freeze moment: late here means submissions kept arriving past the deadline the
-        # snapshot was supposed to pin.
+        # snapshot was supposed to pin. It needs no template repo, so it is always asked.
         at = grading_datetime_at(sched, slug)
         if at is not None:
             moments.append((f"assignments.{slug} snapshot", at))
-        if entry.solution_datetime is not None:
+        if (
+            entry.solution_datetime is not None
+            and f"{slug}{HANDOUT_SUFFIX}" in synthesised
+        ):
             moments.append((f"assignments.{slug} solution", entry.solution_datetime))
     return sorted(
         (
@@ -298,8 +352,8 @@ def _marker(state: dict) -> str:
     return f"<!-- dsl-cadence-state: {json.dumps(state, sort_keys=True)} -->"
 
 
-def _driver_body(course_org: str, verdict: Verdict, state: dict) -> str:
-    """The driver-health issue: which driver last fired, when, and against what threshold.
+def _driver_body(course_org: str, verdict: Verdict) -> str:
+    """The driver-health issue: when each driver last fired, and against what threshold.
 
     Timestamps, minutes and workflow names only - this repo is world-readable."""
     return "\n".join(
@@ -315,40 +369,40 @@ def _driver_body(course_org: str, verdict: Verdict, state: dict) -> str:
             "",
             (
                 f"An external dispatch is expected every 15 min and alarms after "
-                f"{_minutes(DS01_DEAD)} min. GitHub's own cron is best-effort - it drops "
-                f"most of its fires by design - so it is reported after "
-                f"{int(GH_CRON_DEAD.total_seconds() // 3600)}h and never alarms on its own."
+                f"{_minutes(DS01_DEAD)} min. GitHub's own cron line is INFORMATION only - "
+                "it drops most of its fires by design, so it is never what this issue is "
+                "about."
             ),
             "",
             (
                 f"Read off this workflow's last {RUNS_PAGE} runs, and rewritten on every "
-                "tick. It closes itself once both drivers are inside their thresholds."
+                f"tick. It closes itself once a dispatch has arrived within "
+                f"{_minutes(HEALTHY_GAP)} min - back on cadence, not merely seen once."
             ),
             "",
             f"cc @{course_org}/course-admin",
             "",
-            _marker(state),
+            _marker({"dispatch": verdict.dispatch_state}),
         ]
     )
 
 
 def _driver_comment(course_org: str, verdict: Verdict) -> str:
     """The transition line - short, because it is an email subject more than a document."""
-    lines = []
-    if verdict.ds01_dead and verdict.last_dispatch_at is not None:
-        lines.append(
+    if verdict.dispatch_on_cadence:
+        line = (
+            f"- the external dispatcher is firing again (last fire "
+            f"{_minutes(verdict.now - verdict.last_dispatch_at)} min ago)"
+        )
+    elif verdict.last_dispatch_at is None:
+        line = f"- no external dispatch at all in the last {RUNS_PAGE} runs of this workflow"
+    else:
+        line = (
             f"- no external dispatch for "
             f"{_minutes(verdict.now - verdict.last_dispatch_at)} min "
             f"(alarm at {_minutes(DS01_DEAD)} min)"
         )
-    if verdict.gh_cron_stale and verdict.last_schedule_at is not None:
-        lines.append(
-            f"- no GitHub cron fire for "
-            f"{_minutes(verdict.now - verdict.last_schedule_at)} min (informational)"
-        )
-    if not lines:
-        lines.append("- both drivers are firing inside their thresholds again")
-    return "\n".join(lines) + f"\n\ncc @{course_org}/course-admin"
+    return f"{line}\n\ncc @{course_org}/course-admin"
 
 
 def _item_line(item: LateItem, now: datetime) -> str:
@@ -426,26 +480,33 @@ def fetch_runs(course_org: str) -> list[dict]:
 def report_course(course_org: str, verdict: Verdict, dry_run: bool = False) -> int:
     """Keep the course org's driver-health issue in line with `verdict`. Returns the error
     count - a cadence failure IS worth a red run, because this is the check that watches
-    the drivers - but it never raises, so it can never abort a release."""
-    if not verdict.armed:
-        # A `::warning::` on a green run: true, worth seeing, and not a fault. This is the
-        # normal state of every org until the external dispatcher ships.
-        log_withheld(
-            f"the cadence alarms for {course_org}: no {DISPATCH_EVENT} run in the last "
-            f"{RUNS_PAGE} runs of {WORKFLOW_FILE}, so there is no external driver to hold "
-            "to a schedule yet - nothing opened and nothing closed"
-        )
-        return 0
+    the drivers - but it never raises, so it can never abort a release.
+
+    The dispatcher is the only subject. It opens when the dispatcher is late, holds while it
+    stays late, and closes only once it is back on cadence."""
     repo = f"{course_org}/.github"
     try:
-        if verdict.ds01_dead:
-            state = {
-                "ds01_dead": verdict.ds01_dead,
-                "gh_cron_stale": verdict.gh_cron_stale,
-            }
-            existing = find_issue(repo, DRIVER_TITLE)
+        # Asked FIRST, and unconditionally, because it is half the evidence about whether
+        # this org was ever armed: `verdict.armed` only says whether a dispatch is in the
+        # window, so an org whose dispatcher died days ago reads as disarmed - and would
+        # stop being watched with its own alarm still standing. An open issue is proof this
+        # module armed here once.
+        existing = find_issue(repo, DRIVER_TITLE)
+        if not verdict.armed and existing is None:
+            # A `::warning::` on a green run: true, worth seeing, and not a fault. This is
+            # the normal state of every org until the external dispatcher ships.
+            log_withheld(
+                f"the cadence alarms for {course_org}: no {DISPATCH_EVENT} run in the last "
+                f"{RUNS_PAGE} runs of {WORKFLOW_FILE} and no open `{DRIVER_TITLE}` issue, "
+                "so there is no external driver to hold to a schedule - nothing opened and "
+                "nothing closed"
+            )
+            return 0
+        if verdict.ds01_dead or not verdict.armed:
+            state = {"dispatch": verdict.dispatch_state}
             # The body is state, so a comment (the half that emails) is posted only when
-            # the set of live alarms is not the one the body already records.
+            # the alarm is not the one the body already records - which here means the
+            # dispatcher went from "seen, too long ago" to "not in the window at all".
             changed = (read_state(existing[1]) if existing else {}) != state
             if dry_run:
                 log(
@@ -453,21 +514,17 @@ def report_course(course_org: str, verdict: Verdict, dry_run: bool = False) -> i
                     f"`{DRIVER_TITLE}` in {repo}"
                 )
                 return 0
-            log_step(
-                f"no external dispatch for "
-                f"{_minutes(verdict.now - verdict.last_dispatch_at)} min in {course_org}"
-            )
+            log_step(f"{course_org}: external dispatch {verdict.dispatch_state}")
             return upsert_issue(
                 repo,
                 DRIVER_TITLE,
-                _driver_body(course_org, verdict, state),
+                _driver_body(course_org, verdict),
                 comment=_driver_comment(course_org, verdict) if changed else None,
             )
-        if verdict.gh_cron_stale:
-            # Informational, and never a reason to open: GitHub dropping most of its own
-            # fires is its documented, measured normal state, and the external dispatcher
-            # is the driver that matters. It appears in the body when the dispatcher is
-            # down too, and it holds an open issue open until the cron is seen again.
+        if not verdict.dispatch_on_cadence:
+            # Seen inside DS01_DEAD but not yet back on cadence. Nothing to open (the
+            # dispatcher is alive) and nothing to close (one fire after an outage is not a
+            # recovery) - so leave whatever stands, standing.
             return 0
         if dry_run:
             log(f"    DRY-RUN  would close `{DRIVER_TITLE}` in {repo} if it is open")
@@ -490,9 +547,10 @@ def report_cohort(
     """Keep this cohort's late-delivery issue in line with `items`. Returns the error count,
     and never raises - the same contract as `report_course`.
 
-    Opening needs late items; CLOSING needs a proven cadence, not merely the absence of
-    them. Without that asymmetry the issue would close on the first quiet tick of an outage
-    and reopen on the next late moment, twice an hour."""
+    Opening needs late items; CLOSING needs a proven cadence (`Verdict.healthy`, which
+    counts the gap this tick arrived on), not merely the absence of them. Without that
+    asymmetry the issue would close on the first quiet tick of an outage and reopen on the
+    next late moment, twice an hour."""
     if not verdict.armed:
         return 0
     repo = f"{cohort_org}/{CONFIG_REPO}"

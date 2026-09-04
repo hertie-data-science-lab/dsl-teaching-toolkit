@@ -2,10 +2,11 @@
 
 The module is stateless - both answers come out of the workflow's own run listing - so
 `evaluate` and `late_items` are pure and get fixed datetimes here. What the tests are really
-holding are the anti-cry-wolf rules: DISARMED until an external dispatch has ever been seen,
-a lateness window that ignores a term written in the past, hysteresis before an issue closes,
-and a comment only on a transition. Plus the PII rule: a public `.github` issue may carry
-labels, timestamps and minutes, never a handle or a repo name.
+holding are the anti-cry-wolf rules: disarmed until an external dispatch appears in the
+window (and NOT disarmed by one scrolling out of it while the alarm stands), a lateness
+window that ignores a term written in the past, hysteresis in both directions before
+anything closes, and a comment only on a transition. Plus the PII rule: a public `.github`
+issue may carry labels, timestamps and minutes, never a handle or a repo name.
 """
 
 from __future__ import annotations
@@ -47,11 +48,13 @@ def _evaluate(runs: list[dict], now: datetime = NOW) -> cadence.Verdict:
 # ------------------------------------------------------------------------ armed / disarmed
 
 
-def test_disarmed_until_an_external_dispatch_has_ever_been_seen():
+def test_disarmed_while_no_external_dispatch_is_in_the_window():
     # Every org gets this code before the dispatcher exists. Armed on GitHub's cron alone,
     # each would be told four times an hour that a driver it never had is missing.
+    # (`armed` is about the WINDOW, not about history - see report_course for the rest.)
     v = _evaluate([_run(5, cadence.CRON_EVENT), _run(20, cadence.CRON_EVENT)])
     assert v.armed is False
+    assert v.dispatch_state == cadence.DISPATCH_UNSEEN
 
 
 def test_one_dispatch_run_of_any_conclusion_arms_it():
@@ -68,29 +71,35 @@ def test_this_runs_own_row_is_never_evidence_of_anything():
     assert v.last_dispatch_at is None and v.prev_executed_at is None
 
 
-# --------------------------------------------------------------------- the two thresholds
+# ------------------------------------------------------------------------- the threshold
 
 
-def test_ds01_is_dead_at_two_hours_and_one_minute_not_one_fifty_nine():
-    assert _evaluate([_run(119)]).ds01_dead is False
-    assert _evaluate([_run(121)]).ds01_dead is True
+def test_ds01_is_dead_past_two_hours_and_not_at_exactly_two():
+    # Pinned at the boundary as well as either side of it, so a `>`/`>=` swap fails here
+    # rather than shaving two minutes off the alarm in production.
     assert cadence.DS01_DEAD == timedelta(hours=2)
+    assert _evaluate([_run(119)]).ds01_dead is False
+    assert _evaluate([_run(120)]).ds01_dead is False
+    assert _evaluate([_run(121)]).ds01_dead is True
 
 
-def test_the_github_cron_is_stale_at_twenty_four_hours_and_one_minute():
-    day = 24 * 60
-    armed = [_run(5)]  # a dispatch run, so the verdict is armed either way
-    assert _evaluate([*armed, _run(day - 1, cadence.CRON_EVENT)]).gh_cron_stale is False
-    assert _evaluate([*armed, _run(day + 1, cadence.CRON_EVENT)]).gh_cron_stale is True
+def test_githubs_own_cron_is_recorded_and_never_measured():
+    # There is no cron threshold at all: at four dispatches an hour the 20-run window spans
+    # about five hours, so any "quiet for a day" rule could only ever read as false. The
+    # timestamp is kept for the body; nothing compares it to anything.
+    v = _evaluate([_run(5), _run(20, cadence.CRON_EVENT)])
+    assert v.last_schedule_at == NOW - timedelta(minutes=20)
+    assert not hasattr(v, "gh_cron_stale")
+    # ...and its absence from the window is not a fault either
+    assert _evaluate([_run(5)]).last_schedule_at is None
 
 
-def test_no_cron_run_in_the_window_is_ignorance_not_staleness():
-    # Once the dispatcher fires four times an hour it crowds GitHub's occasional run out of
-    # the last 20 - reading that as staleness would hold the driver-health issue open for
-    # ever, which is the failure mode this whole module exists to avoid.
-    v = _evaluate([_run(5), _run(20)])
-    assert v.last_schedule_at is None
-    assert v.gh_cron_stale is False
+def test_the_dispatcher_is_back_on_cadence_at_exactly_twenty_minutes():
+    # The CLOSE rule for driver health, and the other exact boundary.
+    assert cadence.HEALTHY_GAP == timedelta(minutes=20)
+    assert _evaluate([_run(20)]).dispatch_on_cadence is True
+    assert _evaluate([_run(21)]).dispatch_on_cadence is False
+    assert _evaluate([]).dispatch_on_cadence is False
 
 
 # ------------------------------------------------------------------ the previous tick
@@ -239,9 +248,11 @@ def test_a_tbc_entry_is_never_late():
     assert cadence.late_items(sched.releases, sched, NOW - timedelta(days=1), NOW) == []
 
 
-def test_a_handout_the_scheduler_could_not_synthesise_is_not_reported():
-    # `_handout_releases` skips an assignment with no template repo in the course org, so
-    # no release carries it - and something that could not ship is not "late".
+def test_neither_handout_nor_solution_is_reported_without_a_synthesised_release():
+    # `_handout_releases` skips an assignment with no template repo in the course org, so no
+    # release carries its handout - and the model solution rides on that same release, so
+    # without one it could not have shipped either. Something that could not ship is not
+    # "late". The SNAPSHOT is different: the freeze needs no template, so it still counts.
     _releases, sched = _plan()
     labels = [
         i.label
@@ -250,7 +261,7 @@ def test_a_handout_the_scheduler_could_not_synthesise_is_not_reported():
         )
     ]
     assert "assignments.assignment-1 handout" not in labels
-    # the snapshot and solution moments are the assignment block's own, and still reported
+    assert "assignments.assignment-1 solution" not in labels
     assert "assignments.assignment-1 snapshot" in labels
 
 
@@ -310,7 +321,6 @@ def _verdict(**kw) -> cadence.Verdict:
         "last_dispatch_at": NOW - timedelta(minutes=5),
         "last_schedule_at": NOW - timedelta(minutes=40),
         "ds01_dead": False,
-        "gh_cron_stale": False,
         "prev_executed_at": NOW - timedelta(minutes=15),
         "recent_gaps": [timedelta(minutes=15)] * cadence.HEALTHY_GAPS,
         "now": NOW,
@@ -327,19 +337,38 @@ def _item(label: str, minutes_late: int = 90) -> cadence.LateItem:
 # ---- driver health
 
 
-def test_a_disarmed_verdict_writes_nothing_anywhere(stub, capsys):
+def test_a_disarmed_verdict_with_no_open_issue_writes_nothing_anywhere(stub, capsys):
     s = stub()
-    v = _verdict(armed=False, ds01_dead=True, last_dispatch_at=None)
+    v = _verdict(armed=False, ds01_dead=False, last_dispatch_at=None)
     assert cadence.report_course("Course-Org", v) == 0
     assert (
         cadence.report_cohort("Course-Org", "Cohort-f2026", v, [_item("releases.a")])
         == 0
     )
     assert (s.upserted, s.closed) == ([], [])
-    # ...but it says so, on the run summary, without reddening the run.
+    # ...but it says so, on the run summary, without reddening the run - and it says what
+    # it actually knows: nothing in the WINDOW, not "no driver has ever existed".
     err = capsys.readouterr().err
-    assert "::warning::" in err and "DISARMED" not in err
+    assert "::warning::" in err
     assert cadence.DISPATCH_EVENT in err
+    assert f"last {cadence.RUNS_PAGE} runs" in err
+    assert "yet" not in err
+
+
+def test_a_dispatcher_dead_long_enough_to_leave_the_window_is_still_watched(stub):
+    # The trap in reading "armed" as history: the dispatcher dies, the issue opens, and
+    # days later its last run scrolls out of the last RUNS_PAGE runs. Read as disarmed, the
+    # module would fall silent about a broken org whose own alarm is still standing - so an
+    # OPEN issue is the other half of the evidence.
+    s = stub(existing=(7, "opened while it was still in the window"))
+    v = _verdict(armed=False, ds01_dead=False, last_dispatch_at=None)
+    assert cadence.report_course("Course-Org", v) == 0
+    assert s.closed == []
+    (_repo, _title, body, comment) = s.upserted[0]
+    assert f"not once in the last {cadence.RUNS_PAGE} runs" in body
+    assert cadence.read_state(body) == {"dispatch": cadence.DISPATCH_UNSEEN}
+    # a body we did not write reads as no state, so this counts as a transition
+    assert comment is not None and "in the last 20 runs" in comment
 
 
 def test_a_dead_dispatcher_opens_the_issue_in_the_public_dot_github(stub):
@@ -358,11 +387,7 @@ def test_a_dead_dispatcher_opens_the_issue_in_the_public_dot_github(stub):
 
 def _driver_body(verdict: cadence.Verdict) -> str:
     """The rendered driver-health body, exactly as `report_course` renders it."""
-    return cadence._driver_body(
-        "Course-Org",
-        verdict,
-        {"ds01_dead": verdict.ds01_dead, "gh_cron_stale": verdict.gh_cron_stale},
-    )
+    return cadence._driver_body("Course-Org", verdict)
 
 
 def test_the_driver_body_carries_only_timestamps_and_minutes():
@@ -371,10 +396,24 @@ def test_the_driver_body_carries_only_timestamps_and_minutes():
     body = _driver_body(
         _verdict(ds01_dead=True, last_dispatch_at=NOW - timedelta(minutes=180))
     )
-    assert cadence.read_state(body) == {"ds01_dead": True, "gh_cron_stale": False}
+    assert cadence.read_state(body) == {"dispatch": cadence.DISPATCH_STALE}
     assert body.strip().endswith("-->")  # the marker is last, out of the reader's way
     for leak in ("classroom-config/", "-anna", "grades-"):
         assert leak not in body
+
+
+def test_the_body_records_githubs_cron_without_alarming_on_it(stub):
+    # It drops most of its fires by design, so the line is information and there is no
+    # threshold behind it. A silent cron alone opens nothing.
+    s = stub()
+    quiet_cron = _verdict(last_schedule_at=None)
+    assert cadence.report_course("Course-Org", quiet_cron) == 0
+    assert s.upserted == []  # the dispatcher is fine, so there is nothing to open
+    body = _driver_body(_verdict(ds01_dead=True, last_schedule_at=None))
+    assert (
+        f"last GitHub cron fire: not once in the last {cadence.RUNS_PAGE} runs" in body
+    )
+    assert "INFORMATION only" in body
 
 
 def test_a_standing_alarm_is_not_re_announced_every_tick(stub):
@@ -385,38 +424,38 @@ def test_a_standing_alarm_is_not_re_announced_every_tick(stub):
     assert comment is None  # the body is refreshed; nobody is emailed again
 
 
-def test_a_new_alarm_on_a_standing_issue_comments(stub):
+def test_the_dispatcher_dropping_out_of_the_window_is_worth_a_second_email(stub):
+    # The one transition a standing alarm has: "seen, too long ago" is bad, "not in the
+    # last 20 runs at all" is worse, and a human should hear it.
     was = _driver_body(
         _verdict(ds01_dead=True, last_dispatch_at=NOW - timedelta(minutes=180))
     )
     s = stub(existing=(7, was))
-    worse = _verdict(
-        ds01_dead=True,
-        gh_cron_stale=True,
-        last_dispatch_at=NOW - timedelta(minutes=180),
-        last_schedule_at=NOW - timedelta(hours=30),
-    )
+    worse = _verdict(armed=False, ds01_dead=False, last_dispatch_at=None)
     assert cadence.report_course("Course-Org", worse) == 0
-    (_repo, _title, _body, comment) = s.upserted[0]
+    (_repo, _title, body, comment) = s.upserted[0]
+    assert cadence.read_state(body) == {"dispatch": cadence.DISPATCH_UNSEEN}
     assert comment is not None
-    assert "GitHub cron" in comment and "cc @Course-Org/course-admin" in comment
+    assert "no external dispatch at all" in comment
+    assert "cc @Course-Org/course-admin" in comment
 
 
-def test_both_drivers_inside_their_thresholds_closes_the_issue(stub):
+def test_a_dispatcher_back_on_cadence_closes_the_issue(stub):
     s = stub(existing=(7, "whatever"))
     assert cadence.report_course("Course-Org", _verdict()) == 0
     assert s.upserted == []
     ((repo, title, comment),) = s.closed
     assert (repo, title) == ("Course-Org/.github", cadence.DRIVER_TITLE)
-    assert "again" in comment
+    assert "firing again" in comment
 
 
-def test_githubs_own_cron_never_opens_an_issue_on_its_own(stub):
-    # It drops most of its fires by design. Alarming on that is the cry-wolf failure, and
-    # the dispatcher is the driver that actually matters.
-    s = stub()
-    v = _verdict(gh_cron_stale=True, last_schedule_at=NOW - timedelta(hours=30))
-    assert cadence.report_course("Course-Org", v) == 0
+def test_one_dispatch_after_an_outage_does_not_close_the_issue(stub):
+    # Closing on "seen inside 2h" would close on the first fire after a three-hour outage
+    # and reopen on the next missed one. The close rule is BACK ON CADENCE.
+    s = stub(existing=(7, "whatever"))
+    limping = _verdict(last_dispatch_at=NOW - timedelta(minutes=45))
+    assert limping.ds01_dead is False and limping.dispatch_on_cadence is False
+    assert cadence.report_course("Course-Org", limping) == 0
     assert (s.upserted, s.closed) == ([], [])
 
 
@@ -515,6 +554,35 @@ def test_eight_healthy_gaps_close_the_late_delivery_issue(stub):
     ((repo, title, comment),) = s.closed
     assert (repo, title) == ("Cohort-f2026/classroom-config", cadence.LATE_TITLE)
     assert str(cadence.HEALTHY_GAPS) in comment
+
+
+def test_this_ticks_own_gap_counts_towards_the_close(stub):
+    # Eight punctual historical gaps and then a three-hour hole, and this tick is the one
+    # on the far side of it. Judged on history alone the issue closes, and its closing
+    # comment claims eight consecutive on-time ticks - about the very gap that was late.
+    s = stub(existing=(7, "body"))
+    limped_in = _verdict(prev_executed_at=NOW - timedelta(hours=3))
+    assert limped_in.gap == timedelta(hours=3)
+    assert limped_in.healthy is False
+    assert cadence.report_cohort("Course-Org", "Cohort-f2026", limped_in, []) == 0
+    assert (s.upserted, s.closed) == ([], [])
+
+
+def test_a_gap_of_exactly_twenty_minutes_is_still_healthy():
+    # The boundary, so a `<=`/`<` swap fails here rather than reopening the issue on every
+    # tick that lands exactly on the cadence.
+    on_the_line = _verdict(
+        prev_executed_at=NOW - cadence.HEALTHY_GAP,
+        recent_gaps=[cadence.HEALTHY_GAP] * cadence.HEALTHY_GAPS,
+    )
+    assert on_the_line.healthy is True
+    assert _verdict(prev_executed_at=NOW - timedelta(minutes=21)).healthy is False
+
+
+def test_no_previous_tick_at_all_is_not_good_news():
+    # Nothing to measure is not "on cadence" - it is no evidence, and a standing issue
+    # stays standing.
+    assert _verdict(prev_executed_at=None).healthy is False
 
 
 def test_a_cohort_dry_run_writes_nothing(stub):

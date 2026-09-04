@@ -38,7 +38,6 @@ def _verdict(
         last_dispatch_at=now,
         last_schedule_at=now,
         ds01_dead=False,
-        gh_cron_stale=False,
         prev_executed_at=now if prev is None else prev,
         recent_gaps=[],
         now=now,
