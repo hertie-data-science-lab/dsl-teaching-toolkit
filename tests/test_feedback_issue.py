@@ -308,6 +308,15 @@ def test_a_receipt_is_posted_once_and_carries_its_marker(monkeypatch):
     assert f"body=hello\n{marker}\n" in post
 
 
+def test_the_comment_lookup_pages_through_a_long_thread(monkeypatch):
+    # "Already said" is only true of the comments actually read. A thread that outgrew one
+    # page would hide its own markers and re-post every receipt and every grade on it.
+    calls = _gh(monkeypatch, {"comments?": (0, ""), "--method POST": (0, "")})
+    grades.post_receipt("Cohort", "assignment-1-ada-l", 7, "hello", "MARK")
+    ((listing,),) = ([c for c in calls if "comments?" in " ".join(c)],)
+    assert "--paginate" in listing
+
+
 def test_a_re_run_over_the_same_commit_posts_nothing(monkeypatch):
     # The refresh runs four times an hour for the length of the late window; a student
     # must not collect four identical receipts for one push.

@@ -741,5 +741,12 @@ def test_a_gradebook_with_no_roster_row_is_counted_not_fatal(
 
 
 def test_distribute_reds_when_the_roster_cannot_be_read(tmp_path, monkeypatch, capsys):
-    assert _distribute(monkeypatch, tmp_path, roster_rows=None)["rc"] == 1
+    out = _distribute(monkeypatch, tmp_path, roster_rows=None)
+    assert out["rc"] == 1
     assert "could not be read" in capsys.readouterr().err
+    # And the registrar export is LEFT ALONE. It is one row per enrolled student, so
+    # regenerating it from a roster nobody could read would commit a header line over the
+    # file a registrar transcribes grades from.
+    ((_repo, files, _delete),) = out["config"]
+    assert grades.COHORT_CSV_NAME not in files
+    assert grades.DISTRIBUTED_PATH in files

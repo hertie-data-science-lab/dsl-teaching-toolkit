@@ -1089,9 +1089,14 @@ def post_marked_comment(
 
     The marker is the whole idempotence story, and it is why both callers share this: the
     refresh pass runs four times an hour for the length of the late window, and distribute
-    is re-run after every correction. Neither may say the same thing twice."""
+    is re-run after every correction. Neither may say the same thing twice.
+
+    Paginated, because "already said" is only true of the comments we actually read: a
+    thread that outgrew one page would hide its own markers and be told everything
+    again."""
     code, out = gh(
         "api",
+        "--paginate",
         f"repos/{cohort_org}/{repo}/issues/{issue_no}/comments?per_page=100",
         "--jq",
         ".[].body",
@@ -2062,7 +2067,7 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
     provisioning_failed = bool(ensure_gradebooks(cohort_org, dry_run=dry_run))
     course_org = course_org_for_cohort(cohort_org)
     sched = schedule.load(cohort_org)
-    students = roster.load(cohort_org) or []
+    students = roster.load(cohort_org)
     now = datetime.now(UTC).isoformat(timespec="seconds")
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "cfg"
@@ -2192,10 +2197,17 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
     # 4. The registrar's export and the record of what went out, in ONE commit - together
     #    with the retired files this cohort is migrating off, so the old and the new can
     #    never both be present for a reader to choose between.
-    writes = {
-        COHORT_CSV_NAME: render_registrar_csv(students, books).encode(),
-        DISTRIBUTED_PATH: dump_distributed(record).encode(),
-    }
+    writes = {DISTRIBUTED_PATH: dump_distributed(record).encode()}
+    if students is None:
+        # `roster.load` answers None for a roster it could not READ, and the export is one
+        # row per ENROLLED student - so regenerating it from no rows would commit a header
+        # line over the file a registrar transcribes grades from. Leaving it is the only
+        # safe answer; the run goes red and the next one rebuilds it.
+        log_err(
+            f"roster in {cohort_org} could not be read - {COHORT_CSV_NAME} left as it is"
+        )
+    else:
+        writes[COHORT_CSV_NAME] = render_registrar_csv(students, books).encode()
     recorded = put_files(
         cohort_org,
         CONFIG_REPO,
@@ -2214,7 +2226,11 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
     log_ok(f"Done - {json.dumps(counts)}")
     return (
         1
-        if provisioning_failed or counts["failed"] or failed_mail or not recorded
+        if provisioning_failed
+        or counts["failed"]
+        or failed_mail
+        or not recorded
+        or students is None
         else 0
     )
 
