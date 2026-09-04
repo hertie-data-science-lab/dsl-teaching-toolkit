@@ -49,6 +49,13 @@ Things whose *literal spelling* is depended on from outside Python:
   means **adding a link to the chain**, never editing one. For the descriptions, an org on the
   oldest string must still reach the newest in one pass; for `STUB_MARKS`, a repo seeded with an
   older wording must still be recognised as unwritten, or its placeholder syllabus ships.
+- **`course.FEEDBACK_ISSUE_TITLE` / `FEEDBACK_ISSUE_LABEL` / `FEEDBACK_ISSUE_MARKS`** identify
+  the one Feedback issue in each submission repo. `assign` opens it, `grades` posts receipts and
+  grades into it, and the lookup (label -> body mark -> exact title) is what stops a second one
+  appearing over a thread a student is already reading. `FEEDBACK_ISSUE_MARKS` is a chain like
+  `STUB_MARKS`: add a wording, never edit one, or every issue opened under the old one becomes
+  invisible. The hidden `<!-- dsl-receipt:{sha}:{event} -->` on each receipt comment is what
+  makes the quarter-hourly refresh post once rather than four times an hour.
 - **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-cohort`, `submission`, `gradebook`,
   `assignment-template`. Discovery reads them; renaming one is a discovery outage.
 - **`.github/cohort-courses-pages.yml`** is the cohort registry every dropdown reads, and

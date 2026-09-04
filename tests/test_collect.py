@@ -1780,6 +1780,10 @@ def _sheet_env(
             written.append((path, content.decode())) or True
         ),
     )
+    # Receipts have their own tests below; here they are a no-op, so a sheet test does not
+    # also have to stand up an issue per submission repo.
+    monkeypatch.setattr(collect.grades, "ensure_feedback_issue", lambda *a, **k: 1)
+    monkeypatch.setattr(collect.grades, "post_receipt", lambda *a, **k: True)
     return written
 
 
@@ -2201,3 +2205,160 @@ def test_refresh_only_seals_rather_than_re_derives_once_a_snapshot_exists(monkey
         collect.refresh_assignment_sheet("Course", "assignment-1-f2026", "Cohort") == 0
     )
     assert phases == [collect.SheetPhase.OPEN, collect.SheetPhase.FROZEN]
+
+
+# ------------------------------------------------------ receipts, from the refresh pass
+
+
+def _receipt_env(monkeypatch) -> list[tuple[str, str, bool]]:
+    """Record `(repo, receipt body, dry_run)` instead of touching an issue."""
+    posted: list[tuple[str, str, bool]] = []
+    monkeypatch.setattr(
+        collect.grades,
+        "ensure_feedback_issue",
+        lambda org, repo, body, dry_run=False: 7,
+    )
+    monkeypatch.setattr(
+        collect.grades,
+        "post_receipt",
+        lambda org, repo, issue, body, marker, dry_run=False: (
+            posted.append((repo, body, dry_run)) or True
+        ),
+    )
+    return posted
+
+
+def _refresh(monkeypatch, *, now, phase=collect.SheetPhase.OPEN, dry_run=False):
+    return collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=now,
+        phase=phase,
+        dry_run=dry_run,
+    )
+
+
+def test_the_first_refresh_after_the_due_date_tells_everyone_what_was_recorded(
+    monkeypatch,
+):
+    # Including the student with nothing: silence at the deadline is indistinguishable
+    # from a toolkit that broke, and they still have a late window to use.
+    _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS,
+        pins={"assignment-1-ada-l": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
+    )
+    posted = _receipt_env(monkeypatch)
+    _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
+    assert [repo for repo, _body, _dry in posted] == [
+        "assignment-1-ada-l",
+        "assignment-1-ben-k",
+    ]
+    assert "**Submission recorded**" in posted[0][1]
+    assert "pushed Saturday 3 October 2026, 22:14 · on time" in posted[0][1]
+    assert posted[1][1].startswith("**No submission recorded**")
+
+
+def test_a_later_push_earns_an_updated_receipt_and_an_unchanged_pin_earns_none(
+    monkeypatch,
+):
+    # `info.submitted` on the sheet is what the last receipt was about, so the comparison
+    # needs no second record - and the marker on the comment is the backstop.
+    recorded = (
+        "submissions:\n"
+        "  ada-l:\n"
+        "    info:\n"
+        "      submitted: '2026-10-03T22:14+02:00'\n"
+        "      days_late: 0\n"
+        "  ben-k:\n"
+        "    info:\n"
+        "      submitted: '2026-10-03T22:14+02:00'\n"
+        "      days_late: 0\n"
+    )
+    _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS,
+        existing=(recorded, "old-sha"),
+        pins={
+            "assignment-1-ada-l": collect.Pin(SHA, "2026-10-06T07:30:00Z"),  # moved
+            "assignment-1-ben-k": collect.Pin(SHA, "2026-10-03T20:14:00Z"),  # same
+        },
+    )
+    posted = _receipt_env(monkeypatch)
+    _refresh(monkeypatch, now=datetime(2026, 10, 6, 12, tzinfo=BERLIN))
+    ((repo, body, _dry),) = posted
+    assert repo == "assignment-1-ada-l"
+    assert body.startswith("**Submission updated**")
+    assert "2 days late (-20%)" in body
+
+
+def test_the_cutoff_posts_the_final_receipt(monkeypatch):
+    _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS,
+        rows={
+            "assignment-1-ada-l": collect.SnapshotRow(
+                repo="assignment-1-ada-l",
+                sha=SHA,
+                submitted_at="2026-10-06T07:30:00Z",
+                submitted_source="commit",
+            )
+        },
+    )
+    posted = _receipt_env(monkeypatch)
+    _refresh(
+        monkeypatch,
+        now=datetime(2026, 10, 11, tzinfo=BERLIN),
+        phase=collect.SheetPhase.FREEZING,
+    )
+    # Only the student whose work was frozen: there is no pin to point the other at, and
+    # they were already told at the deadline that nothing had been recorded.
+    ((repo, body, _dry),) = posted
+    assert repo == "assignment-1-ada-l"
+    assert body == (
+        f"**Frozen for grading** · `{SHA[:7]}` · 2 days late. No further pushes count.\n"
+    )
+
+
+def test_nothing_is_posted_for_work_handed_in_off_github(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("there is no push to acknowledge")
+
+    _sheet_env(monkeypatch, targets=SOLO_TARGETS, grading="submit_via: external\n")
+    monkeypatch.setattr(collect.grades, "post_receipt", boom)
+    monkeypatch.setattr(collect.grades, "ensure_feedback_issue", boom)
+    _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
+
+
+def test_a_dry_run_carries_the_flag_all_the_way_to_the_issue(monkeypatch):
+    _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS,
+        pins={"assignment-1-ada-l": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
+    )
+    posted = _receipt_env(monkeypatch)
+    _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN), dry_run=True)
+    assert all(dry for _repo, _body, dry in posted)
+
+
+def test_the_public_log_counts_receipts_and_names_no_submission_repo(
+    monkeypatch, capsys
+):
+    # This runs in the course org's PUBLIC `.github`, and a submission repo is named
+    # `<slug>-<handle>`. Per-repo detail goes through log_person (local, DSL_VERBOSE=1).
+    _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS,
+        pins={"assignment-1-ada-l": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
+    )
+    _receipt_env(monkeypatch)
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
+    out = capsys.readouterr().out
+    assert "2 submission receipt(s) up to date" in out
+    assert "ada-l" not in out and "ben-k" not in out

@@ -416,6 +416,10 @@ def ensure_label(
     doesn't have it, so a form's `labels:` line is a request, not a guarantee."""
     code, out = gh(
         "api",
+        # Spelt out so `ghcli._is_mutating` sees a write and the pacer counts it: a POST
+        # inferred from the presence of `--field` is a POST the governor cannot see.
+        "--method",
+        "POST",
         f"repos/{org}/{repo}/labels",
         "--field",
         f"name={name}",

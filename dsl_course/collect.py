@@ -92,7 +92,7 @@ from pathlib import Path
 
 import yaml
 
-from . import grades, roster, schedule, sync_teams, teams
+from . import course, grades, roster, schedule, sync_teams, teams
 from .course import (
     CONFIG_REPO,
     SOLUTION_BRANCH,
@@ -111,7 +111,7 @@ from .gh_contents import (
     put_file,
 )
 from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
-from .log import log, log_err, log_ok, log_skip, log_step
+from .log import log, log_err, log_ok, log_person, log_skip, log_step
 from .repos import repo_missing
 
 AUTOGRADE_DIR = "autograde"  # classroom-config/autograde/<slug>/<key>.json
@@ -878,6 +878,16 @@ def _display_moment(at: datetime | None) -> str:
     return f"{at:%a} {at.day} {at:%b} {at.year} {at:%H:%M}"
 
 
+def _display_long(at: datetime | None, tz_name: str = "") -> str:
+    """`Sunday 4 October 2026, 23:59 (Europe/Berlin)` - the form a STUDENT reads, once, in
+    an issue they have to act on. The sheet's header uses the short form beside it: a
+    grader scans that file rather than reading it."""
+    if at is None:
+        return ""
+    zone = f" ({tz_name})" if tz_name else ""
+    return f"{at:%A} {at.day} {at:%B %Y}, {at:%H:%M}{zone}"
+
+
 def _cutoff_at(sched: schedule.Schedule, key: str, gspec: dict) -> datetime | None:
     """When this assignment stops accepting work: an explicit `grading_datetime`, else the
     due date plus the template's late window."""
@@ -909,6 +919,8 @@ def sheet_spec(
         autograde=bool(gspec["autograde"]),
         due_display=_display_moment(entry.due_datetime if entry else None),
         cutoff_display=_display_moment(_cutoff_at(sched, key, gspec)),
+        due_long=_display_long(entry.due_datetime if entry else None, sched.timezone),
+        cutoff_long=_display_long(_cutoff_at(sched, key, gspec), sched.timezone),
     )
 
 
@@ -1000,6 +1012,83 @@ def _provisional_pins(
     return pins
 
 
+def _receipt_event(
+    phase: SheetPhase, sha: str, was: object, now_shown: str
+) -> str | None:
+    """Which receipt this unit has earned since the last write, if any.
+
+    The comparison is against what the SHEET last recorded, not against a marker we would
+    have to store: `info.submitted` is already there, it is ours, and it moves exactly when
+    a new commit is pinned. A push in the same minute as the last one is the one case it
+    cannot see, and a duplicate receipt is worse than a missed one for a student who
+    pushed twice in sixty seconds."""
+    if phase is SheetPhase.FREEZING:
+        return course.RECEIPT_FROZEN if sha else None
+    if not was:
+        return course.RECEIPT_DUE  # first time we have looked; says so either way
+    if now_shown and now_shown != was:
+        return course.RECEIPT_UPDATED
+    return None
+
+
+def _post_receipts(
+    cohort_org: str,
+    spec: grades.SheetSpec,
+    targets: list[tuple[str, str, list[str]]],
+    pins: dict[str, tuple[str, str]],
+    previous: dict,
+    phase: SheetPhase,
+    tz: str | None,
+    due: datetime | None,
+    dry_run: bool,
+) -> None:
+    """Tell each student what we recorded for them, in their own repo's Feedback issue.
+
+    Never fatal: a receipt is a courtesy, and a repo whose issue cannot be opened must not
+    stop the sheet - which is the record - from being written. Nothing at all for work
+    handed in off GitHub: there is no push to acknowledge."""
+    if spec.submit_external:
+        return
+    posted = 0
+    for repo, unit, _members in targets:
+        sha, submitted_at = pins.get(repo, ("", ""))
+        when = _parse_iso(submitted_at) if (sha and submitted_at) else None
+        if when is not None:
+            # In the COHORT's clock, like everything else a student is shown: the API
+            # answers UTC, and "pushed 20:14" for a 22:14 push reads as a bug.
+            when = when.astimezone(schedule._tz(tz))
+        shown = submitted_display(submitted_at, tz) if when is not None else ""
+        was = ((previous.get(unit) or {}).get(grades.INFO_KEY) or {}).get("submitted")
+        event = _receipt_event(phase, sha, was, shown)
+        if event is None:
+            continue
+        body = grades.receipt(
+            spec,
+            event,
+            sha=sha,
+            pushed_display=_display_long(when),
+            days=days_late(when, due) if (when is not None and due) else 0,
+        )
+        issue = grades.ensure_feedback_issue(
+            cohort_org, repo, grades.feedback_body(spec), dry_run
+        )
+        if issue is None:
+            continue
+        if grades.post_receipt(
+            cohort_org,
+            repo,
+            issue,
+            body,
+            course.receipt_marker(sha, event),
+            dry_run,
+        ):
+            posted += 1
+            log_person(f"    receipt ({event}) on {cohort_org}/{repo}#{issue}")
+    if posted:
+        # A COUNT: this log is public, and a receipt names a submission repo.
+        log_ok(f"{posted} submission receipt(s) up to date")
+
+
 def _status_line(
     spec: grades.SheetSpec, phase: SheetPhase, total: int, submitted: int, derived: bool
 ) -> str:
@@ -1028,6 +1117,7 @@ def sync_sheet(
     phase: SheetPhase = SheetPhase.OPEN,
     units: list[tuple[str, list[str]]] | None = None,
     autograde: dict[str, str] | None = None,
+    receipts: bool = True,
     dry_run: bool = False,
 ) -> bool:
     """Write `grading_sheets/<slug>.yml` for this assignment, creating it if it is not
@@ -1056,6 +1146,16 @@ def sync_sheet(
         log(f"  [skip] {path} - no submission units yet; a later tick creates it")
         return True
 
+    try:
+        found = get_file_with_sha(cohort_org, CONFIG_REPO, path)
+    except RuntimeError as exc:
+        log_err(f"  ! could not read {path}: {exc}")
+        return False
+    old_text, old_sha = found if found else ("", "")
+    previous = (grades.parse_sheet(old_text) if old_text else {}).get(
+        spec.container_key
+    ) or {}
+
     derive = (
         bool(targets)
         and not spec.submit_external
@@ -1081,19 +1181,25 @@ def sync_sheet(
         info_updates = _sheet_info(
             cohort_org, targets, pins, due, sched.timezone, is_group=is_group
         )
+    if derive and receipts:
+        _post_receipts(
+            cohort_org,
+            spec,
+            targets,
+            pins,
+            previous,
+            phase,
+            sched.timezone,
+            due,
+            dry_run,
+        )
     for unit, count in (autograde or {}).items():
         info_updates.setdefault(unit, {})["autograde"] = count
 
     submitted = sum(1 for info in info_updates.values() if info.get("submitted"))
     status = _status_line(spec, phase, len(units), submitted, derive)
-    try:
-        found = get_file_with_sha(cohort_org, CONFIG_REPO, path)
-    except RuntimeError as exc:
-        log_err(f"  ! could not read {path}: {exc}")
-        return False
-    old_text, old_sha = found if found else ("", "")
     sheet = grades.merge_sheet(
-        grades.parse_sheet(old_text) if old_text else None,
+        {spec.container_key: previous} if previous else None,
         spec,
         units,
         info_updates,

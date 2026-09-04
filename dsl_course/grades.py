@@ -43,7 +43,15 @@ import yaml
 
 from . import mailer, roster
 from .access import FACULTY_READ_ACCESS, grant_faculty
-from .course import CONFIG_REPO, GRADEBOOK_PREFIX
+from .course import (
+    CONFIG_REPO,
+    FEEDBACK_ISSUE_LABEL,
+    FEEDBACK_ISSUE_MARKS,
+    FEEDBACK_ISSUE_TITLE,
+    GRADEBOOK_PREFIX,
+    feedback_issue_body,
+    receipt_body,
+)
 from .discovery import course_name_for_cohort, list_org_repos
 from .gh_contents import (
     blob_sha,
@@ -59,6 +67,7 @@ from .repos import (
     add_collaborator,
     create_repo,
     default_branch,
+    ensure_label,
     repo_exists,
     set_repo_topics,
 )
@@ -368,6 +377,11 @@ class SheetSpec:
     autograde: bool = False
     due_display: str = ""
     cutoff_display: str = ""
+    # The same two moments spelt out in full - `Sunday 4 October 2026, 23:59
+    # (Europe/Berlin)`. The Feedback issue uses these: a student reads that line once and
+    # has to act on it, where a grader scans the sheet's header and wants it short.
+    due_long: str = ""
+    cutoff_long: str = ""
 
     @property
     def container_key(self) -> str:
@@ -780,6 +794,221 @@ def final_grade(
     if penalty is not None and days is not None and days > 0:
         earned *= Decimal(1) - penalty * days
     return max(Decimal(0), earned + (_decimal(adjustment) or Decimal(0)))
+
+
+# ----------------------------------------------------------- the Feedback issue, in situ
+
+# Reading and writing the issue whose CONTRACT lives in `course`. Everything that decides
+# WHAT is said is there; everything that decides whether a call is made is here.
+_FEEDBACK_LABEL_COLOUR = "0e8a16"
+_FEEDBACK_LABEL_DESCRIPTION = (
+    "Submission receipts, feedback and grades from the toolkit"
+)
+
+
+def feedback_body(
+    spec, team: str = "", members: tuple[str, ...] | list[str] = ()
+) -> str:
+    """The Feedback issue's body for one submission repo, from the assignment's own spec."""
+    late = ""
+    if not spec.submit_external and spec.late_window_days and spec.cutoff_long:
+        rate = (
+            f", at {spec.late_penalty_per_day} of your grade per day started"
+            if spec.late_penalty_per_day
+            else ""
+        )
+        late = f"accepted until {spec.cutoff_long}{rate}."
+    # Handles, not names: this body is written from the provisioning path, which knows the
+    # repo's collaborators and not the roster's display names - and a handle is what the
+    # repo shows the team anyway.
+    team_line = (
+        f"{team} ({', '.join('@' + h for h in members)})" if team and members else ""
+    )
+    return feedback_issue_body(
+        due_display=spec.due_long,
+        late_policy_line=late,
+        team_line=team_line,
+        external=spec.submit_external,
+    )
+
+
+def late_line(spec) -> str:
+    """The late policy as the sentence a receipt carries, or "" when there is no window."""
+    if spec.submit_external or not (spec.late_window_days and spec.cutoff_long):
+        return ""
+    # The rate TRAILS the date rather than bracketing it: `cutoff_long` already ends in
+    # the cohort's timezone, and two parentheticals in a row read as a typo.
+    rate = (
+        f", at {spec.late_penalty_per_day} per day" if spec.late_penalty_per_day else ""
+    )
+    return f"Late work is accepted until {spec.cutoff_long}{rate}."
+
+
+def penalty_display(spec, days: int) -> str:
+    """`-20%` - what two days at 10% costs, for the receipt. "" when nothing is deducted."""
+    rate = penalty_rate(spec.late_penalty_per_day)
+    if rate is None or days <= 0:
+        return ""
+    return f"-{_plain((rate * days * 100).quantize(Decimal('0.01')))}%"
+
+
+def receipt(
+    spec, event: str, *, sha: str = "", pushed_display: str = "", days: int = 0
+) -> str:
+    """One receipt for this assignment, composed from its own late policy."""
+    return receipt_body(
+        event,
+        sha=sha,
+        pushed_display=pushed_display,
+        days_late=days,
+        penalty_display=penalty_display(spec, days),
+        late_line=late_line(spec),
+    )
+
+
+def _feedback_issues(
+    cohort_org: str, repo: str, query: str, jq: str
+) -> list[str] | None:
+    code, out = gh("api", f"repos/{cohort_org}/{repo}/issues?{query}", "--jq", jq)
+    if code != 0:
+        return None
+    return [line for line in out.splitlines() if line.strip()]
+
+
+def find_feedback_issue(cohort_org: str, repo: str) -> tuple[int, str] | None:
+    """`(number, state)` of this repo's Feedback issue, or None.
+
+    Three rungs, cheapest first: the LABEL, then a body carrying one of the marks, then the
+    exact title. Deliberately the LIST endpoint rather than `gh issue list --search`: the
+    search index lags behind by minutes, and a lookup that comes back empty here does not
+    mean "not there", it means "opened a second one" - which is what the search path did.
+
+    Pull requests are issues to this endpoint, so they are filtered out: a PR titled
+    Feedback would otherwise be commented on instead."""
+    by_label = _feedback_issues(
+        cohort_org,
+        repo,
+        f"labels={FEEDBACK_ISSUE_LABEL}&state=all&per_page=5",
+        '.[] | select(.pull_request == null) | "\\(.number)\\t\\(.state)"',
+    )
+    if by_label:
+        number, _, state = by_label[0].partition("\t")
+        return int(number), state
+    marks = " or ".join(f'contains("{mark}")' for mark in FEEDBACK_ISSUE_MARKS)
+    listed = _feedback_issues(
+        cohort_org,
+        repo,
+        "state=all&per_page=50",
+        ".[] | select(.pull_request == null) | "
+        f'"\\(.number)\\t\\(.state)\\t\\(if ((.body // "") | {marks}) then "mark" else "" end)'
+        '\\t\\(.title)"',
+    )
+    if not listed:
+        return None
+    rows = [line.split("\t") for line in listed]
+    marked = [r for r in rows if len(r) > 2 and r[2] == "mark"]
+    titled = [r for r in rows if len(r) > 3 and r[3] == FEEDBACK_ISSUE_TITLE]
+    for candidate in (marked, titled):
+        if candidate:
+            return int(candidate[0][0]), candidate[0][1]
+    return None
+
+
+def ensure_feedback_issue(
+    cohort_org: str, repo: str, body: str, dry_run: bool = False
+) -> int | None:
+    """This repo's Feedback issue number, opening one if it has none.
+
+    A CLOSED issue is reopened: a student who closes theirs must still receive their
+    receipts and their grade, and a second issue would split the thread they were told to
+    read. Never two - see `find_feedback_issue` for why the lookup is not a search."""
+    found = find_feedback_issue(cohort_org, repo)
+    if found is not None:
+        number, state = found
+        if state == "closed" and not dry_run:
+            # `--method PATCH` so ghcli's write pacer counts it (see `_is_mutating`).
+            code, out = gh(
+                "api",
+                "--method",
+                "PATCH",
+                f"repos/{cohort_org}/{repo}/issues/{number}",
+                "--field",
+                "state=open",
+            )
+            if code != 0:
+                log_err(f"  ! could not reopen the Feedback issue: {out[:160]}")
+        return number
+    if dry_run:
+        log("    DRY-RUN  would open the Feedback issue")
+        return None
+    # The label first: GitHub silently drops a label the repo does not have, and the label
+    # is the cheapest rung of the lookup above.
+    ensure_label(
+        cohort_org,
+        repo,
+        FEEDBACK_ISSUE_LABEL,
+        color=_FEEDBACK_LABEL_COLOUR,
+        description=_FEEDBACK_LABEL_DESCRIPTION,
+    )
+    code, out = gh(
+        "api",
+        "--method",
+        "POST",
+        f"repos/{cohort_org}/{repo}/issues",
+        "--field",
+        f"title={FEEDBACK_ISSUE_TITLE}",
+        "--field",
+        f"body={body}",
+        "--field",
+        f"labels[]={FEEDBACK_ISSUE_LABEL}",
+        "--jq",
+        ".number",
+    )
+    if code != 0:
+        log_err(f"  ! could not open the Feedback issue: {out[:160]}")
+        return None
+    return int(out.strip()) if out.strip().isdigit() else None
+
+
+def post_receipt(
+    cohort_org: str,
+    repo: str,
+    issue_no: int,
+    body: str,
+    marker: str,
+    dry_run: bool = False,
+) -> bool:
+    """Post one receipt comment, unless the issue already carries its marker.
+
+    The marker is the whole idempotence story: the refresh pass runs four times an hour for
+    the length of the late window, and a student must not collect four identical receipts
+    for one push."""
+    code, out = gh(
+        "api",
+        f"repos/{cohort_org}/{repo}/issues/{issue_no}/comments?per_page=100",
+        "--jq",
+        ".[].body",
+    )
+    if code != 0:
+        log_err(f"  ! could not read the Feedback issue's comments: {out[:160]}")
+        return False
+    if marker in out:
+        return True  # already said, on this commit, for this event
+    if dry_run:
+        log("    DRY-RUN  would post a submission receipt")
+        return True
+    code, out = gh(
+        "api",
+        "--method",
+        "POST",
+        f"repos/{cohort_org}/{repo}/issues/{issue_no}/comments",
+        "--field",
+        f"body={body}\n{marker}\n",
+    )
+    if code != 0:
+        log_err(f"  ! could not post a submission receipt: {out[:160]}")
+        return False
+    return True
 
 
 # ---------------------------------------------------------------------- gh/git wiring

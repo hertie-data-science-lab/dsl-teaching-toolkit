@@ -37,9 +37,14 @@ from pathlib import Path
 
 import yaml
 
-from . import roster, schedule, site, sync_teams, teams
+from . import grades, roster, schedule, site, sync_teams, teams
 from .access import FACULTY_READ_ACCESS, grant_faculty, grant_team_repo_access
-from .collect import assignment_is_group, sync_sheet
+from .collect import (
+    assignment_is_group,
+    load_grading_spec,
+    sheet_spec,
+    sync_sheet,
+)
 from .course import (
     CONFIG_REPO,
     SOLUTION_BRANCH,
@@ -334,6 +339,7 @@ def provision_one(
     team: str | None = None,
     touch_existing: bool = True,
     existing: frozenset[str] | None = None,
+    feedback_body: str = "",
 ) -> str:
     """Generate one submission repo and grant its members access.
 
@@ -386,6 +392,19 @@ def provision_one(
             # Not named: this log is public. The nightly sweep converges the topic.
             log_err(
                 "  ! a submission repo is untagged - the nightly sweep converges it"
+            )
+        # The Feedback issue, on the CREATE path only. It is where every receipt and,
+        # eventually, the grade is posted, so the student is told at handout where to
+        # look. Never re-probed for a repo that already exists: that would be one listing
+        # per student per hourly tick for the rest of the term, for an issue that does not
+        # go away - and the refresh pass opens a missing one lazily when it first has
+        # something to say.
+        if feedback_body and not grades.ensure_feedback_issue(
+            cohort_org, repo, feedback_body
+        ):
+            log_err(
+                "  ! a submission repo has no Feedback issue yet - the refresh pass "
+                "opens it before the first receipt"
             )
 
     solution_failed = False
@@ -624,9 +643,16 @@ def provision_all(
     # They differ exactly when `cohort_dest_repo` is set. Keying the lookup or the team slug
     # on the name then meant no teams found at all, or a team granted on the repo under a
     # slug that Sync membership reconciles a DIFFERENT team for.
-    found = schedule.entry_for_repo(schedule.load(cohort_org), template)
+    sched = schedule.load(cohort_org)
+    found = schedule.entry_for_repo(sched, template)
     key = found[0] if found else assignment_slug(template)
     slug = schedule.cohort_name(*found) if found else key
+    # The assignment's own facts, read once: they compose both the grading sheet's header
+    # (below) and the Feedback issue's body (per unit, since a team's names it).
+    spec = sheet_spec(
+        sched, key, slug, load_grading_spec(master_org, template), bool(group)
+    )
+    feedback_bodies: dict[str, str] = {}
 
     # A provisioning unit is (repo_name, [member handles], team slug). Individual = one per
     # student (a team of one); group = one per team from teams.csv, keyed on `key`.
@@ -678,6 +704,7 @@ def provision_all(
                 (submission_repo(slug, team), vetted, sync_teams.team_slug(key, team))
             )
             sheet_units.append((team, vetted))
+            feedback_bodies[units[-1][0]] = grades.feedback_body(spec, team, vetted)
         what = f"{len(units)} team(s)"
     else:
         units = [
@@ -685,6 +712,8 @@ def provision_all(
             for s in onboarded
         ]
         sheet_units = [(s.github_handle, [s.github_handle]) for s in onboarded]
+        body = grades.feedback_body(spec)
+        feedback_bodies = {repo: body for repo, _handles, _team in units}
         what = f"{len(units)} student(s)"
 
     log_step(
@@ -751,6 +780,7 @@ def provision_all(
                 team=team,
                 touch_existing=touch_existing,
                 existing=existing,
+                feedback_body=feedback_bodies.get(repo, ""),
             )
             results[status] = results.get(status, 0) + 1
 
@@ -776,7 +806,7 @@ def provision_all(
     if not sync_sheet(
         master_org,
         cohort_org,
-        schedule.load(cohort_org),
+        sched,
         key,
         slug,
         template,
