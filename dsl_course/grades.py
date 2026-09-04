@@ -1072,6 +1072,14 @@ _GRADEBOOK_POINTER = (
     "`grades-<your handle>`."
 )
 _README_COLUMNS = ("Assignment", "Final grade", "Submitted", "Late", "Team")
+# What the Submitted column says where there is no time to show. The two are different
+# facts and a student reads them as such: `external` is "we never expected a commit here",
+# `not submitted` is "we looked, and nothing was in the repo". Calling the second one
+# external told a student who missed a deadline that their assignment was handed in
+# somewhere else.
+_EXTERNAL = "external"
+_NOT_SUBMITTED = "not submitted"
+_NO_SUBMISSION_LINE = "No submission was recorded."
 _REGISTRAR_FIELDS = ("hertie_email", "name", "github_handle")
 
 
@@ -1122,12 +1130,19 @@ def _penalty_display(rate: Decimal | None, days_late: object) -> str:
     return f"-{_plain(rate * days * 100)}%"
 
 
-def _submitted_display(value: object) -> str:
+def _submitted_display(value: object, external: bool = False) -> str:
     """A recorded submission time as a person reads it: `3 Oct 22:14`.
+
+    `external` - the assignment is handed in off GitHub - says so instead, and is the ONLY
+    thing that may: there is no commit to time, so a blank here is the shape of the
+    assignment rather than a missing submission. An `info:` block with no `submitted` in
+    it is the other case, and comes back "" for the caller to name.
 
     Anything that does not parse as a timestamp comes back verbatim. `info:` is the
     toolkit's, but a grader may have typed over it, and their words about their own
     cohort beat this module's guess at what they meant."""
+    if external:
+        return _EXTERNAL
     if _blank(value):
         return ""
     text = value.isoformat() if isinstance(value, datetime) else str(value).strip()
@@ -1183,7 +1198,9 @@ def student_view(
             "score": None if spec.is_group else (_marked(score) or score),
             "max_points": _max_points(spec),
             "feedback": person.get("feedback_individual"),
-            "submitted": _submitted_display(info.get("submitted")),
+            "submitted": _submitted_display(
+                info.get("submitted"), spec.submit_external
+            ),
             "days_late": days_late,
             "penalty": _penalty_display(rate, days_late),
             "team": unit_key if spec.is_group else None,
@@ -1291,7 +1308,9 @@ def _when_clause(days_late: object, submitted: object) -> list[str]:
     late = _late_display(days_late)
     if late:
         return [f"submitted {late}" if late == "on time" else late]
-    return [] if _blank(submitted) else [f"submitted {submitted}"]
+    if _blank(submitted) or submitted == _EXTERNAL:
+        return []  # nothing was timed, and "submitted external" says nothing
+    return [f"submitted {submitted}"]
 
 
 def _questions_clause(score: object) -> str:
@@ -1307,9 +1326,9 @@ def _readme_row(title: str, view: dict) -> str:
     values = (
         title,
         _over_max(view.get("final_grade", ""), view.get("max_points")),
-        # No `submitted` at all means nothing was ever timed here: the work was handed in
-        # somewhere off GitHub.
-        view.get("submitted") or "external",
+        # An external assignment says so; anything else with no time on it is a repo
+        # nothing was ever pushed to.
+        view.get("submitted") or _NOT_SUBMITTED,
         _late_display(view.get("days_late")),
         view.get("team", ""),
     )
@@ -1417,7 +1436,9 @@ def team_result(spec: SheetSpec, team: str, block: dict | None) -> TeamResult:
         team=team,
         team_score=block.get(spec.score_key),
         max_points=_max_points(spec),
-        submitted_display=_submitted_display(info.get("submitted")),
+        submitted_display=_submitted_display(
+            info.get("submitted"), spec.submit_external
+        ),
         days_late=days_late,
         penalty=_penalty_display(penalty_rate(spec.late_penalty_per_day), days_late),
         feedback_group=block.get(spec.feedback_key) or "",
@@ -1460,7 +1481,12 @@ def individual_issue_body(title: str, view: dict) -> str:
             f"**Final grade:** {final}",
         ]
     feedback = "" if _blank(view.get("feedback")) else str(view["feedback"]).strip()
-    return _feedback_body(title, _SEP.join(clauses) if final else "", feedback)
+    # A mark on a repo nothing was pushed to - a 0, usually - needs to say why it is one.
+    # An external assignment carries `submitted: external`, so it is never this case.
+    nothing_in = _NO_SUBMISSION_LINE if final and "submitted" not in view else ""
+    return _feedback_body(
+        title, _SEP.join(clauses) if final else "", nothing_in, feedback
+    )
 
 
 def team_issue_body(title: str, result: TeamResult) -> str:

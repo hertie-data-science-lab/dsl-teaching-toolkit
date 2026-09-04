@@ -336,12 +336,46 @@ def test_the_gradebook_readme_is_exactly_the_page_the_spec_shows():
     )
 
 
-def test_an_assignment_handed_in_off_github_says_so_in_the_submitted_column():
-    spec = individual_spec(submit_external=True)
-    sheet = {"submissions": {"ada-l": {"score_individual": 9}}}
+@pytest.mark.parametrize(
+    ("spec", "expected"),
+    [
+        # Handed in off GitHub: there was never a commit to time.
+        (individual_spec(submit_external=True), "external"),
+        # A GitHub assignment whose repo nobody pushed to. Calling this one "external"
+        # told a student who had missed the deadline that their work was handed in
+        # somewhere else - and told their grader the same.
+        (individual_spec(), "not submitted"),
+    ],
+    ids=["external", "nothing pushed"],
+)
+def test_the_submitted_column_tells_the_two_kinds_of_blank_apart(spec, expected):
+    sheet = {"submissions": {"ada-l": {"info": {}, "score_individual": 9}}}
     books = build_books({"assignment-1": (spec, sheet)})
     row = render_readme("ada-l", books["ada-l"], {}).splitlines()[4]
-    assert row == "| assignment-1 | 9 | external |  |  |"
+    assert row == f"| assignment-1 | 9 | {expected} |  |  |"
+
+
+def test_a_mark_on_a_repo_nothing_was_pushed_to_says_that_in_the_comment():
+    # A 0 with no explanation is the one grade a student writes in about.
+    sheet = {"submissions": {"ada-l": {"info": {}, "score_individual": 0}}}
+    view = build_books({"assignment-1": (individual_spec(), sheet)})["ada-l"][
+        "assignment-1"
+    ]
+    assert individual_issue_body("Introduce Yourself", view) == (
+        "### Feedback · Introduce Yourself\n"
+        "**Grade:** 0\n"
+        "\n"
+        "No submission was recorded.\n"
+    )
+
+
+def test_an_assignment_handed_in_off_github_is_never_called_unsubmitted():
+    spec = individual_spec(submit_external=True)
+    sheet = {"submissions": {"ada-l": {"score_individual": 9}}}
+    view = build_books({"assignment-1": (spec, sheet)})["ada-l"]["assignment-1"]
+    body = individual_issue_body("Introduce Yourself", view)
+    assert "No submission was recorded." not in body
+    assert "submitted external" not in body  # nor does it read as a timestamp
 
 
 def test_one_row_per_assignment_sorted_by_slug():
