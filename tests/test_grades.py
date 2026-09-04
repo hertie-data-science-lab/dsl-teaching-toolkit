@@ -547,6 +547,26 @@ def test_a_dry_run_writes_nothing_posts_nothing_and_sends_nothing(
     assert "<handle>" in printed  # the sample email, from placeholders
 
 
+def test_a_team_issue_distribute_has_to_open_still_names_the_team(
+    tmp_path, monkeypatch
+):
+    # Distribute is the last opener of a Feedback issue, and it knows the unit and its
+    # members; it used to pass neither, so a team reached this way was never told which
+    # team the repo belonged to.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _TEAM_SHEET},
+        grading=_GRADING_YML + "type: group\n",
+    )
+    ((repo, body),) = out["issues"]
+    assert repo == "assignment-1-alpha"
+    assert (
+        "**Team:** alpha (@ada-l) - fill in CONTRIBUTIONS.md before the deadline."
+        in body.splitlines()
+    )
+
+
 def test_a_sheet_that_does_not_parse_sends_nothing_at_all(tmp_path, monkeypatch):
     # Not "everything except that one": a partial distribution has to be reconciled
     # student by student, where a refused one is fixed in the file and pressed again.

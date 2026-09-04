@@ -80,6 +80,15 @@ def test_the_issue_body_for_a_team_repo_names_the_team_and_asks_for_contribution
     )
 
 
+def test_an_individual_body_never_names_a_team_even_when_handed_one():
+    # The variant follows the ASSIGNMENT's shape, not the caller's memory: `unit` is the
+    # handle on an individual assignment, and putting it behind "**Team:**" would tell a
+    # student they had team-mates.
+    body = grades.feedback_body(spec(), "ada-l", ["ada-l"])
+    assert "**Team:**" not in body
+    assert "CONTRIBUTIONS.md" not in body
+
+
 def test_the_issue_body_for_work_handed_in_off_github_promises_no_receipts():
     # There is no push to acknowledge, so the body must not tell a student to expect one.
     body = grades.feedback_body(spec(submit_external=True))

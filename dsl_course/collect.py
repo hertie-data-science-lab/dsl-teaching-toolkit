@@ -890,7 +890,7 @@ def _post_receipts(
     if spec.submit_external:
         return
     posted = 0
-    for repo, unit, _members in targets:
+    for repo, unit, members in targets:
         sha, submitted_at = pins.get(repo, ("", ""))
         when = _parse_iso(submitted_at) if (sha and submitted_at) else None
         if when is not None:
@@ -910,7 +910,7 @@ def _post_receipts(
             days=days_late(when, due) if (when is not None and due) else 0,
         )
         issue = grades.ensure_feedback_issue(
-            cohort_org, repo, grades.feedback_body(spec), dry_run
+            cohort_org, repo, grades.feedback_body(spec, unit, members), dry_run
         )
         if issue is None:
             continue

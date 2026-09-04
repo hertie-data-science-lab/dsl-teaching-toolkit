@@ -2331,6 +2331,39 @@ def test_the_first_refresh_after_the_due_date_tells_everyone_what_was_recorded(
     assert posted[1][1].startswith("**No submission recorded**")
 
 
+def test_a_team_issue_the_refresh_has_to_open_still_names_the_team(monkeypatch):
+    # The refresh is where a lazily-opened issue is opened - a team formed after the
+    # handout, or an assignment handed out before this pass shipped. It has the members in
+    # hand, and the CONTRIBUTIONS.md ask is only actionable while the window is still open.
+    _sheet_env(
+        monkeypatch,
+        targets=[("assignment-1-team-alpha", "team-alpha", ["ada-l", "ben-k"])],
+        grading=GRADING_YML + "type: group\n",
+        pins={"assignment-1-team-alpha": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
+    )
+    _receipt_env(monkeypatch)
+    opened: list[str] = []
+    monkeypatch.setattr(
+        collect.grades,
+        "ensure_feedback_issue",
+        lambda org, repo, body, dry_run=False: opened.append(body) or 7,
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=True,
+        now=datetime(2026, 10, 5, tzinfo=BERLIN),
+    )
+    assert (
+        "**Team:** team-alpha (@ada-l, @ben-k) - fill in CONTRIBUTIONS.md before the "
+        "deadline." in opened[0].splitlines()
+    )
+
+
 def test_a_later_push_earns_an_updated_receipt_and_an_unchanged_pin_earns_none(
     monkeypatch,
 ):

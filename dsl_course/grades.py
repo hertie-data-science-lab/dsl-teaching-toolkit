@@ -909,10 +909,19 @@ def late_policy(spec) -> str:
 
 
 def feedback_body(
-    spec, team: str = "", members: tuple[str, ...] | list[str] = ()
+    spec, unit: str = "", members: tuple[str, ...] | list[str] = ()
 ) -> str:
-    """The Feedback issue's body for one submission repo, from the assignment's own spec."""
+    """The Feedback issue's body for one submission repo, from the assignment's own spec.
+
+    `unit` is the row that repo belongs to - a team name on a group assignment, the
+    student's handle on an individual one - and WHICH VARIANT to write is read off the
+    spec rather than left to the caller. Only a group body names the team and asks for
+    CONTRIBUTIONS.md, and the openers that reach a repo late (the first refresh after the
+    due date, distribute) each know their unit but used to pass neither - so a team whose
+    issue was opened lazily never got the ask, on the one path where there was still time
+    to act on it."""
     late = late_policy(spec)
+    team = unit if spec.is_group else ""
     # Handles, not names: this body is written from the provisioning path, which knows the
     # repo's collaborators and not the roster's display names - and a handle is what the
     # repo shows the team anyway.
@@ -1986,12 +1995,14 @@ def _adjusted_count(spec: SheetSpec, sheet: dict) -> int:
 def _issue_targets(
     spec: SheetSpec, sheet: dict, books: dict[str, dict[str, dict]]
 ) -> list[tuple[str, str, str]]:
-    """`(target, submission repo, comment body)` for every unit of one assignment.
+    """`(target, submission repo, comment body, members)` for every unit of one assignment.
 
     A TEAM's comment is built from `TeamResult`, which has no member fields at all, so the
     thing that must never appear in a repo the whole team can read cannot be put there by
-    mistake. An individual's comment is built from their own allowlisted view."""
-    out: list[tuple[str, str, str]] = []
+    mistake. An individual's comment is built from their own allowlisted view. The members
+    come along because this may be the moment the Feedback issue is first opened, and a
+    team's body names them."""
+    out: list[tuple[str, str, str, list[str]]] = []
     for unit, block in ((sheet or {}).get(spec.container_key) or {}).items():
         if not isinstance(block, dict):
             continue
@@ -2000,12 +2011,13 @@ def _issue_targets(
             result = team_result(spec, unit, block)
             if _blank(result.team_score) and _blank(result.feedback_group):
                 continue  # nothing marked yet; a bare heading tells a team nothing
-            out.append((unit, repo, team_issue_body(spec.title, result)))
+            members = list(block.get("members") or {})
+            out.append((unit, repo, team_issue_body(spec.title, result), members))
         else:
             view = (books.get(unit) or {}).get(spec.slug) or {}
             if not view:
                 continue
-            out.append((unit, repo, individual_issue_body(spec.title, view)))
+            out.append((unit, repo, individual_issue_body(spec.title, view), [unit]))
     return out
 
 
@@ -2085,14 +2097,16 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
     #    and its marks reach the student through the gradebook instead.
     for slug in sorted(sheets):
         spec = specs[slug]
-        for target, repo, body in _issue_targets(spec, sheets[slug], books):
+        for target, repo, body, members in _issue_targets(spec, sheets[slug], books):
             digest = content_hash(body)
             if record.get((target, slug, CHANNEL_ISSUE), ("",))[0] == digest:
                 continue  # already said, in these words
             if dry_run:
                 counts["comments"] += 1
                 continue
-            issue = ensure_feedback_issue(cohort_org, repo, feedback_body(spec))
+            issue = ensure_feedback_issue(
+                cohort_org, repo, feedback_body(spec, target, members)
+            )
             if issue is None:
                 # A submission repo that is not there (a student who never onboarded, a
                 # team formed after the handout). Counted, never named.
