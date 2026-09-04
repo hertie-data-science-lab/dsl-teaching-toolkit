@@ -417,7 +417,7 @@ def _handout_releases(
             continue
         out.append(
             Release(
-                label=f"{slug}-handout",
+                label=f"{slug}{schedule.HANDOUT_SUFFIX}",
                 when=entry.handout_datetime,
                 assignment=template,
                 assignment_solution=_solution_due(cohort_org, slug, entry, now),
