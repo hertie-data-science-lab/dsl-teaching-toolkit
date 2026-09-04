@@ -224,7 +224,7 @@ real config lives in `classroom-config`.
 Every user-editable file in `classroom-config` ships as a **pair**: `<file>` is a minimal
 commented scaffold, seeded once and never rewritten, so faculty edits are safe; `<file>.sample`
 is a filled worked example, re-converged on every refresh. The SYSTEM-owned half - the README
-contract and the three workflows under `.github/` (`welcome.CLASSROOM_SYSTEM_FILES`) - is
+contract and the workflows under `.github/` (`welcome.CLASSROOM_SYSTEM_FILES`) - is
 re-converged the same way, so a dispatcher fix reaches running cohorts without re-bootstrapping. Partial provisioning fails the run
 loudly rather than leaving a half-built org.
 
