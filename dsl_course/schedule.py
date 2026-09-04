@@ -88,6 +88,15 @@ from .repos import default_branch, repo_exists
 SCHEDULE_PATH = "schedule.yml"
 DEFAULT_TZ = "Europe/Berlin"
 
+# What a release SYNTHESISED from `assignments.<slug>.handout_datetime` is labelled:
+# `<slug>-handout`. There is no such entry in any file - `scheduler._handout_releases`
+# invents it so the handout fires through the `releases:` machinery, and `cadence` reads the
+# slug back out of the label to report a late handout against the assignment block faculty
+# would actually edit. Written once here because the two sides must agree exactly: spelled
+# separately, a rename would leave cadence reporting `releases.<slug>-handout`, a field that
+# exists nowhere.
+HANDOUT_SUFFIX = "-handout"
+
 
 # --------------------------------------------------------------------------- pure core
 

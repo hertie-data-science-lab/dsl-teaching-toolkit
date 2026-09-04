@@ -698,6 +698,8 @@ Self-contained - workflows and their Python implementation both live in this rep
   - `scheduler` - the hourly cron: freeze passed deadlines, autograde, then fire due releases.
   - `schedule` - parse and validate `schedule.yml` (the three blocks, timezone normalisation,
     dropped-entry reporting, write-once handout records).
+  - `cadence` - the scheduler's own watchdog: reads that workflow's run history and files a
+    driver-health issue (course `.github`) or a late-delivery issue (cohort `classroom-config`).
   - `deploy` - the single release executor (`deploy_many`): copy each source path into its
     cohort repo additively, cloning every repo once per run. Shared by the button and the scheduler.
   - `assign` - freeze a cohort assignment template, then fan out per-student (or per-team) repos.
@@ -722,6 +724,8 @@ Self-contained - workflows and their Python implementation both live in this rep
   - `ghcli` - the shared `gh`/git subprocess wrappers, their timeouts and rate-limit
     backoff, and the fail-loud read contract (`is_missing_resource`).
   - `gh_teams` - team reads/writes, including the prune guard (`reconcile_team_members`).
+  - `issues` - the one self-updating issue primitive (`find_issue` by EXACT title,
+    `upsert_issue`, `close_issues_titled`), shared by `source_digest` and `cadence`.
 - `templates/` - the files bootstrap seeds into a fresh org, verbatim from disk
   (`welcome.template`), one subdirectory per destination:
   - `welcome/` - the cohort onboarding + team-formation workflows and their issue forms.

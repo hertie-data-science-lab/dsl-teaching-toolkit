@@ -30,6 +30,49 @@ BERLIN = ZoneInfo("Europe/Berlin")
 WHEN = datetime(2026, 9, 15, 14, 0, tzinfo=BERLIN)
 
 
+def _verdict(
+    now: datetime = WHEN, prev: datetime | None = None
+) -> scheduler.cadence.Verdict:
+    return scheduler.cadence.Verdict(
+        armed=True,
+        last_dispatch_at=now,
+        last_schedule_at=now,
+        ds01_dead=False,
+        prev_executed_at=now if prev is None else prev,
+        recent_gaps=[],
+        now=now,
+    )
+
+
+@pytest.fixture(autouse=True)
+def cadence_calls(monkeypatch):
+    """Stub the whole cadence surface and hand the test what was asked of it.
+
+    The check reads this workflow's own run history and files two issues, all real gh I/O -
+    and `conftest` refuses a live `gh`, so every `--all-cohorts` test below would otherwise
+    fail on the read rather than on what it is about. `late_items` is deliberately left
+    real: it is pure, and it is the half the wiring can get wrong."""
+    calls: dict[str, list] = {
+        "fetch_runs": [],
+        "evaluate": [],
+        "report_course": [],
+        "report_cohort": [],
+    }
+
+    def _record(name: str, answer):
+        def stub(*args, **kwargs):
+            calls[name].append(args)
+            return answer
+
+        return stub
+
+    monkeypatch.setattr(scheduler.cadence, "fetch_runs", _record("fetch_runs", []))
+    monkeypatch.setattr(scheduler.cadence, "evaluate", _record("evaluate", _verdict()))
+    monkeypatch.setattr(scheduler.cadence, "report_course", _record("report_course", 0))
+    monkeypatch.setattr(scheduler.cadence, "report_cohort", _record("report_cohort", 0))
+    return calls
+
+
 @pytest.fixture(autouse=True)
 def _no_source_preflight(monkeypatch):
     """`run` also pre-flights the plan's sources against the course org, which is real gh
@@ -1427,7 +1470,9 @@ def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsy
     )
     seen: list[str] = []
 
-    def fake_run(course, cohort, now, dry_run=False, release=True, autograde=True):
+    def fake_run(
+        course, cohort, now, dry_run=False, release=True, autograde=True, verdict=None
+    ):
         seen.append(cohort)
         if cohort == "Cohort-A":
             raise RuntimeError("Cohort-A: gh: HTTP 502")
@@ -1567,6 +1612,175 @@ def test_the_two_phase_flags_are_refused_together(monkeypatch):
         ],
     )
     assert scheduler.main() == 1
+
+
+# ------------------------------------------------------------------ the cadence wiring
+# The alarms themselves are tests/test_cadence.py's job. These are about WHICH invocations
+# are allowed to touch them: a real, whole-course release pass and nothing else, because a
+# dry-run preview or a laptop run that armed or closed an alarm would be lying about the
+# state of the drivers.
+
+
+def _all_cohorts_argv(monkeypatch, *extra: str, now: datetime = WHEN) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "scheduler",
+            "--course-org",
+            "Course-Org",
+            "--all-cohorts",
+            "--skip-autograde",
+            "--now",
+            now.isoformat(),
+            *extra,
+        ],
+    )
+
+
+def test_the_cadence_is_read_once_per_course_not_once_per_cohort(
+    monkeypatch, cadence_calls
+):
+    # One request for the whole course: the run history it reads is the WORKFLOW's, which is
+    # one workflow per course org however many cohorts it serves.
+    _phase_spies(monkeypatch, _DUE_RELEASE)
+    monkeypatch.setattr(
+        scheduler, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+    )
+    _all_cohorts_argv(monkeypatch)
+    assert scheduler.main() == 0
+    assert len(cadence_calls["fetch_runs"]) == 1
+    assert len(cadence_calls["evaluate"]) == 1
+    assert len(cadence_calls["report_course"]) == 1
+    # lateness, though, is per cohort - it is that cohort's plan that was late
+    assert [c[1] for c in cadence_calls["report_cohort"]] == ["Cohort-A", "Cohort-B"]
+
+
+def test_a_dry_run_never_reads_or_writes_the_cadence(monkeypatch, cadence_calls):
+    # The manual dispatch button defaults to dry-run, so a curious click must not close a
+    # live alarm, arm a disarmed org, or comment on anything.
+    _phase_spies(monkeypatch, _DUE_RELEASE)
+    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+    _all_cohorts_argv(monkeypatch, "--dry-run")
+    assert scheduler.main() == 0
+    assert cadence_calls["fetch_runs"] == []
+    assert cadence_calls["report_course"] == cadence_calls["report_cohort"] == []
+
+
+def test_the_autograde_job_never_touches_the_cadence(monkeypatch, cadence_calls):
+    # Cadence belongs to the release phase: the grading job is one cohort, runs after it,
+    # and would measure the gap against the run it is itself part of.
+    _phase_spies(monkeypatch, _DUE_RELEASE)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "scheduler",
+            "--course-org",
+            "Course-Org",
+            "--cohort-org",
+            "Cohort-A",
+            "--autograde-only",
+            "--now",
+            WHEN.isoformat(),
+        ],
+    )
+    assert scheduler.main() == 0
+    assert cadence_calls["fetch_runs"] == []
+    assert cadence_calls["report_course"] == cadence_calls["report_cohort"] == []
+
+
+def test_a_single_cohort_invocation_never_touches_the_cadence(
+    monkeypatch, cadence_calls
+):
+    # A laptop, or a break-glass run during an Actions outage. It knows nothing about the
+    # other cohorts and must not report on the drivers' behalf.
+    _phase_spies(monkeypatch, _DUE_RELEASE)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "scheduler",
+            "--course-org",
+            "Course-Org",
+            "--cohort-org",
+            "Cohort-A",
+            "--now",
+            WHEN.isoformat(),
+        ],
+    )
+    assert scheduler.main() == 0
+    assert cadence_calls["fetch_runs"] == []
+    assert cadence_calls["report_cohort"] == []
+
+
+def test_lateness_is_asked_about_the_whole_plan_not_just_what_is_due(
+    monkeypatch, cadence_calls
+):
+    # `late_items` is left real here on purpose: the wiring has to hand it the MERGED plan
+    # (`releases:` entries plus the synthesised handouts) and the verdict's previous tick.
+    _phase_spies(monkeypatch, _DUE_RELEASE)
+    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+    late = _verdict(now=WHEN + timedelta(hours=3), prev=WHEN - timedelta(hours=1))
+    monkeypatch.setattr(scheduler.cadence, "evaluate", lambda *a: late)
+    # An hour of queue between GitHub accepting this run and the runner starting it: the
+    # window is measured off the verdict's instants, so the lateness is 3h, not 4.
+    _all_cohorts_argv(monkeypatch, now=WHEN + timedelta(hours=4))
+    assert scheduler.main() == 0
+    (_course, cohort, verdict, items, _dry) = cadence_calls["report_cohort"][0]
+    assert cohort == "Cohort-A" and verdict is late
+    assert [i.label for i in items] == ["releases.wk1 -> deploy[0]"]
+    assert items[0].late == timedelta(hours=3)
+
+
+def test_a_cadence_read_that_fails_reddens_the_run_and_releases_anyway(
+    monkeypatch, cadence_calls
+):
+    # This is the check that watches the drivers, so its own failure is worth a red X - and
+    # worth nothing more: every cohort's release still fires, and nothing is reported off a
+    # reading that was never taken.
+    calls = _phase_spies(monkeypatch, _DUE_RELEASE)
+    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+
+    def boom(org):
+        raise RuntimeError("gh: HTTP 502")
+
+    monkeypatch.setattr(scheduler.cadence, "fetch_runs", boom)
+    _all_cohorts_argv(monkeypatch)
+    assert scheduler.main() == 1
+    assert calls == ["snapshot", "preflight", "release"]
+    assert cadence_calls["report_course"] == cadence_calls["report_cohort"] == []
+
+
+def test_a_lateness_check_that_raises_reddens_the_run_and_releases_anyway(
+    monkeypatch, cadence_calls
+):
+    # `late_items` is the one piece of the check that used to be evaluated OUTSIDE the
+    # try - as an argument to the reporter - so a raise there escaped the release phase and
+    # cost the cohort its releases, which is the one thing the cadence check may never do.
+    calls = _phase_spies(monkeypatch, _DUE_RELEASE)
+    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+
+    def boom(*a):
+        raise RuntimeError("a plan this reader cannot walk")
+
+    monkeypatch.setattr(scheduler.cadence, "late_items", boom)
+    _all_cohorts_argv(monkeypatch)
+    assert scheduler.main() == 1
+    assert calls == ["snapshot", "preflight", "release"]
+    assert cadence_calls["report_cohort"] == []
+
+
+def test_a_cadence_report_that_fails_reddens_the_run_and_releases_anyway(
+    monkeypatch, cadence_calls
+):
+    calls = _phase_spies(monkeypatch, _DUE_RELEASE)
+    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(scheduler.cadence, "report_cohort", lambda *a: 1)
+    monkeypatch.setattr(scheduler.cadence, "report_course", lambda *a: 1)
+    _all_cohorts_argv(monkeypatch)
+    assert scheduler.main() == 1
+    assert calls == ["snapshot", "preflight", "release"]
 
 
 def test_list_cohorts_prints_json_and_nothing_else(monkeypatch, capsys):

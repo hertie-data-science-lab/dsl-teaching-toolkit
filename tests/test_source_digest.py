@@ -7,12 +7,12 @@ the one that matters. These tests pin the three moments a human is meant to hear
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
 
+from dsl_course import issues
 from dsl_course import source_digest as sd
 from dsl_course.schedule import SourceFault
 
@@ -30,17 +30,22 @@ def _f(where: str, offset: timedelta | None, field: str = "course_source_path"):
 
 
 class _Gh:
-    """A recording fake for ghcli.gh - every call captured, replies queued by subcommand."""
+    """A recording fake for ghcli.gh - every call captured, replies queued by subcommand.
 
-    def __init__(self, issues: list[dict] | None = None):
-        self.issues = issues or []
+    The issue LISTING goes through `gh_json` (it parses stdout alone, so a gh advisory on
+    stderr cannot spoil it), so that one is served by `json` below."""
+
+    def __init__(self, rows: list[dict] | None = None):
+        self.rows = rows or []
         self.calls: list[tuple[str, ...]] = []
 
     def __call__(self, *args, **kwargs):
         self.calls.append(args)
-        if args[:2] == ("issue", "list"):
-            return 0, json.dumps(self.issues)
         return 0, ""
+
+    def json(self, *args, **kwargs):
+        self.calls.append(args)
+        return self.rows
 
     def did(self, *prefix) -> list[tuple[str, ...]]:
         return [c for c in self.calls if c[: len(prefix)] == prefix]
@@ -48,9 +53,13 @@ class _Gh:
 
 @pytest.fixture
 def gh(monkeypatch):
-    def _make(issues=None):
-        fake = _Gh(issues)
-        monkeypatch.setattr(sd, "gh", fake)
+    def _make(rows=None):
+        fake = _Gh(rows)
+        # The issue plumbing lives in `dsl_course.issues` now (`find_issue`/`upsert_issue`/
+        # `close_issues_titled`); the digest's own logic is unchanged, so this is the same
+        # recording fake one module further down.
+        monkeypatch.setattr(issues, "gh", fake)
+        monkeypatch.setattr(issues, "gh_json", fake.json)
         # The body's field-reference link is pinned to the tier the course org runs; that
         # read is not what any of these tests is about.
         monkeypatch.setattr(sd, "central_ref_for", lambda org: "release")
@@ -217,22 +226,6 @@ def test_dry_run_touches_nothing(gh):
         == 0
     )
     assert fake.did("issue", "create") == fake.did("issue", "edit") == []
-
-
-def test_the_digest_lookup_asks_for_more_than_the_default_page(monkeypatch):
-    # `gh issue list` returns 30 by default and the exact-title match below is client-side,
-    # so a repo whose issue list buried ours past the 30th result looked as though no
-    # digest existed - and every hourly run opened a fresh one.
-    seen: list[tuple[str, ...]] = []
-
-    def fake_gh(*args, **kwargs):
-        seen.append(args)
-        return 0, "[]"
-
-    monkeypatch.setattr(sd, "gh", fake_gh)
-    assert sd._open_issue("Cohort-f2026") is None
-    (args,) = seen
-    assert "--limit" in args and args[args.index("--limit") + 1] == "100"
 
 
 def test_the_field_reference_points_at_the_tier_the_org_runs(monkeypatch):

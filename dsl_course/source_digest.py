@@ -28,7 +28,7 @@ import re
 
 from .central import CENTRAL, CENTRAL_REF
 from .discovery import central_ref_for
-from .ghcli import gh
+from .issues import close_issues_titled, find_issue, upsert_issue
 from .log import log_err, log_ok, log_step
 from .schedule import (
     CONFIG_REPO,
@@ -195,39 +195,6 @@ def _comment(appeared, escalated, cleared, current: dict[str, str]) -> str:
     return "\n\n".join(parts)
 
 
-def _open_issue(cohort_org: str) -> tuple[int, str] | None:
-    """(number, body) of this cohort's open digest issue, or None when there isn't one."""
-    code, out = gh(
-        "issue",
-        "list",
-        "--repo",
-        f"{cohort_org}/{CONFIG_REPO}",
-        "--state",
-        "open",
-        "--search",
-        f"{TITLE} in:title",
-        # `gh issue list` defaults to 30. The search is narrow, but the exact-title match
-        # below happens client-side - so a repo whose issue list happened to bury ours past
-        # the 30th result would look as though no digest existed, and every run would open
-        # a fresh one.
-        "--limit",
-        "100",
-        "--json",
-        "number,body,title",
-    )
-    if code != 0:
-        raise RuntimeError(
-            f"could not list issues in {cohort_org}/{CONFIG_REPO}: {out}"
-        )
-    rows = json.loads(out or "[]")
-    # Match the title EXACTLY. `--search` is full-text, so an issue a human filed quoting
-    # this title would otherwise be adopted as ours and rewritten out from under them.
-    for r in sorted(rows, key=lambda r: r["number"]):
-        if r.get("title") == TITLE:
-            return r["number"], r.get("body") or ""
-    return None
-
-
 def sync(
     cohort_org: str,
     course_org: str,
@@ -239,30 +206,25 @@ def sync(
 
     Never raises past the caller's isolation and never fails a run: a notification that
     could not be delivered must not take a release cron down with it."""
+    repo = f"{cohort_org}/{CONFIG_REPO}"
+    # Read first, and not only to decide create-vs-edit: the PREVIOUS state rides along in
+    # the body, and it is what tells "still broken" from "just got worse".
     try:
-        existing = _open_issue(cohort_org)
+        existing = find_issue(repo, TITLE)
     except RuntimeError as exc:
         log_err(str(exc))
         return 1
-
-    repo = f"{cohort_org}/{CONFIG_REPO}"
 
     if not faults:
         if existing:
             if dry_run:
                 log_step(f"[dry-run] would close the source digest in {repo}")
                 return 0
-            code, out = gh(
-                "issue",
-                "close",
-                str(existing[0]),
-                "--repo",
+            if close_issues_titled(
                 repo,
-                "--comment",
+                TITLE,
                 "Every source the plan names is now staged in the course org.",
-            )
-            if code != 0:
-                log_err(f"could not close the source digest in {repo}: {out[:200]}")
+            ):
                 return 1
             log_ok(f"source digest cleared and closed in {repo}")
         return 0
@@ -295,42 +257,16 @@ def sync(
         )
         return 0
 
-    if existing:
-        code, out = gh(
-            "issue", "edit", str(existing[0]), "--repo", repo, "--body", body
-        )
-        number = existing[0]
-    else:
-        code, out = gh(
-            "issue",
-            "create",
-            "--repo",
-            repo,
-            "--title",
-            TITLE,
-            "--body",
-            body,
-        )
-        number = None
-    if code != 0:
-        log_err(f"could not write the source digest in {repo}: {out[:200]}")
-        return 1
-
     # A comment is the only half of this that emails anyone, so it is posted ONLY for a
-    # transition. A brand-new issue notifies on its own creation, so it needs no comment.
-    if note and number is not None:
-        code, out = gh(
-            "issue",
-            "comment",
-            str(number),
-            "--repo",
-            repo,
-            "--body",
-            f"{note}\n\ncc @{cohort_org}/instructors",
-        )
-        if code != 0:
-            log_err(f"could not comment on the source digest in {repo}: {out[:200]}")
-            return 1
+    # transition - and `upsert_issue` withholds it on an issue it had to CREATE, which
+    # notifies on its own.
+    if upsert_issue(
+        repo,
+        TITLE,
+        body,
+        comment=f"{note}\n\ncc @{cohort_org}/instructors" if note else None,
+    ):
+        return 1
     log_ok(
         f"source digest in {repo}: {len(faults)} fault(s), "
         f"{len(appeared)} new, {len(escalated)} escalated, {len(cleared)} cleared"

@@ -14,7 +14,13 @@ TWO DRIVERS deliver those ticks (see `workflows_render.render_scheduler`): GitHu
 cron, which is best-effort and in practice delivers a small fraction of its fires, and an
 external dispatcher that fires the same workflow by `repository_dispatch`. Nothing here
 needs to know which arrived: every action is dated and either idempotent or fire-once, so
-an extra tick costs a few reads and a missed one is picked up by the next.
+an extra tick costs a few reads and a missed one is picked up by the next. What DOES watch
+the drivers is `dsl_course.cadence`, called from the release phase below: it reads this
+workflow's own run history and files two issues off it - the course org's "driver health"
+when the external dispatcher has gone quiet, and a cohort's "late delivery" when a dated
+moment shipped well after its datetime. Only a real, whole-course pass touches it (never a
+dry-run preview and never a single-cohort invocation), and it is disarmed until the external
+dispatcher has been seen at least once.
 
 TWO PHASES, which the workflow runs as separate jobs so that neither waits on the other
 (`--skip-autograde` runs the first, `--autograde-only` the second; passing neither runs
@@ -69,7 +75,7 @@ import json
 import sys
 from datetime import datetime, timezone
 
-from . import schedule, site, source_digest
+from . import cadence, schedule, site, source_digest
 from .assign import provision_all, solution_released
 from .collect import (
     SnapshotResult,
@@ -411,7 +417,7 @@ def _handout_releases(
             continue
         out.append(
             Release(
-                label=f"{slug}-handout",
+                label=f"{slug}{schedule.HANDOUT_SUFFIX}",
                 when=entry.handout_datetime,
                 assignment=template,
                 assignment_solution=_solution_due(cohort_org, slug, entry, now),
@@ -466,9 +472,13 @@ def _release_phase(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
+    verdict: cadence.Verdict | None = None,
 ) -> int:
     """Snapshot every passed deadline, pre-flight the plan's sources, and fire everything
-    now due. Returns the error count. No grading: see `_autograde_passed_deadlines`."""
+    now due. Returns the error count. No grading: see `_autograde_passed_deadlines`.
+
+    `verdict` is the cadence reading `main` took once for the whole course; None means this
+    invocation does not report lateness at all (see `main`)."""
     # Re-sorted, not just concatenated: the synthesised handouts carry their own datetimes
     # and would otherwise land after every scheduled release whatever their date.
     releases = sorted(
@@ -481,10 +491,33 @@ def _release_phase(
         f"{len(due)}/{len(releases)} release(s) due"
     )
 
+    # Lateness is measured over the WHOLE plan, not over `due`: an entry is reported when
+    # its own moment fell in the gap since the last executed tick, and that is a question
+    # about the datetimes, not about what happens to be firing. A cadence failure counts
+    # (this is the check that watches the drivers) but can never abort the release below -
+    # so the whole check, `late_items` included, sits inside the try. Both ends of the
+    # window are `created_at` instants (`verdict.now` is this run's own), so the gap is on
+    # GitHub's clock rather than a runner clock that also carries this run's queue delay.
+    errors = 0
+    if verdict is not None and not dry_run:
+        try:
+            errors += cadence.report_cohort(
+                course_org,
+                cohort_org,
+                verdict,
+                cadence.late_items(
+                    releases, sched, verdict.prev_executed_at, verdict.now
+                ),
+                dry_run,
+            )
+        except Exception as exc:
+            log_err(f"could not check {cohort_org}'s plan for late deliveries: {exc}")
+            errors += 1
+
     # Freeze passed deadlines FIRST: server-timed, and before anything grades against the
     # snapshot. Independent of the release plan - a cohort can pin due dates without
     # scheduling a single release.
-    errors = _snapshot_passed_deadlines(course_org, cohort_org, sched, now, dry_run)
+    errors += _snapshot_passed_deadlines(course_org, cohort_org, sched, now, dry_run)
     # Look AHEAD as well as at what is due: a deploy whose source was never staged fails
     # at its moment, which is far too late to write the thing. This is the only unattended
     # surface that notices - the commit-time validator only ever runs when someone edits
@@ -520,9 +553,13 @@ def run(
     *,
     release: bool = True,
     autograde: bool = True,
+    verdict: cadence.Verdict | None = None,
 ) -> int:
     """One cohort, one or both phases. The workflow's two jobs each ask for one phase
-    (`--skip-autograde` / `--autograde-only`); a local run asks for both."""
+    (`--skip-autograde` / `--autograde-only`); a local run asks for both.
+
+    `verdict` is the cadence reading of the drivers, taken once per course by `main`. None
+    (the default) means this invocation reports no lateness - see `main` for which ones."""
     sched = schedule.load(cohort_org)
     # A plan that could not be read AS A PLAN is not an empty one. `load` deliberately
     # falls back to an empty Schedule so one cohort's typo cannot freeze the cron - but
@@ -532,7 +569,7 @@ def run(
     # (Individually DROPPED entries stay advisory, as before - the rest of the plan runs.)
     errors = int(sched.unparseable)
     if release:
-        errors += _release_phase(course_org, cohort_org, sched, now, dry_run)
+        errors += _release_phase(course_org, cohort_org, sched, now, dry_run, verdict)
     if autograde:
         log_step(f"Autograde {course_org} -> {cohort_org} as of {now.isoformat()}")
         errors += _autograde_passed_deadlines(
@@ -647,16 +684,43 @@ def main() -> int:
             )
             return 0
         rc = 0
+        # ONE cadence reading for the whole course, taken before anything ships - the
+        # question is how long since the previous tick, and firing the releases first would
+        # answer it about this run's own writes. Only on a real, whole-course release pass:
+        # the manual button defaults to a dry run, and a single `--cohort-org` invocation
+        # is a laptop, so neither may arm an alarm, comment on one, or close one.
+        verdict = None
+        if phases["release"] and not args.dry_run:
+            try:
+                verdict = cadence.evaluate(
+                    now, cadence.fetch_runs(args.course_org), cadence.own_run_id()
+                )
+            except Exception as exc:
+                # Worth the red X - this is the check that watches the drivers - and worth
+                # nothing more: `verdict` stays None and every release below still runs.
+                log_err(f"could not read {args.course_org}'s run history: {exc}")
+                rc |= 1
         for cohort in cohorts:
             # One cohort's raised failure (a read helper that couldn't reach the API, a
             # site sync that blew up) must not abort the remaining cohorts' scheduled
             # releases - log it, mark the batch failed, and carry on. The same per-cohort
             # isolation PR #151/#146 applied to the nightly refresh.
             try:
-                rc |= run(args.course_org, cohort, now, dry_run=args.dry_run, **phases)
+                rc |= run(
+                    args.course_org,
+                    cohort,
+                    now,
+                    dry_run=args.dry_run,
+                    verdict=verdict,
+                    **phases,
+                )
             except Exception as exc:
                 log_err(f"scheduler run for {cohort} failed: {exc}")
                 rc |= 1  # accumulate, don't clobber prior cohorts' status bits
+        # Last, so a driver-health alarm can never delay a release: the drivers being down
+        # is not this run's problem to fix, only to report.
+        if verdict is not None:
+            rc |= cadence.report_course(args.course_org, verdict, args.dry_run)
         return rc
 
     if not args.cohort_org:
