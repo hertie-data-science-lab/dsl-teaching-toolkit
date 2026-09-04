@@ -125,7 +125,9 @@ def test_no_executed_run_in_the_window_leaves_the_gap_unknown():
 
 
 def test_recent_gaps_are_newest_first_and_gate_the_close():
-    healthy = [_run(15 * i, run_id=i) for i in range(1, cadence.HEALTHY_GAPS + 2)]
+    # Fed OLDEST first, because the API does not promise an order: the newest-first reading
+    # below has to be derived from the timestamps, not inherited from the listing.
+    healthy = [_run(15 * i, run_id=i) for i in range(cadence.HEALTHY_GAPS + 1, 0, -1)]
     v = _evaluate(healthy)
     assert v.recent_gaps == [timedelta(minutes=15)] * cadence.HEALTHY_GAPS
     assert v.healthy is True
