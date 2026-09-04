@@ -45,9 +45,10 @@ teams:
 | Field | Owner | Student sees |
 | --- | --- | --- |
 | `info.submitted`, `info.days_late`, `info.contributions`, `info.autograde` | toolkit, refreshed until frozen | `submitted`, `days_late` |
-| `score_group` / `score_individual` (per question, or one value) | you | as the total, plus the breakdown |
+| `score_individual` (per question, or one value) | you | the total, and the breakdown behind it |
 | `feedback_group`, `feedback_individual` | you | yes (own + team) |
-| `adjustment_individual` | you - the ONLY override, in both shapes | their own |
+| `score_group` | you | the team's, in the TEAM repo's comment - never in a member's gradebook |
+| `adjustment_individual` | you - the ONLY override, in both shapes | **no** - only the final grade it produced |
 | `notes_not_shared_with_students` | you | **never** |
 | final grade | derived on output, never stored | yes |
 
