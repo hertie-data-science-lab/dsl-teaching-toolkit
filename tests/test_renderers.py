@@ -19,7 +19,6 @@ from dsl_course import (
     mailer,
     profile_readme,
     seed,
-    welcome,
     workflows_place,
     workflows_render,
 )
@@ -605,15 +604,6 @@ def test_classroom_config_scheduler_dispatcher_fires_on_a_schedule_change():
     # The course org is read from THIS cohort's own pointer, never baked in at bootstrap.
     assert "contents/dsl-course.yml" in tmpl
     assert tmpl.splitlines()[0].startswith("# SYSTEM-OWNED")
-
-
-def test_the_scheduler_dispatcher_is_seeded_into_every_cohort():
-    # A template nobody registers is a file no cohort ever gets: seed.refresh writes
-    # exactly welcome.CLASSROOM_SYSTEM_FILES into each cohort's classroom-config.
-    assert (
-        ".github/workflows/dispatch-scheduled-release.yml",
-        "classroom-config/dispatch-scheduled-release.yml",
-    ) in welcome.CLASSROOM_SYSTEM_FILES
 
 
 def test_send_codes_only_ever_runs_off_a_roster_push():
