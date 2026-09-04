@@ -1584,6 +1584,25 @@ def test_list_cohorts_prints_json_and_nothing_else(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out) == ["Cohort-A", "Cohort-B"]
 
 
+def test_list_cohorts_keeps_a_retry_notice_off_stdout(monkeypatch, capsys):
+    # `ghcli.gh` prints its retry notices to STDOUT before a successful retry. A second
+    # line in the captured output writes a step-output line with no `=`, GitHub rejects
+    # the whole outputs file, and because the listing runs first the release step is then
+    # skipped - one transient rate-limit costing a whole release tick.
+    def noisy(org):
+        print("  [wait] rate-limited, retry 1/3 in 30s")
+        return ["Cohort-A"]
+
+    monkeypatch.setattr(scheduler, "discover_cohorts", noisy)
+    monkeypatch.setattr(
+        sys, "argv", ["scheduler", "--course-org", "Course-Org", "--list-cohorts"]
+    )
+    assert scheduler.main() == 0
+    out = capsys.readouterr()
+    assert out.out == '["Cohort-A"]\n'
+    assert "[wait]" in out.err  # not swallowed - just off the answer's channel
+
+
 # ----------------------------------------------------- source pre-flight (unattended)
 
 

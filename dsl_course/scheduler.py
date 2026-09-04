@@ -64,6 +64,7 @@ Usage (the workflow's two jobs are the first two lines; --now is for testing):
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import sys
 from datetime import datetime, timezone
@@ -604,11 +605,16 @@ def main() -> int:
         return 1
 
     if args.list_cohorts:
-        # The grading job's matrix, and the ONLY thing this prints: the workflow captures
-        # stdout and hands it to fromJSON. Registry reads are silent when they succeed and
-        # raise (having logged to stderr) when the file is malformed, so a green run's
-        # stdout is the JSON and nothing else.
-        print(json.dumps(discover_cohorts(args.course_org)))
+        # The grading job's matrix, and the ONLY thing that may reach stdout: the workflow
+        # captures it whole into a step output and hands it to fromJSON. `ghcli.gh` prints
+        # its retry notices ("[wait] rate-limited...") to stdout before a successful
+        # retry, and a second line there writes a step-output line with no `=` - GitHub
+        # rejects the file, the step fails, and because the listing runs first the release
+        # step is skipped. So one transient 403 would cost a whole release tick. Every log
+        # line the read makes goes to stderr for the duration; only the answer is printed.
+        with contextlib.redirect_stdout(sys.stderr):
+            cohorts = discover_cohorts(args.course_org)
+        print(json.dumps(cohorts))
         return 0
 
     phases = {
