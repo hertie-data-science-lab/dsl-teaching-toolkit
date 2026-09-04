@@ -593,6 +593,27 @@ def test_classroom_config_site_dispatcher_fires_on_schedule_or_people_change():
     assert "sync-site" in tmpl  # dispatches the sync-site event
 
 
+def test_classroom_config_scheduler_dispatcher_fires_on_a_schedule_change():
+    # GitHub delivers only a fraction of `schedule:` cron fires, so the promise that a
+    # schedule.yml edit takes effect within minutes holds only if the edit itself starts a
+    # run. schedule.yml alone: no other file in classroom-config moves a release moment.
+    tmpl = (
+        ROOT / "templates" / "classroom-config" / "dispatch-scheduled-release.yml"
+    ).read_text()
+    doc = yaml.safe_load(tmpl)
+    trigger = doc.get("on", doc.get(True))
+    assert set(trigger) == {"push"}
+    assert trigger["push"]["paths"] == ["schedule.yml"]
+    assert trigger["push"]["branches"] == ["main"]
+    # DSL_BOT_TOKEN does every call here, so the ambient token gets no scopes at all.
+    assert doc["permissions"] == {}
+    # The event type the course org's Scheduled release filters `types:` on.
+    assert "event_type=scheduled-release" in tmpl
+    # The course org is read from THIS cohort's own pointer, never baked in at bootstrap.
+    assert "contents/dsl-course.yml" in tmpl
+    assert tmpl.splitlines()[0].startswith("# SYSTEM-OWNED")
+
+
 def test_send_codes_only_ever_runs_off_a_roster_push():
     # A roster edit is the ONLY way codes go out: no button, no cohort dropdown, no
     # dry_run. The job is ungated (a repository_dispatch has no actor for check-team to

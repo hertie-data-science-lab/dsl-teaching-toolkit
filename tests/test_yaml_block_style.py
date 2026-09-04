@@ -44,6 +44,7 @@ EXCLUDED = {
     "templates/welcome/ISSUE_TEMPLATE/02-join-team.yml",
     "templates/classroom-config/dispatch-sync.yml",
     "templates/classroom-config/dispatch-sync-site.yml",
+    "templates/classroom-config/dispatch-scheduled-release.yml",
     "templates/classroom-config/dispatch-send-codes.yml",
 }
 

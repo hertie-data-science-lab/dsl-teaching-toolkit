@@ -60,6 +60,7 @@ USER_OWNED = {*welcome.CLASSROOM_SCAFFOLDS, "grades/.gitkeep"}
 SYSTEM_OWNED = {
     ".github/workflows/dispatch-sync.yml",
     ".github/workflows/dispatch-sync-site.yml",
+    ".github/workflows/dispatch-scheduled-release.yml",
     ".github/workflows/dispatch-send-codes.yml",
     ".github/workflows/validate-schedule.yml",
     "README.md",
@@ -1433,6 +1434,7 @@ def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypat
         "README.md",
         ".github/workflows/dispatch-sync.yml",
         ".github/workflows/dispatch-sync-site.yml",
+        ".github/workflows/dispatch-scheduled-release.yml",
         ".github/workflows/dispatch-send-codes.yml",
         ".github/workflows/validate-schedule.yml",
     }, (
