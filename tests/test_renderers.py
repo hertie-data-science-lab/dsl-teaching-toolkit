@@ -96,7 +96,13 @@ SEED_REFRESH_GROUPED = {"refresh"}
 # whole org before converging it.
 DEFAULT_TIMEOUT = 30
 CHECK_TEAM_TIMEOUT = 5
-JOB_TIMEOUTS = {"grade_assignment": 120, "bootstrap_cohort": 60}
+# Distribute grades walks every submission repo and every gradebook in the cohort, so
+# it is bounded like the other grading jobs rather than by the 30-minute default.
+JOB_TIMEOUTS = {
+    "grade_assignment": 120,
+    "distribute_grades": 120,
+    "bootstrap_cohort": 60,
+}
 # The scheduler is the one workflow whose jobs carry DIFFERENT budgets: it releases and
 # grades in two jobs precisely so the two-hour one is never in the release's way, and giving
 # the release job that budget back would hide a hung release for two hours. 60 rather than

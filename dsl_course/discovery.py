@@ -227,6 +227,15 @@ def course_name_for_cohort(cohort_org: str) -> str:
     return course_name_of(str(pointer.get("course") or ""))
 
 
+def course_org_for_cohort(cohort_org: str) -> str:
+    """The COURSE org this cohort belongs to, from its own `.github/dsl-course.yml`
+    `course:` pointer. "" when the pointer is missing or unreadable.
+
+    A cohort-side CLI is given only the cohort; anything it needs from the course side -
+    an assignment's `grading.yml`, say - has to start here."""
+    return str(org_meta(cohort_org).get("course") or "")
+
+
 def course_name_of(course_org: str) -> str:
     """A COURSE org's display name from its own identity file. "" when unnamed or absent.
 

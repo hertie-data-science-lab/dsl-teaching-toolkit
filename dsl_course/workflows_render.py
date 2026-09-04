@@ -799,12 +799,14 @@ on:
 
 
 def render_distribute_grades(cohort_orgs: list[str]) -> str:
-    """Fan the merged gradebook/<handle>.yml files out into each private grades-<handle>."""
+    """Send every mark a grader has written where it has to go."""
     return f"""name: Distribute grades
 
-# Run AFTER merging the Render grades preview PR. Copies each merged gradebook/<handle>.yml
-# into that student's private grades-<handle> repo and (unless silenced) emails them a
-# notification to their hertie email address. Needs the GRAPH_* secrets for the email.
+# Reads the grading sheets in classroom-config and sends what they hold: a feedback comment
+# on each submission repo's Feedback issue, each student's private grades-<handle> repo, the
+# registrar export, and (unless silenced) an email saying there is something new to read.
+# Nothing is said twice - a re-run after one correction reaches one student.
+# Dry run first; it writes nothing and prints the counts. Needs the GRAPH_* secrets to mail.
 
 on:
   workflow_dispatch:
@@ -822,7 +824,7 @@ on:
 {_concurrency("distribute-grades")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   distribute-grades:
-{_run_preamble()}      - name: Distribute grades
+{_run_preamble(_TIMEOUT_GRADING)}      - name: Distribute grades
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COHORT_ORG: ${{{{ inputs.cohort_org }}}}

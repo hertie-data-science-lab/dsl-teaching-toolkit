@@ -14,7 +14,7 @@ import subprocess
 import pytest
 import yaml
 
-from dsl_course import central, collect, ghcli, repos, roster, schedule, site, teams
+from dsl_course import central, ghcli, grades, repos, roster, schedule, site, teams
 
 # students.csv's header row, DERIVED from the columns the engine declares rather than
 # re-typed. `roster.FIELDS` is a frozen public contract (the shipped JavaScript spells the
@@ -104,7 +104,7 @@ def _clear_process_memos():
     roster._roster_text.cache_clear()
     teams._teams_text.cache_clear()
     schedule._schedule_text.cache_clear()
-    collect._grading_text.cache_clear()
+    grades._grading_text.cache_clear()
 
 
 def workflow_inputs(rendered: str) -> dict:

@@ -47,7 +47,9 @@ def feedback_issues(monkeypatch):
     opened, on the create path, with this assignment's facts in it."""
     opened: list[tuple[str, str]] = []
     monkeypatch.setattr(
-        assign, "load_grading_spec", lambda org, template: dict(collect._DEFAULT_SPEC)
+        assign,
+        "load_grading_spec",
+        lambda org, template: dict(collect.grades._DEFAULT_SPEC),
     )
     monkeypatch.setattr(
         assign.grades,

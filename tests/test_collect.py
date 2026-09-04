@@ -788,7 +788,7 @@ def _stub_solution_clone(monkeypatch, grading: str = "autograde: true\nmax_auto:
     clone), so both transports answer with the template's grading.yml."""
     monkeypatch.setattr(collect, "clone", _clone_writing(grading))
     monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, ""))
-    monkeypatch.setattr(collect, "_grading_text", lambda org, template: grading)
+    monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: grading)
     # The grading sheet has its own tests below; here it is a no-op, so an autograding
     # test does not have to stand up a roster, a snapshot and a classroom-config read.
     monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: True)
@@ -1013,7 +1013,7 @@ def test_collect_records_a_skip_when_the_template_has_no_solution_branch(monkeyp
     # Fire-once: no marker means the scheduler re-clones this template and re-decides the
     # same skip on every hourly tick, for ever. Hand-marked assignments are common.
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
-    monkeypatch.setattr(collect, "_grading_text", lambda org, template: "")
+    monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     sheets = _recorded_sheet_writes(monkeypatch)
     written = _captured_writes(monkeypatch)
@@ -1704,7 +1704,7 @@ def test_an_unwritten_no_solution_branch_marker_goes_red(monkeypatch, capsys):
     # No `solution` branch means hand-marked, recorded once. A failed record means the
     # same clone attempt, and the same decision, every hour.
     monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
-    monkeypatch.setattr(collect, "_grading_text", lambda org, template: "")
+    monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
     monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: True)
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     _failing_put_file(monkeypatch)
@@ -1759,7 +1759,7 @@ def _sheet_env(
 ):
     """Stand `sync_sheet` up on stubs and return the (path, text) writes it makes."""
     written: list[tuple[str, str]] = []
-    monkeypatch.setattr(collect, "_grading_text", lambda org, template: grading)
+    monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: grading)
     monkeypatch.setattr(
         collect, "submission_targets", lambda org, slug, is_group, key=None: targets
     )
@@ -2194,17 +2194,21 @@ def test_load_grading_spec_never_raises_and_falls_back_to_the_defaults(monkeypat
     def unreadable(*a, **k):
         raise RuntimeError("500")
 
-    monkeypatch.setattr(collect, "get_file_content", unreadable)
+    monkeypatch.setattr(collect.grades, "get_file_content", unreadable)
     assert collect.load_grading_spec("Course", "assignment-1-f2026") == DEFAULT_SPEC
-    collect._grading_text.cache_clear()
-    monkeypatch.setattr(collect, "get_file_content", lambda *a, **k: "questions: [")
+    collect.grades._grading_text.cache_clear()
+    monkeypatch.setattr(
+        collect.grades, "get_file_content", lambda *a, **k: "questions: ["
+    )
     assert collect.load_grading_spec("Course", "assignment-1-f2026") == DEFAULT_SPEC
 
 
 def test_the_grading_yml_is_read_once_per_template_per_process(monkeypatch):
     reads: list[str] = []
     monkeypatch.setattr(
-        collect, "get_file_content", lambda org, repo, path, ref="": reads.append(repo)
+        collect.grades,
+        "get_file_content",
+        lambda org, repo, path, ref="": reads.append(repo),
     )
     collect.load_grading_spec("Course", "assignment-1-f2026")
     collect.load_grading_spec("Course", "assignment-1-f2026")
@@ -2216,7 +2220,9 @@ def test_refresh_only_seals_rather_than_re_derives_once_a_snapshot_exists(monkey
     # phase, so pressing it cannot move a fact the freeze recorded.
     phases: list[collect.SheetPhase] = []
     monkeypatch.setattr(collect.schedule, "load", lambda org: _sched())
-    monkeypatch.setattr(collect, "_grading_text", lambda org, template: GRADING_YML)
+    monkeypatch.setattr(
+        collect.grades, "_grading_text", lambda org, template: GRADING_YML
+    )
     monkeypatch.setattr(
         collect,
         "sync_sheet",

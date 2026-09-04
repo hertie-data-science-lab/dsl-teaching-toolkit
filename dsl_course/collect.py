@@ -85,12 +85,10 @@ import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from enum import Enum
 from functools import cache
 from pathlib import Path
-
-import yaml
 
 from . import course, grades, roster, schedule, sync_teams, teams
 from .course import (
@@ -111,6 +109,16 @@ from .gh_contents import (
     put_file,
 )
 from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
+
+# The assignment's definition and the sheet's spec live in `grades` (see the section
+# there): `grades` may not import `collect`, and the sheet is its type. Re-exported
+# under their old names so every caller and workflow keeps spelling them here.
+from .grades import (
+    GRADING_FILE,
+    load_grading_spec,
+    parse_grading_spec,
+    sheet_spec,
+)
 from .log import log, log_err, log_ok, log_person, log_skip, log_step
 from .repos import repo_missing
 
@@ -125,7 +133,6 @@ SNAPSHOT_FIELDS = ("repo", "sha", "recorded_at", "submitted_at", "submitted_sour
 # API) comes later; recording the provenance now is what lets a marker - and the code -
 # tell a client-supplied time from a server-observed one in a file that is never rewritten.
 SUBMITTED_SOURCE_COMMIT = "commit"
-GRADING_FILE = "grading.yml"  # on the template's solution branch
 RUN_TIMEOUT = 300  # wall-clock seconds per graded subprocess
 # The note on the one zero that means "the RUNNER broke", not "the student didn't submit".
 # `collect` keys its systemic-failure guard on it, so it is a constant, not a loose string.
@@ -180,99 +187,7 @@ _STUDENT_TEST_RIGGING = (
     "pytest.py",
 )
 
-# The assignment's own definition. `type`/`autograde`/`tests` drive the autograder;
-# everything below them drives the grading sheet - its shape, its maxima, its header - so a
-# course states each fact once, in the file that already holds the others.
-_DEFAULT_SPEC = {
-    "type": "individual",
-    "autograde": True,
-    "tests": "tests",
-    "title": "",
-    "submit_via": "github",
-    "questions": None,
-    "late_window_days": None,
-    "late_penalty_per_day": None,
-}
-
-SUBMIT_VIA = (
-    "github",
-    "external",
-)  # `external` = handed in off GitHub (Moodle, Kaggle)
-
-
 # --------------------------------------------------------------------------- pure core
-
-
-def _one_of(value: object, allowed: tuple[str, ...], field: str, default: str) -> str:
-    """A closed vocabulary, or the default with a warning. Never the raw value: an
-    unrecognised `submit_via` would silently turn late arithmetic off for a cohort."""
-    text = str(value or "").strip().lower()
-    if text in allowed:
-        return text
-    log_err(
-        f"  ! {GRADING_FILE}: `{field}: {value}` is not one of "
-        f"{'/'.join(allowed)} - using `{default}`"
-    )
-    return default
-
-
-def _questions(value: object) -> dict[str, str] | None:
-    """`questions:` as {name: maximum AS TEXT}.
-
-    Text, because the maxima are only ever DISPLAYED - beside each blank in the sheet, and
-    in its header - and a course that writes `1.5` must read back what it wrote. Anything
-    that is not a mapping is dropped with a warning rather than half-read."""
-    if not isinstance(value, dict):
-        log_err(
-            f"  ! {GRADING_FILE}: `questions:` must be a mapping of name -> points - ignored"
-        )
-        return None
-    questions = {
-        str(name).strip(): ("" if points is None else str(points).strip())
-        for name, points in value.items()
-        if str(name).strip()
-    }
-    return questions or None
-
-
-def _whole_days(value: object) -> int | None:
-    """`late_window_days` as a whole number of days, or None with a warning."""
-    try:
-        return max(0, int(str(value).strip()))
-    except (TypeError, ValueError):
-        log_err(
-            f"  ! {GRADING_FILE}: `late_window_days: {value}` is not a whole number of "
-            f"days - ignored"
-        )
-        return None
-
-
-def parse_grading_spec(text: str) -> dict:
-    """Parse a grading.yml (missing keys fall back to defaults; extras ignored).
-
-    A malformed VALUE is logged and dropped, never raised and never passed through: this
-    file is hand-edited by faculty and read by an hourly cron, so one bad line costs the
-    field it sits on and nothing else."""
-    data = yaml.safe_load(text) if text.strip() else {}
-    if not isinstance(data, dict):
-        data = {}
-    spec = dict(_DEFAULT_SPEC)
-    spec.update({k: data[k] for k in ("type", "autograde", "tests") if k in data})
-    if "title" in data:
-        spec["title"] = str(data["title"] or "").strip()
-    if "submit_via" in data:
-        spec["submit_via"] = _one_of(
-            data["submit_via"], SUBMIT_VIA, "submit_via", "github"
-        )
-    if "questions" in data:
-        spec["questions"] = _questions(data["questions"])
-    if "late_window_days" in data:
-        spec["late_window_days"] = _whole_days(data["late_window_days"])
-    if "late_penalty_per_day" in data:
-        spec["late_penalty_per_day"] = (
-            str(data["late_penalty_per_day"] or "").strip() or None
-        )
-    return spec
 
 
 def template_is_group(master_org: str, template: str) -> bool:
@@ -704,37 +619,6 @@ def mark_graded(cohort_org: str, slug: str) -> bool:
     )
 
 
-@cache
-def _grading_text(course_org: str, template: str) -> str | None:
-    """The template's grading.yml, read ONCE per template per process.
-
-    An hourly tick asks the same template the same question from the scheduler, the sheet
-    refresh and the collection that follows them. Memoising the TEXT (like
-    `schedule._schedule_text`) means every caller still parses its own dict - nothing
-    shared to mutate - and still sees its own warnings. tests/conftest.py clears it."""
-    return get_file_content(course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH)
-
-
-def load_grading_spec(course_org: str, template: str) -> dict:
-    """The assignment's definition from the course template's `solution` branch.
-
-    NEVER raises: it sits under the hourly cron, and a template with no solution branch, no
-    grading.yml, or one that does not parse must leave the rest of the tick running on the
-    defaults rather than take the cohort down with it."""
-    try:
-        text = _grading_text(course_org, template)
-    except RuntimeError as exc:
-        log_err(f"  ! could not read {template}/{GRADING_FILE}: {exc}")
-        return dict(_DEFAULT_SPEC)
-    try:
-        return parse_grading_spec(text or "")
-    except yaml.YAMLError as exc:
-        log_err(
-            f"  ! {template}/{GRADING_FILE} is not valid YAML - using defaults: {exc}"
-        )
-        return dict(_DEFAULT_SPEC)
-
-
 def load_snapshots(cohort_org: str, slug: str) -> dict[str, str] | None:
     """{repo: sha} from this assignment's snapshot CSV, or None if no snapshot was ever
     taken (the two are different: a recorded blank sha means "no submission", while no
@@ -868,60 +752,6 @@ class SheetPhase(Enum):
     OPEN = "open"  # before the cutoff: `info:` is re-derived on every write
     FREEZING = "freezing"  # the cutoff write: derive once more, then stop
     FROZEN = "frozen"  # after it: `info:` is copied verbatim, whatever we now think
-
-
-def _display_moment(at: datetime | None) -> str:
-    """`Sun 4 Oct 2026 23:59` - a date a grader reads, not one a machine parses. Built by
-    hand rather than with `%-d`, which is a glibc/BSD extension."""
-    if at is None:
-        return ""
-    return f"{at:%a} {at.day} {at:%b} {at.year} {at:%H:%M}"
-
-
-def _display_long(at: datetime | None, tz_name: str = "") -> str:
-    """`Sunday 4 October 2026, 23:59 (Europe/Berlin)` - the form a STUDENT reads, once, in
-    an issue they have to act on. The sheet's header uses the short form beside it: a
-    grader scans that file rather than reading it."""
-    if at is None:
-        return ""
-    zone = f" ({tz_name})" if tz_name else ""
-    return f"{at:%A} {at.day} {at:%B %Y}, {at:%H:%M}{zone}"
-
-
-def _cutoff_at(sched: schedule.Schedule, key: str, gspec: dict) -> datetime | None:
-    """When this assignment stops accepting work: an explicit `grading_datetime`, else the
-    due date plus the template's late window."""
-    entry = sched.assignments.get(key)
-    if entry is None:
-        return None
-    if entry.grading_datetime is not None:
-        return entry.grading_datetime
-    days = gspec.get("late_window_days")
-    return entry.due_datetime + timedelta(days=days) if days else entry.due_datetime
-
-
-def sheet_spec(
-    sched: schedule.Schedule, key: str, slug: str, gspec: dict, is_group: bool
-) -> grades.SheetSpec:
-    """What the sheet needs to know about this assignment, gathered from the two files
-    that own it: `grading.yml` on the template's solution branch, and the cohort's
-    `schedule.yml`. Nothing here is written into the sheet as data - it reaches the grader
-    as the comment header, which is regenerated on every write."""
-    entry = sched.assignments.get(key)
-    return grades.SheetSpec(
-        slug=slug,
-        title=gspec["title"] or (entry.title if entry else "") or slug,
-        is_group=is_group,
-        submit_external=gspec["submit_via"] == "external",
-        questions=gspec["questions"],
-        late_window_days=gspec["late_window_days"],
-        late_penalty_per_day=gspec["late_penalty_per_day"],
-        autograde=bool(gspec["autograde"]),
-        due_display=_display_moment(entry.due_datetime if entry else None),
-        cutoff_display=_display_moment(_cutoff_at(sched, key, gspec)),
-        due_long=_display_long(entry.due_datetime if entry else None, sched.timezone),
-        cutoff_long=_display_long(_cutoff_at(sched, key, gspec), sched.timezone),
-    )
 
 
 def _parse_iso(stamp: str) -> datetime | None:
@@ -1074,7 +904,7 @@ def _post_receipts(
             spec,
             event,
             sha=sha,
-            pushed_display=_display_long(when),
+            pushed_display=grades._display_long(when),
             days=days_late(when, due) if (when is not None and due) else 0,
         )
         issue = grades.ensure_feedback_issue(
@@ -1179,7 +1009,9 @@ def sync_sheet(
             pins = {r: (row.sha, row.submitted_at) for r, row in rows.items()}
         else:
             pins = _provisional_pins(
-                cohort_org, targets, (_cutoff_at(sched, key, gspec) or now).isoformat()
+                cohort_org,
+                targets,
+                (grades._cutoff_at(sched, key, gspec) or now).isoformat(),
             )
             if pins is None:
                 log_err(

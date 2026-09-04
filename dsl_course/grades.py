@@ -34,14 +34,16 @@ import json
 import sys
 import tempfile
 import textwrap
+from collections.abc import Container
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from functools import cache
 from pathlib import Path
 
 import yaml
 
-from . import mailer, roster
+from . import mailer, roster, schedule
 from .access import FACULTY_READ_ACCESS, grant_faculty
 from .course import (
     CONFIG_REPO,
@@ -49,16 +51,23 @@ from .course import (
     FEEDBACK_ISSUE_MARKS,
     FEEDBACK_ISSUE_TITLE,
     GRADEBOOK_PREFIX,
+    SOLUTION_BRANCH,
     feedback_issue_body,
     receipt_body,
+    resolve_is_group,
+    submission_repo,
 )
-from .discovery import course_name_for_cohort, list_org_repos
+from .discovery import (
+    course_name_for_cohort,
+    course_org_for_cohort,
+    list_org_repos,
+)
 from .gh_contents import (
     blob_sha,
     dump_csv,
     get_file_content,
-    get_file_with_sha,
     put_file,
+    put_files,
     read_csv,
 )
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
@@ -77,8 +86,9 @@ GRADEBOOK_DIR = "gradebook"  # rendered per-student YAML staged for the preview 
 # Which student has been told about which version of their gradebook. SYSTEM-owned, in the
 # private classroom-config. The notify set is derived from this rather than from the push
 # outcome, which is not durable enough to retry a notification that failed.
+# RETIRED, and read exactly once per cohort: `distributed.csv` below replaces it, and the
+# migration that writes that file deletes this one in the same commit.
 NOTIFIED_PATH = f"{GRADEBOOK_DIR}/notified.csv"
-NOTIFIED_HEADER = ("github_handle", "grades_sha", "notified_at")
 # `{handle: (gradebook sha, when)}`
 Notified = dict[str, tuple[str, str]]
 RENDER_BRANCH = "grades-update"
@@ -796,6 +806,192 @@ def final_grade(
     return max(Decimal(0), earned + (_decimal(adjustment) or Decimal(0)))
 
 
+# ------------------------------------------------- the assignment's own definition
+
+# `grading.yml`, on the course template's `solution` branch, is where an assignment is
+# DEFINED. It lives here rather than in `collect` because both readers need it and only
+# one of them is the autograder: `collect` takes `type`/`autograde`/`tests` from it, and
+# everything else in it exists to shape the grading sheet - which is this module's. The
+# names `collect` still spells are re-exported there, so no caller had to move.
+GRADING_FILE = "grading.yml"  # on the template's solution branch
+
+# The assignment's own definition. `type`/`autograde`/`tests` drive the autograder;
+# everything below them drives the grading sheet - its shape, its maxima, its header - so a
+# course states each fact once, in the file that already holds the others.
+_DEFAULT_SPEC = {
+    "type": "individual",
+    "autograde": True,
+    "tests": "tests",
+    "title": "",
+    "submit_via": "github",
+    "questions": None,
+    "late_window_days": None,
+    "late_penalty_per_day": None,
+}
+
+SUBMIT_VIA = (
+    "github",
+    "external",
+)  # `external` = handed in off GitHub (Moodle, Kaggle)
+
+
+def _one_of(value: object, allowed: tuple[str, ...], field: str, default: str) -> str:
+    """A closed vocabulary, or the default with a warning. Never the raw value: an
+    unrecognised `submit_via` would silently turn late arithmetic off for a cohort."""
+    text = str(value or "").strip().lower()
+    if text in allowed:
+        return text
+    log_err(
+        f"  ! {GRADING_FILE}: `{field}: {value}` is not one of "
+        f"{'/'.join(allowed)} - using `{default}`"
+    )
+    return default
+
+
+def _questions(value: object) -> dict[str, str] | None:
+    """`questions:` as {name: maximum AS TEXT}.
+
+    Text, because the maxima are only ever DISPLAYED - beside each blank in the sheet, and
+    in its header - and a course that writes `1.5` must read back what it wrote. Anything
+    that is not a mapping is dropped with a warning rather than half-read."""
+    if not isinstance(value, dict):
+        log_err(
+            f"  ! {GRADING_FILE}: `questions:` must be a mapping of name -> points - ignored"
+        )
+        return None
+    questions = {
+        str(name).strip(): ("" if points is None else str(points).strip())
+        for name, points in value.items()
+        if str(name).strip()
+    }
+    return questions or None
+
+
+def _whole_days(value: object) -> int | None:
+    """`late_window_days` as a whole number of days, or None with a warning."""
+    try:
+        return max(0, int(str(value).strip()))
+    except (TypeError, ValueError):
+        log_err(
+            f"  ! {GRADING_FILE}: `late_window_days: {value}` is not a whole number of "
+            f"days - ignored"
+        )
+        return None
+
+
+def parse_grading_spec(text: str) -> dict:
+    """Parse a grading.yml (missing keys fall back to defaults; extras ignored).
+
+    A malformed VALUE is logged and dropped, never raised and never passed through: this
+    file is hand-edited by faculty and read by an hourly cron, so one bad line costs the
+    field it sits on and nothing else."""
+    data = yaml.safe_load(text) if text.strip() else {}
+    if not isinstance(data, dict):
+        data = {}
+    spec = dict(_DEFAULT_SPEC)
+    spec.update({k: data[k] for k in ("type", "autograde", "tests") if k in data})
+    if "title" in data:
+        spec["title"] = str(data["title"] or "").strip()
+    if "submit_via" in data:
+        spec["submit_via"] = _one_of(
+            data["submit_via"], SUBMIT_VIA, "submit_via", "github"
+        )
+    if "questions" in data:
+        spec["questions"] = _questions(data["questions"])
+    if "late_window_days" in data:
+        spec["late_window_days"] = _whole_days(data["late_window_days"])
+    if "late_penalty_per_day" in data:
+        spec["late_penalty_per_day"] = (
+            str(data["late_penalty_per_day"] or "").strip() or None
+        )
+    return spec
+
+
+@cache
+def _grading_text(course_org: str, template: str) -> str | None:
+    """The template's grading.yml, read ONCE per template per process.
+
+    An hourly tick asks the same template the same question from the scheduler, the sheet
+    refresh and the collection that follows them. Memoising the TEXT (like
+    `schedule._schedule_text`) means every caller still parses its own dict - nothing
+    shared to mutate - and still sees its own warnings. tests/conftest.py clears it."""
+    return get_file_content(course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH)
+
+
+def load_grading_spec(course_org: str, template: str) -> dict:
+    """The assignment's definition from the course template's `solution` branch.
+
+    NEVER raises: it sits under the hourly cron, and a template with no solution branch, no
+    grading.yml, or one that does not parse must leave the rest of the tick running on the
+    defaults rather than take the cohort down with it."""
+    try:
+        text = _grading_text(course_org, template)
+    except RuntimeError as exc:
+        log_err(f"  ! could not read {template}/{GRADING_FILE}: {exc}")
+        return dict(_DEFAULT_SPEC)
+    try:
+        return parse_grading_spec(text or "")
+    except yaml.YAMLError as exc:
+        log_err(
+            f"  ! {template}/{GRADING_FILE} is not valid YAML - using defaults: {exc}"
+        )
+        return dict(_DEFAULT_SPEC)
+
+
+def _display_moment(at: datetime | None) -> str:
+    """`Sun 4 Oct 2026 23:59` - a date a grader reads, not one a machine parses. Built by
+    hand rather than with `%-d`, which is a glibc/BSD extension."""
+    if at is None:
+        return ""
+    return f"{at:%a} {at.day} {at:%b} {at.year} {at:%H:%M}"
+
+
+def _display_long(at: datetime | None, tz_name: str = "") -> str:
+    """`Sunday 4 October 2026, 23:59 (Europe/Berlin)` - the form a STUDENT reads, once, in
+    an issue they have to act on. The sheet's header uses the short form beside it: a
+    grader scans that file rather than reading it."""
+    if at is None:
+        return ""
+    zone = f" ({tz_name})" if tz_name else ""
+    return f"{at:%A} {at.day} {at:%B %Y}, {at:%H:%M}{zone}"
+
+
+def _cutoff_at(sched: schedule.Schedule, key: str, gspec: dict) -> datetime | None:
+    """When this assignment stops accepting work: an explicit `grading_datetime`, else the
+    due date plus the template's late window."""
+    entry = sched.assignments.get(key)
+    if entry is None:
+        return None
+    if entry.grading_datetime is not None:
+        return entry.grading_datetime
+    days = gspec.get("late_window_days")
+    return entry.due_datetime + timedelta(days=days) if days else entry.due_datetime
+
+
+def sheet_spec(
+    sched: schedule.Schedule, key: str, slug: str, gspec: dict, is_group: bool
+) -> SheetSpec:
+    """What the sheet needs to know about this assignment, gathered from the two files
+    that own it: `grading.yml` on the template's solution branch, and the cohort's
+    `schedule.yml`. Nothing here is written into the sheet as data - it reaches the grader
+    as the comment header, which is regenerated on every write."""
+    entry = sched.assignments.get(key)
+    return SheetSpec(
+        slug=slug,
+        title=gspec["title"] or (entry.title if entry else "") or slug,
+        is_group=is_group,
+        submit_external=gspec["submit_via"] == "external",
+        questions=gspec["questions"],
+        late_window_days=gspec["late_window_days"],
+        late_penalty_per_day=gspec["late_penalty_per_day"],
+        autograde=bool(gspec["autograde"]),
+        due_display=_display_moment(entry.due_datetime if entry else None),
+        cutoff_display=_display_moment(_cutoff_at(sched, key, gspec)),
+        due_long=_display_long(entry.due_datetime if entry else None, sched.timezone),
+        cutoff_long=_display_long(_cutoff_at(sched, key, gspec), sched.timezone),
+    )
+
+
 # ----------------------------------------------------------- the Feedback issue, in situ
 
 # Reading and writing the issue whose CONTRACT lives in `course`. Everything that decides
@@ -977,7 +1173,7 @@ def ensure_feedback_issue(
     return int(out.strip()) if out.strip().isdigit() else None
 
 
-def post_receipt(
+def post_marked_comment(
     cohort_org: str,
     repo: str,
     issue_no: int,
@@ -985,11 +1181,11 @@ def post_receipt(
     marker: str,
     dry_run: bool = False,
 ) -> bool:
-    """Post one receipt comment, unless the issue already carries its marker.
+    """Post one comment on the Feedback issue, unless it already carries `marker`.
 
-    The marker is the whole idempotence story: the refresh pass runs four times an hour for
-    the length of the late window, and a student must not collect four identical receipts
-    for one push."""
+    The marker is the whole idempotence story, and it is why both callers share this: the
+    refresh pass runs four times an hour for the length of the late window, and distribute
+    is re-run after every correction. Neither may say the same thing twice."""
     code, out = gh(
         "api",
         f"repos/{cohort_org}/{repo}/issues/{issue_no}/comments?per_page=100",
@@ -1013,9 +1209,16 @@ def post_receipt(
         f"body={body}\n{marker}\n",
     )
     if code != 0:
-        log_err(f"  ! could not post a submission receipt: {out[:160]}")
+        log_err(f"  ! could not comment on the Feedback issue: {out[:160]}")
         return False
     return True
+
+
+def post_receipt(
+    cohort_org: str, repo: str, issue_no: int, body: str, marker: str, dry_run=False
+) -> bool:
+    """A submission receipt - `post_marked_comment` under the name its caller uses."""
+    return post_marked_comment(cohort_org, repo, issue_no, body, marker, dry_run)
 
 
 # ------------------------------------------------------------- what a student is shown
@@ -1321,14 +1524,15 @@ def _questions_clause(score: object) -> str:
     return " (" + ", ".join(f"{name} {value}" for name, value in marked.items()) + ")"
 
 
-def _readme_row(title: str, view: dict) -> str:
+def _readme_row(title: str, view: dict, timed: bool = True) -> str:
     """One assignment's row in the summary table."""
     values = (
         title,
         _over_max(view.get("final_grade", ""), view.get("max_points")),
         # An external assignment says so; anything else with no time on it is a repo
-        # nothing was ever pushed to.
-        view.get("submitted") or _NOT_SUBMITTED,
+        # nothing was ever pushed to - unless nothing timed this assignment at all, in
+        # which case the cell is blank rather than an accusation.
+        view.get("submitted") or (_NOT_SUBMITTED if timed else ""),
         _late_display(view.get("days_late")),
         view.get("team", ""),
     )
@@ -1351,7 +1555,12 @@ def _readme_section(title: str, view: dict) -> str:
     return "\n\n".join(parts)
 
 
-def render_readme(handle: str, book: dict[str, dict], titles: dict[str, str]) -> str:
+def render_readme(
+    handle: str,
+    book: dict[str, dict],
+    titles: dict[str, str],
+    timed: Container[str] | None = None,
+) -> str:
     """One student's gradebook README - the file they actually open.
 
     The privacy line, one row per assignment, then a section per assignment with their
@@ -1363,13 +1572,24 @@ def render_readme(handle: str, book: dict[str, dict], titles: dict[str, str]) ->
     `handle` is the student the book belongs to; the text names nobody - the repo is
     already private to them - and takes it so that every per-student write reads the
     same at the call site. `titles` maps a slug to the assignment's name, falling back to
-    the slug rather than rendering an empty heading."""
+    the slug rather than rendering an empty heading.
+
+    `timed` is the set of slugs whose source records WHEN the work came in - the grading
+    sheets. An assignment distributed from a legacy CSV is not in it, and its Submitted
+    cell is left blank: "not submitted" there would be this module asserting something no
+    source told it. None (the default) means every assignment is timed, which is what a
+    caller holding only sheets has."""
     del handle
     slugs = sorted(book)
     table = [
         "| " + " | ".join(_README_COLUMNS) + " |",
         "|" + "---|" * len(_README_COLUMNS),
-        *(_readme_row(titles.get(slug, slug), book[slug]) for slug in slugs),
+        *(
+            _readme_row(
+                titles.get(slug, slug), book[slug], timed is None or slug in timed
+            )
+            for slug in slugs
+        ),
     ]
     sections = [_readme_section(titles.get(slug, slug), book[slug]) for slug in slugs]
     return "\n\n".join([_PRIVACY_HEADER, "\n".join(table), *sections]) + "\n"
@@ -1672,8 +1892,12 @@ def provision_one(
     return "failed-no-collaborator"
 
 
-def sync(cohort_org: str, dry_run: bool = False) -> int:
+def ensure_gradebooks(cohort_org: str, dry_run: bool = False) -> int:
     """Provision one private gradebook repo per onboarded enrolled student. Idempotent.
+
+    Named for what it does, and called by `distribute` before anything is written into
+    one: a student who onboarded since the last run has no repo to push a grade into, and
+    the failure a moment later would say only "could not write".
 
     Auditors are read-only and are never assessed, so they get no gradebook."""
     students = roster.load(cohort_org)
@@ -1706,6 +1930,14 @@ def sync(cohort_org: str, dry_run: bool = False) -> int:
         return 0
     log_ok(f"Done - {json.dumps(results)}")
     return 1 if any(k.startswith("failed") for k in results) else 0
+
+
+def sync(cohort_org: str, dry_run: bool = False) -> int:
+    """`ensure_gradebooks` under the name the seeded workflows still call for one term.
+
+    An org runs whichever toolkit ref its `central_ref` names, so a workflow file written
+    before the rename is live until that org's nightly Refresh replaces it."""
+    return ensure_gradebooks(cohort_org, dry_run=dry_run)
 
 
 def render(cohort_org: str) -> int:
@@ -1837,94 +2069,390 @@ def render(cohort_org: str) -> int:
     return 0
 
 
+# ---------------------------------------------------------------- what was distributed
+
+# One row per thing SAID, so a re-run says nothing twice and a failure is retried exactly
+# once. It replaces `gradebook/notified.csv`, which recorded only the email and only per
+# student - so a corrected grade re-emailed the whole cohort, and a comment that failed to
+# post was never retried because nothing recorded that it had not.
+DISTRIBUTED_PATH = f"{GRADEBOOK_DIR}/distributed.csv"
+DISTRIBUTED_HEADER = (
+    "target",  # a handle, or a TEAM name for a team-repo comment
+    "assignment",  # the cohort-side slug; "" for the whole-book email
+    "channel",
+    "content_hash",
+    "distributed_at",
+)
+CHANNEL_ISSUE = "issue"
+CHANNEL_GRADEBOOK = "gradebook"
+CHANNEL_EMAIL = "email"
+# `{(target, assignment, channel): (content hash, when)}`
+Distributed = dict[tuple[str, str, str], tuple[str, str]]
+
+# The hidden marker on a feedback comment. Keyed on the CONTENT, so a corrected grade is a
+# new comment and an unchanged one is silence - and so a lost `distributed.csv` costs one
+# listing per repo rather than a duplicate comment for every student.
+GRADE_MARK = "<!-- dsl-grade:{} -->"
+
+
+def content_hash(text: str) -> str:
+    """The short hash a feedback comment is marked with and `distributed.csv` records."""
+    return blob_sha(text.encode())[:12]
+
+
+def parse_distributed(text: str) -> Distributed:
+    """`distributed.csv` into its lookup. Machine-written, but it sits in a repo faculty
+    can edit, so it goes through the same BOM/delimiter guard as the roster."""
+    return {
+        (
+            (row.get("target") or "").strip(),
+            (row.get("assignment") or "").strip(),
+            (row.get("channel") or "").strip(),
+        ): (
+            (row.get("content_hash") or "").strip(),
+            (row.get("distributed_at") or "").strip(),
+        )
+        for row in read_csv(text, ("target",), DISTRIBUTED_PATH)
+        if (row.get("target") or "").strip()
+    }
+
+
+def dump_distributed(records: Distributed) -> str:
+    """Sorted, so a run that changed one row shows one line in the diff."""
+    return dump_csv(
+        DISTRIBUTED_HEADER,
+        (
+            (target, assignment, channel, digest, when)
+            for (target, assignment, channel), (digest, when) in sorted(records.items())
+        ),
+    )
+
+
+def _read_distributed(wd: Path) -> tuple[Distributed, bool]:
+    """`(what has been distributed, whether this run is the migration)`.
+
+    A cohort part-way through the term has `notified.csv` and no `distributed.csv`. Its
+    rows become EMAIL rows here, so nobody is emailed again for a book they already know
+    about - the hash is over different bytes now, so the first run after the migration
+    does re-tell everyone once; that is what `--no-notify` is for."""
+    live = wd / DISTRIBUTED_PATH
+    if live.is_file():
+        return parse_distributed(live.read_text()), False
+    old = wd / NOTIFIED_PATH
+    if not old.is_file():
+        return {}, False
+    return {
+        (handle, "", CHANNEL_EMAIL): (sha, when)
+        for handle, (sha, when) in (_read_notified(wd) or {}).items()
+    }, True
+
+
+def _retired_gradebook_files(wd: Path) -> list[str]:
+    """The per-student YAML the retired `render` staged for its preview PR. The gradebook
+    repos hold the real thing now, and a stale copy of a grade is worse than none."""
+    folder = wd / GRADEBOOK_DIR
+    if not folder.is_dir():
+        return []
+    return sorted(f"{GRADEBOOK_DIR}/{p.name}" for p in folder.glob("*.yml"))
+
+
+def load_legacy_grades(wd: Path) -> dict[str, list[GradeRow]]:
+    """Every `grades/<slug>.csv` in a classroom-config checkout, keyed by slug.
+
+    The transition reader: a cohort that began marking before the grading sheet existed
+    keeps distributing from the table it is using. Raises nothing - a CSV on the retired
+    column names names itself and is skipped, because a partial read would publish a
+    gradebook with that assignment silently missing."""
+    folder = wd / GRADES_DIR
+    if not folder.is_dir():
+        return {}
+    out: dict[str, list[GradeRow]] = {}
+    for path in sorted(folder.glob("*.csv")):
+        try:
+            out[path.stem] = parse_grades(path.read_text(encoding="utf-8"))
+        except RetiredGradeHeader as exc:
+            log_err(f"{GRADES_DIR}/{path.name}: {exc}")
+    return out
+
+
+def _spec_from_sheet(slug: str, sheet: dict) -> SheetSpec:
+    """A minimal spec for a sheet whose assignment the schedule no longer declares - a
+    term whose entry has been deleted, or a hand-written sheet. Its shape is read off the
+    file itself so the marks still reach their students; the maxima and the late policy
+    are simply unknown, and nothing is derived from them."""
+    return SheetSpec(slug=slug, title=slug, is_group="teams" in (sheet or {}))
+
+
+def sheet_specs(course_org: str, sched) -> dict[str, SheetSpec]:
+    """One spec per assignment the cohort's schedule declares, keyed by its COHORT-side
+    name - which is what the sheets, the repos and the gradebooks are all named after."""
+    specs: dict[str, SheetSpec] = {}
+    for key, entry in sched.assignments.items():
+        name = schedule.cohort_name(key, entry)
+        gspec = (
+            load_grading_spec(course_org, entry.course_source_repo)
+            if course_org
+            else dict(_DEFAULT_SPEC)
+        )
+        specs[name] = sheet_spec(
+            sched,
+            key,
+            name,
+            gspec,
+            resolve_is_group(
+                force=False,
+                schedule_type=entry.type,
+                template_group=gspec["type"] == "group",
+            ),
+        )
+    return specs
+
+
+def _adjusted_count(spec: SheetSpec, sheet: dict) -> int:
+    """How many individual adjustments a grader has written into one sheet - the dry run
+    reports it, because an adjustment is the one thing in the file no arithmetic explains."""
+    total = 0
+    for block in ((sheet or {}).get(spec.container_key) or {}).values():
+        if not isinstance(block, dict):
+            continue
+        people = (block.get("members") or {}) if spec.is_group else {"": block}
+        total += sum(
+            1
+            for person in people.values()
+            if isinstance(person, dict)
+            and not _blank(person.get("adjustment_individual"))
+        )
+    return total
+
+
+def _issue_targets(
+    spec: SheetSpec, sheet: dict, books: dict[str, dict[str, dict]]
+) -> list[tuple[str, str, str]]:
+    """`(target, submission repo, comment body)` for every unit of one assignment.
+
+    A TEAM's comment is built from `TeamResult`, which has no member fields at all, so the
+    thing that must never appear in a repo the whole team can read cannot be put there by
+    mistake. An individual's comment is built from their own allowlisted view."""
+    out: list[tuple[str, str, str]] = []
+    for unit, block in ((sheet or {}).get(spec.container_key) or {}).items():
+        if not isinstance(block, dict):
+            continue
+        repo = submission_repo(spec.slug, unit)
+        if spec.is_group:
+            result = team_result(spec, unit, block)
+            if _blank(result.team_score) and _blank(result.feedback_group):
+                continue  # nothing marked yet; a bare heading tells a team nothing
+            out.append((unit, repo, team_issue_body(spec.title, result)))
+        else:
+            view = (books.get(unit) or {}).get(spec.slug) or {}
+            if not view:
+                continue
+            out.append((unit, repo, individual_issue_body(spec.title, view)))
+    return out
+
+
+def _gradebook_files(
+    handle: str, book: dict[str, dict], titles, timed
+) -> dict[str, bytes]:
+    """The two files a student's private gradebook holds: the data and the page."""
+    return {
+        "grades.yml": render_yaml({"student": handle, "assignments": book}).encode(),
+        "README.md": render_readme(handle, book, titles, timed).encode(),
+    }
+
+
 def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> int:
-    """Fan the merged gradebook/<handle>.yml files out into each private grades-<handle>,
-    then (unless silenced) email each student a notification to their hertie email address.
+    """Send every mark a grader has written where it has to go: a feedback comment on each
+    submission repo's Feedback issue, each student's private gradebook, the registrar's
+    export, and an email saying there is something new to read.
 
-    Clone classroom-config once and read the files locally (rather than an API GET per
-    student); the only per-student call left is the unavoidable write to each repo.
+    ONE clone of classroom-config and one pass over it - the sheets, the transition CSVs
+    and `distributed.csv` are all read locally, so the only per-student calls left are the
+    writes. Every one of those is skipped when `distributed.csv` says the same content has
+    already gone out, which is what makes a correction to one grade reach one student.
 
-    dry_run pushes nothing and only previews the email notifications (the grade values
-    themselves were already previewed in the render PR)."""
+    Dry run - the default - reads everything, writes nothing, posts nothing, sends nothing,
+    and prints the counts a grader checks before pressing it for real."""
+    provisioning_failed = bool(ensure_gradebooks(cohort_org, dry_run=dry_run))
+    course_org = course_org_for_cohort(cohort_org)
+    sched = schedule.load(cohort_org)
+    students = roster.load(cohort_org) or []
+    now = datetime.now(UTC).isoformat(timespec="seconds")
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "cfg"
         if not clone(cohort_org, CONFIG_REPO, wd):
             log_err(f"could not clone {cohort_org}/{CONFIG_REPO}")
             return 1
-        gbdir = wd / GRADEBOOK_DIR
-        files = sorted(gbdir.glob("*.yml")) if gbdir.is_dir() else []
-        if not files:
+        sheets = load_sheets(wd)
+        legacy = load_legacy_grades(wd)
+        if not sheets and not legacy:
             log_err(
-                f"no {GRADEBOOK_DIR}/ in {cohort_org}/{CONFIG_REPO} - run `render` first."
+                f"no {SHEETS_DIR}/ or {GRADES_DIR}/ in {cohort_org}/{CONFIG_REPO} - hand "
+                f"out an assignment (which creates its grading sheet) first"
             )
             return 1
-        log_step(f"Distributing {len(files)} gradebook(s) in {cohort_org}")
+        specs = sheet_specs(course_org, sched)
+        sources: dict[str, tuple[SheetSpec, dict] | list[GradeRow]] = {}
+        for slug, sheet in sheets.items():
+            specs.setdefault(slug, _spec_from_sheet(slug, sheet))
+            sources[slug] = (specs[slug], sheet)
+        for slug, rows in legacy.items():
+            # A slug with both is the SHEET's - that is the file a grader was told to type
+            # in, and the CSV beside it is what they were typing in before.
+            sources.setdefault(slug, rows)
+        titles = {
+            slug: specs[slug].title if slug in specs else slug for slug in sources
+        }
+        # Which assignments know when the work came in. A legacy CSV knows nothing about
+        # timing, so its README cell is BLANK - "not submitted" there would be this
+        # module asserting something it has no source for.
+        timed = frozenset(sheets)
+        books = build_books(sources)
+        distributed, migrating = _read_distributed(wd)
+        retired = _retired_gradebook_files(wd) if migrating else []
 
-        notified = _read_notified(wd)
-        results: dict[str, int] = {}
-        changed: list[str] = []  # pushed a NEW version this run
-        live: dict[str, str] = {}  # handle -> the sha their repo now holds
-        for f in files:
-            content = f.read_text()
-            sha = blob_sha(content.encode())
+    log_step(f"Distributing {len(books)} gradebook(s) in {cohort_org}")
+    record: Distributed = dict(distributed)
+    counts = {"comments": 0, "gradebooks": 0, "emails": 0, "skipped": 0, "failed": 0}
+
+    # 1. The feedback comment on each submission repo's Feedback issue. Sheet-backed
+    #    assignments only: a legacy CSV has no submission-unit structure to post against,
+    #    and its marks reach the student through the gradebook instead.
+    for slug in sorted(sheets):
+        spec = specs[slug]
+        for target, repo, body in _issue_targets(spec, sheets[slug], books):
+            digest = content_hash(body)
+            if record.get((target, slug, CHANNEL_ISSUE), ("",))[0] == digest:
+                continue  # already said, in these words
             if dry_run:
-                log_person(
-                    f"    DRY-RUN  would update {GRADEBOOK_PREFIX}{f.stem}/grades.yml"
-                )
-                # No push, so `ok` vs `unchanged` is unknowable without a read per
-                # student. Assume the push lands: that is what the preview is previewing.
-                changed.append(f.stem)
-                live[f.stem] = sha
+                counts["comments"] += 1
                 continue
-            status = _push_gradebook(cohort_org, f.stem, content)
-            results[status] = results.get(status, 0) + 1
-            if status == "ok":
-                changed.append(f.stem)
-            if status in ("ok", "unchanged"):
-                live[f.stem] = sha
-    # Who still needs telling. On the first run there is no marker, so `changed` (a new
-    # version pushed) is the rule; after that, a recorded sha that does not match the one
-    # their repo now holds means either a new version OR a notification that failed last
-    # time - the case the push outcome alone could never express.
-    if notified is None:
-        pending = list(changed)
-    else:
-        pending = [h for h in live if notified.get(h, ("", ""))[0] != live[h]]
+            issue = ensure_feedback_issue(cohort_org, repo, feedback_body(spec))
+            if issue is None:
+                # A submission repo that is not there (a student who never onboarded, a
+                # team formed after the handout). Counted, never named.
+                counts["skipped"] += 1
+                continue
+            if post_marked_comment(
+                cohort_org, repo, issue, body, GRADE_MARK.format(digest)
+            ):
+                record[(target, slug, CHANNEL_ISSUE)] = (digest, now)
+                counts["comments"] += 1
+                log_person(f"  [ok] feedback on {cohort_org}/{repo}#{issue}")
+            else:
+                counts["failed"] += 1
+
+    # 2. The private gradebook: grades.yml and README.md in ONE commit per student, so a
+    #    student never sees a page that disagrees with the data beside it.
+    live: dict[str, str] = {}
+    for handle in sorted(books):
+        files = _gradebook_files(handle, books[handle], titles, timed)
+        digest = content_hash("".join(f.decode() for f in files.values()))
+        live[handle] = digest
+        if record.get((handle, "", CHANNEL_GRADEBOOK), ("",))[0] == digest:
+            continue
+        if dry_run:
+            counts["gradebooks"] += 1
+            continue
+        if put_files(
+            cohort_org,
+            f"{GRADEBOOK_PREFIX}{handle}",
+            files,
+            "grades: update",
+        ):
+            record[(handle, "", CHANNEL_GRADEBOOK)] = (digest, now)
+            counts["gradebooks"] += 1
+            log_person(f"  [ok] {GRADEBOOK_PREFIX}{handle}")
+        else:
+            counts["failed"] += 1
+
+    # 3. Who still needs telling. Keyed on the gradebook's content, so a student whose
+    #    book did not change is not emailed and one whose email FAILED last time is.
+    pending = [
+        handle
+        for handle, digest in sorted(live.items())
+        if record.get((handle, "", CHANNEL_EMAIL), ("",))[0] != digest
+    ]
 
     if dry_run:
-        log_ok(f"DRY-RUN previewed {len(changed)} gradebook update(s) - nothing pushed")
-        if notify and pending:
-            _email_updates(cohort_org, pending, dry_run=True)
-        return 0
-    log_ok(f"Done - {json.dumps(results)}")
+        _preview(cohort_org, sheets, specs, books, counts, pending, notify)
+        return 1 if provisioning_failed else 0
 
-    notifications_failed, told = (
+    failed_mail, told = (
         _email_updates(cohort_org, pending, dry_run=False)
         if notify and pending
         else (0, [])
     )
+    counts["emails"] = len(told)
+    for handle in told:
+        record[(handle, "", CHANNEL_EMAIL)] = (live[handle], now)
 
-    stamp = datetime.now(UTC).isoformat(timespec="seconds")
-    # Record who was TOLD, plus - on a first run - a baseline for everyone who needed no
-    # telling. Never a handle in `pending` that is not in `told`: that is a notification
-    # that failed, and recording it would make the retry impossible, which is the whole
-    # point of the marker.
-    if notified is None:
-        record = {h: (sha, stamp) for h, sha in live.items() if h not in pending}
-    else:
-        record = dict(notified)
-    record |= {h: (live[h], stamp) for h in told}
-    marker_failed = record != (notified or {}) and not _write_notified(
-        cohort_org, record
+    # 4. The registrar's export and the record of what went out, in ONE commit - together
+    #    with the retired files this cohort is migrating off, so the old and the new can
+    #    never both be present for a reader to choose between.
+    writes = {
+        COHORT_CSV_NAME: render_registrar_csv(students, books).encode(),
+        DISTRIBUTED_PATH: dump_distributed(record).encode(),
+    }
+    recorded = put_files(
+        cohort_org,
+        CONFIG_REPO,
+        writes,
+        f"grades: distribute ({counts['comments']} comment(s), "
+        f"{counts['gradebooks']} gradebook(s), {counts['emails']} email(s))",
+        delete=([NOTIFIED_PATH, *retired] if migrating else []),
     )
-    if marker_failed:
+    if not recorded:
         log_err(
-            f"{len(told)} student(s) were notified but {NOTIFIED_PATH} could not record "
-            f"it - the next run will notify them again."
+            f"grades were distributed but {DISTRIBUTED_PATH} could not be written - the "
+            f"next run re-posts and re-emails what it cannot see was already sent"
         )
+    # Counts only: this workflow's log is world-readable and every target here is a
+    # student. The per-target lines above went through log_person.
+    log_ok(f"Done - {json.dumps(counts)}")
+    return (
+        1
+        if provisioning_failed or counts["failed"] or failed_mail or not recorded
+        else 0
+    )
 
-    pushes_failed = any(k.startswith("failed") for k in results)
-    return 1 if pushes_failed or notifications_failed or marker_failed else 0
+
+def _preview(
+    cohort_org: str,
+    sheets: dict[str, dict],
+    specs: dict[str, SheetSpec],
+    books: dict[str, dict[str, dict]],
+    counts: dict[str, int],
+    pending: list[str],
+    notify: bool,
+) -> None:
+    """The dry run's report: what a real run would do, in counts a grader can check.
+
+    No names, and no marks: this is the log of a workflow that runs in a PUBLIC repo. The
+    sample email is rendered from placeholders, never from a student."""
+    for slug in sorted(sheets):
+        spec = specs[slug]
+        units = (sheets[slug] or {}).get(spec.container_key) or {}
+        views = [book[slug] for book in books.values() if slug in book]
+        derived = sum(1 for v in views if not needs_hand_decision(v))
+        hand = sum(1 for v in views if needs_hand_decision(v))
+        team_clause = f" in {len(units)} team(s)" if spec.is_group else ""
+        log(
+            f"  {slug}: {len(views)} student(s){team_clause} · {derived} final grade(s) "
+            f"derived, {_adjusted_count(spec, sheets[slug])} adjusted, {hand} need a "
+            f"hand decision"
+        )
+        log(f"  {COHORT_CSV_NAME}: would gain column {slug}")
+    log(
+        f"  would post {counts['comments']} comment(s), update "
+        f"{counts['gradebooks']} gradebook(s), email "
+        f"{len(pending) if notify else 0} student(s)"
+    )
+    if notify and pending:
+        log("  Sample email (placeholders, not a real student):")
+        for line in sample_body(cohort_org).splitlines():
+            log(f"    {line}")
+    log_ok("DRY-RUN - nothing written, nothing posted, nothing sent")
 
 
 def _read_notified(wd: Path) -> Notified | None:
@@ -1945,51 +2473,6 @@ def _read_notified(wd: Path) -> Notified | None:
         # roster.
         for row in read_csv(path.read_text(), ("github_handle",), NOTIFIED_PATH)
     }
-
-
-def _write_notified(cohort_org: str, notified: Notified) -> bool:
-    """One PUT for the whole cohort - the read was a local file in the clone."""
-    body = dump_csv(
-        NOTIFIED_HEADER,
-        ((handle, sha, when) for handle, (sha, when) in sorted(notified.items())),
-    )
-    return put_file(
-        cohort_org,
-        CONFIG_REPO,
-        NOTIFIED_PATH,
-        body.encode(),
-        "grades: record notifications sent",
-    )
-
-
-def _push_gradebook(cohort_org: str, handle: str, content: str) -> str:
-    """Write grades.yml into grades-<handle>. One of `ok` (the file changed), `unchanged`
-    (it already held exactly this) or `failed-push` (a missing repo - sync not run - or an
-    unreadable one).
-
-    The tri-state is what `distribute` notifies off. `put_file` compares blob shas and
-    skips an identical write, but it returns True either way, so a re-run of Distribute
-    told the WHOLE cohort their grades had been updated whenever a marker had corrected
-    one row. Read the sha here instead - the same single GET put_file would have made -
-    and hand it back as `expected_sha`, which also makes this a safe read-modify-write:
-    a gradebook that moved on between the read and the write is refused, not clobbered."""
-    repo = f"{GRADEBOOK_PREFIX}{handle}"
-    body = content.encode()
-    try:
-        current = get_file_with_sha(cohort_org, repo, "grades.yml")
-    except RuntimeError as exc:
-        log_err(f"could not read {repo}/grades.yml: {exc}")
-        return "failed-push"
-    if current is not None and current[1] == blob_sha(body):
-        log_person(f"  [skip] {repo}/grades.yml unchanged")
-        return "unchanged"
-    sha = current[1] if current is not None else ""
-    if not put_file(
-        cohort_org, repo, "grades.yml", body, "grades: update", expected_sha=sha
-    ):
-        return "failed-push"
-    log_person(f"  [ok] + {repo}/grades.yml")
-    return "ok"
 
 
 def update_message(

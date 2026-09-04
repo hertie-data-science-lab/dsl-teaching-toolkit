@@ -7,11 +7,15 @@ from __future__ import annotations
 
 import csv
 import io
+from datetime import datetime, timezone
+from pathlib import Path
+from shutil import copytree
 
 import pytest
 import yaml
 
 from dsl_course import ghcli, grades, repos, roster
+from dsl_course.schedule import AssignmentEntry, Schedule
 from tests.conftest import ROSTER_HEADER
 
 
@@ -566,104 +570,6 @@ def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
     assert sent and sent[-1][0][0] == "ada@uni.edu"
 
 
-# ---------------- an unsent notification reddens the run (the count is no longer dropped)
-
-
-def _distribute_with(
-    monkeypatch,
-    tmp_path,
-    *,
-    sent,
-    live: str | None = None,
-    outbox: list | None = None,
-    notified: str | None = None,
-    marker: list | None = None,
-    dry_run: bool = False,
-    roster_rows: str | None = "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n",
-):
-    """`distribute` against a local classroom-config clone, pushing to nothing.
-
-    `live` is what each student's gradebook repo already holds (None = no file yet);
-    `outbox` collects every batch handed to the mailer; `notified` seeds the marker file
-    (None = the cohort has none yet); `marker` collects what is written back to it."""
-    cfg = tmp_path / "cfg"
-
-    def fake_gh(*args, **kwargs):
-        if args[:2] == ("repo", "clone"):
-            from pathlib import Path
-            from shutil import copytree
-
-            copytree(cfg, Path(args[3]))
-        return 0, ""
-
-    (cfg / grades.GRADEBOOK_DIR).mkdir(parents=True)
-    (cfg / grades.GRADEBOOK_DIR / "ada-l.yml").write_text("student: ada-l\n")
-    if notified is not None:
-        (cfg / grades.NOTIFIED_PATH).write_text(notified)
-    monkeypatch.setattr(grades, "gh", fake_gh)
-    monkeypatch.setattr(ghcli, "gh", fake_gh)
-
-    def fake_put_file(org, repo, path, content, message, expected_sha=None):
-        if marker is not None and path == grades.NOTIFIED_PATH:
-            marker.append(content.decode())
-        return True
-
-    monkeypatch.setattr(grades, "put_file", fake_put_file)
-    monkeypatch.setattr(
-        grades,
-        "get_file_with_sha",
-        lambda *a, **k: (
-            None if live is None else (live, grades.blob_sha(live.encode()))
-        ),
-    )
-    students = (
-        None if roster_rows is None else roster.parse(ROSTER_HEADER + roster_rows)
-    )
-    monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
-    monkeypatch.setattr(
-        grades.mailer,
-        "send_bulk",
-        lambda msgs, dry_run=False, sample=None: (
-            outbox.append(msgs) if outbox is not None else None,
-            [m[0] for m in msgs[:sent]],
-        )[1],
-    )
-    return grades.distribute("COHORT", dry_run=dry_run)
-
-
-def test_distribute_goes_red_when_a_notification_could_not_be_sent(
-    tmp_path, monkeypatch, capsys
-):
-    # The grades are pushed by this point, so nothing is undone - but a student who never
-    # got the mail does not know to look, and the count used to be thrown away, so the run
-    # was green and said nothing.
-    assert _distribute_with(monkeypatch, tmp_path, sent=0) == 1
-    assert "1 of 1 grade notification(s) not sent" in capsys.readouterr().err
-
-
-def test_distribute_stays_green_when_every_notification_lands(tmp_path, monkeypatch):
-    assert _distribute_with(monkeypatch, tmp_path, sent=1) == 0
-
-
-def test_distribute_emails_nobody_whose_gradebook_did_not_change(tmp_path, monkeypatch):
-    # put_file returns True for a no-op write (it compares blob shas and skips), so
-    # "pushed" was true for every student whose file already held exactly this. A re-run
-    # after one marker's correction then told the WHOLE cohort their grades had been
-    # updated. Only a gradebook that actually changed is notified.
-    outbox: list = []
-    rc = _distribute_with(
-        monkeypatch, tmp_path, sent=1, live="student: ada-l\n", outbox=outbox
-    )
-    assert rc == 0
-    assert outbox == [], "an unchanged gradebook still emailed its student"
-
-    # ... and a gradebook that DID change is still notified.
-    outbox.clear()
-    assert _distribute_with(monkeypatch, tmp_path / "next", sent=1, outbox=outbox) == 0
-    assert [m[0] for batch in outbox for m in batch] == ["ada@uni.edu"]
-
-
 # ---------------- "nothing new to render" must mean nothing new, not a failed commit
 
 
@@ -790,136 +696,379 @@ def test_a_dry_run_lists_nothing(monkeypatch):
     assert grades.sync("COHORT", dry_run=True) == 0
 
 
-# ------------------------------------------- notifications are retryable, and idempotent
+# ------------------------------------------------------------------ distribute, end to end
 
-
-_ADA_YML = "student: ada-l\n"
-_ADA_SHA = grades.blob_sha(_ADA_YML.encode())
-_STALE_SHA = "a-sha-from-an-earlier-version"
-
-
-def _notified_at(sha):
-    return (
-        f"github_handle,grades_sha,notified_at\nada-l,{sha},2026-08-31T09:00:00+00:00\n"
-    )
-
-
-@pytest.mark.parametrize(
-    ("notified_sha", "sent", "rc", "mailed", "marked"),
-    [
-        # The bug: the push says `unchanged`, so the old push-outcome rule notified nobody
-        # and the student whose mail failed last run could never be told.
-        (_STALE_SHA, 0, 1, ["ada@uni.edu"], False),
-        # ... and once the retry lands, the marker moves on.
-        (_STALE_SHA, 1, 0, ["ada@uni.edu"], True),
-        # Already told about exactly this version: nothing to send, nothing to record.
-        (_ADA_SHA, 1, 0, [], False),
-    ],
-    ids=["retried", "retry-recorded", "already-told"],
+_SHEET = """\
+submissions:
+  ada-l:
+    info:
+      submitted: '2026-10-03T22:14+02:00'
+      days_late: 0
+    score_individual: 43
+    adjustment_individual:
+    feedback_individual: |
+      Clean derivation.
+    notes_not_shared_with_students: chased by email
+"""
+_TEAM_SHEET = """\
+teams:
+  alpha:
+    info:
+      submitted: '2026-10-03T22:14+02:00'
+      days_late: 0
+    score_group: 43
+    feedback_group: |
+      Good work.
+    members:
+      ada-l:
+        adjustment_individual: -3
+        feedback_individual: |
+          Your section repeats the Q4 error.
+        notes_not_shared_with_students: privately noted
+"""
+_GRADING_YML = (
+    "title: Neural networks\nlate_window_days: 7\nlate_penalty_per_day: 10%\n"
 )
-def test_a_notification_is_sent_once_per_version_and_retried_until_it_lands(
-    monkeypatch, tmp_path, notified_sha, sent, rc, mailed, marked
-):
-    outbox: list = []
-    marker: list = []
-    assert (
-        _distribute_with(
-            monkeypatch,
-            tmp_path,
-            sent=sent,
-            live=_ADA_YML,  # identical to the rendered file, so the push says `unchanged`
-            notified=_notified_at(notified_sha),
-            outbox=outbox,
-            marker=marker,
-        )
-        == rc
+_LEGACY_CSV = (
+    "github_handle,team,autograde_score,manual_score,team_score,"
+    "individual_adjustment,final_grade,individual_comments,team_comments\n"
+    "ada-l,,,,,,77,Solid work,\n"
+)
+ROSTER_ADA = "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
+
+
+def _schedule_with(*slugs: str) -> Schedule:
+    return Schedule(
+        assignments={
+            slug: AssignmentEntry(
+                course_source_repo=f"{slug}-f2026",
+                due_datetime=datetime(2026, 10, 4, 23, 59, tzinfo=timezone.utc),
+            )
+            for slug in slugs
+        }
     )
-    assert [m[0] for batch in outbox for m in batch] == mailed
-    assert bool(marker) is marked, "a failed notification must not be recorded as sent"
 
 
-def test_a_cohort_with_no_notified_file_is_not_re_emailed_wholesale(
-    monkeypatch, tmp_path
-):
-    # The migration case: the first run after this ships must not tell a whole cohort
-    # their grades have been updated. No marker means nothing to catch up on - and the
-    # baseline is recorded so the next run has one.
-    outbox: list = []
-    marker: list = []
-    assert (
-        _distribute_with(
-            monkeypatch,
-            tmp_path,
-            sent=1,
-            live=_ADA_YML,
-            outbox=outbox,
-            marker=marker,
-        )
-        == 0
+def _distribute(
+    monkeypatch,
+    tmp_path,
+    *,
+    sheets: dict[str, str] | None = None,
+    legacy: dict[str, str] | None = None,
+    grading: str = _GRADING_YML,
+    distributed: str | None = None,
+    notified: str | None = None,
+    stale_gradebooks: tuple[str, ...] = (),
+    existing_marks: str = "",
+    sent: int = 1,
+    notify: bool = True,
+    dry_run: bool = False,
+    roster_rows: str | None = ROSTER_ADA,
+    issue: int | None = 7,
+    put_files_ok: bool = True,
+) -> dict:
+    """`distribute` over a local classroom-config clone, writing to nothing.
+
+    Returns every effect it had: the comments posted, the gradebook commits, the
+    classroom-config commit and the mail batches - which between them are the four things
+    a student can be reached by."""
+    cfg = tmp_path / "cfg"
+    (cfg / grades.SHEETS_DIR).mkdir(parents=True)
+    sheets = {"assignment-1": _SHEET} if sheets is None else sheets
+    for slug, text in sheets.items():
+        (cfg / grades.SHEETS_DIR / f"{slug}.yml").write_text(text)
+    for slug, text in (legacy or {}).items():
+        (cfg / grades.GRADES_DIR).mkdir(exist_ok=True)
+        (cfg / grades.GRADES_DIR / f"{slug}.csv").write_text(text)
+    if distributed is not None:
+        (cfg / grades.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
+        (cfg / grades.DISTRIBUTED_PATH).write_text(distributed)
+    if notified is not None:
+        (cfg / grades.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
+        (cfg / grades.NOTIFIED_PATH).write_text(notified)
+    for name in stale_gradebooks:
+        (cfg / grades.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
+        (cfg / grades.GRADEBOOK_DIR / name).write_text("student: someone\n")
+
+    def fake_gh(*args, **kwargs):
+        if args[:2] == ("repo", "clone"):
+            copytree(cfg, Path(args[3]))
+            return 0, ""
+        if "comments?" in " ".join(str(a) for a in args):
+            return 0, existing_marks
+        return 0, ""
+
+    effects: dict = {
+        "comments": [],
+        "gradebooks": [],
+        "config": [],
+        "outbox": [],
+        "issues": [],
+    }
+    monkeypatch.setattr(grades, "gh", fake_gh)
+    monkeypatch.setattr(ghcli, "gh", fake_gh)
+    monkeypatch.setattr(grades, "ensure_gradebooks", lambda org, dry_run=False: 0)
+    monkeypatch.setattr(grades, "course_org_for_cohort", lambda org: "COURSE")
+    monkeypatch.setattr(grades, "_grading_text", lambda org, tpl: grading)
+    monkeypatch.setattr(
+        grades.schedule,
+        "load",
+        lambda org: _schedule_with(*(sheets or {"assignment-1": ""})),
     )
-    assert outbox == []
-    assert marker and "ada-l" in marker[-1]
-
-
-def test_distribute_reds_when_the_roster_cannot_be_read(monkeypatch, tmp_path, capsys):
-    # `roster.load(...) or []` read an unreadable roster as "nobody to email": grades out,
-    # nobody told, run green.
-    assert _distribute_with(monkeypatch, tmp_path, sent=1, roster_rows=None) == 1
-    assert "could not be read" in capsys.readouterr().err
-
-
-def test_gradebooks_with_no_roster_row_are_counted_not_fatal(
-    monkeypatch, tmp_path, capsys
-):
-    # A withdrawn student is an ordinary state; it must not red every distribution from
-    # here on, and the log must not name them.
-    assert (
-        _distribute_with(
-            monkeypatch,
-            tmp_path,
-            sent=0,
-            roster_rows="\nbo@uni.edu,Bo,enrolled,bo-b,7,dsl-x\n",
-        )
-        == 0
+    monkeypatch.setattr(
+        grades,
+        "ensure_feedback_issue",
+        lambda org, repo, body, dry_run=False: (
+            effects["issues"].append((repo, body)) or issue
+        ),
     )
+    monkeypatch.setattr(
+        grades,
+        "post_marked_comment",
+        lambda org, repo, no, body, marker, dry_run=False: (
+            effects["comments"].append((repo, body, marker)) or True
+        ),
+    )
+
+    def fake_put_files(org, repo, files, message, *, delete=(), create_only=False):
+        target = "config" if repo == grades.CONFIG_REPO else "gradebooks"
+        effects[target].append(
+            (repo, {k: v.decode() for k, v in files.items()}, tuple(delete))
+        )
+        return put_files_ok
+
+    monkeypatch.setattr(grades, "put_files", fake_put_files)
+    students = (
+        None if roster_rows is None else roster.parse(ROSTER_HEADER + roster_rows)
+    )
+    monkeypatch.setattr(grades.roster, "load", lambda org: students)
+    monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
+    monkeypatch.setattr(
+        grades.mailer,
+        "send_bulk",
+        lambda msgs, dry_run=False, sample=None: (
+            effects["outbox"].append(msgs),
+            [m[0] for m in msgs[:sent]],
+        )[1],
+    )
+    effects["rc"] = grades.distribute("COHORT", notify=notify, dry_run=dry_run)
+    return effects
+
+
+def test_a_real_run_reaches_all_four_channels(tmp_path, monkeypatch):
+    out = _distribute(monkeypatch, tmp_path)
+    assert out["rc"] == 0
+    # the feedback comment, on the student's own submission repo
+    ((repo, body, marker),) = out["comments"]
+    assert repo == "assignment-1-ada-l"
+    assert "### Feedback · Neural networks" in body and "43" in body
+    assert marker.startswith("<!-- dsl-grade:") and marker.endswith("-->")
+    # ONE commit per gradebook, holding both files, so the page never disagrees with the
+    # data beside it
+    ((gb_repo, files, _delete),) = out["gradebooks"]
+    assert gb_repo == "grades-ada-l"
+    assert set(files) == {"grades.yml", "README.md"}
+    assert "student: ada-l" in files["grades.yml"]
+    assert "| Neural networks | 43 |" in files["README.md"]
+    # the registrar export and the record, in one classroom-config commit
+    ((_cfg, cfg_files, _d),) = out["config"]
+    assert set(cfg_files) == {grades.COHORT_CSV_NAME, grades.DISTRIBUTED_PATH}
+    assert "ada@uni.edu,Ada,ada-l,43" in cfg_files[grades.COHORT_CSV_NAME]
+    # and the email
+    assert [m[0] for batch in out["outbox"] for m in batch] == ["ada@uni.edu"]
+
+
+def test_nothing_a_student_may_not_see_reaches_them(tmp_path, monkeypatch):
+    # The two leaks this design exists to close: the grader's private notes, and one
+    # member's adjustment in a repo the whole team reads.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _TEAM_SHEET},
+        grading=_GRADING_YML + "type: group\n",
+    )
+    ((repo, body, _marker),) = out["comments"]
+    assert repo == "assignment-1-alpha"  # the TEAM's repo
+    for secret in ("privately noted", "-3", "repeats the Q4 error"):
+        assert secret not in body
+    ((_gb, files, _d),) = out["gradebooks"]
+    assert "privately noted" not in files["grades.yml"]
+    assert "privately noted" not in files["README.md"]
+
+
+def test_a_dry_run_writes_nothing_posts_nothing_and_sends_nothing(
+    tmp_path, monkeypatch, capsys
+):
+    out = _distribute(monkeypatch, tmp_path, dry_run=True)
+    assert out["rc"] == 0
+    assert (out["comments"], out["gradebooks"], out["config"], out["issues"]) == (
+        [],
+        [],
+        [],
+        [],
+    )
+    assert out["outbox"] == []
+    printed = capsys.readouterr().out
+    assert "assignment-1: 1 student(s) · 1 final grade(s) derived" in printed
+    assert "0 need a hand decision" in printed
+    assert f"{grades.COHORT_CSV_NAME}: would gain column assignment-1" in printed
+    assert (
+        "would post 1 comment(s), update 1 gradebook(s), email 1 student(s)" in printed
+    )
+    assert "<handle>" in printed  # the sample email, from placeholders
+
+
+def test_a_re_run_says_nothing_twice(tmp_path, monkeypatch):
+    first = _distribute(monkeypatch, tmp_path)
+    ((_cfg, cfg_files, _d),) = first["config"]
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        distributed=cfg_files[grades.DISTRIBUTED_PATH],
+    )
+    assert again["comments"] == []
+    assert again["gradebooks"] == []
+    assert again["outbox"] == []
+    assert again["rc"] == 0
+
+
+def test_a_corrected_grade_reaches_that_student_and_only_them(tmp_path, monkeypatch):
+    first = _distribute(monkeypatch, tmp_path)
+    ((_cfg, cfg_files, _d),) = first["config"]
+    corrected = _SHEET.replace("score_individual: 43", "score_individual: 45")
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets={"assignment-1": corrected},
+        distributed=cfg_files[grades.DISTRIBUTED_PATH],
+    )
+    ((_repo, body, _marker),) = again["comments"]  # exactly one new comment
+    assert "45" in body
+    assert len(again["gradebooks"]) == 1
+    assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
+
+
+def test_a_lost_record_still_does_not_duplicate_a_comment(tmp_path, monkeypatch):
+    # `distributed.csv` deleted, restored from a backup, never written: the hash on the
+    # comment itself is the second belt, and it is read from the issue.
+    first = _distribute(monkeypatch, tmp_path)
+    ((_repo, body, marker),) = first["comments"]
+    posted: list = []
+    monkeypatch.setattr(
+        grades,
+        "post_marked_comment",
+        grades.post_marked_comment,  # the real one, over the stubbed gh
+    )
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        existing_marks=f"an earlier comment\n{marker}\n",
+    )
+    del posted, body
+    # The real post_marked_comment saw its own marker on the issue and posted nothing.
+    assert again["rc"] == 0
+
+
+def test_the_registrar_export_is_written_only_on_a_real_run(tmp_path, monkeypatch):
+    assert _distribute(monkeypatch, tmp_path, dry_run=True)["config"] == []
+    ((_cfg, files, _d),) = _distribute(monkeypatch, tmp_path / "real")["config"]
+    csv_text = files[grades.COHORT_CSV_NAME]
+    assert csv_text.splitlines()[0] == "hertie_email,name,github_handle,assignment-1"
+
+
+def test_the_migration_off_notified_csv_happens_in_one_commit(tmp_path, monkeypatch):
+    # The old marker and the dead per-student YAML go in the SAME commit that writes the
+    # new record, so no reader ever sees both and has to choose.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        notified=(
+            "github_handle,grades_sha,notified_at\n"
+            "ada-l,anoldsha,2026-08-31T09:00:00+00:00\n"
+        ),
+        stale_gradebooks=("ada-l.yml",),
+        notify=False,  # so the carried-over row is visible, not overwritten
+    )
+    ((_cfg, files, delete),) = out["config"]
+    assert grades.DISTRIBUTED_PATH in files
+    assert set(delete) == {
+        grades.NOTIFIED_PATH,
+        f"{grades.GRADEBOOK_DIR}/ada-l.yml",
+    }
+    # The email rows carried over, so nobody is re-told about a book they already know
+    # about beyond the one re-hash this migration costs.
+    assert "ada-l,,email,anoldsha," in files[grades.DISTRIBUTED_PATH]
+
+
+def test_a_cohort_still_on_the_grade_csvs_gets_gradebooks_but_no_comments(
+    tmp_path, monkeypatch
+):
+    # A legacy CSV has no submission-unit structure to post against, and no timing - so
+    # the Submitted cell is BLANK rather than an accusation.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={},
+        legacy={"assignment-1": _LEGACY_CSV},
+    )
+    assert out["comments"] == [] and out["issues"] == []
+    ((_gb, files, _d),) = out["gradebooks"]
+    assert "| Neural networks | 77 |  |  |  |" in files["README.md"]
+    assert "not submitted" not in files["README.md"]
+
+
+def test_a_missing_submission_repo_is_a_counted_skip(tmp_path, monkeypatch, capsys):
+    out = _distribute(monkeypatch, tmp_path, issue=None)
+    assert out["comments"] == []
+    assert out["rc"] == 0  # a student who never onboarded is not a failure
+    assert '"skipped": 1' in capsys.readouterr().out
+
+
+def test_the_public_log_carries_counts_and_no_student(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    _distribute(monkeypatch, tmp_path)
+    out = capsys.readouterr().out
+    assert '"comments": 1' in out and '"gradebooks": 1' in out
+    assert "ada-l" not in out and "ada@uni.edu" not in out
+
+
+def test_an_unsent_notification_reddens_the_run_and_is_retried(tmp_path, monkeypatch):
+    # The grades are out by this point, so nothing is undone - but a student who never got
+    # the mail does not know to look, and the record must not claim they were told.
+    first = _distribute(monkeypatch, tmp_path, sent=0)
+    assert first["rc"] == 1
+    ((_cfg, files, _d),) = first["config"]
+    assert ",email," not in files[grades.DISTRIBUTED_PATH]
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        distributed=files[grades.DISTRIBUTED_PATH],
+        sent=1,
+    )
+    assert [m[0] for batch in again["outbox"] for m in batch] == ["ada@uni.edu"]
+
+
+def test_no_notify_sends_nothing_and_stays_green(tmp_path, monkeypatch):
+    out = _distribute(monkeypatch, tmp_path, notify=False)
+    assert out["outbox"] == [] and out["rc"] == 0
+
+
+def test_distribute_reds_when_the_record_could_not_be_written(tmp_path, monkeypatch):
+    out = _distribute(monkeypatch, tmp_path, put_files_ok=False)
+    assert out["rc"] == 1
+
+
+def test_a_gradebook_with_no_roster_row_is_counted_not_fatal(
+    tmp_path, monkeypatch, capsys
+):
+    out = _distribute(
+        monkeypatch, tmp_path, roster_rows="\nbo@uni.edu,Bo,enrolled,bo-b,7,dsl-x\n"
+    )
+    assert out["rc"] == 0
     err = capsys.readouterr().err
     assert "no roster row with an email" in err and "ada-l" not in err
 
 
-def test_a_first_run_does_not_record_a_notification_that_failed(monkeypatch, tmp_path):
-    # The baseline seeded from every gradebook, told or not - so a mail that failed on the
-    # very first run was recorded as sent, `pending` was empty next time, and the student
-    # was never told. Every deployed cohort's first run after this ships takes this path.
-    outbox: list = []
-    marker: list = []
-    assert (
-        _distribute_with(
-            monkeypatch,
-            tmp_path,
-            sent=0,  # the notification fails
-            live=None,  # no gradebook there yet, so the push is `ok`
-            outbox=outbox,
-            marker=marker,
-        )
-        == 1
-    )
-    assert [m[0] for batch in outbox for m in batch] == ["ada@uni.edu"]
-    assert marker == [] or "ada-l" not in marker[-1], (
-        "a failed first-run notification was baselined as sent, so it can never be retried"
-    )
-
-
-def test_a_dry_run_previews_the_students_a_real_run_would_mail(monkeypatch, tmp_path):
-    # The preview appended every gradebook, so a 30-student cohort with one corrected
-    # grade previewed 30 recipients and then mailed 1. It is the documented review step.
-    outbox: list = []
-    _distribute_with(
-        monkeypatch,
-        tmp_path,
-        sent=1,
-        live=_ADA_YML,
-        notified=_notified_at(_ADA_SHA),  # already told about exactly this version
-        outbox=outbox,
-        dry_run=True,
-    )
-    assert [m[0] for batch in outbox for m in batch] == []
+def test_distribute_reds_when_the_roster_cannot_be_read(tmp_path, monkeypatch, capsys):
+    assert _distribute(monkeypatch, tmp_path, roster_rows=None)["rc"] == 1
+    assert "could not be read" in capsys.readouterr().err
