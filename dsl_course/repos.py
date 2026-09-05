@@ -10,7 +10,7 @@ from functools import cache
 from typing import NamedTuple
 
 from .ghcli import gh, is_already_exists, is_missing_resource
-from .log import log, log_err, log_ok, log_person, log_skip
+from .log import log, log_err, log_err_person, log_ok, log_person, log_skip
 
 
 class _RepoReadFailed(RuntimeError):
@@ -409,7 +409,13 @@ def set_repo_topics(org: str, repo: str, topics: list[str]) -> bool:
 
 
 def ensure_label(
-    org: str, repo: str, name: str, *, color: str, description: str
+    org: str,
+    repo: str,
+    name: str,
+    *,
+    color: str,
+    description: str,
+    person: bool = False,
 ) -> bool:
     """Create an issue label if the repo doesn't have it. Already-there is success.
 
@@ -433,12 +439,27 @@ def ensure_label(
     )
     if code == 0 or is_already_exists(out):
         return True
-    log_err(f"could not create label '{name}' on {org}/{repo}: {out[:160]}")
+    if person:
+        log_err_person(
+            f"could not create the '{name}' label on a repo in {org}",
+            f"could not create label '{name}' on {org}/{repo}: {out[:160]}",
+        )
+    else:
+        log_err(f"could not create label '{name}' on {org}/{repo}: {out[:160]}")
     return False
 
 
-def add_collaborator(org: str, repo: str, login: str, permission: str = "push") -> bool:
-    """Add a collaborator to a repo. permission: pull | triage | push | maintain | admin."""
+def add_collaborator(
+    org: str,
+    repo: str,
+    login: str,
+    permission: str = "push",
+    person: bool = False,
+) -> bool:
+    """Add a collaborator to a repo. permission: pull | triage | push | maintain | admin.
+
+    `person=True` when the repo is somebody's - the failure line then names them only in
+    the verbose log (see `log.log_err_person`)."""
     code, out = gh(
         "api",
         "--method",
@@ -449,7 +470,13 @@ def add_collaborator(org: str, repo: str, login: str, permission: str = "push") 
     )
     if code == 0:
         return True
-    log_err(f"failed to add {login} to {org}/{repo}: {out[:200]}")
+    if person:
+        log_err_person(
+            f"failed to grant one collaborator access in {org}",
+            f"failed to add {login} to {org}/{repo}: {out[:200]}",
+        )
+    else:
+        log_err(f"failed to add {login} to {org}/{repo}: {out[:200]}")
     return False
 
 

@@ -253,7 +253,7 @@ def test_the_issue_is_opened_once_with_its_label(monkeypatch):
     monkeypatch.setattr(
         grades,
         "ensure_label",
-        lambda org, repo, name, *, color, description: labelled.append(name) or True,
+        lambda org, repo, name, **kw: labelled.append(name) or True,
     )
     assert grades.ensure_feedback_issue("Cohort", "assignment-1-ada-l", "body") == 12
     assert labelled == [

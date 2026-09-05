@@ -477,7 +477,9 @@ def provision_one(
     # routes access through the team to avoid the wedge.
     added = 0
     for handle in handles:
-        if add_collaborator(cohort_org, repo, handle, permission="maintain"):
+        if add_collaborator(
+            cohort_org, repo, handle, permission="maintain", person=True
+        ):
             log_person(f"  [ok]   + @{handle} (maintain)")
             added += 1
         else:

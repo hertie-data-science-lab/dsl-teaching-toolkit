@@ -1992,8 +1992,12 @@ def collect(
         # and the sentinel.
         archive_ok = True
         for apath, acontent, amsg in archives:
-            if not put_file(cohort_org, CONFIG_REPO, apath, acontent, amsg):
-                log_err(f"could not write {apath}")
+            # `person=True`: the PATH is `autograde/<slug>/<handle>.json`, and this log is
+            # world-readable even when classroom-config is not.
+            if not put_file(
+                cohort_org, CONFIG_REPO, apath, acontent, amsg, person=True
+            ):
+                log_person(f"    ! could not write {apath}")
                 archive_ok = False
         # The grading sheet is the record, and freezing it is the LAST write before the
         # fire-once sentinel. Order matters both ways round: a sentinel written over an

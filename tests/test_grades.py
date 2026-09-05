@@ -12,7 +12,7 @@ from shutil import copytree
 
 import pytest
 
-from dsl_course import ghcli, grades, repos, roster
+from dsl_course import gh_contents, ghcli, grades, repos, roster
 from dsl_course.schedule import AssignmentEntry, Schedule
 from tests.conftest import ROSTER_HEADER
 
@@ -105,6 +105,95 @@ def test_gradebook_provisioning_names_nobody_on_the_happy_path(monkeypatch, caps
     assert grades.provision_one("COHORT", "ada-l") == "ok"
     captured = capsys.readouterr()
     assert "ada-l" not in captured.out + captured.err
+
+
+@pytest.mark.parametrize(
+    "break_it",
+    [
+        "tree",  # the repo could not be read before writing
+        "build",  # POST /git/trees
+        "commit",  # POST /git/commits
+        "ref",  # PATCH the branch
+    ],
+)
+def test_no_failure_branch_of_a_gradebook_write_names_the_student(
+    break_it, monkeypatch, capsys
+):
+    # The green path was covered; the failure branches were not, and they are where the
+    # repo name lives: `could not commit to COHORT/grades-ada-l` on a bad day publishes the
+    # roster one student at a time, from a run in a PUBLIC .github repo.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    if break_it == "tree":
+        monkeypatch.setattr(
+            gh_contents,
+            "default_branch",
+            lambda org, repo, **k: (_ for _ in ()).throw(
+                RuntimeError(f"could not read {org}/{repo}'s default branch: 500")
+            ),
+        )
+    else:
+        monkeypatch.setattr(
+            gh_contents, "default_branch", lambda org, repo, **k: "main"
+        )
+        monkeypatch.setattr(gh_contents, "repo_blob_shas", lambda o, r, b: {})
+        monkeypatch.setattr(gh_contents, "_head", lambda o, r, b: ("parent", "tree"))
+        answers = {"trees": break_it != "build", "commits": break_it != "commit"}
+        monkeypatch.setattr(
+            gh_contents,
+            "gh",
+            lambda *a, **k: (
+                (0, "sha") if answers.get(_endpoint(a), False) else (1, "boom")
+            ),
+        )
+    assert not gh_contents.put_files(
+        "COHORT", "grades-ada-l", {"grades.yml": b"x\n"}, "grades: update", person=True
+    )
+    captured = capsys.readouterr()
+    assert "ada-l" not in captured.out + captured.err
+    assert captured.err.strip(), "the fault itself still has to be reported"
+
+
+def _endpoint(args) -> str:
+    """Which git-data call a stubbed `gh` was asked for."""
+    joined = " ".join(str(a) for a in args)
+    for name in ("trees", "commits", "refs"):
+        if f"/git/{name}" in joined:
+            return name
+    return ""
+
+
+def test_a_failed_label_or_collaborator_grant_names_nobody_publicly(
+    monkeypatch, capsys
+):
+    # Both are called once per SUBMISSION repo now (the Feedback issue's label, and the
+    # student's own grant), so both name a `<slug>-<handle>` repo on failure.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "boom"))
+    assert not repos.ensure_label(
+        "COHORT",
+        "assignment-1-ada-l",
+        "dsl-feedback",
+        color="ededed",
+        description="d",
+        person=True,
+    )
+    assert not repos.add_collaborator(
+        "COHORT", "assignment-1-ada-l", "ada-l", person=True
+    )
+    captured = capsys.readouterr()
+    assert "ada-l" not in captured.out + captured.err
+    assert captured.err.count("COHORT") == 2  # the fault, and where to look
+
+
+def test_the_verbose_log_still_says_which_repo_it_was(monkeypatch, capsys):
+    # The name is not thrown away, it is moved: a maintainer running the CLI locally with
+    # DSL_VERBOSE=1 still gets the repo, and so does the private classroom-config archive.
+    monkeypatch.setenv("DSL_VERBOSE", "1")
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "boom"))
+    assert not repos.add_collaborator(
+        "COHORT", "assignment-1-ada-l", "ada-l", person=True
+    )
+    assert "assignment-1-ada-l" in capsys.readouterr().out
 
 
 def test_a_gradebook_the_student_cannot_open_is_a_failure(monkeypatch):

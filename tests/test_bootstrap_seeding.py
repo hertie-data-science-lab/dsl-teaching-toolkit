@@ -257,7 +257,9 @@ def test_the_scaffold_set_lands_as_one_commit_but_stays_create_only_per_file(
     monkeypatch.setattr(
         gh_contents,
         "_commit_tree",
-        lambda org, repo, branch, tree, message: committed.append(tree) or True,
+        lambda org, repo, branch, tree, message, person=False: (
+            committed.append(tree) or True
+        ),
     )
 
     assert gh_contents.put_files(

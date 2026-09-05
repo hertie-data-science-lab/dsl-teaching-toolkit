@@ -1773,7 +1773,7 @@ def test_collect_withholds_the_sentinel_when_an_archive_write_fails(monkeypatch)
     _stub_collect(monkeypatch, None)
     written: list[str] = []
 
-    def failing_put(org, repo, path, content, msg):
+    def failing_put(org, repo, path, content, msg, person=False):
         written.append(path)
         return not path.endswith("ben.json")  # one archive write fails
 

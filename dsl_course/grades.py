@@ -1225,6 +1225,7 @@ def ensure_feedback_issue(
         FEEDBACK_ISSUE_LABEL,
         color=_FEEDBACK_LABEL_COLOUR,
         description=_FEEDBACK_LABEL_DESCRIPTION,
+        person=True,
     )
     code, out = gh(
         "api",
@@ -2027,7 +2028,7 @@ def provision_one(
         # mark corrected here would be overwritten on the next run. The sheet is where a
         # mark belongs.
         grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
-    if add_collaborator(cohort_org, repo, handle, permission="pull"):
+    if add_collaborator(cohort_org, repo, handle, permission="pull", person=True):
         log_person(f"  [ok]   + @{handle} (read)")
         return "skipped" if existed else "ok"
     # A gradebook the student can't open is a failure, not a partial success - the status
