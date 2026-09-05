@@ -23,7 +23,10 @@ jobs:
           set -eo pipefail
           # tr: HTTP headers end CRLF, and a trailing \r would make `date` reject the value.
           headers=$(curl -sI -H "Authorization: token $GH_TOKEN" https://api.github.com/user | tr -d '\r')
-          expiry=$(grep -i '^github-authentication-token-expiration:' <<<"$headers" | cut -d' ' -f2-)
+          # `|| true`: grep exits 1 when the header is absent, and under pipefail that would
+          # end the step right here, silently - for a token with no expiry AND for a rejected
+          # one, which is exactly the case this canary exists to shout about.
+          expiry=$(grep -i '^github-authentication-token-expiration:' <<<"$headers" | cut -d' ' -f2- || true)
           if [ -z "$expiry" ]; then
             # No header means either a token that never expires or one GitHub has stopped
             # accepting - only the status line tells them apart.
