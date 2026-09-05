@@ -15,8 +15,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import schedule
-from tests.e2e import allowlist, cleanup, drive, estate, schedule_edit
+from dsl_course import ghcli, schedule
+from tests.e2e import allowlist, cleanup, drive, estate, schedule_edit, student
 
 GATE = 'pytest.skip("live e2e - set DSL_E2E=1", allow_module_level=True)'
 OTHER = "hertie-ml-26-deep"
@@ -377,6 +377,62 @@ def test_a_run_id_that_is_not_one_is_refused():
     assert cleanup.check_run_id(cleanup.new_run_id())
 
 
+def _one_repo_of_this_run(monkeypatch, answer: tuple[int, str]) -> None:
+    """One org holding exactly one of this run's repos, and a `gh` that answers `answer`
+    to the delete."""
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", f"{COURSE},{COHORT}")
+    monkeypatch.setenv("DSL_E2E_ORGS", COHORT)
+    monkeypatch.setattr(
+        cleanup.discovery, "list_org_repos", lambda org: [{"name": cleanup.slug(RUN)}]
+    )
+    monkeypatch.setattr(cleanup, "_clean_config", lambda *args: 0)
+    monkeypatch.setattr(ghcli, "gh", lambda *args, **kwargs: answer)
+
+
+FORBIDDEN = (1, "HTTP 403: Must have admin rights to Repository")
+
+
+def test_a_delete_that_403s_is_counted_undone_not_deleted(monkeypatch, capsys):
+    # The first live run read `[ok] 3 repo(s) deleted` while all three 403'd, because the
+    # count was of attempts. The two numbers must describe the same repos.
+    _one_repo_of_this_run(monkeypatch, FORBIDDEN)
+    left: list[str] = []
+    assert cleanup.cleanup(RUN, left=left) == 1
+    out, err = capsys.readouterr()
+    assert f"{COHORT}: 0 repo(s) deleted" in out
+    assert "left 1 thing(s) undone" in err
+    assert left == [f"{COHORT}/{cleanup.slug(RUN)}"]
+
+
+def test_a_delete_that_works_is_counted_deleted(monkeypatch, capsys):
+    _one_repo_of_this_run(monkeypatch, (0, ""))
+    left: list[str] = []
+    assert cleanup.cleanup(RUN, left=left) == 0
+    assert f"{COHORT}: 1 repo(s) deleted" in capsys.readouterr().out
+    assert left == []
+
+
+def test_what_is_left_behind_comes_with_the_command_to_delete_it(monkeypatch, capsys):
+    # The run is already over by the time anyone reads this; a re-run with the same token
+    # would 403 again, so the way out is the delete spelt out.
+    _one_repo_of_this_run(monkeypatch, FORBIDDEN)
+    assert cleanup.main(["--run-id", RUN]) == 1
+    assert "gh api --method DELETE repos/<org>/<repo>" in capsys.readouterr().out
+
+
+def test_the_repo_names_in_those_commands_are_verbose_only(monkeypatch, capsys):
+    # `<slug>-<handle>` names a student; the template is safe to print, the filled-in
+    # command is not.
+    filled = f"DELETE repos/{COHORT}/{cleanup.slug(RUN)}"
+    _one_repo_of_this_run(monkeypatch, FORBIDDEN)
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    cleanup.main(["--run-id", RUN])
+    assert filled not in capsys.readouterr().out
+    monkeypatch.setenv("DSL_VERBOSE", "1")
+    cleanup.main(["--run-id", RUN])
+    assert filled in capsys.readouterr().out
+
+
 def test_cleanup_refuses_without_the_transport_fence(monkeypatch):
     monkeypatch.delenv("DSL_ORG_ALLOWLIST", raising=False)
     with pytest.raises(RuntimeError, match="DSL_ORG_ALLOWLIST is not set"):
@@ -427,3 +483,76 @@ def test_every_live_test_module_carries_the_gate():
     assert modules, "the live harness has no test modules"
     for path in modules:
         assert GATE in path.read_text(), f"{path.name} is not gated on DSL_E2E"
+
+
+# --------------------------------------------- the student pushes the way a student does
+
+
+def test_the_students_git_calls_all_run_with_hooks_off(monkeypatch, tmp_path):
+    """The maintainer's own `pre-push` fired inside the harness's throwaway clone and
+    failed the first live run on their house lint rules. A student's machine has no such
+    hook, so the harness must not have one either."""
+    seen: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        student.ghcli, "git", lambda *args: seen.append(args) or (0, "")
+    )
+    monkeypatch.setenv(student.HANDLE_ENV, "e2e-student")
+    monkeypatch.setenv(student.TOKEN_ENV, "ghp_notatoken")
+    student.push_file(
+        "org/repo", tmp_path / "clone", "submission.py", 'print("x")\n', "e2e: submit"
+    )
+
+    clone = next(a for a in seen if "clone" in a)
+    assert ("--config", student.HOOKS_SETTING) == clone[1:3]
+    for args in (a for a in seen if a is not clone):
+        assert student.HOOKS_OFF[1] in args, f"hooks are live for `{' '.join(args)}`"
+
+    push = next(a for a in seen if "push" in a)
+    assert push[2:4] == student.HOOKS_OFF and "--no-verify" in push
+    assert "--no-verify" in next(a for a in seen if "commit" in a)
+
+
+def test_the_submission_is_clean_python(monkeypatch):
+    # It is pushed to a repo a maintainer may clone next; nothing lints it any more.
+    module = _pipeline_module(monkeypatch)
+    assert module.SUBMISSION_BODY == 'print("e2e submission")\n'
+
+
+# ------------------------------------------------- can this token take the run away again
+
+HEADERS = (
+    "HTTP/2.0 200 OK\r\nX-Oauth-Scopes: gist, read:org, repo\r\nDate: now\r\n\r\n{}"
+)
+
+
+def test_a_classic_token_without_delete_repo_is_refused(monkeypatch):
+    module = _pipeline_module(monkeypatch)
+    assert module.oauth_scopes(HEADERS) == frozenset({"gist", "read:org", "repo"})
+    monkeypatch.setattr(ghcli, "gh", lambda *args, **kwargs: (0, HEADERS))
+    with pytest.raises(AssertionError, match="cannot delete repos"):
+        module._assert_can_delete_repos()
+
+
+def test_a_classic_token_with_delete_repo_passes(monkeypatch):
+    module = _pipeline_module(monkeypatch)
+    full = HEADERS.replace("read:org, repo", "delete_repo, read:org, repo")
+    assert "delete_repo" in module.oauth_scopes(full)
+    monkeypatch.setattr(ghcli, "gh", lambda *args, **kwargs: (0, full))
+    module._assert_can_delete_repos()
+
+
+def test_a_fine_grained_token_is_probed_instead(monkeypatch, capsys):
+    """It sends no `X-OAuth-Scopes` at all, so the scope check has nothing to read and
+    `admin` on a repo the token can see is the question that can be answered."""
+    module = _pipeline_module(monkeypatch)
+    assert module.oauth_scopes("HTTP/2.0 200 OK\r\nDate: now\r\n\r\n{}") is None
+
+    answers = iter([(0, "HTTP/2.0 200 OK\r\n\r\n{}"), (0, "true\n")])
+    monkeypatch.setattr(ghcli, "gh", lambda *args, **kwargs: next(answers))
+    module._assert_can_delete_repos()
+    assert "no X-OAuth-Scopes" in capsys.readouterr().out
+
+    denied = iter([(0, "HTTP/2.0 200 OK\r\n\r\n{}"), (0, "false\n")])
+    monkeypatch.setattr(ghcli, "gh", lambda *args, **kwargs: next(denied))
+    with pytest.raises(AssertionError, match="cannot delete repos"):
+        module._assert_can_delete_repos()

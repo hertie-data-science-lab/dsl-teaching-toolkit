@@ -7,6 +7,11 @@ test the harness rather than the pipeline.
 
 The token is a fine-grained PAT (Contents R/W on the demo cohort org) and it appears in
 the remote URL, so every failure message here goes through `_redact` first.
+
+Every git call here runs with hooks off. A student's laptop has no repo hooks; the
+MAINTAINER'S has whatever their dotfiles install, and a `pre-push` that lints the working
+tree fires inside this throwaway clone and fails the run on the maintainer's own house
+style rather than on anything the pipeline did.
 """
 
 from __future__ import annotations
@@ -36,6 +41,13 @@ def _redact(text: str, token: str) -> str:
     return text.replace(token, "***")
 
 
+# Hooks off, in git's two spellings: `--config` for the repo `clone` is about to create
+# (which also covers a hooks template copied into it), and the pre-command `-c` for every
+# call afterwards (which also covers a global `core.hooksPath`).
+HOOKS_SETTING = "core.hooksPath=/dev/null"
+HOOKS_OFF = ("-c", HOOKS_SETTING)
+
+
 def _git(*args: str, token: str) -> str:
     code, out = ghcli.git(*args)
     if code != 0:
@@ -56,14 +68,27 @@ def push_file(repo: str, dest: Path, path: str, content: str, message: str) -> s
         f"user.name={who}",
         "-c",
         f"user.email={who}@users.noreply.github.com",
-        "-c",
-        "core.hooksPath=/dev/null",
+        *HOOKS_OFF,
     ]
-    _git("clone", "--depth", "1", url, str(dest), token=token)
+    _git(
+        "clone", "--config", HOOKS_SETTING, "--depth", "1", url, str(dest), token=token
+    )
     target = dest / path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content)
-    _git("-C", str(dest), "add", path, token=token)
-    _git("-C", str(dest), *identity, "commit", "-m", message, token=token)
-    _git("-C", str(dest), "push", "-q", "origin", "HEAD", token=token)
-    return _git("-C", str(dest), "rev-parse", "HEAD", token=token).strip()
+    _git("-C", str(dest), *HOOKS_OFF, "add", path, token=token)
+    _git(
+        "-C", str(dest), *identity, "commit", "--no-verify", "-m", message, token=token
+    )
+    _git(
+        "-C",
+        str(dest),
+        *HOOKS_OFF,
+        "push",
+        "--no-verify",
+        "-q",
+        "origin",
+        "HEAD",
+        token=token,
+    )
+    return _git("-C", str(dest), *HOOKS_OFF, "rev-parse", "HEAD", token=token).strip()

@@ -51,6 +51,7 @@ from dsl_course import (
     roster,
     seed,
 )
+from dsl_course.log import log
 
 from . import allowlist, cleanup, drive, estate, schedule_edit, student
 
@@ -76,6 +77,12 @@ DISTRIBUTE_GRADES = "distribute-grades.yml"
 EXPECTED_TIER = "staging"
 
 SUBMISSION = "submission.py"
+
+# Ruff-clean on purpose (double quotes, trailing newline). Hooks are off for the student's
+# push, so nothing lints this any more - but the file lands in a repo the maintainer may
+# well clone next, and a submission that trips their formatter on arrival is noise the
+# harness does not need to generate.
+SUBMISSION_BODY = 'print("e2e submission")\n'
 
 # What the harness types into the grading sheet. The note is a SENTINEL: it is the one
 # field a student must never see, so it is written on purpose and then looked for in every
@@ -123,12 +130,56 @@ def _declared_tier() -> str:
     return central.resolve_central_ref(declared, source=f"{COURSE_ORG}/.github")
 
 
+CANNOT_DELETE = (
+    "the token cannot delete repos - cleanup would leave the run's repos behind; "
+    "use a classic PAT with delete_repo"
+)
+
+# What deletion needs, in classic-PAT vocabulary. `repo` on its own reads and writes but
+# cannot remove; `delete_repo` on its own cannot see what to remove.
+DELETE_SCOPES = frozenset({"repo", "delete_repo"})
+
+
+def oauth_scopes(response: str) -> frozenset[str] | None:
+    """The classic-PAT scopes out of a `gh api -i` response, or None if it carries no
+    `X-OAuth-Scopes` header at all - which is how a FINE-GRAINED token answers, and means
+    the question has to be asked a different way rather than answered `no`."""
+    for line in response.splitlines():
+        name, sep, value = line.partition(":")
+        if sep and name.strip().lower() == "x-oauth-scopes":
+            return frozenset(s.strip() for s in value.split(",") if s.strip())
+    return None
+
+
+def _assert_can_delete_repos() -> None:
+    """Refuse to create anything with a token that could not take it away again.
+
+    This is the 403 that ends a run with its repos still in the org: `gh api --method
+    DELETE` needs `delete_repo`, which is not in the scope set a `gh auth login` hands
+    out, and nothing before the teardown asks for it."""
+    code, response = ghcli.gh("api", "-i", "user")
+    assert code == 0, f"cannot read the token's own scopes: {response[:200]}"
+    scopes = oauth_scopes(response)
+    if scopes is None:
+        # A fine-grained PAT sends no scope header; what carries deletion there is the
+        # Administration permission, and the only way to read that is to ask about a repo.
+        code, admin = ghcli.gh(
+            "api", f"repos/{COURSE_ORG}/.github", "-q", ".permissions.admin"
+        )
+        assert code == 0 and admin.strip() == "true", CANNOT_DELETE
+        log(f"  no X-OAuth-Scopes - taking admin on {COURSE_ORG}/.github as the answer")
+        return
+    missing = sorted(DELETE_SCOPES - scopes)
+    assert not missing, f"{CANNOT_DELETE} (missing {', '.join(missing)})"
+
+
 def _preflight(run_id: str) -> None:
     """Refuse to start against an estate that would make the result meaningless.
 
-    Each of these has been a wasted run: an org still on `release` tests last month's
-    code; a staging branch that is not this checkout tests somebody else's; a workflow
-    file in the org that is not the one this tip renders means the buttons this run
+    Each of these has been a wasted run: a token without `delete_repo` ends with the whole
+    run still sitting in the org; an org still on `release` tests last month's code; a
+    staging branch that is not this checkout tests somebody else's; a workflow file in
+    the org that is not the one this tip renders means the buttons this run
     presses are not the buttons under review; a missing roster row hands out to nobody;
     and a namespace that is not empty means a previous run is still lying around and its
     repos would be read as this one's.
@@ -136,6 +187,10 @@ def _preflight(run_id: str) -> None:
     allowlist.assert_fence()
     for org in (COURSE_ORG, COHORT_ORG):
         allowlist.assert_allowed(org)
+
+    # Before anything is created, not after: a token that cannot delete leaves every repo
+    # this run makes behind it.
+    _assert_can_delete_repos()
 
     tier = _declared_tier()
     assert tier == EXPECTED_TIER, f"{COURSE_ORG} runs {tier}, not {EXPECTED_TIER}"
@@ -397,7 +452,7 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
             f"{COHORT_ORG}/{repo}",
             Path(tmp) / "clone",
             SUBMISSION,
-            "print('e2e submission')\n",
+            SUBMISSION_BODY,
             "e2e: submit",
         )
     stages["submission"] = Stage("submission", detail={"repo": repo, "sha": sha})
