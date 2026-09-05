@@ -53,8 +53,10 @@ teams:
 | final grade | derived on output, never stored | yes |
 
 The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 0. A
-non-numeric score (`pass`, `A-`) is passed through verbatim with no arithmetic; the dry run
-counts those as "needs a hand decision". The question names, the `# /N` maxima and the whole
+non-numeric score (`pass`, `A-`) is passed through verbatim with no arithmetic - unless a
+late penalty applies to it, which no arithmetic can do: that mark is **held**. Nothing is
+posted, written or emailed for it, the dry run and the run both count it (`held`), and it
+goes out as soon as you put a number (or waive the penalty with `adjustment_individual`). The question names, the `# /N` maxima and the whole
 header come from `grading_config.yml` and `schedule.yml` and are re-emitted on every write - so
 edit them **there**, never in the sheet.
 

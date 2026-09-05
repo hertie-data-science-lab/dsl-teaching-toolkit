@@ -2125,6 +2125,31 @@ def _issue_targets(
     return out
 
 
+def _hold_undecided(books: dict[str, dict[str, dict]]) -> dict[str, dict[str, str]]:
+    """Take every mark that still needs a person out of the books, and say whose it was.
+
+    `pass`, two days late, is not `pass minus 20%`. Sending it puts a line a student can
+    read - "penalty -20% · Final grade: pass" - where a decision should have been, and the
+    dry run that counted it has already gone by. So the mark is HELD: no comment, no
+    gradebook entry, no column in the registrar's export, until a grader settles it in the
+    sheet. Nothing else that student has is held with it.
+
+    Returns `{slug: {handle: the submission unit the mark belongs to}}` - the unit, because
+    a group's comment is built from the team block rather than from any member's view, so
+    it has to be skipped by name.
+    """
+    held: dict[str, dict[str, str]] = {}
+    for handle, book in books.items():
+        for slug in [s for s, view in book.items() if needs_hand_decision(view)]:
+            held.setdefault(slug, {})[handle] = book[slug].get("team") or handle
+            del book[slug]
+    # A student whose ONLY mark was held has nothing to be sent: leaving the empty book in
+    # would commit a gradebook page with nothing new on it and email them about it.
+    for handle in [h for h, book in books.items() if not book]:
+        del books[handle]
+    return held
+
+
 def _gradebook_files(
     handle: str, book: dict[str, dict], titles, timed
 ) -> dict[str, bytes]:
@@ -2192,16 +2217,35 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
         distributed, migrating = _read_distributed(wd)
         retired = _retired_gradebook_files(wd) if migrating else []
 
+    held = _hold_undecided(books)
     log_step(f"Distributing {len(books)} gradebook(s) in {cohort_org}")
     record: Distributed = dict(distributed)
-    counts = {"comments": 0, "gradebooks": 0, "emails": 0, "skipped": 0, "failed": 0}
+    counts = {
+        "comments": 0,
+        "gradebooks": 0,
+        "emails": 0,
+        "held": sum(len(whose) for whose in held.values()),
+        "skipped": 0,
+        "failed": 0,
+    }
+    for slug in sorted(held):
+        for handle in sorted(held[slug]):
+            log_person(
+                f"  [hold] {slug} for {handle} - a score no penalty can be applied to; "
+                f"nothing is sent until it is settled in the sheet"
+            )
 
     # 1. The feedback comment on each submission repo's Feedback issue. Sheet-backed
     #    assignments only: a legacy CSV has no submission-unit structure to post against,
     #    and its marks reach the student through the gradebook instead.
     for slug in sorted(sheets):
         spec = specs[slug]
+        withheld = set(held.get(slug, {}).values())
         for target, repo, body, members in _issue_targets(spec, sheets[slug], books):
+            if target in withheld:
+                # A team's comment is built from the team block, not from a member's view,
+                # so pulling the views is not enough to keep this one back.
+                continue
             digest = content_hash(body)
             if record.get((target, slug, CHANNEL_ISSUE), ("",))[0] == digest:
                 continue  # already said, in these words
@@ -2265,7 +2309,7 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
     ]
 
     if dry_run:
-        _preview(cohort_org, sheets, specs, books, counts, pending, notify)
+        _preview(cohort_org, sheets, specs, books, counts, pending, notify, held)
         return 1 if provisioning_failed else 0
 
     failed_mail, told = (
@@ -2326,6 +2370,7 @@ def _preview(
     counts: dict[str, int],
     pending: list[str],
     notify: bool,
+    held: dict[str, dict[str, str]],
 ) -> None:
     """The dry run's report: what a real run would do, in counts a grader can check.
 
@@ -2337,15 +2382,16 @@ def _preview(
         views = [book[slug] for book in books.values() if slug in book]
         # Only rows that have been MARKED are counted as grades: an unmarked one is
         # neither a grade this run would derive nor a decision anybody has to take, and
-        # counting it as either told a grader the sheet was further on than it is.
+        # counting it as either told a grader the sheet was further on than it is. The
+        # held ones are no longer in the books - they are added back to the head count
+        # here, because they are still students on this assignment.
         marked = [v for v in views if "final_grade" in v]
-        derived = sum(1 for v in marked if not needs_hand_decision(v))
-        hand = sum(1 for v in marked if needs_hand_decision(v))
+        hand = len(held.get(slug, {}))
         team_clause = f" in {len(units)} team(s)" if spec.is_group else ""
         log(
-            f"  {slug}: {len(views)} student(s){team_clause} · {derived} final grade(s) "
-            f"derived, {_adjusted_count(spec, sheets[slug])} adjusted, {hand} need a "
-            f"hand decision"
+            f"  {slug}: {len(views) + hand} student(s){team_clause} · {len(marked)} "
+            f"final grade(s) derived, {_adjusted_count(spec, sheets[slug])} adjusted, "
+            f"{hand} held for a hand decision"
         )
         log(f"  {COHORT_CSV_NAME}: would gain column {slug}")
     log(

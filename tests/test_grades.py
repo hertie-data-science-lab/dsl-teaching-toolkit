@@ -358,6 +358,14 @@ teams:
 _GRADING_YML = (
     "title: Neural networks\nlate_window_days: 7\nlate_penalty_per_day: 10%\n"
 )
+# `pass`, two days late: a score no penalty can be applied to, under one that would have
+# applied to a number.
+_HELD_SHEET = _SHEET.replace("score_individual: 43", "score_individual: pass").replace(
+    "days_late: 0", "days_late: 2"
+)
+_HELD_TEAM_SHEET = _TEAM_SHEET.replace("score_group: 43", "score_group: pass").replace(
+    "days_late: 0", "days_late: 2"
+)
 _LEGACY_CSV = (
     "github_handle,team,autograde_score,manual_score,team_score,"
     "individual_adjustment,final_grade,individual_comments,team_comments\n"
@@ -525,6 +533,61 @@ def test_nothing_a_student_may_not_see_reaches_them(tmp_path, monkeypatch):
     assert "privately noted" not in files["README.md"]
 
 
+def test_a_score_no_penalty_fits_is_held_rather_than_sent(
+    tmp_path, monkeypatch, capsys
+):
+    # "penalty -20% · Final grade: pass" is not a grade, it is a contradiction a student
+    # would read before anyone noticed. Nothing goes out for it until a person settles it.
+    out = _distribute(monkeypatch, tmp_path, sheets={"assignment-1": _HELD_SHEET})
+    assert out["rc"] == 0
+    assert out["comments"] == []
+    assert out["gradebooks"] == []
+    assert out["outbox"] == []
+    printed = capsys.readouterr().out
+    assert '"held": 1' in printed
+    assert "ada-l" not in printed  # the public log counts, it never names
+
+
+def test_a_held_team_score_holds_the_teams_comment_too(tmp_path, monkeypatch):
+    # A team's comment is built from the team block rather than from a member's view, so
+    # taking the views out of the books is not on its own enough to keep it back.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _HELD_TEAM_SHEET},
+        grading=_GRADING_YML + "type: group\n",
+    )
+    assert out["rc"] == 0
+    assert out["comments"] == []
+    assert out["gradebooks"] == []
+
+
+def test_holding_one_mark_leaves_the_students_other_marks_alone(tmp_path, monkeypatch):
+    # The hold is per assignment: everything else a grader has settled still goes out.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _SHEET, "assignment-2": _HELD_SHEET},
+    )
+    assert out["rc"] == 0
+    assert [repo for repo, _body, _marker in out["comments"]] == ["assignment-1-ada-l"]
+    ((_repo, files, _delete),) = out["gradebooks"]
+    assert "assignment-1" in files["grades.yml"]
+    assert "assignment-2" not in files["grades.yml"]
+
+
+def test_the_dry_run_counts_what_it_would_hold(tmp_path, monkeypatch, capsys):
+    _distribute(
+        monkeypatch, tmp_path, sheets={"assignment-1": _HELD_SHEET}, dry_run=True
+    )
+    printed = capsys.readouterr().out
+    assert "assignment-1: 1 student(s) · 0 final grade(s) derived" in printed
+    assert "1 held for a hand decision" in printed
+    assert (
+        "would post 0 comment(s), update 0 gradebook(s), email 0 student(s)" in printed
+    )
+
+
 def test_a_dry_run_writes_nothing_posts_nothing_and_sends_nothing(
     tmp_path, monkeypatch, capsys
 ):
@@ -539,7 +602,7 @@ def test_a_dry_run_writes_nothing_posts_nothing_and_sends_nothing(
     assert out["outbox"] == []
     printed = capsys.readouterr().out
     assert "assignment-1: 1 student(s) · 1 final grade(s) derived" in printed
-    assert "0 need a hand decision" in printed
+    assert "0 held for a hand decision" in printed
     assert f"{grades.COHORT_CSV_NAME}: would gain column assignment-1" in printed
     assert (
         "would post 1 comment(s), update 1 gradebook(s), email 1 student(s)" in printed
