@@ -440,14 +440,22 @@ def provision_one(
     # HEAD and the autograder has run off that snapshot - so a commit here would reach no
     # gradebook and form no part of the record. Faculty need to SEE the work, not edit it.
     if not existed:
-        grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
+        grant_faculty(
+            cohort_org,
+            repo,
+            FACULTY_READ_ACCESS,
+            missing_is_note=True,
+            person=True,
+        )
     if team is not None:
         # Group: materialise the team from its members and grant it on the repo, so
         # post-sync membership edits propagate to access (vs. one-off collaborator grants).
         # A team that couldn't take all its members grants access to nobody missing, so
         # its result counts towards this repo's status rather than being discarded.
         team_ok = sync_teams.ensure_team(cohort_org, team, set(handles), prune=False)
-        access_ok = grant_team_repo_access(cohort_org, team, repo, "maintain")
+        access_ok = grant_team_repo_access(
+            cohort_org, team, repo, "maintain", person=True
+        )
         if access_ok:
             log_person(f"  [ok]   + team {team} (maintain)")
         if not team_ok:

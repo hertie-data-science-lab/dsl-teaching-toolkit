@@ -2175,7 +2175,13 @@ def provision_one(
         # Read, not write: `distribute` rewrites grades.yml from the grading sheet, so a
         # mark corrected here would be overwritten on the next run. The sheet is where a
         # mark belongs.
-        grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
+        grant_faculty(
+            cohort_org,
+            repo,
+            FACULTY_READ_ACCESS,
+            missing_is_note=True,
+            person=True,
+        )
     if add_collaborator(cohort_org, repo, handle, permission="pull", person=True):
         log_person(f"  [ok]   + @{handle} (read)")
         return "skipped" if existed else "ok"
