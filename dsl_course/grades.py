@@ -2343,6 +2343,28 @@ def sheet_specs(course_org: str, sched) -> dict[str, SheetSpec]:
     return specs
 
 
+def _part_marked_count(spec: SheetSpec, sheet: dict) -> int:
+    """How many units have SOME question marked and some not.
+
+    A partly filled map totals to what has been typed so far, and a real run sends that
+    total: which is right (a grader who wants to release Q1 early may) and is also exactly
+    how half a mark reaches a student unnoticed. So the dry run says how many there are,
+    and the decision stays the grader's."""
+    if not spec.questions:
+        return 0
+    total = 0
+    for block in ((sheet or {}).get(spec.container_key) or {}).values():
+        if not isinstance(block, dict):
+            continue
+        score = block.get(spec.score_key)
+        if not isinstance(score, dict):
+            continue
+        filled = [k for k in spec.questions if not _blank(score.get(k))]
+        if filled and len(filled) < len(spec.questions):
+            total += 1
+    return total
+
+
 def _adjusted_count(spec: SheetSpec, sheet: dict) -> int:
     """How many individual adjustments a grader has written into one sheet - the dry run
     reports it, because an adjustment is the one thing in the file no arithmetic explains."""
@@ -2460,7 +2482,12 @@ def _commit_record(
     return False
 
 
-def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> int:
+def distribute(
+    cohort_org: str,
+    notify: bool = True,
+    dry_run: bool = False,
+    assignment: str = "",
+) -> int:
     """Send every mark a grader has written where it has to go: a feedback comment on each
     submission repo's Feedback issue, each student's private gradebook, the registrar's
     export, and an email saying there is something new to read.
@@ -2469,6 +2496,12 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
     and `distributed.csv` are all read locally, so the only per-student calls left are the
     writes. Every one of those is skipped when `distributed.csv` says the same content has
     already gone out, which is what makes a correction to one grade reach one student.
+
+    `assignment` narrows the run to one slug. Empty - the default - is every sheet in the
+    repo, which is right at the end of term and wrong in the middle of it: a1's marks are
+    ready while a2 is half typed in, and the whole-repo run shipped both. Narrowing is not
+    a safety net for a half-marked sheet (a partial per-question map still totals, which is
+    the grader's call to make) - it is what lets them make it one assignment at a time.
 
     Dry run - the default - reads everything, writes nothing, posts nothing, sends nothing,
     and prints the counts a grader checks before pressing it for real."""
@@ -2497,6 +2530,19 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
                 f"out an assignment (which creates its grading sheet) first"
             )
             return 1
+        if assignment:
+            # Narrowed AFTER the read, not during it: `load_sheets` is what refuses to
+            # distribute anything while one sheet is mid-edit, and that guard is about the
+            # repo, not about the slug somebody typed.
+            wanted = {assignment}
+            if not (wanted & (set(sheets) | set(legacy))):
+                log_err(
+                    f"no grading sheet or grade CSV for `{assignment}` in {cohort_org} - "
+                    f"nothing distributed"
+                )
+                return 1
+            sheets = {s: v for s, v in sheets.items() if s in wanted}
+            legacy = {s: v for s, v in legacy.items() if s in wanted}
         specs = sheet_specs(course_org, sched)
         sources: dict[str, tuple[SheetSpec, dict] | list[GradeRow]] = {}
         for slug, sheet in sheets.items():
@@ -2727,6 +2773,9 @@ def _preview(
         tally = Counter(reason for _unit, reason in held.get(slug, {}).values())
         for reason, count in sorted(tally.items()):
             log(f"    {count} with {HOLD_REASONS[reason]}")
+        part = _part_marked_count(spec, sheets[slug])
+        if part:
+            log(f"    {part} unit(s) have unmarked questions")
         log(f"  {COHORT_CSV_NAME}: would gain column {slug}")
     log(
         f"  would post {counts['comments']} comment(s), update "
@@ -2874,6 +2923,11 @@ def main() -> int:
             p.add_argument("--dry-run", action="store_true")
         if name == "distribute":
             p.add_argument(
+                "--assignment",
+                default="",
+                help="One assignment slug; default is every sheet in the cohort.",
+            )
+            p.add_argument(
                 "--no-notify",
                 action="store_true",
                 help="Skip the email notification (just push the grades).",
@@ -2895,7 +2949,10 @@ def main() -> int:
         if args.action == "sync":
             return sync(args.cohort_org, dry_run=args.dry_run)
         return distribute(
-            args.cohort_org, notify=not args.no_notify, dry_run=args.dry_run
+            args.cohort_org,
+            notify=not args.no_notify,
+            dry_run=args.dry_run,
+            assignment=args.assignment,
         )
     except RuntimeError as exc:
         log_err(str(exc))

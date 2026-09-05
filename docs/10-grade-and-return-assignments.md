@@ -78,7 +78,9 @@ there is no commit to time.
 5. **The cutoff** (`grading_datetime`, else the due date plus the late window) freezes the
    pin and the sheet. Its header then reads `FROZEN`.
 6. **Distribute grades** (button), `dry_run` first. The dry run reads everything, writes
-   nothing, and prints the counts.
+   nothing, and prints the counts - including how many marks are **held** for a hand
+   decision and how many units still have unmarked questions. Set `assignment` to one slug
+   to send just that one; blank sends every sheet in the cohort.
 
 ## What Distribute sends
 

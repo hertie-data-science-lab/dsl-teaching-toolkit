@@ -494,6 +494,7 @@ def _distribute(
     issue: int | None = 7,
     put_files_ok: bool = True,
     course_name=lambda org: "",
+    assignment: str = "",
 ) -> dict:
     """`distribute` over a local classroom-config clone, writing to nothing.
 
@@ -580,7 +581,9 @@ def _distribute(
             [m[0] for m in msgs[:sent]],
         )[1],
     )
-    effects["rc"] = grades.distribute("COHORT", notify=notify, dry_run=dry_run)
+    effects["rc"] = grades.distribute(
+        "COHORT", notify=notify, dry_run=dry_run, assignment=assignment
+    )
     return effects
 
 
@@ -702,6 +705,60 @@ def test_a_handle_in_two_teams_is_held_rather_than_taking_the_last_one(
         grading=_GRADING_YML + "type: group\n",
     )
     assert out["gradebooks"] == []
+
+
+def test_distribute_can_be_narrowed_to_one_assignment(tmp_path, monkeypatch):
+    # a1's marks are ready while a2 is half typed in; the whole-repo run shipped both.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _SHEET, "assignment-2": _SHEET},
+        assignment="assignment-1",
+    )
+    assert out["rc"] == 0
+    assert [repo for repo, _b, _m in out["comments"]] == ["assignment-1-ada-l"]
+    ((_repo, files, _delete),) = out["gradebooks"]
+    assert "assignment-1" in files["grades.yml"]
+    assert "assignment-2" not in files["grades.yml"]
+
+
+def test_a_slug_no_sheet_matches_distributes_nothing(tmp_path, monkeypatch, capsys):
+    out = _distribute(monkeypatch, tmp_path, assignment="assignment-9")
+    assert out["rc"] == 1
+    assert (out["comments"], out["gradebooks"], out["config"]) == ([], [], [])
+    assert "no grading sheet or grade CSV for `assignment-9`" in capsys.readouterr().err
+
+
+def test_the_dry_run_counts_units_with_questions_still_unmarked(
+    tmp_path, monkeypatch, capsys
+):
+    # A partly filled map totals to what has been typed, and a real run sends it - which is
+    # the grader's call to make, so the count is what they are given to make it with.
+    sheet = _SHEET.replace(
+        "score_individual: 43", "score_individual:\n      Q1: 15\n      Q2:"
+    )
+    grading = _GRADING_YML + "questions:\n  Q1: 15\n  Q2: 10\n"
+    _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet},
+        grading=grading,
+        dry_run=True,
+    )
+    assert "1 unit(s) have unmarked questions" in capsys.readouterr().out
+
+
+def test_a_half_marked_map_is_still_sent_on_a_real_run(tmp_path, monkeypatch):
+    # Not held: a grader releasing Q1 early is a decision, not a typo.
+    sheet = _SHEET.replace(
+        "score_individual: 43", "score_individual:\n      Q1: 15\n      Q2:"
+    )
+    grading = _GRADING_YML + "questions:\n  Q1: 15\n  Q2: 10\n"
+    out = _distribute(
+        monkeypatch, tmp_path, sheets={"assignment-1": sheet}, grading=grading
+    )
+    ((_repo, body, _marker),) = out["comments"]
+    assert "15" in body
 
 
 def test_the_dry_run_says_what_each_hold_is(tmp_path, monkeypatch, capsys):
