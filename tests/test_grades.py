@@ -1087,6 +1087,26 @@ def test_the_migration_off_notified_csv_happens_in_one_commit(tmp_path, monkeypa
     assert "ada-l,,email,anoldsha," in files[grades.DISTRIBUTED_PATH]
 
 
+def test_the_dead_per_student_yaml_goes_whether_or_not_this_is_the_migration(
+    tmp_path, monkeypatch
+):
+    # A cohort that reached `distributed.csv` without ever having had a `notified.csv` was
+    # never on the migration path, so its `gradebook/*.yml` was left in place for the rest
+    # of the term - a stale copy of a grade beside the repo that holds the real one.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        stale_gradebooks=("ada-l.yml", "bo-b.yml"),
+    )
+    ((_cfg, files, delete),) = out["config"]
+    assert set(delete) == {
+        f"{grades.GRADEBOOK_DIR}/ada-l.yml",
+        f"{grades.GRADEBOOK_DIR}/bo-b.yml",
+    }
+    # `distributed.csv` lives in the same folder and is the one file still read there.
+    assert grades.DISTRIBUTED_PATH in files
+
+
 def test_a_cohort_still_on_the_grade_csvs_gets_gradebooks_but_no_comments(
     tmp_path, monkeypatch
 ):

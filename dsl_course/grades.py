@@ -2329,7 +2329,13 @@ def _read_distributed(wd: Path) -> tuple[Distributed, bool]:
 
 def _retired_gradebook_files(wd: Path) -> list[str]:
     """The per-student YAML the retired `render` staged for its preview PR. The gradebook
-    repos hold the real thing now, and a stale copy of a grade is worse than none."""
+    repos hold the real thing now, and a stale copy of a grade is worse than none.
+
+    Asked on EVERY run, not only on the `notified.csv` migration: a cohort that reached
+    `distributed.csv` without ever having had a notified.csv - which is every cohort
+    bootstrapped since - was never on the migration path, so its `gradebook/*.yml` sat
+    there for the rest of the term. They are dead either way, and the only file in that
+    folder anything still reads is `distributed.csv`, which is not a `.yml`."""
     folder = wd / GRADEBOOK_DIR
     if not folder.is_dir():
         return []
@@ -2606,7 +2612,7 @@ def distribute(
         timed = frozenset(sheets)
         books, unknown = _on_the_roster(build_gradebooks(sources), students)
         distributed, migrating = _read_distributed(wd)
-        retired = _retired_gradebook_files(wd) if migrating else []
+        retired = _retired_gradebook_files(wd)
 
     held = _hold_undecided(
         books,
@@ -2763,7 +2769,7 @@ def distribute(
         writes,
         f"grades: distribute ({counts['comments']} comment(s), "
         f"{counts['gradebooks']} gradebook(s), {counts['emails']} email(s))",
-        [NOTIFIED_PATH, *retired] if migrating else [],
+        [*([NOTIFIED_PATH] if migrating else []), *retired],
     )
     if not recorded:
         log_err(
