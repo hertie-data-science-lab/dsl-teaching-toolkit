@@ -2414,14 +2414,47 @@ def test_an_explicit_grading_datetime_wins_over_the_late_window(monkeypatch):
     "submitted,expected",
     [
         ("2026-10-04T21:59:00Z", 0),  # 23:59 Berlin - exactly on time
-        ("2026-10-04T22:00:00Z", 1),  # one minute over: a day STARTED
+        ("2026-10-04T22:00:00Z", 1),  # 00:00 Berlin: the next date has STARTED
         ("2026-10-06T07:30:00Z", 2),
     ],
 )
 def test_days_late_counts_days_started_not_days_elapsed(submitted, expected):
     # "10% per day" in the Hertie wording means per day STARTED; rounding the other way
     # would make the penalty a function of the hour a student happened to push at.
-    assert collect.days_late(collect._parse_iso(submitted), DUE) == expected
+    assert (
+        collect.days_late(collect._parse_iso(submitted), DUE, "Europe/Berlin")
+        == expected
+    )
+
+
+def test_days_late_counts_calendar_days_across_the_clock_change():
+    # The clocks go back on 25 October 2026, so the day after a 24 October deadline is 25
+    # hours long. Counted in 86400-second blocks, a push at 23:59 the next evening was TWO
+    # days late: a 10% deduction the student could not have avoided and nobody could
+    # explain. A calendar day is a calendar day.
+    due = datetime(2026, 10, 24, 23, 59, tzinfo=BERLIN)
+    # 23:59 Berlin the following evening, as the API reports it: +01:00 by then.
+    next_evening = collect._parse_iso("2026-10-25T22:59:00Z")
+    assert (next_evening - due).total_seconds() == 25 * 3600
+    assert collect.days_late(next_evening, due, "Europe/Berlin") == 1
+
+
+def test_days_late_counts_in_the_cohorts_own_zone():
+    # 00:30 in Berlin is still the 4th in London: whose midnight counts is the cohort's.
+    due = datetime(2026, 10, 4, 23, 59, tzinfo=BERLIN)
+    just_after = collect._parse_iso("2026-10-04T22:30:00Z")
+    assert collect.days_late(just_after, due, "Europe/Berlin") == 1
+    assert collect.days_late(just_after, due, "Europe/London") == 0
+
+
+def test_days_late_is_measured_from_the_minute_the_receipt_shows():
+    # The receipt says `pushed ... 23:59`; charging a day for the seconds it does not show
+    # is the same receipt disagreeing with itself.
+    boundary = collect._parse_iso("2026-10-04T21:59:01Z")  # 23:59:01 Berlin
+    assert collect.submitted_display("2026-10-04T21:59:01Z", "Europe/Berlin").endswith(
+        "23:59+02:00"
+    )
+    assert collect.days_late(boundary, DUE, "Europe/Berlin") == 0
 
 
 def test_the_submitted_stamp_is_minutes_in_the_cohorts_own_clock():

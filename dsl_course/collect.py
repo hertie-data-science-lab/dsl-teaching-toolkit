@@ -777,12 +777,25 @@ def submitted_display(submitted_at: str, tz: str | None) -> str:
     return at.astimezone(schedule._tz(tz)).isoformat(timespec="minutes")
 
 
-def days_late(submitted: datetime, due: datetime) -> int:
-    """Whole days started past the due date, floored at 0. A minute late is one day late -
-    the Hertie wording is "per day started", and rounding the other way would make the
-    penalty a function of the hour a student pushed at."""
-    seconds = (submitted - due).total_seconds()
-    return int(-(-seconds // 86400)) if seconds > 0 else 0
+def days_late(submitted: datetime, due: datetime, tz: str | None = None) -> int:
+    """Whole days late, counted in the COHORT's own calendar and floored at 0.
+
+    A day starts at local midnight, not 86400 seconds after the last one. The night the
+    clocks go back is 25 hours long, so counting fixed blocks made a push at 23:59 the day
+    after a late-October deadline read as TWO days late - a 10% deduction nobody could
+    explain and the student could not have avoided. Days STARTED is the Hertie wording, and
+    a day starts when the date does: the first local midnight past the deadline is day one.
+
+    Measured from the MINUTE-truncated submission time, which is the value the receipt and
+    the sheet both show. Without that, a push at 23:59:01 against a 23:59 deadline was
+    displayed as `pushed 23:59` and charged a day - the two lines of the same receipt
+    disagreeing with each other."""
+    zone = schedule._tz(tz)
+    local = submitted.astimezone(zone).replace(second=0, microsecond=0)
+    deadline = due.astimezone(zone)
+    if local <= deadline:
+        return 0
+    return (local.date() - deadline.date()).days
 
 
 CONTRIBUTIONS_UNFILLED = "(not filled in)"
@@ -835,7 +848,7 @@ def _sheet_info(
         when = _parse_iso(submitted_at) if (sha and submitted_at) else None
         if when is not None:
             info["submitted"] = submitted_display(submitted_at, tz)
-            info["days_late"] = days_late(when, due) if due is not None else None
+            info["days_late"] = days_late(when, due, tz) if due is not None else None
         if is_group:
             info["contributions"] = _contributions(cohort_org, repo, sha)
         out[unit] = info
@@ -961,7 +974,7 @@ def _post_receipts(
             event,
             sha=sha,
             pushed_display=grades._display_long(when),
-            days=days_late(when, due) if (when is not None and due) else 0,
+            days=days_late(when, due, tz) if (when is not None and due) else 0,
         )
         issue = grades.ensure_feedback_issue(
             cohort_org, repo, grades.feedback_body(spec, unit, members), dry_run
