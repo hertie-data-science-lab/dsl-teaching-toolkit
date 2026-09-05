@@ -4,6 +4,8 @@ six hours."""
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from dsl_course import ghcli
@@ -187,6 +189,87 @@ def test_reads_are_never_paced(monkeypatch):
 )
 def test_which_argv_shapes_count_as_a_write(args, mutating):
     assert ghcli._is_mutating(args) is mutating
+
+
+# ------------------------------------ a transient GitHub fault on a READ rides the ladder
+
+
+class _Canned:
+    """One canned `subprocess.run` result."""
+
+    def __init__(self, returncode=0, stdout="", stderr=""):
+        self.returncode, self.stdout, self.stderr = returncode, stdout, stderr
+
+
+def _canned_gh(monkeypatch, *results: _Canned) -> list[list[str]]:
+    """Serve `results` to successive `gh` calls (the last one repeats), with the ladder's
+    backoff spent instantly. Returns the argv of every call made."""
+    import subprocess
+
+    calls: list[list[str]] = []
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        return results[min(len(calls) - 1, len(results) - 1)]
+
+    monkeypatch.setattr(subprocess, "run", run)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
+    return calls
+
+
+def test_a_read_that_hits_a_500_is_retried(monkeypatch, capsys):
+    # Three real `Scheduled release` runs died on one contents-API 500. The tick fires 96
+    # times a day, and a red one files a public "is failing" issue and mails course-admin -
+    # so a fault GitHub fixes by itself a second later must not end the run.
+    calls = _canned_gh(
+        monkeypatch,
+        _Canned(1, "", "gh: Internal Server Error (HTTP 500)"),
+        _Canned(0, "{}", ""),
+    )
+    assert ghcli.gh("api", "repos/O/R/contents/f") == (0, "{}")
+    assert len(calls) == 2
+    assert "[wait] transient http 500, retry 1/3" in capsys.readouterr().out
+
+
+def test_a_read_truncated_mid_json_is_retried(monkeypatch):
+    # The other shape the failed runs took: the response body simply ended early.
+    calls = _canned_gh(
+        monkeypatch,
+        _Canned(1, "", "unexpected end of JSON input"),
+        _Canned(0, "[]", ""),
+    )
+    assert ghcli.gh_json("api", "repos/O/R/contents/f") == []
+    assert len(calls) == 2
+
+
+def test_a_write_that_hits_a_500_is_never_retried(monkeypatch):
+    # A POST that came back 5xx may still have APPLIED; repeating it would apply it twice.
+    # Straight to the ladder, so the write governor's shared window stays untouched.
+    calls = _canned_gh(
+        monkeypatch, _Canned(1, "", "gh: Internal Server Error (HTTP 500)")
+    )
+    code, _, err = ghcli._run_gh(("api", "--method", "POST", "orgs/O/repos"), None, 3)
+    assert code == 1 and "HTTP 500" in err
+    assert len(calls) == 1
+
+
+def test_a_rate_limit_is_still_retried(monkeypatch, capsys):
+    # The ladder's original reason, and its wording, unchanged by the transient markers.
+    calls = _canned_gh(
+        monkeypatch,
+        _Canned(1, "", "You have exceeded a secondary rate limit"),
+        _Canned(0, "ok", ""),
+    )
+    assert ghcli.gh("api", "repos/O/R") == (0, "ok")
+    assert len(calls) == 2
+    assert "[wait] rate-limited, retry 1/3" in capsys.readouterr().out
+
+
+def test_an_ordinary_failure_is_not_retried(monkeypatch):
+    # The markers must stay narrow: a 404 or a 403 is the answer, not a fault to sit out.
+    calls = _canned_gh(monkeypatch, _Canned(1, "", "gh: Not Found (HTTP 404)"))
+    assert ghcli.gh("api", "repos/O/R")[0] == 1
+    assert len(calls) == 1
 
 
 def test_clone_carries_a_branch_when_one_is_asked_for(monkeypatch):

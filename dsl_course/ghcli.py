@@ -1,5 +1,6 @@
 """The two subprocess wrappers everything GitHub-facing runs through - `gh` and `git` -
-with their timeouts, the rate-limit retry ladder, and the shared 404 test.
+with their timeouts, the retry ladder (rate limits, and a transient GitHub fault on a
+read), and the shared 404 test.
 """
 
 from __future__ import annotations
@@ -21,6 +22,19 @@ RATE_LIMIT_MARKERS = (
     "abuse detection",
 )
 
+# A GitHub-side fault on ONE call, in gh's own words: the 5xx family (`gh: Internal Server
+# Error (HTTP 500)`, `HTTP 502: Bad Gateway`) and the body that ended mid-JSON. The same
+# call a moment later almost always succeeds - so without this a single bad read reddens a
+# tick, files a public "is failing" issue and mails course-admin. The scheduler ticks 96
+# times a day, which is far too often for that to stay noise anyone reads.
+TRANSIENT_MARKERS = (
+    "http 500",
+    "http 502",
+    "http 503",
+    "http 504",
+    "unexpected end of json input",
+)
+
 # Per-call ceiling for a single `gh` subprocess. A hung TLS connection would otherwise
 # block the whole Actions job until GitHub's 6-hour limit; a timeout is treated as a
 # retryable failure within the retry ladder below.
@@ -36,8 +50,9 @@ def _run_gh(
     stdout on its own - gh writes advisories (a token nearing expiry, an update notice) to
     stderr, and a joined pair would feed them to the JSON parser.
 
-    Retries on GitHub secondary rate limits, and on a subprocess timeout, with exponential
-    backoff."""
+    Retries on GitHub secondary rate limits, on a subprocess timeout, and - for a
+    NON-mutating call only - on a transient GitHub fault (see TRANSIENT_MARKERS), with
+    exponential backoff."""
     delay = 30
     for attempt in range(retries + 1):
         try:
@@ -63,11 +78,19 @@ def _run_gh(
         if result.returncode == 0:
             return result.returncode, result.stdout, result.stderr
         lower = (result.stdout + result.stderr).lower()
-        is_rate_limited = any(m in lower for m in RATE_LIMIT_MARKERS)
-        if not is_rate_limited or attempt == retries:
+        why = None
+        if any(m in lower for m in RATE_LIMIT_MARKERS):
+            why = "rate-limited"
+        elif not _is_mutating(args):
+            # Only a READ repeats a 5xx: a mutating call that came back with one may still
+            # have applied the write, and repeating it would apply it twice.
+            marker = next((m for m in TRANSIENT_MARKERS if m in lower), None)
+            if marker:
+                why = f"transient {marker}"
+        if why is None or attempt == retries:
             return result.returncode, result.stdout, result.stderr
         print(
-            f"  [wait] rate-limited, retry {attempt + 1}/{retries} in {delay}s",
+            f"  [wait] {why}, retry {attempt + 1}/{retries} in {delay}s",
             flush=True,
         )
         time.sleep(delay)
@@ -118,9 +141,9 @@ def _pace_writes(args: tuple[str, ...]) -> None:
 def gh(*args: str, stdin: str | None = None, retries: int = 3) -> tuple[int, str]:
     """Run a gh CLI command. Returns (returncode, stdout+stderr).
 
-    Retries on GitHub secondary rate limits - and on a subprocess timeout - with
-    exponential backoff, and paces writes to stay under the secondary limit in the first
-    place (see _pace_writes).
+    Retries on GitHub secondary rate limits, on a subprocess timeout, and - for a read
+    only - on a transient GitHub fault, with exponential backoff; and paces writes to stay
+    under the secondary limit in the first place (see _pace_writes).
     """
     _pace_writes(args)
     code, out, err = _run_gh(args, stdin, retries)
