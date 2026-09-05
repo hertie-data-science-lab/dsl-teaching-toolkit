@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import schedule
+from dsl_course import ghcli, schedule
 from tests.e2e import allowlist, cleanup, drive, estate, schedule_edit
 
 GATE = 'pytest.skip("live e2e - set DSL_E2E=1", allow_module_level=True)'
@@ -375,6 +375,62 @@ def test_a_run_id_that_is_not_one_is_refused():
         with pytest.raises(ValueError, match="not a run id"):
             cleanup.slug(junk)
     assert cleanup.check_run_id(cleanup.new_run_id())
+
+
+def _one_repo_of_this_run(monkeypatch, answer: tuple[int, str]) -> None:
+    """One org holding exactly one of this run's repos, and a `gh` that answers `answer`
+    to the delete."""
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", f"{COURSE},{COHORT}")
+    monkeypatch.setenv("DSL_E2E_ORGS", COHORT)
+    monkeypatch.setattr(
+        cleanup.discovery, "list_org_repos", lambda org: [{"name": cleanup.slug(RUN)}]
+    )
+    monkeypatch.setattr(cleanup, "_clean_config", lambda *args: 0)
+    monkeypatch.setattr(ghcli, "gh", lambda *args, **kwargs: answer)
+
+
+FORBIDDEN = (1, "HTTP 403: Must have admin rights to Repository")
+
+
+def test_a_delete_that_403s_is_counted_undone_not_deleted(monkeypatch, capsys):
+    # The first live run read `[ok] 3 repo(s) deleted` while all three 403'd, because the
+    # count was of attempts. The two numbers must describe the same repos.
+    _one_repo_of_this_run(monkeypatch, FORBIDDEN)
+    left: list[str] = []
+    assert cleanup.cleanup(RUN, left=left) == 1
+    out, err = capsys.readouterr()
+    assert f"{COHORT}: 0 repo(s) deleted" in out
+    assert "left 1 thing(s) undone" in err
+    assert left == [f"{COHORT}/{cleanup.slug(RUN)}"]
+
+
+def test_a_delete_that_works_is_counted_deleted(monkeypatch, capsys):
+    _one_repo_of_this_run(monkeypatch, (0, ""))
+    left: list[str] = []
+    assert cleanup.cleanup(RUN, left=left) == 0
+    assert f"{COHORT}: 1 repo(s) deleted" in capsys.readouterr().out
+    assert left == []
+
+
+def test_what_is_left_behind_comes_with_the_command_to_delete_it(monkeypatch, capsys):
+    # The run is already over by the time anyone reads this; a re-run with the same token
+    # would 403 again, so the way out is the delete spelt out.
+    _one_repo_of_this_run(monkeypatch, FORBIDDEN)
+    assert cleanup.main(["--run-id", RUN]) == 1
+    assert "gh api --method DELETE repos/<org>/<repo>" in capsys.readouterr().out
+
+
+def test_the_repo_names_in_those_commands_are_verbose_only(monkeypatch, capsys):
+    # `<slug>-<handle>` names a student; the template is safe to print, the filled-in
+    # command is not.
+    filled = f"DELETE repos/{COHORT}/{cleanup.slug(RUN)}"
+    _one_repo_of_this_run(monkeypatch, FORBIDDEN)
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    cleanup.main(["--run-id", RUN])
+    assert filled not in capsys.readouterr().out
+    monkeypatch.setenv("DSL_VERBOSE", "1")
+    cleanup.main(["--run-id", RUN])
+    assert filled in capsys.readouterr().out
 
 
 def test_cleanup_refuses_without_the_transport_fence(monkeypatch):

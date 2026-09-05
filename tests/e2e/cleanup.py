@@ -93,18 +93,25 @@ def _delete_repo(org: str, name: str, dry_run: bool) -> bool:
     return True
 
 
-def _clean_repos(org: str, run_id: str, dry_run: bool) -> int:
-    """Delete this run's repos in one org. Returns the number of failures."""
+def _clean_repos(org: str, run_id: str, dry_run: bool, left: list[str]) -> int:
+    """Delete this run's repos in one org. Returns the number of failures, and appends
+    `<org>/<name>` for each repo still standing to `left`.
+
+    The number REPORTED is of deletes that happened, not of deletes attempted. On a token
+    without `delete_repo` the two differ completely: the first live run printed `[ok]
+    hertie-dsl-demo-f2026: 3 repo(s) deleted` above three 403s, and the reassuring line is
+    the one an operator reads."""
     names = sorted(row["name"] for row in discovery.list_org_repos(org))
     mine = [n for n in names if is_run_repo(n, run_id)]
-    failures = sum(not _delete_repo(org, n, dry_run) for n in mine)
-    log_ok(f"{org}: {len(mine)} repo(s) {'to delete' if dry_run else 'deleted'}")
+    gone = [n for n in mine if _delete_repo(org, n, dry_run)]
+    log_ok(f"{org}: {len(gone)} repo(s) {'to delete' if dry_run else 'deleted'}")
+    left.extend(f"{org}/{n}" for n in mine if n not in gone)
     for name in names:
         if is_drift(name, run_id):
             log_err(
                 f"{org}/{name} looks like e2e leavings from another run - LEFT ALONE"
             )
-    return failures
+    return len(mine) - len(gone)
 
 
 def _clean_config(org: str, run_id: str, dry_run: bool) -> int:
@@ -166,10 +173,17 @@ def restore_files(org: str, repo: str, before: dict[str, str | None]) -> int:
     return 0
 
 
-def cleanup(run_id: str, *, dry_run: bool = False) -> int:
-    """Undo run `run_id` across every org in scope. Returns a process exit code."""
+def cleanup(
+    run_id: str, *, dry_run: bool = False, left: list[str] | None = None
+) -> int:
+    """Undo run `run_id` across every org in scope. Returns a process exit code.
+
+    `left` collects `<org>/<repo>` for every repo that could not be deleted, so a caller
+    can say what to do about them; the count in the summary line and the length of this
+    list describe the same repos."""
     check_run_id(run_id)
     allowlist.assert_fence()
+    left = [] if left is None else left
     failures = 0
     log(
         f"cleanup {slug(run_id)}"
@@ -177,7 +191,7 @@ def cleanup(run_id: str, *, dry_run: bool = False) -> int:
     )
     for org in sorted(allowlist.orgs()):
         log_step(f"cleanup {slug(run_id)} in {org}")
-        failures += _clean_repos(org, run_id, dry_run)
+        failures += _clean_repos(org, run_id, dry_run, left)
         failures += _clean_config(org, run_id, dry_run)
     if failures:
         log_err(f"cleanup left {failures} thing(s) undone - re-run it")
@@ -195,11 +209,23 @@ def main(argv: list[str] | None = None) -> int:
         "--dry-run", action="store_true", help="list what would go; delete nothing"
     )
     args = parser.parse_args(argv)
+    left: list[str] = []
     try:
-        return cleanup(args.run_id, dry_run=args.dry_run)
+        code = cleanup(args.run_id, dry_run=args.dry_run, left=left)
     except (RuntimeError, ValueError) as exc:
         log_err(str(exc))
         return 1
+    if left:
+        # A re-run only helps if the token was the problem and has since been swapped;
+        # the way out of a run that already died is the delete, by hand, spelt out. The
+        # template goes to everyone because a public log may not name a repo - a submission
+        # repo is `<slug>-<handle>` - and the filled-in commands follow the same rule as
+        # every other per-person line.
+        log(f"  or delete the {len(left)} repo(s) by hand:")
+        log("    gh api --method DELETE repos/<org>/<repo>")
+        for repo in left:
+            log_person(f"    gh api --method DELETE repos/{repo}")
+    return code
 
 
 if __name__ == "__main__":
