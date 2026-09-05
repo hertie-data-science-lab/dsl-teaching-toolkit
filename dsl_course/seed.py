@@ -231,23 +231,19 @@ def _live_cohorts(course_org: str) -> tuple[list[str], int]:
     return live, unregistered
 
 
-def seed_github_workflows(course_org: str, central_ref: str) -> int:
-    """Seed/refresh the org-level workflows into the course org's .github repo: the
-    CENTRAL Release materials (course-source-repo dropdown), Release assignment, plus Sync
-    membership / Bootstrap cohort / Refresh.
+def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]:
+    """`{path: content}` for the org-level workflow set, exactly as it would be written.
 
-    All of them land as ONE commit (and the retired ones go in the same commit). They are
-    rendered from one set of inputs by shared helpers, so in practice they change together:
-    an edit to the run preamble or to a dropdown helper re-renders every one of them, and
-    file-by-file writes turned each such edit into a wall of near-identical
-    `ci: <file>.yml` commits in the repo whose history faculty actually browse.
-
-    Returns 1 if that commit didn't land - a workflow that didn't land is exactly the thing a
-    green run must not hide."""
+    Split out from the write below so that "what this checkout renders for this org" can be
+    asked without writing anything - the live e2e preflight compares these blob shas with
+    what the org actually has, which is the only honest way to tell a refreshed org from a
+    stale one. Every input is discovered from the org itself (cohorts, content repos,
+    assignment templates), so the answer is org-specific without the caller having to know
+    any of it."""
     cohorts = discover_cohorts(course_org)
     source_repos = discover_content_repos(course_org)
     assignments = discover_assignments(course_org)
-    files = {
+    rendered = {
         ".github/workflows/release-materials.yml": render_central_release(
             source_repos, cohorts
         ),
@@ -272,16 +268,33 @@ def seed_github_workflows(course_org: str, central_ref: str) -> int:
         ".github/workflows/refresh-actions.yml": render_refresh(),
         ".github/workflows/scheduled-release.yml": render_scheduler(),
     }
+    return {
+        path: for_placement(content, central_ref).encode()
+        for path, content in rendered.items()
+    }
+
+
+def seed_github_workflows(course_org: str, central_ref: str) -> int:
+    """Seed/refresh the org-level workflows into the course org's .github repo: the
+    CENTRAL Release materials (course-source-repo dropdown), Release assignment, plus Sync
+    membership / Bootstrap cohort / Refresh.
+
+    All of them land as ONE commit (and the retired ones go in the same commit). They are
+    rendered from one set of inputs by shared helpers, so in practice they change together:
+    an edit to the run preamble or to a dropdown helper re-renders every one of them, and
+    file-by-file writes turned each such edit into a wall of near-identical
+    `ci: <file>.yml` commits in the repo whose history faculty actually browse.
+
+    Returns 1 if that commit didn't land - a workflow that didn't land is exactly the thing a
+    green run must not hide."""
+    files = github_workflow_files(course_org, central_ref)
     log_step(
         f"Seeding org-level workflows into {course_org}/.github at central ref {central_ref}"
     )
     if not put_files(
         course_org,
         ".github",
-        {
-            path: for_placement(content, central_ref).encode()
-            for path, content in files.items()
-        },
+        files,
         "ci: refresh org workflows",
         # Retired workflows - remove any copies already seeded into orgs bootstrapped before
         # the change, so faculty never see two workflows for one job. sync-enrolment/sync-teams
