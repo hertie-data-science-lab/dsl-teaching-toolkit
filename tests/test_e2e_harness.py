@@ -516,3 +516,43 @@ def test_the_submission_is_clean_python(monkeypatch):
     # It is pushed to a repo a maintainer may clone next; nothing lints it any more.
     module = _pipeline_module(monkeypatch)
     assert module.SUBMISSION_BODY == 'print("e2e submission")\n'
+
+
+# ------------------------------------------------- can this token take the run away again
+
+HEADERS = (
+    "HTTP/2.0 200 OK\r\nX-Oauth-Scopes: gist, read:org, repo\r\nDate: now\r\n\r\n{}"
+)
+
+
+def test_a_classic_token_without_delete_repo_is_refused(monkeypatch):
+    module = _pipeline_module(monkeypatch)
+    assert module.oauth_scopes(HEADERS) == frozenset({"gist", "read:org", "repo"})
+    monkeypatch.setattr(ghcli, "gh", lambda *args, **kwargs: (0, HEADERS))
+    with pytest.raises(AssertionError, match="cannot delete repos"):
+        module._assert_can_delete_repos()
+
+
+def test_a_classic_token_with_delete_repo_passes(monkeypatch):
+    module = _pipeline_module(monkeypatch)
+    full = HEADERS.replace("read:org, repo", "delete_repo, read:org, repo")
+    assert "delete_repo" in module.oauth_scopes(full)
+    monkeypatch.setattr(ghcli, "gh", lambda *args, **kwargs: (0, full))
+    module._assert_can_delete_repos()
+
+
+def test_a_fine_grained_token_is_probed_instead(monkeypatch, capsys):
+    """It sends no `X-OAuth-Scopes` at all, so the scope check has nothing to read and
+    `admin` on a repo the token can see is the question that can be answered."""
+    module = _pipeline_module(monkeypatch)
+    assert module.oauth_scopes("HTTP/2.0 200 OK\r\nDate: now\r\n\r\n{}") is None
+
+    answers = iter([(0, "HTTP/2.0 200 OK\r\n\r\n{}"), (0, "true\n")])
+    monkeypatch.setattr(ghcli, "gh", lambda *args, **kwargs: next(answers))
+    module._assert_can_delete_repos()
+    assert "no X-OAuth-Scopes" in capsys.readouterr().out
+
+    denied = iter([(0, "HTTP/2.0 200 OK\r\n\r\n{}"), (0, "false\n")])
+    monkeypatch.setattr(ghcli, "gh", lambda *args, **kwargs: next(denied))
+    with pytest.raises(AssertionError, match="cannot delete repos"):
+        module._assert_can_delete_repos()
