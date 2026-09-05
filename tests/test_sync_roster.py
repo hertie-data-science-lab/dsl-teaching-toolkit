@@ -194,7 +194,7 @@ def _offboard_stubs(monkeypatch, *, collaborators, declared=None, probed=None):
     monkeypatch.setattr(sync_roster, "list_org_repos", lambda org: repos)
     monkeypatch.setattr(sync_roster.teams, "load", lambda org: declared or {})
 
-    def collaborator(org, repo, login):
+    def collaborator(org, repo, login, person=False):
         if probed is not None:
             probed.append(repo)
         return login in collaborators
@@ -204,14 +204,16 @@ def _offboard_stubs(monkeypatch, *, collaborators, declared=None, probed=None):
     monkeypatch.setattr(
         sync_roster,
         "remove_collaborator",
-        lambda org, repo, login: removed.append((repo, login)) or True,
+        lambda org, repo, login, person=False: removed.append((repo, login)) or True,
     )
     # No pending invitations unless a test says otherwise (it re-stubs these after us).
-    monkeypatch.setattr(sync_roster, "pending_invitations", lambda org, repo, login: [])
+    monkeypatch.setattr(
+        sync_roster, "pending_invitations", lambda org, repo, login, person=False: []
+    )
     monkeypatch.setattr(
         sync_roster,
         "cancel_invitation",
-        lambda *a: pytest.fail("there was no invitation to cancel"),
+        lambda *a, **k: pytest.fail("there was no invitation to cancel"),
     )
     return removed
 
@@ -280,13 +282,13 @@ def test_a_never_accepted_invitation_is_cancelled_too(monkeypatch):
     monkeypatch.setattr(
         sync_roster,
         "pending_invitations",
-        lambda org, repo, login: ["777"] if login == "zoe-z" else [],
+        lambda org, repo, login, person=False: ["777"] if login == "zoe-z" else [],
     )
     cancelled: list[tuple[str, str]] = []
     monkeypatch.setattr(
         sync_roster,
         "cancel_invitation",
-        lambda org, repo, invitation_id: (
+        lambda org, repo, invitation_id, person=False: (
             cancelled.append((repo, invitation_id)) or True
         ),
     )
@@ -297,13 +299,13 @@ def test_a_never_accepted_invitation_is_cancelled_too(monkeypatch):
 
 def test_an_unreadable_invitation_listing_is_an_error_not_a_pass(monkeypatch):
     _offboard_stubs(monkeypatch, collaborators=set())
-    monkeypatch.setattr(sync_roster, "pending_invitations", lambda *a: None)
+    monkeypatch.setattr(sync_roster, "pending_invitations", lambda *a, **k: None)
     assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l"}) == 2
 
 
 def test_an_unreadable_collaborator_check_is_an_error_not_a_revoke(monkeypatch):
     _repos_only = _offboard_stubs(monkeypatch, collaborators=set())
-    monkeypatch.setattr(sync_roster, "is_collaborator", lambda *a: None)
+    monkeypatch.setattr(sync_roster, "is_collaborator", lambda *a, **k: None)
     assert sync_roster.revoke_offboarded_access("COHORT", {"ada-l"}) == 2
     assert _repos_only == []  # a rate limit is not evidence of anything
 

@@ -110,6 +110,7 @@ def test_gradebook_provisioning_names_nobody_on_the_happy_path(monkeypatch, caps
 @pytest.mark.parametrize(
     "break_it",
     [
+        "branch-404",  # the gradebook repo is not there at all
         "tree",  # the repo could not be read before writing
         "build",  # POST /git/trees
         "commit",  # POST /git/commits
@@ -123,7 +124,14 @@ def test_no_failure_branch_of_a_gradebook_write_names_the_student(
     # repo name lives: `could not commit to COHORT/grades-ada-l` on a bad day publishes the
     # roster one student at a time, from a run in a PUBLIC .github repo.
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    if break_it == "tree":
+    if break_it == "branch-404":
+        # The one that happened: `grades-<handle>` was never provisioned, GET /repos 404s,
+        # and `default_branch` raises NAMING the repo. Stubbed at the process boundary so
+        # the real repos.default_branch runs and writes its own message.
+        monkeypatch.setattr(
+            repos, "gh", lambda *a, **k: (1, '{"message":"Not Found"} (HTTP 404)')
+        )
+    elif break_it == "tree":
         monkeypatch.setattr(
             gh_contents,
             "default_branch",
@@ -183,6 +191,36 @@ def test_a_failed_label_or_collaborator_grant_names_nobody_publicly(
     captured = capsys.readouterr()
     assert "ada-l" not in captured.out + captured.err
     assert captured.err.count("COHORT") == 2  # the fault, and where to look
+
+
+def test_no_topic_stamp_or_offboarding_failure_names_a_student_repo(
+    monkeypatch, capsys
+):
+    # The other five repos.py failure lines that carry `{org}/{repo}` on a path a student
+    # repo reaches: the topic stamp both sweeps make, and the four calls that take a
+    # vanished handle's access away.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "boom"))
+    assert not repos.set_repo_topics(
+        "COHORT", "grades-ada-l", ["gradebook"], person=True
+    )
+    assert (
+        repos.is_collaborator("COHORT", "assignment-1-ada-l", "ada-l", person=True)
+        is None
+    )
+    assert not repos.remove_collaborator(
+        "COHORT", "assignment-1-ada-l", "ada-l", person=True
+    )
+    assert (
+        repos.pending_invitations("COHORT", "assignment-1-ada-l", "ada-l", person=True)
+        is None
+    )
+    assert not repos.cancel_invitation(
+        "COHORT", "assignment-1-ada-l", "777", person=True
+    )
+    captured = capsys.readouterr()
+    assert "ada-l" not in captured.out + captured.err
+    assert captured.err.count("COHORT") == 5  # each fault, and where to look
 
 
 def test_the_verbose_log_still_says_which_repo_it_was(monkeypatch, capsys):
@@ -559,8 +597,14 @@ def _distribute(
         ),
     )
 
-    def fake_put_files(org, repo, files, message, *, delete=(), create_only=False):
+    def fake_put_files(
+        org, repo, files, message, *, delete=(), create_only=False, person=False
+    ):
         target = "config" if repo == grades.CONFIG_REPO else "gradebooks"
+        if target == "gradebooks":
+            # The repo is named after the student, so the write has to be marked as one:
+            # without it, a gradebook GitHub could not read published its own name.
+            assert person, "a gradebook write must be a person write"
         effects[target].append(
             (repo, {k: v.decode() for k, v in files.items()}, tuple(delete))
         )

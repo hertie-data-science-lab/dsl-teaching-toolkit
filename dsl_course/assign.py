@@ -388,11 +388,7 @@ def provision_one(
         return "failed-create"
     else:
         log_person(f"  [ok] created {cohort_org}/{repo}")
-        if not set_repo_topics(cohort_org, repo, [slug, "submission"]):
-            # Not named: this log is public. The nightly sweep converges the topic.
-            log_err(
-                "  ! a submission repo is untagged - the nightly sweep converges it"
-            )
+        set_repo_topics(cohort_org, repo, [slug, "submission"], person=True)
         # The Feedback issue, on the CREATE path only. It is where every receipt and,
         # eventually, the grade is posted, so the student is told at handout where to
         # look. Never re-probed for a repo that already exists: that would be one listing

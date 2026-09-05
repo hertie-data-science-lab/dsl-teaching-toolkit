@@ -461,10 +461,15 @@ def _converge(monkeypatch, repos, ok=True):
     monkeypatch.setattr(
         access,
         "set_repo_topics",
-        lambda org, repo, topics: stamped.append((repo, topics)) or ok,
+        lambda org, repo, topics, person=False: (
+            stamped.append((repo, topics, person)) or ok
+        ),
     )
     swept = access.converge_topics("Cohort-f2026", repos, "cohort")
-    return swept.failures, dict(stamped)
+    # Every repo this sweep tags is a submission repo or a gradebook, so every stamp is a
+    # person write and no failure line may name one.
+    assert all(person for _repo, _topics, person in stamped)
+    return swept.failures, {repo: topics for repo, topics, _person in stamped}
 
 
 def test_only_the_repos_missing_a_topic_are_patched(monkeypatch):

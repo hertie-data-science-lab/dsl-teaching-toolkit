@@ -16,7 +16,7 @@ from .course import (
 from .discovery import classify_repos
 from .gh_teams import create_team
 from .ghcli import gh, is_missing_resource
-from .log import log, log_err, log_ok
+from .log import log, log_err, log_ok, log_person
 from .repos import Converged, set_repo_topics, topic_name
 
 
@@ -267,8 +267,10 @@ def converge_topics(org: str, repos: list[dict], tier: str | None) -> Converged:
         have = set(repo.get("topics") or [])
         if wanted <= have:
             continue
-        if set_repo_topics(org, name, sorted(have | wanted)):
-            log_ok(f"topics converged on {name}")
+        # Every repo this sweep tags is somebody's - a submission repo or a gradebook
+        # (everything else `continue`s above) - and this log is public.
+        if set_repo_topics(org, name, sorted(have | wanted), person=True):
+            log_person(f"  [ok] topics converged on {org}/{name}")
             changed += 1
         else:
             failures += 1

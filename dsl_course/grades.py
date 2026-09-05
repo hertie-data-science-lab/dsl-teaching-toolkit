@@ -2159,11 +2159,14 @@ def provision_one(
         ):
             return "failed-create"
         put_file(
-            cohort_org, repo, "README.md", _STARTER_README.encode(), "init gradebook"
+            cohort_org,
+            repo,
+            "README.md",
+            _STARTER_README.encode(),
+            "init gradebook",
+            person=True,
         )
-        if not set_repo_topics(cohort_org, repo, ["gradebook"]):
-            # Not named: this log is public. The nightly sweep converges the topic.
-            log_err("  ! a gradebook is untagged - the nightly sweep converges it")
+        set_repo_topics(cohort_org, repo, ["gradebook"], person=True)
 
         # At creation only: a team grant does not decay, and the nightly sweep
         # (access.converge_faculty_access) owns the floor for every gradebook that already
@@ -2711,6 +2714,7 @@ def distribute(
             f"{GRADEBOOK_PREFIX}{handle}",
             files,
             "grades: update",
+            person=True,
         ):
             record[(handle, "", CHANNEL_GRADEBOOK)] = (digest, now, "")
             live[handle] = digest
