@@ -723,6 +723,57 @@ def test_a_repo_no_student_can_open_is_a_failed_handout(_provisioned, monkeypatc
     assert status.startswith("failed")
 
 
+def test_a_team_missing_members_is_not_named_in_a_public_log(
+    _provisioned, monkeypatch, capsys
+):
+    # The repo is named after the TEAM, so this line published who is grouped with whom -
+    # from a release that runs in the course org's PUBLIC `.github`.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
+    monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: False)
+    assert (
+        assign.provision_one(
+            "COURSE",
+            "assignment-1",
+            "COHORT",
+            "assignment-1-wizards",
+            ["ada-l", "bob-b"],
+            "assignment-1",
+            team="assignment-1-wizards",
+        )
+        == "failed-team-members"
+    )
+    captured = capsys.readouterr()
+    assert "wizards" not in captured.out + captured.err
+    # The fault itself still reaches faculty; the status above is what gets counted.
+    assert "a team is missing member(s)" in captured.err
+
+
+def test_the_verbose_log_still_says_which_team_it_was(
+    _provisioned, monkeypatch, capsys
+):
+    monkeypatch.setenv("DSL_VERBOSE", "1")
+    monkeypatch.setattr(assign, "grant_team_repo_access", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
+    monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: False)
+    assign.provision_one(
+        "COURSE",
+        "assignment-1",
+        "COHORT",
+        "assignment-1-wizards",
+        ["ada-l", "bob-b"],
+        "assignment-1",
+        team="assignment-1-wizards",
+    )
+    # The detail line specifically - `provision_one` narrates the CREATE through
+    # log_person too, so a bare repo-name assertion here would pass without this fix.
+    assert (
+        "team assignment-1-wizards is missing member(s) - they cannot see "
+        "COHORT/assignment-1-wizards" in capsys.readouterr().out
+    )
+
+
 def test_a_group_repo_reports_the_teams_own_failures(_provisioned, monkeypatch):
     # ensure_team's result used to be discarded, so a team that couldn't take its members
     # (they see nothing - access is via the team) still reported "ok".

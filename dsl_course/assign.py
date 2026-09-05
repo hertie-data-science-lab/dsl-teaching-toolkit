@@ -55,7 +55,15 @@ from .discovery import ASSIGNMENT_TEMPLATE_TOPIC, list_org_repos
 from .fs import copy_tree
 from .gh_contents import file_exists, get_file_content, put_file, put_files, repo_tree
 from .ghcli import GIT_ENV, clone, gh, git
-from .log import log, log_err, log_ok, log_person, log_skip, log_step
+from .log import (
+    log,
+    log_err,
+    log_err_person,
+    log_ok,
+    log_person,
+    log_skip,
+    log_step,
+)
 from .releaseignore import RELEASEIGNORE, deny_for, excluded_in_tree
 from .repos import (
     add_collaborator,
@@ -459,7 +467,14 @@ def provision_one(
         if access_ok:
             log_person(f"  [ok]   + team {team} (maintain)")
         if not team_ok:
-            log_err(f"  ! team {team} is missing member(s) - they cannot see {repo}")
+            # One per group repo, and `provision_all` tallies the `failed-team-members`
+            # status below into the count faculty read. The team NAME is a roster of who
+            # is grouped with whom, and the repo is named after it.
+            log_err_person(
+                "  ! a team is missing member(s) - they cannot see their repo",
+                f"  ! team {team} is missing member(s) - they cannot see "
+                f"{cohort_org}/{repo}",
+            )
         # A failed solution push WINS over every other fault here. provision_all writes the
         # FIRE-ONCE solution marker off these statuses, so a repo that reported any other
         # failure had its missing solution forgotten - and the marker guaranteed no later
