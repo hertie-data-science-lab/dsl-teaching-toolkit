@@ -403,6 +403,49 @@ def test_every_shipped_sample_parses_with_the_real_parser():
     assert grades.NOTES_KEY not in grades.STUDENT_VIEW_KEYS
 
 
+# `(slug, schedule key, is_group, phase, submitted, total, derived)` - the moment each
+# shipped sample is a picture OF. The counts are the sample's own rows.
+_SAMPLE_SHEETS = [
+    ("assignment-1", "assignment-1", False, collect.SheetPhase.FROZEN, 0, 3, False),
+    (
+        "assignment-4-project",
+        "assignment-4-project",
+        True,
+        collect.SheetPhase.OPEN,
+        2,
+        2,
+        True,
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "slug,key,is_group,phase,submitted,total,derived",
+    _SAMPLE_SHEETS,
+    ids=[s[0] for s in _SAMPLE_SHEETS],
+)
+def test_every_sample_sheet_is_what_the_toolkit_would_write(
+    slug, key, is_group, phase, submitted, total, derived
+):
+    # These ship into every cohort's classroom-config as `grading_sheets/*.yml.sample` and
+    # are the only worked example a grader has. Hand-written, they drifted: their headers
+    # quoted points, a late window and `autograde off` that the example course's own
+    # grading.yml declared none of, and a status line the renderer never emits. Rendering
+    # them from those files is what stops that happening twice.
+    sched, error = schedule.load_file(str(welcome.EXAMPLE_COHORT / "schedule.yml"))
+    assert error is None, error
+    entry = sched.assignments[key]
+    gspec = grades.parse_grading_spec(
+        welcome.example_course_file(
+            f"{entry.course_source_repo}/solution/{grades.GRADING_FILE}"
+        )
+    )
+    spec = grades.sheet_spec(sched, key, slug, gspec, is_group)
+    text = welcome.example_cohort_file(f"{grades.SHEETS_DIR}/{slug}.yml")
+    status = collect._status_line(spec, phase, total, submitted, derived)
+    assert grades.dump_sheet(grades.parse_sheet(text), spec, status) == text
+
+
 def test_scaffold_and_sample_carry_the_engines_current_column_sets():
     # A drifted header teaches faculty a schema the engine no longer reads. The scaffolds
     # are the file they fill in; the samples are what they copy rows from.
@@ -544,20 +587,26 @@ def test_every_example_assignment_parses_with_the_real_grading_reader():
     # grading.yml is design-time faculty input, and `parse_grading_spec` defaults every
     # missing key - so a retired spelling in the example reads as a silent default rather
     # than an error. Assert the VALUES, not just that it parses.
-    kinds = {}
+    kinds, autograded = {}, set()
     for a in sorted(welcome.EXAMPLE_COURSE.glob("assignment-*")):
         spec_file = a / "solution" / collect.GRADING_FILE
         assert spec_file.is_file(), f"{a.name}: no solution/{collect.GRADING_FILE}"
         spec = collect.parse_grading_spec(spec_file.read_text())
         kinds[a.name] = spec["type"]
-        # the hidden tests the autograder runs live where the file says
+        autograded.add(spec["autograde"])
+        # the hidden tests the autograder runs live where the file says - seeded even where
+        # this assignment is hand-marked, so turning `autograde` on needs no other edit
         assert (a / "solution" / spec["tests"]).is_dir(), (
             f"{a.name}: `tests: {spec['tests']}` names no directory"
         )
-        assert spec["autograde"] is True
+        assert spec["title"], (
+            f"{a.name}: no `title:` - the grading sheet's header needs it"
+        )
     # both kinds are demonstrated - `type: group` is what drives team provisioning, and an
     # example that only ever showed individual assignments taught half the schema
     assert "group" in kinds.values() and "individual" in kinds.values(), kinds
+    # and both sides of the opt-in, since hand-marking is the default and the common case
+    assert autograded == {True, False}
 
 
 def test_every_example_assignment_has_the_layout_the_engine_pushes():

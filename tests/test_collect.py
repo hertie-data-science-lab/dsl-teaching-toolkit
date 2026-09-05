@@ -1815,7 +1815,7 @@ def test_the_sheet_created_at_handout_has_every_row_and_derives_nothing(monkeypa
     )
     ((path, text),) = written
     assert path == "grading_sheets/assignment-1.yml"
-    assert "# Status: OPEN - 0 of 2 submitted" in text
+    assert "# Status: OPEN - 0 of 2 students have submitted" in text
     assert "; late pushes still update" not in text  # nothing can be late yet
     sheet = grades.parse_sheet(text)
     assert list(sheet["submissions"]) == ["ada-l", "ben-k"]
@@ -1873,7 +1873,10 @@ def test_the_refresh_fills_info_and_leaves_the_graders_text_byte_identical(monke
     # ben-k deleted his `info:` and `adjustment_individual`; only the first comes back.
     assert "info" in sheet["submissions"]["ben-k"]
     assert "adjustment_individual" not in sheet["submissions"]["ben-k"]
-    assert "# Status: OPEN - 1 of 2 submitted; late pushes still update" in text
+    assert (
+        "# Status: OPEN - 1 of 2 students have submitted; late pushes still update"
+        in text
+    )
 
 
 def test_the_refresh_writes_nothing_when_nothing_has_changed(monkeypatch):

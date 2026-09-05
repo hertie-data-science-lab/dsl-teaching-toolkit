@@ -939,7 +939,10 @@ def _status_line(
         return f"FROZEN {spec.cutoff_display}".strip()
     if spec.submit_external:
         return "OPEN - submitted outside GitHub"
-    line = f"OPEN - {submitted} of {total} submitted"
+    # Named, because "3 of 5" reads differently for teams than for students and a grader
+    # scanning this line wants to know which they are looking at without counting rows.
+    unit = "teams" if spec.is_group else "students"
+    line = f"OPEN - {submitted} of {total} {unit} have submitted"
     if derived:
         line += "; late pushes still update `info:` until the cutoff."
     return line
