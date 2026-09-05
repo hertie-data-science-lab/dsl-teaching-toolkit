@@ -108,6 +108,28 @@ def test_parse_grading_spec_drops_a_malformed_value_and_keeps_the_rest(capsys):
     assert "submit_via" in err and "questions" in err and "late_window_days" in err
 
 
+def test_a_bare_late_penalty_number_is_refused_out_loud(capsys):
+    # `penalty_rate` refuses a bare 10 - neither 1000% nor, silently, 10%. Refusing it
+    # without a word meant every late mark in that cohort lost its deduction and every
+    # receipt showed no percentage, on a green run.
+    spec = collect.parse_grading_spec("late_penalty_per_day: 10\n")
+    assert spec["late_penalty_per_day"] is None
+    err = capsys.readouterr().err
+    assert "late_penalty_per_day: 10" in err
+    assert "`10%` or `0.1`" in err
+
+
+def test_a_penalty_rate_that_parses_is_kept_exactly_as_typed(capsys):
+    for typed in ("10%", "0.1", "5.5%"):
+        assert (
+            collect.parse_grading_spec(f"late_penalty_per_day: {typed}\n")[
+                "late_penalty_per_day"
+            ]
+            == typed
+        )
+    assert capsys.readouterr().err == ""
+
+
 def test_score_from_junit_counts_only_clean_passes():
     xml = """<testsuite>
       <testcase name="t_pass"/>

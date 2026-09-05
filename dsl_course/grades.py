@@ -834,6 +834,25 @@ def _whole_days(value: object) -> int | None:
         return None
 
 
+def _penalty(value: object) -> str | None:
+    """`late_penalty_per_day` as it was typed, or None with a warning.
+
+    `penalty_rate` refuses a bare `10` - neither 1000% nor, silently, 10% - and refusing it
+    without saying so meant every late mark in that cohort quietly lost its deduction and
+    every receipt showed no percentage. Checked here, once per spec, like every other
+    malformed field: the derivation itself stays pure and is called per student."""
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if penalty_rate(raw) is None:
+        log_err(
+            f"  ! {GRADING_FILE}: `late_penalty_per_day: {value}` is not a rate - write "
+            f"`10%` or `0.1`; no late penalty is applied"
+        )
+        return None
+    return raw
+
+
 def parse_grading_spec(text: str) -> dict:
     """Parse a `grading_config.yml` (missing keys fall back to defaults; extras ignored).
 
@@ -856,9 +875,7 @@ def parse_grading_spec(text: str) -> dict:
     if "late_window_days" in data:
         spec["late_window_days"] = _whole_days(data["late_window_days"])
     if "late_penalty_per_day" in data:
-        spec["late_penalty_per_day"] = (
-            str(data["late_penalty_per_day"] or "").strip() or None
-        )
+        spec["late_penalty_per_day"] = _penalty(data["late_penalty_per_day"])
     return spec
 
 
