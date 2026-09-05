@@ -766,9 +766,10 @@ def submitted_display(submitted_at: str, tz: str | None) -> str:
     """The pinned commit's time in the COHORT's own clock, to the minute -
     `2026-10-03T22:14+02:00`.
 
-    To the MINUTE deliberately: with seconds it matches YAML 1.1's timestamp pattern, and
-    `safe_load` would hand the next writer a `datetime` where the grader's file has a
-    string - so the sheet would re-type its own field and churn a commit."""
+    To the MINUTE: seconds add nothing a grader reads a submission time for, and this is
+    also the form the mock-up shows. It used to be load-bearing as well - with seconds the
+    value matches YAML 1.1's timestamp pattern - but `grades._SheetLoader` now keeps every
+    plain scalar in the sheet a string, so the type can no longer move under it."""
     at = _parse_iso(submitted_at)
     if at is None:
         return ""

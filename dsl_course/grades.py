@@ -416,6 +416,38 @@ def merge_sheet(
     return {spec.container_key: blocks, **kept}
 
 
+_NULL_TAG = "tag:yaml.org,2002:null"
+
+
+def _null_only(resolvers: dict) -> dict:
+    """`yaml_implicit_resolvers` with every rule but null removed."""
+    return {
+        first: [(tag, rx) for tag, rx in rules if tag == _NULL_TAG]
+        for first, rules in resolvers.items()
+    }
+
+
+class _SheetLoader(yaml.SafeLoader):
+    """The grading sheet's own loader: a blank cell is None, and EVERYTHING else a grader
+    typed is the string they typed.
+
+    YAML 1.1's implicit typing is wrong for a mark. It reads `010` as 8, `1:30` as 90,
+    `+4` as 4, `yes` as True and a bare timestamp as a datetime - so a file a grader saved
+    came back holding values they never wrote, and the toolkit rewrote their file to match.
+    Only the null rule survives here, which is the one implicit type the sheet actually
+    declares (`key:`, `~`, `null` all mean "not filled in"); every other plain scalar is a
+    `str`. The arithmetic never needed the typing - `_decimal` parses the text - and this
+    is what lets `adjustment_individual: +4` still say `+4` after a refresh.
+
+    A SUBCLASS, like `_SheetDumper`: `yaml.safe_load` is called all over this package and
+    must keep reading ordinary YAML."""
+
+
+_SheetLoader.yaml_implicit_resolvers = _null_only(
+    yaml.SafeLoader.yaml_implicit_resolvers
+)
+
+
 def parse_sheet(text: str) -> dict:
     """A grading sheet's YAML into a dict ({} when the file is empty).
 
@@ -424,7 +456,7 @@ def parse_sheet(text: str) -> dict:
     so a broken save is ordinary; what must never happen is the toolkit reading one as an
     empty sheet and writing a blank file back over it."""
     try:
-        data = yaml.safe_load(text) or {}
+        data = yaml.load(text, Loader=_SheetLoader) or {}
     except yaml.YAMLError as exc:
         raise SheetUnreadable(" ".join(str(exc).split())) from exc
     if not isinstance(data, dict):
@@ -440,6 +472,16 @@ class _SheetDumper(yaml.SafeDumper):
     emit."""
 
 
+# The loader's rules, on the way out as well as in. What decides whether a scalar needs
+# quoting is whether reading it back would change it - so a dumper that knows `14` and `+4`
+# and `2026-10-03T22:14+02:00` all come back as the strings they are writes them bare,
+# exactly as the mock-up shows them, and quotes only the handful (`null`, `~`, an empty
+# string) that the surviving null rule would still retype.
+_SheetDumper.yaml_implicit_resolvers = _null_only(
+    yaml.SafeDumper.yaml_implicit_resolvers
+)
+
+
 def _represent_sheet_str(dumper: yaml.SafeDumper, data: str):
     """Multi-line text as a literal block (`|`), so the paragraph a grader typed comes back
     as a paragraph rather than one escaped line they can neither read nor edit."""
@@ -453,8 +495,22 @@ def _represent_sheet_none(dumper: yaml.SafeDumper, _data: None):
     return dumper.represent_scalar("tag:yaml.org,2002:null", "")
 
 
+def _represent_sheet_number(dumper: yaml.SafeDumper, data: float):
+    """A number the toolkit computed - `info.days_late` - written as its plain text.
+
+    The sheet is TEXT, both ways: its loader gives every plain scalar back as a `str`, so a
+    value emitted under a number's tag would come back a different type than it went out,
+    and the dumper would have to quote it to say so. Same bytes on the page, one type in
+    the file."""
+    return dumper.represent_scalar("tag:yaml.org,2002:str", str(data))
+
+
 _SheetDumper.add_representer(str, _represent_sheet_str)
 _SheetDumper.add_representer(type(None), _represent_sheet_none)
+# bool is a subclass of int, and PyYAML dispatches on the exact type - so `True` keeps its
+# own representer and is never written as `1`.
+_SheetDumper.add_representer(int, _represent_sheet_number)
+_SheetDumper.add_representer(float, _represent_sheet_number)
 
 
 def _wrapped(text: str) -> list[str]:

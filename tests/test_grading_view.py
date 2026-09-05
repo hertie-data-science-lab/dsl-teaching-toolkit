@@ -557,7 +557,8 @@ def test_load_sheets_reads_every_sheet_in_a_classroom_config_checkout(tmp_path):
     (folder / "notes.txt").write_text("not a sheet")
     sheets = load_sheets(tmp_path)
     assert sheets == {
-        "assignment-1": {"submissions": {"ada-l": {"score_individual": 9}}},
+        # `9`, not 9: what a grader typed comes back as the text they typed.
+        "assignment-1": {"submissions": {"ada-l": {"score_individual": "9"}}},
         "assignment-2": {},
     }
 

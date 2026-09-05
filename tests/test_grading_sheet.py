@@ -127,13 +127,16 @@ def test_autograde_adds_its_info_field_only_when_the_assignment_autogrades():
 
 
 def _marked(spec: SheetSpec, units) -> dict:
-    """A sheet a grader has worked in: marks, multi-line feedback, notes, an override."""
+    """A sheet a grader has worked in: marks, multi-line feedback, notes, an override.
+
+    The marks are STRINGS because that is what a sheet read off disk holds - `_SheetLoader`
+    hands every plain scalar back as the text it was typed as."""
     sheet = new_sheet(spec, units)
     block = sheet[spec.container_key][units[0][0]]
-    block[spec.score_key] = {"Q1": 14, "Q2": 6} if spec.questions else 14
+    block[spec.score_key] = {"Q1": "14", "Q2": "6"} if spec.questions else "14"
     block[spec.feedback_key] = "Clean derivation in Q1.\nQ2 confuses the marginal.\n"
     person = block["members"]["ada-l"] if spec.is_group else block
-    person["adjustment_individual"] = -3
+    person["adjustment_individual"] = "-3"
     person["feedback_individual"] = (
         "Your section repeats the Q2 error.\nSee the team.\n"
     )
@@ -147,12 +150,12 @@ def test_the_merge_keeps_every_word_the_grader_typed():
     before = dump_sheet(marked, spec, "OPEN")
     merged = merge_sheet(marked, spec, TEAMS, {})
     team = merged["teams"]["team-alpha"]
-    assert team["score_group"] == {"Q1": 14, "Q2": 6}
+    assert team["score_group"] == {"Q1": "14", "Q2": "6"}
     assert (
         team["feedback_group"] == "Clean derivation in Q1.\nQ2 confuses the marginal.\n"
     )
     assert team["members"]["ada-l"] == {
-        "adjustment_individual": -3,
+        "adjustment_individual": "-3",
         "feedback_individual": "Your section repeats the Q2 error.\nSee the team.\n",
         NOTES_KEY: "extension granted by email",
     }
@@ -250,7 +253,7 @@ def test_a_member_who_joins_a_team_later_gets_a_blank_row():
     grown = [("team-alpha", ["ada-l", "ben-k", "chen-w"]), TEAMS[1]]
     members = merge_sheet(marked, spec, grown, {})["teams"]["team-alpha"]["members"]
     assert list(members) == ["ada-l", "ben-k", "chen-w"]
-    assert members["ada-l"]["adjustment_individual"] == -3  # untouched
+    assert members["ada-l"]["adjustment_individual"] == "-3"  # untouched
     assert members["chen-w"] == dict.fromkeys(PERSON_KEYS)
 
 
@@ -409,6 +412,65 @@ def test_the_sheet_round_trips_and_is_byte_identical_on_a_second_write(spec, uni
     text = dump_sheet(sheet, spec, "OPEN - 1 of 2 have submitted")
     assert parse_sheet(text) == sheet
     assert dump_sheet(parse_sheet(text), spec, "OPEN - 1 of 2 have submitted") == text
+
+
+# The values YAML 1.1 would retype under a grader, and what each one used to become:
+# `010` -> 8, `1:30` -> 90 (sexagesimal), `+4` -> 4, `yes` -> True, a bare timestamp -> a
+# datetime. A mark of 10 written with a leading zero was scored as 8.
+VERBATIM = [
+    "010",
+    "1:30",
+    "+4",
+    "yes",
+    "no",
+    "0.5",
+    "2026-10-03T22:14:00+02:00",
+    "14",
+    "pass",
+    "A-",
+    "0x1f",
+    "1_0",
+]
+
+
+@pytest.mark.parametrize("typed", VERBATIM)
+def test_a_value_a_grader_typed_survives_a_round_trip_as_the_text_they_typed(typed):
+    spec = individual()
+    sheet = merge_sheet(None, spec, [("ada-l", ["ada-l"])], {})
+    sheet["submissions"]["ada-l"]["score_individual"] = typed
+    text = dump_sheet(sheet, spec, "OPEN")
+    # Bare on the page - no quotes the grader did not type - and the same bytes on a
+    # second write, so the tick that re-reads it commits nothing.
+    assert f"score_individual: {typed}" in text
+    back = parse_sheet(text)["submissions"]["ada-l"]["score_individual"]
+    assert back == typed and isinstance(back, str)
+    assert dump_sheet(parse_sheet(text), spec, "OPEN") == text
+
+
+@pytest.mark.parametrize("blank", ["", " ~", " null", " Null", " NULL"])
+def test_the_one_implicit_type_left_is_the_blank_cell(blank):
+    # `key:` is how the sheet says "not filled in", and it is the only implicit type the
+    # file declares. It must survive as None, or every blank would read as the word.
+    sheet = parse_sheet(f"submissions:\n  ada-l:\n    score_individual:{blank}\n")
+    assert sheet["submissions"]["ada-l"]["score_individual"] is None
+
+
+def test_a_value_that_would_read_back_as_a_blank_is_quoted():
+    # The other side of the same rule: a grader who really typed `null` gets it back.
+    spec = individual()
+    sheet = merge_sheet(None, spec, [("ada-l", ["ada-l"])], {})
+    sheet["submissions"]["ada-l"]["score_individual"] = "null"
+    text = dump_sheet(sheet, spec, "OPEN")
+    assert "score_individual: 'null'" in text
+    assert parse_sheet(text)["submissions"]["ada-l"]["score_individual"] == "null"
+
+
+def test_the_arithmetic_reads_the_text_the_sheet_holds():
+    # `score_total` never needed the typing - it parses the text - which is what let the
+    # loader stop guessing at it.
+    assert score_total({"Q1": "14", "Q2": "6"}) == Decimal(20)
+    assert score_total("14") == Decimal(14)
+    assert final_grade("20", penalty_rate("10%"), "2", "+4") == Decimal(20)
 
 
 def test_an_empty_file_parses_as_an_empty_sheet():

@@ -1864,8 +1864,10 @@ def test_the_refresh_fills_info_and_leaves_the_graders_text_byte_identical(monke
     ((_path, text),) = written
     sheet = grades.parse_sheet(text)
     ada = sheet["submissions"]["ada-l"]
-    assert ada["info"] == {"submitted": "2026-10-06T09:30+02:00", "days_late": 2}
-    assert ada["score_individual"] == {"Q1": 14, "Q2": 9}
+    assert ada["info"] == {"submitted": "2026-10-06T09:30+02:00", "days_late": "2"}
+    # The marks come back as the TEXT the grader typed - `14`, not 14. Implicit YAML
+    # typing is what turns `010` into 8 and `+4` into 4, and none of it is wanted here.
+    assert ada["score_individual"] == {"Q1": "14", "Q2": "9"}
     assert ada["feedback_individual"] == "Clean derivation.\nWatch the units.\n"
     assert ada["notes_not_shared_with_students"] == "chased by email"
     # ben-k deleted his `info:` and `adjustment_individual`; only the first comes back.
@@ -2080,7 +2082,7 @@ def test_the_freeze_reads_the_written_snapshot_and_seals_the_sheet(monkeypatch):
     assert "# Status: FROZEN Sun 11 Oct 2026 23:59" in text
     ada = grades.parse_sheet(text)["submissions"]["ada-l"]
     assert ada["info"]["submitted"] == "2026-10-03T22:14+02:00"
-    assert ada["info"]["days_late"] == 0
+    assert ada["info"]["days_late"] == "0"
     assert ada["info"]["autograde"] == "7/9"
 
 
@@ -2119,7 +2121,7 @@ def test_a_frozen_sheet_is_never_re_derived(monkeypatch):
     sheet = grades.parse_sheet(text)
     assert sheet["submissions"]["ada-l"]["info"] == {
         "submitted": "2026-10-03T22:14+02:00",
-        "days_late": 0,
+        "days_late": "0",
     }
     assert "# Status: FROZEN" in text
 
