@@ -2400,8 +2400,14 @@ def _preview(
         f"{len(pending) if notify else 0} student(s)"
     )
     if notify and pending:
+        # Rendered exactly as the send renders it, course name and all: a preview that
+        # showed the generic wording while the real mail named the course was reviewing
+        # text nobody would ever receive - and the subject line, which is the half a
+        # student reads first, was not shown at all.
+        subject, body = sample_message(cohort_org, _course_name(cohort_org))
         log("  Sample email (placeholders, not a real student):")
-        for line in sample_body(cohort_org).splitlines():
+        log(f"    Subject: {subject}")
+        for line in body.splitlines():
             log(f"    {line}")
     log_ok("DRY-RUN - nothing written, nothing posted, nothing sent")
 
@@ -2431,14 +2437,35 @@ def update_message(
     return (student.hertie_email, subject, body)
 
 
-def sample_body(cohort_org: str, course_name: str = "") -> str:
-    """The notification rendered with PLACEHOLDERS, for the dry-run preview.
+def sample_message(cohort_org: str, course_name: str = "") -> tuple[str, str]:
+    """The notification's `(subject, body)` rendered with PLACEHOLDERS, for the preview.
 
     `update_message` with a placeholder in place of a student - see `mailer.sample_of`."""
-    return mailer.sample_of(
+    return mailer.sample_message_of(
         lambda student: update_message(student, cohort_org, course_name),
         github_handle="<handle>",
     )
+
+
+def sample_body(cohort_org: str, course_name: str = "") -> str:
+    """The body alone - what `send_bulk` prints beneath a dry-run send."""
+    return sample_message(cohort_org, course_name)[1]
+
+
+def _course_name(cohort_org: str) -> str:
+    """The course's name for the subject and the body of an email, or "" if it cannot be
+    read.
+
+    Never fatal, and never skipped by the preview: the grades are already pushed by the
+    time the send runs, so a transient read failure or a malformed dsl-course.yml must not
+    turn a successful distribution into a traceback with zero notifications sent
+    (`load_yaml_config` deliberately RAISES on both). A course that carries no name yet
+    keeps the generic wording rather than emailing a blank."""
+    try:
+        return course_name_for_cohort(cohort_org)
+    except Exception as exc:  # a name is never worth losing the notifications over
+        log_err(f"could not read the course name ({exc}) - the email goes without it")
+        return ""
 
 
 def _email_updates(
@@ -2470,15 +2497,7 @@ def _email_updates(
     # "your grades have been updated" from another. Read live from the course org's
     # dsl-course.yml; a course that carries no name yet keeps the generic wording rather
     # than emailing a blank.
-    # The grades are already pushed by the time this runs, so a transient read failure or a
-    # malformed dsl-course.yml must not turn a successful distribution into a traceback
-    # with zero notifications sent - load_yaml_config deliberately RAISES on both. The
-    # course name is a nicety; the email is not.
-    try:
-        course_name = course_name_for_cohort(cohort_org)
-    except Exception as exc:  # a name is never worth losing the notifications over
-        log_err(f"could not read the course name ({exc}) - mailing without it")
-        course_name = ""
+    course_name = _course_name(cohort_org)
     messages = []
     # Keyed on the ADDRESS, holding every handle that maps to it: two roster rows sharing
     # an address (one student, two accounts) would otherwise record only the last, leaving

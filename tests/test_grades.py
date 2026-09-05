@@ -403,6 +403,7 @@ def _distribute(
     roster_rows: str | None = ROSTER_ADA,
     issue: int | None = 7,
     put_files_ok: bool = True,
+    course_name=lambda org: "",
 ) -> dict:
     """`distribute` over a local classroom-config clone, writing to nothing.
 
@@ -479,7 +480,7 @@ def _distribute(
         None if roster_rows is None else roster.parse(ROSTER_HEADER + roster_rows)
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    monkeypatch.setattr(grades, "course_name_for_cohort", lambda org: "")
+    monkeypatch.setattr(grades, "course_name_for_cohort", course_name)
     monkeypatch.setattr(
         grades.mailer,
         "send_bulk",
@@ -574,6 +575,36 @@ def test_holding_one_mark_leaves_the_students_other_marks_alone(tmp_path, monkey
     ((_repo, files, _delete),) = out["gradebooks"]
     assert "assignment-1" in files["grades.yml"]
     assert "assignment-2" not in files["grades.yml"]
+
+
+def test_the_dry_run_sample_email_is_the_one_that_would_be_sent(
+    tmp_path, monkeypatch, capsys
+):
+    # The subject is the half a student reads first, and the course name is what tells one
+    # of these apart from another - so a preview that showed neither was reviewing text
+    # nobody would ever receive.
+    _distribute(
+        monkeypatch,
+        tmp_path,
+        dry_run=True,
+        course_name=lambda org: "Deep Learning",
+    )
+    printed = capsys.readouterr().out
+    assert "    Subject: Your grades for Deep Learning have been updated" in printed
+    assert "Your grades for Deep Learning have been updated. View them" in printed
+    assert "grades-<handle>" in printed  # a placeholder, never a student
+
+
+def test_an_unreadable_course_name_still_previews_the_email(
+    tmp_path, monkeypatch, capsys
+):
+    # Same fallback the send has: the name is a nicety, the notification is not.
+    def boom(org):
+        raise RuntimeError("no dsl-course.yml")
+
+    out = _distribute(monkeypatch, tmp_path, dry_run=True, course_name=boom)
+    assert out["rc"] == 0
+    assert "    Subject: Your grades have been updated" in capsys.readouterr().out
 
 
 def test_the_dry_run_counts_what_it_would_hold(tmp_path, monkeypatch, capsys):
