@@ -77,6 +77,12 @@ EXPECTED_TIER = "staging"
 
 SUBMISSION = "submission.py"
 
+# Ruff-clean on purpose (double quotes, trailing newline). Hooks are off for the student's
+# push, so nothing lints this any more - but the file lands in a repo the maintainer may
+# well clone next, and a submission that trips their formatter on arrival is noise the
+# harness does not need to generate.
+SUBMISSION_BODY = 'print("e2e submission")\n'
+
 # What the harness types into the grading sheet. The note is a SENTINEL: it is the one
 # field a student must never see, so it is written on purpose and then looked for in every
 # place the toolkit could leak it to.
@@ -397,7 +403,7 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
             f"{COHORT_ORG}/{repo}",
             Path(tmp) / "clone",
             SUBMISSION,
-            "print('e2e submission')\n",
+            SUBMISSION_BODY,
             "e2e: submit",
         )
     stages["submission"] = Stage("submission", detail={"repo": repo, "sha": sha})

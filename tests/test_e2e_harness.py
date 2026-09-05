@@ -16,7 +16,7 @@ import pytest
 import yaml
 
 from dsl_course import ghcli, schedule
-from tests.e2e import allowlist, cleanup, drive, estate, schedule_edit
+from tests.e2e import allowlist, cleanup, drive, estate, schedule_edit, student
 
 GATE = 'pytest.skip("live e2e - set DSL_E2E=1", allow_module_level=True)'
 OTHER = "hertie-ml-26-deep"
@@ -483,3 +483,36 @@ def test_every_live_test_module_carries_the_gate():
     assert modules, "the live harness has no test modules"
     for path in modules:
         assert GATE in path.read_text(), f"{path.name} is not gated on DSL_E2E"
+
+
+# --------------------------------------------- the student pushes the way a student does
+
+
+def test_the_students_git_calls_all_run_with_hooks_off(monkeypatch, tmp_path):
+    """The maintainer's own `pre-push` fired inside the harness's throwaway clone and
+    failed the first live run on their house lint rules. A student's machine has no such
+    hook, so the harness must not have one either."""
+    seen: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        student.ghcli, "git", lambda *args: seen.append(args) or (0, "")
+    )
+    monkeypatch.setenv(student.HANDLE_ENV, "e2e-student")
+    monkeypatch.setenv(student.TOKEN_ENV, "ghp_notatoken")
+    student.push_file(
+        "org/repo", tmp_path / "clone", "submission.py", 'print("x")\n', "e2e: submit"
+    )
+
+    clone = next(a for a in seen if "clone" in a)
+    assert ("--config", student.HOOKS_SETTING) == clone[1:3]
+    for args in (a for a in seen if a is not clone):
+        assert student.HOOKS_OFF[1] in args, f"hooks are live for `{' '.join(args)}`"
+
+    push = next(a for a in seen if "push" in a)
+    assert push[2:4] == student.HOOKS_OFF and "--no-verify" in push
+    assert "--no-verify" in next(a for a in seen if "commit" in a)
+
+
+def test_the_submission_is_clean_python(monkeypatch):
+    # It is pushed to a repo a maintainer may clone next; nothing lints it any more.
+    module = _pipeline_module(monkeypatch)
+    assert module.SUBMISSION_BODY == 'print("e2e submission")\n'
