@@ -10,7 +10,8 @@
 # no `info:` block and no late arithmetic.
 # You fill in: score_individual, adjustment_individual, feedback_individual,
 # notes_not_shared_with_students. Anything you type is never touched. Nothing reaches a student
-# until you run Distribute grades.
+# until you run Distribute grades. YAML comments you add are not preserved when the toolkit
+# rewrites the file.
 # -------------------------------------------------------------------------------------------
 submissions:
   anna-adams:

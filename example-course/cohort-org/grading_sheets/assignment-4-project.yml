@@ -12,7 +12,7 @@
 # You fill in: score_group (one value per question; max points shown beside each),
 # feedback_group, adjustment_individual, feedback_individual, notes_not_shared_with_students.
 # Anything you type is never touched. Nothing reaches a student until you run Distribute
-# grades.
+# grades. YAML comments you add are not preserved when the toolkit rewrites the file.
 # -------------------------------------------------------------------------------------------
 teams:
   team-alpha:

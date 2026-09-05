@@ -58,7 +58,9 @@ late penalty applies to it, which no arithmetic can do: that mark is **held**. N
 posted, written or emailed for it, the dry run and the run both count it (`held`), and it
 goes out as soon as you put a number (or waive the penalty with `adjustment_individual`). The question names, the `# /N` maxima and the whole
 header come from `grading_config.yml` and `schedule.yml` and are re-emitted on every write - so
-edit them **there**, never in the sheet.
+edit them **there**, never in the sheet. The toolkit writes the file only when the data or
+that header really moved, so your quoting and spacing survive the quarter-hourly tick; YAML
+comments you add do not survive a rewrite when one happens.
 
 An assignment whose `grading_config.yml` says `submit_via: external` has no `info:` block at all:
 there is no commit to time.

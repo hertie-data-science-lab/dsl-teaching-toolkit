@@ -212,12 +212,16 @@ _COMMENT_COLUMN = 32
 _HEADER_WIDTH = 93  # the ruled line, and the width the header prose wraps to
 
 
-class SheetUnreadable(Exception):
+class SheetUnreadable(RuntimeError):
     """A grading sheet whose YAML nobody can read - a grader mid-edit.
 
     Its own class because the answer to it is specific and is the same everywhere: LEAVE
     THE FILE ALONE. A parse that came back empty instead would read as "this assignment
-    has no rows", and the next write would rebuild the sheet blank over a term's marking."""
+    has no rows", and the next write would rebuild the sheet blank over a term's marking.
+
+    A `RuntimeError`, so the CLIs that already answer one with a message rather than a
+    traceback - `status.main`, `grades.main` - answer this the same way. A sheet mid-edit
+    is an ordinary state, not a crash."""
 
 
 def sheet_path(slug: str) -> str:
@@ -449,6 +453,35 @@ _SheetLoader.yaml_implicit_resolvers = _null_only(
 )
 
 
+def _no_duplicate_keys(loader: yaml.SafeLoader, node, deep: bool = False) -> dict:
+    """YAML's mapping rule, minus last-one-wins.
+
+    PyYAML keeps the LAST of two identical keys and says nothing. In a file two people
+    hand-edit in a browser that is a mark silently discarded - the mock-up's own worked
+    example has `adjustment_individual` twice in one block - so the sheet is refused
+    instead and left exactly as it is until somebody fixes it.
+
+    `flatten_mapping` first, so an anchor merge (`<<`) still behaves as YAML says."""
+    loader.flatten_mapping(node)
+    mapping: dict = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in mapping:
+            raise yaml.constructor.ConstructorError(
+                "while reading a grading sheet",
+                node.start_mark,
+                f"the key `{key}` appears twice",
+                key_node.start_mark,
+            )
+        mapping[key] = loader.construct_object(value_node, deep=deep)
+    return mapping
+
+
+_SheetLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _no_duplicate_keys
+)
+
+
 def parse_sheet(text: str) -> dict:
     """A grading sheet's YAML into a dict ({} when the file is empty).
 
@@ -593,7 +626,8 @@ def _you_fill_in_sentence(spec: SheetSpec) -> str:
     fields += ["adjustment_individual", "feedback_individual", NOTES_KEY]
     return (
         f"You fill in: {', '.join(fields)}. Anything you type is never touched. Nothing "
-        f"reaches a student until you run Distribute grades."
+        f"reaches a student until you run Distribute grades. YAML comments you add are "
+        f"not preserved when the toolkit rewrites the file."
     )
 
 
@@ -602,6 +636,20 @@ def _you_fill_in_sentence(spec: SheetSpec) -> str:
 # both spellings live here so a reworded header cannot silently un-freeze a sheet.
 STATUS_PREFIX = "# Status: "
 FROZEN_STATUS = "FROZEN"
+
+
+def sheet_header(text: str) -> str:
+    """The leading comment block of a sheet - the part the toolkit owns and keeps true.
+
+    Where the line between "ours" and "the grader's" is drawn for the write decision: the
+    header (status, the config facts, the two sentences) is re-emitted on every write, and
+    everything below it is theirs, formatting and comments included."""
+    out: list[str] = []
+    for line in text.splitlines(keepends=True):
+        if line.strip() and not line.startswith("#"):
+            break
+        out.append(line)
+    return "".join(out)
 
 
 def sheet_is_frozen(text: str) -> bool:

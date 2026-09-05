@@ -586,3 +586,22 @@ def test_a_non_numeric_grade_gets_no_arithmetic():
     # told to pass them through rather than publish a computed number nobody typed.
     assert final_grade("pass", penalty_rate("10%"), 2, None) is None
     assert final_grade(None, None, None, "+4") is None
+
+
+def test_a_sheet_mid_edit_is_a_runtime_error_not_a_traceback():
+    # `status.main` and `grades.main` answer a RuntimeError with a message; a sheet a
+    # grader is part-way through saving is an ordinary state, not a crash.
+    assert issubclass(SheetUnreadable, RuntimeError)
+
+
+def test_a_duplicate_key_is_refused_rather_than_silently_resolved():
+    with pytest.raises(SheetUnreadable) as caught:
+        parse_sheet(
+            "submissions:\n  a:\n    score_individual: 18\n    score_individual: 20\n"
+        )
+    assert "appears twice" in str(caught.value)
+
+
+def test_the_header_tells_a_grader_their_comments_do_not_survive_a_rewrite():
+    spec = SheetSpec(slug="assignment-1", title="Intro", is_group=False)
+    assert "comments you add are not preserved" in dump_sheet({}, spec, "OPEN")

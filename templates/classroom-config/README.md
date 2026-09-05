@@ -42,7 +42,9 @@ that never leave this repo. Worked examples of both shapes ship as
 Everything under `info:` is the toolkit's - when the work came in, how late it was, what
 `CONTRIBUTIONS.md` said, the autograde count. It refreshes every quarter of an hour from the
 due date and freezes at the cutoff. Everything else is yours and is never touched, including
-keys you invent and rows for students who have left.
+keys you invent and rows for students who have left. The file is only rewritten when the data
+or the header really changed, so your own formatting survives an ordinary tick - but YAML
+comments you add are not preserved when a rewrite does happen.
 
 The question names, the `# /N` maxima and the header come from the template's `grading_config.yml`
 and this cohort's `schedule.yml`. Edit them **there** - the sheet's copy is regenerated on

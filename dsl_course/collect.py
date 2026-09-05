@@ -99,7 +99,6 @@ from .course import (
 from .discovery import list_org_repos
 from .fs import copy_tree
 from .gh_contents import (
-    blob_sha,
     dump_csv,
     file_exists,
     get_file_content,
@@ -1211,7 +1210,15 @@ def sync_sheet(
     )
     status = _status_line(spec, phase, len(units), submitted, derive)
     content = grades.dump_sheet(sheet, spec, status).encode()
-    changed = not (old_sha and blob_sha(content) == old_sha)
+    # NOT a byte compare. The file is the grader's: their quoting, their indentation, the
+    # blank lines they leave and the comments they add ("extension granted by email") are
+    # all things a re-dump rewrites, and this runs four times an hour - so a sheet was
+    # canonicalised within fifteen minutes of every save, and a grader editing it locally
+    # got a non-fast-forward on every push. What the toolkit owns is the DATA and the
+    # header; a write happens when one of those two really moved, and not otherwise.
+    changed = sheet != on_disk or grades.sheet_header(old_text) != grades.sheet_header(
+        content.decode()
+    )
     written = True
     if not changed:
         log_skip(f"{path} (unchanged)")

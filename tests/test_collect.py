@@ -2144,6 +2144,110 @@ def test_a_freeze_with_no_snapshot_keeps_the_facts_the_sheet_already_holds(
     assert "# Status: FROZEN" in text
 
 
+def _canonical(status: str, units: list[str]) -> str:
+    """A sheet exactly as the toolkit would write it - the starting point for asking what
+    a grader's own save is allowed to look like."""
+    gspec = collect.parse_grading_spec(GRADING_YML)
+    spec = grades.sheet_spec(_sched(), "assignment-1", "assignment-1", gspec, False)
+    sheet = grades.merge_sheet(
+        None, spec, [(u, [u]) for u in units], {u: {"days_late": "0"} for u in units}
+    )
+    return grades.dump_sheet(sheet, spec, status)
+
+
+FROZEN_STATUS = "FROZEN Sun 11 Oct 2026 23:59"
+
+
+def test_a_comment_the_grader_added_is_not_rewritten_away(monkeypatch):
+    # The file is theirs. Their comments, their quoting and their blank lines were all
+    # rewritten within fifteen minutes of every save by a byte compare against a fresh
+    # dump - and "extension granted by email" is exactly the note that vanished.
+    theirs = (
+        _canonical(FROZEN_STATUS, ["ada-l", "ben-k"])
+        + "\n# marking notes: chased ben by email on 12 Oct\n"
+    ).replace("days_late: 0", "days_late: '0'")  # same string, their quoting
+    written = _sheet_env(
+        monkeypatch, targets=SOLO_TARGETS, existing=(theirs, "their-sha")
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 20, tzinfo=BERLIN),
+    )
+    assert written == []
+
+
+def test_a_real_change_is_still_written(monkeypatch):
+    # The other half: a row the sheet does not have yet is a change to the DATA, so the
+    # file is rewritten however non-canonically it was saved.
+    theirs = _canonical(FROZEN_STATUS, ["ada-l"]) + "\n# ben has not onboarded\n"
+    written = _sheet_env(
+        monkeypatch, targets=SOLO_TARGETS, existing=(theirs, "their-sha")
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 20, tzinfo=BERLIN),
+    )
+    ((_path, text),) = written
+    assert "ben-k" in text
+
+
+def test_a_status_line_that_moved_is_written(monkeypatch):
+    # The header is the toolkit's half of the file and has to stay true: a sheet that says
+    # OPEN after the cutoff tells a grader the marks can still move.
+    theirs = _canonical("OPEN - 2 of 2 students have submitted", ["ada-l", "ben-k"])
+    written = _sheet_env(
+        monkeypatch, targets=SOLO_TARGETS, existing=(theirs, "their-sha")
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 20, tzinfo=BERLIN),
+    )
+    ((_path, text),) = written
+    assert "# Status: FROZEN" in text
+
+
+def test_a_duplicate_key_leaves_the_sheet_exactly_as_it_is(monkeypatch, capsys):
+    # PyYAML keeps the LAST of two identical keys and says nothing - a mark silently
+    # discarded in a file two people edit in a browser (the mock-up's own worked example
+    # has `adjustment_individual` twice in one block).
+    doubled = (
+        "submissions:\n  ada-l:\n    score_individual: 18\n    score_individual: 20\n"
+    )
+    written = _sheet_env(
+        monkeypatch, targets=SOLO_TARGETS, existing=(doubled, "their-sha")
+    )
+    assert not collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 2, tzinfo=BERLIN),
+    )
+    assert written == []
+    assert "appears twice" in capsys.readouterr().err
+
+
 def test_the_sheet_is_written_against_the_sha_it_was_read_at(monkeypatch):
     # A grader saving in the browser inside the quarter-hourly tick would otherwise be
     # silently reverted: `put_file` fetches a fresh sha unless it is given one, and that
