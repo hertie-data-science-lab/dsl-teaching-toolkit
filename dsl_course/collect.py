@@ -3,9 +3,9 @@
 Runs entirely in a faculty-controlled job (course-org Actions, bot token). For each
 submission repo it checks out the commit that repo was frozen at (see SNAPSHOTS below),
 overlays the assignment's HIDDEN tests (kept on the course template's `solution` branch,
-never shipped to students), runs them, and records a machine score into the PRIVATE grades
-CSV. Faculty & instructors then add manual marks and the existing grades pipeline emails
-the result - so a student never sees a score in their own repo.
+never shipped to students), runs them, and records how many passed into the PRIVATE grading
+sheet, as information for whoever marks it. Faculty & instructors write the marks there and
+`grades distribute` sends them - so a student never sees a score in their own repo.
 
   course/<template> @ solution branch  ->  grading_config.yml + hidden tests
                 |
@@ -13,7 +13,7 @@ the result - so a student never sees a score in their own repo.
   cohort/<slug>-<team>    (group)              |
                 v
   classroom-config/autograde/<slug>/<key>.json   (per-test detail, private archive)
-  classroom-config/grades/<slug>.csv             (autograde_score + team filled)
+  classroom-config/grading_sheets/<slug>.yml     (`info.autograde`, never a mark)
 
 Student code is run in a subprocess with the GitHub token stripped from the environment.
 
@@ -50,10 +50,8 @@ is never graded again automatically. A DECISION not to grade (no `solution` bran
 instead, saying why - because a skip that leaves the directory empty is re-decided, at the
 cost of a template clone, every hour for ever. `has_autograde_results` tests for either
 record, never bare directory existence, so a stray early write into the directory can no
-longer be mistaken for a completed grade. Machine-written grade cells are write-once too (see
-`grades.merge_auto`), so a marker's hand-edit is never clobbered. To re-grade deliberately,
-delete `autograde/<slug>/` and let the next tick regrade -
-and clear the `autograde_score` cells you want recomputed.
+longer be mistaken for a completed grade. To re-grade deliberately, delete
+`autograde/<slug>/` and let the next tick regrade.
 
 grading_config.yml (on the template's solution branch):
     type: individual        # or group
@@ -1895,8 +1893,9 @@ def collect(
             return 1
         # A failed archive write must red the run and WITHHOLD the sentinel: the marker is now
         # a single explicit file, not the first archive's side effect, so partial detail can
-        # never be mistaken for a completed grade. The next tick regrades (merge_auto leaves the
-        # recorded scores untouched) and rewrites the missing archive(s) + the sentinel.
+        # never be mistaken for a completed grade. The next tick regrades - the sheet's
+        # `info.autograde` is derived, never typed - and rewrites the missing archive(s)
+        # and the sentinel.
         archive_ok = True
         for apath, acontent, amsg in archives:
             if not put_file(cohort_org, CONFIG_REPO, apath, acontent, amsg):

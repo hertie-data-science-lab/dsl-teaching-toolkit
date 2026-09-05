@@ -2495,9 +2495,9 @@ def _email_updates(
     and records the second: the grades themselves are already pushed by this point, so a
     mail failure is not a reason to undo anything - but a student who never got the
     notification does not know to look, and a green run told nobody."""
-    # Fold-keyed for the same reason merge_auto is: the gradebook filenames come from the
-    # grade CSVs (a marker's typing) and the roster's casing is its own, so a case-only
-    # difference used to mean a student was silently never told their grades had landed.
+    # Fold-keyed: the gradebook names come from what a marker typed into the sheet and the
+    # roster's casing is its own, so a case-only difference used to mean a student was
+    # silently never told their grades had landed.
     students = roster.load(cohort_org)
     if students is None:
         # Distinct from an empty roster: unreadable must red, as it does in enrol_codes.run.

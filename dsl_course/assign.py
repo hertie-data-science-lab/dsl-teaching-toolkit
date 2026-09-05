@@ -438,7 +438,8 @@ def provision_one(
     # so re-granting here bought nothing and cost two PUTs per student per assignment on
     # every path that reaches this line.
     #
-    # READ, not write. Marking happens in `classroom-config/grades/<slug>.csv` (docs/10),
+    # READ, not write. Marking happens in
+    # `classroom-config/grading_sheets/<slug>.yml` (docs/10),
     # and by the time anyone marks, the deadline snapshot has already frozen this repo's
     # HEAD and the autograder has run off that snapshot - so a commit here would reach no
     # gradebook and form no part of the record. Faculty need to SEE the work, not edit it.
