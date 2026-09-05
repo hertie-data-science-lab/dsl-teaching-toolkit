@@ -62,7 +62,7 @@ from .gh_contents import (
     put_files,
     read_csv,
 )
-from .ghcli import clone, gh
+from .ghcli import bot_login, clone, gh
 from .log import log, log_err, log_ok, log_person, log_step
 from .repos import (
     add_collaborator,
@@ -1142,6 +1142,29 @@ def receipt(
     )
 
 
+class IssueLookupFailed:
+    """The Feedback-issue lookup could not be READ - as against finding nothing there.
+
+    A 5xx or a secondary limit that outlived the retry ladder used to come back as "this
+    repo has no Feedback issue", and the very next thing that happens is a SECOND issue
+    opened over the thread the student was told to read. Falsy, so `if not found` still
+    reads naturally; distinguished from None by identity, never by truth."""
+
+    __slots__ = ()
+
+    def __bool__(self) -> bool:
+        return False
+
+
+LOOKUP_FAILED = IssueLookupFailed()
+
+# Oldest first, and the author with it. The toolkit opens the Feedback issue at handout,
+# so ours is the oldest one carrying the label - but a student holds `maintain` on their
+# own submission repo and can open and label their own, and GitHub's default ordering is
+# newest first, which handed it theirs.
+_ISSUE_ORDER = "sort=created&direction=asc"
+
+
 def _feedback_issues(
     cohort_org: str, repo: str, query: str, jq: str
 ) -> list[str] | None:
@@ -1151,8 +1174,26 @@ def _feedback_issues(
     return [line for line in out.splitlines() if line.strip()]
 
 
-def find_feedback_issue(cohort_org: str, repo: str) -> tuple[int, str] | None:
-    """`(number, state)` of this repo's Feedback issue, or None.
+def _ours(rows: list[list[str]], login_at: int) -> list[str]:
+    """The issue this toolkit opened, if one of these is - else the oldest of them.
+
+    Ordering already puts ours first whenever it was opened first; preferring the author
+    closes the case where a student's own labelled issue predates the handout's. One
+    candidate is not a choice, and asking who we are costs a call, so it is not asked."""
+    if len(rows) < 2:
+        return rows[0]
+    mine = bot_login()
+    for row in rows:
+        if mine and len(row) > login_at and row[login_at] == mine:
+            return row
+    return rows[0]
+
+
+def find_feedback_issue(
+    cohort_org: str, repo: str
+) -> tuple[int, str] | IssueLookupFailed | None:
+    """`(number, state)` of this repo's Feedback issue, None if it has none, or
+    `LOOKUP_FAILED` if the question could not be answered.
 
     Three rungs, cheapest first: the LABEL, then a body carrying one of the marks, then the
     exact title. Deliberately the LIST endpoint rather than `gh issue list --search`: the
@@ -1164,21 +1205,26 @@ def find_feedback_issue(cohort_org: str, repo: str) -> tuple[int, str] | None:
     by_label = _feedback_issues(
         cohort_org,
         repo,
-        f"labels={FEEDBACK_ISSUE_LABEL}&state=all&per_page=5",
-        '.[] | select(.pull_request == null) | "\\(.number)\\t\\(.state)"',
+        f"labels={FEEDBACK_ISSUE_LABEL}&state=all&per_page=5&{_ISSUE_ORDER}",
+        ".[] | select(.pull_request == null) | "
+        '"\\(.number)\\t\\(.state)\\t\\(.user.login // "")"',
     )
+    if by_label is None:
+        return LOOKUP_FAILED
     if by_label:
-        number, _, state = by_label[0].partition("\t")
-        return int(number), state
+        row = _ours([line.split("\t") for line in by_label], 2)
+        return int(row[0]), row[1]
     marks = " or ".join(f'contains("{mark}")' for mark in FEEDBACK_ISSUE_MARKS)
     listed = _feedback_issues(
         cohort_org,
         repo,
-        "state=all&per_page=50",
+        f"state=all&per_page=50&{_ISSUE_ORDER}",
         ".[] | select(.pull_request == null) | "
         f'"\\(.number)\\t\\(.state)\\t\\(if ((.body // "") | {marks}) then "mark" else "" end)'
-        '\\t\\(.title)"',
+        '\\t\\(.title)\\t\\(.user.login // "")"',
     )
+    if listed is None:
+        return LOOKUP_FAILED
     if not listed:
         return None
     rows = [line.split("\t") for line in listed]
@@ -1186,19 +1232,28 @@ def find_feedback_issue(cohort_org: str, repo: str) -> tuple[int, str] | None:
     titled = [r for r in rows if len(r) > 3 and r[3] == FEEDBACK_ISSUE_TITLE]
     for candidate in (marked, titled):
         if candidate:
-            return int(candidate[0][0]), candidate[0][1]
+            row = _ours(candidate, 4)
+            return int(row[0]), row[1]
     return None
 
 
 def ensure_feedback_issue(
     cohort_org: str, repo: str, body: str, dry_run: bool = False
-) -> int | None:
+) -> int | IssueLookupFailed | None:
     """This repo's Feedback issue number, opening one if it has none.
 
     A CLOSED issue is reopened: a student who closes theirs must still receive their
     receipts and their grade, and a second issue would split the thread they were told to
-    read. Never two - see `find_feedback_issue` for why the lookup is not a search."""
+    read. Never two - see `find_feedback_issue` for why the lookup is not a search, and
+    why a lookup that FAILED opens nothing: `LOOKUP_FAILED` comes straight back, and the
+    caller leaves this unit for the next tick."""
     found = find_feedback_issue(cohort_org, repo)
+    if isinstance(found, IssueLookupFailed):
+        log_err(
+            f"  ! could not read the Feedback issues in {cohort_org} - opening none, "
+            f"posting none; the next run tries again"
+        )
+        return LOOKUP_FAILED
     if found is not None:
         number, state = found
         if state == "closed" and not dry_run:
@@ -2100,12 +2155,16 @@ DISTRIBUTED_HEADER = (
     "channel",
     "content_hash",
     "distributed_at",
+    # The issue a feedback comment landed on, so a later run posts to the SAME thread
+    # without asking - and never opens a second one because a listing was unreadable.
+    # Blank on every other channel.
+    "issue",
 )
 CHANNEL_ISSUE = "issue"
 CHANNEL_GRADEBOOK = "gradebook"
 CHANNEL_EMAIL = "email"
-# `{(target, assignment, channel): (content hash, when)}`
-Distributed = dict[tuple[str, str, str], tuple[str, str]]
+# `{(target, assignment, channel): (content hash, when, issue number or "")}`
+Distributed = dict[tuple[str, str, str], tuple[str, str, str]]
 
 # The hidden marker on a feedback comment. Keyed on the CONTENT, so a corrected grade is a
 # new comment and an unchanged one is silence - and so a lost `distributed.csv` costs one
@@ -2129,6 +2188,7 @@ def parse_distributed(text: str) -> Distributed:
         ): (
             (row.get("content_hash") or "").strip(),
             (row.get("distributed_at") or "").strip(),
+            (row.get("issue") or "").strip(),
         )
         for row in read_csv(text, ("target",), DISTRIBUTED_PATH)
         if (row.get("target") or "").strip()
@@ -2140,8 +2200,10 @@ def dump_distributed(records: Distributed) -> str:
     return dump_csv(
         DISTRIBUTED_HEADER,
         (
-            (target, assignment, channel, digest, when)
-            for (target, assignment, channel), (digest, when) in sorted(records.items())
+            (target, assignment, channel, digest, when, issue)
+            for (target, assignment, channel), (digest, when, issue) in sorted(
+                records.items()
+            )
         ),
     )
 
@@ -2165,6 +2227,7 @@ def _read_distributed(wd: Path) -> tuple[Distributed, bool]:
         ((row.get("github_handle") or "").strip(), "", CHANNEL_EMAIL): (
             (row.get("grades_sha") or "").strip(),
             (row.get("notified_at") or "").strip(),
+            "",
         )
         for row in read_csv(old.read_text(), ("github_handle",), NOTIFIED_PATH)
         if (row.get("github_handle") or "").strip()
@@ -2415,23 +2478,47 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
                 # so pulling the views is not enough to keep this one back.
                 continue
             digest = content_hash(body)
-            if record.get((target, slug, CHANNEL_ISSUE), ("",))[0] == digest:
+            said, _when, known = record.get((target, slug, CHANNEL_ISSUE), ("", "", ""))
+            if said == digest:
                 continue  # already said, in these words
             if dry_run:
                 counts["comments"] += 1
                 continue
-            issue = ensure_feedback_issue(
-                cohort_org, repo, feedback_body(spec, target, members)
+            # The thread this unit's last comment landed on, if there was one: the same
+            # issue, without a listing to get wrong.
+            issue: int | IssueLookupFailed | None = (
+                int(known) if known.isdigit() else None
             )
+            if issue is None:
+                issue = ensure_feedback_issue(
+                    cohort_org, repo, feedback_body(spec, target, members)
+                )
+            if isinstance(issue, IssueLookupFailed):
+                # The listing could not be READ. Opening one here is how a second Feedback
+                # issue appears over the thread the student was told to read, so this unit
+                # waits - counted, and the run goes red so somebody looks.
+                counts["failed"] += 1
+                log_person(f"  [wait] Feedback issue unreadable on {cohort_org}/{repo}")
+                continue
             if issue is None:
                 # A submission repo that is not there (a student who never onboarded, a
                 # team formed after the handout). Counted, never named.
                 counts["skipped"] += 1
                 continue
-            if post_marked_comment(
+            posted = post_marked_comment(
                 cohort_org, repo, issue, body, GRADE_MARK.format(digest)
-            ):
-                record[(target, slug, CHANNEL_ISSUE)] = (digest, now)
+            )
+            if not posted and known:
+                # The recorded thread is gone (deleted, or transferred). Look it up once,
+                # rather than leaving this student unreachable for the rest of the term.
+                issue = ensure_feedback_issue(
+                    cohort_org, repo, feedback_body(spec, target, members)
+                )
+                posted = isinstance(issue, int) and post_marked_comment(
+                    cohort_org, repo, issue, body, GRADE_MARK.format(digest)
+                )
+            if posted:
+                record[(target, slug, CHANNEL_ISSUE)] = (digest, now, str(issue))
                 counts["comments"] += 1
                 log_person(f"  [ok] feedback on {cohort_org}/{repo}#{issue}")
             else:
@@ -2461,7 +2548,7 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
             files,
             "grades: update",
         ):
-            record[(handle, "", CHANNEL_GRADEBOOK)] = (digest, now)
+            record[(handle, "", CHANNEL_GRADEBOOK)] = (digest, now, "")
             live[handle] = digest
             counts["gradebooks"] += 1
             log_person(f"  [ok] {GRADEBOOK_PREFIX}{handle}")
@@ -2487,7 +2574,7 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
     )
     counts["emails"] = len(told)
     for handle in told:
-        record[(handle, "", CHANNEL_EMAIL)] = (live[handle], now)
+        record[(handle, "", CHANNEL_EMAIL)] = (live[handle], now, "")
 
     # 4. The registrar's export and the record of what went out, in ONE commit - together
     #    with the retired files this cohort is migrating off, so the old and the new can

@@ -247,6 +247,56 @@ def test_the_lookup_uses_the_list_endpoint_never_the_search_index(monkeypatch):
     assert not any("--search" in " ".join(c) or "issue" == c[0] for c in calls)
 
 
+def test_a_lookup_that_failed_opens_nothing(monkeypatch, capsys):
+    # A 5xx or a secondary limit that outlived the retry ladder used to read as "this repo
+    # has no Feedback issue", and the next thing that happens is a SECOND issue opened over
+    # the thread the student was told to read.
+    monkeypatch.setattr(grades, "gh", lambda *a, **k: (1, "gh: Internal Server Error"))
+    found = grades.find_feedback_issue("Cohort", "assignment-1-ada-l")
+    assert isinstance(found, grades.IssueLookupFailed)
+    assert not found  # falsy, so `if not found` still reads naturally
+    assert found is not None  # but never mistaken for "there is none"
+    assert isinstance(
+        grades.ensure_feedback_issue("Cohort", "assignment-1-ada-l", "body"),
+        grades.IssueLookupFailed,
+    )
+    assert "posting none" in capsys.readouterr().err
+
+
+def test_the_oldest_labelled_issue_is_asked_for_first(monkeypatch):
+    # GitHub lists newest first by default, and a student holds `maintain` on their own
+    # submission repo: theirs would have won.
+    seen: list[str] = []
+    monkeypatch.setattr(
+        grades,
+        "gh",
+        lambda *a, **k: seen.append(" ".join(a)) or (0, "7\topen\tdsl-bot"),
+    )
+    assert grades.find_feedback_issue("Cohort", "assignment-1-ada-l") == (7, "open")
+    assert "direction=asc" in seen[0] and "sort=created" in seen[0]
+
+
+def test_the_bot_authored_issue_wins_over_a_students_own(monkeypatch):
+    # Both carry the label. Ordering settles it whenever ours is older; the author settles
+    # it when it is not.
+    monkeypatch.setattr(grades, "bot_login", lambda: "dsl-bot-app")
+    monkeypatch.setattr(
+        grades,
+        "gh",
+        lambda *a, **k: (0, "3\topen\tada-l\n9\topen\tdsl-bot-app"),
+    )
+    assert grades.find_feedback_issue("Cohort", "assignment-1-ada-l") == (9, "open")
+
+
+def test_an_unreadable_bot_identity_takes_the_oldest(monkeypatch):
+    # "" means the identity could not be read: the ordering is the answer that is left.
+    monkeypatch.setattr(grades, "bot_login", lambda: "")
+    monkeypatch.setattr(
+        grades, "gh", lambda *a, **k: (0, "3\topen\tada-l\n9\topen\tdsl-bot-app")
+    )
+    assert grades.find_feedback_issue("Cohort", "assignment-1-ada-l") == (3, "open")
+
+
 def test_the_issue_is_opened_once_with_its_label(monkeypatch):
     calls = _gh(monkeypatch, {"issues?": (0, ""), "--method POST": (0, "12\n")})
     labelled: list[str] = []

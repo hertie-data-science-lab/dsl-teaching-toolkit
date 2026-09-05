@@ -1020,7 +1020,9 @@ def _post_receipts(
         issue = grades.ensure_feedback_issue(
             cohort_org, repo, grades.feedback_body(spec, unit, members), dry_run
         )
-        if issue is None:
+        if not isinstance(issue, int):
+            # No issue, or a lookup that could not be read. A receipt is a courtesy and the
+            # sheet is the record, so either way this unit waits for the next tick.
             continue
         if grades.post_receipt(
             cohort_org,

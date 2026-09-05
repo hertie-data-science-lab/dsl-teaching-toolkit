@@ -854,6 +854,42 @@ def test_a_re_run_says_nothing_twice(tmp_path, monkeypatch):
     assert again["rc"] == 0
 
 
+def test_the_record_remembers_which_issue_the_comment_landed_on(tmp_path, monkeypatch):
+    # A later run posts to the SAME thread without a listing to get wrong - and cannot open
+    # a second one because a listing came back unreadable.
+    first = _distribute(monkeypatch, tmp_path)
+    ((_cfg, cfg_files, _d),) = first["config"]
+    assert cfg_files[grades.DISTRIBUTED_PATH].splitlines()[0].endswith(",issue")
+    record = grades.parse_distributed(cfg_files[grades.DISTRIBUTED_PATH])
+    assert record[("ada-l", "assignment-1", grades.CHANNEL_ISSUE)][2] == "7"
+
+    corrected = _SHEET.replace("score_individual: 43", "score_individual: 45")
+    again = _distribute(
+        monkeypatch,
+        tmp_path / "again",
+        sheets={"assignment-1": corrected},
+        distributed=cfg_files[grades.DISTRIBUTED_PATH],
+        # A lookup would have to go through here. It does not run at all.
+        issue=grades.LOOKUP_FAILED,
+    )
+    ((_repo, body, _marker),) = again["comments"]
+    assert "45" in body
+    assert again["issues"] == []
+
+
+def test_an_unreadable_issue_lookup_posts_nothing_and_reds_the_run(
+    tmp_path, monkeypatch, capsys
+):
+    # Nothing is opened and nothing is posted for that unit; the run goes red so somebody
+    # looks, and the next one tries again.
+    out = _distribute(monkeypatch, tmp_path, issue=grades.LOOKUP_FAILED)
+    assert out["rc"] == 1
+    assert out["comments"] == []
+    printed = capsys.readouterr()
+    assert '"failed": 1' in printed.out
+    assert "ada-l" not in printed.out
+
+
 def test_a_corrected_grade_reaches_that_student_and_only_them(tmp_path, monkeypatch):
     first = _distribute(monkeypatch, tmp_path)
     ((_cfg, cfg_files, _d),) = first["config"]
