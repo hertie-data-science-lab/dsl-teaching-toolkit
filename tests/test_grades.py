@@ -563,7 +563,8 @@ def _distribute(
         effects[target].append(
             (repo, {k: v.decode() for k, v in files.items()}, tuple(delete))
         )
-        return put_files_ok
+        # A callable lets a test answer per write - which is what a lost ref race is.
+        return put_files_ok(files) if callable(put_files_ok) else put_files_ok
 
     monkeypatch.setattr(grades, "put_files", fake_put_files)
     students = (
@@ -838,6 +839,33 @@ def test_a_sheet_that_does_not_parse_sends_nothing_at_all(tmp_path, monkeypatch)
     assert out["rc"] == 1
     assert out["comments"] == [] and out["gradebooks"] == []
     assert out["config"] == [] and out["outbox"] == []
+
+
+def test_the_record_survives_one_lost_race_with_the_cron(tmp_path, monkeypatch, capsys):
+    # The quarter-hourly scheduler commits into the same repo all through the term, and the
+    # ref update is not forced. Losing that race cost the RECORD, not a file: comments and
+    # gradebooks are guarded by their own content, the emails only by `distributed.csv`, so
+    # the next run mailed the whole cohort again.
+    tries = {"n": 0}
+
+    def refuse_the_first_record(files):
+        if grades.DISTRIBUTED_PATH not in files:
+            return True  # the gradebook writes are not in the race
+        tries["n"] += 1
+        return tries["n"] > 1
+
+    out = _distribute(monkeypatch, tmp_path, put_files_ok=refuse_the_first_record)
+    assert tries["n"] == 2  # refused once, rebuilt against a fresh head, landed
+    assert out["rc"] == 0
+    assert "rebuilding the record commit" in capsys.readouterr().out
+
+
+def test_a_record_that_cannot_be_written_twice_still_reds_the_run(
+    tmp_path, monkeypatch
+):
+    # Two attempts, not a ladder: a second loss is a fault to report.
+    out = _distribute(monkeypatch, tmp_path, put_files_ok=False)
+    assert out["rc"] == 1
 
 
 def test_a_re_run_says_nothing_twice(tmp_path, monkeypatch):

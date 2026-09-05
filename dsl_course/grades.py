@@ -2385,6 +2385,33 @@ def _gradebook_files(
     }
 
 
+def _commit_record(
+    cohort_org: str, writes: dict[str, bytes], message: str, delete: list[str]
+) -> bool:
+    """Land `distributed.csv` and the registrar export, with ONE retry on a fresh head.
+
+    The ref update is deliberately not forced, so a commit that landed between reading the
+    head and moving it makes this fail - and the quarter-hourly scheduler commits into the
+    same repo (a snapshot, a grading sheet) all through the term. The cost of losing that
+    race was not a lost file but a lost RECORD: comments are guarded by the hash marker on
+    the comment itself and gradebooks by a blob compare, but the emails are guarded only by
+    this file, so the next run mailed every student again.
+
+    A retry is safe because the paths are DISJOINT from anything the cron writes and
+    `put_files` re-reads the head, rebuilds the tree and re-filters the no-ops on each
+    call: the second attempt is the same commit against whatever landed meanwhile. Two
+    attempts, not a ladder - a second loss is a fault to report, not a race to keep
+    running."""
+    for attempt in (1, 2):
+        if put_files(cohort_org, CONFIG_REPO, writes, message, delete=delete):
+            return True
+        if attempt == 1:
+            log(
+                f"  ({CONFIG_REPO} moved under this run - rebuilding the record commit)"
+            )
+    return False
+
+
 def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> int:
     """Send every mark a grader has written where it has to go: a feedback comment on each
     submission repo's Feedback issue, each student's private gradebook, the registrar's
@@ -2590,13 +2617,12 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
         )
     else:
         writes[COHORT_CSV_NAME] = render_registrar_csv(students, books).encode()
-    recorded = put_files(
+    recorded = _commit_record(
         cohort_org,
-        CONFIG_REPO,
         writes,
         f"grades: distribute ({counts['comments']} comment(s), "
         f"{counts['gradebooks']} gradebook(s), {counts['emails']} email(s))",
-        delete=([NOTIFIED_PATH, *retired] if migrating else []),
+        [NOTIFIED_PATH, *retired] if migrating else [],
     )
     if not recorded:
         log_err(
