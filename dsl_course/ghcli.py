@@ -11,6 +11,7 @@ import re
 import subprocess
 import time
 from collections import deque
+from functools import cache
 from itertools import pairwise
 from pathlib import Path
 from typing import Any
@@ -415,14 +416,33 @@ def git(*args: str, cwd: str | None = None) -> tuple[int, str]:
 
 # Bot identity + disabled hooks for engine-made commits. Spread into git() calls in the
 # clone/commit/push paths of release/site/scaffold/assign: git("-C", wd, *GIT_ENV, ...).
+# Spelt once here because `collect` reads it back off a commit to tell the toolkit's own
+# commits from a student's.
+BOT_EMAIL = "bot@dsl.local"
+BOT_NAME = "dsl-bot"
 GIT_ENV = [
     "-c",
-    "user.email=bot@dsl.local",
+    f"user.email={BOT_EMAIL}",
     "-c",
-    "user.name=dsl-bot",
+    f"user.name={BOT_NAME}",
     "-c",
     "core.hooksPath=/dev/null",
 ]
+
+
+@cache
+def bot_login() -> str:
+    """The GitHub login this token authenticates as - resolved ONCE per process.
+
+    A commit the API made on the toolkit's behalf (the `/generate` that creates every
+    submission repo, a Contents PUT) carries this login as its author, and no git identity
+    at all - so `BOT_EMAIL` cannot recognise it and the login has to be asked for. One
+    call per process, cached, because the question is asked once per submission repo.
+
+    "" when it cannot be read, which every caller must treat as "cannot tell" - never as
+    "not the bot", or a transient here would turn a handout commit into a submission."""
+    code, out = gh("api", "user", "--jq", ".login")
+    return out.strip() if code == 0 else ""
 
 
 def is_missing_resource(out: str) -> bool:

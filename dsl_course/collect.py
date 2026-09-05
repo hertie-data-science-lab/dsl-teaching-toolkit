@@ -107,7 +107,7 @@ from .gh_contents import (
     is_untouched_stub,
     put_file,
 )
-from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
+from .ghcli import BOT_EMAIL, GIT_ENV, bot_login, clone, gh, git, is_missing_resource
 
 # The assignment's definition and the sheet's spec live in `grades` (see the section
 # there): `grades` may not import `collect`, and the sheet is its type. Re-exported
@@ -432,6 +432,43 @@ def _until_param(deadline: str, tz: str | None = None) -> str:
     )
 
 
+# The commit facts the freeze needs, in one read: the sha and its committer date, plus
+# what tells the toolkit's own handout commit from a student's push - how many parents it
+# has, and who GitHub says wrote it. Tab-joined because a git author's name and email are
+# free text and a space is not a separator in them.
+_COMMIT_FIELDS = (
+    '[(.[0].sha // ""), (.[0].commit.committer.date // ""), '
+    '((.[0].parents // [] | length) | tostring), (.[0].author.login // ""), '
+    '(.[0].commit.author.email // "")] | join("\t")'
+)
+
+
+def _commit_facts(out: str) -> tuple[str, str, int | None, str, str]:
+    """`_COMMIT_FIELDS` parsed back: (sha, committer date, parent count, login, email).
+
+    The parent count is None when the answer did not carry one - an older shape, or a
+    truncated read. None means "cannot tell", and every caller must read it that way."""
+    parts = out.strip().split("\t")
+    parts += [""] * (5 - len(parts))
+    sha, committed, parents, author, email = parts[:5]
+    return sha, committed, int(parents) if parents.isdigit() else None, author, email
+
+
+def _is_handout_commit(parents: int | None, author: str, email: str) -> bool:
+    """Whether this commit is the repo's first AND the toolkit's own.
+
+    Both halves are required. A ROOT commit that a student made is a real submission (they
+    force-pushed over the handout, which is theirs to do), and a bot commit further along
+    the history is not the handout. `bot_login()` answering "" means the identity could not
+    be read, so nothing is claimed - a transient must never turn a student's work into "no
+    submission recorded"."""
+    if parents != 0:
+        return False
+    if email and email == BOT_EMAIL:
+        return True
+    return bool(author) and author == bot_login()
+
+
 @dataclass(frozen=True)
 class Pin:
     """What the freeze found for one submission repo: the sha to grade, that commit's
@@ -474,13 +511,19 @@ def _snapshot_sha(
         "-f",
         "per_page=1",
         "--jq",
-        '(.[0].sha // "") + " " + (.[0].commit.committer.date // "")',
+        _COMMIT_FIELDS,
     )
     if code == 0:
-        sha, _, committed = out.strip().partition(" ")
+        sha, committed, parents, author, email = _commit_facts(out)
         if not sha:
             _warn_if_late_commits_only(cohort_org, repo, deadline)
             return Pin()  # the repo is reachable; no commit on/before the deadline
+        if _is_handout_commit(parents, author, email):
+            # The repo's FIRST commit, made by the toolkit: `/generate` copies the template
+            # into every student repo, so a student who never pushed still has a commit
+            # dated at the handout. Pinning it recorded them as having submitted, on time,
+            # and posted them a receipt saying so.
+            return Pin()
         if _committed_after(committed, recorded_at):
             # Tag, never the handle: this log is public.
             log(

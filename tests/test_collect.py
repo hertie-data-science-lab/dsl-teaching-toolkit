@@ -576,10 +576,22 @@ def test_submission_targets_group_without_teams_is_empty(monkeypatch):
 # -------------------------------------------------------------------- taking a snapshot
 
 
+def _commits_line(
+    sha: str = SHA,
+    committed: str = "2026-10-12T08:00:00Z",
+    parents: int = 1,
+    author: str = "anna-adams",
+    email: str = "anna@uni.edu",
+) -> str:
+    """One row of what `_COMMIT_FIELDS` asks the commits API for. Defaults describe a
+    student's push ON TOP of the handout - the ordinary submission."""
+    return "\t".join([sha, committed, str(parents), author, email])
+
+
 @pytest.mark.parametrize(
     "response,expected",
     [
-        ((0, f"{SHA} 2026-10-12T08:00:00Z"), collect.Pin(SHA, "2026-10-12T08:00:00Z")),
+        ((0, _commits_line()), collect.Pin(SHA, "2026-10-12T08:00:00Z")),
         # repo exists, no commit that early -> recorded non-submission
         ((0, ""), collect.Pin()),
         # 404: the repo ISN'T THERE - distinct from empty, so an all-absent set can be skipped
@@ -600,11 +612,78 @@ def test_snapshot_sha_maps_api_outcomes(monkeypatch, response, expected):
 
 def test_snapshot_sha_asks_the_api_for_one_commit_before_a_utc_cutoff(monkeypatch):
     seen: list[tuple[str, ...]] = []
-    monkeypatch.setattr(collect, "gh", lambda *a, **k: seen.append(a) or (0, SHA))
+    monkeypatch.setattr(
+        collect, "gh", lambda *a, **k: seen.append(a) or (0, _commits_line())
+    )
     collect._snapshot_sha("Cohort", "assignment-1-anna", "2026-10-15T23:59:59+02:00")
     args = seen[0]
     assert "repos/Cohort/assignment-1-anna/commits" in args
     assert "until=2026-10-15T21:59:59Z" in args and "per_page=1" in args
+
+
+def test_the_handout_commit_is_not_a_submission(monkeypatch):
+    # `/generate` copies the template into every student repo, so a student who never
+    # pushed still has a commit dated at the handout. Pinning it recorded them as having
+    # submitted, on time, and posted them a receipt saying so.
+    monkeypatch.setattr(
+        collect,
+        "gh",
+        lambda *a, **k: (
+            0,
+            _commits_line(parents=0, author="dsl-bot-app", email=collect.BOT_EMAIL),
+        ),
+    )
+    assert collect._snapshot_sha("Cohort", "assignment-1-anna", "2026-10-13") == (
+        collect.Pin()
+    )
+
+
+def test_a_handout_commit_is_recognised_by_the_tokens_own_login(monkeypatch):
+    # A commit the API made carries no git identity to match on - only the login of the
+    # account the call was made with, which is asked for once per process.
+    monkeypatch.setattr(collect, "bot_login", lambda: "dsl-bot-app")
+    monkeypatch.setattr(
+        collect,
+        "gh",
+        lambda *a, **k: (0, _commits_line(parents=0, author="dsl-bot-app", email="")),
+    )
+    assert collect._snapshot_sha("Cohort", "assignment-1-anna", "2026-10-13") == (
+        collect.Pin()
+    )
+
+
+def test_a_students_commit_on_top_of_the_handout_is_a_submission(monkeypatch):
+    # The ordinary case: one parent, so it is not the repo's first commit whoever made it.
+    monkeypatch.setattr(
+        collect,
+        "gh",
+        lambda *a, **k: (0, _commits_line(parents=1, email=collect.BOT_EMAIL)),
+    )
+    assert collect._snapshot_sha(
+        "Cohort", "assignment-1-anna", "2026-10-13"
+    ) == collect.Pin(SHA, "2026-10-12T08:00:00Z")
+
+
+def test_a_student_authored_root_commit_is_a_submission(monkeypatch):
+    # They force-pushed over the handout, which is theirs to do. Both halves of the test
+    # are required: root ALONE would throw their work away.
+    monkeypatch.setattr(collect, "bot_login", lambda: "dsl-bot-app")
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, _commits_line(parents=0)))
+    assert collect._snapshot_sha(
+        "Cohort", "assignment-1-anna", "2026-10-13"
+    ) == collect.Pin(SHA, "2026-10-12T08:00:00Z")
+
+
+def test_an_unreadable_bot_identity_never_discards_a_submission(monkeypatch):
+    # "" from `bot_login` means the identity could not be read. Nothing is claimed on it:
+    # a transient there must not turn a student's work into "no submission recorded".
+    monkeypatch.setattr(collect, "bot_login", lambda: "")
+    monkeypatch.setattr(
+        collect, "gh", lambda *a, **k: (0, _commits_line(parents=0, email=""))
+    )
+    assert collect._snapshot_sha(
+        "Cohort", "assignment-1-anna", "2026-10-13"
+    ) == collect.Pin(SHA, "2026-10-12T08:00:00Z")
 
 
 def test_snapshot_sha_flags_a_commit_dated_after_the_freeze(monkeypatch, capsys):
@@ -613,7 +692,9 @@ def test_snapshot_sha_flags_a_commit_dated_after_the_freeze(monkeypatch, capsys)
     # cannot have existed then - a skewed or doctored clock - and a marker has to be told,
     # because everything downstream treats the pinned sha as settled.
     monkeypatch.setattr(
-        collect, "gh", lambda *a, **k: (0, f"{SHA} 2026-10-16T10:00:00Z")
+        collect,
+        "gh",
+        lambda *a, **k: (0, _commits_line(committed="2026-10-16T10:00:00Z")),
     )
     assert collect._snapshot_sha(
         "Cohort",
