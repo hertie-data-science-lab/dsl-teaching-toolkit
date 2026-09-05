@@ -1757,9 +1757,22 @@ def _sheet_env(
     pins=None,
     rows=None,
     contributions=None,
+    pushed=None,
 ):
-    """Stand `sync_sheet` up on stubs and return the (path, text) writes it makes."""
+    """Stand `sync_sheet` up on stubs and return the (path, text) writes it makes.
+
+    `pushed` is `{repo: pushed_at}` out of the org listing the refresh takes to find which
+    repos can have moved. Unset means none of them carries one, so every repo is read -
+    which is what every test written before that short-circuit existed expects."""
     written: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        collect,
+        "list_org_repos",
+        lambda org: [
+            {"name": repo, "pushed_at": (pushed or {}).get(repo, "")}
+            for repo, _unit, _members in targets
+        ],
+    )
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: grading)
     monkeypatch.setattr(
         collect, "submission_targets", lambda org, slug, is_group, key=None: targets
@@ -2001,6 +2014,89 @@ def test_a_sheet_the_grader_broke_mid_edit_is_left_exactly_as_it_is(
         now=datetime(2026, 10, 6, tzinfo=BERLIN),
     )
     assert written == []
+
+
+_PINNED = (
+    "submissions:\n"
+    "  ada-l:\n"
+    "    info:\n"
+    "      submitted: 2026-10-03T22:14+02:00\n"
+    "      days_late: 0\n"
+    "    score_individual: 18\n"
+    "  ben-k:\n"
+    "    info:\n"
+    "      submitted:\n"
+    "      days_late:\n"
+    "    score_individual:\n"
+)
+
+
+def _read_repos(monkeypatch, env_pins=None) -> list[str]:
+    """Record which repos the refresh actually asks the commits API about."""
+    asked: list[str] = []
+
+    def fake(org, repo, deadline):
+        asked.append(repo)
+        return (env_pins or {}).get(repo, collect.Pin())
+
+    monkeypatch.setattr(collect, "_snapshot_sha", fake)
+    return asked
+
+
+def test_a_repo_nobody_has_pushed_to_is_not_read_again(monkeypatch):
+    # The refresh runs four times an hour for the length of the late window. One org
+    # listing says which repos have moved; a repo quiet since the commit the sheet already
+    # records cannot have gained a later one, so it costs nothing to leave alone.
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS,
+        existing=(_PINNED, "SHA"),
+        # 20:14:20Z is 22:14:20+02:00 - the same MINUTE as the pin. A push lands seconds
+        # after the commit it carries, so comparing to the second would call it busy.
+        pushed={"assignment-1-ada-l": "2026-10-03T20:14:20Z"},
+    )
+    asked = _read_repos(monkeypatch)
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 6, tzinfo=BERLIN),
+    )
+    assert asked == ["assignment-1-ben-k"]  # never submitted; always worth asking
+    # And the fact it was not re-read for still stands, and still counts.
+    ((_path, text),) = written
+    assert "submitted: 2026-10-03T22:14+02:00" in text
+    assert "# Status: OPEN - 1 of 2 students have submitted" in text
+
+
+def test_a_repo_pushed_to_since_the_pin_is_re_read(monkeypatch):
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS,
+        existing=(_PINNED, "SHA"),
+        pushed={"assignment-1-ada-l": "2026-10-06T07:31:00Z"},
+    )
+    asked = _read_repos(
+        monkeypatch, {"assignment-1-ada-l": collect.Pin(SHA, "2026-10-06T07:30:00Z")}
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 6, 12, 0, tzinfo=BERLIN),
+    )
+    assert asked == ["assignment-1-ada-l", "assignment-1-ben-k"]
+    ((_path, text),) = written
+    assert "submitted: 2026-10-06T09:30+02:00" in text
+    assert "days_late: 2" in text
 
 
 def test_a_refresh_whose_lookups_failed_leaves_the_sheet_alone(monkeypatch):

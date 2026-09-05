@@ -148,6 +148,10 @@ def list_org_repos(org: str) -> list[dict]:
 
     Fields are normalised to the names the callers use (`url`, `isTemplate`).
 
+    `pushed_at` rides along because one listing answering "which of these has moved?" is
+    what saves the sheet refresh a commits call per submission repo per tick (see
+    `collect._provisional_pins`).
+
     An empty list means the org genuinely holds no repos; a failed listing raises, since
     every caller reads "no repos" as "nothing to do" (refresh converges zero repos and
     reports success, profile_readme misfiles a cohort org as a course org).
@@ -158,7 +162,7 @@ def list_org_repos(org: str) -> list[dict]:
         f"orgs/{org}/repos?per_page=100",
         "--jq",
         ".[] | {name, description, visibility, url: .html_url, "
-        "isTemplate: .is_template, archived, topics: (.topics // [])}",
+        "isTemplate: .is_template, archived, pushed_at, topics: (.topics // [])}",
     )
     if code != 0:
         raise RuntimeError(f"could not list repos in {org}: {out[:200]}")

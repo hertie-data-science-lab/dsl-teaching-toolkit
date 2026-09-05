@@ -98,6 +98,7 @@ from .course import (
     resolve_is_group,
     submission_repo,
 )
+from .discovery import list_org_repos
 from .fs import copy_tree
 from .gh_contents import (
     blob_sha,
@@ -818,12 +819,18 @@ def _sheet_info(
     """The toolkit's facts, per submission unit: when the pinned commit was made, how late
     that is, and (for a team) what CONTRIBUTIONS.md said at that commit.
 
-    Only what was DERIVED. The block's shape - which keys exist at all for this assignment
-    - is `grades._fresh_info`'s to declare, and the merge unions the two; stating it here
-    as well is how a key added in one place goes missing in the other."""
+    Only what was DERIVED, and only for the repos that were READ - a unit with no pin here
+    was left alone by `_provisional_pins` because nothing has been pushed to it, and the
+    merge keeps the fact the sheet already holds for it.
+
+    The block's shape - which keys exist at all for this assignment - is
+    `grades._fresh_info`'s to declare, and the merge unions the two; stating it here as
+    well is how a key added in one place goes missing in the other."""
     out: dict[str, dict] = {}
     for repo, unit, _members in targets:
-        sha, submitted_at = pins.get(repo, ("", ""))
+        if repo not in pins:
+            continue
+        sha, submitted_at = pins[repo]
         info: dict = {}
         when = _parse_iso(submitted_at) if (sha and submitted_at) else None
         if when is not None:
@@ -835,16 +842,62 @@ def _sheet_info(
     return out
 
 
+def _quiet_since(pushed_at: str, recorded: object) -> bool:
+    """Whether this repo can be left alone: nothing has been pushed to it since the commit
+    the sheet already records.
+
+    Both sides to the MINUTE. `recorded` is `info.submitted`, the pinned commit's committer
+    date written to the minute; a push lands seconds AFTER the commit it carries, so a
+    second-precision comparison would call every repo busy and save nothing. A push in a
+    later minute is the only thing that can have added a commit we have not seen.
+
+    False whenever the answer is not certain - an unparseable stamp, a repo missing from
+    the listing, a unit the sheet has no fact for yet - because the cost of asking again is
+    one API call and the cost of not asking is a submission nobody sees."""
+    if not pushed_at or not recorded:
+        return False
+    pushed, pinned = _parse_iso(str(pushed_at)), _parse_iso(str(recorded))
+    if pushed is None or pinned is None:
+        return False
+    to_minute = {"second": 0, "microsecond": 0}
+    return pushed.replace(**to_minute) <= pinned.replace(**to_minute)
+
+
 def _provisional_pins(
-    cohort_org: str, targets: list[tuple[str, str, list[str]]], deadline: str
+    cohort_org: str,
+    targets: list[tuple[str, str, list[str]]],
+    deadline: str,
+    previous: dict,
 ) -> dict[str, tuple[str, str]] | None:
     """Each repo's last commit on or before the cutoff, read WITHOUT writing a snapshot.
 
     The snapshot file stays write-once and stays the cutoff's job: these pins move with
     every push through the late window, which is the whole point of refreshing the sheet.
-    None if any lookup failed - a half-read cohort must not rewrite the file."""
+
+    Only the repos that can have MOVED are read. One org listing carries `pushed_at` for
+    the whole cohort, and a repo quiet since the commit the sheet already records cannot
+    have gained a later one - so it is not asked, and the fact on the sheet stands (a unit
+    absent from these pins is one `grades._merged_block` leaves alone). The refresh runs
+    four times an hour for the length of the late window, where it used to cost one commits
+    call per submission repo on every one of those ticks.
+
+    None if a lookup we DID make failed - a half-read cohort must not rewrite the file."""
+    try:
+        pushed = {
+            row["name"]: row.get("pushed_at") or ""
+            for row in list_org_repos(cohort_org)
+        }
+    except RuntimeError as exc:
+        # Not a failure: without the listing every repo is simply read, as before.
+        pushed = {}
+        log(f"  (no repo listing for the refresh - re-reading each submission: {exc})")
     pins: dict[str, tuple[str, str]] = {}
-    for repo, _unit, _members in targets:
+    for repo, unit, _members in targets:
+        recorded = ((previous.get(unit) or {}).get(grades.INFO_KEY) or {}).get(
+            "submitted"
+        )
+        if _quiet_since(pushed.get(repo, ""), recorded):
+            continue
         pin = _snapshot_sha(cohort_org, repo, deadline)
         if pin is None:
             return None
@@ -1037,6 +1090,7 @@ def sync_sheet(
             cohort_org,
             targets,
             (grades.cutoff_at(sched, key, gspec) or now).isoformat(),
+            previous,
         )
         if found is None:
             log_err(f"  ! could not read every submission for {path} - not rewriting")
@@ -1049,8 +1103,6 @@ def sync_sheet(
     for unit, count in (autograde or {}).items():
         info_updates.setdefault(unit, {})["autograde"] = count
 
-    submitted = sum(1 for info in info_updates.values() if info.get("submitted"))
-    status = _status_line(spec, phase, len(units), submitted, derive)
     sheet = grades.merge_sheet(
         on_disk or None,
         spec,
@@ -1058,6 +1110,16 @@ def sync_sheet(
         info_updates,
         frozen=phase is SheetPhase.FROZEN,
     )
+    # Counted off the MERGED sheet rather than off this tick's derivation: a repo nobody
+    # has pushed to since the last refresh is not re-read, so its submission is on the file
+    # and not in `info_updates`.
+    submitted = sum(
+        1
+        for block in (sheet.get(spec.container_key) or {}).values()
+        if isinstance(block, dict)
+        and (block.get(grades.INFO_KEY) or {}).get("submitted")
+    )
+    status = _status_line(spec, phase, len(units), submitted, derive)
     content = grades.dump_sheet(sheet, spec, status).encode()
     changed = not (old_sha and blob_sha(content) == old_sha)
     written = True
