@@ -521,7 +521,7 @@ def main() -> int:
         default="auto",
         help="individual = one repo per student; group = one per team (from "
         "classroom-config/teams.csv); auto = whatever schedule.yml / the template's "
-        "grading.yml declare (default: individual).",
+        "grading_config.yml declare (default: individual).",
     )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -608,7 +608,7 @@ def provision_all(
 
     Callable directly (e.g. by the scheduler) as well as from the CLI. `group=None`
     (the default) reads the template's own declaration - `type: group` in the
-    grading.yml on its solution branch; pass True to force per-team for a template
+    grading_config.yml on its solution branch; pass True to force per-team for a template
     that doesn't declare it.
 
     `scheduled` marks the hourly cron: a group assignment with no teams yet is then a
@@ -617,7 +617,7 @@ def provision_all(
         log_err("master-org and cohort-org must differ.")
         return 1, False
     if group is None:
-        # schedule.yml's assignments.<slug>.type wins; grading.yml is the fallback.
+        # schedule.yml's assignments.<slug>.type wins; grading_config.yml is the fallback.
         group = assignment_is_group(master_org, cohort_org, template)
         if group:
             log("  (declared `type: group` - provisioning per team)")

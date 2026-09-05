@@ -294,7 +294,8 @@ def create_repo(
 # depth, case-insensitively, and as glob patterns so `.env.local` is caught alongside
 # `.env`. The public site copies whole discovered session folders wholesale, so anything a
 # faculty member happens to keep beside their teaching material is published with it: a
-# `solution/` next to the lab it answers, the `grading.yml` that says how it is marked, the
+# `solution/` next to the lab it answers, the `grading_config.yml` that says how it is
+# marked, the
 # hidden `tests/`, a `.env` with a live key. None of those is a release decision anyone
 # made; they are what "copy the folder" means.
 #
@@ -304,7 +305,8 @@ def create_repo(
 PUBLICATION_DENYLIST = (
     "solution",
     "solutions",
-    "grading.yml",
+    "grading_config.yml",
+    "grading.yml",  # the pre-rename name, still on every template scaffolded before it
     "tests",
     ".env",
     ".env.*",
@@ -333,7 +335,8 @@ def has_denied_component(path: str) -> bool:
 #
 # Kept apart from PUBLICATION_DENYLIST deliberately, and it is not an oversight that
 # neither list mentions the other. That one is a SECURITY boundary: a `solution/`, a
-# `grading.yml`, a `.env` must not leak, and every entry earns its place by what it would
+# `grading_config.yml`, a `.env` must not leak, and every entry earns its place by what it
+# would
 # cost to publish. Nothing here leaks anything - it is clutter. Folding the two together
 # would let an edit meant for a list of nuisances widen the list that keeps answers away
 # from a class.

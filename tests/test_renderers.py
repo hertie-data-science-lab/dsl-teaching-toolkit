@@ -262,7 +262,7 @@ def test_refresh_re_seeds_itself_nightly_without_a_gate():
 
 def test_provision_type_choice_defaults_to_auto():
     # Manual dispatch surfaces the individual/group choice, but `auto` (follow
-    # schedule.yml / the template's grading.yml) is the default - dispatching without
+    # schedule.yml / the template's grading_config.yml) is the default - dispatching without
     # thinking about it must match what the schedule would have done.
     rendered = workflows_render.render_provision(
         ["Cohort-f2026"], ["assignment-4-project-f2026"]
@@ -668,7 +668,7 @@ def test_classroom_config_roster_dispatcher_fires_send_codes_on_students_csv():
 
 
 def test_new_assignment_button_exposes_format_and_type():
-    # The grading.yml vocabulary (type: individual/group) is chosen
+    # The grading_config.yml vocabulary (type: individual/group) is chosen
     # on the button and recorded by the scaffold - not hand-edited in afterwards.
     rendered = workflows_render.render_new_assignment()
     inputs = workflow_inputs(rendered)

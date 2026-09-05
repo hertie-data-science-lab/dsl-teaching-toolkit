@@ -758,12 +758,17 @@ def final_grade(
 
 # ------------------------------------------------- the assignment's own definition
 
-# `grading.yml`, on the course template's `solution` branch, is where an assignment is
-# DEFINED. It lives here rather than in `collect` because both readers need it and only
+# `grading_config.yml`, on the course template's `solution` branch, is where an assignment
+# is DEFINED. It lives here rather than in `collect` because both readers need it and only
 # one of them is the autograder: `collect` takes `type`/`autograde`/`tests` from it, and
 # everything else in it exists to shape the grading sheet - which is this module's. The
 # names `collect` still spells are re-exported there, so no caller had to move.
-GRADING_FILE = "grading.yml"  # on the template's solution branch
+GRADING_FILE = "grading_config.yml"  # on the template's solution branch
+
+# What the file was called while it held three autograder fields. It defines the whole
+# assignment now - dates aside - and the name says so. Templates scaffolded before the
+# rename still carry the old one, so it is still READ; nothing writes it any more.
+LEGACY_GRADING_FILE = "grading.yml"
 
 # The assignment's own definition. `type`/`autograde`/`tests` drive the autograder;
 # everything below them drives the grading sheet - its shape, its maxima, its header - so a
@@ -830,7 +835,7 @@ def _whole_days(value: object) -> int | None:
 
 
 def parse_grading_spec(text: str) -> dict:
-    """Parse a grading.yml (missing keys fall back to defaults; extras ignored).
+    """Parse a `grading_config.yml` (missing keys fall back to defaults; extras ignored).
 
     A malformed VALUE is logged and dropped, never raised and never passed through: this
     file is hand-edited by faculty and read by an hourly cron, so one bad line costs the
@@ -859,21 +864,36 @@ def parse_grading_spec(text: str) -> dict:
 
 @cache
 def _grading_text(course_org: str, template: str) -> str | None:
-    """The template's grading.yml, read ONCE per template per process.
+    """The template's `grading_config.yml`, read ONCE per template per process.
 
     An hourly tick asks the same template the same question from the scheduler, the sheet
     refresh and the collection that follows them. Memoising the TEXT (like
     `schedule._schedule_text`) means every caller still parses its own dict - nothing
-    shared to mutate - and still sees its own warnings. tests/conftest.py clears it."""
-    return get_file_content(course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH)
+    shared to mutate - and still sees its own warnings. tests/conftest.py clears it.
+
+    The old name is a FALLBACK, not a second spelling: a template scaffolded before the
+    rename is read and its owner told to rename it, once per template per process - this
+    cache is what makes it once rather than once per tick per pass."""
+    text = get_file_content(course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH)
+    if text is not None:
+        return text
+    legacy = get_file_content(
+        course_org, template, LEGACY_GRADING_FILE, ref=SOLUTION_BRANCH
+    )
+    if legacy is not None:
+        log_err(
+            f"  ! {template} still defines the assignment in {LEGACY_GRADING_FILE} - "
+            f"rename to {GRADING_FILE}; the old name stops working next term"
+        )
+    return legacy
 
 
 def load_grading_spec(course_org: str, template: str) -> dict:
     """The assignment's definition from the course template's `solution` branch.
 
     NEVER raises: it sits under the hourly cron, and a template with no solution branch, no
-    grading.yml, or one that does not parse must leave the rest of the tick running on the
-    defaults rather than take the cohort down with it."""
+    definition file, or one that does not parse must leave the rest of the tick running on
+    the defaults rather than take the cohort down with it."""
     try:
         text = _grading_text(course_org, template)
     except RuntimeError as exc:
@@ -929,7 +949,7 @@ def sheet_spec(
     sched: schedule.Schedule, key: str, slug: str, gspec: dict, is_group: bool
 ) -> SheetSpec:
     """What the sheet needs to know about this assignment, gathered from the two files
-    that own it: `grading.yml` on the template's solution branch, and the cohort's
+    that own it: `grading_config.yml` on the template's solution branch, and the cohort's
     `schedule.yml`. Nothing here is written into the sheet as data - it reaches the grader
     as the comment header, which is regenerated on every write."""
     entry = sched.assignments.get(key)

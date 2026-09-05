@@ -43,7 +43,7 @@ SYLLABUS_SESSIONS_FILE = "SYLLABUS.sessions.md"
 # to release a README still containing it, so the sentinel is declared ONCE here - the
 # writer and the guard both import it, and neither can lapse when the wording is edited.
 FACULTY_ONLY_HEADING = "delete this section before releasing the README"
-# The branch an assignment template keeps its solution and grading.yml on.
+# The branch an assignment template keeps its solution and grading_config.yml on.
 SOLUTION_BRANCH = "solution"
 
 # The four ROLE teams every org's access is expressed in: the two faculty teams, created
@@ -238,7 +238,7 @@ def resolve_is_group(
 
     An explicit force (the Grade-assignment workflow's checkbox / `--group`) wins; else the
     COHORT's declaration - `assignments.<slug>.type` in classroom-config/schedule.yml, passed
-    as `schedule_type`; else the template's design-time grading.yml `type:`, passed as
+    as `schedule_type`; else the template's design-time grading_config.yml `type:`, passed as
     `template_group` (True/False, or None when not consulted); else individual. Pure: each
     caller passes the inputs it already holds, so no consumer re-derives its own precedence
     (and none re-trusts student-writable teams.csv to decide the kind)."""

@@ -2,7 +2,7 @@
 used as a list item (`- {a: 1, b: 2}`).
 
 Flow and block parse identically, so this is a teaching/readability standard rather than a
-correctness one: `schedule.yml`, `people.yml`, `dsl-course.yml`, `grading.yml` and the docs
+correctness one: `schedule.yml`, `people.yml`, `dsl-course.yml`, `grading_config.yml` and the docs
 that mirror them are read and hand-edited by course teams, and one shape everywhere is what
 makes them copyable. The guard matters most for the SEEDED templates - a flow item left in
 `templates/classroom-config/schedule.yml` is `.format()`ed into every new cohort org, so the
@@ -166,8 +166,9 @@ DUMPED = {
 }
 
 # Every runtime-generated faculty-facing artefact rendered from templates or string
-# constants: the `.format()`ed seed templates (whose doubled `{{ }}` braces can hide a flow
-# item until bootstrap renders them) and the grading.yml written to each solution branch.
+# constants: the `.format()`ed seed templates (whose doubled `{{ }}` braces can hide a
+# flow item until bootstrap renders them) and the grading_config.yml written to each
+# solution branch.
 SEEDED = {
     "classroom-config/schedule.yml (seeded)": lambda: welcome.template(
         "classroom-config/schedule.yml"
@@ -186,7 +187,7 @@ SEEDED = {
     "cohort/dsl-course.yml (seeded)": lambda: bootstrap_course._cohort_metadata(
         "Org", "Course"
     ),
-    "grading.yml (scaffolded)": lambda: _GRADING_YML.format(
+    "grading_config.yml (scaffolded)": lambda: _GRADING_YML.format(
         kind="group", fmt="notebook"
     ),
 }

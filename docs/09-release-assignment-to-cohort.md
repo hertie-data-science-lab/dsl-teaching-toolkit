@@ -35,7 +35,7 @@ Other inputs, all default **off**:
 - `include_solution` (also push the template's `solution`
 branch into each student repo). Schedulable instead, as `solution_datetime:` on the
 assignment - see [07](07-schedule-releases.md#releasing-the-model-solution)
-- `type` (`auto` **default** = follow `schedule.yml` / the template's `grading.yml`;
+- `type` (`auto` **default** = follow `schedule.yml` / the template's `grading_config.yml`;
 or force `individual` / `group` for this dispatch -
 see [Group or individual?](#group-or-individual))
 - `dry_run` (list the repos that *would* be created).
@@ -56,12 +56,12 @@ Two places to say it, depending on how you release:
       type: group          # or individual - the default if field empty
   ```
 
-- **Manual dispatch**: the **Release assignment** workflow asks for `type` - pick `individual` or `group`, or leave the default `auto` (= whatever `schedule.yml` or the template's `grading.yml` declare; unwritten everywhere means individual).
+- **Manual dispatch**: the **Release assignment** workflow asks for `type` - pick `individual` or `group`, or leave the default `auto` (= whatever `schedule.yml` or the template's `grading_config.yml` declare; unwritten everywhere means individual).
 
 - `group` = one shared repo per team from `teams.csv` (repo `<slug>-<team>`, every member a collaborator), graded per team into the `team`/`autograde_score` columns, with `team_score` left for the shared mark you set. 
 - `individual` = one private repo per onboarded, enrolled student (`<slug>-<handle>`), graded into `autograde_score`.
 
-> NB: The template's `grading.yml` also carries a `type:` - the **New assignment** workflow's `type` input writes it at scaffold time, so most assignments are already declared there.
+> NB: The template's `grading_config.yml` also carries a `type:` - the **New assignment** workflow's `type` input writes it at scaffold time, so most assignments are already declared there.
 
 ## Group assignments: creating the teams
 
@@ -91,7 +91,7 @@ assignments:
 
 - **The date students see** (cohort site + the brief's "due" event) is `assignments[slug].due_datetime`
   (23:59 that day). Edit → commit to `main` - **Sync site** fires automatically on the push.
-- **The late window** is the template `grading.yml`'s `late_window_days` (with
+- **The late window** is the template `grading_config.yml`'s `late_window_days` (with
   `late_penalty_per_day`, a percentage of the earned grade per day started). Between the due
   date and the cutoff the grading sheet keeps refreshing and each late push earns a receipt.
 - **The cutoff** is `grading_datetime` if set, else the due date plus that late window.

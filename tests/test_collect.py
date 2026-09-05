@@ -532,11 +532,12 @@ def test_submission_targets_individual_skips_unonboarded(monkeypatch):
 
 
 def test_submission_targets_individual_ignores_teams_csv(monkeypatch):
-    # Replaces the old "infer group from teams.csv" test: that inference is REMOVED. A student
-    # can grow teams.csv by opening a "Join team" issue naming an INDIVIDUAL assignment, so
-    # with is_group=False submission_targets must never consult teams.csv - the faculty-owned
-    # schedule/grading.yml decides the kind upstream (resolve_is_group). Here a team row exists
-    # for the slug, yet the individual (one-repo-per-student) targets are returned regardless.
+    # Replaces the old "infer group from teams.csv" test: that inference is REMOVED. A
+    # student can grow teams.csv by opening a "Join team" issue naming an INDIVIDUAL
+    # assignment, so with is_group=False submission_targets must never consult teams.csv
+    # - the faculty-owned schedule/grading_config.yml decides the kind upstream
+    # (resolve_is_group). Here a team row exists for the slug, yet the individual
+    # (one-repo-per-student) targets are returned regardless.
     monkeypatch.setattr(collect.teams, "load", lambda org: _TEAMS)
     monkeypatch.setattr(collect.roster, "load", lambda org: _STUDENTS)
     assert collect.submission_targets("Cohort", "assignment-4-project", False) == [
@@ -773,7 +774,7 @@ def _clone_writing(grading: str):
     def fake_clone(org, repo, dest, branch=None):
         dest = Path(dest)
         dest.mkdir(parents=True, exist_ok=True)
-        (dest / "grading.yml").write_text(grading)
+        (dest / "grading_config.yml").write_text(grading)
         (dest / "tests").mkdir(exist_ok=True)
         return True
 
@@ -785,7 +786,7 @@ def _stub_solution_clone(monkeypatch, grading: str = "autograde: true\nmax_auto:
 
     `_grading_text` is the API read of the SAME file: `collect` needs the assignment's
     definition before it clones (the grading sheet is frozen on paths that never reach a
-    clone), so both transports answer with the template's grading.yml."""
+    clone), so both transports answer with the template's grading_config.yml."""
     monkeypatch.setattr(collect, "clone", _clone_writing(grading))
     monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: grading)
@@ -1135,13 +1136,13 @@ def test_template_is_group_reads_the_solution_branch_grading_yml(monkeypatch):
 
 
 def test_template_is_group_defaults_to_individual_without_grading_yml(monkeypatch):
-    # No solution branch / no grading.yml -> the contents fetch misses -> individual.
+    # No solution branch / no grading_config.yml -> the contents fetch misses -> individual.
     monkeypatch.setattr(collect.grades, "get_file_content", lambda *a, **k: None)
     assert not collect.template_is_group("Course-Org", "assignment-1-f2026")
 
 
 def test_assignment_is_group_prefers_the_cohort_schedule(monkeypatch):
-    # schedule.yml's assignments.<slug>.type wins; grading.yml is only the fallback.
+    # schedule.yml's assignments.<slug>.type wins; grading_config.yml is only the fallback.
     from dsl_course.schedule import AssignmentEntry, Schedule
 
     entry = AssignmentEntry(
@@ -1156,13 +1157,13 @@ def test_assignment_is_group_prefers_the_cohort_schedule(monkeypatch):
         "template_is_group",
         lambda org, template: calls.append(template) or True,
     )
-    # no cohort declaration -> falls through to grading.yml
+    # no cohort declaration -> falls through to grading_config.yml
     entry.type = None
     assert collect.assignment_is_group(
         "Course", "Cohort-f2026", "assignment-4-project-f2026"
     )
     assert calls == ["assignment-4-project-f2026"]
-    # cohort says individual -> grading.yml is NOT consulted
+    # cohort says individual -> grading_config.yml is NOT consulted
     entry.type = "individual"
     calls.clear()
     assert not collect.assignment_is_group(
@@ -1530,7 +1531,7 @@ def test_strip_student_test_rigging_survives_a_symlink_cycle(tmp_path):
         (True, "individual", False, True),  # ... over everything below it
         (False, "group", False, True),  # cohort schedule beats the template
         (False, "individual", True, False),
-        (False, None, True, True),  # template grading.yml is the fallback
+        (False, None, True, True),  # template grading_config.yml is the fallback
         (False, None, False, False),
         (False, None, None, False),  # nothing declared -> individual
     ],
@@ -2388,7 +2389,8 @@ def test_the_submitted_stamp_is_minutes_in_the_cohorts_own_clock():
 
 def test_load_grading_spec_never_raises_and_falls_back_to_the_defaults(monkeypatch):
     # It sits under the hourly cron: a template with no solution branch, or one whose
-    # grading.yml does not parse, must cost that assignment its defaults - not the tick.
+    # grading_config.yml does not parse, must cost that assignment its defaults - not
+    # the tick.
     def unreadable(*a, **k):
         raise RuntimeError("500")
 
@@ -2401,16 +2403,57 @@ def test_load_grading_spec_never_raises_and_falls_back_to_the_defaults(monkeypat
     assert collect.load_grading_spec("Course", "assignment-1-f2026") == DEFAULT_SPEC
 
 
-def test_the_grading_yml_is_read_once_per_template_per_process(monkeypatch):
+def test_the_grading_config_is_read_once_per_template_per_process(monkeypatch):
     reads: list[str] = []
     monkeypatch.setattr(
         collect.grades,
         "get_file_content",
-        lambda org, repo, path, ref="": reads.append(repo),
+        lambda org, repo, path, ref="": (reads.append(repo), "type: group")[1],
     )
     collect.load_grading_spec("Course", "assignment-1-f2026")
     collect.load_grading_spec("Course", "assignment-1-f2026")
     assert reads == ["assignment-1-f2026"]
+
+
+def test_the_definition_is_read_from_grading_config_yml(monkeypatch):
+    # The file that DEFINES the assignment carries the name, and it is the one asked for
+    # first - a template that has been renamed costs no extra read.
+    paths: list[str] = []
+
+    def fake_get(org, repo, path, ref=""):
+        paths.append(path)
+        return "type: group"
+
+    monkeypatch.setattr(collect.grades, "get_file_content", fake_get)
+    assert collect.load_grading_spec("Course", "assignment-4-f2026")["type"] == "group"
+    assert paths == ["grading_config.yml"]
+
+
+def test_the_old_grading_yml_still_defines_an_assignment(monkeypatch, capsys):
+    # Every template scaffolded before the rename still carries the old name. It is read,
+    # and its owner is told once - the memo above is what makes it once - what to rename.
+    def fake_get(org, repo, path, ref=""):
+        return "type: group" if path == collect.grades.LEGACY_GRADING_FILE else None
+
+    monkeypatch.setattr(collect.grades, "get_file_content", fake_get)
+    assert collect.load_grading_spec("Course", "assignment-4-f2026")["type"] == "group"
+    assert collect.load_grading_spec("Course", "assignment-4-f2026")["type"] == "group"
+    warnings = [
+        line
+        for line in capsys.readouterr().err.splitlines()
+        if "grading_config.yml" in line
+    ]
+    assert len(warnings) == 1
+    assert "rename to grading_config.yml" in warnings[0]
+    assert "stops working next term" in warnings[0]
+
+
+def test_a_template_with_neither_name_says_nothing(monkeypatch, capsys):
+    # Plenty of assignments have no definition file at all; the defaults cover them, and a
+    # deprecation notice for a file nobody wrote would be noise on every tick.
+    monkeypatch.setattr(collect.grades, "get_file_content", lambda *a, **k: None)
+    assert collect.load_grading_spec("Course", "assignment-9-f2026") == DEFAULT_SPEC
+    assert "rename to" not in capsys.readouterr().err
 
 
 def test_refresh_only_seals_rather_than_re_derives_once_a_snapshot_exists(monkeypatch):

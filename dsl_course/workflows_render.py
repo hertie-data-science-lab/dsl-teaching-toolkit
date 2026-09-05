@@ -570,7 +570,7 @@ on:
         type: boolean
         default: false
       type:
-        description: "individual (one repo per student) or group (one per team from teams.csv). auto = whatever schedule.yml / the template's grading.yml declare (default: individual)"
+        description: "individual (one repo per student) or group (one per team from teams.csv). auto = whatever schedule.yml / the template's grading_config.yml declare (default: individual)"
         required: true
         type: choice
         default: auto
@@ -1093,9 +1093,9 @@ on:
 def render_new_assignment() -> str:
     """Scaffold an assignment-N-<tag> template repo (main + solution branch), then refresh.
 
-    format/type land in the solution branch's grading.yml (and shape the starter/hidden
+    format/type land in the solution branch's grading_config.yml (and shape the starter/hidden
     tests), so the choice made on this workflow is the one the grader later obeys - the
-    grading.yml vocabulary is picked here, not hand-edited in afterwards."""
+    grading_config.yml vocabulary is picked here, not hand-edited in afterwards."""
     return f"""name: New assignment
 
 on:

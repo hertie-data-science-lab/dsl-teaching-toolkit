@@ -55,10 +55,10 @@ teams:
 The final mark is `total × (1 − rate × days_late) + adjustment`, floored at 0. A
 non-numeric score (`pass`, `A-`) is passed through verbatim with no arithmetic; the dry run
 counts those as "needs a hand decision". The question names, the `# /N` maxima and the whole
-header come from `grading.yml` and `schedule.yml` and are re-emitted on every write - so
+header come from `grading_config.yml` and `schedule.yml` and are re-emitted on every write - so
 edit them **there**, never in the sheet.
 
-An assignment whose `grading.yml` says `submit_via: external` has no `info:` block at all:
+An assignment whose `grading_config.yml` says `submit_via: external` has no `info:` block at all:
 there is no commit to time.
 
 ## Marking, step by step
@@ -93,7 +93,7 @@ skips the email.
 
 ## Autograding (optional)
 
-`autograde: true` in the template's `grading.yml` runs the hidden tests from its `solution`
+`autograde: true` in the template's `grading_config.yml` runs the hidden tests from its `solution`
 branch at the cutoff, against the frozen pin, in a sandbox with the token stripped. The
 count lands in `info.autograde` (`7/9`) for your information only - it is never a mark by
 itself and a student never sees it. Per-test detail goes to `classroom-config/autograde/`.

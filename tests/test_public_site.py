@@ -39,7 +39,8 @@ def _seed_source(root: Path) -> None:
         "README.md": "# materials",  # not a section
         # What a faculty member keeps beside the lab, and the public must never see.
         "labs/01_first-lab/solution/answers.ipynb": "the answers",
-        "labs/01_first-lab/grading.yml": "points: 10",
+        "labs/01_first-lab/grading_config.yml": "points: 10",
+        "labs/02_second-lab/grading.yml": "points: 10",  # the pre-rename name
         "labs/02_second-lab/tests/test_hidden.py": "assert secret()",
         "readings/01_first-lab/.env.local": "OPENAI_API_KEY=sk-live",
         # What no denylist has any reason to refuse, and faculty withheld by hand. At the
@@ -261,14 +262,16 @@ def test_public_sync_cli_without_source_repo_is_the_resync_path(monkeypatch):
 
 def test_the_public_site_never_publishes_what_sits_beside_the_material(published):
     # The public path copied every discovered session folder wholesale, so a `solution/`
-    # next to the lab it answers, the `grading.yml` that marks it, the hidden `tests/` and
+    # next to the lab it answers, the file that marks it (under either name), the hidden
+    # `tests/` and
     # a `.env` with a live key were all published with it. No release decision made any of
     # those; they are what "copy the folder" means.
     files = published(readings_mode="actual-readings")
     assert f"{SERVED}/session-1/labs/lab.ipynb" in files  # the material still ships
     for leaked in (
         f"{SERVED}/session-1/labs/solution/answers.ipynb",
-        f"{SERVED}/session-1/labs/grading.yml",
+        f"{SERVED}/session-1/labs/grading_config.yml",
+        f"{SERVED}/session-2/labs/grading.yml",
         f"{SERVED}/session-2/labs/tests/test_hidden.py",
         f"{SERVED}/session-1/readings/.env.local",
     ):

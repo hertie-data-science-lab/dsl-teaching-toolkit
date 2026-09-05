@@ -202,13 +202,13 @@ Live example: [`example-course/course-org/assignment-1-f2026`](../example-course
 
 `assignment-N-<tag>` - a template repo with two branches. Student repos are generated from
 `main` only. The **New assignment** workflow's `format` (py/notebook) picks the starter
-stub; `type` (individual/group) is recorded in `grading.yml`, and handout and grading obey
+stub; `type` (individual/group) is recorded in `grading_config.yml`, and handout and grading obey
 `type: group` automatically. The autograder takes either format - it converts any `.ipynb`
 the submission holds before running the hidden tests.
 
 ```
 main branch      README.md (the brief) + starter.*      -> what students get
-solution branch  solution/ + grading.yml + tests/       -> faculty-only; hidden tests
+solution branch  solution/ + grading_config.yml + tests/       -> faculty-only; hidden tests
                                                             power the (optional) autograder
 ```
 
@@ -235,7 +235,7 @@ repos, never orgs. Every release is idempotent - re-runs are no-ops.
 | Action | Does | Fields |
 |--------|------|--------|
 | `deploy` | copy a source path → a cohort repo | `course_source_repo`, `course_source_path`, `cohort_dest_repo` (default `materials`), `cohort_dest_path` (default: mirror). A list, or a single mapping for one copy |
-| `assignment` | one private repo per onboarded student - or per team, when the template's `grading.yml` says `type: group` | the template repo name |
+| `assignment` | one private repo per onboarded student - or per team, when the template's `grading_config.yml` says `type: group` | the template repo name |
 
 (Grading takes no action here - each assignment is autograded automatically, once, at its
 `grading_datetime` under `assignments:`.)
@@ -319,7 +319,7 @@ assignments:
 | `title` | no | the template README's `# ` heading | the assignment's name, beside the slug on the site. Declared here it shows from day one; the README fallback only appears at hand-out |
 | `handout_datetime` | no* | - | when repos are provisioned, automatic. *Required for the schedule to release it. If you hand out via the **Release assignment** workflow instead, the workflow records the release moment here for you |
 | `grading_datetime` | no | `due_datetime` + `late_window_days` | snapshot freezes + autograder fires (once) |
-| `type` | no | individual | `group` / `individual` - how handout + grading fan out. Can also be set in the template's `grading.yml` |
+| `type` | no | individual | `group` / `individual` - how handout + grading fan out. Can also be set in the template's `grading_config.yml` |
 | `max_team_size` | no | 5 | group assignments: Join-team cap |
 | `course_source_repo` | **yes** | - (entry dropped without it) | the course-org repo this hands out from. A name that does not exist is reported loudly |
 | `cohort_dest_repo` | no | the slug | the cohort-side name: student/team repos (`<name>-<handle>`), the frozen cohort template, the teams.csv key, snapshots and grades |
@@ -331,7 +331,7 @@ assignments:                          # each assignment's WHOLE lifecycle, keyed
   assignment-1:                       # students SEE this slug: it names their repo (`assignment-1-<handle>`)
     title: Linear regression          # optional: the name shown beside the slug
     handout_datetime: 2026-09-22T09:00  # optional: provision one repo per student (or per
-                                        # team - the template's grading.yml decides), automatic
+                                        # team - the template's grading_config.yml decides), automatic
     due_datetime: 2026-10-13            # what students see
     grading_datetime: 2026-10-15        # optional: the grading pin - snapshot freezes and the
                                         # autograder fires (once). Default = due_datetime.

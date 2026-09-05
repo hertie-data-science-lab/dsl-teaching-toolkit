@@ -44,7 +44,7 @@ Everything under `info:` is the toolkit's - when the work came in, how late it w
 due date and freezes at the cutoff. Everything else is yours and is never touched, including
 keys you invent and rows for students who have left.
 
-The question names, the `# /N` maxima and the header come from the template's `grading.yml`
+The question names, the `# /N` maxima and the header come from the template's `grading_config.yml`
 and this cohort's `schedule.yml`. Edit them **there** - the sheet's copy is regenerated on
 every write.
 

@@ -7,7 +7,7 @@ never shipped to students), runs them, and records a machine score into the PRIV
 CSV. Faculty & instructors then add manual marks and the existing grades pipeline emails
 the result - so a student never sees a score in their own repo.
 
-  course/<template> @ solution branch  ->  grading.yml + hidden tests
+  course/<template> @ solution branch  ->  grading_config.yml + hidden tests
                 |
   cohort/<slug>-<handle>  (individual)   clone @ snapshot, overlay tests, run
   cohort/<slug>-<team>    (group)              |
@@ -55,7 +55,7 @@ longer be mistaken for a completed grade. Machine-written grade cells are write-
 delete `autograde/<slug>/` and let the next tick regrade -
 and clear the `autograde_score` cells you want recomputed.
 
-grading.yml (on the template's solution branch):
+grading_config.yml (on the template's solution branch):
     type: individual        # or group
     autograde: true         # false -> skip (all-manual)
     tests: tests            # path on the solution branch holding the hidden tests
@@ -193,8 +193,8 @@ _STUDENT_TEST_RIGGING = (
 
 def template_is_group(master_org: str, template: str) -> bool:
     """Whether an assignment template declares itself group-provisioned: `type: group` in
-    the grading.yml on its solution branch (written by the New assignment scaffold). No
-    solution branch / no grading.yml means individual (the parse's default).
+    the grading_config.yml on its solution branch (written by the New assignment scaffold). No
+    solution branch / no grading_config.yml means individual (the parse's default).
 
     Through `load_grading_spec`, so the scheduler's group resolution shares the memoised
     read with the sheet refresh and the collection that follow it in the same tick."""
@@ -206,10 +206,10 @@ def assignment_is_group(master_org: str, cohort_org: str, template: str) -> bool
 
     Precedence (via `resolve_is_group`): the COHORT's own declaration -
     `assignments.<slug>.type` in classroom-config/schedule.yml - wins; else the template's
-    design-time grading.yml `type:` (solution branch, written by the New assignment scaffold);
+    design-time grading_config.yml `type:` (solution branch, written by the New assignment scaffold);
     else individual. Read-side only: the cohort setting never writes back into the course org's
-    grading.yml - sources are read course-ward, state written cohort-ward. The template's
-    grading.yml is read only when the cohort leaves `type` unset."""
+    grading_config.yml - sources are read course-ward, state written cohort-ward. The template's
+    grading_config.yml is read only when the cohort leaves `type` unset."""
     found = schedule.entry_for_repo(schedule.load(cohort_org), template)
     entry = found[1] if found else None
     schedule_type = entry.type if entry else None
@@ -362,7 +362,7 @@ def submission_targets(
     up by the name then found none, so a group assignment silently had no targets at all.
     Defaults to `slug` for the (usual) case where they are the same.
 
-    `is_group` is decided upstream by `resolve_is_group` (force -> schedule -> grading.yml)
+    `is_group` is decided upstream by `resolve_is_group` (force -> schedule -> grading_config.yml)
     and passed in; it is NEVER inferred from teams.csv here. teams.csv is student-writable (a
     "Join team" issue can add a row against an individual assignment), so trusting its rows to
     decide the assignment's KIND would let a student turn an individual assignment into a group
@@ -1652,8 +1652,8 @@ def collect(
 
     entry = found[1] if found else None
     # group-vs-individual via the single `resolve_is_group` precedence (force -> cohort
-    # schedule `type:` -> template grading.yml -> individual). The entry is the one found
-    # above by course_source_repo - `slug` is the cohort-side NAME, which is
+    # schedule `type:` -> template grading_config.yml -> individual). The entry is the
+    # one found above by course_source_repo - `slug` is the cohort-side NAME, which is
     # `cohort_dest_repo` when that is set and so is not a key into `sched.assignments`.
     is_group = resolve_is_group(
         force=group,

@@ -286,8 +286,8 @@ class AssignmentEntry:
     # schedule that publishes the assignment's dates. "" = fall back to the heading.
     title: str = ""
     # 'group' | 'individual' | None. The COHORT-level declaration of how this assignment
-    # fans out; when set it wins over the template's own grading.yml `type:` (the
-    # design-time fallback). None = defer to grading.yml (then individual).
+    # fans out; when set it wins over the template's own grading_config.yml `type:` (the
+    # design-time fallback). None = defer to grading_config.yml (then individual).
     type: str | None = None
     # Group assignments: the team-size cap the welcome repo's "Join team" flow enforces
     # (templates/welcome/team-formation.yml reads it straight from schedule.yml; its
@@ -757,7 +757,7 @@ def _parse_assignments(
             ),
             handout_datetime=handout,
             solution_datetime=solution,
-            # anything other than the two known values -> None, i.e. the grading.yml
+            # anything other than the two known values -> None, i.e. the grading_config.yml
             # fallback (flagged above, not silent)
             type=kind if kind in ("group", "individual") else None,
             max_team_size=cap,

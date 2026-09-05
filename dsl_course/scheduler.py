@@ -197,7 +197,7 @@ def _execute_nondeploy(
     changed = False
     if release.assignment:
         # provision_all's default (group=None) resolves group-vs-individual from the
-        # cohort schedule / the template's grading.yml - so a scheduled group handout
+        # cohort schedule / the template's grading_config.yml - so a scheduled group handout
         # provisions per TEAM, not one repo per student.
         failed, changed = provision_all(
             course_org,
@@ -238,12 +238,14 @@ def _snapshot_passed_deadlines(
             log(f"    DRY-RUN  snapshot {snapshot_path(name)} (deadline {deadline})")
             continue
         log_step(f"  snapshot {name} (deadline {deadline})")
-        # Resolve group-ness the SAME way grading does, through the one `resolve_is_group`
-        # precedence - cohort schedule `type:` wins, else the template's grading.yml - so the
-        # snapshot freezes the exact repos grading scores. Deriving it from the schedule alone
-        # would miss a group assignment declared ONLY in grading.yml, freezing individual repos
-        # while grading targets group repos (every team then reads as "absent from the snapshot"
-        # and scores zero). grading.yml is read only when the schedule leaves type unset.
+        # Resolve group-ness the SAME way grading does, through the one
+        # `resolve_is_group` precedence - cohort schedule `type:` wins, else the
+        # template's grading_config.yml - so the snapshot freezes the exact repos
+        # grading scores. Deriving it from the schedule alone would miss a group
+        # assignment declared ONLY in grading_config.yml, freezing individual repos
+        # while grading targets group repos (every team then reads as "absent from the
+        # snapshot" and scores zero). grading_config.yml is read only when the schedule
+        # leaves type unset.
         if entry.type is not None:
             template_group = None
         else:
@@ -300,7 +302,7 @@ def _autograde_passed_deadlines(
 
     A missing template repo, a template with no `solution` branch, and `autograde: false`
     are all skips, not failures: plenty of assignments are hand-marked. Group vs individual
-    is not guessed here - `collect` resolves it from the cohort schedule / grading.yml."""
+    is not guessed here - `collect` resolves it from the cohort schedule / grading_config.yml."""
     errors = 0
     for slug, deadline in due_snapshots(course_org, sched, now):
         # the fire-once marker is keyed on the cohort NAME - it must agree with what
@@ -403,7 +405,7 @@ def _handout_releases(
     ONE block, and the handout still fires through the exact machinery a
     `releases` entry would: due at its datetime, re-checked every tick
     (idempotent - a late onboarder gets their repo on the next one), per-team when the
-    template's grading.yml says so. An assignment with no `<slug>-<tag>` template repo is
+    template's grading_config.yml says so. An assignment with no `<slug>-<tag>` template repo is
     skipped - it may be pinned for its website date alone.
 
     The model solution rides on THIS release once `solution_datetime` has passed, rather

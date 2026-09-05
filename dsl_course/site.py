@@ -503,7 +503,7 @@ def _materials_index(
     for repo in sorted(content_repos):
         branch, paths = _repo_tree(cohort_org, repo)
         for path in paths:
-            # A released `solution/`, `grading.yml` or hidden `tests/` is not course
+            # A released `solution/`, `grading_config.yml` or hidden `tests/` is not course
             # material, and this index is the one page that lists everything a release
             # happened to carry - so it was the shortest route from "someone released a
             # folder wholesale" to "the whole class has the answers".
@@ -798,11 +798,12 @@ def _assignment_entry(
     )
     out = slug in handed_out or pinned_out
     # A group assignment fans out one repo per TEAM, so the shape a student looks for
-    # differs. Through `resolve_is_group` rather than testing `type == "group"` here: that
-    # is the single precedence every other consumer resolves through, and a second copy of
-    # it in the one place students READ the answer is how the site comes to name a shape
-    # the handout does not create. `template_group=None` leaves the design-time grading.yml
-    # unconsulted - the site will not spend an API call per assignment on a repo name.
+    # differs. Through `resolve_is_group` rather than testing `type == "group"` here:
+    # that is the single precedence every other consumer resolves through, and a second
+    # copy of it in the one place students READ the answer is how the site comes to name
+    # a shape the handout does not create. `template_group=None` leaves the design-time
+    # grading_config.yml unconsulted - the site will not spend an API call per
+    # assignment on a repo name.
     group = resolve_is_group(
         force=False,
         schedule_type=found[1].type if found else None,

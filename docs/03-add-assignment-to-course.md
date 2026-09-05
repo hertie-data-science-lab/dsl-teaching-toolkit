@@ -24,21 +24,21 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
    | Branch | Holds | Who sees it |
    |--------|-------|-------------|
    | `main` | `README.md` (brief) + `starter.*` | **what students get** |
-   | `solution` | `solution/` (model answer) + `grading.yml` + hidden `tests/` | **faculty & instructors only** |
+   | `solution` | `solution/` (model answer) + `grading_config.yml` + hidden `tests/` | **faculty & instructors only** |
 
 2. **Clone the repo locally**
    - This allows you to make local edits and replace with your own content.
 
 3. **Push your content** 
    - Brief + starter → `main`
-   - Model solution, `grading.yml` and the hidden `tests/` → `solution`
+   - Model solution, `grading_config.yml` and the hidden `tests/` → `solution`
    - Student repos are generated from **`main` only**, unless you tick `include_solution` at release time. 
-   - For a purely hand-marked assignment, set `autograde: false` in `grading.yml` - or push no
-     `solution` branch at all. **Do not delete `grading.yml`**: a missing file falls back to
+   - For a purely hand-marked assignment, set `autograde: false` in `grading_config.yml` - or push no
+     `solution` branch at all. **Do not delete `grading_config.yml`**: a missing file falls back to
      `autograde: true, tests: tests`, and the grading run then errors on the `tests/` folder
      that isn't there.
-   - For a partially machine-marked assignment set `autograde: true` in `grading.yml`:
-      - put the hidden tests in `tests/` (path configurable via `grading.yml`'s `tests:` field) plain pytest files that `from starter import ...` and check the submission, run faculty-side only, never shipped to students. 
+   - For a partially machine-marked assignment set `autograde: true` in `grading_config.yml`:
+      - put the hidden tests in `tests/` (path configurable via `grading_config.yml`'s `tests:` field) plain pytest files that `from starter import ...` and check the submission, run faculty-side only, never shipped to students. 
      - `info.autograde` in the grading sheet then shows how many of them each submission passed - a count for you to mark against, never the mark itself, and never shown to a student.
      - Full grading flow: [Grade and return assignments](10-grade-and-return-assignments.md).
 
@@ -49,10 +49,10 @@ Repeat for each assignment (`number` = 2, 3, …).
 ### Group vs individual assignments
 
 - If not defined, an assignment is default `type` = `individual`; it is individually assessed and returned to students. 
-- A group project is the same flow with `type` = `group` - recorded in the solution branch's `grading.yml`, 
+- A group project is the same flow with `type` = `group` - recorded in the solution branch's `grading_config.yml`, 
 - For group projects, both handout and grading then run per team automatically (i.e one repo per team is created, and the grading run assesses at the team-level with individual carve outs for comments / grade adjustments):
 
-> The type is determined in the assignment's solution branch in the `grading.yml`'s field `type: individual | group`. 
+> The type is determined in the assignment's solution branch in the `grading_config.yml`'s field `type: individual | group`. 
 >- This field is initially set (1) at the course-level when the assignment itself is created using the ` New assignment` workflow (in the course org's `.github`'s Actions tab) 
 > - It can be also be set in (2) the cohort's `classroom-config/schedule.yml`, which is more accessible to TAs with only cohort org write access:
 >

@@ -78,7 +78,7 @@ jobs:
               // (or there is no schedule.yml), and when the entry declares a `type:` that is
               // not `group`: a team may only form for a group assignment the teaching team has
               // declared, or one student could mint any number of real GitHub teams under names
-              // of their choosing. `type:` may instead live in the template's grading.yml, which
+              // of their choosing. `type:` may instead live in the template's grading_config.yml, which
               // this workflow cannot read, so an entry with no `type:` still forms a team.
               // A declared slug with no cap -> DEFAULT_TEAM_SIZE.
               const DEFAULT_TEAM_SIZE = 5;

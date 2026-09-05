@@ -76,7 +76,7 @@ def cadence_calls(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _grading_spec_defaults(monkeypatch):
-    """The cutoff is read out of each template's grading.yml (`late_window_days`), which is
+    """The cutoff is read out of each template's grading_config.yml (`late_window_days`), which is
     real gh I/O. Answered with the defaults - no window - so every test below keeps
     measuring the behaviour it was written for; the tests that are ABOUT the window declare
     their own spec."""
@@ -844,7 +844,7 @@ def test_due_snapshots_empty_without_assignments():
 
 
 def _window(monkeypatch, days: int | None) -> None:
-    """Declare a late window in the template's grading.yml, as a real course does."""
+    """Declare a late window in the template's grading_config.yml, as a real course does."""
     monkeypatch.setattr(
         scheduler,
         "load_grading_spec",
@@ -935,8 +935,8 @@ def _stub_snapshots(monkeypatch, existing: set[str]):
             or scheduler.SnapshotResult.WRITTEN
         ),
     )
-    # The snapshot pass resolves group-ness from the template grading.yml when the schedule
-    # leaves type unset; keep that network-free and individual by default.
+    # The snapshot pass resolves group-ness from the template grading_config.yml when
+    # the schedule leaves type unset; keep that network-free and individual by default.
     monkeypatch.setattr(
         scheduler, "_assignment_template", lambda org, slug, entry: None
     )
@@ -1128,7 +1128,7 @@ def _stub_collect(monkeypatch, marked: set[str], templates: set[str], rc: int = 
 def _no_sheet_refresh(monkeypatch) -> list[tuple[str, str]]:
     """The grading-sheet pass, stubbed to a recorder of `(slug, cohort name)`.
 
-    It sits between the freeze and the autograde and reads the template's grading.yml, so
+    It sits between the freeze and the autograde and reads the template's grading_config.yml, so
     every `run()` test would otherwise reach the API for a file it does not care about."""
     refreshed: list[tuple[str, str]] = []
     monkeypatch.setattr(scheduler, "template_is_group", lambda org, template: False)

@@ -641,7 +641,8 @@ def test_group_none_infers_per_team_from_the_templates_grading_yml(
     tmp_path, capsys, monkeypatch
 ):
     # group=None (the default - scheduler and untick'd button alike) asks the template's
-    # own grading.yml: `type: group` provisions per TEAM without anyone force-ticking.
+    # own grading_config.yml: `type: group` provisions per TEAM without anyone
+    # force-ticking.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
         "dsl_course.assign.assignment_is_group", lambda org, cohort, template: True
@@ -672,7 +673,7 @@ def test_group_none_infers_per_team_from_the_templates_grading_yml(
 def test_group_false_forces_individual_even_for_a_group_template(
     tmp_path, capsys, monkeypatch
 ):
-    # An explicit False never consults grading.yml - the caller decided.
+    # An explicit False never consults grading_config.yml - the caller decided.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
         "dsl_course.assign.assignment_is_group",

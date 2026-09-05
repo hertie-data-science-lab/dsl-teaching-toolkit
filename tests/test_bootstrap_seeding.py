@@ -427,11 +427,11 @@ _SAMPLE_SHEETS = [
 def test_every_sample_sheet_is_what_the_toolkit_would_write(
     slug, key, is_group, phase, submitted, total, derived
 ):
-    # These ship into every cohort's classroom-config as `grading_sheets/*.yml.sample` and
-    # are the only worked example a grader has. Hand-written, they drifted: their headers
-    # quoted points, a late window and `autograde off` that the example course's own
-    # grading.yml declared none of, and a status line the renderer never emits. Rendering
-    # them from those files is what stops that happening twice.
+    # These ship into every cohort's classroom-config as `grading_sheets/*.yml.sample`
+    # and are the only worked example a grader has. Hand-written, they drifted: their
+    # headers quoted points, a late window and `autograde off` that the example course's
+    # own grading_config.yml declared none of, and a status line the renderer never
+    # emits. Rendering them from those files is what stops that happening twice.
     sched, error = schedule.load_file(str(welcome.EXAMPLE_COHORT / "schedule.yml"))
     assert error is None, error
     entry = sched.assignments[key]
@@ -584,9 +584,9 @@ def test_the_example_courses_people_block_feeds_both_of_its_readers():
 
 
 def test_every_example_assignment_parses_with_the_real_grading_reader():
-    # grading.yml is design-time faculty input, and `parse_grading_spec` defaults every
-    # missing key - so a retired spelling in the example reads as a silent default rather
-    # than an error. Assert the VALUES, not just that it parses.
+    # grading_config.yml is design-time faculty input, and `parse_grading_spec` defaults
+    # every missing key - so a retired spelling in the example reads as a silent default
+    # rather than an error. Assert the VALUES, not just that it parses.
     kinds, autograded = {}, set()
     for a in sorted(welcome.EXAMPLE_COURSE.glob("assignment-*")):
         spec_file = a / "solution" / collect.GRADING_FILE

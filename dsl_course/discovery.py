@@ -235,7 +235,7 @@ def course_org_for_cohort(cohort_org: str) -> str:
     `course:` pointer. "" when the pointer is missing or unreadable.
 
     A cohort-side CLI is given only the cohort; anything it needs from the course side -
-    an assignment's `grading.yml`, say - has to start here."""
+    an assignment's `grading_config.yml`, say - has to start here."""
     return str(org_meta(cohort_org).get("course") or "")
 
 
