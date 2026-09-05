@@ -596,6 +596,28 @@ def _you_fill_in_sentence(spec: SheetSpec) -> str:
     )
 
 
+# The sheet says its own state in its header, and `collect` reads it back to decide
+# whether the file has already been sealed. A contract, therefore, not a formatting choice:
+# both spellings live here so a reworded header cannot silently un-freeze a sheet.
+STATUS_PREFIX = "# Status: "
+FROZEN_STATUS = "FROZEN"
+
+
+def sheet_is_frozen(text: str) -> bool:
+    """Whether this sheet's own header says it has been sealed.
+
+    The header is regenerated on every write, so it is the toolkit's own last word on the
+    file - and it survives what the snapshot cannot: a sheet sealed on the facts it held
+    because no snapshot could be read stays sealed. Only the comment block is looked at;
+    the word appearing inside a grader's feedback means nothing."""
+    for line in text.splitlines():
+        if line.startswith(STATUS_PREFIX):
+            return line[len(STATUS_PREFIX) :].strip().startswith(FROZEN_STATUS)
+        if line and not line.startswith("#"):
+            break  # past the header block
+    return False
+
+
 def _sheet_header(spec: SheetSpec, status_line: str) -> str:
     """The comment block at the top of the sheet, regenerated on every write so that it is
     still true after `grading_config.yml` changes under a sheet that already has marks."""
@@ -607,7 +629,7 @@ def _sheet_header(spec: SheetSpec, status_line: str) -> str:
         "#",
         "# From grading_config.yml / schedule.yml (edit THERE, not here):",
         *(f"#   {fact}" for fact in _config_facts(spec)),
-        f"# Status: {status_line}",
+        f"{STATUS_PREFIX}{status_line}",
         "#",
         *_wrapped(_auto_filled_sentence(spec)),
         *_wrapped(_you_fill_in_sentence(spec)),
@@ -775,7 +797,10 @@ LEGACY_GRADING_FILE = "grading.yml"
 # course states each fact once, in the file that already holds the others.
 _DEFAULT_SPEC = {
     "type": "individual",
-    "autograde": True,
+    # OFF unless the assignment asks for it. Most assignments are hand-marked, and a
+    # default of true made every template without the key try to run hidden tests that were
+    # never written - a red tick every quarter of an hour for the rest of the term.
+    "autograde": False,
     "tests": "tests",
     "title": "",
     "submit_via": "github",

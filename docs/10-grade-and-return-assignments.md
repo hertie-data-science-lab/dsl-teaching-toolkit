@@ -95,8 +95,8 @@ skips the email.
 
 ## Autograding (optional)
 
-`autograde: true` in the template's `grading_config.yml` runs the hidden tests from its `solution`
-branch at the cutoff, against the frozen pin, in a sandbox with the token stripped. The
+Off unless you ask for it. `autograde: true` in the template's `grading_config.yml` runs the
+hidden tests from its `solution` branch at the cutoff, against the frozen pin, in a sandbox with the token stripped. The
 count lands in `info.autograde` (`7/9`) for your information only - it is never a mark by
 itself and a student never sees it. Per-test detail goes to `classroom-config/autograde/`.
 To regrade, delete `autograde/<slug>/`.

@@ -33,10 +33,9 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
    - Brief + starter → `main`
    - Model solution, `grading_config.yml` and the hidden `tests/` → `solution`
    - Student repos are generated from **`main` only**, unless you tick `include_solution` at release time. 
-   - For a purely hand-marked assignment, set `autograde: false` in `grading_config.yml` - or push no
-     `solution` branch at all. **Do not delete `grading_config.yml`**: a missing file falls back to
-     `autograde: true, tests: tests`, and the grading run then errors on the `tests/` folder
-     that isn't there.
+   - A purely hand-marked assignment needs nothing: `autograde` defaults to **false**, and a
+     template with no `solution` branch at all is hand-marked too. The cutoff still freezes the
+     sheet and records the decision not to machine-mark it.
    - For a partially machine-marked assignment set `autograde: true` in `grading_config.yml`:
       - put the hidden tests in `tests/` (path configurable via `grading_config.yml`'s `tests:` field) plain pytest files that `from starter import ...` and check the submission, run faculty-side only, never shipped to students. 
      - `info.autograde` in the grading sheet then shows how many of them each submission passed - a count for you to mark against, never the mark itself, and never shown to a student.

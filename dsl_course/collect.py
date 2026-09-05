@@ -55,7 +55,7 @@ longer be mistaken for a completed grade. To re-grade deliberately, delete
 
 grading_config.yml (on the template's solution branch):
     type: individual        # or group
-    autograde: true         # false -> skip (all-manual)
+    autograde: false        # the default; true -> run the hidden tests at the cutoff
     tests: tests            # path on the solution branch holding the hidden tests
 
 Usage:
@@ -1055,6 +1055,36 @@ def _status_line(
     return line
 
 
+def _sheet_phase(
+    cohort_org: str,
+    slug: str,
+    old_text: str,
+    now: datetime,
+    cutoff: datetime | None,
+) -> SheetPhase:
+    """Where this write falls in the assignment's life.
+
+    Decided from the file and the clock rather than by the caller. The handout, the
+    refresh, the button and the freeze each used to pass their own answer, and the one
+    that defaulted to OPEN won whenever it ran last: a late onboarder provisioned after
+    the cutoff - or any press of Release assignment - rewrote a sealed sheet's header back
+    to `OPEN - late pushes still update info:`, telling a grader the marks could still
+    move.
+
+    ALREADY SEALED is what the sheet itself says, so the seal survives a snapshot that
+    could not be read. Otherwise the CUTOFF decides, off the schedule and the template -
+    no extra call. Only when the schedule cannot say (an assignment collected by hand,
+    with no dated entry) is the snapshot file asked."""
+    if grades.sheet_is_frozen(old_text):
+        return SheetPhase.FROZEN
+    sealed = (
+        now >= cutoff
+        if cutoff is not None
+        else load_snapshots(cohort_org, slug) is not None
+    )
+    return SheetPhase.FREEZING if sealed else SheetPhase.OPEN
+
+
 def sync_sheet(
     course_org: str,
     cohort_org: str,
@@ -1065,7 +1095,6 @@ def sync_sheet(
     *,
     is_group: bool,
     now: datetime,
-    phase: SheetPhase = SheetPhase.OPEN,
     units: list[tuple[str, list[str]]] | None = None,
     autograde: dict[str, str] | None = None,
     dry_run: bool = False,
@@ -1075,7 +1104,9 @@ def sync_sheet(
 
     ONE function for all three moments - handout, refresh, freeze - because they differ
     only in what `info:` may say. A separate creator would be a second definition of the
-    sheet's shape, and the two would drift the first time a field was added.
+    sheet's shape, and the two would drift the first time a field was added. Which moment
+    this is, is decided HERE (`_sheet_phase`) and never passed in: three callers choosing
+    it from different information is how a re-fired handout un-froze a sealed sheet.
 
     Nothing is derived before the due date (there is nothing to derive, and a handout must
     not cost an API call per student), nothing at all for an externally submitted
@@ -1102,6 +1133,9 @@ def sync_sheet(
         log_err(f"  ! could not read {path}: {exc}")
         return False
     old_text, old_sha = found if found else ("", "")
+    phase = _sheet_phase(
+        cohort_org, slug, old_text, now, grades.cutoff_at(sched, key, gspec)
+    )
     try:
         on_disk = grades.parse_sheet(old_text) if old_text else {}
     except grades.SheetUnreadable as exc:
@@ -1606,9 +1640,10 @@ def refresh_assignment_sheet(
     re-derives `info:`, so a grader who presses the button an hour after a late push sees
     it immediately instead of waiting for the tick.
 
-    A sheet whose snapshot already exists is past its cutoff and is written in the FROZEN
-    phase - the facts it holds are the ones the freeze recorded, and no later press may
-    move them."""
+    A sheet past its cutoff is sealed rather than refreshed - `sync_sheet` reads that off
+    the sheet and the clock - so no press of this button can move a fact the freeze
+    recorded, and one pressed over a cutoff that passed while nothing ran does the sealing
+    the tick missed."""
     sched = schedule.load(cohort_org)
     found = schedule.entry_for_repo(sched, template)
     key = found[0] if found else assignment_slug(template)
@@ -1629,11 +1664,6 @@ def refresh_assignment_sheet(
         template,
         is_group=is_group,
         now=datetime.now(schedule._tz(sched.timezone)),
-        phase=(
-            SheetPhase.FROZEN
-            if load_snapshots(cohort_org, slug) is not None
-            else SheetPhase.OPEN
-        ),
         dry_run=dry_run,
     )
     return 0 if ok else 1
@@ -1729,10 +1759,26 @@ def collect(
             template,
             is_group=is_group,
             now=cutoff,
-            phase=SheetPhase.FREEZING,
             autograde=counts,
             dry_run=dry_run,
         )
+
+    def sealed(counts: dict[str, str] | None = None) -> bool:
+        """Freeze the sheet, and say whether this run may record anything permanent.
+
+        A skip or graded record is FIRE-ONCE. Written over a sheet the freeze could not
+        seal - a grader saving in the browser between the read and the compare-and-swap
+        write, which is the exact minute graders are told they may type - it retires the
+        assignment with its header still OPEN and its `info:` still provisional, and
+        nothing ever re-derives them. So the marker waits for the seal, and the next tick
+        does both."""
+        if freeze_sheet(counts):
+            return True
+        log_err(
+            f"{slug}: the grading sheet could not be sealed - recording nothing, so the "
+            f"next run seals it and then records"
+        )
+        return False
 
     with tempfile.TemporaryDirectory() as sd:
         soldir = Path(sd) / "sol"
@@ -1744,7 +1790,8 @@ def collect(
             # Hand-marked, then: say so once in the archive rather than re-deciding it
             # on every hourly tick (see FIRE-ONCE above). The sheet is still frozen - the
             # deadline passed whether or not anything machine-grades.
-            freeze_sheet()
+            if not sealed():
+                return 1
             return _record_skip(
                 cohort_org,
                 slug,
@@ -1755,22 +1802,24 @@ def collect(
             log_ok(
                 f"{slug}: autograde disabled in {GRADING_FILE} - all-manual, nothing to collect."
             )
-            freeze_sheet()
+            if not sealed():
+                return 1
             return _record_skip(
                 cohort_org, slug, f"`autograde: false` in {GRADING_FILE}", dry_run
             )
         tests_src = soldir / str(gspec["tests"])
         if not tests_src.is_dir():
-            # The third hand-marked exit, and the one a template falls into by accident:
-            # `autograde` defaults to true, so an assignment whose hidden tests were never
-            # written lands here. Recorded and frozen like the other two rather than red -
+            # The third hand-marked exit: an assignment that asked to be autograded and
+            # whose hidden tests were never written. Recorded and frozen like the other
+            # two rather than red -
             # a fault the cron re-decides every quarter of an hour is a fault nobody reads,
             # and the sheet has to be sealed whether or not a machine ever marked anything.
             log_err(
                 f"{slug}: no `{gspec['tests']}/` on the solution branch - hand-marked, "
                 f"nothing to collect."
             )
-            freeze_sheet()
+            if not sealed():
+                return 1
             return _record_skip(
                 cohort_org,
                 slug,
@@ -1903,6 +1952,8 @@ def collect(
                 f"{slug}: nothing gradable across {len(targets)} target(s) - recording "
                 f"the skip rather than retrying every hour."
             )
+            if not sealed():
+                return 1
             return _record_skip(
                 cohort_org,
                 slug,
@@ -1949,7 +2000,7 @@ def collect(
         # unfrozen sheet would leave the cutoff's facts unrecorded for ever (nothing
         # re-derives them), and a frozen sheet with no sentinel is simply re-frozen next
         # tick to identical bytes, which writes nothing.
-        if not (archive_ok and freeze_sheet(scores) and mark_graded(cohort_org, slug)):
+        if not (archive_ok and sealed(scores) and mark_graded(cohort_org, slug)):
             log_err(
                 f"{slug}: graded {len(scores)} target(s) but a result archive, the grading "
                 f"sheet or the fire-once sentinel failed to write - NOT marking "

@@ -52,7 +52,7 @@ def _clear_dep_caches() -> None:
 
 DEFAULT_SPEC = {
     "type": "individual",
-    "autograde": True,
+    "autograde": False,
     "tests": "tests",
     "title": "",
     "submit_via": "github",
@@ -898,17 +898,20 @@ def _stub_solution_clone(monkeypatch, grading: str = "autograde: true\nmax_auto:
     monkeypatch.setattr(collect, "sync_sheet", lambda *a, **k: True)
 
 
-def _recorded_sheet_writes(monkeypatch, order: list | None = None) -> list[dict]:
-    """The `sync_sheet` calls collect makes, in order - what phase, and with which
-    autograde counts. `order` interleaves them with the classroom-config writes, which is
-    what the sentinel-ordering tests are actually about."""
+def _recorded_sheet_writes(
+    monkeypatch, order: list | None = None, ok: bool = True
+) -> list[dict]:
+    """The `sync_sheet` calls collect makes, in order, and with which autograde counts.
+    `order` interleaves them with the classroom-config writes, which is what the
+    sentinel-ordering tests are actually about; `ok` is what each call answers, so a test
+    can refuse the freeze."""
     calls: list[dict] = []
 
     def fake_sync(course_org, cohort_org, sched, key, slug, template, **kw):
         calls.append({"slug": slug, **kw})
         if order is not None:
-            order.append((collect.grades.sheet_path(slug), kw["phase"].value))
-        return True
+            order.append(collect.grades.sheet_path(slug))
+        return ok
 
     monkeypatch.setattr(collect, "sync_sheet", fake_sync)
     return calls
@@ -1127,7 +1130,43 @@ def test_collect_records_a_skip_when_the_template_has_no_solution_branch(monkeyp
     assert collect.SOLUTION_BRANCH in text  # the record says why
     # The deadline passed whether or not anything machine-grades, so the sheet is still
     # sealed - a hand-marked assignment left OPEN tells its grader marks can still move.
-    assert [c["phase"] for c in sheets] == [collect.SheetPhase.FREEZING]
+    # `sync_sheet` is handed the cutoff and works the rest out (see `_sheet_phase`).
+    assert len(sheets) == 1 and sheets[0]["slug"] == "assignment-1"
+
+
+def test_a_freeze_that_fails_records_no_skip_and_goes_red(monkeypatch, capsys):
+    # A skip record is fire-once. Written over a sheet the freeze could not seal - a
+    # grader saving in the browser inside the compare-and-swap window is enough - it
+    # retires the assignment with an OPEN header and provisional `info:` that nothing ever
+    # re-derives. So the marker waits, and the next tick seals and then records.
+    monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
+    monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
+    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    _recorded_sheet_writes(monkeypatch, ok=False)
+    written = _captured_writes(monkeypatch)
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
+    assert written == []
+    assert "could not be sealed" in capsys.readouterr().err
+
+
+def test_the_next_run_after_a_failed_freeze_seals_and_then_records(monkeypatch):
+    # The retry the run above leaves open: nothing about the failure is remembered, so the
+    # tick that follows does both halves.
+    monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
+    monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: "")
+    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    sheets = _recorded_sheet_writes(monkeypatch, ok=True)
+    written = _captured_writes(monkeypatch)
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
+    assert len(sheets) == 1
+    assert [path for path, _text in written] == ["autograde/assignment-1/_skipped.json"]
+
+
+def test_autograde_is_off_unless_the_assignment_asks_for_it():
+    # Most assignments are hand-marked. A default of true made every template without the
+    # key try to run hidden tests that were never written - red every quarter of an hour.
+    assert collect.parse_grading_spec("")["autograde"] is False
+    assert collect.parse_grading_spec("autograde: true\n")["autograde"] is True
 
 
 def test_collect_records_a_skip_when_autograde_is_disabled(monkeypatch):
@@ -1161,7 +1200,7 @@ def test_collect_records_a_skip_when_the_solution_branch_has_no_tests(monkeypatc
     ((path, text),) = written
     assert path == "autograde/assignment-1/_skipped.json"
     assert "no `tests/` on the solution branch - hand-marked" in text
-    assert [c["phase"] for c in sheets] == [collect.SheetPhase.FREEZING]
+    assert len(sheets) == 1 and sheets[0]["slug"] == "assignment-1"
 
 
 def test_collect_dry_run_records_no_skip(monkeypatch):
@@ -2075,8 +2114,7 @@ def test_a_freeze_with_no_snapshot_keeps_the_facts_the_sheet_already_holds(
         "assignment-1",
         "assignment-1-f2026",
         is_group=False,
-        now=datetime(2026, 10, 12, tzinfo=BERLIN),
-        phase=collect.SheetPhase.FREEZING,
+        now=datetime(2026, 10, 12, tzinfo=BERLIN),  # past the 11 Oct cutoff
     )
     ((_path, text),) = written
     assert "submitted: 2026-10-06T09:30+02:00" in text
@@ -2266,7 +2304,7 @@ def test_an_externally_submitted_assignment_gets_no_info_and_a_status_that_says_
         "assignment-1",
         "assignment-1-f2026",
         is_group=False,
-        now=datetime(2026, 10, 6, tzinfo=BERLIN),
+        now=datetime(2026, 10, 2, tzinfo=BERLIN),  # still open
     )
     ((_path, text),) = written
     assert "# Status: OPEN - submitted outside GitHub" in text
@@ -2301,8 +2339,7 @@ def test_the_freeze_reads_the_written_snapshot_and_seals_the_sheet(monkeypatch):
         "assignment-1",
         "assignment-1-f2026",
         is_group=False,
-        now=datetime(2026, 10, 11, tzinfo=BERLIN),
-        phase=collect.SheetPhase.FREEZING,
+        now=datetime(2026, 10, 12, tzinfo=BERLIN),  # past the 11 Oct cutoff
         autograde={"ada-l": "7/9"},
     )
     ((_path, text),) = written
@@ -2317,6 +2354,7 @@ def test_a_frozen_sheet_is_never_re_derived(monkeypatch):
     # After the freeze the recorded facts stand. A later press of Collect submissions must
     # not quietly re-date a submission the cutoff already settled.
     sealed = (
+        "# Status: FROZEN Sun 11 Oct 2026 23:59\n"
         "submissions:\n"
         "  ada-l:\n"
         "    info:\n"
@@ -2342,7 +2380,6 @@ def test_a_frozen_sheet_is_never_re_derived(monkeypatch):
         "assignment-1-f2026",
         is_group=False,
         now=datetime(2026, 10, 20, tzinfo=BERLIN),
-        phase=collect.SheetPhase.FROZEN,
     )
     ((_path, text),) = written
     sheet = grades.parse_sheet(text)
@@ -2616,28 +2653,97 @@ def test_a_template_with_neither_name_says_nothing(monkeypatch, capsys):
     assert "rename to" not in capsys.readouterr().err
 
 
-def test_refresh_only_seals_rather_than_re_derives_once_a_snapshot_exists(monkeypatch):
-    # The Collect submissions button after the cutoff: the sheet is written in the FROZEN
-    # phase, so pressing it cannot move a fact the freeze recorded.
-    phases: list[collect.SheetPhase] = []
-    monkeypatch.setattr(collect.schedule, "load", lambda org: _sched())
-    monkeypatch.setattr(
-        collect.grades, "_grading_text", lambda org, template: GRADING_YML
+@pytest.mark.parametrize(
+    "old_text,now,expected",
+    [
+        ("", datetime(2026, 10, 5, tzinfo=BERLIN), collect.SheetPhase.OPEN),
+        ("", datetime(2026, 10, 12, tzinfo=BERLIN), collect.SheetPhase.FREEZING),
+        (
+            "# Status: FROZEN Sun 11 Oct 2026 23:59\nsubmissions:\n",
+            datetime(2026, 10, 12, tzinfo=BERLIN),
+            collect.SheetPhase.FROZEN,
+        ),
+        (
+            # A sealed sheet stays sealed however late the caller's clock says it is not.
+            "# Status: FROZEN Sun 11 Oct 2026 23:59\nsubmissions:\n",
+            datetime(2026, 10, 5, tzinfo=BERLIN),
+            collect.SheetPhase.FROZEN,
+        ),
+    ],
+)
+def test_the_phase_is_read_off_the_sheet_and_the_cutoff(old_text, now, expected):
+    # One decision, in one place. Three callers used to choose it, and the one that
+    # defaulted to OPEN un-froze whatever it ran over.
+    cutoff = datetime(2026, 10, 11, 23, 59, tzinfo=BERLIN)
+    assert collect._sheet_phase("Cohort", "assignment-1", old_text, now, cutoff) == (
+        expected
     )
-    monkeypatch.setattr(
-        collect,
-        "sync_sheet",
-        lambda *a, **k: phases.append(k["phase"]) or True,
+
+
+def test_a_re_fired_handout_after_the_cutoff_cannot_un_freeze_the_sheet(monkeypatch):
+    # `due_releases` is cumulative, so the scheduler re-provisions every handed-out
+    # assignment on every tick, and any press of Release assignment does the same. Both
+    # used to rewrite a sealed header back to "OPEN - late pushes still update `info:`".
+    sealed = (
+        "# Status: FROZEN Sun 11 Oct 2026 23:59\n"
+        "submissions:\n"
+        "  ada-l:\n"
+        "    info:\n"
+        "      submitted: '2026-10-03T22:14+02:00'\n"
+        "      days_late: 0\n"
     )
-    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: None)
+    written = _sheet_env(
+        monkeypatch, targets=SOLO_TARGETS, existing=(sealed, "old-sha")
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 20, tzinfo=BERLIN),
+        units=[("ada-l", ["ada-l"]), ("ben-k", ["ben-k"])],  # what a handout passes
+    )
+    ((_path, text),) = written
+    assert "# Status: FROZEN" in text
+    assert "OPEN" not in text
+    ada = grades.parse_sheet(text)["submissions"]["ada-l"]
+    assert ada["info"] == {"submitted": "2026-10-03T22:14+02:00", "days_late": "0"}
+
+
+def test_the_button_seals_a_sheet_whose_cutoff_has_passed(monkeypatch):
+    # Pressing Collect submissions after the cutoff does the sealing a missed tick did
+    # not, rather than copying an OPEN sheet forward for the rest of the term. The due
+    # date is long past for any clock this runs on.
+    past = Schedule(
+        assignments={
+            "assignment-1": collect.schedule.AssignmentEntry(
+                course_source_repo="assignment-1-f2026",
+                due_datetime=datetime(2020, 10, 4, 23, 59, tzinfo=BERLIN),
+            )
+        },
+        timezone="Europe/Berlin",
+    )
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        rows={
+            "assignment-1-ada-l": collect.SnapshotRow(
+                repo="assignment-1-ada-l",
+                sha=SHA,
+                submitted_at="2020-10-03T20:14:00Z",
+                submitted_source="commit",
+            )
+        },
+    )
+    monkeypatch.setattr(collect.schedule, "load", lambda org: past)
     assert (
         collect.refresh_assignment_sheet("Course", "assignment-1-f2026", "Cohort") == 0
     )
-    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: {"r": SHA})
-    assert (
-        collect.refresh_assignment_sheet("Course", "assignment-1-f2026", "Cohort") == 0
-    )
-    assert phases == [collect.SheetPhase.OPEN, collect.SheetPhase.FROZEN]
+    ((_path, text),) = written
+    assert "# Status: FROZEN" in text
 
 
 # ------------------------------------------------------ receipts, from the refresh pass
@@ -2661,7 +2767,7 @@ def _receipt_env(monkeypatch) -> list[tuple[str, str, bool]]:
     return posted
 
 
-def _refresh(monkeypatch, *, now, phase=collect.SheetPhase.OPEN, dry_run=False):
+def _refresh(monkeypatch, *, now, dry_run=False):
     return collect.sync_sheet(
         "Course",
         "Cohort",
@@ -2671,7 +2777,6 @@ def _refresh(monkeypatch, *, now, phase=collect.SheetPhase.OPEN, dry_run=False):
         "assignment-1-f2026",
         is_group=False,
         now=now,
-        phase=phase,
         dry_run=dry_run,
     )
 
@@ -2777,11 +2882,7 @@ def test_the_cutoff_posts_the_final_receipt(monkeypatch):
         },
     )
     posted = _receipt_env(monkeypatch)
-    _refresh(
-        monkeypatch,
-        now=datetime(2026, 10, 11, tzinfo=BERLIN),
-        phase=collect.SheetPhase.FREEZING,
-    )
+    _refresh(monkeypatch, now=datetime(2026, 10, 12, tzinfo=BERLIN))
     # Only the student whose work was frozen: there is no pin to point the other at, and
     # they were already told at the deadline that nothing had been recorded.
     ((repo, body, _dry),) = posted
