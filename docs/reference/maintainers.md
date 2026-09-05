@@ -227,8 +227,16 @@ push`) outside the orgs it names - opt-in, unset everywhere else, and it raises 
 returning a failure pair, which `repo_exists` would read as absence. `tests/e2e/allowlist.py`
 names the two demo orgs as a literal; `DSL_E2E_ORGS` may only NARROW that. Preflight refuses
 to start unless the course org declares `central_ref: staging`, `staging` is this checkout's
-HEAD, the org has refreshed since, the test student has a roster row, and the run's
-namespace is empty.
+HEAD, every workflow the org holds is byte-for-byte what this checkout renders for it, the
+test student has a roster row, and the run's namespace is empty.
+
+That workflow check is a blob-sha comparison, not a timestamp: the preflight renders the
+org's whole `.github/workflows` set with `seed.github_workflow_files` (the same call
+Refresh actions makes, at the tier the org declares) and compares each blob sha with the
+org's tree. Every input to that render is discovered from the org, so nothing is hardcoded
+and no file is excused. A named file means run **Refresh actions** and start again. The
+`.last-refresh` heartbeat is only checked for existence - its content is the date, so it
+moves at most once a day and could never show a promotion made an hour ago.
 
 Everything a run creates is namespaced `assignment-90-<run id>`. If it dies halfway:
 

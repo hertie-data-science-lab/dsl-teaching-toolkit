@@ -152,6 +152,78 @@ def test_a_config_repo_that_is_not_there_is_not_an_error(monkeypatch):
     assert estate.fingerprint(COURSE) == {"repos": {}, estate.CONFIG_REPO: {}}
 
 
+# ------------------------------------------------------- are the org's workflows current
+
+# The preflight's real question. The heartbeat cannot answer it: its content is the date,
+# so it moves at most once a day and a promotion an hour later leaves it untouched while
+# the workflow files themselves have been rewritten.
+
+RENDERED = {
+    ".github/workflows/refresh-actions.yml": b"on: schedule\n",
+    ".github/workflows/send-codes.yml": b"on: workflow_dispatch\n",
+}
+
+
+def _tree(shas: dict[str, str]) -> dict:
+    return {
+        "tree": [
+            {"path": name, "type": "blob", "sha": sha} for name, sha in shas.items()
+        ]
+    }
+
+
+def _org_holds(monkeypatch, shas: dict[str, str]) -> None:
+    monkeypatch.setattr(estate.ghcli, "gh_json", lambda *args: _tree(shas))
+
+
+def _sha(path: str) -> str:
+    return estate.gh_contents.blob_sha(RENDERED[path])
+
+
+def test_an_org_running_what_this_tip_renders_has_no_drift(monkeypatch):
+    _org_holds(
+        monkeypatch,
+        {
+            "refresh-actions.yml": _sha(".github/workflows/refresh-actions.yml"),
+            "send-codes.yml": _sha(".github/workflows/send-codes.yml"),
+        },
+    )
+    assert estate.workflow_drift(COURSE, RENDERED) == []
+
+
+def test_one_stale_workflow_is_named(monkeypatch):
+    _org_holds(
+        monkeypatch,
+        {
+            "refresh-actions.yml": _sha(".github/workflows/refresh-actions.yml"),
+            "send-codes.yml": "0" * 40,
+        },
+    )
+    assert estate.workflow_drift(COURSE, RENDERED) == ["send-codes.yml"]
+
+
+def test_a_workflow_the_org_never_got_is_named(monkeypatch):
+    _org_holds(
+        monkeypatch,
+        {"refresh-actions.yml": _sha(".github/workflows/refresh-actions.yml")},
+    )
+    assert estate.workflow_drift(COURSE, RENDERED) == ["send-codes.yml"]
+
+
+def test_a_retired_workflow_the_org_still_holds_is_named(monkeypatch):
+    # Refresh deletes retired workflows in the same commit it writes the current set, so a
+    # leftover is the same signal as a stale file: this org has not been refreshed.
+    _org_holds(
+        monkeypatch,
+        {
+            "refresh-actions.yml": _sha(".github/workflows/refresh-actions.yml"),
+            "send-codes.yml": _sha(".github/workflows/send-codes.yml"),
+            "render-grades.yml": "1" * 40,
+        },
+    )
+    assert estate.workflow_drift(COURSE, RENDERED) == ["render-grades.yml"]
+
+
 # ---------------------------------------------------------------------- driving a workflow
 
 

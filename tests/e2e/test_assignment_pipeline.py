@@ -49,6 +49,7 @@ from dsl_course import (
     ghcli,
     grades,
     roster,
+    seed,
 )
 
 from . import allowlist, cleanup, drive, estate, schedule_edit, student
@@ -108,11 +109,6 @@ class Pipeline:
 # ------------------------------------------------------------------------- preflight
 
 
-def _iso(when: str) -> datetime:
-    """GitHub's `2026-09-04T11:22:33Z` as an aware datetime."""
-    return datetime.fromisoformat(when.replace("Z", "+00:00"))
-
-
 def _cohort_timezone() -> ZoneInfo:
     text = gh_contents.get_file_content(COHORT_ORG, course.CONFIG_REPO, "schedule.yml")
     return ZoneInfo(
@@ -131,10 +127,11 @@ def _preflight(run_id: str) -> None:
     """Refuse to start against an estate that would make the result meaningless.
 
     Each of these has been a wasted run: an org still on `release` tests last month's
-    code; a staging branch that is not this checkout tests somebody else's; a refresh that
-    has not happened since means the org's workflow FILES are older than the engine they
-    would run; a missing roster row hands out to nobody; and a namespace that is not empty
-    means a previous run is still lying around and its repos would be read as this one's.
+    code; a staging branch that is not this checkout tests somebody else's; a workflow
+    file in the org that is not the one this tip renders means the buttons this run
+    presses are not the buttons under review; a missing roster row hands out to nobody;
+    and a namespace that is not empty means a previous run is still lying around and its
+    repos would be read as this one's.
     """
     allowlist.assert_fence()
     for org in (COURSE_ORG, COHORT_ORG):
@@ -150,14 +147,22 @@ def _preflight(run_id: str) -> None:
         "promote first, or check out what you are testing"
     )
 
-    refreshed = ghcli.gh_json(
-        "api",
-        f"repos/{COURSE_ORG}/.github/commits?path=.github/.last-refresh&per_page=1",
+    # The heartbeat says only that a refresh has EVER run here (see seed.HEARTBEAT_PATH):
+    # its content is the date, so it is one commit a day at most, and a promotion later the
+    # same day could never move it. It cannot answer "are these files current".
+    assert gh_contents.get_file_content(COURSE_ORG, ".github", seed.HEARTBEAT_PATH), (
+        "the course org has never recorded a refresh"
     )
-    assert refreshed, "the course org has never recorded a refresh"
-    assert _iso(refreshed[0]["commit"]["committer"]["date"]) > _iso(
-        tip["commit"]["committer"]["date"]
-    ), "the org has not refreshed since the promotion - its workflow files are stale"
+
+    # What can: render the org's workflow set from this checkout, the way Refresh actions
+    # does, and compare blob shas with what the org is holding.
+    drift = estate.workflow_drift(
+        COURSE_ORG, seed.github_workflow_files(COURSE_ORG, tier)
+    )
+    assert not drift, (
+        f"org workflow {', '.join(drift)} differs from what this tip renders - "
+        "run Refresh actions"
+    )
 
     students = roster.load(COHORT_ORG) or []
     assert student.handle() in {s.github_handle for s in students}, (
