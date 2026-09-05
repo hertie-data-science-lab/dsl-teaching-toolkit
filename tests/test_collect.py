@@ -738,10 +738,15 @@ def test_snapshot_sha_says_nothing_about_an_ordinary_commit(monkeypatch, capsys)
     assert "dated after" not in capsys.readouterr().out
 
 
-def _stub_snapshot_write(monkeypatch, pins: dict, existing=None):
-    """Wire snapshot_assignment onto stubs; returns the (path, text) writes it makes."""
+def _stub_snapshot_write(monkeypatch, pins: dict, existing=None, pushed=None):
+    """Wire snapshot_assignment onto stubs; returns the (path, text) writes it makes.
+
+    `pushed` is `{repo: pushed_at}` out of the org listing - the server's word on when each
+    repo last received anything. Unset means the listing carries none, which is what every
+    test written before that check existed expects."""
     written: list[tuple[str, str]] = []
     monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: existing)
+    monkeypatch.setattr(collect, "_pushed_at", lambda org: pushed or {})
     monkeypatch.setattr(
         collect,
         "submission_targets",
@@ -1995,6 +2000,108 @@ SOLO_TARGETS = [
 ]
 
 
+@pytest.mark.parametrize(
+    "committed,pushed_at,expected",
+    [
+        # Committed before the due date, delivered after it: the committer date is the
+        # student's to set, so the server's push time contradicts it.
+        ("2026-10-04T20:00:00Z", "2026-10-06T09:00:00Z", True),
+        # Both before: an ordinary on-time submission.
+        ("2026-10-04T20:00:00Z", "2026-10-04T20:01:00Z", False),
+        # Both after: an ordinary late submission, and the arithmetic already says so.
+        ("2026-10-06T08:00:00Z", "2026-10-06T09:00:00Z", False),
+        # Nothing to compare against accuses nobody.
+        ("2026-10-04T20:00:00Z", "", False),
+        ("", "2026-10-06T09:00:00Z", False),
+        ("not a date", "2026-10-06T09:00:00Z", False),
+    ],
+)
+def test_a_push_that_contradicts_the_committer_date_is_flagged(
+    committed, pushed_at, expected
+):
+    assert collect.delivery_is_suspect(committed, pushed_at, DUE) is expected
+
+
+def test_the_snapshot_records_a_delivery_the_server_contradicts(monkeypatch, capsys):
+    # A late push with GIT_COMMITTER_DATE set before the due date was pinned with
+    # `days_late: 0` and nothing anywhere said otherwise.
+    written = _stub_snapshot_write(
+        monkeypatch,
+        {"assignment-1-anna": collect.Pin(SHA, "2026-10-15T21:40:00Z")},
+        pushed={"assignment-1-anna": "2026-10-16T08:00:00Z"},
+    )
+    assert (
+        collect.snapshot_assignment(
+            "Cohort",
+            "assignment-1",
+            "2026-10-15T23:59:59+02:00",
+            is_group=False,
+            tz="Europe/Berlin",
+        )
+        is collect.SnapshotResult.WRITTEN
+    )
+    ((_path, text),) = written
+    row = collect.parse_snapshot_rows(text)["assignment-1-anna"]
+    assert row.submitted_source == collect.SUBMITTED_SOURCE_SUSPECT
+    out = capsys.readouterr().out
+    assert "dated before the push that delivered it" in out
+    assert "anna" not in out  # a tag, never the handle
+
+
+def test_the_sheet_carries_the_note_for_a_contradicted_submission(monkeypatch):
+    # A grader marking late work has to see it before they act on `days_late: 0`.
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        pins={"assignment-1-ada-l": collect.Pin(SHA, "2026-10-04T20:00:00Z")},
+        pushed={"assignment-1-ada-l": "2026-10-06T09:00:00Z"},
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 6, tzinfo=BERLIN),
+    )
+    ((_path, text),) = written
+    info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
+    assert info["submitted_note"] == collect.SUSPECT_NOTE
+    assert info["days_late"] == "0"  # the arithmetic still says what it says
+
+
+def test_the_freeze_reads_the_note_back_off_the_snapshot(monkeypatch):
+    # Recorded once, at the freeze, and read back from the record - not re-derived from a
+    # listing that has since moved on.
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        rows={
+            "assignment-1-ada-l": collect.SnapshotRow(
+                repo="assignment-1-ada-l",
+                sha=SHA,
+                submitted_at="2026-10-04T20:00:00Z",
+                submitted_source=collect.SUBMITTED_SOURCE_SUSPECT,
+            )
+        },
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 12, tzinfo=BERLIN),
+    )
+    ((_path, text),) = written
+    info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
+    assert info["submitted_note"] == collect.SUSPECT_NOTE
+
+
 def test_the_sheet_created_at_handout_has_every_row_and_derives_nothing(monkeypatch):
     # Before the due date there is nothing to derive, and a handout must not cost an API
     # call per student to find that out - so no pin is read at all.
@@ -2691,7 +2798,7 @@ def test_days_late_counts_in_the_cohorts_own_zone():
 
 
 def test_days_late_is_measured_from_the_minute_the_receipt_shows():
-    # The receipt says `pushed ... 23:59`; charging a day for the seconds it does not show
+    # The receipt says `committed ... 23:59`; charging a day for the seconds it hides
     # is the same receipt disagreeing with itself.
     boundary = collect._parse_iso("2026-10-04T21:59:01Z")  # 23:59:01 Berlin
     assert collect.submitted_display("2026-10-04T21:59:01Z", "Europe/Berlin").endswith(
@@ -2923,7 +3030,7 @@ def test_the_first_refresh_after_the_due_date_tells_everyone_what_was_recorded(
         "assignment-1-ben-k",
     ]
     assert "**Submission recorded**" in posted[0][1]
-    assert "pushed Saturday 3 October 2026, 22:14 · on time" in posted[0][1]
+    assert "committed Saturday 3 October 2026, 22:14 · on time" in posted[0][1]
     assert posted[1][1].startswith("**No submission recorded**")
 
 

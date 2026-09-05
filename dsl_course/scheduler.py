@@ -261,7 +261,12 @@ def _snapshot_passed_deadlines(
         # neither writes a snapshot file - which is what keeps the autograde phase off an
         # assignment that would otherwise score write-once zeros for the whole cohort.
         result = snapshot_assignment(
-            cohort_org, name, deadline, is_group=is_group, teams_key=slug
+            cohort_org,
+            name,
+            deadline,
+            is_group=is_group,
+            teams_key=slug,
+            tz=sched.timezone,
         )
         if result is SnapshotResult.FAILED:
             errors += 1

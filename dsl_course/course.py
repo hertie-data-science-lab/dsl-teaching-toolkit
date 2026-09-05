@@ -171,6 +171,11 @@ def receipt_body(
 ) -> str:
     """One receipt, as the student reads it.
 
+    "committed", not "pushed": the moment shown is the pinned commit's COMMITTER date,
+    which is `GIT_COMMITTER_DATE` and so the student's own to set. Calling it the push time
+    said the server had timed it, which it had not - and the pin, the late arithmetic and
+    this line all rest on the same claim.
+
     `late_line` is the course's late policy as a sentence; the caller composes it because
     the dates and the rate come from two other files. Everything else is fixed here."""
     short = sha[:7]
@@ -183,14 +188,12 @@ def receipt_body(
             f"**Frozen for grading** · `{short}` · {plain}. No further pushes count.\n"
         )
     if event == RECEIPT_UPDATED:
-        return (
-            f"**Submission updated** · `{short}` · pushed {pushed_display} · {late}\n"
-        )
+        return f"**Submission updated** · `{short}` · committed {pushed_display} · {late}\n"
     if not sha:
         opening = "**No submission recorded** at the deadline."
         tail = f" {late_line}" if late_line else ""
         return f"{opening}{tail}\n"
-    first = f"**Submission recorded** · `{short}` · pushed {pushed_display} · {late}"
+    first = f"**Submission recorded** · `{short}` · committed {pushed_display} · {late}"
     if not late_line:
         return f"{first}\n"
     return f"{first}\n{late_line} A further push replaces this.\n"

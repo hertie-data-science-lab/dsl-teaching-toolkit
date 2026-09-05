@@ -930,7 +930,7 @@ def _stub_snapshots(monkeypatch, existing: set[str]):
         "snapshot_assignment",
         # `is_group` is REQUIRED (no default), so a scheduler that stopped passing it fails
         # these tests loudly instead of silently freezing every assignment as individual.
-        lambda org, slug, deadline, *, is_group, teams_key=None: (
+        lambda org, slug, deadline, *, is_group, teams_key=None, tz=None: (
             taken.append((org, slug, deadline, teams_key))
             or scheduler.SnapshotResult.WRITTEN
         ),
@@ -1046,7 +1046,7 @@ def test_run_reports_a_failed_snapshot(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
-        lambda org, slug, deadline, *, is_group, teams_key=None: (
+        lambda org, slug, deadline, *, is_group, teams_key=None, tz=None: (
             scheduler.SnapshotResult.FAILED
         ),
     )
@@ -2269,6 +2269,7 @@ def _real_snapshot_then_autograde(monkeypatch, targets):
         "_snapshot_sha",
         lambda org, repo, deadline, at="": collect_mod.Pin(absent=True),
     )
+    monkeypatch.setattr(collect_mod, "_pushed_at", lambda org: {})
 
     def no_write(*a, **k):
         raise AssertionError("nothing may be written when there is nothing to freeze")

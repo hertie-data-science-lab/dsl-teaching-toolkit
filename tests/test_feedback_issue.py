@@ -126,7 +126,8 @@ def test_the_three_receipt_bodies_read_as_the_mock_up_specifies():
         days_late=0,
         late_line=late,
     ) == (
-        "**Submission recorded** · `a1b2c3d` · pushed Saturday 3 October 2026, 22:14 · "
+        "**Submission recorded** · `a1b2c3d` · committed Saturday 3 October 2026, "
+        "22:14 · "
         "on time\n"
         "Late work is accepted until 11 October 2026, 23:59 (10% per day). A further "
         "push replaces this.\n"
@@ -138,7 +139,7 @@ def test_the_three_receipt_bodies_read_as_the_mock_up_specifies():
         days_late=2,
         penalty_display="-20%",
     ) == (
-        "**Submission updated** · `a1b2c3d` · pushed Tuesday 6 October 2026, 09:30 · "
+        "**Submission updated** · `a1b2c3d` · committed Tuesday 6 October 2026, 09:30 · "
         "2 days late (-20%)\n"
     )
     assert course.receipt_body(course.RECEIPT_FROZEN, sha=SHA, days_late=2) == (

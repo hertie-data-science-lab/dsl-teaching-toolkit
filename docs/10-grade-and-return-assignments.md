@@ -62,6 +62,12 @@ edit them **there**, never in the sheet. The toolkit writes the file only when t
 that header really moved, so your quoting and spacing survive the quarter-hourly tick; YAML
 comments you add do not survive a rewrite when one happens.
 
+`info.submitted` is the pinned commit's **committer** date, which is a value the student's
+own git client writes. Where GitHub's record of when the repo last received a push is later
+than the due moment while that commit claims to predate it, `info.submitted_note` says
+`commit dated before the push that delivered it - check` and the snapshot row records
+`suspect`. The late arithmetic still says what the dates say; the note is for you.
+
 An assignment whose `grading_config.yml` says `submit_via: external` has no `info:` block at all:
 there is no commit to time.
 

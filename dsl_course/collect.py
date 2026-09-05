@@ -27,7 +27,9 @@ assignment shortly after its grading deadline, writing one row per submission re
 
 and never rewriting it. `submitted_at` is WHEN that pinned commit was made and
 `submitted_source` says where that time came from - `commit` for the committer date the
-API reports, which the student supplies and can backdate. Grading pins to the recorded sha; a blank sha means "nothing had
+API reports, which the student supplies and can backdate, and `suspect` when GitHub's own
+`pushed_at` for that repo is LATER than the due moment while the commit claims to predate
+it (the sheet then carries `info.submitted_note` for whoever marks it). Grading pins to the recorded sha; a blank sha means "nothing had
 been pushed by the deadline" and scores zero. Only with no snapshot at all does grading
 fall back to the date-based pin, loudly.
 
@@ -131,6 +133,12 @@ SNAPSHOT_FIELDS = ("repo", "sha", "recorded_at", "submitted_at", "submitted_sour
 # API) comes later; recording the provenance now is what lets a marker - and the code -
 # tell a client-supplied time from a server-observed one in a file that is never rewritten.
 SUBMITTED_SOURCE_COMMIT = "commit"
+# The committer date says the work predates the deadline; GitHub's own `pushed_at` says
+# the repo did not receive it until after. One of the two is a claim the student wrote
+# (`GIT_COMMITTER_DATE`) and the other is the server's, so the row says so rather than
+# quietly pinning the earlier one.
+SUBMITTED_SOURCE_SUSPECT = "suspect"
+SUSPECT_NOTE = "commit dated before the push that delivered it - check"
 RUN_TIMEOUT = 300  # wall-clock seconds per graded subprocess
 # The note on the one zero that means "the RUNNER broke", not "the student didn't submit".
 # `collect` keys its systemic-failure guard on it, so it is a constant, not a loose string.
@@ -568,6 +576,28 @@ def _committed_after(committed: str, recorded_at: str) -> bool:
     return when is not None and taken is not None and when > taken
 
 
+def delivery_is_suspect(
+    committed: str, pushed_at: str, moment: datetime | None
+) -> bool:
+    """Whether the SERVER says this commit arrived after `moment` while the commit itself
+    claims to predate it.
+
+    The pin is chosen on the committer date, which is `GIT_COMMITTER_DATE` and therefore
+    the student's to set: a late push backdated before the due date is pinned with
+    `days_late: 0` and, until this, nothing anywhere said otherwise. `pushed_at` from the
+    org listing is the cheap server-side second opinion - it is the repo's LAST push, so it
+    only ever accuses a repo that really did receive something late.
+
+    Anything missing means no accusation: a listing without the field, an unparseable date,
+    or no moment to compare against."""
+    if not (committed and pushed_at and moment):
+        return False
+    made, delivered = _parse_iso(committed), _parse_iso(pushed_at)
+    if made is None or delivered is None:
+        return False
+    return made <= moment < delivered
+
+
 def _warn_if_late_commits_only(cohort_org: str, repo: str, deadline: str) -> None:
     """When a reachable repo yielded no commit on/before the deadline, tell an empty repo
     apart from one that HAS commits, all dated after the cutoff. The snapshot filters on the
@@ -700,6 +730,7 @@ def snapshot_assignment(
     *,
     is_group: bool,
     teams_key: str | None = None,
+    tz: str | None = None,
 ) -> SnapshotResult:
     """Freeze, at a server-chosen MOMENT, the commit each of `slug`'s submission repos will
     be graded at. Write-once: an existing snapshot is never re-taken or overwritten, so a
@@ -735,6 +766,12 @@ def snapshot_assignment(
         )
         return SnapshotResult.NOTHING_TO_FREEZE
     recorded_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    # One listing for the whole cohort, and the only reason to take it: `pushed_at` is the
+    # server's word on when each repo last received anything, and the pin is chosen on a
+    # date the student wrote. Best-effort - without it the rows simply carry `commit`, as
+    # they always did.
+    pushed = _pushed_at(cohort_org)
+    moment = local_deadline(deadline, tz)
     rows: list[tuple[str, str, str, str, str]] = []
     any_present = False
     for repo, _key, _members in targets:
@@ -748,8 +785,22 @@ def snapshot_assignment(
             # The pinned commit's committer date, recorded with WHERE it came from - the
             # student supplied it, so it is a claim, not an observation (see the module
             # docstring). The snapshot is write-once, so it is recorded now or never.
+            suspect = delivery_is_suspect(pin.committed, pushed.get(repo, ""), moment)
+            if suspect:
+                # Tag, never the handle: this log is public.
+                log(
+                    f"  [warn] {target_ref(repo)} is pinned to a commit dated before the "
+                    f"push that delivered it - a committer date is client-supplied, so "
+                    f"check it before marking"
+                )
             rows.append(
-                (repo, pin.sha, recorded_at, pin.committed, SUBMITTED_SOURCE_COMMIT)
+                (
+                    repo,
+                    pin.sha,
+                    recorded_at,
+                    pin.committed,
+                    SUBMITTED_SOURCE_SUSPECT if suspect else SUBMITTED_SOURCE_COMMIT,
+                )
             )
         else:
             # Absent, or reachable with nothing pushed by the deadline. Either way there is
@@ -868,6 +919,7 @@ def _sheet_info(
     tz: str | None,
     *,
     is_group: bool,
+    suspect: set[str] | None = None,
 ) -> dict[str, dict]:
     """The toolkit's facts, per submission unit: when the pinned commit was made, how late
     that is, and (for a team) what CONTRIBUTIONS.md said at that commit.
@@ -889,6 +941,12 @@ def _sheet_info(
         if when is not None:
             info["submitted"] = submitted_display(submitted_at, tz)
             info["days_late"] = days_late(when, due, tz) if due is not None else None
+            if repo in (suspect or ()):
+                # The one fact in `info:` that is not about the work: the committer date
+                # this row is built from is the student's to set, and the server says the
+                # push that carried it landed later. A grader marking late work has to see
+                # that before they act on `days_late: 0`.
+                info["submitted_note"] = SUSPECT_NOTE
         if is_group:
             info["contributions"] = _contributions(cohort_org, repo, sha)
         out[unit] = info
@@ -916,12 +974,29 @@ def _quiet_since(pushed_at: str, recorded: object) -> bool:
     return pushed.replace(**to_minute) <= pinned.replace(**to_minute)
 
 
+def _pushed_at(cohort_org: str) -> dict[str, str]:
+    """`{repo: pushed_at}` for the whole cohort, from ONE listing.
+
+    The server's word on when each repo last received anything - which is what the pin, a
+    date the student wrote, is checked against. Best-effort: without it every repo is
+    simply read (see `_provisional_pins`) and nothing is accused."""
+    try:
+        return {
+            row["name"]: row.get("pushed_at") or ""
+            for row in list_org_repos(cohort_org)
+        }
+    except RuntimeError as exc:
+        log(f"  (no repo listing this tick - re-reading each submission: {exc})")
+        return {}
+
+
 def _provisional_pins(
     cohort_org: str,
     targets: list[tuple[str, str, list[str]]],
     deadline: str,
     previous: dict,
-) -> dict[str, tuple[str, str]] | None:
+    due: datetime | None = None,
+) -> tuple[dict[str, tuple[str, str]], set[str]] | None:
     """Each repo's last commit on or before the cutoff, read WITHOUT writing a snapshot.
 
     The snapshot file stays write-once and stays the cutoff's job: these pins move with
@@ -934,17 +1009,11 @@ def _provisional_pins(
     four times an hour for the length of the late window, where it used to cost one commits
     call per submission repo on every one of those ticks.
 
-    None if a lookup we DID make failed - a half-read cohort must not rewrite the file."""
-    try:
-        pushed = {
-            row["name"]: row.get("pushed_at") or ""
-            for row in list_org_repos(cohort_org)
-        }
-    except RuntimeError as exc:
-        # Not a failure: without the listing every repo is simply read, as before.
-        pushed = {}
-        log(f"  (no repo listing for the refresh - re-reading each submission: {exc})")
+    Returns `(pins, the repos whose pin the server's own push time contradicts)`, or None
+    if a lookup we DID make failed - a half-read cohort must not rewrite the file."""
+    pushed = _pushed_at(cohort_org)
     pins: dict[str, tuple[str, str]] = {}
+    suspect: set[str] = set()
     for repo, unit, _members in targets:
         recorded = ((previous.get(unit) or {}).get(grades.INFO_KEY) or {}).get(
             "submitted"
@@ -955,7 +1024,9 @@ def _provisional_pins(
         if pin is None:
             return None
         pins[repo] = (pin.sha, pin.committed)
-    return pins
+        if delivery_is_suspect(pin.committed, pushed.get(repo, ""), due):
+            suspect.add(repo)
+    return pins, suspect
 
 
 def _receipt_event(
@@ -1162,6 +1233,7 @@ def sync_sheet(
     )
     info_updates: dict[str, dict] = {}
     pins: dict[str, tuple[str, str]] = {}
+    suspect: set[str] = set()
     if derive and phase is SheetPhase.FREEZING:
         rows = load_snapshot_rows(cohort_org, slug)
         if rows is None:
@@ -1174,20 +1246,33 @@ def sync_sheet(
             derive = False
         else:
             pins = {r: (row.sha, row.submitted_at) for r, row in rows.items()}
+            # Recorded once, at the freeze, and read back here: the snapshot is the record.
+            suspect = {
+                r
+                for r, row in rows.items()
+                if row.submitted_source == SUBMITTED_SOURCE_SUSPECT
+            }
     elif derive:
         found = _provisional_pins(
             cohort_org,
             targets,
             (grades.cutoff_at(sched, key, gspec) or now).isoformat(),
             previous,
+            due,
         )
         if found is None:
             log_err(f"  ! could not read every submission for {path} - not rewriting")
             return False
-        pins = found
+        pins, suspect = found
     if derive:
         info_updates = _sheet_info(
-            cohort_org, targets, pins, due, sched.timezone, is_group=is_group
+            cohort_org,
+            targets,
+            pins,
+            due,
+            sched.timezone,
+            is_group=is_group,
+            suspect=suspect,
         )
     for unit, count in (autograde or {}).items():
         info_updates.setdefault(unit, {})["autograde"] = count
