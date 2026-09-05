@@ -750,23 +750,55 @@ def score_total(
     return total if marked else None
 
 
+# Every way `late_penalty_per_day` can be written wrong, and what to say about it. One
+# multiplies every late mark in the cohort, so none of them may pass quietly: a bare `10`
+# meant no penalty at all while the header still advertised one, and `-10%` ADDED marks for
+# being late.
+_PENALTY_FAULTS = {
+    "unwritten": "is not a number - write `10%` or `0.1`",
+    "bare": "is neither a percentage nor a fraction - write `10%` or `0.1`",
+    "negative": "is negative - that would ADD marks for lateness",
+    "over": "is more than 100% a day",
+}
+
+
+def penalty_fault(text: object) -> str:
+    """Why `late_penalty_per_day` cannot be used, as a `_PENALTY_FAULTS` key, or "".
+
+    Blank and absent are not faults - plenty of assignments accept no late work at all, or
+    accept it without a deduction."""
+    if text is None:
+        return ""
+    raw = str(text).strip()
+    if not raw:
+        return ""
+    percent = raw.endswith("%")
+    rate = _decimal(raw[:-1] if percent else raw)
+    if rate is None:
+        return "unwritten"
+    if percent:
+        rate /= 100
+    elif rate >= 1:
+        # A BARE `10` is read neither as 1000% nor, silently, as 10%. The two spellings a
+        # course actually writes are the percentage and the fraction; guessing between
+        # them on a number that multiplies every late mark is not a guess worth making.
+        return "bare"
+    if rate < 0:
+        return "negative"
+    return "over" if rate > 1 else ""
+
+
 def penalty_rate(text: object) -> Decimal | None:
     """`late_penalty_per_day` as a fraction: `10%` and `0.1` both give 0.10.
 
-    A BARE `10` is REFUSED (None), read neither as 1000% nor silently as 10%. The two
-    spellings a course actually writes are the percentage and the fraction; guessing
-    between them on a number that multiplies every late mark is not a guess worth
-    making."""
-    if text is None:
+    None for anything `penalty_fault` refuses - which `parse_grading_spec` has already
+    said out loud, once, when the assignment's definition was read."""
+    if penalty_fault(text):
         return None
-    raw = str(text).strip()
+    raw = str(text or "").strip()
     if not raw:
         return None
-    if raw.endswith("%"):
-        rate = _decimal(raw[:-1])
-        return None if rate is None else rate / 100
-    rate = _decimal(raw)
-    return None if rate is None or rate >= 1 else rate
+    return _decimal(raw[:-1]) / 100 if raw.endswith("%") else _decimal(raw)
 
 
 def final_grade(
@@ -870,19 +902,21 @@ def _whole_days(value: object) -> int | None:
 
 
 def _penalty(value: object) -> str | None:
-    """`late_penalty_per_day` as it was typed, or None with a warning.
+    """`late_penalty_per_day` as it was typed, or None with a warning saying which way it
+    is wrong.
 
-    `penalty_rate` refuses a bare `10` - neither 1000% nor, silently, 10% - and refusing it
-    without saying so meant every late mark in that cohort quietly lost its deduction and
-    every receipt showed no percentage. Checked here, once per spec, like every other
-    malformed field: the derivation itself stays pure and is called per student."""
+    Checked here, once per spec, like every other malformed field: the derivation itself
+    stays pure and is called per student. Refusing without saying so meant every late mark
+    in that cohort quietly lost its deduction while the sheet's header still advertised
+    one."""
     raw = str(value or "").strip()
     if not raw:
         return None
-    if penalty_rate(raw) is None:
+    fault = penalty_fault(raw)
+    if fault:
         log_err(
-            f"  ! {GRADING_FILE}: `late_penalty_per_day: {value}` is not a rate - write "
-            f"`10%` or `0.1`; no late penalty is applied"
+            f"  ! {GRADING_FILE}: `late_penalty_per_day: {value}` "
+            f"{_PENALTY_FAULTS[fault]}; no late penalty is applied"
         )
         return None
     return raw

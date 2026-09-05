@@ -119,8 +119,29 @@ def test_a_bare_late_penalty_number_is_refused_out_loud(capsys):
     assert "`10%` or `0.1`" in err
 
 
+@pytest.mark.parametrize(
+    "typed,says",
+    [
+        ("10", "neither a percentage nor a fraction"),
+        ("1", "neither a percentage nor a fraction"),
+        ("ten percent", "is not a number"),
+        ("-10%", "would ADD marks for lateness"),
+        ("-0.1", "would ADD marks for lateness"),
+        ("150%", "more than 100% a day"),
+    ],
+)
+def test_every_way_the_late_policy_can_be_wrong_says_so(typed, says, capsys):
+    # One number multiplies every late mark in the cohort. `-10%` ADDED marks for being
+    # late and `150%` took more than the work was worth, both on a green run.
+    spec = collect.parse_grading_spec(f"late_penalty_per_day: {typed}\n")
+    assert spec["late_penalty_per_day"] is None
+    err = capsys.readouterr().err
+    assert says in err
+    assert "no late penalty is applied" in err
+
+
 def test_a_penalty_rate_that_parses_is_kept_exactly_as_typed(capsys):
-    for typed in ("10%", "0.1", "5.5%"):
+    for typed in ("10%", "0.1", "5.5%", "0%", "100%"):
         assert (
             collect.parse_grading_spec(f"late_penalty_per_day: {typed}\n")[
                 "late_penalty_per_day"
