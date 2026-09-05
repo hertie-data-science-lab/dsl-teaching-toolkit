@@ -932,11 +932,14 @@ def _sheet_info(
     `grades._fresh_info`'s to declare, and the merge unions the two; stating it here as
     well is how a key added in one place goes missing in the other."""
     out: dict[str, dict] = {}
+    looked_at = datetime.now(schedule._tz(tz)).isoformat(timespec="minutes")
     for repo, unit, _members in targets:
         if repo not in pins:
             continue
         sha, submitted_at = pins[repo]
-        info: dict = {}
+        # This pass READ this repo, whatever it found. Recorded so the once-only receipt
+        # fires once and so a repo nobody has pushed to is not re-read every tick.
+        info: dict = {"checked": looked_at}
         when = _parse_iso(submitted_at) if (sha and submitted_at) else None
         if when is not None:
             info["submitted"] = submitted_display(submitted_at, tz)
@@ -953,25 +956,32 @@ def _sheet_info(
     return out
 
 
-def _quiet_since(pushed_at: str, recorded: object) -> bool:
-    """Whether this repo can be left alone: nothing has been pushed to it since the commit
-    the sheet already records.
+def _quiet_since(pushed_at: str, recorded: object, checked: object = None) -> bool:
+    """Whether this repo can be left alone: nothing has reached it since we last looked.
 
-    Both sides to the MINUTE. `recorded` is `info.submitted`, the pinned commit's committer
-    date written to the minute; a push lands seconds AFTER the commit it carries, so a
-    second-precision comparison would call every repo busy and save nothing. A push in a
-    later minute is the only thing that can have added a commit we have not seen.
+    Two facts on the sheet can answer that, and they are compared differently. `recorded`
+    is `info.submitted`, a pinned commit's committer date - a push lands seconds AFTER the
+    commit it carries, so the minute is compared INCLUSIVELY or every repo reads as busy
+    and nothing is saved. `checked` is `info.checked`, the minute this pass last looked at
+    the repo, so a push inside that same minute is still unseen and the comparison is
+    STRICT. The second fact is what a non-submitter has: without it every repo nobody has
+    pushed to was re-read four times an hour for the whole late window.
 
     False whenever the answer is not certain - an unparseable stamp, a repo missing from
     the listing, a unit the sheet has no fact for yet - because the cost of asking again is
     one API call and the cost of not asking is a submission nobody sees."""
-    if not pushed_at or not recorded:
+    if not pushed_at:
         return False
-    pushed, pinned = _parse_iso(str(pushed_at)), _parse_iso(str(recorded))
-    if pushed is None or pinned is None:
+    pushed = _parse_iso(str(pushed_at))
+    if pushed is None:
         return False
     to_minute = {"second": 0, "microsecond": 0}
-    return pushed.replace(**to_minute) <= pinned.replace(**to_minute)
+    pushed = pushed.replace(**to_minute)
+    pinned = _parse_iso(str(recorded)) if recorded else None
+    if pinned is not None and pushed <= pinned.replace(**to_minute):
+        return True
+    looked = _parse_iso(str(checked)) if checked else None
+    return looked is not None and pushed < looked.replace(**to_minute)
 
 
 def _pushed_at(cohort_org: str) -> dict[str, str]:
@@ -1015,10 +1025,8 @@ def _provisional_pins(
     pins: dict[str, tuple[str, str]] = {}
     suspect: set[str] = set()
     for repo, unit, _members in targets:
-        recorded = ((previous.get(unit) or {}).get(grades.INFO_KEY) or {}).get(
-            "submitted"
-        )
-        if _quiet_since(pushed.get(repo, ""), recorded):
+        was = (previous.get(unit) or {}).get(grades.INFO_KEY) or {}
+        if _quiet_since(pushed.get(repo, ""), was.get("submitted"), was.get("checked")):
             continue
         pin = _snapshot_sha(cohort_org, repo, deadline)
         if pin is None:
@@ -1030,7 +1038,7 @@ def _provisional_pins(
 
 
 def _receipt_event(
-    phase: SheetPhase, sha: str, was: object, now_shown: str
+    phase: SheetPhase, sha: str, was: object, now_shown: str, checked: object = None
 ) -> str | None:
     """Which receipt this unit has earned since the last write, if any.
 
@@ -1041,8 +1049,12 @@ def _receipt_event(
     pushed twice in sixty seconds."""
     if phase is SheetPhase.FREEZING:
         return course.RECEIPT_FROZEN if sha else None
-    if not was:
-        return course.RECEIPT_DUE  # first time we have looked; says so either way
+    if not was and not checked:
+        # The first time we looked, and it says so either way. `checked` is what tells a
+        # student who has not submitted apart from one we have never looked at: without it
+        # this fired on every tick, and the receipt marker swallowed all but the first -
+        # at the cost of an issue lookup and a comment read per non-submitter per tick.
+        return course.RECEIPT_DUE
     if now_shown and now_shown != was:
         return course.RECEIPT_UPDATED
     return None
@@ -1076,8 +1088,9 @@ def _post_receipts(
             # answers UTC, and "pushed 20:14" for a 22:14 push reads as a bug.
             when = when.astimezone(schedule._tz(tz))
         shown = submitted_display(submitted_at, tz) if when is not None else ""
-        was = ((previous.get(unit) or {}).get(grades.INFO_KEY) or {}).get("submitted")
-        event = _receipt_event(phase, sha, was, shown)
+        before = (previous.get(unit) or {}).get(grades.INFO_KEY) or {}
+        was = before.get("submitted")
+        event = _receipt_event(phase, sha, was, shown, before.get("checked"))
         if event is None or (not changed and event == course.RECEIPT_UPDATED):
             continue
         body = grades.receipt(
@@ -1333,7 +1346,10 @@ def sync_sheet(
     # sheet lands first. An unchanged tick posts nothing new to say - only the once-only
     # `due` and `frozen` events, which have to fire whether or not a pin moved (a student
     # who never submitted has an unchanging sheet and is owed both).
-    if derive:
+    if derive and written:
+        # Only when the SHEET landed. Both this pass and the Collect button can derive the
+        # same event, and the one whose compare-and-swap write was refused has not recorded
+        # what its receipt would promise - it posted a duplicate instead.
         _post_receipts(
             cohort_org,
             spec,

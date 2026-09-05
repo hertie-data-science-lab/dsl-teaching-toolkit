@@ -271,7 +271,13 @@ class SheetSpec:
 def _fresh_info(spec: SheetSpec) -> dict:
     """A blank `info:` block: every fact this assignment's toolkit will fill, and no other.
     `contributions` exists only where CONTRIBUTIONS.md does and `autograde` only where
-    tests will run - an always-blank key is a question a grader keeps re-asking."""
+    tests will run - an always-blank key is a question a grader keeps re-asking.
+
+    Two toolkit facts are deliberately NOT here, because they have nothing to say until
+    there is something to say: `checked` (the minute this unit was last read) appears from
+    the first derivation, and `submitted_note` only where the server's push time
+    contradicts the commit's own date. `_merged_block` unions whatever was derived over
+    this, so both arrive the moment they exist."""
     info: dict = {"submitted": None, "days_late": None}
     if spec.is_group:
         info["contributions"] = None

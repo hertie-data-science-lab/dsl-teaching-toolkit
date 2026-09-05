@@ -40,7 +40,8 @@ that never leave this repo. Worked examples of both shapes ship as
 `grading_sheets/*.yml.sample`.
 
 Everything under `info:` is the toolkit's - when the work came in, how late it was, what
-`CONTRIBUTIONS.md` said, the autograde count. It refreshes every quarter of an hour from the
+`CONTRIBUTIONS.md` said, the autograde count, and `checked`, the minute the row was last
+looked at. It refreshes every quarter of an hour from the
 due date and freezes at the cutoff. Everything else is yours and is never touched, including
 keys you invent and rows for students who have left. The file is only rewritten when the data
 or the header really changed, so your own formatting survives an ordinary tick - but YAML

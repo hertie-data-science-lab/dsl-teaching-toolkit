@@ -1951,12 +1951,14 @@ def _sheet_env(
     rows=None,
     contributions=None,
     pushed=None,
+    write_ok=True,
 ):
     """Stand `sync_sheet` up on stubs and return the (path, text) writes it makes.
 
     `pushed` is `{repo: pushed_at}` out of the org listing the refresh takes to find which
     repos can have moved. Unset means none of them carries one, so every repo is read -
-    which is what every test written before that short-circuit existed expects."""
+    which is what every test written before that short-circuit existed expects.
+    `write_ok=False` refuses the sheet write, which is what a lost compare-and-swap is."""
     written: list[tuple[str, str]] = []
     monkeypatch.setattr(
         collect,
@@ -1984,7 +1986,7 @@ def _sheet_env(
         collect,
         "put_file",
         lambda org, repo, path, content, msg, **kw: (
-            written.append((path, content.decode())) or True
+            written.append((path, content.decode())) or write_ok
         ),
     )
     # Receipts have their own tests below; here they are a no-op, so a sheet test does not
@@ -2172,7 +2174,9 @@ def test_the_refresh_fills_info_and_leaves_the_graders_text_byte_identical(monke
     ((_path, text),) = written
     sheet = grades.parse_sheet(text)
     ada = sheet["submissions"]["ada-l"]
-    assert ada["info"] == {"submitted": "2026-10-06T09:30+02:00", "days_late": "2"}
+    assert ada["info"]["submitted"] == "2026-10-06T09:30+02:00"
+    assert ada["info"]["days_late"] == "2"
+    assert ada["info"]["checked"]  # this pass looked, and says so
     # The marks come back as the TEXT the grader typed - `14`, not 14. Implicit YAML
     # typing is what turns `010` into 8 and `+4` into 4, and none of it is wanted here.
     assert ada["score_individual"] == {"Q1": "14", "Q2": "9"}
@@ -3145,15 +3149,17 @@ def test_a_dry_run_carries_the_flag_all_the_way_to_the_issue(monkeypatch):
     assert all(dry for _repo, _body, dry in posted)
 
 
-def test_an_unchanged_tick_posts_no_updated_receipt(monkeypatch):
-    # The refresh runs four times an hour. When the merged sheet is byte-identical to what
-    # the repo already holds, nothing has moved and there is nothing to tell anyone - but
-    # the once-only `due` receipt still has to reach the student who never submitted.
+def test_the_first_tick_after_the_due_date_tells_the_non_submitter_once(monkeypatch):
+    # The refresh runs four times an hour, and a blank `submitted` reads the same on the
+    # first tick as on the fiftieth: the once-only `due` receipt fired every time and the
+    # marker on the comment swallowed all but the first - at the cost of an issue lookup
+    # and a comment read per non-submitter per tick, all through the late window.
     pins = {"assignment-1-ada-l": collect.Pin(SHA, "2026-10-03T20:14:00Z")}
     written = _sheet_env(monkeypatch, targets=SOLO_TARGETS, pins=pins)
-    _receipt_env(monkeypatch)
+    first = _receipt_env(monkeypatch)
     _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
     ((_path, settled),) = written
+    assert "assignment-1-ben-k" in [repo for repo, _b, _d in first]
 
     written.clear()
     _sheet_env(
@@ -3165,8 +3171,56 @@ def test_an_unchanged_tick_posts_no_updated_receipt(monkeypatch):
     posted = _receipt_env(monkeypatch)
     _refresh(monkeypatch, now=datetime(2026, 10, 5, 0, 15, tzinfo=BERLIN))
     assert written == []  # nothing rewritten
-    assert [repo for repo, _b, _d in posted] == ["assignment-1-ben-k"]
-    assert posted[0][1].startswith("**No submission recorded**")
+    assert posted == []  # and nothing said twice - `info.checked` is on the sheet
+
+
+def test_a_repo_quiet_since_we_last_looked_is_not_re_read(monkeypatch):
+    # The other half of the same fact: a non-submitter had no `submitted` to compare a
+    # `pushed_at` against, so every one of them cost a commits call on every tick.
+    def never(*a, **k):
+        raise AssertionError("a repo quiet since the last look is not re-read")
+
+    sheet = (
+        "# Status: OPEN - 0 of 1 students have submitted\n"
+        "submissions:\n"
+        "  ada-l:\n"
+        "    info:\n"
+        "      submitted:\n"
+        "      days_late:\n"
+        "      checked: '2026-10-05T00:10+02:00'\n"
+        "    score_individual:\n"
+    )
+    _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        existing=(sheet, "their-sha"),
+        pushed={"assignment-1-ada-l": "2026-10-04T22:00:00Z"},  # 00:00 Berlin, earlier
+    )
+    monkeypatch.setattr(collect, "_snapshot_sha", never)
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 5, 0, 15, tzinfo=BERLIN),
+    )
+
+
+def test_a_receipt_is_not_posted_when_the_sheet_write_was_refused(monkeypatch):
+    # The Collect button and the cron can derive the same event, and the one whose
+    # compare-and-swap write loses has not recorded what its receipt would promise.
+    _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        pins={"assignment-1-ada-l": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
+        write_ok=False,
+    )
+    posted = _receipt_env(monkeypatch)
+    assert not _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
+    assert posted == []
 
 
 def test_the_public_log_counts_receipts_and_names_no_submission_repo(
