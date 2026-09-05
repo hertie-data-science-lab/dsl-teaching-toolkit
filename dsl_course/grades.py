@@ -25,6 +25,7 @@ import json
 import sys
 import tempfile
 import textwrap
+from collections import Counter
 from collections.abc import Container
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -718,18 +719,27 @@ def _plain(number: Decimal) -> str:
     return format(number.normalize(), "f")
 
 
-def score_total(score: object) -> Decimal | None:
+def score_total(
+    score: object, questions: dict[str, str] | None = None
+) -> Decimal | None:
     """What a `score_group`/`score_individual` cell adds up to: the scalar itself, or the
     sum of a per-question map.
 
     None when there is nothing to add - the cell is blank, the map is entirely blank, or a
     value is not a number. A PARTLY filled map still totals, so the running total is right
     while marking is in progress; one non-numeric question, though, makes the whole total a
-    guess, and a guess is exactly what must not reach a student."""
+    guess, and a guess is exactly what must not reach a student.
+
+    `questions` is the assignment's own list. Given one, a key it does not declare is NOT
+    added: a stray `Q5: 10` used to make 53 out of a 50-point assignment, with no maximum
+    beside it and nothing said. The unit is held for a person either way (see
+    `sheet_hold_reasons`); this is what stops the number existing at all."""
     if not isinstance(score, dict):
         return _decimal(score)
     total, marked = Decimal(0), False
-    for value in score.values():
+    for key, value in score.items():
+        if questions and key not in questions:
+            continue
         if value is None or not str(value).strip():
             continue
         number = _decimal(value)
@@ -1429,7 +1439,10 @@ def student_view(
     days_late = info.get("days_late")
     rate = penalty_rate(spec.late_penalty_per_day)
     final = final_grade(
-        score_total(score), rate, days_late, person.get("adjustment_individual")
+        score_total(score, spec.questions),
+        rate,
+        days_late,
+        person.get("adjustment_individual"),
     )
     return _allowlisted(
         {
@@ -1448,6 +1461,69 @@ def student_view(
             "team_feedback": block.get("feedback_group") if spec.is_group else None,
         }
     )
+
+
+# Why a mark cannot be sent as it stands. The code is what the pipeline carries; the
+# sentence is what the dry run prints. Every one of these used to pass silently.
+HOLD_REASONS = {
+    "penalty": "a mark no late penalty can be applied to",
+    "score": "a non-numeric value in a per-question map",
+    "adjustment": "a non-numeric adjustment",
+    "question": "a question the assignment does not declare",
+    "duplicate": "a handle in more than one submission unit",
+}
+
+
+def _is_typo(value: object) -> bool:
+    """A cell that was typed in and is not a number.
+
+    Blank is not a typo (nobody has marked it yet) and neither is a deliberate free-text
+    mark in a SCALAR cell (`pass`, `A-`) - only the callers that know they are looking at
+    arithmetic ask this. `−3` with a Unicode minus, which is what a word processor
+    produces, is exactly the case: it read as no adjustment at all while the grader
+    believed a penalty had been waived."""
+    return not _blank(value) and _decimal(value) is None
+
+
+def _score_fault(spec: SheetSpec, score: object) -> str:
+    """What is wrong with one unit's score cell, as a `HOLD_REASONS` code, or ""."""
+    if not isinstance(score, dict):
+        return ""  # a scalar mark is free text by design
+    if spec.questions and set(score) - set(spec.questions):
+        return "question"
+    return "score" if any(_is_typo(value) for value in score.values()) else ""
+
+
+def sheet_hold_reasons(spec: SheetSpec, sheet: dict) -> dict[str, str]:
+    """Every handle in this sheet whose mark a person still has to settle, and why.
+
+    What a grader TYPED, checked before any of it is sent - as against
+    `needs_hand_decision`, which is about what the arithmetic could not then do with it.
+    Each of these went out silently: `Q1: 14/15` deleted the student's grade and sent
+    their feedback anyway; `−3` was read as no adjustment while the grader believed a
+    penalty had been waived; a stray `Q5` was added to a total the assignment has no
+    maximum for; and a handle in two teams took whichever team the loop reached last.
+
+    One reason per handle, the first found: this is a line in a log, not a diagnosis."""
+    held: dict[str, str] = {}
+    seen: set[str] = set()
+    for unit_key, block in ((sheet or {}).get(spec.container_key) or {}).items():
+        if not isinstance(block, dict):
+            continue  # a unit mid-edit; the next run reads a whole block
+        fault = _score_fault(spec, block.get(spec.score_key))
+        people = (block.get("members") or {}) if spec.is_group else {unit_key: block}
+        for handle, person in people.items():
+            if handle in seen:
+                held[handle] = "duplicate"
+                continue
+            seen.add(handle)
+            person = person if isinstance(person, dict) else {}
+            reason = fault or (
+                "adjustment" if _is_typo(person.get("adjustment_individual")) else ""
+            )
+            if reason:
+                held[handle] = reason
+    return held
 
 
 def needs_hand_decision(view: dict) -> bool:
@@ -2167,23 +2243,32 @@ def _issue_targets(
     return out
 
 
-def _hold_undecided(books: dict[str, dict[str, dict]]) -> dict[str, dict[str, str]]:
+def _hold_undecided(
+    books: dict[str, dict[str, dict]], reasons: dict[str, dict[str, str]]
+) -> dict[str, dict[str, tuple[str, str]]]:
     """Take every mark that still needs a person out of the books, and say whose it was.
 
-    `pass`, two days late, is not `pass minus 20%`. Sending it puts a line a student can
-    read - "penalty -20% · Final grade: pass" - where a decision should have been, and the
-    dry run that counted it has already gone by. So the mark is HELD: no comment, no
-    gradebook entry, no column in the registrar's export, until a grader settles it in the
-    sheet. Nothing else that student has is held with it.
+    Two kinds arrive here. `reasons` is what a grader TYPED that cannot be acted on
+    (`sheet_hold_reasons`); the rest is arithmetic that could not be done - `pass`, two
+    days late, is not `pass minus 20%`. Sending either puts a line a student can read
+    where a decision should have been, and the dry run that counted it has already gone
+    by. So the mark is HELD: no comment, no gradebook entry, no column in the registrar's
+    export, until a grader settles it in the sheet. Nothing else that student has is held
+    with it.
 
-    Returns `{slug: {handle: the submission unit the mark belongs to}}` - the unit, because
-    a group's comment is built from the team block rather than from any member's view, so
-    it has to be skipped by name.
+    Returns `{slug: {handle: (submission unit, reason)}}` - the unit, because a group's
+    comment is built from the team block rather than from any member's view, so it has to
+    be skipped by name.
     """
-    held: dict[str, dict[str, str]] = {}
+    held: dict[str, dict[str, tuple[str, str]]] = {}
     for handle, book in books.items():
-        for slug in [s for s, view in book.items() if needs_hand_decision(view)]:
-            held.setdefault(slug, {})[handle] = book[slug].get("team") or handle
+        for slug, view in list(book.items()):
+            reason = (reasons.get(slug) or {}).get(handle) or (
+                "penalty" if needs_hand_decision(view) else ""
+            )
+            if not reason:
+                continue
+            held.setdefault(slug, {})[handle] = (view.get("team") or handle, reason)
             del book[slug]
     # A student whose ONLY mark was held has nothing to be sent: leaving the empty book in
     # would commit a gradebook page with nothing new on it and email them about it.
@@ -2259,7 +2344,13 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
         distributed, migrating = _read_distributed(wd)
         retired = _retired_gradebook_files(wd) if migrating else []
 
-    held = _hold_undecided(books)
+    held = _hold_undecided(
+        books,
+        {
+            slug: sheet_hold_reasons(specs[slug], sheet)
+            for slug, sheet in sheets.items()
+        },
+    )
     log_step(f"Distributing {len(books)} gradebook(s) in {cohort_org}")
     record: Distributed = dict(distributed)
     counts = {
@@ -2271,10 +2362,10 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
         "failed": 0,
     }
     for slug in sorted(held):
-        for handle in sorted(held[slug]):
+        for handle, (_unit, reason) in sorted(held[slug].items()):
             log_person(
-                f"  [hold] {slug} for {handle} - a score no penalty can be applied to; "
-                f"nothing is sent until it is settled in the sheet"
+                f"  [hold] {slug} for {handle} - {HOLD_REASONS[reason]}; nothing is sent "
+                f"until it is settled in the sheet"
             )
 
     # 1. The feedback comment on each submission repo's Feedback issue. Sheet-backed
@@ -2282,7 +2373,7 @@ def distribute(cohort_org: str, notify: bool = True, dry_run: bool = False) -> i
     #    and its marks reach the student through the gradebook instead.
     for slug in sorted(sheets):
         spec = specs[slug]
-        withheld = set(held.get(slug, {}).values())
+        withheld = {unit for unit, _reason in held.get(slug, {}).values()}
         for target, repo, body, members in _issue_targets(spec, sheets[slug], books):
             if target in withheld:
                 # A team's comment is built from the team block, not from a member's view,
@@ -2412,7 +2503,7 @@ def _preview(
     counts: dict[str, int],
     pending: list[str],
     notify: bool,
-    held: dict[str, dict[str, str]],
+    held: dict[str, dict[str, tuple[str, str]]],
 ) -> None:
     """The dry run's report: what a real run would do, in counts a grader can check.
 
@@ -2435,6 +2526,11 @@ def _preview(
             f"final grade(s) derived, {_adjusted_count(spec, sheets[slug])} adjusted, "
             f"{hand} held for a hand decision"
         )
+        # Named, not just counted: "1 held" tells a grader to go looking without saying
+        # what for, and every one of these is a thing they typed and can fix in a minute.
+        tally = Counter(reason for _unit, reason in held.get(slug, {}).values())
+        for reason, count in sorted(tally.items()):
+            log(f"    {count} with {HOLD_REASONS[reason]}")
         log(f"  {COHORT_CSV_NAME}: would gain column {slug}")
     log(
         f"  would post {counts['comments']} comment(s), update "

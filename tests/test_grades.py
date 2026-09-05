@@ -6,6 +6,7 @@ deliberately not mocked, per the testing strategy. No network here.
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from decimal import Decimal
 from pathlib import Path
 from shutil import copytree
 
@@ -547,6 +548,82 @@ def test_a_score_no_penalty_fits_is_held_rather_than_sent(
     printed = capsys.readouterr().out
     assert '"held": 1' in printed
     assert "ada-l" not in printed  # the public log counts, it never names
+
+
+def test_a_typo_in_one_question_cell_is_held_not_silently_dropped(
+    tmp_path, monkeypatch, capsys
+):
+    # `Q1: 14/15` used to total to nothing: the student's grade vanished and their
+    # feedback was posted anyway, with the dry run counting the row as unmarked.
+    sheet = _SHEET.replace(
+        "score_individual: 43", "score_individual:\n      Q1: 14/15\n      Q2: 10"
+    )
+    out = _distribute(monkeypatch, tmp_path, sheets={"assignment-1": sheet})
+    assert out["rc"] == 0
+    assert (out["comments"], out["gradebooks"], out["outbox"]) == ([], [], [])
+    printed = capsys.readouterr().out
+    assert '"held": 1' in printed
+    assert "ada-l" not in printed
+
+
+def test_a_non_numeric_adjustment_is_held_not_read_as_zero(tmp_path, monkeypatch):
+    # `−3` is what a word processor produces. It was read as no adjustment at all, so the
+    # grader believed a penalty had been waived and the student was penalised anyway.
+    sheet = _SHEET.replace("adjustment_individual:", "adjustment_individual: \u22123")
+    out = _distribute(monkeypatch, tmp_path, sheets={"assignment-1": sheet})
+    assert (out["comments"], out["gradebooks"]) == ([], [])
+
+
+def test_a_question_the_assignment_does_not_declare_is_held_and_never_summed(
+    tmp_path, monkeypatch
+):
+    # A stray `Q5: 10` made 53 out of a 50-point assignment, with no maximum beside it.
+    sheet = _SHEET.replace(
+        "score_individual: 43",
+        "score_individual:\n      Q1: 15\n      Q2: 10\n      Q5: 10",
+    )
+    grading = _GRADING_YML + "questions:\n  Q1: 15\n  Q2: 10\n"
+    out = _distribute(
+        monkeypatch, tmp_path, sheets={"assignment-1": sheet}, grading=grading
+    )
+    assert (out["comments"], out["gradebooks"]) == ([], [])
+    assert grades.score_total(
+        {"Q1": "15", "Q2": "10", "Q5": "10"}, {"Q1": "15", "Q2": "10"}
+    ) == Decimal(25)
+
+
+def test_a_handle_in_two_teams_is_held_rather_than_taking_the_last_one(
+    tmp_path, monkeypatch
+):
+    # The later team's view silently won the gradebook. Which team a student is in is not
+    # something to guess at.
+    sheet = _TEAM_SHEET + (
+        "  beta:\n"
+        "    score_group: 20\n"
+        "    feedback_group: |\n      Thin.\n"
+        "    members:\n"
+        "      ada-l:\n"
+        "        adjustment_individual:\n"
+    )
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": sheet},
+        grading=_GRADING_YML + "type: group\n",
+    )
+    assert out["gradebooks"] == []
+
+
+def test_the_dry_run_says_what_each_hold_is(tmp_path, monkeypatch, capsys):
+    # "1 held" tells a grader to go looking without saying what for, and every one of
+    # these is something they typed and can fix in a minute.
+    sheet = _SHEET.replace(
+        "score_individual: 43", "score_individual:\n      Q1: 14/15\n      Q2: 10"
+    )
+    _distribute(monkeypatch, tmp_path, sheets={"assignment-1": sheet}, dry_run=True)
+    printed = capsys.readouterr().out
+    assert "1 held for a hand decision" in printed
+    assert "1 with a non-numeric value in a per-question map" in printed
 
 
 def test_a_held_team_score_holds_the_teams_comment_too(tmp_path, monkeypatch):
