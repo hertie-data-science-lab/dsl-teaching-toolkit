@@ -240,7 +240,9 @@ autograde / grading-sheet artefacts. Anything else that drifted is REPORTED, nev
 Budget 20-30 minutes of wall clock, ~16 runs, all in public repos and therefore free.
 Three Scheduled-release dispatches are needed, not two: the pass that hands out cannot
 also collect, and the DUE date and the CUTOFF drive different passes (refresh, then
-freeze). One-off setup: `python3 -m dsl_course.grades sync --cohort-org <demo cohort>`
+freeze). Each schedule edit the run makes drives a tick of its own as well (the cohort's
+`dispatch-scheduled-release.yml` fires on the push), which the harness waits out before
+dispatching. One-off setup: `python3 -m dsl_course.grades sync --cohort-org <demo cohort>`
 once, so the test student's `grades-<handle>` repo already exists - a repo the run created
 is drift the teardown cannot take back. (There is no button for it any more: Sync
 gradebooks was retired with the other two grading workflows.)

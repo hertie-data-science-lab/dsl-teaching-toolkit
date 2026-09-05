@@ -213,23 +213,35 @@ def _schedule_block(
 def _write_schedule(
     slug: str, run_id: str, handout: datetime, due: datetime, cutoff: datetime
 ) -> Stage:
-    """Put (or move) this run's fenced block into the cohort's schedule.yml."""
+    """Put (or move) this run's fenced block into the cohort's schedule.yml.
+
+    The push is itself a driver now: the cohort's seeded `dispatch-scheduled-release.yml`
+    fires the course org's Scheduled release from every schedule.yml push, so the edit
+    starts a real tick. It is waited out here rather than raced, so the pass dispatched
+    next is the one whose log and artefacts the stage after it reads."""
     read = gh_contents.get_file_with_sha(COHORT_ORG, course.CONFIG_REPO, "schedule.yml")
     assert read is not None, f"{COHORT_ORG} has no schedule.yml"
     text, sha = read
     edited = schedule_edit.insert_block(
         text, run_id, _schedule_block(slug, handout, due, cutoff)
     )
+    before = drive.run_ids(CONTROL_REPO, SCHEDULED_RELEASE)
     assert schedule_edit.put_schedule(COHORT_ORG, edited, sha)
-    return Stage("schedule", detail={"due": due, "cutoff": cutoff, "text": edited})
+    driven = drive.wait_for_push_driven_tick(CONTROL_REPO, SCHEDULED_RELEASE, before)
+    return Stage(
+        "schedule",
+        detail={"due": due, "cutoff": cutoff, "text": edited, "driven": driven},
+    )
 
 
 def _dispatch_scheduler(name: str) -> Stage:
     """One real Scheduled release tick, waited out.
 
-    Two of these are needed, in this order, because `scheduler.run` snapshots what is
+    Three of these are needed, in this order, because `scheduler.run` snapshots what is
     already past its deadline BEFORE it hands anything out - so the pass that hands out
-    can never be the pass that collects."""
+    can never be the pass that collects - and the due date and the cutoff drive different
+    passes. Each dispatch reaches both of the workflow's jobs: the release job walks every
+    cohort, the autograde job one matrix leg per cohort."""
     drive.wait_for_idle(CONTROL_REPO, SCHEDULED_RELEASE)
     run_id = drive.dispatch(CONTROL_REPO, SCHEDULED_RELEASE, {"dry_run": False})
     conclusion = drive.wait_for_run(CONTROL_REPO, run_id)

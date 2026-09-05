@@ -157,8 +157,36 @@ def test_a_config_repo_that_is_not_there_is_not_an_error(monkeypatch):
 
 def test_the_harness_waits_on_the_group_the_renderer_declares():
     # Read from `workflows_render`, not retyped: renaming the group there would otherwise
-    # leave the harness waiting for a queue nothing is ever put in.
+    # leave the harness waiting for a queue nothing is ever put in. The group is on the
+    # release JOB and its value is a dry-run expression, so the literal is what is pulled
+    # out - a real pass is the only kind this harness dispatches.
     assert drive.SCHEDULED_RELEASE_GROUP == "scheduled-release"
+
+
+def test_a_schedule_push_that_drives_no_tick_is_not_an_error(monkeypatch):
+    # `dispatch-scheduled-release.yml` is only in cohorts that have refreshed since it
+    # shipped. Where it is not, the edit starts nothing and the harness carries on to its
+    # own dispatch rather than timing out.
+    monkeypatch.setattr(drive, "_runs", lambda repo, workflow, limit=30: [{"id": 1}])
+    monkeypatch.setattr(drive, "_sleep", lambda seconds: None)
+    clock = iter([0, 1, 999])
+    monkeypatch.setattr(drive, "_now", lambda: next(clock))
+    assert drive.wait_for_push_driven_tick("org/.github", "w.yml", {1}) is None
+
+
+def test_the_tick_a_schedule_push_drives_is_waited_out(monkeypatch):
+    # The push is a driver now, so the run it starts is waited out rather than raced: the
+    # pass dispatched next must be the one whose artefacts the next stage reads.
+    monkeypatch.setattr(
+        drive, "_runs", lambda repo, workflow, limit=30: [{"id": 1}, {"id": 7}]
+    )
+    monkeypatch.setattr(drive, "_now", lambda: 0)
+    waited = []
+    monkeypatch.setattr(
+        drive, "wait_for_run", lambda repo, run_id, timeout: waited.append(run_id)
+    )
+    assert drive.wait_for_push_driven_tick("org/.github", "w.yml", {1}) == 7
+    assert waited == [7]
 
 
 def test_only_unfinished_runs_count_as_busy():

@@ -12,20 +12,37 @@ what `ghcli._is_mutating` recognises, so the fence sees it.
 from __future__ import annotations
 
 import json
+import re
+import textwrap
 import time
 
 import yaml
 
 from dsl_course import ghcli, workflows_render
 
-# The group name is READ from the renderer rather than retyped, so that renaming it there
-# cannot leave the harness waiting on a group nothing is queued in. Runs in this group
-# queue instead of overlapping (one pending run at a time), so a dispatch aimed at a busy
-# Scheduled release either waits behind the cron tick or is dropped - `wait_for_idle`
-# before dispatching is what makes the two scheduler passes deterministic.
-SCHEDULED_RELEASE_GROUP: str = yaml.safe_load(
-    workflows_render._SCHEDULED_RELEASE_CONCURRENCY
-)["concurrency"]["group"]
+
+def _release_group() -> str:
+    """The queue a REAL Scheduled release lands in, read out of the renderer.
+
+    Read rather than retyped, so that renaming it there cannot leave the harness waiting
+    on a group nothing is queued in. The scheduler's group sits on its release JOB now
+    that releasing and grading are two of them, and its value is an expression: a manual
+    dry run gets a group per run, everything else the literal here. This harness only ever
+    dispatches real passes, so the literal is the queue its runs join."""
+    expression = yaml.safe_load(textwrap.dedent(workflows_render._RELEASE_CONCURRENCY))[
+        "concurrency"
+    ]["group"]
+    literal = re.search(r"'([^']+)'\s*}}", expression)
+    if not literal:
+        raise RuntimeError(f"no literal group in the release job's {expression!r}")
+    return literal.group(1)
+
+
+# Runs in this group queue instead of overlapping (one pending run at a time), so a
+# dispatch aimed at a busy Scheduled release either waits behind the tick already running
+# or is dropped - `wait_for_idle` before dispatching is what makes the scheduler passes
+# deterministic.
+SCHEDULED_RELEASE_GROUP: str = _release_group()
 
 # A workflow run that has not finished yet, in GitHub's vocabulary.
 ACTIVE_STATUSES = frozenset(
@@ -52,6 +69,11 @@ def _runs(repo: str, workflow: str, limit: int = 30) -> list[dict]:
     return payload.get("workflow_runs") or []
 
 
+def run_ids(repo: str, workflow: str) -> set[int]:
+    """The ids of `workflow`'s recent runs - the "before" of a wait for a new one."""
+    return {r["id"] for r in _runs(repo, workflow)}
+
+
 def busy(runs: list[dict]) -> list[dict]:
     """The runs that have not finished. Pure - the filter every wait here shares."""
     return [r for r in runs if r.get("status") in ACTIVE_STATUSES]
@@ -60,9 +82,11 @@ def busy(runs: list[dict]) -> list[dict]:
 def wait_for_idle(repo: str, workflow: str, timeout: int = RUN_TIMEOUT_SECONDS) -> None:
     """Block until no run of `workflow` is queued or in progress.
 
-    Called before every dispatch of a workflow in the `scheduled-release` concurrency
-    group: Actions holds exactly one pending run per group, so dispatching into a busy
-    group can silently drop the click."""
+    Called before every dispatch of Scheduled release: Actions holds exactly one pending
+    run per concurrency group, so dispatching into a busy group can silently drop the
+    click. The whole RUN, not just its release job - the pass this harness is about to
+    dispatch reads what the one before it wrote, and the autograde job is where the
+    marker lands."""
     deadline = _now() + timeout
     while busy(_runs(repo, workflow)):
         if _now() >= deadline:
@@ -146,3 +170,31 @@ def run_log(repo: str, run_id: int) -> str:
             f"could not read the log of run {run_id} in {repo}: {out[:200]}"
         )
     return out
+
+
+def wait_for_push_driven_tick(
+    repo: str,
+    workflow: str,
+    before: set[int],
+    appear: int = DISPATCH_TIMEOUT_SECONDS,
+    timeout: int = RUN_TIMEOUT_SECONDS,
+) -> int | None:
+    """Wait out the Scheduled release a cohort's own schedule.yml push starts.
+
+    A cohort's seeded `dispatch-scheduled-release.yml` fires the course org's Scheduled
+    release from every push to its schedule.yml, so this harness's schedule edits now
+    drive the scheduler themselves. That run does exactly the work the pass dispatched
+    next does, and it is idempotent - what it must not do is arrive in the middle of the
+    stage after it. Returns the run id it waited on, or None when none appeared: the
+    dispatcher is only in cohorts that have refreshed since it shipped, and its absence
+    is not what this test is about."""
+    deadline = _now() + appear
+    while True:
+        new = run_ids(repo, workflow) - before
+        if new:
+            run_id = max(new)
+            wait_for_run(repo, run_id, timeout)
+            return run_id
+        if _now() >= deadline:
+            return None
+        _sleep(POLL_SECONDS)
