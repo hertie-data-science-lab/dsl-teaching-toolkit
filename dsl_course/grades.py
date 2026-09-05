@@ -1748,6 +1748,42 @@ def build_gradebooks(
     return books
 
 
+def _on_the_roster(
+    books: dict[str, dict[str, dict]], students: list[roster.Student] | None
+) -> tuple[dict[str, dict[str, dict]], int]:
+    """The books belonging to somebody this cohort's roster knows, and how many marks the
+    rest accounted for.
+
+    Every source of marks is hand-typed - a grading sheet, and the legacy `grades/*.csv` a
+    transition cohort is still marking in - so both carry rows for handles the cohort does
+    not have: a student who withdrew before onboarding, a handle typed from memory, a
+    cohort's CSVs carried over wholesale from the term before. `ensure_gradebooks`
+    provisions one repo per ONBOARDED enrolled student and nothing else, so a book for any
+    other handle was a write to a repo that does not exist - a 404 per row, in a PUBLIC
+    log, naming `grades-<handle>` as it went. Dropping them here is what makes the two
+    agree.
+
+    A roster that could not be READ (None) filters nothing: the run is already going red
+    for it, and treating an unreadable file as "nobody is enrolled" would withhold the
+    whole cohort's grades on the strength of a transient failure."""
+    if students is None:
+        return books, 0
+    known = {
+        s.github_handle.casefold() for s in roster.enrolled(students) if s.onboarded
+    }
+    kept = {
+        handle: book for handle, book in books.items() if handle.casefold() in known
+    }
+    unknown = 0
+    for handle in sorted(set(books) - set(kept)):
+        unknown += len(books[handle])
+        log_person(
+            f"  [unknown] {handle} is not an onboarded student on this roster - "
+            f"{len(books[handle])} mark(s) ignored"
+        )
+    return kept, unknown
+
+
 def _cell(value: object) -> str:
     """One value as a Markdown table cell: no `|` to close the column early, no newline to
     end the row. A grader's feedback is free text and can reach a table either way."""
@@ -2565,7 +2601,7 @@ def distribute(
         # timing, so its README cell is BLANK - "not submitted" there would be this
         # module asserting something it has no source for.
         timed = frozenset(sheets)
-        books = build_gradebooks(sources)
+        books, unknown = _on_the_roster(build_gradebooks(sources), students)
         distributed, migrating = _read_distributed(wd)
         retired = _retired_gradebook_files(wd) if migrating else []
 
@@ -2583,6 +2619,7 @@ def distribute(
         "gradebooks": 0,
         "emails": 0,
         "held": sum(len(whose) for whose in held.values()),
+        "unknown": unknown,
         "skipped": 0,
         "failed": 0,
     }
@@ -2783,6 +2820,9 @@ def _preview(
         if part:
             log(f"    {part} unit(s) have unmarked questions")
         log(f"  {COHORT_CSV_NAME}: would gain column {slug}")
+    if counts["unknown"]:
+        # Counted, not named: a handle nobody enrolled is still somebody's.
+        log(f"  {counts['unknown']} mark(s) for handles not on the roster - ignored")
     log(
         f"  would post {counts['comments']} comment(s), update "
         f"{counts['gradebooks']} gradebook(s), email "
