@@ -1037,6 +1037,30 @@ def test_collect_records_a_skip_when_autograde_is_disabled(monkeypatch):
     assert "autograde: false" in text
 
 
+def test_collect_records_a_skip_when_the_solution_branch_has_no_tests(monkeypatch):
+    # `autograde` defaults to TRUE, so a template whose hidden tests were never written
+    # lands here - and landed here red, every quarter of an hour, with the sheet left OPEN
+    # and no skip recorded. It is a hand-marked assignment like the other two.
+    def clone_without_tests(org, repo, dest, branch=None):
+        Path(dest).mkdir(parents=True, exist_ok=True)
+        (Path(dest) / collect.GRADING_FILE).write_text("autograde: true\n")
+        return True
+
+    monkeypatch.setattr(collect, "clone", clone_without_tests)
+    monkeypatch.setattr(collect, "gh", lambda *a, **k: (0, ""))
+    monkeypatch.setattr(
+        collect.grades, "_grading_text", lambda org, template: "autograde: true\n"
+    )
+    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    sheets = _recorded_sheet_writes(monkeypatch)
+    written = _captured_writes(monkeypatch)
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
+    ((path, text),) = written
+    assert path == "autograde/assignment-1/_skipped.json"
+    assert "no `tests/` on the solution branch - hand-marked" in text
+    assert [c["phase"] for c in sheets] == [collect.SheetPhase.FREEZING]
+
+
 def test_collect_dry_run_records_no_skip(monkeypatch):
     # A dry run must not fire the marker - that would silence the real run that follows.
     _stub_solution_clone(monkeypatch, "autograde: false\n")

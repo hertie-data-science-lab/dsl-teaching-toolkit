@@ -1707,10 +1707,22 @@ def collect(
             )
         tests_src = soldir / str(gspec["tests"])
         if not tests_src.is_dir():
+            # The third hand-marked exit, and the one a template falls into by accident:
+            # `autograde` defaults to true, so an assignment whose hidden tests were never
+            # written lands here. Recorded and frozen like the other two rather than red -
+            # a fault the cron re-decides every quarter of an hour is a fault nobody reads,
+            # and the sheet has to be sealed whether or not a machine ever marked anything.
             log_err(
-                f"{slug}: tests path `{gspec['tests']}` not found on the solution branch."
+                f"{slug}: no `{gspec['tests']}/` on the solution branch - hand-marked, "
+                f"nothing to collect."
             )
-            return 1
+            freeze_sheet()
+            return _record_skip(
+                cohort_org,
+                slug,
+                f"no `{gspec['tests']}/` on the solution branch - hand-marked",
+                dry_run,
+            )
 
         # Targets: one per team (group) or one per onboarded student (individual). Repos
         # are named after the cohort-side `slug`; teams.csv is keyed on the schedule `key`.
