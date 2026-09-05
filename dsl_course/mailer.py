@@ -412,10 +412,10 @@ def send_bulk(
     return _send_via_graph(graph, messages)
 
 
-def sample_of(
+def sample_message_of(
     build: Callable[[roster.Student], tuple[str, str, str]], **placeholders: str
-) -> str:
-    """One message rendered against a PLACEHOLDER student, for a dry-run preview.
+) -> tuple[str, str]:
+    """The `(subject, body)` of one message rendered against a PLACEHOLDER student.
 
     A dry run masks every recipient and prints no real body, which leaves the one thing a
     reviewer actually wants to check - the wording - invisible. `build` is the caller's
@@ -428,4 +428,12 @@ def sample_of(
         "github_handle": "",
         "github_id": "",
     } | placeholders
-    return build(roster.Student(**fields))[2]
+    _to, subject, body = build(roster.Student(**fields))
+    return subject, body
+
+
+def sample_of(
+    build: Callable[[roster.Student], tuple[str, str, str]], **placeholders: str
+) -> str:
+    """The BODY of `sample_message_of` - what `send_bulk` prints under a dry run."""
+    return sample_message_of(build, **placeholders)[1]

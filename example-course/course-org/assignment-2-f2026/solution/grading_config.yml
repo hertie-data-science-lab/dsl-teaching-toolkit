@@ -1,0 +1,10 @@
+# How this assignment is defined and marked. Dates live in the cohort's schedule.yml.
+title: Gradient descent
+type: individual      # individual (one repo per student) or group (one repo per team)
+autograde: true       # false -> skip autograding (all-manual)
+tests: tests          # path (on THIS solution branch) holding the hidden tests
+                      # how many passed is shown to you as `info.autograde` in the grading
+                      # sheet - never a mark by itself, and never something a student sees
+
+late_window_days: 7        # 0 = nothing after the due date is accepted
+late_penalty_per_day: 10%  # of the EARNED grade, per day started

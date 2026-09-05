@@ -32,13 +32,19 @@ import json
 import sys
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
 
-from . import roster, schedule, site, sync_teams, teams
+from . import grades, roster, schedule, site, sync_teams, teams
 from .access import FACULTY_READ_ACCESS, grant_faculty, grant_team_repo_access
-from .collect import assignment_is_group
+from .collect import (
+    assignment_is_group,
+    load_grading_spec,
+    sheet_spec,
+    sync_sheet,
+)
 from .course import (
     CONFIG_REPO,
     SOLUTION_BRANCH,
@@ -333,6 +339,7 @@ def provision_one(
     team: str | None = None,
     touch_existing: bool = True,
     existing: frozenset[str] | None = None,
+    feedback_body: str = "",
 ) -> str:
     """Generate one submission repo and grant its members access.
 
@@ -386,6 +393,19 @@ def provision_one(
             log_err(
                 "  ! a submission repo is untagged - the nightly sweep converges it"
             )
+        # The Feedback issue, on the CREATE path only. It is where every receipt and,
+        # eventually, the grade is posted, so the student is told at handout where to
+        # look. Never re-probed for a repo that already exists: that would be one listing
+        # per student per hourly tick for the rest of the term, for an issue that does not
+        # go away - and the refresh pass opens a missing one lazily when it first has
+        # something to say.
+        if feedback_body and not grades.ensure_feedback_issue(
+            cohort_org, repo, feedback_body
+        ):
+            log_err(
+                "  ! a submission repo has no Feedback issue yet - the refresh pass "
+                "opens it before the first receipt"
+            )
 
     solution_failed = False
     if sol_dir is not None:
@@ -418,7 +438,8 @@ def provision_one(
     # so re-granting here bought nothing and cost two PUTs per student per assignment on
     # every path that reaches this line.
     #
-    # READ, not write. Marking happens in `classroom-config/grades/<slug>.csv` (docs/10),
+    # READ, not write. Marking happens in
+    # `classroom-config/grading_sheets/<slug>.yml` (docs/10),
     # and by the time anyone marks, the deadline snapshot has already frozen this repo's
     # HEAD and the autograder has run off that snapshot - so a commit here would reach no
     # gradebook and form no part of the record. Faculty need to SEE the work, not edit it.
@@ -456,7 +477,9 @@ def provision_one(
     # routes access through the team to avoid the wedge.
     added = 0
     for handle in handles:
-        if add_collaborator(cohort_org, repo, handle, permission="maintain"):
+        if add_collaborator(
+            cohort_org, repo, handle, permission="maintain", person=True
+        ):
             log_person(f"  [ok]   + @{handle} (maintain)")
             added += 1
         else:
@@ -501,7 +524,7 @@ def main() -> int:
         default="auto",
         help="individual = one repo per student; group = one per team (from "
         "classroom-config/teams.csv); auto = whatever schedule.yml / the template's "
-        "grading.yml declare (default: individual).",
+        "grading_config.yml declare (default: individual).",
     )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -588,7 +611,7 @@ def provision_all(
 
     Callable directly (e.g. by the scheduler) as well as from the CLI. `group=None`
     (the default) reads the template's own declaration - `type: group` in the
-    grading.yml on its solution branch; pass True to force per-team for a template
+    grading_config.yml on its solution branch; pass True to force per-team for a template
     that doesn't declare it.
 
     `scheduled` marks the hourly cron: a group assignment with no teams yet is then a
@@ -597,7 +620,7 @@ def provision_all(
         log_err("master-org and cohort-org must differ.")
         return 1, False
     if group is None:
-        # schedule.yml's assignments.<slug>.type wins; grading.yml is the fallback.
+        # schedule.yml's assignments.<slug>.type wins; grading_config.yml is the fallback.
         group = assignment_is_group(master_org, cohort_org, template)
         if group:
             log("  (declared `type: group` - provisioning per team)")
@@ -623,9 +646,16 @@ def provision_all(
     # They differ exactly when `cohort_dest_repo` is set. Keying the lookup or the team slug
     # on the name then meant no teams found at all, or a team granted on the repo under a
     # slug that Sync membership reconciles a DIFFERENT team for.
-    found = schedule.entry_for_repo(schedule.load(cohort_org), template)
+    sched = schedule.load(cohort_org)
+    found = schedule.entry_for_repo(sched, template)
     key = found[0] if found else assignment_slug(template)
     slug = schedule.cohort_name(*found) if found else key
+    # The assignment's own facts, read once: they compose both the grading sheet's header
+    # (below) and the Feedback issue's body (per unit, since a team's names it).
+    spec = sheet_spec(
+        sched, key, slug, load_grading_spec(master_org, template), bool(group)
+    )
+    feedback_bodies: dict[str, str] = {}
 
     # A provisioning unit is (repo_name, [member handles], team slug). Individual = one per
     # student (a team of one); group = one per team from teams.csv, keyed on `key`.
@@ -652,6 +682,10 @@ def provision_all(
         # into the private cohort org (and granted `maintain` on a repo) by ensure_team.
         # `vet_groups` is that one allowlist; the reporting below is this path's own.
         units = []
+        # What the GRADING SHEET is keyed on: the team NAME from teams.csv (and, below, the
+        # student's handle) - the same key `collect.submission_targets` uses, so the
+        # handout's rows and every later refresh's rows are the same rows.
+        sheet_units: list[tuple[str, list[str]]] = []
         for team, vetted, rejected in sync_teams.vet_groups(groups, participants):
             for m in rejected:
                 # Names a handle a STUDENT typed into teams.csv, and this workflow's log is
@@ -672,12 +706,17 @@ def provision_all(
             units.append(
                 (submission_repo(slug, team), vetted, sync_teams.team_slug(key, team))
             )
+            sheet_units.append((team, vetted))
+            feedback_bodies[units[-1][0]] = grades.feedback_body(spec, team, vetted)
         what = f"{len(units)} team(s)"
     else:
         units = [
             (submission_repo(slug, s.github_handle), [s.github_handle], None)
             for s in onboarded
         ]
+        sheet_units = [(s.github_handle, [s.github_handle]) for s in onboarded]
+        body = grades.feedback_body(spec)
+        feedback_bodies = {repo: body for repo, _handles, _team in units}
         what = f"{len(units)} student(s)"
 
     log_step(
@@ -744,6 +783,7 @@ def provision_all(
                 team=team,
                 touch_existing=touch_existing,
                 existing=existing,
+                feedback_body=feedback_bodies.get(repo, ""),
             )
             results[status] = results.get(status, 0) + 1
 
@@ -757,13 +797,44 @@ def provision_all(
 
     schedule.record_handout(cohort_org, key)
 
+    changed = any(k != "skipped" for k in results)
+
+    # The grading sheet arrives WITH the handout: every row present, every human field
+    # blank, and a header saying which fields the toolkit fills and when. A sheet that only
+    # appeared once someone had submitted would be one a grader cannot plan around - and a
+    # missing row would be indistinguishable from an ungraded one. Nothing is derived here
+    # (there is nothing to derive before the due date, and a handout must not cost an API
+    # call per student); the hourly refresh takes over from the due date.
+    #
+    # Only when this pass actually provisioned something, for the same reason the site sync
+    # below is: `due_releases` is cumulative, so the scheduler re-fires every handed-out
+    # assignment on every tick, and a pass that skipped every repo has nothing new to put
+    # in the sheet - it would only rewrite the header a live refresh had just filled in.
+    #
+    # Not fatal, and deliberately not counted: the repos are handed out by this point, and
+    # the refresh pass creates a sheet it finds missing on the next tick.
+    if changed and not sync_sheet(
+        master_org,
+        cohort_org,
+        sched,
+        key,
+        slug,
+        template,
+        is_group=bool(group),
+        now=datetime.now(timezone.utc),
+        units=sheet_units,
+    ):
+        log_err(
+            f"  ! could not write the grading sheet for {slug} - the hourly refresh "
+            f"creates it on a later tick"
+        )
+
     # site.sync_site now RAISES on a genuine tree/team read failure (post-PR2), and a config
     # file that doesn't parse raises yaml.YAMLError - which is NOT a RuntimeError. The repos
     # are already handed out by this point, so neither failure may abort the run with a
     # traceback and misreport the whole handout as failed: log it, count it (so the run goes
     # red and the next Sync site / tick refreshes the site), and return normally.
     site_failed = False
-    changed = any(k != "skipped" for k in results)
     try:
         # A tick that created or changed nothing has nothing to show the site: skipping the
         # sync here is what stops every handed-out assignment re-rendering the site hourly.

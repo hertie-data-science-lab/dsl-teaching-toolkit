@@ -2,7 +2,7 @@
 used as a list item (`- {a: 1, b: 2}`).
 
 Flow and block parse identically, so this is a teaching/readability standard rather than a
-correctness one: `schedule.yml`, `people.yml`, `dsl-course.yml`, `grading.yml` and the docs
+correctness one: `schedule.yml`, `people.yml`, `dsl-course.yml`, `grading_config.yml` and the docs
 that mirror them are read and hand-edited by course teams, and one shape everywhere is what
 makes them copyable. The guard matters most for the SEEDED templates - a flow item left in
 `templates/classroom-config/schedule.yml` is `.format()`ed into every new cohort org, so the
@@ -27,7 +27,14 @@ import pytest
 import yaml
 
 from dsl_course import bootstrap_course, welcome
-from dsl_course.grades import GradeRow, build_gradebooks, render_yaml
+from dsl_course.grades import (
+    GradeRow,
+    SheetSpec,
+    build_gradebooks,
+    dump_sheet,
+    new_sheet,
+    render_yaml,
+)
 from dsl_course.scaffold import _GRADING_YML
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -101,14 +108,35 @@ PY_FILES = sorted((ROOT / "dsl_course").glob("*.py"))
 
 
 def _gradebook() -> str:
-    """One student's rendered gradebook - the `yaml.safe_dump` path (grades.render_yaml)."""
+    """One student's `grades.yml` - the `yaml.safe_dump` path (grades.render_yaml)."""
     rows = {
         "assignment-1": [
             GradeRow(github_handle="janedoe", team="t1", final_grade="15")
         ],
         "assignment-2": [GradeRow(github_handle="janedoe", final_grade="10")],
     }
-    return render_yaml(build_gradebooks(rows)["janedoe"])
+    books = build_gradebooks(rows)
+    return render_yaml({"student": "janedoe", "assignments": books["janedoe"]})
+
+
+def _grading_sheet_dump() -> str:
+    """One assignment's grading sheet - the `_SheetDumper` path (grades.dump_sheet). It has
+    its own dumper, so PyYAML's default is not what keeps this one block style."""
+    spec = SheetSpec(
+        slug="assignment-1",
+        title="Neural networks from scratch",
+        is_group=True,
+        questions={"Q1": "15", "Q2": "10"},
+        late_window_days=7,
+        late_penalty_per_day="10%",
+        due_display="Sun 4 Oct 2026 23:59",
+        cutoff_display="Sun 11 Oct 2026 23:59",
+    )
+    return dump_sheet(
+        new_sheet(spec, [("team-alpha", ["ada-l", "ben-k"])]),
+        spec,
+        "OPEN - 0 of 1 teams have submitted",
+    )
 
 
 def _inventory_dump() -> str:
@@ -131,14 +159,16 @@ def _cohort_registry_dump() -> str:
 # them passes it explicitly. Flow style at the document root is a single braced line with
 # no `- ` at all, so FLOW_ITEM can't see it - assert on the braces/brackets instead.
 DUMPED = {
-    "gradebook/<handle>.yml (grades.render_yaml)": _gradebook,
+    "grades-<handle>/grades.yml (grades.render_yaml)": _gradebook,
     "list_orgs --yaml inventory": _inventory_dump,
     "cohort-courses-pages.yml (discovery)": _cohort_registry_dump,
+    "grading_sheets/<slug>.yml (grades.dump_sheet)": _grading_sheet_dump,
 }
 
 # Every runtime-generated faculty-facing artefact rendered from templates or string
-# constants: the `.format()`ed seed templates (whose doubled `{{ }}` braces can hide a flow
-# item until bootstrap renders them) and the grading.yml written to each solution branch.
+# constants: the `.format()`ed seed templates (whose doubled `{{ }}` braces can hide a
+# flow item until bootstrap renders them) and the grading_config.yml written to each
+# solution branch.
 SEEDED = {
     "classroom-config/schedule.yml (seeded)": lambda: welcome.template(
         "classroom-config/schedule.yml"
@@ -157,7 +187,7 @@ SEEDED = {
     "cohort/dsl-course.yml (seeded)": lambda: bootstrap_course._cohort_metadata(
         "Org", "Course"
     ),
-    "grading.yml (scaffolded)": lambda: _GRADING_YML.format(
+    "grading_config.yml (scaffolded)": lambda: _GRADING_YML.format(
         kind="group", fmt="notebook"
     ),
 }

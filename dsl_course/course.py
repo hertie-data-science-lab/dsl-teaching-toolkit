@@ -43,7 +43,7 @@ SYLLABUS_SESSIONS_FILE = "SYLLABUS.sessions.md"
 # to release a README still containing it, so the sentinel is declared ONCE here - the
 # writer and the guard both import it, and neither can lapse when the wording is edited.
 FACULTY_ONLY_HEADING = "delete this section before releasing the README"
-# The branch an assignment template keeps its solution and grading.yml on.
+# The branch an assignment template keeps its solution and grading_config.yml on.
 SOLUTION_BRANCH = "solution"
 
 # The four ROLE teams every org's access is expressed in: the two faculty teams, created
@@ -88,6 +88,117 @@ COHORT_TEAMS = (
 ROLE_TEAMS = frozenset(slug for slug, _, _ in (*FACULTY_TEAMS, *COHORT_TEAMS))
 
 
+# ------------------------------------------------------------------ the Feedback issue
+
+# Every submission repo carries ONE issue, opened at handout, where the student's receipts
+# and finally their feedback appear. The contract lives here, at layer 0, because `assign`
+# opens the issue and `grades` posts into it, and the two must agree on the spelling or the
+# second one opens a duplicate.
+FEEDBACK_ISSUE_TITLE = "Feedback"
+FEEDBACK_ISSUE_LABEL = "dsl-feedback"
+# A tuple, like `gh_contents.STUB_MARKS`: an issue opened under an older wording must still
+# be RECOGNISED, so a mark is added to the chain, never edited. Recognition is what stops a
+# second Feedback issue appearing in a repo that already has one.
+FEEDBACK_ISSUE_MARKS = ("<!-- dsl-course: feedback -->",)
+
+_SUBMIT_PARAGRAPH = (
+    "Push your work to this repository as normal; the last commit to `main` before the "
+    "deadline is what we grade. A submission receipt is posted here at the deadline and "
+    "after any late push, and your feedback and grade follow as a comment once marking is "
+    "complete."
+)
+_EXTERNAL_PARAGRAPH = (
+    "This assignment is submitted outside GitHub (see the brief). This repository holds "
+    "the brief and your feedback."
+)
+_CONTRIBUTIONS_ASK = "fill in CONTRIBUTIONS.md before the deadline."
+
+# The three receipt events. One comment each, additive: a comment edited in place leaves no
+# trace of when the work actually arrived, and the volume is bounded (one at the deadline,
+# one per late push, one at the cutoff).
+RECEIPT_DUE = "due"
+RECEIPT_UPDATED = "updated"
+RECEIPT_FROZEN = "frozen"
+
+
+def feedback_issue_body(
+    *,
+    due_display: str,
+    late_policy_line: str = "",
+    team_line: str = "",
+    external: bool = False,
+) -> str:
+    """The body of a submission repo's Feedback issue.
+
+    The caller supplies only what it knows - the rendered dates, and (for a team) the team
+    and its members; every word of boilerplate is here, so the three variants cannot drift
+    apart in three call sites."""
+    lines = [FEEDBACK_ISSUE_MARKS[0], f"**Due:** {due_display}"]
+    if external:
+        return "\n".join([*lines, "", _EXTERNAL_PARAGRAPH]) + "\n"
+    if late_policy_line:
+        lines.append(f"**Late work:** {late_policy_line}")
+    if team_line:
+        lines.append(f"**Team:** {team_line} - {_CONTRIBUTIONS_ASK}")
+    return "\n".join([*lines, "", _SUBMIT_PARAGRAPH]) + "\n"
+
+
+def receipt_marker(sha: str, event: str) -> str:
+    """The hidden marker every receipt carries.
+
+    Keyed on the COMMIT as well as the event, so a re-run that finds the same pin posts
+    nothing while a genuinely new push still gets its own receipt. A run with no submission
+    to point at keys on `none`, which is equally once-only."""
+    return f"<!-- dsl-receipt:{sha or 'none'}:{event} -->"
+
+
+def _late_phrase(days_late: int, penalty_display: str = "") -> str:
+    """`on time`, `2 days late`, or `2 days late (-20%)`."""
+    if days_late <= 0:
+        return "on time"
+    phrase = f"{days_late} day{'' if days_late == 1 else 's'} late"
+    return f"{phrase} ({penalty_display})" if penalty_display else phrase
+
+
+def receipt_body(
+    event: str,
+    *,
+    sha: str = "",
+    pushed_display: str = "",
+    days_late: int = 0,
+    penalty_display: str = "",
+    late_line: str = "",
+) -> str:
+    """One receipt, as the student reads it.
+
+    "committed", not "pushed": the moment shown is the pinned commit's COMMITTER date,
+    which is `GIT_COMMITTER_DATE` and so the student's own to set. Calling it the push time
+    said the server had timed it, which it had not - and the pin, the late arithmetic and
+    this line all rest on the same claim.
+
+    `late_line` is the course's late policy as a sentence; the caller composes it because
+    the dates and the rate come from two other files. Everything else is fixed here."""
+    short = sha[:7]
+    late = _late_phrase(days_late, penalty_display)
+    if event == RECEIPT_FROZEN:
+        # No percentage here: the deduction was quoted when the late push was recorded,
+        # and this receipt is about the pin closing, not about the mark.
+        plain = _late_phrase(days_late)
+        return (
+            f"**Frozen for grading** · `{short}` · {plain}. No further pushes count.\n"
+        )
+    if event == RECEIPT_UPDATED:
+        return f"**Submission updated** · `{short}` · committed {pushed_display} · {late}\n"
+    if not sha:
+        opening = "**No submission recorded** at the deadline."
+        tail = f" {late_line}" if late_line else ""
+        return f"{opening}{tail}\n"
+    first = f"**Submission recorded** · `{short}` · committed {pushed_display} · {late}"
+    if not late_line:
+        return f"{first}\n"
+    return f"{first}\n{late_line} A further push replaces this.\n"
+
+
 def submission_repo(slug: str, suffix: str) -> str:
     """A submission repo's name: `<slug>-<handle>` individually, `<slug>-<team>` for a
     group. One composition, so the provisioner, the grader and the "your repo is called"
@@ -130,7 +241,7 @@ def resolve_is_group(
 
     An explicit force (the Grade-assignment workflow's checkbox / `--group`) wins; else the
     COHORT's declaration - `assignments.<slug>.type` in classroom-config/schedule.yml, passed
-    as `schedule_type`; else the template's design-time grading.yml `type:`, passed as
+    as `schedule_type`; else the template's design-time grading_config.yml `type:`, passed as
     `template_group` (True/False, or None when not consulted); else individual. Pure: each
     caller passes the inputs it already holds, so no consumer re-derives its own precedence
     (and none re-trusts student-writable teams.csv to decide the kind)."""

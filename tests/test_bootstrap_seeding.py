@@ -257,7 +257,9 @@ def test_the_scaffold_set_lands_as_one_commit_but_stays_create_only_per_file(
     monkeypatch.setattr(
         gh_contents,
         "_commit_tree",
-        lambda org, repo, branch, tree, message: committed.append(tree) or True,
+        lambda org, repo, branch, tree, message, person=False: (
+            committed.append(tree) or True
+        ),
     )
 
     assert gh_contents.put_files(
@@ -347,8 +349,8 @@ def test_the_sample_set_is_the_whole_worked_example_cohort():
         "teams.csv.sample",
         "schedule.yml.sample",
         "people.yml.sample",
-        "grades/assignment-1.csv.sample",
-        "grades/assignment-4-project.csv.sample",
+        "grading_sheets/assignment-1.yml.sample",
+        "grading_sheets/assignment-4-project.yml.sample",
     }
     for path, source in welcome.CLASSROOM_SAMPLES.items():
         assert (welcome.EXAMPLE_COHORT / source).is_file(), f"{path} <- {source}"
@@ -381,16 +383,69 @@ def test_every_shipped_sample_parses_with_the_real_parser():
     )
     assert faculty["instructors"] and faculty["teaching_assistants"]
 
-    # both grade tables: the individual case, and the team-graded one the derived set
-    # restored (a group assignment fills team/team_grade/team_comments instead)
-    individual = grades.parse_grades(
-        welcome.example_cohort_file("grades/assignment-1.csv")
+    # both grading sheets: the individual case, and the group one (which nests `members:`
+    # inside each team). Parsed by the very function the toolkit reads a live sheet with.
+    individual = grades.parse_sheet(
+        welcome.example_cohort_file("grading_sheets/assignment-1.yml")
     )
-    project = grades.parse_grades(
-        welcome.example_cohort_file("grades/assignment-4-project.csv")
+    project = grades.parse_sheet(
+        welcome.example_cohort_file("grading_sheets/assignment-4-project.yml")
     )
-    assert individual and not any(r.team for r in individual)
-    assert project and all(r.team and r.team_score for r in project)
+    assert set(individual) == {"submissions"}
+    assert all(
+        "score_individual" in block for block in individual["submissions"].values()
+    )
+    assert set(project) == {"teams"}
+    assert all(
+        {"info", "score_group", "feedback_group", "members"} <= set(block)
+        for block in project["teams"].values()
+    )
+    # A sample is what a grader copies from, so it must not teach them to type a note that
+    # reaches a student: the private keys are present and the allowlist has never seen them.
+    assert grades.NOTES_KEY not in grades.STUDENT_VIEW_KEYS
+
+
+# `(slug, schedule key, is_group, phase, submitted, total, derived)` - the moment each
+# shipped sample is a picture OF. The counts are the sample's own rows.
+_SAMPLE_SHEETS = [
+    ("assignment-1", "assignment-1", False, collect.SheetPhase.FROZEN, 0, 3, False),
+    (
+        "assignment-4-project",
+        "assignment-4-project",
+        True,
+        collect.SheetPhase.OPEN,
+        2,
+        2,
+        True,
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "slug,key,is_group,phase,submitted,total,derived",
+    _SAMPLE_SHEETS,
+    ids=[s[0] for s in _SAMPLE_SHEETS],
+)
+def test_every_sample_sheet_is_what_the_toolkit_would_write(
+    slug, key, is_group, phase, submitted, total, derived
+):
+    # These ship into every cohort's classroom-config as `grading_sheets/*.yml.sample`
+    # and are the only worked example a grader has. Hand-written, they drifted: their
+    # headers quoted points, a late window and `autograde off` that the example course's
+    # own grading_config.yml declared none of, and a status line the renderer never
+    # emits. Rendering them from those files is what stops that happening twice.
+    sched, error = schedule.load_file(str(welcome.EXAMPLE_COHORT / "schedule.yml"))
+    assert error is None, error
+    entry = sched.assignments[key]
+    gspec = grades.parse_grading_spec(
+        welcome.example_course_file(
+            f"{entry.course_source_repo}/solution/{grades.GRADING_FILE}"
+        )
+    )
+    spec = grades.sheet_spec(sched, key, slug, gspec, is_group)
+    text = welcome.example_cohort_file(f"{grades.SHEETS_DIR}/{slug}.yml")
+    status = collect._status_line(spec, phase, total, submitted, derived)
+    assert grades.dump_sheet(grades.parse_sheet(text), spec, status) == text
 
 
 def test_scaffold_and_sample_carry_the_engines_current_column_sets():
@@ -531,23 +586,29 @@ def test_the_example_courses_people_block_feeds_both_of_its_readers():
 
 
 def test_every_example_assignment_parses_with_the_real_grading_reader():
-    # grading.yml is design-time faculty input, and `parse_grading_spec` defaults every
-    # missing key - so a retired spelling in the example reads as a silent default rather
-    # than an error. Assert the VALUES, not just that it parses.
-    kinds = {}
+    # grading_config.yml is design-time faculty input, and `parse_grading_spec` defaults
+    # every missing key - so a retired spelling in the example reads as a silent default
+    # rather than an error. Assert the VALUES, not just that it parses.
+    kinds, autograded = {}, set()
     for a in sorted(welcome.EXAMPLE_COURSE.glob("assignment-*")):
         spec_file = a / "solution" / collect.GRADING_FILE
         assert spec_file.is_file(), f"{a.name}: no solution/{collect.GRADING_FILE}"
         spec = collect.parse_grading_spec(spec_file.read_text())
         kinds[a.name] = spec["type"]
-        # the hidden tests the Grade assignment workflow runs live where the file says
+        autograded.add(spec["autograde"])
+        # the hidden tests the autograder runs live where the file says - seeded even where
+        # this assignment is hand-marked, so turning `autograde` on needs no other edit
         assert (a / "solution" / spec["tests"]).is_dir(), (
             f"{a.name}: `tests: {spec['tests']}` names no directory"
         )
-        assert spec["autograde"] is True
+        assert spec["title"], (
+            f"{a.name}: no `title:` - the grading sheet's header needs it"
+        )
     # both kinds are demonstrated - `type: group` is what drives team provisioning, and an
     # example that only ever showed individual assignments taught half the schema
     assert "group" in kinds.values() and "individual" in kinds.values(), kinds
+    # and both sides of the opt-in, since hand-marking is the default and the common case
+    assert autograded == {True, False}
 
 
 def test_every_example_assignment_has_the_layout_the_engine_pushes():

@@ -10,7 +10,7 @@ from functools import cache
 from typing import NamedTuple
 
 from .ghcli import gh, is_already_exists, is_missing_resource
-from .log import log, log_err, log_ok, log_person, log_skip
+from .log import log, log_err, log_err_person, log_ok, log_person, log_skip
 
 
 class _RepoReadFailed(RuntimeError):
@@ -294,7 +294,8 @@ def create_repo(
 # depth, case-insensitively, and as glob patterns so `.env.local` is caught alongside
 # `.env`. The public site copies whole discovered session folders wholesale, so anything a
 # faculty member happens to keep beside their teaching material is published with it: a
-# `solution/` next to the lab it answers, the `grading.yml` that says how it is marked, the
+# `solution/` next to the lab it answers, the `grading_config.yml` that says how it is
+# marked, the
 # hidden `tests/`, a `.env` with a live key. None of those is a release decision anyone
 # made; they are what "copy the folder" means.
 #
@@ -304,7 +305,8 @@ def create_repo(
 PUBLICATION_DENYLIST = (
     "solution",
     "solutions",
-    "grading.yml",
+    "grading_config.yml",
+    "grading.yml",  # the pre-rename name, still on every template scaffolded before it
     "tests",
     ".env",
     ".env.*",
@@ -333,7 +335,8 @@ def has_denied_component(path: str) -> bool:
 #
 # Kept apart from PUBLICATION_DENYLIST deliberately, and it is not an oversight that
 # neither list mentions the other. That one is a SECURITY boundary: a `solution/`, a
-# `grading.yml`, a `.env` must not leak, and every entry earns its place by what it would
+# `grading_config.yml`, a `.env` must not leak, and every entry earns its place by what it
+# would
 # cost to publish. Nothing here leaks anything - it is clutter. Folding the two together
 # would let an edit meant for a list of nuisances widen the list that keeps answers away
 # from a class.
@@ -406,7 +409,13 @@ def set_repo_topics(org: str, repo: str, topics: list[str]) -> bool:
 
 
 def ensure_label(
-    org: str, repo: str, name: str, *, color: str, description: str
+    org: str,
+    repo: str,
+    name: str,
+    *,
+    color: str,
+    description: str,
+    person: bool = False,
 ) -> bool:
     """Create an issue label if the repo doesn't have it. Already-there is success.
 
@@ -416,6 +425,10 @@ def ensure_label(
     doesn't have it, so a form's `labels:` line is a request, not a guarantee."""
     code, out = gh(
         "api",
+        # Spelt out so `ghcli._is_mutating` sees a write and the pacer counts it: a POST
+        # inferred from the presence of `--field` is a POST the governor cannot see.
+        "--method",
+        "POST",
         f"repos/{org}/{repo}/labels",
         "--field",
         f"name={name}",
@@ -426,12 +439,27 @@ def ensure_label(
     )
     if code == 0 or is_already_exists(out):
         return True
-    log_err(f"could not create label '{name}' on {org}/{repo}: {out[:160]}")
+    if person:
+        log_err_person(
+            f"could not create the '{name}' label on a repo in {org}",
+            f"could not create label '{name}' on {org}/{repo}: {out[:160]}",
+        )
+    else:
+        log_err(f"could not create label '{name}' on {org}/{repo}: {out[:160]}")
     return False
 
 
-def add_collaborator(org: str, repo: str, login: str, permission: str = "push") -> bool:
-    """Add a collaborator to a repo. permission: pull | triage | push | maintain | admin."""
+def add_collaborator(
+    org: str,
+    repo: str,
+    login: str,
+    permission: str = "push",
+    person: bool = False,
+) -> bool:
+    """Add a collaborator to a repo. permission: pull | triage | push | maintain | admin.
+
+    `person=True` when the repo is somebody's - the failure line then names them only in
+    the verbose log (see `log.log_err_person`)."""
     code, out = gh(
         "api",
         "--method",
@@ -442,7 +470,13 @@ def add_collaborator(org: str, repo: str, login: str, permission: str = "push") 
     )
     if code == 0:
         return True
-    log_err(f"failed to add {login} to {org}/{repo}: {out[:200]}")
+    if person:
+        log_err_person(
+            f"failed to grant one collaborator access in {org}",
+            f"failed to add {login} to {org}/{repo}: {out[:200]}",
+        )
+    else:
+        log_err(f"failed to add {login} to {org}/{repo}: {out[:200]}")
     return False
 
 

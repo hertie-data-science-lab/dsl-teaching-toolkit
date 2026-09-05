@@ -249,7 +249,7 @@ Solutions live on the course template's `solution` branch and are never shipped 
 `include_solution` is ticked. Whether a release fans out per student or per team resolves
 through **one** precedence chain, `course.resolve_is_group`: the workflow's `group` checkbox
 (force) → the cohort's `assignments.<slug>.type` in schedule.yml → the template's own
-`grading.yml` `type:` (the design-time default the scaffold wrote) → individual. Read-side only -
+`grading_config.yml` `type:` (the design-time default the scaffold wrote) → individual. Read-side only -
 the cohort setting never writes back into the course org. Group repos are granted to the
 materialised project Team; individual repos get the student as a direct collaborator.
 

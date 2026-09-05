@@ -60,5 +60,5 @@ example-course/
 > readers in `tests/test_bootstrap_seeding.py`, so nothing here can go schema-stale in silence.
 
 > NB: **Assignment layout:** each `assignment-*/` splits into `main/` (→ the repo's `main` branch,
-> what students get) and `solution/` (→ the `solution` branch: model solution, `grading.yml`, and
-> the HIDDEN `tests/` that **Grade assignment** runs). Student repos never get `solution/`.
+> what students get) and `solution/` (→ the `solution` branch: model solution, `grading_config.yml`, and
+> the HIDDEN `tests/` the autograder runs at the cutoff). Student repos never get `solution/`.

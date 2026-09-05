@@ -399,8 +399,9 @@ def test_only_a_group_assignment_may_form_a_team():
     assert _team_cap_answers(
         schedule_yml, ["solo", "project", "inline", "untyped", "invented"]
     ) == [None, 3, None, 5, None]
-    # `untyped` is 5, not None: `type:` may live in the template's grading.yml instead, and
-    # this workflow cannot read it - refusing there would break real group assignments.
+    # `untyped` is 5, not None: `type:` may live in the template's grading_config.yml
+    # instead, and this workflow cannot read it - refusing there would break real group
+    # assignments.
 
 
 def test_the_group_only_guard_is_in_the_shipped_script():

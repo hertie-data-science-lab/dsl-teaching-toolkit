@@ -13,7 +13,7 @@ grants it: [`access-reference.md`](access-reference.md).
 | --- | --- |
 | **Bootstrap cohort** | Configure a pre-created cohort org: `welcome` + `classroom-config`, permissions, site, `course_admins`, register + refresh. Safe to re-run on a live cohort - your `classroom-config` files are never overwritten. |
 | **New materials repo** | Scaffold a `course-materials-<tag>` repo (lectures/readings/labs session folders, `SYLLABUS.md`, the run-from-repo Release workflows). |
-| **New assignment** | Scaffold an `assignment-N-<tag>` template: brief + starter on `main`; stub solution, `grading.yml` and a hidden test on the `solution` branch. `format` picks py/notebook stubs; `type: group` makes handout + grading run per team. |
+| **New assignment** | Scaffold an `assignment-N-<tag>` template: brief + starter on `main`; stub solution, `grading_config.yml` and a hidden test on the `solution` branch. `format` picks py/notebook stubs; `type: group` makes handout + grading run per team. |
 | **Generate syllabus** | Write the syllabus's "Course sessions and readings" section - one block per session, with its title, learning objectives and reading list - from a cohort's `schedule.yml` and this repo's `readings/`. Lands in `SYLLABUS.sessions.md` beside your syllabus, never released to students; it never touches `SYLLABUS.md` itself. |
 | **Refresh actions** | Re-seed the run-from-repo workflows, propagate the repo secret, repopulate every dropdown, rebuild the profile READMEs. No inputs. Also runs itself daily, so every org converges on the toolkit tier its course org runs within 24h without anyone clicking. _(All DSL orgs at once: [Refresh Course Orgs Inventory](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml).)_ |
 | **Check cohort setup** | Read-only per-cohort checklist of what's configured and what's missing, with an edit link for each gap. |
@@ -25,7 +25,7 @@ grants it: [`access-reference.md`](access-reference.md).
 | --- | --- |
 | **Scheduled release** | **Primary** - fires the cohort's `releases` plan and freezes passed deadlines, roughly every 15 minutes. Manual runs default to `dry_run=true`. See [07](../07-schedule-releases.md#what-drives-the-scheduler). |
 | **Release materials** | Copy `course_source_path` (a folder, a file, or a comma-separated list) from a course-org `course_source_repo` into the cohort's `cohort_dest_repo` at `cohort_dest_path` - the same four fields as a `schedule.yml` `deploy`. Covers session folders, datasets, root files and code subpackages alike. _Fallback - see [07](../07-schedule-releases.md), [08](../08-release-materials-to-cohort.md)._ |
-| **Release assignment** | Freeze a cohort template from the chosen `assignment-*`, then generate one private `<slug>-<handle>` repo per onboarded student. `include_solution` and `dry_run` default off; `type` defaults to `auto` (follow `schedule.yml` / the template's `grading.yml`). _Fallback - see [07](../07-schedule-releases.md), [09](../09-release-assignment-to-cohort.md)._ |
+| **Release assignment** | Freeze a cohort template from the chosen `assignment-*`, then generate one private `<slug>-<handle>` repo per onboarded student. `include_solution` and `dry_run` default off; `type` defaults to `auto` (follow `schedule.yml` / the template's `grading_config.yml`). _Fallback - see [07](../07-schedule-releases.md), [09](../09-release-assignment-to-cohort.md)._ |
 | **Send enrolment codes** | **No button** - it runs only on a push to a cohort's `students.csv`, and it sends for real. Generates an `enrol_code` per roster row, writes it back to `students.csv`, emails each not-yet-onboarded student theirs. Safe on every push: a row's `code_sent_at` stops it being mailed twice (from the first run that sets it), so a re-send means clearing that cell and pushing. |
 | **Sync site** | Regenerate a cohort's website. Releases, a push to `schedule.yml` and a daily cron already do this for you. |
 
@@ -35,10 +35,8 @@ Full flow: [Grade and return assignments](../10-grade-and-return-assignments.md)
 
 | Action | Effect |
 | --- | --- |
-| **Grade assignment** | Faculty-side autograder: pins each submission to the frozen deadline snapshot, runs the template's hidden tests, writes `autograde_score` (and `team`, on a group assignment) into `classroom-config/grades/<slug>.csv`. Nothing is written to student repos. |
-| **Sync gradebooks** | Ensure every onboarded, enrolled student has a private `grades-<handle>` repo (student = read). Idempotent. |
-| **Render grades (preview)** | Pivot the grade CSVs into `gradebook/<handle>.yml` + a wide `cohort-gradebook.csv`, and open **one** PR in `classroom-config` - that diff is the preview. |
-| **Distribute grades** | After merging that PR: push each gradebook to the student's private repo and email the students whose grades changed. Re-run to retry a notification that failed. **`dry_run` defaults to `true`**; `silent` pushes without emailing. |
+| **Collect submissions** | Refresh one assignment's grading sheet now instead of waiting for the cron: re-read each submission, refill `info:`, post any receipt still owed. It never freezes anything - the cutoff does that. |
+| **Distribute grades** | Send what the grading sheet holds: a feedback comment on each submission repo's Feedback issue, each student's private `grades-<handle>` repo (`grades.yml` + `README.md`), `cohort-gradebook.csv`, and an email. Nothing is said twice, so a re-run after one correction reaches one student. **`dry_run` defaults to `true`**; `silent` sends without emailing; `assignment` narrows the run to one slug (blank = every sheet). |
 
 ## Optional: public course website
 

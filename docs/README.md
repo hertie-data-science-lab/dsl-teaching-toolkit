@@ -106,7 +106,7 @@ from:
 |---------|----------------|
 | [01](01-new-course-org.md) course identity, `course_admins`, staff cards | [`course-org/dsl-course.yml`](../example-course/course-org/dsl-course.yml) |
 | [02](02-add-materials-to-course.md) materials tree | [`course-materials-f2026/`](../example-course/course-org/course-materials-f2026/) - `lectures/`, `readings/`, `labs/`, `SYLLABUS.md` |
-| [03](03-add-assignment-to-course.md) assignment `main/` + `solution/` | [`assignment-1`](../example-course/course-org/assignment-1-f2026/) (`.py`), [`assignment-2`](../example-course/course-org/assignment-2-f2026/) (notebook), [`assignment-4-project`](../example-course/course-org/assignment-4-project-f2026/) (**group**) - each with `grading.yml` + hidden `tests/` |
+| [03](03-add-assignment-to-course.md) assignment `main/` + `solution/` | [`assignment-1`](../example-course/course-org/assignment-1-f2026/) (`.py`), [`assignment-2`](../example-course/course-org/assignment-2-f2026/) (notebook), [`assignment-4-project`](../example-course/course-org/assignment-4-project-f2026/) (**group**) - each with `grading_config.yml` + hidden `tests/` |
 | [05](05-manage-teaching-team.md) the teaching team, time-boxed | [`people.yml`](../example-course/cohort-org/people.yml) - two TAs with `start`/`end` dates |
 | [06](06-enrol-students-to-cohort.md) roster + project teams | [`students.csv`](../example-course/cohort-org/students.csv) (incl. an auditor), [`teams.csv`](../example-course/cohort-org/teams.csv) |
 | [07](07-schedule-releases.md) the whole term's plan | [`schedule.yml`](../example-course/cohort-org/schedule.yml) - `releases` with `event_datetime`s + `deploy_datetime`s, `assignments` + `grading_datetime`, `events` (exams, a clinic) |

@@ -85,9 +85,11 @@ from .collect import (
     resolve_is_group,
     snapshot_assignment,
     snapshot_path,
+    sync_sheet,
     template_is_group,
 )
 from .deploy import deploy_many
+from .grades import cutoff_at, load_grading_spec, sheet_path
 from .log import log, log_err, log_ok, log_step
 from .repos import repo_exists
 from .schedule import Release
@@ -122,17 +124,29 @@ def release_order(release: Release) -> tuple[bool, datetime]:
     return (release.when is None, release.when or _EPOCH)
 
 
-def due_snapshots(sched: schedule.Schedule, now: datetime) -> list[tuple[str, str]]:
-    """(slug, grading-deadline ISO) for every scheduled assignment whose grading deadline
-    (`grading_datetime`, else `due_datetime`) has passed at `now` - the assignments whose
-    submissions are ready to be frozen and then graded. Deadline-ordered, so the run log is
-    deterministic. Whether each one has already been snapshotted or graded is a separate,
-    I/O question (see `_snapshot_passed_deadlines` / `_autograde_passed_deadlines`)."""
-    passed = [
-        (slug, at)
-        for slug in sched.assignments
-        if (at := schedule.grading_datetime_at(sched, slug)) is not None and at <= now
-    ]
+def due_snapshots(
+    course_org: str, sched: schedule.Schedule, now: datetime
+) -> list[tuple[str, str]]:
+    """(slug, cutoff ISO) for every scheduled assignment whose CUTOFF has passed at `now` -
+    the assignments whose submissions are ready to be frozen and then graded.
+    Deadline-ordered, so the run log is deterministic.
+
+    The cutoff is `grades.cutoff_at`: an explicit `grading_datetime`, else the due date plus
+    the template's `late_window_days`. Reading the template is what puts the freeze at the
+    END of the late window rather than at the deadline the window is measured from - the
+    sheet's header and every receipt promise work is accepted until then, and a snapshot
+    taken at the due date silently refused all of it.
+
+    Not pure, therefore: it reads each template's `grading_config.yml`. That read is
+    memoised per process (`grades._grading_text`), and both passes below share this answer.
+    Whether each assignment has already been snapshotted or graded is still a separate
+    question (see `_snapshot_passed_deadlines` / `_autograde_passed_deadlines`)."""
+    passed = []
+    for slug, entry in sched.assignments.items():
+        gspec = load_grading_spec(course_org, entry.course_source_repo)
+        at = cutoff_at(sched, slug, gspec)
+        if at is not None and at <= now:
+            passed.append((slug, at))
     return [(slug, at.isoformat()) for slug, at in sorted(passed, key=lambda p: p[1])]
 
 
@@ -183,7 +197,7 @@ def _execute_nondeploy(
     changed = False
     if release.assignment:
         # provision_all's default (group=None) resolves group-vs-individual from the
-        # cohort schedule / the template's grading.yml - so a scheduled group handout
+        # cohort schedule / the template's grading_config.yml - so a scheduled group handout
         # provisions per TEAM, not one repo per student.
         failed, changed = provision_all(
             course_org,
@@ -213,7 +227,7 @@ def _snapshot_passed_deadlines(
     What was frozen is NOT returned: the snapshot file itself is the handoff to the
     autograde phase, which runs in another job (and so another process) entirely."""
     errors = 0
-    for slug, deadline in due_snapshots(sched, now):
+    for slug, deadline in due_snapshots(course_org, sched, now):
         entry = sched.assignments[slug]
         # every cohort-side artefact keys on the assignment's cohort NAME, not its slug
         name = schedule.cohort_name(slug, entry)
@@ -224,12 +238,14 @@ def _snapshot_passed_deadlines(
             log(f"    DRY-RUN  snapshot {snapshot_path(name)} (deadline {deadline})")
             continue
         log_step(f"  snapshot {name} (deadline {deadline})")
-        # Resolve group-ness the SAME way grading does, through the one `resolve_is_group`
-        # precedence - cohort schedule `type:` wins, else the template's grading.yml - so the
-        # snapshot freezes the exact repos grading scores. Deriving it from the schedule alone
-        # would miss a group assignment declared ONLY in grading.yml, freezing individual repos
-        # while grading targets group repos (every team then reads as "absent from the snapshot"
-        # and scores zero). grading.yml is read only when the schedule leaves type unset.
+        # Resolve group-ness the SAME way grading does, through the one
+        # `resolve_is_group` precedence - cohort schedule `type:` wins, else the
+        # template's grading_config.yml - so the snapshot freezes the exact repos
+        # grading scores. Deriving it from the schedule alone would miss a group
+        # assignment declared ONLY in grading_config.yml, freezing individual repos
+        # while grading targets group repos (every team then reads as "absent from the
+        # snapshot" and scores zero). grading_config.yml is read only when the schedule
+        # leaves type unset.
         if entry.type is not None:
             template_group = None
         else:
@@ -245,7 +261,12 @@ def _snapshot_passed_deadlines(
         # neither writes a snapshot file - which is what keeps the autograde phase off an
         # assignment that would otherwise score write-once zeros for the whole cohort.
         result = snapshot_assignment(
-            cohort_org, name, deadline, is_group=is_group, teams_key=slug
+            cohort_org,
+            name,
+            deadline,
+            is_group=is_group,
+            teams_key=slug,
+            tz=sched.timezone,
         )
         if result is SnapshotResult.FAILED:
             errors += 1
@@ -282,13 +303,13 @@ def _autograde_passed_deadlines(
     classroom-config is the marker. Absent means never machine-graded, so grade now; present
     means graded already, so never again - which is what stops an hourly re-run from recomputing
     scores a marker has since hand-edited. A deliberate re-grade = delete `autograde/<slug>/`
-    (or use the Grade assignment workflow).
+    (delete `autograde/<slug>/` to let a later tick regrade).
 
     A missing template repo, a template with no `solution` branch, and `autograde: false`
     are all skips, not failures: plenty of assignments are hand-marked. Group vs individual
-    is not guessed here - `collect` resolves it from the cohort schedule / grading.yml."""
+    is not guessed here - `collect` resolves it from the cohort schedule / grading_config.yml."""
     errors = 0
-    for slug, deadline in due_snapshots(sched, now):
+    for slug, deadline in due_snapshots(course_org, sched, now):
         # the fire-once marker is keyed on the cohort NAME - it must agree with what
         # collect writes, or a passed deadline re-grades every tick
         name = schedule.cohort_name(slug, sched.assignments[slug])
@@ -389,7 +410,7 @@ def _handout_releases(
     ONE block, and the handout still fires through the exact machinery a
     `releases` entry would: due at its datetime, re-checked every tick
     (idempotent - a late onboarder gets their repo on the next one), per-team when the
-    template's grading.yml says so. An assignment with no `<slug>-<tag>` template repo is
+    template's grading_config.yml says so. An assignment with no `<slug>-<tag>` template repo is
     skipped - it may be pinned for its website date alone.
 
     The model solution rides on THIS release once `solution_datetime` has passed, rather
@@ -466,6 +487,66 @@ def _preflight_sources(
     return 0
 
 
+def _refresh_sheets(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule,
+    now: datetime,
+    dry_run: bool,
+) -> int:
+    """Keep every open assignment's grading sheet current: one pass, after the freeze.
+
+    Runs from the DUE date, not the cutoff, because that is when a grader starts marking
+    and when the first late push lands. An assignment whose cutoff has PASSED is left
+    alone: the freeze pass above owns it and `collect` seals its sheet, so re-deriving
+    here would move facts the freeze has already settled.
+
+    A sheet that does not exist yet is CREATED - an assignment handed out before this pass
+    shipped (or one whose handout ran before the sheet had rows) gets one on the next
+    tick rather than never."""
+    sealed = {
+        schedule.cohort_name(slug, sched.assignments[slug])
+        for slug, _ in due_snapshots(course_org, sched, now)
+    }
+    errors = 0
+    for slug, entry in sched.assignments.items():
+        if entry.due_datetime is None or entry.due_datetime > now:
+            continue
+        name = schedule.cohort_name(slug, entry)
+        if name in sealed:
+            continue
+        template = _assignment_template(course_org, slug, entry)
+        if not template:
+            continue  # no template to read the assignment's definition from
+        if dry_run:
+            log(f"    DRY-RUN  refresh {sheet_path(name)}")
+            continue
+        log_step(f"  grading sheet {name}")
+        # Spelt exactly as the snapshot pass above spells it, including the short-circuit:
+        # a cohort that has declared `type:` never pays for the template read.
+        is_group = resolve_is_group(
+            force=False,
+            schedule_type=entry.type,
+            template_group=(
+                None
+                if entry.type is not None
+                else template_is_group(course_org, template)
+            ),
+        )
+        if not sync_sheet(
+            course_org,
+            cohort_org,
+            sched,
+            slug,
+            name,
+            template,
+            is_group=is_group,
+            now=now,
+        ):
+            errors += 1
+    return errors
+
+
 def _release_phase(
     course_org: str,
     cohort_org: str,
@@ -474,8 +555,9 @@ def _release_phase(
     dry_run: bool,
     verdict: cadence.Verdict | None = None,
 ) -> int:
-    """Snapshot every passed deadline, pre-flight the plan's sources, and fire everything
-    now due. Returns the error count. No grading: see `_autograde_passed_deadlines`.
+    """Snapshot every passed deadline, refresh every open grading sheet, pre-flight the
+    plan's sources, and fire everything now due. Returns the error count. No grading: see
+    `_autograde_passed_deadlines`.
 
     `verdict` is the cadence reading `main` took once for the whole course; None means this
     invocation does not report lateness at all (see `main`)."""
@@ -518,6 +600,10 @@ def _release_phase(
     # snapshot. Independent of the release plan - a cohort can pin due dates without
     # scheduling a single release.
     errors += _snapshot_passed_deadlines(course_org, cohort_org, sched, now, dry_run)
+    # Then the sheets, in the same pass and straight after: the freeze has just settled
+    # every assignment past its cutoff, and everything else that is past its DUE date
+    # gets its `info:` refreshed here.
+    errors += _refresh_sheets(course_org, cohort_org, sched, now, dry_run)
     # Look AHEAD as well as at what is due: a deploy whose source was never staged fails
     # at its moment, which is far too late to write the thing. This is the only unattended
     # surface that notices - the commit-time validator only ever runs when someone edits

@@ -15,7 +15,7 @@ from typing import Any
 import yaml
 
 from .ghcli import gh, is_missing_resource
-from .log import log_err, log_skip
+from .log import log_err, log_err_person, log_skip
 from .repos import default_branch
 
 
@@ -96,8 +96,12 @@ def put_file(
     content: bytes,
     message: str,
     expected_sha: str | None = None,
+    person: bool = False,
 ) -> bool:
     """Create or update a file via the Contents API.
+
+    `person=True` says the repo or the path names a student, so the failure line is split:
+    what failed goes to the public log, which repo it was goes through `log_person`.
 
     Updates require the existing file's SHA. By default it is fetched here, immediately
     before the write. That SHA is git's blob sha, so comparing it with the blob sha of
@@ -146,7 +150,14 @@ def put_file(
     code, out = gh(*args)
     if code == 0:
         return True
-    log_err(f"failed to put {path}: {out[:200]}")
+    if person:
+        log_err_person(
+            f"failed to write one file into {org} (re-run locally with DSL_VERBOSE=1 "
+            f"to see which)",
+            f"failed to put {org}/{repo}/{path}: {out[:200]}",
+        )
+    else:
+        log_err(f"failed to put {path}: {out[:200]}")
     return False
 
 
@@ -216,8 +227,13 @@ def put_files(
     *,
     delete: Iterable[str] = (),
     create_only: bool = False,
+    person: bool = False,
 ) -> bool:
     """Write `files` and remove `delete` in a SINGLE commit, via the git data API.
+
+    `person=True` says this repo is somebody's - a gradebook, a submission repo - so every
+    failure line below is split: the fault in the public log, the repo name through
+    `log_person`. See `log.log_err_person`.
 
     put_file is one commit per file, which is right for a lone write but turns a set of
     files that always change together - the generated workflows - into a burst of
@@ -246,7 +262,9 @@ def put_files(
         branch = default_branch(org, repo)
         live = repo_blob_shas(org, repo, branch)
     except RuntimeError as exc:
-        log_err(str(exc))
+        _failed(
+            person, f"could not read a repo in {org} before writing to it", str(exc)
+        )
         return False
     tree: list[dict[str, Any]] = []
     for path, content in files.items():
@@ -268,7 +286,7 @@ def put_files(
             tree.append({"path": path, "mode": "100644", "type": "blob", "sha": None})
     if not tree:
         return True
-    return _commit_tree(org, repo, branch, tree, message)
+    return _commit_tree(org, repo, branch, tree, message, person)
 
 
 def _head(org: str, repo: str, branch: str) -> tuple[str, str] | None:
@@ -293,7 +311,11 @@ def _head(org: str, repo: str, branch: str) -> tuple[str, str] | None:
 
 
 def _seed_first_commit(
-    org: str, repo: str, tree: list[dict[str, Any]], message: str
+    org: str,
+    repo: str,
+    tree: list[dict[str, Any]],
+    message: str,
+    person: bool = False,
 ) -> bool:
     """The first commit into a repo that has none, via the Contents API - the only one that
     will create it (see `_commit_tree`).
@@ -306,13 +328,28 @@ def _seed_first_commit(
         content = entry.get("content")
         if content is None:  # a `sha: None` delete - nothing there to delete
             continue
-        if not put_file(org, repo, entry["path"], content.encode(), message):
+        if not put_file(
+            org, repo, entry["path"], content.encode(), message, person=person
+        ):
             ok = False
     return ok
 
 
+def _failed(person: bool, public: str, detail: str) -> None:
+    """One failure line, public or split, depending on whether the repo names somebody."""
+    if person:
+        log_err_person(public, detail)
+    else:
+        log_err(detail)
+
+
 def _commit_tree(
-    org: str, repo: str, branch: str, tree: list[dict[str, Any]], message: str
+    org: str,
+    repo: str,
+    branch: str,
+    tree: list[dict[str, Any]],
+    message: str,
+    person: bool = False,
 ) -> bool:
     """Land `tree` (entries relative to `branch`'s current tree) as one commit.
 
@@ -322,7 +359,7 @@ def _commit_tree(
     try:
         parent = _head(org, repo, branch)
     except RuntimeError as exc:
-        log_err(str(exc))
+        _failed(person, f"could not read a branch head in {org}", str(exc))
         return False
     if parent is None:
         # A repo with NO commits at all refuses `POST /git/trees` outright - "Git Repository
@@ -335,7 +372,7 @@ def _commit_tree(
         # commit moved them off Contents, and the first cohort org bootstrapped afterwards
         # could not seed that repo at all - the roster, schedule and people.yml never
         # landed, and every later step that reads them failed in turn.
-        return _seed_first_commit(org, repo, tree, message)
+        return _seed_first_commit(org, repo, tree, message, person)
     payload: dict[str, Any] = {"tree": tree, "base_tree": parent[1]}
     code, new_tree = gh(
         "api",
@@ -349,7 +386,11 @@ def _commit_tree(
         stdin=json.dumps(payload),
     )
     if code != 0:
-        log_err(f"could not build a tree for {org}/{repo}: {new_tree[:200]}")
+        _failed(
+            person,
+            f"could not build a tree in {org}",
+            f"could not build a tree for {org}/{repo}: {new_tree[:200]}",
+        )
         return False
     code, commit = gh(
         "api",
@@ -369,7 +410,11 @@ def _commit_tree(
         ),
     )
     if code != 0:
-        log_err(f"could not commit to {org}/{repo}: {commit[:200]}")
+        _failed(
+            person,
+            f"could not write a commit in {org}",
+            f"could not commit to {org}/{repo}: {commit[:200]}",
+        )
         return False
     # An existing branch is MOVED; a repo whose first commit this is has no ref to move,
     # so the ref is created instead.
@@ -394,7 +439,11 @@ def _commit_tree(
             f"sha={commit.strip()}",
         )
     if code != 0:
-        log_err(f"could not move {org}/{repo}@{branch}: {out[:200]}")
+        _failed(
+            person,
+            f"could not move a branch in {org} (a concurrent commit, or a lost race)",
+            f"could not move {org}/{repo}@{branch}: {out[:200]}",
+        )
         return False
     return True
 

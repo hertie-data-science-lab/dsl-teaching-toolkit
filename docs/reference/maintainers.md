@@ -49,6 +49,13 @@ Things whose *literal spelling* is depended on from outside Python:
   means **adding a link to the chain**, never editing one. For the descriptions, an org on the
   oldest string must still reach the newest in one pass; for `STUB_MARKS`, a repo seeded with an
   older wording must still be recognised as unwritten, or its placeholder syllabus ships.
+- **`course.FEEDBACK_ISSUE_TITLE` / `FEEDBACK_ISSUE_LABEL` / `FEEDBACK_ISSUE_MARKS`** identify
+  the one Feedback issue in each submission repo. `assign` opens it, `grades` posts receipts and
+  grades into it, and the lookup (label -> body mark -> exact title) is what stops a second one
+  appearing over a thread a student is already reading. `FEEDBACK_ISSUE_MARKS` is a chain like
+  `STUB_MARKS`: add a wording, never edit one, or every issue opened under the old one becomes
+  invisible. The hidden `<!-- dsl-receipt:{sha}:{event} -->` on each receipt comment is what
+  makes the quarter-hourly refresh post once rather than four times an hour.
 - **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-cohort`, `submission`, `gradebook`,
   `assignment-template`. Discovery reads them; renaming one is a discovery outage.
 - **`.github/cohort-courses-pages.yml`** is the cohort registry every dropdown reads, and
@@ -193,6 +200,52 @@ CI and every seeded workflow run 3.12. Conventions:
   `ghcli.gh`, so the retry ladder stays testable and `git` against a tmp repo still runs.
 - Never mock the subject under test - stub what it reads.
 - No `inspect.getsource` assertions: test behaviour, not text.
+
+## End-to-end harness
+
+`tests/e2e` drives the REAL seeded workflows against the demo tier: New assignment ->
+schedule block -> Scheduled release (handout) -> a genuine student push -> Scheduled release
+(snapshot + autograde), then puts both orgs back. It proves the wiring unit tests cannot -
+a click, a cron, a token and a repo - and it is the gate between **Promote to staging and
+Promote to release**. Two scheduler passes are needed because `scheduler.run` snapshots
+before it hands out.
+
+    DSL_E2E=1 \
+    DSL_ORG_ALLOWLIST=hertie-dsl-demo-course-e1234,hertie-dsl-demo-f2026 \
+    GH_TOKEN=<maintainer classic PAT, incl. delete_repo> \
+    DSL_E2E_STUDENT=<handle> DSL_E2E_STUDENT_TOKEN=<fine-grained PAT> \
+    python3 -m pytest tests/e2e -q
+
+Without `DSL_E2E=1` the whole directory is skipped (it still shows as a skip, so a broken
+gate is visible); the pure parts are covered by `tests/test_e2e_harness.py` in the ordinary
+suite. The student token is fine-grained, Contents R/W on the demo cohort org only. The
+maintainer token holds `delete_repo`, which the bot never does - that is why cleanup is a
+command and never a workflow. Environment variables only; no dotfile.
+
+Three fences, and all three must hold. `DSL_ORG_ALLOWLIST` refuses any WRITE (`gh` or `git
+push`) outside the orgs it names - opt-in, unset everywhere else, and it raises rather than
+returning a failure pair, which `repo_exists` would read as absence. `tests/e2e/allowlist.py`
+names the two demo orgs as a literal; `DSL_E2E_ORGS` may only NARROW that. Preflight refuses
+to start unless the course org declares `central_ref: staging`, `staging` is this checkout's
+HEAD, the org has refreshed since, the test student has a roster row, and the run's
+namespace is empty.
+
+Everything a run creates is namespaced `assignment-90-<run id>`. If it dies halfway:
+
+    python -m tests.e2e.cleanup --run-id <run id> [--dry-run]
+
+which deletes only repos matching `assignment-90-<run id>(-.+)?`, removes only its own
+`# dsl-e2e:<run id>` fenced block from schedule.yml, and drops only its own snapshot /
+autograde / grading-sheet artefacts. Anything else that drifted is REPORTED, never deleted.
+Budget 20-30 minutes of wall clock, ~16 runs, all in public repos and therefore free.
+Three Scheduled-release dispatches are needed, not two: the pass that hands out cannot
+also collect, and the DUE date and the CUTOFF drive different passes (refresh, then
+freeze). Each schedule edit the run makes drives a tick of its own as well (the cohort's
+`dispatch-scheduled-release.yml` fires on the push), which the harness waits out before
+dispatching. One-off setup: `python3 -m dsl_course.grades sync --cohort-org <demo cohort>`
+once, so the test student's `grades-<handle>` repo already exists - a repo the run created
+is drift the teardown cannot take back. (There is no button for it any more: Sync
+gradebooks was retired with the other two grading workflows.)
 
 ## Working conventions
 

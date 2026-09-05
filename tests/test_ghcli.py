@@ -183,8 +183,32 @@ def test_reads_are_never_paced(monkeypatch):
         (("api", "--method", "POST", "orgs/O/repos"), True),
         (("api", "-X", "delete", "repos/O/R/collaborators/x"), True),
         (("api", "--method", "PATCH", "repos/O/R"), True),
+        (("api", "--method=PUT", "repos/O/R/contents/a.md"), True),
         (("api", "--paginate", "repos/O/R/collaborators"), False),
         (("repo", "clone", "O/R"), False),
+        # gh sends POST as soon as a field is passed: `repos.ensure_label` writes a label
+        # with no `--method` anywhere in its argv.
+        (("api", "repos/O/R/labels", "--field", "name=x"), True),
+        (("api", "repos/O/R/labels", "-f", "name=x"), True),
+        (("api", "repos/O/R/issues", "--input", "-"), True),
+        # ... but a method that is spelt out wins over the fields beside it.
+        (("api", "--method", "GET", "repos/O/R", "-f", "per_page=1"), False),
+        # Porcelain verbs, which carry no method at all.
+        (("issue", "comment", "5", "--repo", "O/R", "--body", "hi"), True),
+        (("issue", "create", "--repo", "O/R"), True),
+        (("workflow", "run", "deploy.yml", "--repo", "O/R"), True),
+        (("secret", "set", "X", "--org", "O"), True),
+        (("repo", "delete", "O/R", "--yes"), True),
+        (("label", "create", "dsl-feedback", "-R", "O/R"), True),
+        (("team", "list"), True),  # every verb on these two nouns writes
+        (("org", "list"), True),
+        (("issue", "list", "--repo", "O/R"), False),
+        (("repo", "view", "O/R"), False),
+        (("run", "view", "12", "-R", "O/R", "--log"), False),
+        (("workflow", "view", "deploy.yml", "-R", "O/R"), False),
+        # One endpoint, both directions - the document decides.
+        (("api", "graphql", "-f", "query=query { viewer { login } }"), False),
+        (("api", "graphql", "-f", "query=mutation { addStar }"), True),
     ],
 )
 def test_which_argv_shapes_count_as_a_write(args, mutating):
@@ -281,3 +305,199 @@ def test_clone_carries_a_branch_when_one_is_asked_for(monkeypatch):
     assert seen[-1] == ("repo", "clone", "O/R", "/tmp/x", "--", "-q", "-b", "solution")
     ghcli.clone("O", "R", "/tmp/x")
     assert seen[-1] == ("repo", "clone", "O/R", "/tmp/x", "--", "-q")
+
+
+# ------------------------------------------------- the opt-in org allowlist (tests/e2e)
+
+
+class _Ran(list):
+    """The argvs that reached the process boundary, plus canned stdout keyed by a
+    substring of the argv (a list cannot carry the replies dict on its own)."""
+
+    def __init__(self):
+        super().__init__()
+        self.replies: dict[str, str] = {}
+
+
+@pytest.fixture
+def ran(monkeypatch):
+    """Every subprocess argv the wrappers actually reached, with a canned reply.
+
+    Stubbing `subprocess.run` is what the repo's no-live-gh rule asks for everywhere else;
+    here it is also the only honest fake, because ghcli IS the transport - the thing under
+    test is which argvs get as far as the process boundary."""
+    import subprocess
+
+    seen = _Ran()
+
+    def fake_run(cmd, **kwargs):
+        seen.append(list(cmd))
+
+        class R:
+            returncode = 0
+            stdout = next(
+                (v for k, v in seen.replies.items() if k in " ".join(cmd)), ""
+            )
+            stderr = ""
+
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    return seen
+
+
+def test_an_unset_allowlist_changes_nothing(monkeypatch, ran):
+    monkeypatch.delenv("DSL_ORG_ALLOWLIST", raising=False)
+    assert ghcli.gh("api", "--method", "DELETE", "repos/anyone/anything")[0] == 0
+    assert ran[-1][:2] == ["gh", "api"]
+
+
+def test_a_write_to_an_allowed_org_goes_through(monkeypatch, ran):
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-course , demo-f2026")
+    assert (
+        ghcli.gh("api", "--method", "PUT", "repos/demo-f2026/x/contents/a.md")[0] == 0
+    )
+    assert ran, "the call never reached the process boundary"
+
+
+def test_a_write_outside_the_allowlist_raises(monkeypatch, ran):
+    # NOT a failure pair: `utils.repo_exists` reads any failure as absence, so a refusal
+    # returned that way would be heard as "not there yet" and the caller would create it.
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    with pytest.raises(RuntimeError, match="demo-f2026"):
+        ghcli.gh("api", "--method", "DELETE", "repos/hertie-ml-26/live-repo")
+    assert ran == [], "the refused call must not reach the process boundary"
+
+
+def test_a_write_that_names_no_org_is_refused_too(monkeypatch, ran):
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    with pytest.raises(RuntimeError, match="no org at all"):
+        ghcli.gh("api", "--method", "POST", "graphql")
+    assert ran == []
+
+
+def test_the_destination_of_a_template_generate_is_checked(monkeypatch, ran):
+    # The PATH names the template's org; the org the new repo lands in is a `--field`.
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-course")
+    with pytest.raises(RuntimeError, match="hertie-ml-26"):
+        ghcli.gh(
+            "api",
+            "--method",
+            "POST",
+            "repos/demo-course/a-template/generate",
+            "--field",
+            "owner=hertie-ml-26",
+            "--field",
+            "name=a-1",
+        )
+
+
+def test_reads_are_never_fenced(monkeypatch, ran):
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    assert ghcli.gh("api", "repos/hertie-ml-26/live-repo")[0] == 0
+    assert ran, "a read outside the allowlist must still run"
+
+
+def test_a_push_to_an_allowed_remote_goes_through(monkeypatch, ran):
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    ran.replies["remote get-url"] = "https://github.com/demo-f2026/a-1-jane\n"
+    assert ghcli.git("-C", "/tmp/wd", "push", "-q", "origin", "HEAD")[0] == 0
+    assert ran[-1][-2:] == ["origin", "HEAD"]
+
+
+def test_a_push_to_a_remote_outside_the_allowlist_is_refused(monkeypatch, ran):
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    ran.replies["remote get-url"] = "git@github.com:hertie-ml-26/materials.git\n"
+    with pytest.raises(RuntimeError, match="hertie-ml-26"):
+        ghcli.git("-C", "/tmp/wd", "push", "-q", "origin", "HEAD")
+    assert [c for c in ran if "push" in c] == []
+
+
+def test_a_push_whose_remote_cannot_be_read_is_refused(monkeypatch):
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    monkeypatch.setattr(
+        ghcli, "git", ghcli.git
+    )  # the real one; only the URL read fails
+    import subprocess
+
+    def fake_run(cmd, **kwargs):
+        class R:
+            returncode = 1
+            stdout = ""
+            stderr = "fatal: no such remote"
+
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    with pytest.raises(RuntimeError, match="unreadable remote"):
+        ghcli.git("-C", "/tmp/wd", "push", "-q", "origin", "HEAD")
+
+
+def test_other_git_commands_are_untouched(monkeypatch, ran):
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    assert (
+        ghcli.git("-C", "/tmp/wd", "clone", "https://github.com/hertie-ml-26/m")[0] == 0
+    )
+    assert ran, "the fence is about writes, not about reading somebody else's repo"
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("api", "repos/{org}/r/labels", "--field", "name=dsl-feedback"),
+        ("issue", "comment", "5", "--repo", "{org}/r", "--body", "graded"),
+        ("workflow", "run", "deploy.yml", "--repo", "{org}/site"),
+        ("secret", "set", "DSL_BOT_TOKEN", "--org", "{org}"),
+        ("repo", "delete", "{org}/r", "--yes"),
+    ],
+)
+def test_the_fence_reaches_every_write_shape(monkeypatch, ran, args):
+    # Each of these used to slip past both the fence and the write pacer, because neither
+    # could see a write that does not spell `--method`.
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    assert ghcli.gh(*(a.format(org="demo-f2026") for a in args))[0] == 0
+    assert ran, "an allowed write never reached the process boundary"
+    assert len(ghcli._write_times) == 1, "the write pacer did not count it"
+    with pytest.raises(RuntimeError, match="hertie-ml-26"):
+        ghcli.gh(*(a.format(org="hertie-ml-26") for a in args))
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        ("api", "repos/hertie-ml-26/r/labels"),
+        ("api", "--method", "GET", "repos/hertie-ml-26/r"),
+        ("issue", "list", "--repo", "hertie-ml-26/r"),
+        ("repo", "view", "hertie-ml-26/r"),
+        ("run", "view", "12", "-R", "hertie-ml-26/r", "--log"),
+        ("api", "graphql", "-f", "query=query { viewer { login } }"),
+    ],
+)
+def test_read_shapes_still_pass_the_fence(monkeypatch, ran, args):
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    assert ghcli.gh(*args)[0] == 0
+    assert ran, "a read outside the allowlist must still run"
+    assert not ghcli._write_times, "a read must not be paced"
+
+
+def test_an_org_named_only_by_a_flag_is_still_attributed():
+    # `gh secret set --org <name>` is the one write whose target has no `/` in it, so the
+    # positional owner patterns cannot see it - and an unattributed write is refused.
+    assert ghcli._argv_owners(("secret", "set", "X", "--org", "demo-f2026")) == {
+        "demo-f2026"
+    }
+    assert ghcli._argv_owners(("issue", "comment", "5", "-R", "demo-f2026/r")) == {
+        "demo-f2026"
+    }
+    assert ghcli._argv_owners(("repo", "view", "--repo=demo-f2026/r")) == {"demo-f2026"}
+
+
+def test_a_graphql_mutation_is_refused_because_it_names_no_org(monkeypatch, ran):
+    # A GraphQL document names its target inside the query text, not in the argv, so the
+    # fence cannot attribute it - and an unattributable write is refused rather than
+    # waved through. Nothing in the toolkit sends one; if something ever does, this is
+    # where it will be told to say which org it means.
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", "demo-f2026")
+    with pytest.raises(RuntimeError, match="no org at all"):
+        ghcli.gh("api", "graphql", "-f", "query=mutation { addStar }")
+    assert ran == []

@@ -10,7 +10,7 @@ Materials repos get `lectures/`, `readings/` and `labs/` `01_session-1/` skeleto
 top-level directory with an ordinal-prefixed subdirectory is a releasable section - add
 more, e.g. `datasets/`, freely; delete `labs/` if unused) and the run-from-repo Release
 workflows. Assignment repos get a starter on `main` (no tests - grading is faculty-side)
-and a `solution` branch carrying the model solution, `grading.yml`, and the HIDDEN
+and a `solution` branch carrying the model solution, `grading_config.yml`, and the HIDDEN
 tests, so generate never ships any of them to students.
 """
 
@@ -154,18 +154,18 @@ _READINGS_STUB = (
 )
 
 _GRADING_YML = """\
-# How the Grade assignment workflow autogrades this assignment (after the grading_deadline
+# How the autograder marks this assignment (at the cutoff
 # set in schedule.yml). Delete this file (or set autograde: false) for a purely
 # manually-graded assignment.
 type: {kind}      # individual (one repo per student) or group (one repo per team)
 autograde: true       # false -> skip autograding (all-manual)
 tests: tests          # path (on THIS solution branch) holding the hidden tests
-                      # `autograde_score` in grades/<slug>.csv records how many of them
-                      # passed; you own the mark the student actually gets (`final_grade`)
+                      # how many passed is shown to you as `info.autograde` in the grading
+                      # sheet - never a mark by itself, and never something a student sees
 """
 
 _HIDDEN_TEST_PY = """\
-# HIDDEN tests - run faculty-side by the Grade assignment workflow, never shipped to students.
+# HIDDEN tests - run faculty-side at the cutoff, never shipped to students.
 # They import the student's submission (the repo root) and check it.
 # Replace this placeholder with the real grading tests.
 from starter import solve
@@ -176,7 +176,7 @@ def test_solve_runs():
 """
 
 _HIDDEN_TEST_NOTEBOOK = """\
-# HIDDEN tests - run faculty-side by the Grade assignment workflow, never shipped to students.
+# HIDDEN tests - run faculty-side at the cutoff, never shipped to students.
 # The submitted notebook is nbconvert'd to starter.py first; this imports it and checks it.
 # Replace this placeholder with the real grading tests.
 from starter import solve
@@ -464,7 +464,7 @@ def scaffold_assignment(
     holds, so a student who works in a notebook on a `py` assignment still grades.
     kind: 'individual' (one repo per student) or 'group' (one repo per team, graded
     per team from classroom-config/teams.csv). This one DOES land verbatim in the solution
-    branch's grading.yml, so the scaffold and the grader can never disagree."""
+    branch's grading_config.yml, so the scaffold and the grader can never disagree."""
     repo = f"assignment-{number}-{tag}"
     log_step(f"Scaffolding {org}/{repo} ({kind}, {fmt}; template + solution branch)")
     if not create_repo(
@@ -480,7 +480,7 @@ def scaffold_assignment(
     starter_name = "starter.ipynb" if fmt == "notebook" else "starter.py"
     brief = "group assignment" if kind == "group" else "assignment"
     # main: starter only (what students receive on generate). No tests, no autograder -
-    # grading runs faculty-side from the solution branch (see Grade assignment). Create-only:
+    # grading runs faculty-side from the solution branch. Create-only:
     # a re-run against a repo whose starter faculty have since authored must not revert it.
     # Count a failed create-only seed (not a skip of a live file) so a half-written starter
     # reds the scaffold, matching scaffold_materials rather than reporting a green "ready".
@@ -506,8 +506,8 @@ def scaffold_assignment(
         seed_failures += 1
     set_repo_topics(org, repo, [f"assignment-{number}", "assignment"])
 
-    # solution branch: the model solution, grading.yml, and the HIDDEN tests - all kept OFF
-    # main so generate never copies them into student repos.
+    # solution branch: the model solution, grading_config.yml, and the HIDDEN tests -
+    # all kept OFF main so generate never copies them into student repos.
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "r"
         if not clone(org, repo, wd):
@@ -569,11 +569,11 @@ def scaffold_assignment(
             "Both do the same thing, idempotently, so a scheduled release you then "
             "re-run by hand changes nothing.\n"
         )
-        # grading.yml + hidden tests for the faculty-side Grade assignment workflow. The
+        # grading_config.yml + hidden tests for the faculty-side autograder. The
         # type chosen at scaffold time is recorded here - edit this file to change it
         # later. `fmt` is NOT: the grader converts whatever notebooks a submission holds,
         # so it only picks which starter and hidden-test stub are written below.
-        (wd / "grading.yml").write_text(_GRADING_YML.format(kind=kind))
+        (wd / "grading_config.yml").write_text(_GRADING_YML.format(kind=kind))
         tests = wd / "tests"
         tests.mkdir()
         (tests / "test_solution.py").write_text(
@@ -588,7 +588,7 @@ def scaffold_assignment(
             "-q",
             "--no-verify",
             "-m",
-            f"solution: assignment {number} (model + grading.yml + hidden tests)",
+            f"solution: assignment {number} (model + grading_config.yml + hidden tests)",
         )
         if (
             git("-C", str(wd), *GIT_ENV, "push", "-q", "-u", "origin", "solution")[0]

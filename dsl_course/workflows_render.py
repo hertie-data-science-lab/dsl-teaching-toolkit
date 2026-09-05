@@ -570,7 +570,7 @@ on:
         type: boolean
         default: false
       type:
-        description: "individual (one repo per student) or group (one per team from teams.csv). auto = whatever schedule.yml / the template's grading.yml declare (default: individual)"
+        description: "individual (one repo per student) or group (one per team from teams.csv). auto = whatever schedule.yml / the template's grading_config.yml declare (default: individual)"
         required: true
         type: choice
         default: auto
@@ -605,55 +605,42 @@ on:
 """
 
 
-def render_grade_assignment(
+def render_collect_submissions(
     cohort_orgs: list[str], assignments: list[str] | None = None
 ) -> str:
-    """Faculty-side autograder workflow: run hidden tests after the deadline, record scores."""
-    return f"""name: Grade assignment
+    """Refresh one assignment's grading sheet on demand, between cron ticks."""
+    return f"""name: Collect submissions
 
-# Faculty-side autograder, by hand. The Scheduled release cron already grades each ONCE at
-# its grading deadline - this workflow is for a deliberate re-grade. Clones each submission as
-# of the cohort schedule's grading deadline (`grading_datetime`, else `due_datetime` -
-# SSOT, no input here), runs the HIDDEN tests from the template's solution branch, archives
-# result.json, and fills the machine score into the private grades CSV (faculty & instructors
-# then add manual marks; Render + Distribute send them).
+# Brings an assignment's grading sheet up to date NOW instead of waiting for the next
+# quarter-hour tick: it re-reads each submission repo's latest commit, refills the `info:`
+# block (submitted, days late, contributions) and posts any submission receipt still owed.
 #
-# WRITE-ONCE: an `autograde_score`/`team` cell that already holds a value is never
-# overwritten, so re-running does NOT refresh scores - it only fills cells still empty. For a
-# fresh machine score, clear those cells first (and delete classroom-config/autograde/<slug>/
-# to let the cron regrade). Nothing is written to student repos. dry_run lists what would be
-# graded.
+# It never freezes anything. The pin is frozen once, by the cron, at the assignment's
+# grading deadline - so a grader can press this as often as they like without moving what
+# anyone is marked on. Nothing is written to a student repo except that receipt.
 
 on:
   workflow_dispatch:
     inputs:
 {_choice_input("cohort_org", "Cohort org (submissions)", cohort_orgs)}
 {_assignment_input(assignments or [])}
-      group:
-        description: "Group assignment - grade one repo per team"
-        type: boolean
-        default: false
       dry_run:
-        description: "Preview only - list the repos that WOULD be graded"
+        description: "Preview only - show what WOULD be refreshed"
         type: boolean
         default: false
 
-{_concurrency("grade-assignment")}
+{_concurrency("collect-submissions")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  grade:
-{_run_preamble(_TIMEOUT_GRADING)}      - name: Grade
+  collect-submissions:
+{_run_preamble(_TIMEOUT_GRADING)}      - name: Collect submissions
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           MASTER_ORG: ${{{{ github.repository_owner }}}}
           COHORT_ORG: ${{{{ inputs.cohort_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
-          GROUP: ${{{{ inputs.group }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
         run: |
-          gh auth setup-git
-          pip install --quiet pytest nbconvert
-          args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG")
-          [ "$GROUP" = "true" ] && args+=(--group)
+          args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG" --refresh-only)
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
           python3 -m dsl_course.collect "${{args[@]}}"
 """
@@ -742,74 +729,26 @@ def _cohort_dropdown(cohort_orgs: list[str], optional: bool = False) -> str:
     )
 
 
-def render_sync_gradebooks(cohort_orgs: list[str]) -> str:
-    """Provision one private grades-<handle> repo per onboarded student (idempotent)."""
-    return f"""name: Sync gradebooks
-
-# Ensures every onboarded student has a PRIVATE grades-<handle> repo (student = read) -
-# the single home for all their grades. Idempotent; safe to re-run after new enrolments.
-
-on:
-  workflow_dispatch:
-    inputs:
-{_cohort_dropdown(cohort_orgs)}
-      dry_run:
-        description: "Preview only - list the gradebook repos that WOULD be created"
-        type: boolean
-        default: false
-
-{_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  sync-gradebooks:
-{_run_preamble()}      - name: Sync gradebooks
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
-          DRY_RUN: ${{{{ inputs.dry_run }}}}
-        run: |
-          args=(--cohort-org "$COHORT_ORG")
-          [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
-          python3 -m dsl_course.grades sync "${{args[@]}}"
-"""
-
-
-def render_render_grades(cohort_orgs: list[str]) -> str:
-    """Build per-student gradebook YAML from the grade CSVs and open the preview PR."""
-    return f"""name: Render grades (preview)
-
-# Reads classroom-config/grades/<assignment>.csv, builds one gradebook/<handle>.yml per
-# student, and opens ONE pull request in classroom-config. THAT PR IS THE PREVIEW: review
-# every student's grades in the diff, then merge to distribute (Distribute grades).
-
-on:
-  workflow_dispatch:
-    inputs:
-{_cohort_dropdown(cohort_orgs)}
-
-{_concurrency("render-grades")}
-{_PERMISSIONS_JOBS}{_CHECK_TEAM}
-  render-grades:
-{_run_preamble()}      - name: Render grades
-        env:
-          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
-          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
-        run: |
-          gh auth setup-git
-          python3 -m dsl_course.grades render --cohort-org "$COHORT_ORG"
-"""
-
-
 def render_distribute_grades(cohort_orgs: list[str]) -> str:
-    """Fan the merged gradebook/<handle>.yml files out into each private grades-<handle>."""
+    """Send every mark a grader has written where it has to go."""
     return f"""name: Distribute grades
 
-# Run AFTER merging the Render grades preview PR. Copies each merged gradebook/<handle>.yml
-# into that student's private grades-<handle> repo and (unless silenced) emails them a
-# notification to their hertie email address. Needs the GRAPH_* secrets for the email.
+# Reads the grading sheets in classroom-config and sends what they hold: a feedback comment
+# on each submission repo's Feedback issue, each student's private grades-<handle> repo, the
+# registrar export, and (unless silenced) an email saying there is something new to read.
+# Nothing is said twice - a re-run after one correction reaches one student.
+# `assignment` narrows the run to one slug; blank is every sheet in the cohort, which is
+# right at the end of term and wrong in the middle of one.
+# Dry run first; it writes nothing and prints the counts. Needs the GRAPH_* secrets to mail.
 
 on:
   workflow_dispatch:
     inputs:
 {_cohort_dropdown(cohort_orgs)}
+      assignment:
+        description: "One assignment slug - leave blank for every sheet in the cohort"
+        type: string
+        required: false
       dry_run:
         description: "Preview the grade emails - push nothing, send nothing"
         type: boolean
@@ -822,15 +761,17 @@ on:
 {_concurrency("distribute-grades")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   distribute-grades:
-{_run_preamble()}      - name: Distribute grades
+{_run_preamble(_TIMEOUT_GRADING)}      - name: Distribute grades
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          ASSIGNMENT: ${{{{ inputs.assignment }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
           SILENT: ${{{{ inputs.silent }}}}
 {_MAIL_ENV}
         run: |
           args=(--cohort-org "$COHORT_ORG")
+          [ -n "$ASSIGNMENT" ] && args+=(--assignment "$ASSIGNMENT")
 {_DRY_RUN_GATE}
           [ "$SILENT" = "true" ] && args+=(--no-notify)
           python3 -m dsl_course.grades distribute "${{args[@]}}"
@@ -1160,9 +1101,9 @@ on:
 def render_new_assignment() -> str:
     """Scaffold an assignment-N-<tag> template repo (main + solution branch), then refresh.
 
-    format/type land in the solution branch's grading.yml (and shape the starter/hidden
+    format/type land in the solution branch's grading_config.yml (and shape the starter/hidden
     tests), so the choice made on this workflow is the one the grader later obeys - the
-    grading.yml vocabulary is picked here, not hand-edited in afterwards."""
+    grading_config.yml vocabulary is picked here, not hand-edited in afterwards."""
     return f"""name: New assignment
 
 on:

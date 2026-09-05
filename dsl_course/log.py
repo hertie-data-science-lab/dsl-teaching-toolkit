@@ -41,6 +41,21 @@ def log_withheld(msg: str) -> None:
     print(f"::warning::{msg}", file=sys.stderr, flush=True)
 
 
+def log_err_person(public: str, detail: str) -> None:
+    """A failure whose only identifying detail is somebody's repo, split in two.
+
+    The public half says WHAT failed and what to do about it; the half that names the repo,
+    the path or the handle goes through `log_person`. Every faculty workflow runs in the
+    course org's PUBLIC `.github`, and the failure branches are exactly where that was
+    forgotten - a green run says nothing, while `could not commit to <org>/grades-<handle>`
+    on a bad day publishes the roster one student at a time.
+
+    A faculty member who needs the name re-runs the CLI locally with `DSL_VERBOSE=1`, or
+    reads the private classroom-config; a count of what failed is in the run's summary."""
+    log_err(public)
+    log_person(f"  ! {detail}")
+
+
 def log_person(msg: str) -> None:
     """A line that NAMES SOMEBODY - printed only when `DSL_VERBOSE` is set.
 

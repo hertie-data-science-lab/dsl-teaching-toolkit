@@ -3,17 +3,17 @@
 Runs entirely in a faculty-controlled job (course-org Actions, bot token). For each
 submission repo it checks out the commit that repo was frozen at (see SNAPSHOTS below),
 overlays the assignment's HIDDEN tests (kept on the course template's `solution` branch,
-never shipped to students), runs them, and records a machine score into the PRIVATE grades
-CSV. Faculty & instructors then add manual marks and the existing grades pipeline emails
-the result - so a student never sees a score in their own repo.
+never shipped to students), runs them, and records how many passed into the PRIVATE grading
+sheet, as information for whoever marks it. Faculty & instructors write the marks there and
+`grades distribute` sends them - so a student never sees a score in their own repo.
 
-  course/<template> @ solution branch  ->  grading.yml + hidden tests
+  course/<template> @ solution branch  ->  grading_config.yml + hidden tests
                 |
   cohort/<slug>-<handle>  (individual)   clone @ snapshot, overlay tests, run
   cohort/<slug>-<team>    (group)              |
                 v
   classroom-config/autograde/<slug>/<key>.json   (per-test detail, private archive)
-  classroom-config/grades/<slug>.csv             (autograde_score + team filled)
+  classroom-config/grading_sheets/<slug>.yml     (`info.autograde`, never a mark)
 
 Student code is run in a subprocess with the GitHub token stripped from the environment.
 
@@ -22,9 +22,14 @@ entirely client-supplied (`GIT_COMMITTER_DATE`), so late work backdated to befor
 deadline passes a `rev-list --before` pin. The hourly scheduler therefore freezes each
 assignment shortly after its grading deadline, writing one row per submission repo into
 
-    classroom-config/snapshots/<slug>.csv     repo,sha,recorded_at
+    classroom-config/snapshots/<slug>.csv
+        repo,sha,recorded_at,submitted_at,submitted_source
 
-and never rewriting it. Grading pins to the recorded sha; a blank sha means "nothing had
+and never rewriting it. `submitted_at` is WHEN that pinned commit was made and
+`submitted_source` says where that time came from - `commit` for the committer date the
+API reports, which the student supplies and can backdate, and `suspect` when GitHub's own
+`pushed_at` for that repo is LATER than the due moment while the commit claims to predate
+it (the sheet then carries `info.submitted_note` for whoever marks it). Grading pins to the recorded sha; a blank sha means "nothing had
 been pushed by the deadline" and scores zero. Only with no snapshot at all does grading
 fall back to the date-based pin, loudly.
 
@@ -47,14 +52,12 @@ is never graded again automatically. A DECISION not to grade (no `solution` bran
 instead, saying why - because a skip that leaves the directory empty is re-decided, at the
 cost of a template clone, every hour for ever. `has_autograde_results` tests for either
 record, never bare directory existence, so a stray early write into the directory can no
-longer be mistaken for a completed grade. Machine-written grade cells are write-once too (see
-`grades.merge_auto`), so a marker's hand-edit is never clobbered. To re-grade deliberately,
-delete `autograde/<slug>/` (the next tick regrades) or run the Grade assignment workflow -
-and clear the `autograde_score` cells you want recomputed.
+longer be mistaken for a completed grade. To re-grade deliberately, delete
+`autograde/<slug>/` and let the next tick regrade.
 
-grading.yml (on the template's solution branch):
+grading_config.yml (on the template's solution branch):
     type: individual        # or group
-    autograde: true         # false -> skip (all-manual)
+    autograde: false        # the default; true -> run the hidden tests at the cutoff
     tests: tests            # path on the solution branch holding the hidden tests
 
 Usage:
@@ -81,14 +84,13 @@ import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from functools import cache
 from pathlib import Path
 
-import yaml
-
-from . import grades, roster, schedule, sync_teams, teams
+from . import course, grades, roster, schedule, sync_teams, teams
 from .course import (
     CONFIG_REPO,
     SOLUTION_BRANCH,
@@ -96,18 +98,47 @@ from .course import (
     resolve_is_group,
     submission_repo,
 )
+from .discovery import list_org_repos
 from .fs import copy_tree
-from .gh_contents import dump_csv, file_exists, get_file_content, put_file
-from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
-from .log import log, log_err, log_ok, log_skip, log_step
+from .gh_contents import (
+    dump_csv,
+    file_exists,
+    get_file_content,
+    get_file_with_sha,
+    is_untouched_stub,
+    put_file,
+)
+from .ghcli import BOT_EMAIL, GIT_ENV, bot_login, clone, gh, git, is_missing_resource
+
+# The assignment's definition and the sheet's spec live in `grades` (see the section
+# there): `grades` may not import `collect`, and the sheet is its type. Re-exported
+# under their old names so every caller and workflow keeps spelling them here.
+from .grades import (
+    GRADING_FILE,
+    load_grading_spec,
+    parse_grading_spec,  # noqa: F401 - re-exported; `collect` no longer parses it itself
+    sheet_spec,
+)
+from .log import log, log_err, log_ok, log_person, log_skip, log_step
 from .repos import repo_missing
 
 AUTOGRADE_DIR = "autograde"  # classroom-config/autograde/<slug>/<key>.json
 GRADED_RECORD = "_graded.json"  # fire-once sentinel: a successful run's LAST write
 SKIP_RECORD = "_skipped.json"  # the same marker, for an assignment nothing grades
 SNAPSHOT_DIR = "snapshots"  # classroom-config/snapshots/<slug>.csv
-SNAPSHOT_FIELDS = ("repo", "sha", "recorded_at")
-GRADING_FILE = "grading.yml"  # on the template's solution branch
+SNAPSHOT_FIELDS = ("repo", "sha", "recorded_at", "submitted_at", "submitted_source")
+# Where a row's `submitted_at` came from. Only `commit` is written today: the committer
+# date the commits API reports, which is the STUDENT's to set (`GIT_COMMITTER_DATE`) and
+# can therefore be backdated. A server-timed rung (`push`, from the repository-activity
+# API) comes later; recording the provenance now is what lets a marker - and the code -
+# tell a client-supplied time from a server-observed one in a file that is never rewritten.
+SUBMITTED_SOURCE_COMMIT = "commit"
+# The committer date says the work predates the deadline; GitHub's own `pushed_at` says
+# the repo did not receive it until after. One of the two is a claim the student wrote
+# (`GIT_COMMITTER_DATE`) and the other is the server's, so the row says so rather than
+# quietly pinning the earlier one.
+SUBMITTED_SOURCE_SUSPECT = "suspect"
+SUSPECT_NOTE = "commit dated before the push that delivered it - check"
 RUN_TIMEOUT = 300  # wall-clock seconds per graded subprocess
 # The note on the one zero that means "the RUNNER broke", not "the student didn't submit".
 # `collect` keys its systemic-failure guard on it, so it is a constant, not a loose string.
@@ -133,10 +164,6 @@ RLIMIT_CPU_SECONDS = RUN_TIMEOUT * 2
 RLIMIT_NPROC_MAX = 2048
 # Bytes per file: caps a disk-fill bomb (512 MiB).
 RLIMIT_FSIZE_BYTES = 512 * 1024**2
-
-# `_snapshot_sha` sentinel: the repo is ABSENT (404), distinct from a reachable-but-empty repo
-# (""). Can't collide with a real sha (40 hex) or "". Recorded as "" if the snapshot is frozen.
-_REPO_ABSENT = "\x00absent"
 
 # Belt-and-suspenders removal of files a student could commit to hijack their own grading:
 # a pre-baked report, pytest plugin/config-by-name, or an interpreter site-hook. The PRIMARY
@@ -166,32 +193,17 @@ _STUDENT_TEST_RIGGING = (
     "pytest.py",
 )
 
-_DEFAULT_SPEC = {
-    "type": "individual",
-    "autograde": True,
-    "tests": "tests",
-}
-
-
 # --------------------------------------------------------------------------- pure core
-
-
-def parse_grading_spec(text: str) -> dict:
-    """Parse a grading.yml (missing keys fall back to defaults; extras ignored)."""
-    data = yaml.safe_load(text) if text.strip() else {}
-    if not isinstance(data, dict):
-        data = {}
-    spec = dict(_DEFAULT_SPEC)
-    spec.update({k: data[k] for k in _DEFAULT_SPEC if k in data})
-    return spec
 
 
 def template_is_group(master_org: str, template: str) -> bool:
     """Whether an assignment template declares itself group-provisioned: `type: group` in
-    the grading.yml on its solution branch (written by the New assignment scaffold). No
-    solution branch / no grading.yml means individual (the parse's default)."""
-    text = get_file_content(master_org, template, GRADING_FILE, ref=SOLUTION_BRANCH)
-    return parse_grading_spec(text or "")["type"] == "group"
+    the grading_config.yml on its solution branch (written by the New assignment scaffold). No
+    solution branch / no grading_config.yml means individual (the parse's default).
+
+    Through `load_grading_spec`, so the scheduler's group resolution shares the memoised
+    read with the sheet refresh and the collection that follow it in the same tick."""
+    return load_grading_spec(master_org, template)["type"] == "group"
 
 
 def assignment_is_group(master_org: str, cohort_org: str, template: str) -> bool:
@@ -199,10 +211,10 @@ def assignment_is_group(master_org: str, cohort_org: str, template: str) -> bool
 
     Precedence (via `resolve_is_group`): the COHORT's own declaration -
     `assignments.<slug>.type` in classroom-config/schedule.yml - wins; else the template's
-    design-time grading.yml `type:` (solution branch, written by the New assignment scaffold);
+    design-time grading_config.yml `type:` (solution branch, written by the New assignment scaffold);
     else individual. Read-side only: the cohort setting never writes back into the course org's
-    grading.yml - sources are read course-ward, state written cohort-ward. The template's
-    grading.yml is read only when the cohort leaves `type` unset."""
+    grading_config.yml - sources are read course-ward, state written cohort-ward. The template's
+    grading_config.yml is read only when the cohort leaves `type` unset."""
     found = schedule.entry_for_repo(schedule.load(cohort_org), template)
     entry = found[1] if found else None
     schedule_type = entry.type if entry else None
@@ -275,23 +287,55 @@ def autograde_path(slug: str) -> str:
     return f"{AUTOGRADE_DIR}/{slug}"
 
 
-def dump_snapshots(rows: list[tuple[str, str, str]]) -> str:
-    """Serialise (repo, sha, recorded_at) rows to snapshot CSV text, repo-sorted so the
-    file is stable and diffable."""
+def dump_snapshots(rows: list[tuple[str, str, str, str, str]]) -> str:
+    """Serialise (repo, sha, recorded_at, submitted_at, submitted_source) rows to snapshot
+    CSV text, repo-sorted so the file is stable and diffable."""
     return dump_csv(SNAPSHOT_FIELDS, sorted(rows))
 
 
-def parse_snapshots(text: str) -> dict[str, str]:
-    """Parse snapshot CSV text into {repo: sha}. A blank sha is meaningful - it records
-    "nothing had been pushed to this repo by the deadline" - so it is kept, not dropped.
+@dataclass(frozen=True)
+class SnapshotRow:
+    """One repo's row in a frozen snapshot. Blank fields are records, not gaps: a blank
+    `sha` says "nothing had been pushed by the deadline", and blank submission fields say
+    the same, or that this row predates them."""
+
+    repo: str
+    sha: str = ""
+    recorded_at: str = ""
+    submitted_at: str = ""
+    submitted_source: str = ""
+
+
+def parse_snapshot_rows(text: str) -> dict[str, SnapshotRow]:
+    """Parse snapshot CSV text into {repo: SnapshotRow} - every recorded column, for the
+    callers that want the submission time as well as the pin.
+
+    Keyed by NAME, not position: a snapshot frozen before `submitted_at` and
+    `submitted_source` were recorded has three columns, and the file is write-once, so it
+    is never backfilled. It must therefore still parse - with those two blank - rather than
+    strand the cohort that owns it.
 
     A bare DictReader, not gh_contents.read_csv: `dump_snapshots` above wrote this file,
     so it has no BOM and no `;` delimiter to guard against."""
-    return {
-        repo: (row.get("sha") or "").strip()
-        for row in csv.DictReader(io.StringIO(text))
-        if (repo := (row.get("repo") or "").strip())
-    }
+    rows: dict[str, SnapshotRow] = {}
+    for row in csv.DictReader(io.StringIO(text)):
+        if not (repo := (row.get("repo") or "").strip()):
+            continue
+        rows[repo] = SnapshotRow(
+            repo=repo,
+            sha=(row.get("sha") or "").strip(),
+            recorded_at=(row.get("recorded_at") or "").strip(),
+            submitted_at=(row.get("submitted_at") or "").strip(),
+            submitted_source=(row.get("submitted_source") or "").strip(),
+        )
+    return rows
+
+
+def parse_snapshots(text: str) -> dict[str, str]:
+    """Parse snapshot CSV text into {repo: sha} - the pin, which is all grading needs. A
+    blank sha is meaningful - it records "nothing had been pushed to this repo by the
+    deadline" - so it is kept, not dropped."""
+    return {repo: row.sha for repo, row in parse_snapshot_rows(text).items()}
 
 
 # ---------------------------------------------------------------------- gh/git wiring
@@ -323,7 +367,7 @@ def submission_targets(
     up by the name then found none, so a group assignment silently had no targets at all.
     Defaults to `slug` for the (usual) case where they are the same.
 
-    `is_group` is decided upstream by `resolve_is_group` (force -> schedule -> grading.yml)
+    `is_group` is decided upstream by `resolve_is_group` (force -> schedule -> grading_config.yml)
     and passed in; it is NEVER inferred from teams.csv here. teams.csv is student-writable (a
     "Join team" issue can add a row against an individual assignment), so trusting its rows to
     decide the assignment's KIND would let a student turn an individual assignment into a group
@@ -395,19 +439,72 @@ def _until_param(deadline: str, tz: str | None = None) -> str:
     )
 
 
+# The commit facts the freeze needs, in one read: the sha and its committer date, plus
+# what tells the toolkit's own handout commit from a student's push - how many parents it
+# has, and who GitHub says wrote it. Tab-joined because a git author's name and email are
+# free text and a space is not a separator in them.
+_COMMIT_FIELDS = (
+    '[(.[0].sha // ""), (.[0].commit.committer.date // ""), '
+    '((.[0].parents // [] | length) | tostring), (.[0].author.login // ""), '
+    '(.[0].commit.author.email // "")] | join("\t")'
+)
+
+
+def _commit_facts(out: str) -> tuple[str, str, int | None, str, str]:
+    """`_COMMIT_FIELDS` parsed back: (sha, committer date, parent count, login, email).
+
+    The parent count is None when the answer did not carry one - an older shape, or a
+    truncated read. None means "cannot tell", and every caller must read it that way."""
+    parts = out.strip().split("\t")
+    parts += [""] * (5 - len(parts))
+    sha, committed, parents, author, email = parts[:5]
+    return sha, committed, int(parents) if parents.isdigit() else None, author, email
+
+
+def _is_handout_commit(parents: int | None, author: str, email: str) -> bool:
+    """Whether this commit is the repo's first AND the toolkit's own.
+
+    Both halves are required. A ROOT commit that a student made is a real submission (they
+    force-pushed over the handout, which is theirs to do), and a bot commit further along
+    the history is not the handout. `bot_login()` answering "" means the identity could not
+    be read, so nothing is claimed - a transient must never turn a student's work into "no
+    submission recorded"."""
+    if parents != 0:
+        return False
+    if email and email == BOT_EMAIL:
+        return True
+    return bool(author) and author == bot_login()
+
+
+@dataclass(frozen=True)
+class Pin:
+    """What the freeze found for one submission repo: the sha to grade, that commit's
+    committer date, and whether the repo was ABSENT (404).
+
+    `absent` is a field rather than another spelling of a blank sha because the two mean
+    opposite things to `snapshot_assignment`: a reachable-but-empty repo is a real "nobody
+    submitted" and IS frozen, while an absent one may still be provisioned and must not
+    be."""
+
+    sha: str = ""
+    committed: str = ""
+    absent: bool = False
+
+
 def _snapshot_sha(
     cohort_org: str, repo: str, deadline: str, recorded_at: str = ""
-) -> str | None:
-    """The sha to freeze `repo` at: its last commit on or before `deadline`, read from the
-    API (no clone - this runs for every repo of every assignment, hourly).
+) -> Pin | None:
+    """The commit to freeze `repo` at: its last commit on or before `deadline`, read from
+    the API (no clone - this runs for every repo of every assignment, hourly).
 
     "On or before" is judged on the COMMITTER DATE, which the student supplies
     (`GIT_COMMITTER_DATE`). Freezing does not change that - it only stops the pin moving
     afterwards. `recorded_at` is the moment of this freeze: a chosen commit dated after it
     cannot have existed when we looked, so it is a skewed or doctored clock and is logged.
 
-    Returns "" when there is nothing to grade: no commit that early, an empty repo, or no
-    such repo at all (an on-time submission cannot live in a repo that does not exist).
+    Returns a bare `Pin()` when there is nothing to grade - no commit that early, or an
+    empty repo - and `Pin(absent=True)` when there is no such repo at all (an on-time
+    submission cannot live in a repo that does not exist).
     Returns None when the API call itself failed - the caller then abandons the whole
     snapshot so the next cron tick retries, rather than baking a transient error into a
     record that is never rewritten."""
@@ -421,49 +518,84 @@ def _snapshot_sha(
         "-f",
         "per_page=1",
         "--jq",
-        '(.[0].sha // "") + " " + (.[0].commit.committer.date // "")',
+        _COMMIT_FIELDS,
     )
     if code == 0:
-        sha, _, committed = out.strip().partition(" ")
+        sha, committed, parents, author, email = _commit_facts(out)
         if not sha:
             _warn_if_late_commits_only(cohort_org, repo, deadline)
-        elif _committed_after(committed, recorded_at):
+            return Pin()  # the repo is reachable; no commit on/before the deadline
+        if _is_handout_commit(parents, author, email):
+            # The repo's FIRST commit, made by the toolkit: `/generate` copies the template
+            # into every student repo, so a student who never pushed still has a commit
+            # dated at the handout. Pinning it recorded them as having submitted, on time,
+            # and posted them a receipt saying so.
+            return Pin()
+        if _committed_after(committed, recorded_at):
             # Tag, never the handle: this log is public.
             log(
                 f"  [warn] {target_ref(repo)} is pinned to a commit dated after this "
                 f"freeze was taken ({committed} > {recorded_at}) - a committer date is "
                 f"client-supplied, so check for a skewed clock before marking"
             )
-        return sha  # a sha, or "" (repo reachable, no commit on/before the deadline)
+        return Pin(sha, committed)
     # A 409 is an EMPTY repo: it exists but has no commits, so "" is a real recorded
     # non-submission (we freeze it, closing the backdating window for it).
     if "HTTP 409" in out:
-        return ""
+        return Pin()
     # A 404 means the repo ISN'T THERE (not generated yet, a handout typo, or a private-repo
     # blip). That is NOT the same as an existing-but-empty repo: an absent repo may still be
     # provisioned, so if EVERY target is absent the caller skips the freeze rather than pinning
     # "nobody submitted" for ever. A precise marker match, not a loose `"empty" in out`.
     if is_missing_resource(out):
-        return _REPO_ABSENT
+        return Pin(absent=True)
     log_err(f"  ! could not read commits for {target_ref(repo)}: {out[:160]}")
     return None
 
 
-def _committed_after(committed: str, recorded_at: str) -> bool:
-    """Whether `committed` (a commit's committer date) is later than `recorded_at` (the
-    moment the freeze was taken). Both ISO; either missing or unparseable means no.
+def _parse_iso(stamp: str) -> datetime | None:
+    """An API timestamp as an aware datetime, or None if it is not one.
 
     GitHub answers `...Z` and `datetime.fromisoformat` only learnt to read that in 3.11,
     so the suffix is spelt out rather than left to the runner's Python version - the
-    difference between a warning that fires and one that never does."""
-    if not (committed and recorded_at):
-        return False
+    difference between a warning that fires and one that never does. A naive stamp is read
+    as UTC, which is what the API means by one."""
+    if not stamp:
+        return None
     try:
-        when = datetime.fromisoformat(committed.replace("Z", "+00:00"))
-        taken = datetime.fromisoformat(recorded_at.replace("Z", "+00:00"))
+        at = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
     except ValueError:
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=timezone.utc)
+
+
+def _committed_after(committed: str, recorded_at: str) -> bool:
+    """Whether `committed` (a commit's committer date) is later than `recorded_at` (the
+    moment the freeze was taken). Both ISO; either missing or unparseable means no."""
+    when, taken = _parse_iso(committed), _parse_iso(recorded_at)
+    return when is not None and taken is not None and when > taken
+
+
+def delivery_is_suspect(
+    committed: str, pushed_at: str, moment: datetime | None
+) -> bool:
+    """Whether the SERVER says this commit arrived after `moment` while the commit itself
+    claims to predate it.
+
+    The pin is chosen on the committer date, which is `GIT_COMMITTER_DATE` and therefore
+    the student's to set: a late push backdated before the due date is pinned with
+    `days_late: 0` and, until this, nothing anywhere said otherwise. `pushed_at` from the
+    org listing is the cheap server-side second opinion - it is the repo's LAST push, so it
+    only ever accuses a repo that really did receive something late.
+
+    Anything missing means no accusation: a listing without the field, an unparseable date,
+    or no moment to compare against."""
+    if not (committed and pushed_at and moment):
         return False
-    return when.tzinfo is not None and taken.tzinfo is not None and when > taken
+    made, delivered = _parse_iso(committed), _parse_iso(pushed_at)
+    if made is None or delivered is None:
+        return False
+    return made <= moment < delivered
 
 
 def _warn_if_late_commits_only(cohort_org: str, repo: str, deadline: str) -> None:
@@ -498,7 +630,7 @@ def has_autograde_results(cohort_org: str, slug: str) -> bool:
     The scheduler grades an assignment only while neither record is present, so a machine score
     is written once and never silently refreshed under a marker's hand-edits. A deliberate
     re-grade means deleting `autograde/<slug>/` (the next tick then regrades) or running the
-    Grade assignment workflow."""
+    autograder."""
     return any(
         file_exists(cohort_org, CONFIG_REPO, f"{autograde_path(slug)}/{record}")
         for record in (GRADED_RECORD, SKIP_RECORD)
@@ -574,6 +706,13 @@ def load_snapshots(cohort_org: str, slug: str) -> dict[str, str] | None:
     return parse_snapshots(content) if content is not None else None
 
 
+def load_snapshot_rows(cohort_org: str, slug: str) -> dict[str, SnapshotRow] | None:
+    """The frozen snapshot in full - the pin AND when it was submitted - or None if no
+    snapshot was ever taken. What the cutoff's grading-sheet write reads."""
+    content = get_file_content(cohort_org, CONFIG_REPO, snapshot_path(slug))
+    return parse_snapshot_rows(content) if content is not None else None
+
+
 class SnapshotResult(Enum):
     """What `snapshot_assignment` did. Only WRITTEN and PRESENT mean a snapshot exists, so
     only they make an assignment eligible to be graded."""
@@ -591,6 +730,7 @@ def snapshot_assignment(
     *,
     is_group: bool,
     teams_key: str | None = None,
+    tz: str | None = None,
 ) -> SnapshotResult:
     """Freeze, at a server-chosen MOMENT, the commit each of `slug`'s submission repos will
     be graded at. Write-once: an existing snapshot is never re-taken or overwritten, so a
@@ -626,18 +766,46 @@ def snapshot_assignment(
         )
         return SnapshotResult.NOTHING_TO_FREEZE
     recorded_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    rows: list[tuple[str, str, str]] = []
+    # One listing for the whole cohort, and the only reason to take it: `pushed_at` is the
+    # server's word on when each repo last received anything, and the pin is chosen on a
+    # date the student wrote. Best-effort - without it the rows simply carry `commit`, as
+    # they always did.
+    pushed = _pushed_at(cohort_org)
+    moment = local_deadline(deadline, tz)
+    rows: list[tuple[str, str, str, str, str]] = []
     any_present = False
     for repo, _key, _members in targets:
-        sha = _snapshot_sha(cohort_org, repo, deadline, recorded_at)
-        if sha is None:
+        pin = _snapshot_sha(cohort_org, repo, deadline, recorded_at)
+        if pin is None:
             log_err(f"  ! abandoning the {slug} snapshot - will retry on the next run")
             return SnapshotResult.FAILED
-        if sha == _REPO_ABSENT:
-            rows.append((repo, "", recorded_at))  # not there -> blank iff we freeze
+        if not pin.absent:
+            any_present = True  # a sha, or a reachable-but-empty repo that EXISTS
+        if pin.sha:
+            # The pinned commit's committer date, recorded with WHERE it came from - the
+            # student supplied it, so it is a claim, not an observation (see the module
+            # docstring). The snapshot is write-once, so it is recorded now or never.
+            suspect = delivery_is_suspect(pin.committed, pushed.get(repo, ""), moment)
+            if suspect:
+                # Tag, never the handle: this log is public.
+                log(
+                    f"  [warn] {target_ref(repo)} is pinned to a commit dated before the "
+                    f"push that delivered it - a committer date is client-supplied, so "
+                    f"check it before marking"
+                )
+            rows.append(
+                (
+                    repo,
+                    pin.sha,
+                    recorded_at,
+                    pin.committed,
+                    SUBMITTED_SOURCE_SUSPECT if suspect else SUBMITTED_SOURCE_COMMIT,
+                )
+            )
         else:
-            any_present = True  # a sha, or a reachable-but-empty ("") repo that EXISTS
-            rows.append((repo, sha, recorded_at))
+            # Absent, or reachable with nothing pushed by the deadline. Either way there is
+            # no submission, so there is no submission time: both cells stay blank.
+            rows.append((repo, "", recorded_at, "", ""))
     if not any_present:
         # EVERY target repo is ABSENT (404): not generated yet, or a handout typo. This is
         # NOT the same as reachable-but-empty repos (a real "nobody submitted", which we DO
@@ -658,12 +826,543 @@ def snapshot_assignment(
         f"snapshot: {slug} pinned commits as of {deadline}",
     ):
         return SnapshotResult.FAILED
-    pinned = sum(1 for _repo, sha, _at in rows if sha)
+    pinned = sum(1 for row in rows if row[1])
     log_ok(
         f"snapshot {snapshot_path(slug)}: {pinned}/{len(rows)} repo(s) with a commit "
         f"on/before {deadline}"
     )
     return SnapshotResult.WRITTEN
+
+
+# ------------------------------------------------------------------- the grading sheet
+
+# The sheet is created at handout, filled at the due date, refreshed through the late
+# window and frozen at the cutoff. Only the toolkit's own `info:` moves; see
+# `grades.merge_sheet` for what that guarantees the grader.
+CONTRIBUTIONS_FILE = "CONTRIBUTIONS.md"
+
+
+class SheetPhase(Enum):
+    """Where in the assignment's life this write falls.
+
+    OPEN and FROZEN differ in who owns `info:`; FREEZING is the single write that moves it
+    from one to the other, and it still DERIVES (off the frozen snapshot) - it is the last
+    derivation there will ever be."""
+
+    OPEN = "open"  # before the cutoff: `info:` is re-derived on every write
+    FREEZING = "freezing"  # the cutoff write: derive once more, then stop
+    FROZEN = "frozen"  # after it: `info:` is copied verbatim, whatever we now think
+
+
+def submitted_display(submitted_at: str, tz: str | None) -> str:
+    """The pinned commit's time in the COHORT's own clock, to the minute -
+    `2026-10-03T22:14+02:00`.
+
+    To the MINUTE: seconds add nothing a grader reads a submission time for, and this is
+    also the form the mock-up shows. It used to be load-bearing as well - with seconds the
+    value matches YAML 1.1's timestamp pattern - but `grades._SheetLoader` now keeps every
+    plain scalar in the sheet a string, so the type can no longer move under it."""
+    at = _parse_iso(submitted_at)
+    if at is None:
+        return ""
+    return at.astimezone(schedule._tz(tz)).isoformat(timespec="minutes")
+
+
+def days_late(submitted: datetime, due: datetime, tz: str | None = None) -> int:
+    """Whole days late, counted in the COHORT's own calendar and floored at 0.
+
+    A day starts at local midnight, not 86400 seconds after the last one. The night the
+    clocks go back is 25 hours long, so counting fixed blocks made a push at 23:59 the day
+    after a late-October deadline read as TWO days late - a 10% deduction nobody could
+    explain and the student could not have avoided. Days STARTED is the Hertie wording, and
+    a day starts when the date does: the first local midnight past the deadline is day one.
+
+    Measured from the MINUTE-truncated submission time, which is the value the receipt and
+    the sheet both show. Without that, a push at 23:59:01 against a 23:59 deadline was
+    displayed as `pushed 23:59` and charged a day - the two lines of the same receipt
+    disagreeing with each other."""
+    zone = schedule._tz(tz)
+    local = submitted.astimezone(zone).replace(second=0, microsecond=0)
+    deadline = due.astimezone(zone)
+    if local <= deadline:
+        return 0
+    return (local.date() - deadline.date()).days
+
+
+CONTRIBUTIONS_UNFILLED = "(not filled in)"
+
+
+def _contributions(cohort_org: str, repo: str, ref: str) -> str | None:
+    """CONTRIBUTIONS.md as it stood AT THE PIN - not as it stands now, which is a file the
+    team can still edit after the deadline.
+
+    A team that submitted but never wrote the file gets `(not filled in)`, not a blank: the
+    blank would read as "the toolkit did not look", and whether the team said who did what
+    is exactly the thing a grader is deciding an individual adjustment on. Blank is reserved
+    for "there is nothing to have read" - no pin, or a read that failed."""
+    if not ref:
+        return None
+    try:
+        text = get_file_content(cohort_org, repo, CONTRIBUTIONS_FILE, ref=ref)
+    except RuntimeError:
+        return None  # a read failure is not a fact about the team
+    if not text or not text.strip() or is_untouched_stub(text):
+        return CONTRIBUTIONS_UNFILLED
+    return text
+
+
+def _sheet_info(
+    cohort_org: str,
+    targets: list[tuple[str, str, list[str]]],
+    pins: dict[str, tuple[str, str]],
+    due: datetime | None,
+    tz: str | None,
+    *,
+    is_group: bool,
+    suspect: set[str] | None = None,
+) -> dict[str, dict]:
+    """The toolkit's facts, per submission unit: when the pinned commit was made, how late
+    that is, and (for a team) what CONTRIBUTIONS.md said at that commit.
+
+    Only what was DERIVED, and only for the repos that were READ - a unit with no pin here
+    was left alone by `_provisional_pins` because nothing has been pushed to it, and the
+    merge keeps the fact the sheet already holds for it.
+
+    The block's shape - which keys exist at all for this assignment - is
+    `grades._fresh_info`'s to declare, and the merge unions the two; stating it here as
+    well is how a key added in one place goes missing in the other."""
+    out: dict[str, dict] = {}
+    looked_at = datetime.now(schedule._tz(tz)).isoformat(timespec="minutes")
+    for repo, unit, _members in targets:
+        if repo not in pins:
+            continue
+        sha, submitted_at = pins[repo]
+        # This pass READ this repo, whatever it found. Recorded so the once-only receipt
+        # fires once and so a repo nobody has pushed to is not re-read every tick.
+        info: dict = {"checked": looked_at}
+        when = _parse_iso(submitted_at) if (sha and submitted_at) else None
+        if when is not None:
+            info["submitted"] = submitted_display(submitted_at, tz)
+            info["days_late"] = days_late(when, due, tz) if due is not None else None
+            if repo in (suspect or ()):
+                # The one fact in `info:` that is not about the work: the committer date
+                # this row is built from is the student's to set, and the server says the
+                # push that carried it landed later. A grader marking late work has to see
+                # that before they act on `days_late: 0`.
+                info["submitted_note"] = SUSPECT_NOTE
+        if is_group:
+            info["contributions"] = _contributions(cohort_org, repo, sha)
+        out[unit] = info
+    return out
+
+
+def _quiet_since(pushed_at: str, recorded: object, checked: object = None) -> bool:
+    """Whether this repo can be left alone: nothing has reached it since we last looked.
+
+    Two facts on the sheet can answer that, and they are compared differently. `recorded`
+    is `info.submitted`, a pinned commit's committer date - a push lands seconds AFTER the
+    commit it carries, so the minute is compared INCLUSIVELY or every repo reads as busy
+    and nothing is saved. `checked` is `info.checked`, the minute this pass last looked at
+    the repo, so a push inside that same minute is still unseen and the comparison is
+    STRICT. The second fact is what a non-submitter has: without it every repo nobody has
+    pushed to was re-read four times an hour for the whole late window.
+
+    False whenever the answer is not certain - an unparseable stamp, a repo missing from
+    the listing, a unit the sheet has no fact for yet - because the cost of asking again is
+    one API call and the cost of not asking is a submission nobody sees."""
+    if not pushed_at:
+        return False
+    pushed = _parse_iso(str(pushed_at))
+    if pushed is None:
+        return False
+    to_minute = {"second": 0, "microsecond": 0}
+    pushed = pushed.replace(**to_minute)
+    pinned = _parse_iso(str(recorded)) if recorded else None
+    if pinned is not None and pushed <= pinned.replace(**to_minute):
+        return True
+    looked = _parse_iso(str(checked)) if checked else None
+    return looked is not None and pushed < looked.replace(**to_minute)
+
+
+def _pushed_at(cohort_org: str) -> dict[str, str]:
+    """`{repo: pushed_at}` for the whole cohort, from ONE listing.
+
+    The server's word on when each repo last received anything - which is what the pin, a
+    date the student wrote, is checked against. Best-effort: without it every repo is
+    simply read (see `_provisional_pins`) and nothing is accused."""
+    try:
+        return {
+            row["name"]: row.get("pushed_at") or ""
+            for row in list_org_repos(cohort_org)
+        }
+    except RuntimeError as exc:
+        log(f"  (no repo listing this tick - re-reading each submission: {exc})")
+        return {}
+
+
+def _provisional_pins(
+    cohort_org: str,
+    targets: list[tuple[str, str, list[str]]],
+    deadline: str,
+    previous: dict,
+    due: datetime | None = None,
+) -> tuple[dict[str, tuple[str, str]], set[str]] | None:
+    """Each repo's last commit on or before the cutoff, read WITHOUT writing a snapshot.
+
+    The snapshot file stays write-once and stays the cutoff's job: these pins move with
+    every push through the late window, which is the whole point of refreshing the sheet.
+
+    Only the repos that can have MOVED are read. One org listing carries `pushed_at` for
+    the whole cohort, and a repo quiet since the commit the sheet already records cannot
+    have gained a later one - so it is not asked, and the fact on the sheet stands (a unit
+    absent from these pins is one `grades._merged_block` leaves alone). The refresh runs
+    four times an hour for the length of the late window, where it used to cost one commits
+    call per submission repo on every one of those ticks.
+
+    Returns `(pins, the repos whose pin the server's own push time contradicts)`, or None
+    if a lookup we DID make failed - a half-read cohort must not rewrite the file."""
+    pushed = _pushed_at(cohort_org)
+    pins: dict[str, tuple[str, str]] = {}
+    suspect: set[str] = set()
+    for repo, unit, _members in targets:
+        was = (previous.get(unit) or {}).get(grades.INFO_KEY) or {}
+        if _quiet_since(pushed.get(repo, ""), was.get("submitted"), was.get("checked")):
+            continue
+        pin = _snapshot_sha(cohort_org, repo, deadline)
+        if pin is None:
+            return None
+        pins[repo] = (pin.sha, pin.committed)
+        if delivery_is_suspect(pin.committed, pushed.get(repo, ""), due):
+            suspect.add(repo)
+    return pins, suspect
+
+
+def _receipt_event(
+    phase: SheetPhase, sha: str, was: object, now_shown: str, checked: object = None
+) -> str | None:
+    """Which receipt this unit has earned since the last write, if any.
+
+    The comparison is against what the SHEET last recorded, not against a marker we would
+    have to store: `info.submitted` is already there, it is ours, and it moves exactly when
+    a new commit is pinned. A push in the same minute as the last one is the one case it
+    cannot see, and a duplicate receipt is worse than a missed one for a student who
+    pushed twice in sixty seconds."""
+    if phase is SheetPhase.FREEZING:
+        return course.RECEIPT_FROZEN if sha else None
+    if not was and not checked:
+        # The first time we looked, and it says so either way. `checked` is what tells a
+        # student who has not submitted apart from one we have never looked at: without it
+        # this fired on every tick, and the receipt marker swallowed all but the first -
+        # at the cost of an issue lookup and a comment read per non-submitter per tick.
+        return course.RECEIPT_DUE
+    if now_shown and now_shown != was:
+        return course.RECEIPT_UPDATED
+    return None
+
+
+def _post_receipts(
+    cohort_org: str,
+    spec: grades.SheetSpec,
+    targets: list[tuple[str, str, list[str]]],
+    pins: dict[str, tuple[str, str]],
+    previous: dict,
+    phase: SheetPhase,
+    tz: str | None,
+    due: datetime | None,
+    dry_run: bool,
+    changed: bool = True,
+) -> None:
+    """Tell each student what we recorded for them, in their own repo's Feedback issue.
+
+    Never fatal: a receipt is a courtesy, and a repo whose issue cannot be opened must not
+    stop the sheet - which is the record - from being written. Nothing at all for work
+    handed in off GitHub: there is no push to acknowledge."""
+    if spec.submit_external:
+        return
+    posted = 0
+    for repo, unit, members in targets:
+        sha, submitted_at = pins.get(repo, ("", ""))
+        when = _parse_iso(submitted_at) if (sha and submitted_at) else None
+        if when is not None:
+            # In the COHORT's clock, like everything else a student is shown: the API
+            # answers UTC, and "pushed 20:14" for a 22:14 push reads as a bug.
+            when = when.astimezone(schedule._tz(tz))
+        shown = submitted_display(submitted_at, tz) if when is not None else ""
+        before = (previous.get(unit) or {}).get(grades.INFO_KEY) or {}
+        was = before.get("submitted")
+        event = _receipt_event(phase, sha, was, shown, before.get("checked"))
+        if event is None or (not changed and event == course.RECEIPT_UPDATED):
+            continue
+        body = grades.receipt(
+            spec,
+            event,
+            sha=sha,
+            pushed_display=grades._display_long(when),
+            days=days_late(when, due, tz) if (when is not None and due) else 0,
+        )
+        issue = grades.ensure_feedback_issue(
+            cohort_org, repo, grades.feedback_body(spec, unit, members), dry_run
+        )
+        if not isinstance(issue, int):
+            # No issue, or a lookup that could not be read. A receipt is a courtesy and the
+            # sheet is the record, so either way this unit waits for the next tick.
+            continue
+        if grades.post_receipt(
+            cohort_org,
+            repo,
+            issue,
+            body,
+            course.receipt_marker(sha, event),
+            dry_run,
+        ):
+            posted += 1
+            log_person(f"    receipt ({event}) on {cohort_org}/{repo}#{issue}")
+    if posted:
+        # A COUNT: this log is public, and a receipt names a submission repo.
+        log_ok(f"{posted} submission receipt(s) up to date")
+
+
+def _status_line(
+    spec: grades.SheetSpec, phase: SheetPhase, total: int, submitted: int, derived: bool
+) -> str:
+    """The one line of the header that changes hour to hour. It says what a grader wants
+    to know before opening the file: is it worth marking yet, and can it still move?"""
+    if phase is not SheetPhase.OPEN:
+        return f"FROZEN {spec.cutoff_display}".strip()
+    if spec.submit_external:
+        return "OPEN - submitted outside GitHub"
+    # Named, because "3 of 5" reads differently for teams than for students and a grader
+    # scanning this line wants to know which they are looking at without counting rows.
+    unit = "teams" if spec.is_group else "students"
+    line = f"OPEN - {submitted} of {total} {unit} have submitted"
+    if derived:
+        line += "; late pushes still update `info:` until the cutoff."
+    return line
+
+
+def _sheet_phase(
+    cohort_org: str,
+    slug: str,
+    old_text: str,
+    now: datetime,
+    cutoff: datetime | None,
+) -> SheetPhase:
+    """Where this write falls in the assignment's life.
+
+    Decided from the file and the clock rather than by the caller. The handout, the
+    refresh, the button and the freeze each used to pass their own answer, and the one
+    that defaulted to OPEN won whenever it ran last: a late onboarder provisioned after
+    the cutoff - or any press of Release assignment - rewrote a sealed sheet's header back
+    to `OPEN - late pushes still update info:`, telling a grader the marks could still
+    move.
+
+    ALREADY SEALED is what the sheet itself says, so the seal survives a snapshot that
+    could not be read. Otherwise the CUTOFF decides, off the schedule and the template -
+    no extra call. Only when the schedule cannot say (an assignment collected by hand,
+    with no dated entry) is the snapshot file asked."""
+    if grades.sheet_is_frozen(old_text):
+        return SheetPhase.FROZEN
+    sealed = (
+        now >= cutoff
+        if cutoff is not None
+        else load_snapshots(cohort_org, slug) is not None
+    )
+    return SheetPhase.FREEZING if sealed else SheetPhase.OPEN
+
+
+def sync_sheet(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule,
+    key: str,
+    slug: str,
+    template: str,
+    *,
+    is_group: bool,
+    now: datetime,
+    units: list[tuple[str, list[str]]] | None = None,
+    autograde: dict[str, str] | None = None,
+    dry_run: bool = False,
+) -> bool:
+    """Write `grading_sheets/<slug>.yml` for this assignment, creating it if it is not
+    there and leaving it exactly as it is when nothing has changed.
+
+    ONE function for all three moments - handout, refresh, freeze - because they differ
+    only in what `info:` may say. A separate creator would be a second definition of the
+    sheet's shape, and the two would drift the first time a field was added. Which moment
+    this is, is decided HERE (`_sheet_phase`) and never passed in: three callers choosing
+    it from different information is how a re-fired handout un-froze a sealed sheet.
+
+    Nothing is derived before the due date (there is nothing to derive, and a handout must
+    not cost an API call per student), nothing at all for an externally submitted
+    assignment, and nothing once the sheet is FROZEN. The write itself is skipped when the
+    rendered text hashes to what the repo already holds, so the hourly tick is free."""
+    gspec = load_grading_spec(course_org, template)
+    spec = sheet_spec(sched, key, slug, gspec, is_group)
+    path = grades.sheet_path(slug)
+    entry = sched.assignments.get(key)
+    due = entry.due_datetime if entry else None
+
+    targets: list[tuple[str, str, list[str]]] = []
+    if units is None:
+        targets = submission_targets(cohort_org, slug, is_group, key)
+        units = [(unit, members) for _repo, unit, members in targets]
+    if not units:
+        # Nobody onboarded, or no teams yet. `submission_targets` has said which.
+        log(f"  [skip] {path} - no submission units yet; a later tick creates it")
+        return True
+
+    try:
+        found = get_file_with_sha(cohort_org, CONFIG_REPO, path)
+    except RuntimeError as exc:
+        log_err(f"  ! could not read {path}: {exc}")
+        return False
+    old_text, old_sha = found if found else ("", "")
+    phase = _sheet_phase(
+        cohort_org, slug, old_text, now, grades.cutoff_at(sched, key, gspec)
+    )
+    try:
+        on_disk = grades.parse_sheet(old_text) if old_text else {}
+    except grades.SheetUnreadable as exc:
+        # A grader mid-edit. The file is theirs and it is the record, so the tick reports
+        # and stops; the next one picks it up the moment the YAML parses again.
+        log_err(f"  ! {path} cannot be read ({exc}) - leaving it exactly as it is")
+        return False
+    previous = on_disk.get(spec.container_key) or {}
+    if not isinstance(previous, dict):
+        log_err(
+            f"  ! {path}: `{spec.container_key}:` is not a mapping of units - "
+            f"leaving it exactly as it is"
+        )
+        return False
+
+    derive = (
+        bool(targets)
+        and not spec.submit_external
+        and (
+            phase is SheetPhase.FREEZING
+            or (phase is SheetPhase.OPEN and due is not None and now >= due)
+        )
+    )
+    info_updates: dict[str, dict] = {}
+    pins: dict[str, tuple[str, str]] = {}
+    suspect: set[str] = set()
+    if derive and phase is SheetPhase.FREEZING:
+        rows = load_snapshot_rows(cohort_org, slug)
+        if rows is None:
+            # Sealing against a snapshot that is not there would record "nobody submitted"
+            # for the whole cohort, permanently. The facts the sheet already holds are the
+            # last ones anybody looked up, so they stand; only the header moves to FROZEN.
+            log_err(
+                f"  ! no {snapshot_path(slug)} - sealing {path} on the facts it holds"
+            )
+            derive = False
+        else:
+            pins = {r: (row.sha, row.submitted_at) for r, row in rows.items()}
+            # Recorded once, at the freeze, and read back here: the snapshot is the record.
+            suspect = {
+                r
+                for r, row in rows.items()
+                if row.submitted_source == SUBMITTED_SOURCE_SUSPECT
+            }
+    elif derive:
+        found = _provisional_pins(
+            cohort_org,
+            targets,
+            (grades.cutoff_at(sched, key, gspec) or now).isoformat(),
+            previous,
+            due,
+        )
+        if found is None:
+            log_err(f"  ! could not read every submission for {path} - not rewriting")
+            return False
+        pins, suspect = found
+    if derive:
+        info_updates = _sheet_info(
+            cohort_org,
+            targets,
+            pins,
+            due,
+            sched.timezone,
+            is_group=is_group,
+            suspect=suspect,
+        )
+    for unit, count in (autograde or {}).items():
+        info_updates.setdefault(unit, {})["autograde"] = count
+
+    sheet = grades.merge_sheet(
+        on_disk or None,
+        spec,
+        units,
+        info_updates,
+        frozen=phase is SheetPhase.FROZEN,
+    )
+    # Counted off the MERGED sheet rather than off this tick's derivation: a repo nobody
+    # has pushed to since the last refresh is not re-read, so its submission is on the file
+    # and not in `info_updates`.
+    submitted = sum(
+        1
+        for block in (sheet.get(spec.container_key) or {}).values()
+        if isinstance(block, dict)
+        and (block.get(grades.INFO_KEY) or {}).get("submitted")
+    )
+    status = _status_line(spec, phase, len(units), submitted, derive)
+    content = grades.dump_sheet(sheet, spec, status).encode()
+    # NOT a byte compare. The file is the grader's: their quoting, their indentation, the
+    # blank lines they leave and the comments they add ("extension granted by email") are
+    # all things a re-dump rewrites, and this runs four times an hour - so a sheet was
+    # canonicalised within fifteen minutes of every save, and a grader editing it locally
+    # got a non-fast-forward on every push. What the toolkit owns is the DATA and the
+    # header; a write happens when one of those two really moved, and not otherwise.
+    changed = sheet != on_disk or grades.sheet_header(old_text) != grades.sheet_header(
+        content.decode()
+    )
+    written = True
+    if not changed:
+        log_skip(f"{path} (unchanged)")
+    elif dry_run:
+        log(f"    DRY-RUN  {path} ({status})")
+    else:
+        # The message carries counts, never a handle or a team name: classroom-config is
+        # private, but its commit messages are quoted back in public run logs.
+        #
+        # `expected_sha` is the sha this run READ the file at, so GitHub refuses the write
+        # if a grader saved over it in between. Letting `put_file` fetch a fresh sha would
+        # make the call succeed however stale our copy was - and this file is typed into by
+        # hand, in a browser, while the quarter-hourly tick is running: a save landing in
+        # that window would be silently reverted, marks and all. A refusal is counted, and
+        # the next tick re-reads, re-merges and writes.
+        written = put_file(
+            cohort_org,
+            CONFIG_REPO,
+            path,
+            content,
+            f"grading sheet: {slug} - {status}",
+            expected_sha=old_sha,
+        )
+        if written:
+            log_ok(f"{path}: {status}")
+    # AFTER the record: a receipt promises something the sheet is supposed to hold, so the
+    # sheet lands first. An unchanged tick posts nothing new to say - only the once-only
+    # `due` and `frozen` events, which have to fire whether or not a pin moved (a student
+    # who never submitted has an unchanging sheet and is owed both).
+    if derive and written:
+        # Only when the SHEET landed. Both this pass and the Collect button can derive the
+        # same event, and the one whose compare-and-swap write was refused has not recorded
+        # what its receipt would promise - it posted a duplicate instead.
+        _post_receipts(
+            cohort_org,
+            spec,
+            targets,
+            pins,
+            previous,
+            phase,
+            sched.timezone,
+            due,
+            dry_run,
+            changed=changed,
+        )
+    return written
 
 
 def _pin_commit(
@@ -1002,7 +1701,6 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
 def _grade_target(
     cohort_org: str,
     repo: str,
-    spec: dict,
     tests_src: Path,
     deadline: str,
     snapshot: str | None = None,
@@ -1035,6 +1733,50 @@ def _grade_target(
             return _zero_result(GRADE_FAILED_NOTE)
         result["commit"] = sha
         return result
+
+
+def refresh_assignment_sheet(
+    master_org: str,
+    template: str,
+    cohort_org: str,
+    *,
+    group: bool = False,
+    dry_run: bool = False,
+) -> int:
+    """Bring one assignment's grading sheet up to date, without freezing anything.
+
+    What the **Collect submissions** button does, and what the hourly refresh does for
+    every assignment past its due date. The snapshot stays the cutoff's job: this only ever
+    re-derives `info:`, so a grader who presses the button an hour after a late push sees
+    it immediately instead of waiting for the tick.
+
+    A sheet past its cutoff is sealed rather than refreshed - `sync_sheet` reads that off
+    the sheet and the clock - so no press of this button can move a fact the freeze
+    recorded, and one pressed over a cutoff that passed while nothing ran does the sealing
+    the tick missed."""
+    sched = schedule.load(cohort_org)
+    found = schedule.entry_for_repo(sched, template)
+    key = found[0] if found else assignment_slug(template)
+    slug = schedule.cohort_name(*found) if found else key
+    entry = found[1] if found else None
+    gspec = load_grading_spec(master_org, template)
+    is_group = resolve_is_group(
+        force=group,
+        schedule_type=entry.type if entry else None,
+        template_group=gspec["type"] == "group",
+    )
+    ok = sync_sheet(
+        master_org,
+        cohort_org,
+        sched,
+        key,
+        slug,
+        template,
+        is_group=is_group,
+        now=datetime.now(schedule._tz(sched.timezone)),
+        dry_run=dry_run,
+    )
+    return 0 if ok else 1
 
 
 def _today_in_cohort_tz(sched: schedule.Schedule) -> str:
@@ -1071,14 +1813,19 @@ def collect(
     found = schedule.entry_for_repo(sched, template)
     key = found[0] if found else assignment_slug(template)
     slug = schedule.cohort_name(*found) if found else key
-    # SSOT: default the grading pin to the cohort schedule's grading deadline (explicit
-    # `grading_datetime`, else `due_datetime`); an explicit `deadline` (CLI override)
-    # wins; fall back to today - in the cohort's own timezone, like every other date here -
-    # only if unscheduled.
+    # The assignment's definition, read from the API (memoised) rather than from the clone
+    # below, because the grading SHEET must be frozen at the cutoff on every path - and two
+    # of them never reach a clone: a template with no solution branch, and an all-manual
+    # assignment. Both are ordinary states, not failures, and both still have a deadline.
+    # It is also what the cutoff itself is measured with (`late_window_days`).
+    gspec = load_grading_spec(master_org, template)
+    # SSOT: default the grading pin to the assignment's CUTOFF - an explicit
+    # `grading_datetime`, else the due date plus the template's late window. An explicit
+    # `deadline` (CLI override) wins; fall back to today - in the cohort's own timezone,
+    # like every other date here - only if unscheduled.
+    at = grades.cutoff_at(sched, key, gspec)
     deadline = (
-        deadline
-        or schedule.grading_datetime_iso(sched, key)
-        or _today_in_cohort_tz(sched)
+        deadline or (at.isoformat() if at else None) or _today_in_cohort_tz(sched)
     )
     # Pin the deadline to an explicit instant in the COHORT's timezone, once, here: a bare
     # `--deadline 2026-11-15` means the end of the 15th where the students are, and every
@@ -1097,6 +1844,52 @@ def collect(
         )
         return 1
 
+    entry = found[1] if found else None
+    # group-vs-individual via the single `resolve_is_group` precedence (force -> cohort
+    # schedule `type:` -> template grading_config.yml -> individual). The entry is the
+    # one found above by course_source_repo - `slug` is the cohort-side NAME, which is
+    # `cohort_dest_repo` when that is set and so is not a key into `sched.assignments`.
+    is_group = resolve_is_group(
+        force=group,
+        schedule_type=entry.type if entry else None,
+        template_group=gspec["type"] == "group",
+    )
+    cutoff = local_deadline(deadline, sched.timezone)
+
+    def freeze_sheet(counts: dict[str, str] | None = None) -> bool:
+        """Seal the grading sheet: one last derivation, off the write-once snapshot, and
+        `info:` is never touched again. Every path out of a passed cutoff runs it, because
+        a sheet left OPEN after the deadline tells a grader marks can still move."""
+        return sync_sheet(
+            master_org,
+            cohort_org,
+            sched,
+            key,
+            slug,
+            template,
+            is_group=is_group,
+            now=cutoff,
+            autograde=counts,
+            dry_run=dry_run,
+        )
+
+    def sealed(counts: dict[str, str] | None = None) -> bool:
+        """Freeze the sheet, and say whether this run may record anything permanent.
+
+        A skip or graded record is FIRE-ONCE. Written over a sheet the freeze could not
+        seal - a grader saving in the browser between the read and the compare-and-swap
+        write, which is the exact minute graders are told they may type - it retires the
+        assignment with its header still OPEN and its `info:` still provisional, and
+        nothing ever re-derives them. So the marker waits for the seal, and the next tick
+        does both."""
+        if freeze_sheet(counts):
+            return True
+        log_err(
+            f"{slug}: the grading sheet could not be sealed - recording nothing, so the "
+            f"next run seals it and then records"
+        )
+        return False
+
     with tempfile.TemporaryDirectory() as sd:
         soldir = Path(sd) / "sol"
         if not clone(master_org, template, soldir, branch=SOLUTION_BRANCH):
@@ -1105,38 +1898,44 @@ def collect(
                 f"tests to run; nothing to collect."
             )
             # Hand-marked, then: say so once in the archive rather than re-deciding it
-            # on every hourly tick (see FIRE-ONCE above).
+            # on every hourly tick (see FIRE-ONCE above). The sheet is still frozen - the
+            # deadline passed whether or not anything machine-grades.
+            if not sealed():
+                return 1
             return _record_skip(
                 cohort_org,
                 slug,
                 f"no `{SOLUTION_BRANCH}` branch on {master_org}/{template}",
                 dry_run,
             )
-        spec_path = soldir / GRADING_FILE
-        spec = parse_grading_spec(spec_path.read_text() if spec_path.is_file() else "")
-        if not spec["autograde"]:
+        if not gspec["autograde"]:
             log_ok(
                 f"{slug}: autograde disabled in {GRADING_FILE} - all-manual, nothing to collect."
             )
+            if not sealed():
+                return 1
             return _record_skip(
                 cohort_org, slug, f"`autograde: false` in {GRADING_FILE}", dry_run
             )
-        # group-vs-individual via the single `resolve_is_group` precedence (force -> cohort
-        # schedule `type:` -> template grading.yml -> individual). The entry is the one found
-        # above by course_source_repo - `slug` is the cohort-side NAME, which is
-        # `cohort_dest_repo` when that is set and so is not a key into `sched.assignments`.
-        entry = found[1] if found else None
-        is_group = resolve_is_group(
-            force=group,
-            schedule_type=entry.type if entry else None,
-            template_group=spec["type"] == "group",
-        )
-        tests_src = soldir / str(spec["tests"])
+        tests_src = soldir / str(gspec["tests"])
         if not tests_src.is_dir():
+            # The third hand-marked exit: an assignment that asked to be autograded and
+            # whose hidden tests were never written. Recorded and frozen like the other
+            # two rather than red -
+            # a fault the cron re-decides every quarter of an hour is a fault nobody reads,
+            # and the sheet has to be sealed whether or not a machine ever marked anything.
             log_err(
-                f"{slug}: tests path `{spec['tests']}` not found on the solution branch."
+                f"{slug}: no `{gspec['tests']}/` on the solution branch - hand-marked, "
+                f"nothing to collect."
             )
-            return 1
+            if not sealed():
+                return 1
+            return _record_skip(
+                cohort_org,
+                slug,
+                f"no `{gspec['tests']}/` on the solution branch - hand-marked",
+                dry_run,
+            )
 
         # Targets: one per team (group) or one per onboarded student (individual). Repos
         # are named after the cohort-side `slug`; teams.csv is keyed on the schedule `key`.
@@ -1169,7 +1968,9 @@ def collect(
             f"{'team(s)' if is_group else 'student(s)'} as of {deadline}"
         )
 
-        updates: list[tuple[str, dict[str, str]]] = []
+        # `{unit key: "passed/total"}` - what `info.autograde` shows a grader at the
+        # cutoff. Per UNIT, not per member: a team is graded once, on one commit.
+        scores: dict[str, str] = {}
         # The per-target result archives are held here and written only AFTER the grades CSV
         # is durable (see below), with the `_graded.json` sentinel written last of all. Writing
         # archives mid-loop is what let an aborted run un-grade everyone back when bare
@@ -1210,7 +2011,6 @@ def collect(
                 result = _grade_target(
                     cohort_org,
                     repo,
-                    spec,
                     tests_src,
                     deadline,
                     snapshot=None if snapshots is None else snapshots[repo],
@@ -1230,24 +2030,20 @@ def collect(
                     f"autograde: {slug}/{target_key}",
                 )
             )
-            score = str(result["score"])
-            if is_group:
-                # The team's passing-test count goes in `autograde_score`, the same column
-                # an individual assignment uses - NOT in `team_score`. `team_score` is the
-                # marker's shared team mark, and writing a count there put a machine number
-                # and a human mark in one write-once cell: whichever landed first won, so a
-                # team marked before the grading deadline silently lost its autograde and a
-                # team marked after it found the cell already taken. Every member carries
-                # the team's count, which is what they were graded on.
-                updates += [
-                    (m, {"team": target_key, "autograde_score": score}) for m in members
-                ]
-            else:
-                updates.append((target_key, {"autograde_score": score}))
+            # A count, shown to the grader for information - never a mark by itself, and
+            # never a field a student sees. It reaches them, if at all, through whatever
+            # the grader then types into `score_*`.
+            #
+            # Only a unit with someone to give the mark to counts as graded: a team whose
+            # every handle was rejected by the roster allowlist has nobody, and recording
+            # its count would make the assignment look graded when no student can receive
+            # it. The per-target archive above is still written - the run DID examine it.
+            if members:
+                scores[target_key] = f"{result['score']}/{result['max']}"
 
         if dry_run:
             return 0
-        if not updates and unreachable:
+        if not scores and unreachable:
             # Nothing graded because nothing could be READ - a repo that is not there yet,
             # or an API having a bad afternoon. The run is genuinely unfinished, so it goes
             # red and no record is written: the next tick must be free to try again, and
@@ -1257,7 +2053,7 @@ def collect(
                 f"(tagged above) - nothing graded, and nothing recorded; the next run retries"
             )
             return 1
-        if not updates:
+        if not scores:
             # Every target WAS examined and none of them yielded a grade. Not a failure: the
             # snapshot is frozen, so an hourly retry would see exactly what this run saw and
             # go red for ever. Record the skip and stay green - a deliberate re-grade is
@@ -1266,6 +2062,8 @@ def collect(
                 f"{slug}: nothing gradable across {len(targets)} target(s) - recording "
                 f"the skip rather than retrying every hour."
             )
+            if not sealed():
+                return 1
             return _record_skip(
                 cohort_org,
                 slug,
@@ -1286,49 +2084,47 @@ def collect(
             )
             return 1
 
-        path = f"{grades.GRADES_DIR}/{slug}.csv"
-        existing = get_file_content(cohort_org, CONFIG_REPO, path) or ""
-        new_csv = grades.merge_auto(existing, updates)
-        if not put_file(
-            cohort_org,
-            CONFIG_REPO,
-            path,
-            new_csv.encode(),
-            f"autograde: record auto scores for {slug}",
-        ):
-            log_err(f"could not write {path}")
-            return 1
-        # The scores are durably recorded. Only now do the per-target archives go out - and
-        # only if EVERY target was reachable. The `_graded.json` sentinel written after them is
-        # the fire-once marker, so holding it back on any unreachable repo keeps the assignment
-        # eligible for a retry: the next tick regrades (write-once merge_auto leaves the
-        # scores already recorded untouched) and picks up the repo(s) that couldn't be read.
+        # Only if EVERY target was reachable does anything permanent get written. The
+        # `_graded.json` sentinel below is the fire-once marker, so holding it back on any
+        # unreachable repo keeps the assignment eligible for a retry: the next tick regrades
+        # and picks up the repo(s) that could not be read.
         if unreachable:
             log_err(
-                f"{slug}: recorded {len(updates)} score(s), but {len(unreachable)} "
+                f"{slug}: graded {len(scores)} target(s), but {len(unreachable)} "
                 f"submission repo(s) could not be read (tagged above) - NOT marking {slug} "
                 f"machine-graded; the next run retries the missing one(s)"
             )
             return 1
         # A failed archive write must red the run and WITHHOLD the sentinel: the marker is now
         # a single explicit file, not the first archive's side effect, so partial detail can
-        # never be mistaken for a completed grade. The next tick regrades (merge_auto leaves the
-        # recorded scores untouched) and rewrites the missing archive(s) + the sentinel.
+        # never be mistaken for a completed grade. The next tick regrades - the sheet's
+        # `info.autograde` is derived, never typed - and rewrites the missing archive(s)
+        # and the sentinel.
         archive_ok = True
         for apath, acontent, amsg in archives:
-            if not put_file(cohort_org, CONFIG_REPO, apath, acontent, amsg):
-                log_err(f"could not write {apath}")
+            # `person=True`: the PATH is `autograde/<slug>/<handle>.json`, and this log is
+            # world-readable even when classroom-config is not.
+            if not put_file(
+                cohort_org, CONFIG_REPO, apath, acontent, amsg, person=True
+            ):
+                log_person(f"    ! could not write {apath}")
                 archive_ok = False
-        if not (archive_ok and mark_graded(cohort_org, slug)):
+        # The grading sheet is the record, and freezing it is the LAST write before the
+        # fire-once sentinel. Order matters both ways round: a sentinel written over an
+        # unfrozen sheet would leave the cutoff's facts unrecorded for ever (nothing
+        # re-derives them), and a frozen sheet with no sentinel is simply re-frozen next
+        # tick to identical bytes, which writes nothing.
+        if not (archive_ok and sealed(scores) and mark_graded(cohort_org, slug)):
             log_err(
-                f"{slug}: recorded {len(updates)} score(s) but a result archive or the "
-                f"fire-once sentinel failed to write - NOT marking machine-graded; retrying"
+                f"{slug}: graded {len(scores)} target(s) but a result archive, the grading "
+                f"sheet or the fire-once sentinel failed to write - NOT marking "
+                f"machine-graded; retrying"
             )
             return 1
     log_ok(
-        f"recorded {len(updates)} auto score(s) -> {path}; "
+        f"graded {len(scores)} target(s) into {grades.sheet_path(slug)}; "
         f"{len(failed_to_run)} failed to run, {len(unreachable)} unreachable "
-        f"(per-target detail in {autograde_path(slug)}/) - faculty add manual marks, then render"
+        f"(per-target detail in {autograde_path(slug)}/) - faculty mark in the sheet"
     )
     return 0
 
@@ -1353,8 +2149,21 @@ def main() -> int:
     parser.add_argument(
         "--group", action="store_true", help="Group assignment (one repo per team)"
     )
+    parser.add_argument(
+        "--refresh-only",
+        action="store_true",
+        help="Refresh the grading sheet now and stop - no snapshot, no grading, no freeze",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if args.refresh_only:
+        return refresh_assignment_sheet(
+            args.master_org,
+            args.template,
+            args.cohort_org,
+            group=args.group,
+            dry_run=args.dry_run,
+        )
     return collect(
         args.master_org,
         args.template,

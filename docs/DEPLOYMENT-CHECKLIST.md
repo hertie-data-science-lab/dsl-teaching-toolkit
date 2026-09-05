@@ -28,7 +28,7 @@ Accompanies the e2e [worked example](../example-course/).
 | *(optional)* | 5. Teaching team | cohort | edit [`classroom-config/people.yml`](#peopleyml) ([05](05-manage-teaching-team.md)) | handles (+ card fields), optional `start`/`end` | push access for this cohort's instructors/TAs + site cards; time-boxed if dated |
 | `[required]` | 6. Enrol | *nothing to run* - the roster push does it | - | - | codes written to the roster + emailed within a minute; students join via the `welcome` **Join course** issue |
 | *(optional)* | 7. Ad-hoc release | course workflow, per cohort | **Release materials** / **Release assignment** | see [08](08-release-materials-to-cohort.md)/[09](09-release-assignment-to-cohort.md) | anything out earlier/differently than the schedule says |
-| *(optional)* | 8. Return marks | course workflows + [`grades/<slug>.csv`](#gradesslugcsv) | the [grading runbook](10-grade-and-return-assignments.md) | your marks | private per-student gradebooks |
+| *(optional)* | 8. Return marks | course workflows + [`grading_sheets/<slug>.yml`](#grading_sheetsslugyml) | the [grading runbook](10-grade-and-return-assignments.md) | your marks | private per-student gradebooks |
 | *(optional)* | 9. Check cohort setup | course workflow, per cohort | course `.github` → **Check cohort setup** | `cohort_org` | what's configured, what's missing, an edit link per gap |
 
 ## Inputs by file
@@ -158,19 +158,26 @@ assignment-4-project,team-x,anna-adams
 assignment-4-project,team-x,ben-baker
 ```
 
-### `grades/<slug>.csv`
+### `grading_sheets/<slug>.yml`
 
-Live example: [`example-course/cohort-org/grades/assignment-1.csv`](../example-course/cohort-org/grades/assignment-1.csv).
+Live example: [`example-course/cohort-org/grading_sheets/assignment-1.yml`](../example-course/cohort-org/grading_sheets/assignment-1.yml).
 
-`classroom-config/grades/<slug>.csv` - one per assignment. The autograder creates it and
-fills the machine columns (write-once); for hand-marked work copy the header from the seeded
-`grades/assignment-1.csv.sample`. `final_grade` +
-`individual_comments` are what the student sees; full column-by-column reference:
-[the grading runbook](10-grade-and-return-assignments.md#2-add-your-marks-on-top-of--instead-of-autograde).
+`classroom-config/grading_sheets/<slug>.yml` - one per assignment, created at handout with
+every row in it. Everything under `info:` is the toolkit's and refreshes until the cutoff;
+everything else is yours and is never touched. Field-by-field reference:
+[the grading runbook](10-grade-and-return-assignments.md).
 
-```csv
-github_handle,team,autograde_score,manual_score,team_score,individual_adjustment,final_grade,individual_comments,team_comments
-anna-adams,,38/40,9/10,,,A-,Great work,
+```yaml
+submissions:
+  anna-adams:
+    info:                    # toolkit-owned
+      submitted: 2026-10-03T22:14+02:00
+      days_late: 0
+    score_individual: 38
+    adjustment_individual:
+    feedback_individual: |
+      Great work.
+    notes_not_shared_with_students:
 ```
 
 ### Materials repo
@@ -195,13 +202,13 @@ Live example: [`example-course/course-org/assignment-1-f2026`](../example-course
 
 `assignment-N-<tag>` - a template repo with two branches. Student repos are generated from
 `main` only. The **New assignment** workflow's `format` (py/notebook) picks the starter
-stub; `type` (individual/group) is recorded in `grading.yml`, and handout and grading obey
+stub; `type` (individual/group) is recorded in `grading_config.yml`, and handout and grading obey
 `type: group` automatically. The autograder takes either format - it converts any `.ipynb`
 the submission holds before running the hidden tests.
 
 ```
 main branch      README.md (the brief) + starter.*      -> what students get
-solution branch  solution/ + grading.yml + tests/       -> faculty-only; hidden tests
+solution branch  solution/ + grading_config.yml + tests/       -> faculty-only; hidden tests
                                                             power the (optional) autograder
 ```
 
@@ -228,7 +235,7 @@ repos, never orgs. Every release is idempotent - re-runs are no-ops.
 | Action | Does | Fields |
 |--------|------|--------|
 | `deploy` | copy a source path → a cohort repo | `course_source_repo`, `course_source_path`, `cohort_dest_repo` (default `materials`), `cohort_dest_path` (default: mirror). A list, or a single mapping for one copy |
-| `assignment` | one private repo per onboarded student - or per team, when the template's `grading.yml` says `type: group` | the template repo name |
+| `assignment` | one private repo per onboarded student - or per team, when the template's `grading_config.yml` says `type: group` | the template repo name |
 
 (Grading takes no action here - each assignment is autograded automatically, once, at its
 `grading_datetime` under `assignments:`.)
@@ -311,8 +318,8 @@ assignments:
 | `due_datetime` | **yes** | - (entry dropped without it) | what students see; bare date = 23:59:59 |
 | `title` | no | the template README's `# ` heading | the assignment's name, beside the slug on the site. Declared here it shows from day one; the README fallback only appears at hand-out |
 | `handout_datetime` | no* | - | when repos are provisioned, automatic. *Required for the schedule to release it. If you hand out via the **Release assignment** workflow instead, the workflow records the release moment here for you |
-| `grading_datetime` | no | `due_datetime` | snapshot freezes + autograder fires (once) |
-| `type` | no | individual | `group` / `individual` - how handout + grading fan out. Can also be set in the template's `grading.yml` |
+| `grading_datetime` | no | `due_datetime` + `late_window_days` | snapshot freezes + autograder fires (once) |
+| `type` | no | individual | `group` / `individual` - how handout + grading fan out. Can also be set in the template's `grading_config.yml` |
 | `max_team_size` | no | 5 | group assignments: Join-team cap |
 | `course_source_repo` | **yes** | - (entry dropped without it) | the course-org repo this hands out from. A name that does not exist is reported loudly |
 | `cohort_dest_repo` | no | the slug | the cohort-side name: student/team repos (`<name>-<handle>`), the frozen cohort template, the teams.csv key, snapshots and grades |
@@ -324,7 +331,7 @@ assignments:                          # each assignment's WHOLE lifecycle, keyed
   assignment-1:                       # students SEE this slug: it names their repo (`assignment-1-<handle>`)
     title: Linear regression          # optional: the name shown beside the slug
     handout_datetime: 2026-09-22T09:00  # optional: provision one repo per student (or per
-                                        # team - the template's grading.yml decides), automatic
+                                        # team - the template's grading_config.yml decides), automatic
     due_datetime: 2026-10-13            # what students see
     grading_datetime: 2026-10-15        # optional: the grading pin - snapshot freezes and the
                                         # autograder fires (once). Default = due_datetime.
