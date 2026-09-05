@@ -171,6 +171,7 @@ covers one nightly refresh:
 - [ ] one **Scheduled release** tick green (a dry run is enough if nothing is due)
 - [ ] a **Join** issue with a deliberately wrong code is rejected as usual
 - [ ] **Check cohort setup**'s mail-transport row reads `all 4 GRAPH_* secrets set` (the codes send has no preview mode - this row is how the credential is checked without mailing a cohort)
+- [ ] `DSL_E2E=1 pytest tests/e2e -q` green (the end-to-end harness - the gate between staging and release; see [maintainers.md](../docs/reference/maintainers.md#end-to-end-harness) for the env it needs)
 - [ ] no failure issue opened in `hertie-dsl-demo-course-e1234/.github`
 
 ### Rollback
