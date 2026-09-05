@@ -110,6 +110,7 @@ def test_gradebook_provisioning_names_nobody_on_the_happy_path(monkeypatch, caps
 @pytest.mark.parametrize(
     "break_it",
     [
+        "branch-404",  # the gradebook repo is not there at all
         "tree",  # the repo could not be read before writing
         "build",  # POST /git/trees
         "commit",  # POST /git/commits
@@ -123,7 +124,14 @@ def test_no_failure_branch_of_a_gradebook_write_names_the_student(
     # repo name lives: `could not commit to COHORT/grades-ada-l` on a bad day publishes the
     # roster one student at a time, from a run in a PUBLIC .github repo.
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    if break_it == "tree":
+    if break_it == "branch-404":
+        # The one that happened: `grades-<handle>` was never provisioned, GET /repos 404s,
+        # and `default_branch` raises NAMING the repo. Stubbed at the process boundary so
+        # the real repos.default_branch runs and writes its own message.
+        monkeypatch.setattr(
+            repos, "gh", lambda *a, **k: (1, '{"message":"Not Found"} (HTTP 404)')
+        )
+    elif break_it == "tree":
         monkeypatch.setattr(
             gh_contents,
             "default_branch",
@@ -183,6 +191,36 @@ def test_a_failed_label_or_collaborator_grant_names_nobody_publicly(
     captured = capsys.readouterr()
     assert "ada-l" not in captured.out + captured.err
     assert captured.err.count("COHORT") == 2  # the fault, and where to look
+
+
+def test_no_topic_stamp_or_offboarding_failure_names_a_student_repo(
+    monkeypatch, capsys
+):
+    # The other five repos.py failure lines that carry `{org}/{repo}` on a path a student
+    # repo reaches: the topic stamp both sweeps make, and the four calls that take a
+    # vanished handle's access away.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "boom"))
+    assert not repos.set_repo_topics(
+        "COHORT", "grades-ada-l", ["gradebook"], person=True
+    )
+    assert (
+        repos.is_collaborator("COHORT", "assignment-1-ada-l", "ada-l", person=True)
+        is None
+    )
+    assert not repos.remove_collaborator(
+        "COHORT", "assignment-1-ada-l", "ada-l", person=True
+    )
+    assert (
+        repos.pending_invitations("COHORT", "assignment-1-ada-l", "ada-l", person=True)
+        is None
+    )
+    assert not repos.cancel_invitation(
+        "COHORT", "assignment-1-ada-l", "777", person=True
+    )
+    captured = capsys.readouterr()
+    assert "ada-l" not in captured.out + captured.err
+    assert captured.err.count("COHORT") == 5  # each fault, and where to look
 
 
 def test_the_verbose_log_still_says_which_repo_it_was(monkeypatch, capsys):
@@ -559,8 +597,14 @@ def _distribute(
         ),
     )
 
-    def fake_put_files(org, repo, files, message, *, delete=(), create_only=False):
+    def fake_put_files(
+        org, repo, files, message, *, delete=(), create_only=False, person=False
+    ):
         target = "config" if repo == grades.CONFIG_REPO else "gradebooks"
+        if target == "gradebooks":
+            # The repo is named after the student, so the write has to be marked as one:
+            # without it, a gradebook GitHub could not read published its own name.
+            assert person, "a gradebook write must be a person write"
         effects[target].append(
             (repo, {k: v.decode() for k, v in files.items()}, tuple(delete))
         )
@@ -1043,6 +1087,26 @@ def test_the_migration_off_notified_csv_happens_in_one_commit(tmp_path, monkeypa
     assert "ada-l,,email,anoldsha," in files[grades.DISTRIBUTED_PATH]
 
 
+def test_the_dead_per_student_yaml_goes_whether_or_not_this_is_the_migration(
+    tmp_path, monkeypatch
+):
+    # A cohort that reached `distributed.csv` without ever having had a `notified.csv` was
+    # never on the migration path, so its `gradebook/*.yml` was left in place for the rest
+    # of the term - a stale copy of a grade beside the repo that holds the real one.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        stale_gradebooks=("ada-l.yml", "bo-b.yml"),
+    )
+    ((_cfg, files, delete),) = out["config"]
+    assert set(delete) == {
+        f"{grades.GRADEBOOK_DIR}/ada-l.yml",
+        f"{grades.GRADEBOOK_DIR}/bo-b.yml",
+    }
+    # `distributed.csv` lives in the same folder and is the one file still read there.
+    assert grades.DISTRIBUTED_PATH in files
+
+
 def test_a_cohort_still_on_the_grade_csvs_gets_gradebooks_but_no_comments(
     tmp_path, monkeypatch
 ):
@@ -1065,6 +1129,94 @@ def test_a_missing_submission_repo_is_a_counted_skip(tmp_path, monkeypatch, caps
     assert out["comments"] == []
     assert out["rc"] == 0  # a student who never onboarded is not a failure
     assert '"skipped": 1' in capsys.readouterr().out
+
+
+# A handle no roster row claims. Both sources are hand-typed, and a transition cohort's
+# `grades/*.csv` carried six of these on the demo org: `ensure_gradebooks` had provisioned
+# nothing for them, so every one was a 404 naming `grades-<handle>` in a PUBLIC log.
+_UNKNOWN_IN_THE_SHEET = (
+    _SHEET
+    + """\
+  zed-z:
+    info:
+      submitted: '2026-10-03T22:14+02:00'
+      days_late: 0
+    score_individual: 30
+"""
+)
+_UNKNOWN_IN_THE_CSV = _LEGACY_CSV.replace("ada-l,", "mallory-m,")
+
+
+def test_marks_for_handles_not_on_the_roster_are_dropped_not_pushed(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _UNKNOWN_IN_THE_SHEET},
+        legacy={"assignment-2": _UNKNOWN_IN_THE_CSV},
+    )
+    assert out["rc"] == 0
+    # One gradebook, for the one student the roster has - not three.
+    assert [repo for repo, _f, _d in out["gradebooks"]] == ["grades-ada-l"]
+    assert [repo for repo, _b, _m in out["comments"]] == ["assignment-1-ada-l"]
+    printed = capsys.readouterr()
+    assert '"unknown": 2' in printed.out
+    for stranger in ("zed-z", "mallory-m"):
+        assert stranger not in printed.out + printed.err
+
+
+def test_the_dry_run_says_how_many_marks_no_roster_row_claims(
+    tmp_path, monkeypatch, capsys
+):
+    _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _UNKNOWN_IN_THE_SHEET},
+        legacy={"assignment-2": _UNKNOWN_IN_THE_CSV},
+        dry_run=True,
+    )
+    assert (
+        "2 mark(s) for handles not on the roster - ignored" in capsys.readouterr().out
+    )
+
+
+def test_the_verbose_log_still_says_which_handles_were_dropped(
+    tmp_path, monkeypatch, capsys
+):
+    # Moved, not thrown away: a grader who typed a handle wrong has to be able to find it.
+    monkeypatch.setenv("DSL_VERBOSE", "1")
+    _distribute(monkeypatch, tmp_path, sheets={"assignment-1": _UNKNOWN_IN_THE_SHEET})
+    assert "zed-z is not an onboarded student" in capsys.readouterr().out
+
+
+def test_an_unreadable_roster_drops_nobody(tmp_path, monkeypatch, capsys):
+    # None means the file could not be READ. Reading it as "nobody is enrolled" would
+    # withhold the whole cohort's grades on a transient failure.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        sheets={"assignment-1": _UNKNOWN_IN_THE_SHEET},
+        roster_rows=None,
+    )
+    assert sorted(repo for repo, _f, _d in out["gradebooks"]) == [
+        "grades-ada-l",
+        "grades-zed-z",
+    ]
+    assert '"unknown": 0' in capsys.readouterr().out
+
+
+def test_an_auditor_with_a_mark_typed_in_gets_no_gradebook(tmp_path, monkeypatch):
+    # Auditors are never assessed and `ensure_gradebooks` makes them no repo, so a mark
+    # typed against one has nowhere to go.
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        roster_rows=ROSTER_ADA + "zed@uni.edu,Zed,auditor,zed-z,43,dsl-zzz\n",
+        sheets={"assignment-1": _UNKNOWN_IN_THE_SHEET},
+    )
+    assert [repo for repo, _f, _d in out["gradebooks"]] == ["grades-ada-l"]
 
 
 def test_the_public_log_carries_counts_and_no_student(tmp_path, monkeypatch, capsys):
@@ -1110,11 +1262,29 @@ def test_distribute_reds_when_the_record_could_not_be_written(tmp_path, monkeypa
     assert out["rc"] == 1
 
 
-def test_a_gradebook_with_no_roster_row_is_counted_not_fatal(
+def test_a_mark_no_roster_row_claims_is_counted_not_fatal(
     tmp_path, monkeypatch, capsys
 ):
+    # The sheet marks ada-l and the roster has never heard of them: counted and dropped,
+    # rather than pushed at a `grades-ada-l` that was never provisioned.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
     out = _distribute(
         monkeypatch, tmp_path, roster_rows="\nbo@uni.edu,Bo,enrolled,bo-b,7,dsl-x\n"
+    )
+    assert out["rc"] == 0
+    assert out["gradebooks"] == [] and out["outbox"] == []
+    printed = capsys.readouterr()
+    assert '"unknown": 1' in printed.out
+    assert "ada-l" not in printed.out + printed.err
+
+
+def test_a_roster_row_with_no_email_is_counted_not_fatal(tmp_path, monkeypatch, capsys):
+    # On the roster, so the grade is distributed - but there is no address to tell them at,
+    # which is an ordinary state (a withdrawn student) and must not red every run from here
+    # on.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    out = _distribute(
+        monkeypatch, tmp_path, roster_rows="\n,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
     assert out["rc"] == 0
     err = capsys.readouterr().err

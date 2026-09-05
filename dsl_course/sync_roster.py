@@ -118,7 +118,7 @@ def revoke_offboarded_access(
     errors = 0
     revoked = 0
     for repo, suffix in stale:
-        present = is_collaborator(cohort_org, repo, suffix)
+        present = is_collaborator(cohort_org, repo, suffix, person=True)
         if present is None:  # unreadable - never guess, in either direction
             errors += 1
             continue
@@ -126,7 +126,7 @@ def revoke_offboarded_access(
             if dry_run:
                 log_person(f"    DRY-RUN revoke {suffix} <- {cohort_org}/{repo}")
                 revoked += 1
-            elif remove_collaborator(cohort_org, repo, suffix):
+            elif remove_collaborator(cohort_org, repo, suffix, person=True):
                 log_person(f"  [ok] revoked {suffix} from {cohort_org}/{repo}")
                 revoked += 1
             else:
@@ -134,7 +134,7 @@ def revoke_offboarded_access(
         # A grant made before the org invite was accepted is a pending INVITATION, which
         # `is_collaborator` cannot see and `remove_collaborator` does not touch. Left live,
         # accepting it later hands `maintain` back to an off-boarded student.
-        invitations = pending_invitations(cohort_org, repo, suffix)
+        invitations = pending_invitations(cohort_org, repo, suffix, person=True)
         if invitations is None:
             errors += 1
             continue
@@ -142,7 +142,7 @@ def revoke_offboarded_access(
             if dry_run:
                 log_person(f"    DRY-RUN cancel invite {suffix} <- {cohort_org}/{repo}")
                 revoked += 1
-            elif cancel_invitation(cohort_org, repo, invitation_id):
+            elif cancel_invitation(cohort_org, repo, invitation_id, person=True):
                 log_person(f"  [ok] cancelled {suffix}'s invite to {cohort_org}/{repo}")
                 revoked += 1
             else:

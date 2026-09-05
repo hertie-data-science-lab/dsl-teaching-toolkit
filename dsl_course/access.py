@@ -16,19 +16,30 @@ from .course import (
 from .discovery import classify_repos
 from .gh_teams import create_team
 from .ghcli import gh, is_missing_resource
-from .log import log, log_err, log_ok
+from .log import log, log_err, log_err_person, log_ok, log_person
 from .repos import Converged, set_repo_topics, topic_name
 
 
 def grant_team_repo_access(
-    org: str, team: str, repo: str, permission: str, *, missing_is_note: bool = False
+    org: str,
+    team: str,
+    repo: str,
+    permission: str,
+    *,
+    missing_is_note: bool = False,
+    person: bool = False,
 ) -> bool:
     """Grant a team a permission level on one repo (idempotent).
 
     `missing_is_note`: a team that does not exist yet is logged as a note, not an error -
     an org can be released into before its teams exist, and the next release or sync
     fixes it. Any OTHER failure (a 5xx, a rate limit) stays an error either way; it used
-    to read as "team not found" on the read-teams path, which hid real outages."""
+    to read as "team not found" on the read-teams path, which hid real outages.
+
+    `person=True` says the repo is somebody's - a gradebook, a submission repo. The team
+    and the permission are the actionable half and stay public; the repo goes through
+    `log_person`. The nightly sweep sets it on EVERY repo it walks, because it walks the
+    whole org and the caller's `protected` set is optional."""
     code, out = gh(
         "api",
         "-X",
@@ -42,7 +53,13 @@ def grant_team_repo_access(
     if missing_is_note and is_missing_resource(out):
         log(f"  ({team} team not found - create it first)")
         return False
-    log_err(f"  ! could not grant {team} {permission} on {org}/{repo}: {out[:120]}")
+    detail = f"  ! could not grant {team} {permission} on {org}/{repo}: {out[:120]}"
+    if person:
+        log_err_person(
+            f"  ! could not grant {team} {permission} on a repo in {org}", detail
+        )
+    else:
+        log_err(detail)
     return False
 
 
@@ -90,7 +107,12 @@ def faculty_floor(
 
 
 def grant_faculty(
-    org: str, repo: str, access: dict[str, str], *, missing_is_note: bool = False
+    org: str,
+    repo: str,
+    access: dict[str, str],
+    *,
+    missing_is_note: bool = False,
+    person: bool = False,
 ) -> None:
     """Give the faculty teams `access` - COURSE_TEAM_ACCESS where they author,
     FACULTY_READ_ACCESS where the source of truth is elsewhere - on one repo, at the point
@@ -100,7 +122,9 @@ def grant_faculty(
     repo): a cohort whose faculty teams are not there yet must not print two errors per
     student, and `converge_faculty_access` repairs the grant on the next sweep."""
     for team, perm in access.items():
-        grant_team_repo_access(org, team, repo, perm, missing_is_note=missing_is_note)
+        grant_team_repo_access(
+            org, team, repo, perm, missing_is_note=missing_is_note, person=person
+        )
 
 
 def grant_tagged_team_access(course_org: str, repo: str, tag: str) -> None:
@@ -197,6 +221,11 @@ def converge_faculty_access(
     next night finishes)."""
     changed = 0
     failures = 0
+    # Per (team, floor) and per team: this sweep walks EVERY repo in the org, gradebooks
+    # and submission repos included, and its log is public - so what it did is reported as
+    # a count and WHICH repo goes through `log_person`.
+    granted: dict[tuple[str, str], int] = {}
+    unrankable: dict[str, int] = {}
     live = [r["name"] for r in repos if not r.get("archived")]
     for team in COURSE_TEAM_ACCESS:
         try:
@@ -213,15 +242,26 @@ def converge_faculty_access(
             # level this sweep cannot rank", which is left exactly as it is.
             current = have.get(name, "")
             if current is None:
-                log(f"  ({team} holds {name} at a level this sweep cannot rank - left)")
+                unrankable[team] = unrankable.get(team, 0) + 1
+                log_person(
+                    f"  ({team} holds {org}/{name} at a level this sweep cannot rank "
+                    f"- left)"
+                )
                 continue
             if current and _PERM_RANK[current] >= _PERM_RANK[floor]:
                 continue
-            if grant_team_repo_access(org, team, name, floor):
-                log_ok(f"{team} -> {floor} on {name}")
+            if grant_team_repo_access(org, team, name, floor, person=True):
+                log_person(f"  [ok] {team} -> {floor} on {org}/{name}")
+                granted[(team, floor)] = granted.get((team, floor), 0) + 1
                 changed += 1
             else:
                 failures += 1
+    for (team, floor), count in sorted(granted.items()):
+        log_ok(f"{team} -> {floor} on {count} repo(s)")
+    for team, count in sorted(unrankable.items()):
+        log(
+            f"  ({team} holds {count} repo(s) at a level this sweep cannot rank - left)"
+        )
     return Converged(changed, failures)
 
 
@@ -267,8 +307,10 @@ def converge_topics(org: str, repos: list[dict], tier: str | None) -> Converged:
         have = set(repo.get("topics") or [])
         if wanted <= have:
             continue
-        if set_repo_topics(org, name, sorted(have | wanted)):
-            log_ok(f"topics converged on {name}")
+        # Every repo this sweep tags is somebody's - a submission repo or a gradebook
+        # (everything else `continue`s above) - and this log is public.
+        if set_repo_topics(org, name, sorted(have | wanted), person=True):
+            log_person(f"  [ok] topics converged on {org}/{name}")
             changed += 1
         else:
             failures += 1

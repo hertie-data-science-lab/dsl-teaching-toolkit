@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 from dsl_course import access, bootstrap_course, course, gh_contents, ghcli, scaffold
+from tests.conftest import repo_row
 
 
 def test_course_team_access_policy():
@@ -212,7 +213,7 @@ def _sweep(
     monkeypatch.setattr(
         access,
         "grant_team_repo_access",
-        lambda org, team, repo, perm: granted.append((team, repo, perm)) or True,
+        lambda org, team, repo, perm, **k: granted.append((team, repo, perm)) or True,
     )
     swept = access.converge_faculty_access("Org", repos, tier, protected=protected)
     return swept.changed, granted
@@ -441,6 +442,67 @@ def test_a_missing_team_is_a_note_but_any_other_failure_is_an_error(
     assert "could not grant" in capsys.readouterr().err
 
 
+def _public_sweep(monkeypatch, listing_rows, put_ok):
+    """The sweep with only the process boundary stubbed, so its own log lines run."""
+    listing = _listing(*listing_rows) if listing_rows else _listing()
+
+    def fake_gh(*args, **kwargs):
+        if "-X" in args:  # the grant PUT
+            return (0, "") if put_ok else (1, "boom")
+        return 0, listing
+
+    monkeypatch.setattr(access, "gh", fake_gh)
+    repos = [repo_row("grades-ada-l"), repo_row("assignment-1-ada-l")]
+    return access.converge_faculty_access(
+        "COHORT", repos, "cohort", protected=frozenset(r["name"] for r in repos)
+    )
+
+
+def test_the_faculty_sweep_names_no_student_repo_in_a_public_log(monkeypatch, capsys):
+    # The sweep walks EVERY repo in the cohort org, so its per-repo narration named a
+    # gradebook and a submission repo on the happy path, once a night, in a PUBLIC log.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    swept = _public_sweep(monkeypatch, (), put_ok=True)
+    assert swept.changed == 4  # two teams x two repos
+    captured = capsys.readouterr()
+    assert "ada-l" not in captured.out + captured.err
+    # What it did still reaches faculty: the team, the permission and a count.
+    assert "instructors -> pull on 2 repo(s)" in captured.out
+    assert "course-admin -> admin on 2 repo(s)" in captured.out
+
+
+def test_a_failed_faculty_grant_names_no_student_repo(monkeypatch, capsys):
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    swept = _public_sweep(monkeypatch, (), put_ok=False)
+    assert swept.failures == 4
+    captured = capsys.readouterr()
+    assert "ada-l" not in captured.out + captured.err
+    assert "could not grant instructors pull on a repo in COHORT" in captured.err
+
+
+def test_an_unrankable_grant_is_counted_not_named(monkeypatch, capsys):
+    # A repo held at a level this sweep cannot rank is left alone - and saying WHICH one
+    # named it just as loudly as granting it would have.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    swept = _public_sweep(
+        monkeypatch,
+        (_row("grades-ada-l", "read"), _row("assignment-1-ada-l", "read")),
+        put_ok=True,
+    )
+    assert (swept.changed, swept.failures) == (0, 0)
+    captured = capsys.readouterr()
+    assert "ada-l" not in captured.out + captured.err
+    assert (
+        "instructors holds 2 repo(s) at a level this sweep cannot rank" in captured.out
+    )
+
+
+def test_the_verbose_sweep_still_says_which_repo_it_was(monkeypatch, capsys):
+    monkeypatch.setenv("DSL_VERBOSE", "1")
+    _public_sweep(monkeypatch, (), put_ok=True)
+    assert "COHORT/grades-ada-l" in capsys.readouterr().out
+
+
 # ------------------------------------------------------------ converge_topics
 
 
@@ -461,10 +523,15 @@ def _converge(monkeypatch, repos, ok=True):
     monkeypatch.setattr(
         access,
         "set_repo_topics",
-        lambda org, repo, topics: stamped.append((repo, topics)) or ok,
+        lambda org, repo, topics, person=False: (
+            stamped.append((repo, topics, person)) or ok
+        ),
     )
     swept = access.converge_topics("Cohort-f2026", repos, "cohort")
-    return swept.failures, dict(stamped)
+    # Every repo this sweep tags is a submission repo or a gradebook, so every stamp is a
+    # person write and no failure line may name one.
+    assert all(person for _repo, _topics, person in stamped)
+    return swept.failures, {repo: topics for repo, topics, _person in stamped}
 
 
 def test_only_the_repos_missing_a_topic_are_patched(monkeypatch):

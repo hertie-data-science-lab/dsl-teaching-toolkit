@@ -382,14 +382,32 @@ def has_never_material_component(path: str) -> bool:
     return any(is_never_material(part) for part in path.split("/") if part)
 
 
+def _failed_on(person: bool, public: str, detail: str) -> None:
+    """One failure line, public or split, depending on whether the repo names somebody.
+
+    The twin of `gh_contents._failed`; both exist because the failure branches are exactly
+    where the public-log rule was forgotten, and a name reaches the log the moment one of
+    them is written without thinking about it."""
+    if person:
+        log_err_person(public, detail)
+    else:
+        log_err(detail)
+
+
 def topic_name(text: str) -> str:
     """`text` as GitHub stores a topic: lowercase kebab. Shared by the write and by every
     comparison against a live topic list, which must agree or a repo converges nightly."""
     return text.lower().replace("_", "-")
 
 
-def set_repo_topics(org: str, repo: str, topics: list[str]) -> bool:
-    """Replace the full topic list on a repo (GitHub limit: 20 topics, lowercase kebab)."""
+def set_repo_topics(
+    org: str, repo: str, topics: list[str], *, person: bool = False
+) -> bool:
+    """Replace the full topic list on a repo (GitHub limit: 20 topics, lowercase kebab).
+
+    `person=True` says the repo is somebody's - a gradebook, a submission repo. Every
+    caller that tags one already knew not to name it and said so in its own failure line;
+    the line HERE named it anyway, which is the half that reached the public log."""
     normalised = sorted({topic_name(t) for t in topics if t})
     args = [
         "api",
@@ -404,7 +422,13 @@ def set_repo_topics(org: str, repo: str, topics: list[str]) -> bool:
     code, out = gh(*args)
     if code == 0:
         return True
-    log_err(f"failed to set topics on {org}/{repo}: {out[:200]}")
+    detail = f"failed to set topics on {org}/{repo}: {out[:200]}"
+    if person:
+        log_err_person(
+            f"could not tag a repo in {org} - the nightly sweep converges it", detail
+        )
+    else:
+        log_err(detail)
     return False
 
 
@@ -480,7 +504,9 @@ def add_collaborator(
     return False
 
 
-def is_collaborator(org: str, repo: str, login: str) -> bool | None:
+def is_collaborator(
+    org: str, repo: str, login: str, *, person: bool = False
+) -> bool | None:
     """Whether `login` holds a DIRECT collaborator grant on `org/repo`.
 
     Read from the `affiliation=direct` LISTING, not from
@@ -504,24 +530,34 @@ def is_collaborator(org: str, repo: str, login: str) -> bool | None:
         return login.casefold() in {ln.strip().casefold() for ln in out.splitlines()}
     if is_missing_resource(out):
         return False  # no such repo - nothing to revoke on it
-    log_err(
-        f"could not check whether {login} collaborates on {org}/{repo}: {out[:160]}"
+    _failed_on(
+        person,
+        f"could not read a repo's collaborators in {org}",
+        f"could not check whether {login} collaborates on {org}/{repo}: {out[:160]}",
     )
     return None
 
 
-def remove_collaborator(org: str, repo: str, login: str) -> bool:
+def remove_collaborator(
+    org: str, repo: str, login: str, *, person: bool = False
+) -> bool:
     """Revoke a direct collaborator grant. Idempotent - GitHub 204s either way."""
     code, out = gh(
         "api", "--method", "DELETE", f"repos/{org}/{repo}/collaborators/{login}"
     )
     if code == 0:
         return True
-    log_err(f"could not remove {login} from {org}/{repo}: {out[:160]}")
+    _failed_on(
+        person,
+        f"could not revoke a collaborator in {org}",
+        f"could not remove {login} from {org}/{repo}: {out[:160]}",
+    )
     return False
 
 
-def pending_invitations(org: str, repo: str, login: str) -> list[str] | None:
+def pending_invitations(
+    org: str, repo: str, login: str, *, person: bool = False
+) -> list[str] | None:
     """The ids of `login`'s un-accepted invitations to `org/repo`, `[]` if there are none,
     None if the listing could not be read.
 
@@ -541,7 +577,11 @@ def pending_invitations(org: str, repo: str, login: str) -> list[str] | None:
     if code != 0:
         if is_missing_resource(out):
             return []  # no such repo - nothing to cancel on it
-        log_err(f"could not list invitations on {org}/{repo}: {out[:160]}")
+        _failed_on(
+            person,
+            f"could not read a repo's invitations in {org}",
+            f"could not list invitations on {org}/{repo}: {out[:160]}",
+        )
         return None
     fold = login.casefold()
     ids = []
@@ -552,14 +592,20 @@ def pending_invitations(org: str, repo: str, login: str) -> list[str] | None:
     return ids
 
 
-def cancel_invitation(org: str, repo: str, invitation_id: str) -> bool:
+def cancel_invitation(
+    org: str, repo: str, invitation_id: str, *, person: bool = False
+) -> bool:
     """Cancel one repo invitation by id."""
     code, out = gh(
         "api", "--method", "DELETE", f"repos/{org}/{repo}/invitations/{invitation_id}"
     )
     if code == 0:
         return True
-    log_err(f"could not cancel invitation {invitation_id} on {org}/{repo}: {out[:160]}")
+    _failed_on(
+        person,
+        f"could not cancel an invitation in {org}",
+        f"could not cancel invitation {invitation_id} on {org}/{repo}: {out[:160]}",
+    )
     return False
 
 

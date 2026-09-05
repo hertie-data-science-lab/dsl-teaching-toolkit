@@ -55,7 +55,15 @@ from .discovery import ASSIGNMENT_TEMPLATE_TOPIC, list_org_repos
 from .fs import copy_tree
 from .gh_contents import file_exists, get_file_content, put_file, put_files, repo_tree
 from .ghcli import GIT_ENV, clone, gh, git
-from .log import log, log_err, log_ok, log_person, log_skip, log_step
+from .log import (
+    log,
+    log_err,
+    log_err_person,
+    log_ok,
+    log_person,
+    log_skip,
+    log_step,
+)
 from .releaseignore import RELEASEIGNORE, deny_for, excluded_in_tree
 from .repos import (
     add_collaborator,
@@ -388,11 +396,7 @@ def provision_one(
         return "failed-create"
     else:
         log_person(f"  [ok] created {cohort_org}/{repo}")
-        if not set_repo_topics(cohort_org, repo, [slug, "submission"]):
-            # Not named: this log is public. The nightly sweep converges the topic.
-            log_err(
-                "  ! a submission repo is untagged - the nightly sweep converges it"
-            )
+        set_repo_topics(cohort_org, repo, [slug, "submission"], person=True)
         # The Feedback issue, on the CREATE path only. It is where every receipt and,
         # eventually, the grade is posted, so the student is told at handout where to
         # look. Never re-probed for a repo that already exists: that would be one listing
@@ -444,18 +448,33 @@ def provision_one(
     # HEAD and the autograder has run off that snapshot - so a commit here would reach no
     # gradebook and form no part of the record. Faculty need to SEE the work, not edit it.
     if not existed:
-        grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
+        grant_faculty(
+            cohort_org,
+            repo,
+            FACULTY_READ_ACCESS,
+            missing_is_note=True,
+            person=True,
+        )
     if team is not None:
         # Group: materialise the team from its members and grant it on the repo, so
         # post-sync membership edits propagate to access (vs. one-off collaborator grants).
         # A team that couldn't take all its members grants access to nobody missing, so
         # its result counts towards this repo's status rather than being discarded.
         team_ok = sync_teams.ensure_team(cohort_org, team, set(handles), prune=False)
-        access_ok = grant_team_repo_access(cohort_org, team, repo, "maintain")
+        access_ok = grant_team_repo_access(
+            cohort_org, team, repo, "maintain", person=True
+        )
         if access_ok:
             log_person(f"  [ok]   + team {team} (maintain)")
         if not team_ok:
-            log_err(f"  ! team {team} is missing member(s) - they cannot see {repo}")
+            # One per group repo, and `provision_all` tallies the `failed-team-members`
+            # status below into the count faculty read. The team NAME is a roster of who
+            # is grouped with whom, and the repo is named after it.
+            log_err_person(
+                "  ! a team is missing member(s) - they cannot see their repo",
+                f"  ! team {team} is missing member(s) - they cannot see "
+                f"{cohort_org}/{repo}",
+            )
         # A failed solution push WINS over every other fault here. provision_all writes the
         # FIRE-ONCE solution marker off these statuses, so a repo that reported any other
         # failure had its missing solution forgotten - and the marker guaranteed no later
