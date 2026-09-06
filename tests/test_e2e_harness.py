@@ -475,6 +475,32 @@ def test_the_block_the_harness_really_inserts_is_valid_yaml(monkeypatch):
     assert entry["due_datetime"] != entry["grading_datetime"]
 
 
+def test_the_privacy_scan_keeps_every_line_the_toolkit_printed(monkeypatch):
+    # The gate step names the person who PRESSED the button, which a public log is
+    # entitled to do. Only that step's own ACTOR/REPO lines come out of the scan - a
+    # handle anywhere else, including on another `check-team` line, is still a leak.
+    module = _pipeline_module(monkeypatch)
+    gate = "check-team\tVerify the user\t2026-09-06T11:03:38Z   "
+    log = (
+        f"{gate}ACTOR: ada-l\n"
+        f"{gate}REPO: org/.github\n"
+        f"{gate}ada-l may run\n"
+        "collect-submissions\tCollect\t2026-09-06T11:03:56Z   [ok] 1 of 2\n"
+    )
+    kept = module._toolkit_lines(log)
+    assert "ACTOR: ada-l" not in kept
+    assert "REPO: org/.github" not in kept
+    assert "ada-l may run" in kept
+    assert "[ok] 1 of 2" in kept
+
+
+def test_the_status_line_is_what_a_rewritten_sheet_is_quoted_by(monkeypatch):
+    module = _pipeline_module(monkeypatch)
+    sheet = "# GRADING SHEET\n# Status: OPEN - 1 of 2 students\nsubmissions:\n"
+    assert module._status(sheet) == "# Status: OPEN - 1 of 2 students"
+    assert module._status("submissions:\n") == ""
+
+
 def test_every_live_test_module_carries_the_gate():
     """The gate is per-module rather than in the e2e conftest (which says why), so a new
     module that forgot it would drive real orgs from CI. Text, not behaviour, because the

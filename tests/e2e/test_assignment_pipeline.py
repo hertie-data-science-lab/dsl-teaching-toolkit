@@ -686,7 +686,14 @@ def test_the_sheet_is_created_at_handout_with_the_students_row(pipeline):
     block = sheet["submissions"][pipeline.student]
     assert set(block) >= {"info", "score_individual", grades.NOTES_KEY}
     assert block["score_individual"] is None
-    assert block["info"] == {"submitted": None, "days_late": None}
+    # `info:` carries exactly the facts THIS assignment's toolkit will fill, and
+    # `autograde` exists only where hidden tests will run. New assignment scaffolds
+    # `autograde: true` with a stub `tests/` today and may not tomorrow, so the shape is
+    # read off the template's own grading config rather than written down here twice.
+    expected = {"submitted": None, "days_late": None}
+    if grades.load_grading_spec(COURSE_ORG, pipeline.slug)["autograde"]:
+        expected["autograde"] = None
+    assert block["info"] == expected
 
 
 def test_the_handout_sheets_header_says_open_and_nothing_submitted(pipeline):
@@ -699,7 +706,9 @@ def test_the_due_date_fills_info_from_the_students_own_push(pipeline):
     sheet = grades.parse_sheet(pipeline.stages["after_due"].detail["sheet"])
     info = sheet["submissions"][pipeline.student]["info"]
     assert info["submitted"], "the refresh recorded no submission time"
-    assert info["days_late"] == 0
+    # `parse_sheet` hands back what the file says, as text (`grades._SheetLoader`): a mark
+    # a grader typed must come back the way they typed it, so `0` here is "0".
+    assert int(info["days_late"]) == 0
     assert "# Status: OPEN - 1 of " in pipeline.stages["after_due"].detail["sheet"]
 
 
@@ -721,14 +730,18 @@ def test_collect_submissions_over_an_unchanged_cohort_writes_nothing(pipeline):
     # nobody can lean on it, and every press would churn a commit in classroom-config.
     stage = pipeline.stages["collect_button"]
     assert stage.conclusion == "success"
-    assert stage.detail["after"] == stage.detail["before"]
+    assert stage.detail["after"] == stage.detail["before"], (
+        "the press rewrote the sheet: "
+        f"{_status(stage.detail['before'])!r} -> {_status(stage.detail['after'])!r}"
+    )
 
 
 def test_the_cutoff_freezes_the_sheet(pipeline):
     sheet_text = pipeline.stages["artefacts"].detail["sheet"]
     assert "# Status: FROZEN " in sheet_text
     info = grades.parse_sheet(sheet_text)["submissions"][pipeline.student]["info"]
-    assert info["submitted"] and info["days_late"] == 0
+    assert info["submitted"]
+    assert int(info["days_late"]) == 0  # text, like every scalar on the sheet
 
 
 # ----------------------------------------------------------------- distribute the marks
@@ -820,6 +833,31 @@ def test_the_autograde_count_reaches_nobody(pipeline):
         assert "autograde" not in text
 
 
+# What the `check-team` gate step prints before it lets a run start: the handle of the
+# person who PRESSED the button and the repo the workflow lives in. That is the
+# dispatching actor - a faculty member - and naming them in a public log is the point of
+# the line. It is only confusable with a student here because the harness signs in as
+# both. Everything the toolkit itself prints is still scanned.
+GATE_STEP = "check-team\t"
+GATE_FACTS = ("ACTOR:", "REPO:")
+
+
+def _toolkit_lines(log: str) -> str:
+    """`log` without the gate step's own ACTOR/REPO lines."""
+    return "\n".join(
+        line
+        for line in log.splitlines()
+        if not (line.startswith(GATE_STEP) and any(f in line for f in GATE_FACTS))
+    )
+
+
+def _status(sheet_text: str) -> str:
+    """The one header line that says what a write changed."""
+    return next(
+        (line for line in sheet_text.splitlines() if line.startswith("# Status:")), ""
+    )
+
+
 def test_no_public_log_line_names_the_student_anywhere(pipeline):
     # Every one of these runs in the course org's PUBLIC .github repo. A handle, an email
     # or a `<slug>-<handle>` repo name in any of them publishes the roster.
@@ -833,6 +871,7 @@ def test_no_public_log_line_names_the_student_anywhere(pipeline):
         "distribute_again",
     ):
         stage = pipeline.stages[key]
-        assert pipeline.student not in stage.log, f"{stage.name} named the student"
-        assert pipeline.submission_repo not in stage.log, f"{stage.name} named the repo"
-        assert E2E_PRIVATE_NOTE not in stage.log
+        scanned = _toolkit_lines(stage.log)
+        assert pipeline.student not in scanned, f"{stage.name} named the student"
+        assert pipeline.submission_repo not in scanned, f"{stage.name} named the repo"
+        assert E2E_PRIVATE_NOTE not in scanned
