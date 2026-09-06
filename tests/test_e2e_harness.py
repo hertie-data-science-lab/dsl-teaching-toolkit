@@ -8,6 +8,7 @@ it was found. Those are pure functions, and they are tested here, in the ordinar
 
 from __future__ import annotations
 
+import base64
 import importlib
 from datetime import datetime
 from pathlib import Path
@@ -442,6 +443,101 @@ def test_cleanup_refuses_without_the_transport_fence(monkeypatch):
     assert cleanup.main(["--run-id", RUN, "--dry-run"]) == 1
 
 
+# ------------------------------------------------- putting the shared files back exactly
+
+# `csv.writer` writes CRLF, so this is the shape `cohort-gradebook.csv` really has on
+# disk - trailing newline and all. Every byte of it has to survive the round trip.
+CRLF_CSV = b"hertie_email,name\r\nada@x,Ada\r\n"
+
+
+def _reads(monkeypatch, answers: dict[str, tuple[int, str]]):
+    """Stand `cleanup`'s `gh` up on canned answers keyed by the contents path."""
+    seen: list[tuple[str, ...]] = []
+
+    def fake(*args: str, **kw):
+        seen.append(args)
+        for path, answer in answers.items():
+            if any(a.endswith(f"/contents/{path}") for a in args):
+                return answer
+        return 1, "gh: Not Found (HTTP 404)"
+
+    monkeypatch.setattr(cleanup.ghcli, "gh", fake)
+    return seen
+
+
+def test_a_recorded_file_keeps_every_byte_it_had(monkeypatch):
+    # `gh_contents.get_file_content` reads the subprocess in text mode and strips it, so a
+    # CRLF file came back with every \r gone and no trailing newline. Written back that is
+    # a different blob, and the estate check at teardown - which compares blob shas -
+    # called it drift on every single run.
+    encoded = base64.b64encode(CRLF_CSV).decode()
+    _reads(monkeypatch, {"cohort-gradebook.csv": (0, encoded)})
+    assert cleanup.file_bytes(COHORT, "classroom-config", "cohort-gradebook.csv") == (
+        CRLF_CSV
+    )
+
+
+def test_a_file_that_is_not_there_is_recorded_as_absent(monkeypatch):
+    _reads(monkeypatch, {})
+    assert (
+        cleanup.file_bytes(COHORT, "classroom-config", "gradebook/nothing.csv") is None
+    )
+
+
+def test_a_read_that_failed_is_not_read_as_absent(monkeypatch):
+    # An absent file is DELETED by the restore. A rate limit read as absence would take a
+    # real file out of a real org.
+    _reads(monkeypatch, {"cohort-gradebook.csv": (1, "gh: API rate limit exceeded")})
+    with pytest.raises(RuntimeError, match="could not read"):
+        cleanup.file_bytes(COHORT, "classroom-config", "cohort-gradebook.csv")
+
+
+def test_the_restore_writes_back_exactly_what_was_recorded(monkeypatch):
+    written: list[tuple[str, str, dict, tuple]] = []
+    monkeypatch.setattr(
+        cleanup.gh_contents,
+        "put_files",
+        lambda org, repo, files, message, delete=(), **kw: (
+            written.append((org, repo, files, tuple(delete))) or True
+        ),
+    )
+    assert (
+        cleanup.restore_files(
+            COHORT,
+            "classroom-config",
+            {"cohort-gradebook.csv": CRLF_CSV, "gradebook/distributed.csv": None},
+        )
+        == 0
+    )
+    ((org, repo, files, delete),) = written
+    assert (org, repo) == (COHORT, "classroom-config")
+    assert files == {"cohort-gradebook.csv": CRLF_CSV}
+    assert delete == ("gradebook/distributed.csv",)
+
+
+def test_what_was_read_is_what_is_written_back(monkeypatch):
+    # The whole point of the pair, in one line: record a file, hand it back, and the bytes
+    # are the bytes. `put_files` skips a path whose blob already matches, so an unchanged
+    # file makes no commit at all.
+    _reads(
+        monkeypatch,
+        {"cohort-gradebook.csv": (0, base64.b64encode(CRLF_CSV).decode())},
+    )
+    recorded = cleanup.file_bytes(COHORT, "classroom-config", "cohort-gradebook.csv")
+    written: list[dict] = []
+    monkeypatch.setattr(
+        cleanup.gh_contents,
+        "put_files",
+        lambda org, repo, files, message, delete=(), **kw: (
+            written.append(files) or True
+        ),
+    )
+    cleanup.restore_files(
+        COHORT, "classroom-config", {"cohort-gradebook.csv": recorded}
+    )
+    assert written == [{"cohort-gradebook.csv": CRLF_CSV}]
+
+
 def _pipeline_module(monkeypatch):
     """The live pipeline module, imported past its own gate.
 
@@ -473,6 +569,32 @@ def test_the_block_the_harness_really_inserts_is_valid_yaml(monkeypatch):
     # The due date and the cutoff are separate instants: collapsing them would skip the
     # refresh pass entirely, which is most of what the live run is there to exercise.
     assert entry["due_datetime"] != entry["grading_datetime"]
+
+
+def test_the_privacy_scan_keeps_every_line_the_toolkit_printed(monkeypatch):
+    # The gate step names the person who PRESSED the button, which a public log is
+    # entitled to do. Only that step's own ACTOR/REPO lines come out of the scan - a
+    # handle anywhere else, including on another `check-team` line, is still a leak.
+    module = _pipeline_module(monkeypatch)
+    gate = "check-team\tVerify the user\t2026-09-06T11:03:38Z   "
+    log = (
+        f"{gate}ACTOR: ada-l\n"
+        f"{gate}REPO: org/.github\n"
+        f"{gate}ada-l may run\n"
+        "collect-submissions\tCollect\t2026-09-06T11:03:56Z   [ok] 1 of 2\n"
+    )
+    kept = module._toolkit_lines(log)
+    assert "ACTOR: ada-l" not in kept
+    assert "REPO: org/.github" not in kept
+    assert "ada-l may run" in kept
+    assert "[ok] 1 of 2" in kept
+
+
+def test_the_status_line_is_what_a_rewritten_sheet_is_quoted_by(monkeypatch):
+    module = _pipeline_module(monkeypatch)
+    sheet = "# GRADING SHEET\n# Status: OPEN - 1 of 2 students\nsubmissions:\n"
+    assert module._status(sheet) == "# Status: OPEN - 1 of 2 students"
+    assert module._status("submissions:\n") == ""
 
 
 def test_every_live_test_module_carries_the_gate():

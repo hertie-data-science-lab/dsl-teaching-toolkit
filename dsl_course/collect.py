@@ -353,12 +353,53 @@ def _sanitised_env() -> dict:
     return env
 
 
+def one_per_unit(
+    targets: list[tuple[str, str, list[str]]],
+) -> list[tuple[str, str, list[str]]]:
+    """`targets` with each unit key appearing ONCE, the first row kept.
+
+    A submission unit is a repo and a block on the grading sheet, and both are named after
+    the key: two rows carrying the same key are one unit, however they got there. It
+    happens - two roster rows sharing a `github_handle` (the same person entered twice, or
+    a handle pasted into the wrong row), a team listed twice in teams.csv.
+
+    Unfiltered, the duplicate is not merely wasted work. `grades.merge_sheet` walks the
+    units in order, popping each one out of the sheet it read: the first pass merges the
+    block, the second finds the key already popped and builds a BRAND NEW one - so a tick
+    that derived nothing for that unit (a repo quiet since the last look, which is the
+    normal case) replaced a filled-in `info:` with blanks, losing `submitted`, `days_late`
+    and `checked` together. Losing `checked` is what made it flip: the next tick saw a unit
+    nobody had ever looked at, re-read it, filled `info:` back in - and the tick after that
+    blanked it again. The count was wrong with it ("0 of 2 students" for one student), and
+    the repo was read and the receipt derived twice on every tick."""
+    seen: dict[str, tuple[str, str, list[str]]] = {}
+    for repo, unit, members in targets:
+        seen.setdefault(unit, (repo, unit, members))
+    if len(seen) != len(targets):
+        # A count in the public log; the keys themselves only where they are safe. This is
+        # a faculty-fixable data error in a hand-edited CSV, not a toolkit failure.
+        log_err(
+            f"  ! {len(targets) - len(seen)} duplicate submission unit(s) in "
+            f"{CONFIG_REPO} - each one is graded once; fix the duplicated row"
+        )
+        log_person("     duplicated: " + ", ".join(sorted(_repeated(targets))))
+    return list(seen.values())
+
+
+def _repeated(targets: list[tuple[str, str, list[str]]]) -> set[str]:
+    """The unit keys that appear more than once in `targets`."""
+    counted: dict[str, int] = {}
+    for _repo, unit, _members in targets:
+        counted[unit] = counted.get(unit, 0) + 1
+    return {unit for unit, n in counted.items() if n > 1}
+
+
 def submission_targets(
     cohort_org: str, slug: str, is_group: bool, teams_key: str | None = None
 ) -> list[tuple[str, str, list[str]]]:
     """The submission units for `slug` as (repo, key, members): one per team for a group
-    assignment, one per onboarded student otherwise. Empty - with the reason logged - when
-    there is nothing to grade.
+    assignment, one per onboarded student otherwise, each key ONCE (`one_per_unit`).
+    Empty - with the reason logged - when there is nothing to grade.
 
     `slug` is the cohort-side NAME (`schedule.cohort_name`), which is what every repo here
     is named after. `teams_key` is the SCHEDULE KEY, which is what teams.csv is keyed on -
@@ -396,7 +437,7 @@ def submission_targets(
                     f"enrolled, onboarded roster handles - they get no grade row"
                 )
             out.append((submission_repo(slug, team), team, vetted))
-        return out
+        return one_per_unit(out)
     # Enrolled participants only, matching assign/grades: an auditor deliberately has no
     # submission repo, so listing one makes it an unclonable phantom target (noise, and a
     # spurious "could not be read"). `roster.enrolled` drops auditors; `onboarded` drops
@@ -408,7 +449,7 @@ def submission_targets(
     ]
     if not targets:
         log_err(f"no onboarded enrolled students in {cohort_org} to grade.")
-    return targets
+    return one_per_unit(targets)
 
 
 def local_deadline(deadline: str, tz: str | None = None) -> datetime:
@@ -1207,6 +1248,17 @@ def sync_sheet(
     if units is None:
         targets = submission_targets(cohort_org, slug, is_group, key)
         units = [(unit, members) for _repo, unit, members in targets]
+    else:
+        # The handout passes its own list, built from the same roster (`assign.release`),
+        # so it can carry the same key twice for the same reasons. One block per unit here
+        # too: `one_per_unit` says what a repeated key costs the sheet. The repo name is
+        # not needed to tell units apart, hence the blank.
+        units = [
+            (unit, members)
+            for _repo, unit, members in one_per_unit(
+                [("", unit, members) for unit, members in units]
+            )
+        ]
     if not units:
         # Nobody onboarded, or no teams yet. `submission_targets` has said which.
         log(f"  [skip] {path} - no submission units yet; a later tick creates it")

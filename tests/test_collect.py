@@ -594,6 +594,56 @@ def test_submission_targets_group_without_teams_is_empty(monkeypatch):
     assert collect.submission_targets("Cohort", "assignment-4-project", True) == []
 
 
+def test_a_handle_on_two_roster_rows_is_one_submission_unit(monkeypatch):
+    # Two rows, one `github_handle`: the same person entered twice, or a handle pasted
+    # into the wrong row. There is one repo and one block on the grading sheet, so there
+    # is one target - and the duplicate must not reach `merge_sheet`, which walks the
+    # units in order and rebuilds a block whose key it has already popped.
+    twice = [
+        Student("a@x", "Anna Adams", "anna-adams", ""),
+        Student("b@x", "A. Adams", "anna-adams", ""),
+    ]
+    monkeypatch.setattr(collect.roster, "load", lambda org: twice)
+    monkeypatch.setattr(collect.teams, "load", lambda org: {})
+    assert collect.submission_targets("Cohort", "assignment-1", False) == [
+        ("assignment-1-anna-adams", "anna-adams", ["anna-adams"]),
+    ]
+
+
+def test_a_team_listed_twice_is_one_submission_unit(monkeypatch):
+    monkeypatch.setattr(
+        collect.teams,
+        "load",
+        lambda org: {"assignment-4-project": {"team-x": ["anna-adams"]}},
+    )
+    monkeypatch.setattr(collect.roster, "load", lambda org: _STUDENTS)
+    monkeypatch.setattr(
+        collect.sync_teams,
+        "vet_groups",
+        lambda groups, participants: [
+            ("team-x", ["anna-adams"], []),
+            ("team-x", ["anna-adams"], []),
+        ],
+    )
+    assert collect.submission_targets("Cohort", "assignment-4-project", True) == [
+        ("assignment-4-project-team-x", "team-x", ["anna-adams"]),
+    ]
+
+
+def test_a_duplicated_unit_is_reported_without_naming_anyone(monkeypatch, capsys):
+    # The count is actionable and public; the key itself is a roster handle, so it goes
+    # through log_person like every other per-person detail.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    kept = collect.one_per_unit(
+        [("r-ada", "ada-l", ["ada-l"]), ("r-ada", "ada-l", ["ada-l"])]
+    )
+    captured = capsys.readouterr()
+    said = captured.out + captured.err
+    assert kept == [("r-ada", "ada-l", ["ada-l"])]
+    assert "1 duplicate submission unit(s)" in said
+    assert "ada-l" not in said
+
+
 # -------------------------------------------------------------------- taking a snapshot
 
 
@@ -3207,6 +3257,77 @@ def test_a_repo_quiet_since_we_last_looked_is_not_re_read(monkeypatch):
         is_group=False,
         now=datetime(2026, 10, 5, 0, 15, tzinfo=BERLIN),
     )
+
+
+DUPLICATED_SHEET = (
+    "# Status: OPEN - 1 of 1 students have submitted\n"
+    "submissions:\n"
+    "  ada-l:\n"
+    "    info:\n"
+    "      submitted: '2026-10-03T20:14+02:00'\n"
+    "      days_late: 0\n"
+    "      checked: '2026-10-05T00:10+02:00'\n"
+    "    score_individual:\n"
+)
+
+
+def test_a_handout_over_a_duplicated_unit_does_not_blank_what_was_derived(monkeypatch):
+    # `assign.release` builds the handout's units from the roster, so a handle on two rows
+    # arrives here twice - and a handout re-fires whenever a late onboarder is provisioned.
+    # `merge_sheet` pops each key as it walks the units: the second pass would find the
+    # block already gone and build a FRESH one, throwing away `submitted`, `days_late` and
+    # `checked` that a refresh had filled in.
+    written = _sheet_env(
+        monkeypatch, targets=[], existing=(DUPLICATED_SHEET, "their-sha")
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 5, 0, 15, tzinfo=BERLIN),
+        units=[("ada-l", ["ada-l"]), ("ada-l", ["ada-l"])],
+    )
+    text = written[-1][1] if written else DUPLICATED_SHEET
+    info = grades.parse_sheet(text)["submissions"]["ada-l"][grades.INFO_KEY]
+    assert info["submitted"] == "2026-10-03T20:14+02:00"
+    assert info["checked"] == "2026-10-05T00:10+02:00"
+    # One row, so one student to count - the duplicate used to inflate the denominator.
+    assert "1 of 1 students" in text
+
+
+def test_a_refresh_that_derives_nothing_leaves_a_duplicated_unit_alone(monkeypatch):
+    # The live failure this came from: the repo was quiet since the pin, so the tick
+    # derived nothing for it, and the duplicated key rebuilt the block blank. Losing
+    # `checked` with it made the next tick re-read and re-fill, so the sheet flipped
+    # between "1 of 2 submitted" and "0 of 2" on every tick until the freeze.
+    targets = [("assignment-1-ada-l", "ada-l", ["ada-l"])]
+    written = _sheet_env(
+        monkeypatch,
+        targets=targets + targets,  # what an un-deduplicated roster used to hand over
+        existing=(DUPLICATED_SHEET, "their-sha"),
+        pushed={"assignment-1-ada-l": "2026-10-03T18:14:00Z"},  # 20:14 Berlin: the pin
+    )
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group, key=None: collect.one_per_unit(targets + targets),
+    )
+    monkeypatch.setattr(
+        collect,
+        "_snapshot_sha",
+        lambda *a, **k: (_ for _ in ()).throw(
+            AssertionError("a repo quiet since the pin is not re-read")
+        ),
+    )
+    assert _refresh(monkeypatch, now=datetime(2026, 10, 5, 0, 15, tzinfo=BERLIN))
+    text = written[-1][1] if written else DUPLICATED_SHEET
+    info = grades.parse_sheet(text)["submissions"]["ada-l"][grades.INFO_KEY]
+    assert info["submitted"] == "2026-10-03T20:14+02:00"
+    assert info["checked"] == "2026-10-05T00:10+02:00"
 
 
 def test_a_receipt_is_not_posted_when_the_sheet_write_was_refused(monkeypatch):

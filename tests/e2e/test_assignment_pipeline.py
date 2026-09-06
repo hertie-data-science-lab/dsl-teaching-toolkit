@@ -370,20 +370,30 @@ def _mark_the_sheet(slug: str) -> str:
     return marked
 
 
-def _shared_state(student_handle: str) -> dict:
+def _shared_state(student_handle: str) -> dict[str, bytes | None]:
     """Everything a distribute touches that no run id owns - so the teardown can put it
-    back, and so a test can say what changed."""
+    back, and so a test can say what changed.
+
+    BYTES (`cleanup.file_bytes`), because this is both halves of the estate proof: what
+    the teardown hands back, and what "changed nothing" is measured against. The estate
+    check compares blob shas, and a round trip through text is not the same blob - see
+    `file_bytes` for what it loses."""
     gradebook = f"{course.GRADEBOOK_PREFIX}{student_handle}"
     return {
-        "registrar": gh_contents.get_file_content(
+        "registrar": cleanup.file_bytes(
             COHORT_ORG, course.CONFIG_REPO, grades.COHORT_CSV_NAME
         ),
-        "distributed": gh_contents.get_file_content(
+        "distributed": cleanup.file_bytes(
             COHORT_ORG, course.CONFIG_REPO, grades.DISTRIBUTED_PATH
         ),
-        "grades_yml": gh_contents.get_file_content(COHORT_ORG, gradebook, "grades.yml"),
-        "readme": gh_contents.get_file_content(COHORT_ORG, gradebook, "README.md"),
+        "grades_yml": cleanup.file_bytes(COHORT_ORG, gradebook, "grades.yml"),
+        "readme": cleanup.file_bytes(COHORT_ORG, gradebook, "README.md"),
     }
+
+
+def _text(recorded: bytes | None) -> str:
+    """One recorded file as text, for the assertions that read words out of it."""
+    return (recorded or b"").decode()
 
 
 def _distribute(name: str, dry_run: bool) -> Stage:
@@ -686,7 +696,14 @@ def test_the_sheet_is_created_at_handout_with_the_students_row(pipeline):
     block = sheet["submissions"][pipeline.student]
     assert set(block) >= {"info", "score_individual", grades.NOTES_KEY}
     assert block["score_individual"] is None
-    assert block["info"] == {"submitted": None, "days_late": None}
+    # `info:` carries exactly the facts THIS assignment's toolkit will fill, and
+    # `autograde` exists only where hidden tests will run. New assignment scaffolds
+    # `autograde: true` with a stub `tests/` today and may not tomorrow, so the shape is
+    # read off the template's own grading config rather than written down here twice.
+    expected = {"submitted": None, "days_late": None}
+    if grades.load_grading_spec(COURSE_ORG, pipeline.slug)["autograde"]:
+        expected["autograde"] = None
+    assert block["info"] == expected
 
 
 def test_the_handout_sheets_header_says_open_and_nothing_submitted(pipeline):
@@ -699,7 +716,9 @@ def test_the_due_date_fills_info_from_the_students_own_push(pipeline):
     sheet = grades.parse_sheet(pipeline.stages["after_due"].detail["sheet"])
     info = sheet["submissions"][pipeline.student]["info"]
     assert info["submitted"], "the refresh recorded no submission time"
-    assert info["days_late"] == 0
+    # `parse_sheet` hands back what the file says, as text (`grades._SheetLoader`): a mark
+    # a grader typed must come back the way they typed it, so `0` here is "0".
+    assert int(info["days_late"]) == 0
     assert "# Status: OPEN - 1 of " in pipeline.stages["after_due"].detail["sheet"]
 
 
@@ -721,14 +740,18 @@ def test_collect_submissions_over_an_unchanged_cohort_writes_nothing(pipeline):
     # nobody can lean on it, and every press would churn a commit in classroom-config.
     stage = pipeline.stages["collect_button"]
     assert stage.conclusion == "success"
-    assert stage.detail["after"] == stage.detail["before"]
+    assert stage.detail["after"] == stage.detail["before"], (
+        "the press rewrote the sheet: "
+        f"{_status(stage.detail['before'])!r} -> {_status(stage.detail['after'])!r}"
+    )
 
 
 def test_the_cutoff_freezes_the_sheet(pipeline):
     sheet_text = pipeline.stages["artefacts"].detail["sheet"]
     assert "# Status: FROZEN " in sheet_text
     info = grades.parse_sheet(sheet_text)["submissions"][pipeline.student]["info"]
-    assert info["submitted"] and info["days_late"] == 0
+    assert info["submitted"]
+    assert int(info["days_late"]) == 0  # text, like every scalar on the sheet
 
 
 # ----------------------------------------------------------------- distribute the marks
@@ -758,19 +781,19 @@ def test_the_real_run_posts_exactly_one_feedback_comment(pipeline):
 def test_the_real_run_writes_the_students_private_gradebook(pipeline):
     after = pipeline.stages["distribute"].detail["after"]
     assert after["grades_yml"] and after["readme"]
-    assert E2E_SCORE in after["readme"]
-    assert E2E_FEEDBACK in after["readme"]
-    assert pipeline.slug in after["grades_yml"]
+    assert E2E_SCORE in _text(after["readme"])
+    assert E2E_FEEDBACK in _text(after["readme"])
+    assert pipeline.slug in _text(after["grades_yml"])
 
 
 def test_the_real_run_adds_the_column_to_the_registrar_export(pipeline):
-    csv_text = pipeline.stages["distribute"].detail["after"]["registrar"] or ""
+    csv_text = _text(pipeline.stages["distribute"].detail["after"]["registrar"])
     assert csv_text.splitlines()[0].startswith("hertie_email,name,github_handle")
     assert pipeline.slug in csv_text.splitlines()[0]
 
 
 def test_the_real_run_records_what_it_sent(pipeline):
-    recorded = pipeline.stages["distribute"].detail["after"]["distributed"] or ""
+    recorded = _text(pipeline.stages["distribute"].detail["after"]["distributed"])
     assert recorded.splitlines()[0] == ",".join(grades.DISTRIBUTED_HEADER)
     rows = [line for line in recorded.splitlines()[1:] if pipeline.student in line]
     assert any(f",{pipeline.slug},{grades.CHANNEL_ISSUE}," in row for row in rows)
@@ -801,9 +824,9 @@ def test_the_private_note_reaches_nobody(pipeline):
             "the feedback comment",
             "\n".join(pipeline.stages["distribute"].detail["comments"]),
         ),
-        ("grades.yml", after["grades_yml"] or ""),
-        ("the gradebook README", after["readme"] or ""),
-        ("the registrar export", after["registrar"] or ""),
+        ("grades.yml", _text(after["grades_yml"])),
+        ("the gradebook README", _text(after["readme"])),
+        ("the registrar export", _text(after["registrar"])),
     ):
         assert E2E_PRIVATE_NOTE not in text, f"the private note leaked into {where}"
 
@@ -814,10 +837,35 @@ def test_the_autograde_count_reaches_nobody(pipeline):
     after = pipeline.stages["distribute"].detail["after"]
     for text in (
         "\n".join(pipeline.stages["distribute"].detail["comments"]),
-        after["grades_yml"] or "",
-        after["readme"] or "",
+        _text(after["grades_yml"]),
+        _text(after["readme"]),
     ):
         assert "autograde" not in text
+
+
+# What the `check-team` gate step prints before it lets a run start: the handle of the
+# person who PRESSED the button and the repo the workflow lives in. That is the
+# dispatching actor - a faculty member - and naming them in a public log is the point of
+# the line. It is only confusable with a student here because the harness signs in as
+# both. Everything the toolkit itself prints is still scanned.
+GATE_STEP = "check-team\t"
+GATE_FACTS = ("ACTOR:", "REPO:")
+
+
+def _toolkit_lines(log: str) -> str:
+    """`log` without the gate step's own ACTOR/REPO lines."""
+    return "\n".join(
+        line
+        for line in log.splitlines()
+        if not (line.startswith(GATE_STEP) and any(f in line for f in GATE_FACTS))
+    )
+
+
+def _status(sheet_text: str) -> str:
+    """The one header line that says what a write changed."""
+    return next(
+        (line for line in sheet_text.splitlines() if line.startswith("# Status:")), ""
+    )
 
 
 def test_no_public_log_line_names_the_student_anywhere(pipeline):
@@ -833,6 +881,7 @@ def test_no_public_log_line_names_the_student_anywhere(pipeline):
         "distribute_again",
     ):
         stage = pipeline.stages[key]
-        assert pipeline.student not in stage.log, f"{stage.name} named the student"
-        assert pipeline.submission_repo not in stage.log, f"{stage.name} named the repo"
-        assert E2E_PRIVATE_NOTE not in stage.log
+        scanned = _toolkit_lines(stage.log)
+        assert pipeline.student not in scanned, f"{stage.name} named the student"
+        assert pipeline.submission_repo not in scanned, f"{stage.name} named the repo"
+        assert E2E_PRIVATE_NOTE not in scanned

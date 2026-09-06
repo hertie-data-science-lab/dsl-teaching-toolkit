@@ -17,6 +17,7 @@ cleanup is a command here and never a seeded workflow.
 from __future__ import annotations
 
 import argparse
+import base64
 import re
 import secrets
 
@@ -156,15 +157,40 @@ def _is_artefact(path: str, run_id: str) -> bool:
     return rest == mine or rest.startswith((f"{mine}/", f"{mine}."))
 
 
-def restore_files(org: str, repo: str, before: dict[str, str | None]) -> int:
+def file_bytes(org: str, repo: str, path: str) -> bytes | None:
+    """A file's content BYTE FOR BYTE, or None if it is absent.
+
+    `gh_contents.get_file_content` is the wrong instrument for a restore: it comes back
+    through `ghcli.gh`, which reads the subprocess in text mode and strips the result - so
+    a CRLF file arrives with every `\r` gone and every file arrives without its trailing
+    newline. Written back, that is a different blob, and the estate check at teardown saw
+    exactly that: `cohort-gradebook.csv` is `csv.writer` output, so it is CRLF, and every
+    run "restored" it eight bytes shorter than it found it.
+
+    So the base64 is decoded HERE, in Python, and only the base64 alphabet passes through
+    the pipe. Same 404-is-None, anything-else-raises rule as `get_file_content`."""
+    code, out = ghcli.gh(
+        "api", f"repos/{org}/{repo}/contents/{path}", "--jq", ".content"
+    )
+    if code != 0:
+        if ghcli.is_missing_resource(out):
+            return None
+        raise RuntimeError(f"could not read {org}/{repo}/{path}: {out[:200]}")
+    return base64.b64decode(out)
+
+
+def restore_files(org: str, repo: str, before: dict[str, bytes | None]) -> int:
     """Put shared files back exactly as they were found, in ONE commit.
 
     Distribute writes two files no run id owns - `cohort-gradebook.csv` and
     `gradebook/distributed.csv` - plus the test student's own gradebook. They cannot be
     swept by namespace, so the harness records them before the run and hands them back
-    here. A path recorded as None was absent and is deleted."""
-    writes = {path: text.encode() for path, text in before.items() if text is not None}
-    delete = [path for path, text in before.items() if text is None]
+    here. A path recorded as None was absent and is deleted.
+
+    BYTES, from `file_bytes`: "exactly as they were found" is measured by the estate check
+    as a blob sha, so a round trip through text is a restore that does not restore."""
+    writes = {path: data for path, data in before.items() if data is not None}
+    delete = [path for path, data in before.items() if data is None]
     if not gh_contents.put_files(
         org, repo, writes, "e2e: restore shared grading files", delete=delete
     ):
