@@ -370,20 +370,30 @@ def _mark_the_sheet(slug: str) -> str:
     return marked
 
 
-def _shared_state(student_handle: str) -> dict:
+def _shared_state(student_handle: str) -> dict[str, bytes | None]:
     """Everything a distribute touches that no run id owns - so the teardown can put it
-    back, and so a test can say what changed."""
+    back, and so a test can say what changed.
+
+    BYTES (`cleanup.file_bytes`), because this is both halves of the estate proof: what
+    the teardown hands back, and what "changed nothing" is measured against. The estate
+    check compares blob shas, and a round trip through text is not the same blob - see
+    `file_bytes` for what it loses."""
     gradebook = f"{course.GRADEBOOK_PREFIX}{student_handle}"
     return {
-        "registrar": gh_contents.get_file_content(
+        "registrar": cleanup.file_bytes(
             COHORT_ORG, course.CONFIG_REPO, grades.COHORT_CSV_NAME
         ),
-        "distributed": gh_contents.get_file_content(
+        "distributed": cleanup.file_bytes(
             COHORT_ORG, course.CONFIG_REPO, grades.DISTRIBUTED_PATH
         ),
-        "grades_yml": gh_contents.get_file_content(COHORT_ORG, gradebook, "grades.yml"),
-        "readme": gh_contents.get_file_content(COHORT_ORG, gradebook, "README.md"),
+        "grades_yml": cleanup.file_bytes(COHORT_ORG, gradebook, "grades.yml"),
+        "readme": cleanup.file_bytes(COHORT_ORG, gradebook, "README.md"),
     }
+
+
+def _text(recorded: bytes | None) -> str:
+    """One recorded file as text, for the assertions that read words out of it."""
+    return (recorded or b"").decode()
 
 
 def _distribute(name: str, dry_run: bool) -> Stage:
@@ -771,19 +781,19 @@ def test_the_real_run_posts_exactly_one_feedback_comment(pipeline):
 def test_the_real_run_writes_the_students_private_gradebook(pipeline):
     after = pipeline.stages["distribute"].detail["after"]
     assert after["grades_yml"] and after["readme"]
-    assert E2E_SCORE in after["readme"]
-    assert E2E_FEEDBACK in after["readme"]
-    assert pipeline.slug in after["grades_yml"]
+    assert E2E_SCORE in _text(after["readme"])
+    assert E2E_FEEDBACK in _text(after["readme"])
+    assert pipeline.slug in _text(after["grades_yml"])
 
 
 def test_the_real_run_adds_the_column_to_the_registrar_export(pipeline):
-    csv_text = pipeline.stages["distribute"].detail["after"]["registrar"] or ""
+    csv_text = _text(pipeline.stages["distribute"].detail["after"]["registrar"])
     assert csv_text.splitlines()[0].startswith("hertie_email,name,github_handle")
     assert pipeline.slug in csv_text.splitlines()[0]
 
 
 def test_the_real_run_records_what_it_sent(pipeline):
-    recorded = pipeline.stages["distribute"].detail["after"]["distributed"] or ""
+    recorded = _text(pipeline.stages["distribute"].detail["after"]["distributed"])
     assert recorded.splitlines()[0] == ",".join(grades.DISTRIBUTED_HEADER)
     rows = [line for line in recorded.splitlines()[1:] if pipeline.student in line]
     assert any(f",{pipeline.slug},{grades.CHANNEL_ISSUE}," in row for row in rows)
@@ -814,9 +824,9 @@ def test_the_private_note_reaches_nobody(pipeline):
             "the feedback comment",
             "\n".join(pipeline.stages["distribute"].detail["comments"]),
         ),
-        ("grades.yml", after["grades_yml"] or ""),
-        ("the gradebook README", after["readme"] or ""),
-        ("the registrar export", after["registrar"] or ""),
+        ("grades.yml", _text(after["grades_yml"])),
+        ("the gradebook README", _text(after["readme"])),
+        ("the registrar export", _text(after["registrar"])),
     ):
         assert E2E_PRIVATE_NOTE not in text, f"the private note leaked into {where}"
 
@@ -827,8 +837,8 @@ def test_the_autograde_count_reaches_nobody(pipeline):
     after = pipeline.stages["distribute"].detail["after"]
     for text in (
         "\n".join(pipeline.stages["distribute"].detail["comments"]),
-        after["grades_yml"] or "",
-        after["readme"] or "",
+        _text(after["grades_yml"]),
+        _text(after["readme"]),
     ):
         assert "autograde" not in text
 
