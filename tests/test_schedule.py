@@ -1732,19 +1732,49 @@ def _parsed(tmp_path, text: str = _LOCATABLE) -> Schedule:
     return sched
 
 
-def test_every_deploy_knows_the_line_it_is_written_on(tmp_path):
-    # Captured by the loader that read the file, not scanned for afterwards: a scan found
-    # the entry key and then the first matching field under it, so the SECOND deploy of an
-    # entry was reported - and deep-linked - at the first one's line.
+def test_every_deploy_field_knows_the_line_it_is_written_on(tmp_path):
+    # Per FIELD, because that is what a fault cites: `-> course_source_path` must send
+    # faculty to the `course_source_path:` line, and the copy's `course_source_repo:` is
+    # a different line of the same block. Captured by the loader that read the file, not
+    # scanned for afterwards: a scan found the entry key and then the first matching field
+    # under it, so the SECOND deploy of an entry was reported - and deep-linked - at the
+    # first one's line.
     sched = _parsed(tmp_path)
-    lines = {r.label: [d.lineno for d in r.deploy] for r in sched.releases}
-    assert lines == {"lecture_01": [8], "lecture_02": [13, 15]}
+    assert [
+        (
+            schedule._line_of(d.lines, "course_source_repo"),
+            schedule._line_of(d.lines, "course_source_path"),
+        )
+        for r in sched.releases
+        for d in r.deploy
+    ] == [(8, 9), (13, 14), (15, 16)]
 
 
-def test_an_assignment_entry_knows_its_own_line(tmp_path):
-    # The entry's own first key, which is where a reader looking for `course_source_repo`
-    # starts: close enough for a link, and never wrong about the entry.
-    assert _parsed(tmp_path).assignments["assignment-2"].lineno == 20
+def test_an_assignment_field_knows_the_line_it_is_written_on(tmp_path):
+    entry = _parsed(tmp_path).assignments["assignment-2"]
+    assert schedule._line_of(entry.lines, "course_source_repo") == 21
+
+
+def test_the_field_is_cited_wherever_it_sits_in_its_entry(tmp_path):
+    # Nothing makes faculty write `course_source_repo` first, and the line to edit is the
+    # line of the FIELD - not of whichever key happens to open the block.
+    sched = _parsed(
+        tmp_path,
+        "releases:\n"
+        "  lecture_01:\n"
+        "    event_datetime: 2026-09-08T10:00\n"
+        "    deploy:\n"
+        "      - cohort_dest_repo: materials\n"
+        "        deploy_datetime: 2026-09-08T09:00\n"
+        "        course_source_path: lectures/01\n"
+        "        course_source_repo: cm\n",
+    )
+    (deploy,) = sched.releases[0].deploy
+    assert schedule._line_of(deploy.lines, "course_source_path") == 7
+    assert schedule._line_of(deploy.lines, "course_source_repo") == 8
+    # A field the entry does not carry falls back to the line the entry opens on: a
+    # citation pointing at the right block beats no citation, and beats a link to line 1.
+    assert schedule._line_of(deploy.lines, "nonesuch") == 5
 
 
 def test_a_dict_built_by_hand_has_no_line_and_says_so(tmp_path):
@@ -1760,7 +1790,9 @@ def test_a_dict_built_by_hand_has_no_line_and_says_so(tmp_path):
             }
         }
     )
-    assert sched.releases[0].deploy[0].lineno is None
+    deploy = sched.releases[0].deploy[0]
+    assert deploy.lines == {}
+    assert schedule._line_of(deploy.lines, "course_source_path") is None
 
 
 def test_the_line_stamp_never_reaches_the_parsed_plan(tmp_path):
@@ -1770,7 +1802,7 @@ def test_the_line_stamp_never_reaches_the_parsed_plan(tmp_path):
     assert sched.dropped == []
     assert [r.label for r in sched.releases] == ["lecture_01", "lecture_02"]
     assert list(sched.assignments) == ["assignment-2"]
-    assert "__line__" not in json.dumps(asdict(sched), default=str)
+    assert "__lines__" not in json.dumps(asdict(sched), default=str)
 
 
 def test_a_commented_out_entry_is_not_read_as_a_real_one(tmp_path):
@@ -1789,7 +1821,8 @@ def test_a_commented_out_entry_is_not_read_as_a_real_one(tmp_path):
         "      - course_source_repo: cm\n"
         "        course_source_path: lectures/01_lecture\n",
     )
-    assert sched.releases[0].deploy[0].lineno == 9
+    lines = sched.releases[0].deploy[0].lines
+    assert (lines["course_source_repo"], lines["course_source_path"]) == (9, 10)
 
 
 def test_a_fault_carries_the_line_it_is_written_on(monkeypatch, tmp_path):
@@ -1797,16 +1830,17 @@ def test_a_fault_carries_the_line_it_is_written_on(monkeypatch, tmp_path):
     faults = {
         f.path: f for f in schedule.source_faults(_parsed(tmp_path), "Course-Org")
     }
-    assert faults["lectures/02_lecture"].lineno == 13
+    # The `course_source_path:` line - the line the fault names as the one to edit.
+    assert faults["lectures/02_lecture"].lineno == 14
     # Two deploys under one entry are two faults at two lines, and two identities - keyed
     # on the entry alone the second inherited the first's recorded rung.
-    assert faults["readings/02_readings"].lineno == 15
+    assert faults["readings/02_readings"].lineno == 16
     assert faults["readings/02_readings"].key == (
         "releases.lecture_02[readings/02_readings].course_source_path"
     )
     # The row shape the commit comment reuses verbatim: entry, field, line, fault, when.
     assert faults["lectures/02_lecture"].line() == (
-        "releases.lecture_02 -> course_source_path - schedule.yml:13 - "
+        "releases.lecture_02 -> course_source_path - schedule.yml:14 - "
         "Course-Org/cm/lectures/02_lecture does not exist - "
         "fires Tue 15 Sep 2026, 10:00 Europe/Berlin"
     )
@@ -1819,7 +1853,7 @@ def test_the_json_dump_is_the_plan_the_parser_understood(monkeypatch, capsys, tm
     assert schedule.main() == 0
     dumped = json.loads(capsys.readouterr().out)
     assert dumped["timezone"] == "Europe/Berlin"
-    assert dumped["releases"][0]["deploy"][0]["lineno"] == 8
+    assert dumped["releases"][0]["deploy"][0]["lines"]["course_source_path"] == 9
 
 
 def test_a_deploy_datetime_dates_the_fault_not_the_class(monkeypatch):
@@ -1872,7 +1906,7 @@ def test_a_distant_missing_source_reports_but_keeps_the_run_green(
     # The rung, and the line of the file to go and edit - the entry name alone still
     # leaves faculty scrolling a plan they wrote in August.
     assert (
-        "    [advisory] releases.lecture-1 -> course_source_path - schedule.yml:5"
+        "    [advisory] releases.lecture-1 -> course_source_path - schedule.yml:6"
     ) in out
     assert "OK: nothing dropped" in out
 
@@ -1942,7 +1976,7 @@ def test_annotations_are_emitted_by_the_process_that_knows_the_severity(
     # `line=` is what puts the annotation on the offending line of the diff rather than at
     # the top of the file.
     assert (
-        "::warning file=schedule.yml,line=5::releases.lecture-1 -> course_source_path"
+        "::warning file=schedule.yml,line=6::releases.lecture-1 -> course_source_path"
     ) in captured.err
     assert "::warning" not in captured.out
 

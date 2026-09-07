@@ -196,10 +196,13 @@ class Deploy:
     cohort_dest_repo: str = "materials"
     cohort_dest_path: str | None = None
     deploy_datetime: datetime | None = None
-    # The line of schedule.yml this copy is written on, as the loader saw it (see
-    # `_LineLoader`) - what a fault about it cites and deep-links to. Out of `==` and
-    # `repr`, so two Deploys are equal when the COPY is, whatever line each was typed on.
-    lineno: int | None = field(default=None, compare=False, repr=False)
+    # The line each of this copy's keys is written on, as the loader saw them (see
+    # `_LineLoader`), plus "" for the line the copy itself opens on. A fault cites the
+    # line of the FIELD it names (`_line_of`), because that is the line to go and edit -
+    # and `course_source_repo` and `course_source_path` are two different lines of the
+    # same copy. Out of `==` and `repr`, so two Deploys are equal when the COPY is,
+    # whatever lines each was typed on.
+    lines: dict[str, int] = field(default_factory=dict, compare=False, repr=False)
 
 
 @dataclass
@@ -305,8 +308,8 @@ class AssignmentEntry:
     # gift to anyone who pushes late, so faculty name the moment or it never fires.
     # None = release the solution by hand, or not at all.
     solution_datetime: datetime | None = None
-    # The line of schedule.yml this entry is written on - see `Deploy.lineno`.
-    lineno: int | None = field(default=None, compare=False, repr=False)
+    # The line each of this entry's keys is written on - see `Deploy.lines`.
+    lines: dict[str, int] = field(default_factory=dict, compare=False, repr=False)
 
 
 @dataclass
@@ -356,20 +359,32 @@ class Schedule:
 # answer comes from the parser that read the file rather than from a scan of the text
 # afterwards - which was a second opinion about what the file says, and gave two deploys
 # under one entry the same line.
-_LINE = "__line__"
+_LINES = "__lines__"
 
 
 class _LineLoader(yaml.SafeLoader):
-    """SafeLoader that records each mapping's own 1-based line under `__line__`.
+    """SafeLoader that records, under `__lines__`, the 1-based line every key of a mapping
+    is written on - plus `""` for the line the mapping itself opens on.
 
-    A reserved key rather than a parallel index of YAML paths, because the parse walks the
-    mappings and not the paths: every entry meets its own line where it is built.
-    `_take_line` removes the stamp as the parse consumes it, so no key check and no label
-    loop downstream ever sees it."""
+    Per KEY, because that is the granularity a fault cites: `releases.lecture_02 ->
+    course_source_path` sends faculty to the `course_source_path:` line, and the copy's
+    `course_source_repo:` is a different line of the same block. A reserved key rather
+    than a parallel index of YAML paths, because the parse walks the mappings and not the
+    paths: every entry meets its own lines where it is built. `_take_lines` removes the
+    stamp as the parse consumes it, so no key check and no label loop downstream ever
+    sees it."""
 
     def construct_mapping(self, node, deep=False):
         mapping = super().construct_mapping(node, deep=deep)
-        mapping[_LINE] = node.start_mark.line + 1
+        # `node.value` has been flattened by now, so a merged (`<<:`) key is here too,
+        # at the line it was written on in the block it came from.
+        lines = {
+            str(k.value): k.start_mark.line + 1
+            for k, _v in node.value
+            if isinstance(k, yaml.ScalarNode)
+        }
+        lines[""] = node.start_mark.line + 1
+        mapping[_LINES] = lines
         return mapping
 
 
@@ -379,12 +394,22 @@ def _load_yaml(text: str) -> object:
     return yaml.load(text, _LineLoader)
 
 
-def _take_line(mapping: dict) -> int | None:
-    """This mapping's own line, REMOVING the loader's stamp. None for a mapping this
+def _take_lines(mapping: dict) -> dict[str, int]:
+    """This mapping's key lines, REMOVING the loader's stamp. `{}` for a mapping this
     module did not load - a dict built by hand in a test, or a caller that parsed the YAML
     itself - which every consumer already treats as "the line is not known"."""
-    line = mapping.pop(_LINE, None)
-    return line if isinstance(line, int) else None
+    lines = mapping.pop(_LINES, None)
+    return lines if isinstance(lines, dict) else {}
+
+
+def _line_of(lines: dict[str, int], key: str) -> int | None:
+    """The line to cite for a fault about `key`: that key's own line, else the line the
+    entry opens on, else None.
+
+    The fallback is for a field the entry does not carry at all. Every fault this module
+    reports names a key the entry must have declared to have parsed - but a citation
+    pointing at the right BLOCK beats no citation, and beats a link to line 1."""
+    return lines.get(key) or lines.get("")
 
 
 def _drop(drops: list[str], where: str, why: str, cost: str) -> None:
@@ -412,9 +437,9 @@ def _require_mapping(
             cost,
         )
         return None
-    # The block's own line interests nobody; taking it keeps the stamp out of the label
-    # loop that follows, which would otherwise read `__line__` as an entry.
-    _take_line(raw)
+    # The block's own lines interest nobody; taking them keeps the stamp out of the label
+    # loop that follows, which would otherwise read `__lines__` as an entry.
+    _take_lines(raw)
     return raw
 
 
@@ -551,7 +576,7 @@ def _parse_deploy(
         if not isinstance(d, dict):
             _drop(drops, where, "not a mapping", "this copy never ships")
             continue
-        lineno = _take_line(d)
+        lines = _take_lines(d)
         src_repo, src_path = d.get("course_source_repo"), d.get("course_source_path")
         if not src_repo or not src_path:
             _drop(
@@ -580,7 +605,7 @@ def _parse_deploy(
                     "this copy ships at the entry's `event_datetime` instead of the "
                     "time written here",
                 ),
-                lineno=lineno,
+                lines=lines,
             )
         )
     return out
@@ -611,7 +636,7 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Release
                 drops, where, "not a mapping", "nothing deploys and no site row appears"
             )
             continue
-        _take_line(entry)
+        _take_lines(entry)
         raw_when = entry.get("event_datetime")
         when = _coerce_datetime(raw_when, tz)
         tbc = _is_tbc(raw_when) or entry.get("tbc") is True
@@ -689,7 +714,7 @@ def _parse_assignments(
                 drops, where, "not a mapping (it needs a nested `due_datetime:`)", cost
             )
             continue
-        lineno = _take_line(entry)
+        lines = _take_lines(entry)
         due = _coerce_datetime(entry.get("due_datetime"), tz, end_of_day=True)
         if due is None:
             _drop(drops, where, "no valid `due_datetime`", cost)
@@ -813,7 +838,7 @@ def _parse_assignments(
             # fallback (flagged above, not silent)
             type=kind if kind in ("group", "individual") else None,
             max_team_size=cap,
-            lineno=lineno,
+            lines=lines,
         )
     return out
 
@@ -838,7 +863,7 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Event]:
         if not isinstance(entry, dict):
             _drop(drops, where, "not a mapping", "the row never appears on the site")
             continue
-        _take_line(entry)
+        _take_lines(entry)
         raw_when = entry.get("event_datetime")
         when = _coerce_date_or_datetime(raw_when, tz)
         tbc = _is_tbc(raw_when) or entry.get("tbc") is True
@@ -895,7 +920,7 @@ def parse(meta: dict) -> Schedule:
     than recorded as a drop, because a drop reds `--validate` and every live cohort still
     carries the block (see KNOWN_TOP_LEVEL)."""
     meta = meta if isinstance(meta, dict) else {}
-    _take_line(meta)
+    _take_lines(meta)
     drops: list[str] = []
     # A whole plan under an unknown top-level key (`materials_releases:` instead of
     # `releases:`) otherwise validates as "OK: nothing dropped" with zero releases - the
@@ -1356,13 +1381,19 @@ class SourceFault:
 
 class _Wanted(NamedTuple):
     """One source the plan names: the path inside the repo (empty for an assignment, whose
-    repo IS the source), where it is cited, when it is needed, and the line it is written
-    on."""
+    repo IS the source), where it is cited, when it is needed, and the line each of its
+    keys is written on.
+
+    `lines` rather than one line, because the two fields a fault can name are two
+    different lines of the same entry (see `Deploy.lines`)."""
 
     path: str
     where: str
     fires: datetime | None
-    lineno: int | None
+    lines: dict[str, int]
+
+    def lineno(self, field: str) -> int | None:
+        return _line_of(self.lines, field)
 
 
 def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
@@ -1390,13 +1421,13 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                     d.course_source_path,
                     f"releases.{release.label}",
                     d.deploy_datetime or release.when,
-                    d.lineno,
+                    d.lines,
                 )
             )
     for slug, a in sched.assignments.items():
         # An assignment with no handout pin is handed out by hand, so nothing dates it.
         wanted.setdefault(a.course_source_repo, []).append(
-            _Wanted("", f"assignments.{slug}", a.handout_datetime, a.lineno)
+            _Wanted("", f"assignments.{slug}", a.handout_datetime, a.lines)
         )
 
     out: list[SourceFault] = []
@@ -1417,7 +1448,7 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                     w.fires,
                     field="course_source_repo",
                     kind=FaultKind.MISSING_REPO,
-                    lineno=w.lineno,
+                    lineno=w.lineno("course_source_repo"),
                     repo=repo,
                     path=w.path,
                 )
@@ -1461,7 +1492,7 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                         field="course_source_path",
                         kind=FaultKind.WITHHELD,
                         ceiling=Severity.WARNING,
-                        lineno=w.lineno,
+                        lineno=w.lineno("course_source_path"),
                         repo=repo,
                         path=clean,
                     )
@@ -1476,7 +1507,7 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                     w.fires,
                     field="course_source_path",
                     kind=FaultKind.MISSING_PATH,
-                    lineno=w.lineno,
+                    lineno=w.lineno("course_source_path"),
                     repo=repo,
                     path=clean,
                 )
