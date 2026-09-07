@@ -271,6 +271,13 @@ _DRY_RUN_GATE = (
 # each workflow keeps its own issue (a shared title would let one recovery close another's
 # open failure) with no per-renderer string to keep in step with the `name:` above it.
 #
+# The issue is the DURABLE record - it survives a mailbox, it is where a second failure
+# comments, and it closes itself on the recovery. The mail beside it (`_CRON_MAIL`) is how
+# the MAINTAINER hears at all: the only person who can fix a broken run, and the one person
+# GitHub's own scheduled-failure email never reaches. Both are throttled together off the
+# notice step's `report` output, so a run cannot mail without filing and cannot file
+# without mailing.
+#
 # A workflow whose unattended jobs run CONCURRENTLY has to go further, and `scope` is how:
 # the scheduler releases and grades in two jobs (grading once per cohort), which fail
 # independently, and on a shared title the green one closes the red one's issue - then the
@@ -286,6 +293,31 @@ _DRY_RUN_GATE = (
 # is the guard. `source_digest._open_issue` matches client-side for the same reason.
 _SCOPE = "__CRON_ISSUE_SCOPE__"  # replaced per job; see _fill_scope
 _SCOPE_ENV = "__CRON_SCOPE_ENV__"  # any env the scope's shell fragment reads
+
+# The mail that reaches the maintainer, gated on the notice step having actually reported.
+# `--log-failed` is the only way to get the failing STEP's output rather than the whole
+# job's, and it is guarded (`|| true`) because a log that cannot be fetched - a run whose
+# logs are still being assembled - must not lose the mail as well. The CLI always exits 0:
+# this job has already failed for its own reasons, and reddening it twice would say nothing
+# new. Piped, so the tail never becomes an argv a shell could reinterpret.
+_CRON_MAIL_TEMPLATE = (
+    """      - name: Email the maintainer the failed step's log
+        if: (failure() || cancelled()) && github.event_name != 'workflow_dispatch' && steps.notice.outputs.report == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          WORKFLOW: ${{ github.workflow }}
+          REPO: ${{ github.repository }}
+          COURSE: ${{ github.repository_owner }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+"""
+    + _MAIL_ENV
+    + """
+        run: |
+          gh run view "$GITHUB_RUN_ID" --repo "$REPO" --log-failed 2>/dev/null | tail -n 30 \\
+            | python3 -m dsl_course.notify --run-failed --course-org "$COURSE" \\
+                --workflow "$WORKFLOW" --run-url "$RUN_URL" || true
+"""
+)
 
 _CRON_CLOSE_TEMPLATE = (
     """      - name: Close the failure issue once a run succeeds
@@ -312,6 +344,7 @@ _CRON_CLOSE_TEMPLATE = (
 # exists to surface.
 _CRON_NOTICE_TEMPLATE = (
     """      - name: Report an unattended failure as an issue
+        id: notice
         if: (failure() || cancelled()) && github.event_name != 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
@@ -328,13 +361,20 @@ _CRON_NOTICE_TEMPLATE = (
           # A filed issue emails only the repo's watchers, which in practice is nobody, so
           # the FIRST report mentions the org's admins; course-admin, not instructors,
           # because broken infrastructure is not the teaching staff's problem.
+          # Teaching staff read these too (course-admin is mentioned below), and a
+          # broken run is not theirs to fix - so the note says who is already on it.
+          note=$(printf '%s\\nThe toolkit maintainer has been emailed the log - nothing for teaching staff to do.\\n' "$note")
           body=$(printf '%s\\ncc @%s/course-admin\\n' "$note" "${REPO%%/*}")
           # The step runs under `bash -e`, so an unguarded capture would abort the step on a
           # transient search failure - before the `gh issue create` that is the whole point.
           # No dedupe hit just means we file a fresh issue.
           existing=$(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number,title,updatedAt --jq "map(select(.title == \\"$title\\"))[0] | select(.) | \\"\\(.number) \\(.updatedAt)\\"") || true
+          # `report` is what gates the mail step below, so the two channels fire
+          # together: a maintainer who gets an email can always find the issue it came
+          # from, and a thread that is being kept quiet does not mail either.
           if [ -z "$existing" ]; then
             gh issue create --repo "$REPO" --title "$title" --body "$body"
+            echo "report=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Already open. The scheduler fails on EVERY tick while a fault stands, and a
@@ -346,10 +386,13 @@ _CRON_NOTICE_TEMPLATE = (
           last=$(date -u -d "${existing#* }" +%s 2>/dev/null || echo 0)
           if [ $(( $(date -u +%s) - last )) -lt 21600 ]; then
             echo "already reported within the last 6h - see issue ${existing%% *}"
+            echo "report=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           gh issue comment "${existing%% *}" --repo "$REPO" --body "$note"
+          echo "report=true" >> "$GITHUB_OUTPUT"
 """
+    + _CRON_MAIL_TEMPLATE
     + _CRON_CLOSE_TEMPLATE
 )
 
@@ -940,6 +983,11 @@ on:
           DRY_RUN: ${{{{ inputs.dry_run }}}}
           EVENT: ${{{{ github.event_name }}}}
           DRIVER: ${{{{ github.event.client_payload.driver }}}}
+# A source the plan cites and the org has not got is emailed to the people git names for
+# it, from this step (see dsl_course.notify) - so the release pass carries the transport
+# alongside the token. Without it the digest issue's @mention is the only channel, which
+# reaches whoever happens to read GitHub notifications that week.
+{_MAIL_ENV}
         run: |
           gh auth setup-git
           # Which driver delivered this tick. The run history is the only record of that,
