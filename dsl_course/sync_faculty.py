@@ -19,11 +19,16 @@ Two independent flows, split by role rather than by "stability":
   its own team, so there's no "which cohort wins" ambiguity and no
   accumulate-forever list.
 
-Each person entry requires `github_handle` (the only field that grants access);
-`start`/`end` (optional ISO dates) bound when they're active, giving auto-rotation
-with no manual removal step. Every reconcile here is FULL (add + remove) - a lapsed
-`end` date or a deleted entry revokes access on the next sync, same as an edit to
-students.csv/teams.csv.
+Each person entry requires `github_handle` (the only field that grants access) and, for
+an instructor or a TA, `email` (the only way a notification reaches them - see
+`notification_emails`); `start`/`end` (optional ISO dates) bound when they're active,
+giving auto-rotation with no manual removal step. Every reconcile here is FULL
+(add + remove) - a lapsed `end` date or a deleted entry revokes access on the next sync,
+same as an edit to students.csv/teams.csv.
+
+A missing or malformed `email` is reported and does NOT withhold access: a cohort that
+has not filled it in keeps working (and keeps getting the @mention on its digest issue)
+rather than losing its team on the next sync.
 
 Usage:
     python3 -m dsl_course.sync_faculty --course-org hertie-dsl-demo-course-e1234
@@ -58,16 +63,33 @@ ROLE_TEAM = {
     "course_admins": COURSE_ADMIN_TEAM,
 }
 COHORT_PEOPLE_PATH = "people.yml"
+# The roles a cohort declares: its teaching team, the people a notification is addressed
+# to and therefore the entries `email:` is required on. course_admins is course-level and
+# notified through the course org, not a cohort's people.yml.
+TEACHING_ROLES = ("instructors", "teaching_assistants")
 
 
 # --------------------------------------------------------------------------- pure core
+
+
+def valid_email(value: object) -> str | None:
+    """A declared address as written, or None when it is absent or cannot be one (no `@`
+    with something either side). NEVER log the return value or the input: an address is
+    personal data and every faculty workflow runs in a public repo. Report the role and
+    the handle instead."""
+    text = str(value or "").strip()
+    local, _, domain = text.partition("@")
+    return text if local and domain else None
 
 
 def parse_faculty_from_meta(meta: dict) -> dict[str, list[dict]]:
     """Parse an already-loaded config mapping's `people:` block (course org's
     dsl-course.yml, or a cohort's people.yml - same schema) for the roles in ROLE_TEAM.
     Only entries with a `github_handle` grant access; a named entry without one is a
-    legitimate display-only card (noted, not an error), anything else is junk (flagged)."""
+    legitimate display-only card (noted, not an error), anything else is junk (flagged).
+
+    An instructor/TA entry with no usable `email:` is an error line naming the role and
+    the handle - the entry still grants access, it just cannot be notified."""
     people = meta.get("people")
     if not isinstance(people, dict):
         return {}
@@ -77,6 +99,12 @@ def parse_faculty_from_meta(meta: dict) -> dict[str, list[dict]]:
         for p in people.get(role) or []:
             if isinstance(p, dict) and p.get("github_handle"):
                 entries.append(p)
+                if role in TEACHING_ROLES and valid_email(p.get("email")) is None:
+                    log_err(
+                        f"  ! {role} entry {p['github_handle']} has no usable `email:` "
+                        f"- it is required (access still granted, but this person is "
+                        f"not notified): see {COHORT_PEOPLE_PATH}"
+                    )
             elif isinstance(p, dict) and p.get("name"):
                 log(
                     f"  ({role} entry '{p['name']}' has no github_handle - "
@@ -118,6 +146,44 @@ def desired_team_members(
 def _desired_for(faculty: dict[str, list[dict]], team: str, today: str) -> set[str]:
     """This team's desired active handles from a parsed faculty dict."""
     return desired_team_members(faculty, today).get(team, set())
+
+
+def _active_teaching_entries(faculty: dict[str, list[dict]], today: str) -> list[dict]:
+    """The parsed instructor/TA entries active on `today` (an ISO date string), in
+    declaration order - this cohort's teaching team as it stands today."""
+    return [
+        p
+        for role in TEACHING_ROLES
+        for p in faculty.get(role) or []
+        if active_today(p.get("start"), p.get("end"), today)
+    ]
+
+
+def notification_emails(meta: dict) -> list[str]:
+    """The deduplicated addresses of the active instructors and TAs declared in an
+    already-loaded `people:` block - who a notification about this cohort goes to.
+
+    Entries with no usable `email:` are skipped (`parse_faculty_from_meta` has already
+    reported them). Log the LENGTH of this list, never its contents."""
+    faculty = parse_faculty_from_meta(meta)
+    out: list[str] = []
+    seen: set[str] = set()
+    for p in _active_teaching_entries(faculty, date.today().isoformat()):
+        email = valid_email(p.get("email"))
+        if email and email.lower() not in seen:
+            seen.add(email.lower())
+            out.append(email)
+    return out
+
+
+def without_email(faculty: dict[str, list[dict]], today: str) -> list[str]:
+    """The handles of active instructors/TAs no notification can reach. Handles, which
+    are public and loggable; the addresses themselves never leave this module."""
+    return [
+        str(p["github_handle"])
+        for p in _active_teaching_entries(faculty, today)
+        if valid_email(p.get("email")) is None
+    ]
 
 
 def _cohort_roles_only(faculty: dict[str, list[dict]]) -> dict[str, list[dict]]:

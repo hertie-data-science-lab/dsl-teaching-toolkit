@@ -1,7 +1,8 @@
 # This cohort's own instructors/TAs 
 #
 # - the SSOT for their GitHub access & permissions 
-# - supplies the deployed .github.io site's staff cards (name/title/photo/url). 
+# - the SSOT for who is emailed when this cohort needs attention (`email`, required). 
+# - supplies the deployed .github.io site's staff cards (name/title/photo/url/email). 
 # - see reference: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/docs/05-manage-teaching-team.md
 # - see deployed reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/people.yml
 # - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/
@@ -12,12 +13,14 @@
 people:
   instructors:
     - github_handle: "demo-lkaack-placeholder"
+      email: "l.kaack@example.org"
       name: "Prof. Lynn Kaack, PhD"
       title: "Assistant Professor of Computer Science and Public Policy"
       photo: "https://github.com/LynnKaack.png"
       url: "https://www.hertie-school.org/de/research/faculty-and-researchers/profile/person/kaack"
   teaching_assistants:
     - github_handle: "demo-cfusarbassini-placeholder"
+      email: "c.fusarbassini@example.org"
       name: "Chiara Fusar Bassini"
       title: "PhD candidate, Data Science Lab"
       photo: "https://github.com/chiara-fb.png"
@@ -25,6 +28,8 @@ people:
       start: "2026-08-01"
       end: "2027-01-31"
     - github_handle: "demo-henrycgbaker-placeholder"
+      email: "h.baker@example.org"
+      show_email: false                      # emailed, but not shown on the site card
       name: "Henry Baker"
       title: "Research Engineer & Data Scientist, Data Science Lab"
       photo: "/_images/pp/henrycgbaker.jpg"   # the other form: local file in the site repo

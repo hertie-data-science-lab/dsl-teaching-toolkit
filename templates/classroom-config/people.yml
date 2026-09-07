@@ -3,7 +3,8 @@
 # This cohort's own instructors/TAs
 #
 # - the SSOT for their GitHub access & permissions
-# - supplies the deployed .github.io site's staff cards (name/title/photo/url).
+# - the SSOT for who is emailed when this cohort needs attention (see `email` below).
+# - supplies the deployed .github.io site's staff cards (name/title/photo/url/email).
 # - see reference: https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/__CENTRAL_REF__/docs/05-manage-teaching-team.md
 # - see deployed reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/people.yml
 # - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/
@@ -13,6 +14,8 @@
 # people:
 #   instructors:
 #     - github_handle: "janedoe"      # REQUIRED
+#       email: "jane@example.org"     # REQUIRED
+#                                     # notifications go here, and it is shown on the cohort site - add `show_email: false` to keep it off the card
 #       name: "Prof. Jane Doe"        # optional
 #       title: "Professor of ..."     # optional
 #       photo: "/_images/pp/jane.jpg" # optional. Either (1) a relative path to an image committed under `_images/pp/` in this cohort's site repo,
@@ -22,5 +25,6 @@
 #       end: "{year_next}-01-31"      # optional - no end = indefinite
 #   teaching_assistants:
 #     - github_handle: "anOther"
+#       email: "another@example.org"
 #       name: "..."
 #       photo: "https://github.com/anOther.png"   # the second form: a hotlinkable URL
