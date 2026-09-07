@@ -192,6 +192,11 @@ most contended minutes first (on `0 * * * *` the scheduler was delivered 6 ticks
 and membership must write the teams that Sync site then reads. Both rules are enforced by
 `tests/test_renderers.py`; the reasoning sits above the cron literals in `workflows_render`.
 
+**A content fault never reds a cron.** A source the plan cites and the org has not got is
+faculty's to fix, so it is delivered by the cohort's digest issue and an email to the people git
+names for that line - never by the exit code. A red X on any of the five crons means the run
+itself broke, which is why the maintainer is emailed its log tail.
+
 ## The scheduler's two drivers
 
 Even off a contended minute GitHub delivers only 2-7% of the fires it promises, with observed

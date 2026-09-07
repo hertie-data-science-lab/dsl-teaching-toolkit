@@ -284,13 +284,19 @@ So the sources are checked against the course org in two places: **Validate sche
 
 | Distance to the deploy | Severity | What you see |
 |---|---|---|
-| more than 7 days | advisory | a line in the run summary and a yellow annotation on the offending line of `schedule.yml` in the commit. Nobody is emailed |
-| 7 days or less | warning | the above, plus a **digest issue** in `classroom-config` - so it reaches your inbox rather than waiting to be found |
-| 48 hours or less | **urgent** | the digest issue comments to say it escalated |
-| 24 hours or less | **critical** | it comments again, one rung louder |
-| the moment has passed | **missed** | the copy did not ship. A last comment, and the fault stays listed until the source is staged |
+| more than 24 hours | advisory | a line in the run summary and a yellow annotation on the offending line of `schedule.yml` in the commit. Nobody is emailed |
+| 24 hours or less | warning | the **digest issue** in `classroom-config` opens (or updates), comments, and **you are emailed** |
+| 12 hours or less | **urgent** | the issue comments to say it escalated, and a second email goes out |
+| 6 hours or less | **critical** | it comments again, one rung louder, and the email copies the toolkit maintainer |
+| the moment has passed | **missed** | the copy did not ship. A last comment and a last email, and the fault stays listed until the source is staged |
 
-**No rung reds the scheduled run.** A source nobody has written is content only faculty can write, so it is delivered where faculty are looking: the digest issue below, which `cc`s the cohort's instructors and points at the exact line to edit (`schedule.yml:36`, as a link). A red X on **Scheduled release** keeps the one meaning it has everywhere else - the run itself broke.
+**Who is emailed.** Whoever git says can act: the person who last edited that line of `schedule.yml`, and whoever last committed to the materials or template repo it names. A TA's email copies the cohort's instructors. If git can name nobody in `people.yml` - the line was never edited by teaching staff, or the blame could not be read - the whole teaching team is emailed instead. Addresses come from the `email:` field on each entry in `classroom-config/people.yml`; the digest issue `cc`s the same people by handle.
+
+**Nothing is emailed between 22:00 and 07:00** in the cohort's own timezone. The issue still updates and comments immediately; the email is held and sent on the first tick after 07:00, as one message at the loudest rung it reached overnight.
+
+**And a push gets an immediate reply.** Committing a `schedule.yml` that leaves a release inside 24 hours with nothing staged gets a comment on that commit, naming each line and its deadline. Distant faults get nothing - the digest issue holds those.
+
+**No rung reds the scheduled run.** A source nobody has written is content only faculty can write, so it is delivered where faculty are looking rather than spent on an exit code. A red X on **Scheduled release** keeps the one meaning it has everywhere else - the run itself broke.
 
 **Validate schedule never goes red for a missing source either.** Its red X means one thing - an entry you wrote is not in your plan - and it clears when the file next parses cleanly. A missing source is not a broken file and doesn't clear when the file is edited, so it gets its own channel: annotations on the commit, and the digest issue below.
 
@@ -298,11 +304,13 @@ So the sources are checked against the course org in two places: **Validate sche
 
 One issue per cohort, titled **"schedule.yml: planned releases cite sources not staged in the course org"**, kept current by the scheduler:
 
-- its **body** is rewritten every run and always lists everything currently missing, grouped by severity, each line naming the exact field to edit (`releases.lecture_02` → `course_source_path`) and linking at its line in your `schedule.yml`. Editing a body doesn't email anyone, so this is free to happen on every tick.
-- it **comments** only when something crosses a rung - a fault appears at warning or above, or escalates. Comments *do* email, and they `cc @<cohort-org>/instructors`, so you hear the transitions and nothing else.
+- its **body** is rewritten every run and always lists everything currently missing, grouped by severity, each line naming the exact field to edit (`releases.lecture_02` → `course_source_path`), the one sentence that would fix it, and a link at its line in your `schedule.yml`. Editing a body doesn't email anyone, so this is free to happen on every tick.
+- it **comments** only when something crosses a rung - a fault appears at warning, escalates, or clears - and `cc`s the same people the email is addressed to.
 - it **closes itself** when the last missing source is staged.
 
 Appears, escalates, clears - three notifications over the life of a problem, however many ticks happen in between. A term written months ahead sits entirely at *advisory* and opens no issue at all.
+
+Don't close it by hand. Closing changes nothing in the file, and the next tick reopens it; it does remember what it had already told you, so reopening does not email everybody again.
 
 A source that cannot be *read* (a rate limit, a permissions blip) is never reported as missing - that would turn every entry in the plan into a phantom typo.
 
@@ -310,8 +318,8 @@ By hand: add `--check-sources <course-org>` to either `--validate` form above. E
 
 ```
   2 SOURCE(S) NOT IN hertie-dsl-demo-course-e1234 YET:
-    [critical] releases.lecture_02 -> course_source_path at schedule.yml:36 (due Wed 19 Aug 2026, 08:00): `course-materials-f2026/lectures/02_lecture` does not exist yet - this copy ships nothing
-    [advisory] releases.lecture_09 -> course_source_path at schedule.yml:184 (due Wed 04 Nov 2026, 08:00): `course-materials-f2026/lectures/09_lecture` does not exist yet - this copy ships nothing
+    [critical] releases.lecture_02 -> course_source_path - schedule.yml:36 - hertie-dsl-demo-course-e1234/course-materials-f2026/lectures/02_lecture does not exist - fires Wed 19 Aug 2026, 08:00 Europe/Berlin
+    [advisory] releases.lecture_09 -> course_source_path - schedule.yml:184 - hertie-dsl-demo-course-e1234/course-materials-f2026/lectures/09_lecture does not exist - fires Wed 04 Nov 2026, 08:00 Europe/Berlin
 ```
 
 ## Dropped entries

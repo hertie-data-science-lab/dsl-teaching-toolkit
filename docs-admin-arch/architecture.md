@@ -528,12 +528,24 @@ file · tree · team · repo list`"]
   site, Refresh actions, Publish course website) open - or comment on - an issue titled
   *"\<workflow\> is failing"* in the course org's `.github`, and close it on the next success. An
   open issue always means "still broken". Manual dispatch is exempt: someone is watching.
+- **...and reach the one person who can fix them.** On the same 6h throttle, gated off the
+  notice step's own output so the two channels can never diverge, the failing job emails the
+  **maintainer** the run URL and the last 30 lines of the step that failed
+  (`notify.notify_run_failed`). The issue is the durable record; this is the only channel the
+  maintainer is on, since GitHub's own scheduled-failure email goes to whoever last committed
+  the workflow file - always the bot.
 - **A content fault is not a run fault.** A `schedule.yml` entry citing a source nobody has
   staged never touches an exit code, at any rung on its ladder (`schedule.Severity`): it is
   faculty's to fix, so it is delivered on the channel faculty watch - the cohort's source digest
-  issue, which `cc`s the instructors and links the line to edit. Spending the red X on it instead
-  meant up to eight failing runs an hour, each mailing the bot account about a folder only faculty
-  can write, and left the run's own health unreadable.
+  issue, plus an email to the people git names for that line (`notify.route`: the planner of the
+  line and the last committer of the repo, the whole teaching team as fallback). Spending the red
+  X on it instead meant up to eight failing runs an hour, each mailing the bot account about a
+  folder only faculty can write, and left the run's own health unreadable.
+- **A notification is not worth a release.** `notify` and `source_digest` both count their own
+  failures and return them; `_preflight_sources` logs the count and still returns 0, and wraps
+  each in its own `except`. The mail is also **held between 22:00 and 07:00** in the cohort's
+  zone, with the debt recorded in the digest issue's own body - so the state that decides whether
+  somebody gets woken up survives a runner that is destroyed every tick.
 - **Courtesy paths never fail their caller.** The site's overwrite notice logs loudly and leaves
   the exit code untouched - by the time it runs the site is already published, and letting it
   redden the cron would invert the incident it exists to prevent.

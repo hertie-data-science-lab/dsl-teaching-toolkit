@@ -83,6 +83,13 @@ republishes it. Rotation is still a per-org Bootstrap run from central.
 Enrolment-code and grade emails go through `dsl_course.mailer` under a **tenant-level mail
 credential** - a one-time central setup, not per course. `dry_run` previews need nothing.
 
+The same mailbox sends two **fault** emails, which nobody presses a button for. A cohort's
+teaching team is emailed about a planned release whose materials are not staged, addressed to
+whoever git says wrote the line (`notify.notify_source_transitions`, HTML); and the maintainer
+is emailed the log tail of any cron that fails (`notify.notify_run_failed`, plain text), to
+`DSL_MAINTAINER_EMAIL` or, unset, to `GRAPH_SENDER` itself. Both are throttled and neither can
+fail a run - see [Failure semantics](architecture.md#failure-semantics).
+
 Four secrets: `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_CERT`, `GRAPH_SENDER`. The
 Entra app holds the **Mail.Send** application permission (admin-consented) and sends as the
 shared mailbox `datasciencelab@hertie-school.org`. There is no SMTP fallback: the tenant
