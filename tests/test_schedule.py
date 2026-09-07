@@ -7,6 +7,7 @@ default).
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -1538,12 +1539,11 @@ def test_a_source_withheld_by_a_releaseignore_is_a_fault_at_commit_time(monkeypa
     assert "is withheld by a `.releaseignore`" in out[0]
 
 
-def test_a_withheld_source_never_escalates_to_an_error(monkeypatch):
-    # A MISSING source becomes an ERROR as its moment nears, and stays one after it passes.
-    # A WITHHELD source is a decision faculty already made - and `scheduler._check_sources`
-    # folds ERROR into the hourly cron's exit code, so escalating this would redden that
-    # cron every hour for the rest of the term. That is the outcome every other channel in
-    # this feature is written to avoid.
+def test_a_withheld_source_never_escalates_past_a_warning(monkeypatch):
+    # A MISSING source climbs the whole ladder as its moment nears, and stays at the top
+    # after it passes. A WITHHELD source is a decision faculty already made, so it is
+    # listed and nothing more: it must never earn anyone a 24h email, or a "this did not
+    # ship" for the rest of the term.
     _org(monkeypatch, {"cm": [".releaseignore", "lectures", "lectures/01_a"]})
     monkeypatch.setattr(
         schedule, "get_file_content", lambda org, repo, path, **k: "lectures/01_a\n"
@@ -1557,12 +1557,15 @@ def test_a_withheld_source_never_escalates_to_an_error(monkeypatch):
     )
 
 
-def test_a_missing_source_still_escalates_to_an_error(monkeypatch):
+def test_a_missing_source_still_climbs_the_whole_ladder(monkeypatch):
     # The ceiling is per-fault, so capping the withheld one must not soften this.
     _org(monkeypatch, {"cm": ["lectures"]})
     s = Schedule(releases=[_release("lecture-1", "lectures/01_a")])
     fault = schedule.source_faults(s, "Course-Org")[0]
-    assert fault.severity(datetime(2026, 9, 8, 9, 0, tzinfo=BERLIN)) is Severity.ERROR
+    assert (
+        fault.severity(datetime(2026, 9, 8, 9, 0, tzinfo=BERLIN)) is Severity.CRITICAL
+    )
+    assert fault.severity(datetime(2026, 9, 15, 9, 0, tzinfo=BERLIN)) is Severity.MISSED
 
 
 def test_an_unreadable_releaseignore_blob_is_passed_over_in_silence(monkeypatch):
@@ -1661,7 +1664,9 @@ def test_one_tree_fetch_per_repo_however_many_deploys(monkeypatch):
 def test_the_severity_ladder_scales_with_distance_to_the_fire_time(monkeypatch):
     # The same missing folder is a note in August and a failure the night before the
     # lecture. Distance is the whole signal - without it the check either cries wolf on
-    # every term planned up front, or says nothing when it finally matters.
+    # every term planned up front, or says nothing when it finally matters. Five rungs,
+    # because who is told changes on the way down: instructors from a week out, the
+    # maintainer once it is a day away.
     now = datetime(2026, 9, 1, 12, 0, tzinfo=BERLIN)
     S = schedule.Severity
 
@@ -1672,12 +1677,117 @@ def test_the_severity_ladder_scales_with_distance_to_the_fire_time(monkeypatch):
     assert at(now + timedelta(days=8)) is S.ADVISORY
     assert at(now + timedelta(days=6)) is S.WARNING
     assert at(now + timedelta(hours=49)) is S.WARNING
-    assert at(now + timedelta(hours=47)) is S.ERROR
-    # Already passed: the copy did not ship. Going quiet after the fact is the one
-    # behaviour that would make this check worthless.
-    assert at(now - timedelta(days=3)) is S.ERROR
+    assert at(now + timedelta(hours=47)) is S.URGENT
+    assert at(now + timedelta(hours=25)) is S.URGENT
+    assert at(now + timedelta(hours=23)) is S.CRITICAL
+    assert at(now + timedelta(minutes=1)) is S.CRITICAL
+    # At the fire time and after it: the copy did not ship. Going quiet after the fact is
+    # the one behaviour that would make this check worthless.
+    assert at(now) is S.MISSED
+    assert at(now - timedelta(days=3)) is S.MISSED
     # Nothing pins an undated entry to a moment, so it can never escalate.
     assert at(None) is S.ADVISORY
+
+
+# --------------------------------------------------------- the line of the file to edit
+
+# One entry per rung's worth of shapes: a nested deploy, a flat assignment field, a
+# comment between entries, and a second entry whose fields must not be borrowed.
+_LOCATABLE = """\
+timezone: Europe/Berlin
+
+releases:
+  # week one
+  lecture_01:
+    event_datetime: 2026-09-08T10:00
+    deploy:
+      - course_source_repo: cm
+        course_source_path: lectures/01_lecture
+  lecture_02:
+    event_datetime: 2026-09-15T10:00
+    deploy:
+      - course_source_repo: cm
+        course_source_path: lectures/02_lecture
+
+assignments:
+  assignment-2:
+    due_datetime: 2026-10-27T23:59
+    course_source_repo: assignment-2-f2026
+"""
+
+
+def test_locate_finds_a_deploy_field_under_its_release_entry():
+    # `yaml.safe_load` drops positions, so this is a scan of the text - and the entry key
+    # is what anchors it, not the first `course_source_path` in the file.
+    assert schedule.locate(_LOCATABLE, "releases.lecture_01", "course_source_path") == 9
+    assert (
+        schedule.locate(_LOCATABLE, "releases.lecture_02", "course_source_path") == 14
+    )
+    assert (
+        schedule.locate(_LOCATABLE, "releases.lecture_02", "course_source_repo") == 13
+    )
+
+
+def test_locate_finds_a_field_written_flat_on_an_assignment():
+    assert (
+        schedule.locate(_LOCATABLE, "assignments.assignment-2", "course_source_repo")
+        == 19
+    )
+
+
+def test_locate_reports_nothing_it_cannot_be_sure_of():
+    # A link to the wrong line is worse than no link: the caller shows the fault without
+    # one. A field the entry does not have, an entry that is not there, a section that is
+    # not there, and a `where` that is not a path at all.
+    assert (
+        schedule.locate(_LOCATABLE, "assignments.assignment-2", "course_source_path")
+        is None
+    )
+    assert (
+        schedule.locate(_LOCATABLE, "releases.lecture_99", "course_source_path") is None
+    )
+    assert schedule.locate(_LOCATABLE, "events.open_day", "event_datetime") is None
+    assert schedule.locate(_LOCATABLE, "releases", "course_source_path") is None
+    assert schedule.locate("", "releases.lecture_01", "course_source_path") is None
+
+
+def test_locate_never_reads_a_commented_out_entry_as_a_real_one():
+    # The seeded schedule.yml ships its whole schema commented out, and a cohort that has
+    # not written a plan yet has nothing else in the file.
+    text = (
+        "# releases:\n"
+        "#   lecture_01:\n"
+        "#     deploy:\n"
+        "#       - course_source_path: lectures/01_lecture\n"
+        "releases:\n"
+        "  lecture_01:\n"
+        "    deploy:\n"
+        "      - course_source_path: lectures/01_lecture\n"
+    )
+    assert schedule.locate(text, "releases.lecture_01", "course_source_path") == 8
+
+
+def test_a_fault_carries_the_line_it_is_written_on(monkeypatch, tmp_path):
+    f = tmp_path / "schedule.yml"
+    f.write_text(_LOCATABLE)
+    _org(monkeypatch, {"cm": ["lectures", "lectures/01_lecture"]})
+    sched, error = schedule.load_file(str(f))
+    assert error is None
+    faults = {f.where: f for f in schedule.source_faults(sched, "Course-Org")}
+    assert faults["releases.lecture_02"].lineno == 14
+    assert "at schedule.yml:14 (due " in faults["releases.lecture_02"].line()
+
+
+def test_the_json_dump_prints_the_plan_not_the_file(monkeypatch, capsys, tmp_path):
+    # `raw` is kept only so a fault can cite a line; echoing the whole YAML back would
+    # bury the parse the caller asked to see.
+    f = tmp_path / "schedule.yml"
+    f.write_text(_LOCATABLE)
+    monkeypatch.setattr("sys.argv", ["schedule", "--file", str(f)])
+    assert schedule.main() == 0
+    dumped = json.loads(capsys.readouterr().out)
+    assert "raw" not in dumped
+    assert dumped["timezone"] == "Europe/Berlin"
 
 
 def test_a_deploy_datetime_dates_the_fault_not_the_class(monkeypatch):
@@ -1727,9 +1837,11 @@ def test_a_distant_missing_source_reports_but_keeps_the_run_green(
     assert schedule.main() == 0
     out = capsys.readouterr().out
     assert "1 SOURCE(S) NOT IN Course-Org YET:" in out
-    # `!` (not `!!`, and not the `-` a drop uses): the workflow greps these prefixes to
-    # pick ::warning:: over ::error::, so conflating them would mis-rank every fault.
-    assert "    [advisory] releases.lecture-1 -> course_source_path" in out
+    # The rung, and the line of the file to go and edit - the entry name alone still
+    # leaves faculty scrolling a plan they wrote in August.
+    assert (
+        "    [advisory] releases.lecture-1 -> course_source_path at schedule.yml:6"
+    ) in out
     assert "OK: nothing dropped" in out
 
 
@@ -1746,15 +1858,14 @@ def _imminent(tmp_path):
     return f
 
 
-def test_even_an_error_rung_source_leaves_the_parse_verdict_alone(
+def test_even_a_missed_rung_source_leaves_the_parse_verdict_alone(
     monkeypatch, capsys, tmp_path
 ):
     # --check-sources says it never changes the exit code, and it must not: `rc` is the
     # DROPPED-ENTRY channel, which opens an issue titled "entries the scheduler cannot
     # read" and closes it on the next clean parse. A missing source routed through that
-    # gets the wrong name and gets closed without ever being staged. Escalating the error
-    # rung is the hourly pre-flight's job (scheduler._preflight_sources), which owns a
-    # channel of its own.
+    # gets the wrong name and gets closed without ever being staged. Delivering the loud
+    # rungs is the digest issue's job (source_digest), which owns a channel of its own.
     _org(monkeypatch, {"cm": ["lectures"]})
     monkeypatch.setattr(
         "sys.argv",
@@ -1769,7 +1880,7 @@ def test_even_an_error_rung_source_leaves_the_parse_verdict_alone(
     )
     assert schedule.main() == 0
     out = capsys.readouterr().out
-    assert "[error] releases.lecture-1 -> course_source_path" in out
+    assert "[missed] releases.lecture-1 -> course_source_path" in out
     assert "OK: nothing dropped" in out
     # The file parses perfectly. The two verdicts stay apart.
     assert "entry/ies dropped" not in out
@@ -1796,9 +1907,11 @@ def test_annotations_are_emitted_by_the_process_that_knows_the_severity(
     )
     assert schedule.main() == 0
     captured = capsys.readouterr()
-    assert "::warning file=schedule.yml::releases.lecture-1 -> course_source_path" in (
-        captured.err
-    )
+    # `line=` is what puts the annotation on the offending line of the diff rather than at
+    # the top of the file.
+    assert (
+        "::warning file=schedule.yml,line=6::releases.lecture-1 -> course_source_path"
+    ) in captured.err
     assert "::warning" not in captured.out
 
 
@@ -1829,7 +1942,7 @@ def test_worst_severity_is_the_loudest_not_the_first(monkeypatch):
         schedule.SourceFault("b", "gone", now + timedelta(hours=2), "f"),
         schedule.SourceFault("c", "gone", now + timedelta(days=5), "f"),
     ]
-    assert schedule.worst_severity(faults, now) is schedule.Severity.ERROR
+    assert schedule.worst_severity(faults, now) is schedule.Severity.CRITICAL
     assert schedule.worst_severity([], now) is None
 
 

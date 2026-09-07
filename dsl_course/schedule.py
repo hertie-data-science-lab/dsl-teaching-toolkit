@@ -340,6 +340,11 @@ class Schedule:
     # out, snapshotted or graded for the cohort, and an hourly green tick is how that goes
     # unnoticed for a term.
     unparseable: bool = False
+    # The file's own text, kept by `load` / `load_file` so a fault can name the LINE to
+    # edit (`locate`). Nothing parses it a second time. It is provenance rather than plan:
+    # out of `==` and `repr` so two Schedules are equal when the PLAN is, and dropped from
+    # `--validate`'s JSON dump rather than printing the file back at the reader.
+    raw: str = field(default="", compare=False, repr=False)
 
 
 def _drop(drops: list[str], where: str, why: str, cost: str) -> None:
@@ -977,6 +982,7 @@ def load(cohort_org: str) -> Schedule:
         unparseable = True
     sched = parse(meta if isinstance(meta, dict) else {})
     sched.unparseable = unparseable
+    sched.raw = content or ""
     if sched.dropped:
         # Loud, because this is the failure faculty cannot see: the file is valid YAML and
         # the run goes green, but an entry they wrote is not in the plan. Every caller
@@ -1012,7 +1018,9 @@ def load_file(path: str) -> tuple[Schedule | None, str | None]:
         return None, f"{path} is not valid YAML:\n{exc}"
     if not isinstance(meta, dict):
         return None, f"{path} is valid YAML but not a mapping - it needs top-level keys"
-    return parse(meta), None
+    sched = parse(meta)
+    sched.raw = text
+    return sched, None
 
 
 def _repo_paths(course_org: str, repo: str) -> set[str] | None:
@@ -1034,8 +1042,11 @@ def _repo_paths(course_org: str, repo: str) -> set[str] | None:
 # How close a missing source has to be to its fire time before it stops being "not
 # written yet" and starts being a fault. A term planned up front names paths nobody has
 # authored, which is why distance is what separates the normal state from the broken one.
-SOURCE_ERROR_WINDOW = timedelta(hours=48)
+# Three windows rather than one, because who is told changes as the moment approaches
+# (see source_digest): instructors from a week out, the maintainer once it is a day away.
 SOURCE_WARN_WINDOW = timedelta(days=7)
+SOURCE_URGENT_WINDOW = timedelta(hours=48)
+SOURCE_CRITICAL_WINDOW = timedelta(hours=24)
 
 
 class Severity(IntEnum):
@@ -1045,20 +1056,80 @@ class Severity(IntEnum):
 
     ADVISORY = 0
     WARNING = 1
-    ERROR = 2
+    URGENT = 2
+    CRITICAL = 3
+    MISSED = 4
 
     def __str__(self) -> str:
         return self.name.lower()
 
 
+def _hours(window: timedelta) -> int:
+    return int(window.total_seconds() // 3600)
+
+
 def _window_blurb() -> str:
     """The ladder in one sentence, formatted from the windows themselves so changing one
     cannot leave three hand-written prose copies claiming the old numbers."""
-    hours = int(SOURCE_ERROR_WINDOW.total_seconds() // 3600)
     return (
-        f"advisory until {SOURCE_WARN_WINDOW.days} days out, then a warning, "
-        f"then an ERROR inside {hours}h"
+        f"advisory until {SOURCE_WARN_WINDOW.days} days out, then a warning, urgent "
+        f"inside {_hours(SOURCE_URGENT_WINDOW)}h, critical inside "
+        f"{_hours(SOURCE_CRITICAL_WINDOW)}h, missed once it has fired"
     )
+
+
+def locate(text: str, where: str, field: str) -> int | None:
+    """The 1-based line of `where` -> `field` in a raw schedule.yml, or None when the scan
+    cannot find it. `where` is a fault's YAML path: `releases.lecture_02`.
+
+    `yaml.safe_load` drops positions, so pointing faculty at the line to edit means going
+    back to the text. A plain scan, deliberately - a second parser to serve a link would
+    be a second opinion about what the file says. It finds the top-level section, then the
+    entry key under it, then the first `<field>:` line before the next sibling entry: with
+    two deploys in one release that is the first of them, which is close enough for a link
+    and never wrong about the entry."""
+    lines = (text or "").splitlines()
+    section, _, key = where.partition(".")
+    if not section or not key:
+        return None
+
+    def content(raw: str) -> str:
+        """The line minus indentation, its list dash, and a whole-line comment."""
+        stripped = raw.strip()
+        if stripped.startswith("- "):
+            stripped = stripped[2:].lstrip()
+        return "" if stripped.startswith("#") else stripped
+
+    def indent(raw: str) -> int:
+        return len(raw) - len(raw.lstrip())
+
+    i = next(
+        (n for n, raw in enumerate(lines) if content(raw) == f"{section}:"),
+        None,
+    )
+    if i is None:
+        return None
+    entry = None
+    for n in range(i + 1, len(lines)):
+        body = content(lines[n])
+        if not body:
+            continue
+        if indent(lines[n]) == 0:
+            break  # the next top-level section: this one holds no such entry
+        if body.startswith(f"{key}:"):
+            entry = n
+            break
+    if entry is None:
+        return None
+    for n in range(entry + 1, len(lines)):
+        body = content(lines[n])
+        if not body:
+            continue
+        if indent(lines[n]) <= indent(lines[entry]):
+            break  # the next sibling entry, or the next section
+        if body.startswith(f"{field}:"):
+            return n + 1
+    return None
 
 
 @dataclass
@@ -1077,13 +1148,16 @@ class SourceFault:
     # default: it is half of `key`, so a caller that forgets it would not fail, it would
     # quietly give this fault someone else's identity in the digest's state.
     field: str
-    # The loudest this fault may ever get. A MISSING source escalates to ERROR, because
-    # the copy will not ship and nobody meant that. A source a `.releaseignore` withholds
-    # is a decision faculty already made, so it caps at WARNING: the hourly scheduler
-    # folds ERROR into its exit code, and a `.releaseignore` covering a path still named
-    # in schedule.yml would otherwise redden that cron every hour for the rest of the
-    # term - the outcome this feature's every other channel is written to avoid.
-    ceiling: Severity = Severity.ERROR
+    # The loudest this fault may ever get. A MISSING source climbs the whole ladder,
+    # because the copy will not ship and nobody meant that. A source a `.releaseignore`
+    # withholds is a decision faculty already made, so it caps at WARNING: it is listed,
+    # and it never earns anyone an email at 24h or a "this did not ship" once its moment
+    # has passed.
+    ceiling: Severity = Severity.MISSED
+    # The line in schedule.yml this fault is written on, when the scan could find it (see
+    # `locate`). Every surface turns it into `schedule.yml:36` and a deep link, because
+    # the entry name alone still leaves faculty scrolling a file they wrote in August.
+    lineno: int | None = None
 
     @property
     def key(self) -> str:
@@ -1097,24 +1171,34 @@ class SourceFault:
         return f"{self.fires:%a %d %b %Y, %H:%M}" if self.fires else "no date (tbc)"
 
     def severity(self, now: datetime) -> Severity:
-        """How loud this should be at `now` - see SOURCE_ERROR_WINDOW / SOURCE_WARN_WINDOW.
+        """How loud this should be at `now` - see the SOURCE_*_WINDOW constants.
 
-        A fault whose moment has already PASSED stays an error: the copy did not ship, and
-        going quiet once the lecture is over is the one thing that must not happen."""
+        A fault whose moment has already PASSED is MISSED and stays there: the copy did
+        not ship, and going quiet once the lecture is over is the one thing that must not
+        happen. The rungs decide who is TOLD (source_digest, and the mail beside it); none
+        of them touches an exit code, because a source nobody has written yet is a content
+        fault and the red X belongs to the run itself."""
         if self.fires is None:
             return Severity.ADVISORY
         left = self.fires - now
-        if left <= SOURCE_ERROR_WINDOW:
-            return min(Severity.ERROR, self.ceiling)
-        if left <= SOURCE_WARN_WINDOW:
-            return min(Severity.WARNING, self.ceiling)
-        return Severity.ADVISORY
+        if left <= timedelta(0):
+            rung = Severity.MISSED
+        elif left <= SOURCE_CRITICAL_WINDOW:
+            rung = Severity.CRITICAL
+        elif left <= SOURCE_URGENT_WINDOW:
+            rung = Severity.URGENT
+        elif left <= SOURCE_WARN_WINDOW:
+            rung = Severity.WARNING
+        else:
+            rung = Severity.ADVISORY
+        return min(rung, self.ceiling)
 
     def line(self) -> str:
         """The one-line form, everywhere. It names the FIELD as well as the entry, because
         "something is wrong with lecture-2" is not an instruction - and it is the CLI
         report, on the commit faculty just pushed, that most needs to say so."""
-        return f"{self.where} -> {self.field} (due {self.due}): {self.what}"
+        at = f" at {SCHEDULE_PATH}:{self.lineno}" if self.lineno else ""
+        return f"{self.where} -> {self.field}{at} (due {self.due}): {self.what}"
 
 
 def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
@@ -1168,6 +1252,7 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                     f"release from",
                     fires,
                     field="course_source_repo",
+                    lineno=locate(sched.raw, where, "course_source_repo"),
                 )
                 for _, where, fires in wanted[repo]
             )
@@ -1209,6 +1294,7 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                         fires,
                         field="course_source_path",
                         ceiling=Severity.WARNING,
+                        lineno=locate(sched.raw, where, "course_source_path"),
                     )
                 )
                 continue
@@ -1220,6 +1306,7 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                     f"`{repo}/{clean}` does not exist yet - this copy ships nothing",
                     fires,
                     field="course_source_path",
+                    lineno=locate(sched.raw, where, "course_source_path"),
                 )
             )
     return out
@@ -1513,7 +1600,11 @@ def main() -> int:
         source_name = f"{args.cohort_org}/{SCHEDULE_PATH}"
 
     if not args.validate:
-        print(json.dumps(asdict(sched), indent=2, default=str))
+        dump = asdict(sched)
+        # The plan, not the file it came from: `raw` is only there so a fault can cite a
+        # line number, and echoing the whole YAML back would bury the parse it asked for.
+        dump.pop("raw", None)
+        print(json.dumps(dump, indent=2, default=str))
         return 0
     # Report what was UNDERSTOOD as well as what was dropped: validation cannot catch a
     # well-formed entry with the wrong date, but a count that is one short is visible.
@@ -1536,8 +1627,9 @@ def main() -> int:
                     # from this report's text. The run used to grep the report back for a
                     # severity prefix, which silently matched only half the rungs - the
                     # process that KNOWS the severity is the one that should say it.
+                    at = f",line={f.lineno}" if f.lineno else ""
                     print(
-                        f"::warning file={SCHEDULE_PATH}::{f.line()}",
+                        f"::warning file={SCHEDULE_PATH}{at}::{f.line()}",
                         file=sys.stderr,
                     )
             print(
@@ -1551,8 +1643,8 @@ def main() -> int:
     # source missing in August is not a broken file, and folding it into `rc` also meant
     # riding the dropped-entry channel - which opens an issue titled "entries the
     # scheduler cannot read" and closes it on the next clean PARSE, whether or not the
-    # source was ever staged. The error rung is escalated by the hourly pre-flight
-    # (scheduler._preflight_sources), which owns a channel of its own.
+    # source was ever staged. The loud rungs are delivered by the cohort's digest issue
+    # (source_digest), which owns a channel of its own.
     if sched.dropped:
         print(f"\nINVALID: {len(sched.dropped)} entry/ies dropped")
         return 1

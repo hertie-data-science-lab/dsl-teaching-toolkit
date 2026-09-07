@@ -455,13 +455,15 @@ def _preflight_sources(
     dry_run: bool,
 ) -> int:
     """Check the plan's sources against the course org and keep the cohort's digest issue
-    in step. Returns the error count.
+    in step. Always returns 0.
 
-    Exactly one thing here fails the run: a source at the ERROR rung, which is a deploy
-    about to ship nothing. Everything else - a check that could not run, a digest that
-    could not be written - is logged and swallowed. The distinction is the point: a
-    RELEASE problem is worth a red X on the cron, a NOTIFICATION problem is not worth
-    stopping a release for."""
+    Nothing here fails the run, at any rung. A source nobody has staged is a CONTENT
+    fault, and it is delivered where the people who can fix it are looking: the cohort's
+    digest issue, which @mentions the instructors and links the line to edit. The exit
+    code belongs to the run itself - it broke, or it did not - and a missing source used
+    to spend it on every tick, up to eight red runs an hour mailing a bot account about a
+    folder only faculty can write. The signature keeps its int so the caller's `errors +=`
+    reads the same as every other phase."""
     try:
         faults = schedule.source_faults(sched, course_org)
     except Exception as exc:
@@ -474,16 +476,18 @@ def _preflight_sources(
             f"{course_org} (worst: {worst})"
         )
     try:
-        source_digest.sync(cohort_org, course_org, faults, now, dry_run=dry_run)
+        digest = source_digest.sync(
+            cohort_org, course_org, faults, now, dry_run=dry_run
+        )
     except Exception as exc:
         log_err(f"could not update {cohort_org}'s source digest: {exc}")
-    if worst == schedule.Severity.ERROR:
-        log_err(
-            f"{cohort_org}: a source due within "
-            f"{int(schedule.SOURCE_ERROR_WINDOW.total_seconds() // 3600)}h is not staged "
-            f"in {course_org} - that deploy will ship nothing"
+        return 0
+    if digest.errors:
+        # `sync` has already said what went wrong, line by line. Recorded here and NOT
+        # returned: an undelivered notification must not stop a release.
+        log_step(
+            f"{cohort_org}'s source digest: {digest.errors} error(s) - not delivered"
         )
-        return 1
     return 0
 
 
@@ -608,8 +612,8 @@ def _release_phase(
     # at its moment, which is far too late to write the thing. This is the only unattended
     # surface that notices - the commit-time validator only ever runs when someone edits
     # schedule.yml, and a plan written in August and forgotten is exactly the case that
-    # needs catching. Never fatal to the run: an undelivered warning must not stop a
-    # release (see source_digest.sync).
+    # needs catching. Never fatal to the run, at any rung: the fault is faculty's to fix
+    # and the digest issue is how they hear about it (see _preflight_sources).
     errors += _preflight_sources(course_org, cohort_org, sched, now, dry_run)
 
     if dry_run:

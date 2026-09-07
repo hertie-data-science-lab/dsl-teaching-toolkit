@@ -17,7 +17,7 @@ import pytest
 import yaml
 
 from dsl_course import collect as collect_mod
-from dsl_course import course, deploy, ghcli, scheduler, seed
+from dsl_course import course, deploy, ghcli, scheduler, seed, source_digest
 from dsl_course.grades import _DEFAULT_SPEC as DEFAULT_SPEC
 from dsl_course.schedule import (
     AssignmentEntry,
@@ -91,7 +91,9 @@ def _no_source_preflight(monkeypatch):
     I/O. These tests are about the release/snapshot/autograde phases, so it is stubbed to
     "everything is staged" by default; the pre-flight has its own tests below."""
     monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [])
-    monkeypatch.setattr(scheduler.source_digest, "sync", lambda *a, **k: 0)
+    monkeypatch.setattr(
+        scheduler.source_digest, "sync", lambda *a, **k: source_digest.DigestResult()
+    )
 
 
 def _r(label: str, when: datetime, **kw) -> Release:
@@ -1993,7 +1995,7 @@ def _preflight(monkeypatch, faults, now=WHEN, dry_run=False):
     monkeypatch.setattr(
         scheduler.source_digest,
         "sync",
-        lambda *a, **k: seen.update(args=a, kw=k) or 0,
+        lambda *a, **k: seen.update(args=a, kw=k) or source_digest.DigestResult(),
     )
     rc = scheduler._preflight_sources(
         "Course-Org", "Cohort-Org", Schedule(), now, dry_run
@@ -2001,19 +2003,39 @@ def _preflight(monkeypatch, faults, now=WHEN, dry_run=False):
     return rc, seen
 
 
-def test_preflight_fails_the_run_only_for_a_source_about_to_ship_nothing(monkeypatch):
-    # The whole ladder exists so this is the ONLY rung that goes red. A term written up
-    # front is all advisories, and red-Xing that trains everyone to ignore the cron.
-    imminent = SourceFault("releases.a", "gone", WHEN + timedelta(hours=2), "f")
-    distant = SourceFault("releases.b", "gone", WHEN + timedelta(days=40), "f")
-    assert _preflight(monkeypatch, [imminent])[0] == 1
+def test_a_missed_rung_source_leaves_the_exit_code_alone(monkeypatch):
+    # No rung goes red, the top one included. A source nobody staged is faculty's to fix
+    # and the digest issue is where they hear about it; spending the exit code on it meant
+    # up to eight red runs an hour mailing a bot account about a folder it cannot write.
+    missed = SourceFault("releases.a", "gone", WHEN - timedelta(hours=2), "f")
+    critical = SourceFault("releases.b", "gone", WHEN + timedelta(hours=2), "f")
+    distant = SourceFault("releases.c", "gone", WHEN + timedelta(days=40), "f")
+    assert _preflight(monkeypatch, [missed])[0] == 0
+    assert _preflight(monkeypatch, [critical])[0] == 0
     assert _preflight(monkeypatch, [distant])[0] == 0
     assert _preflight(monkeypatch, [])[0] == 0
 
 
+def test_a_digest_error_is_reported_but_never_returned(monkeypatch):
+    # The digest counts its own failures; the pre-flight reads them so the run log says so,
+    # and still returns 0 - an undelivered notification must not stop a release.
+    monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [])
+    monkeypatch.setattr(
+        scheduler.source_digest,
+        "sync",
+        lambda *a, **k: source_digest.DigestResult(errors=1),
+    )
+    assert (
+        scheduler._preflight_sources(
+            "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+        )
+        == 0
+    )
+
+
 def test_preflight_reports_every_fault_however_distant(monkeypatch):
-    # Severity gates the RED X, not the digest: the issue body lists the lot, so the
-    # advisories are there as context the moment one of them escalates.
+    # Severity gates who is TOLD, not what is listed: the issue body carries the lot, so
+    # the advisories are there as context the moment one of them escalates.
     distant = SourceFault("releases.b", "gone", WHEN + timedelta(days=40), "f")
     _, seen = _preflight(monkeypatch, [distant])
     assert seen["args"][2] == [distant]
@@ -2037,7 +2059,7 @@ def test_a_digest_that_cannot_be_written_never_stops_a_release(monkeypatch):
 
 
 def test_a_source_check_that_cannot_run_is_not_read_as_everything_missing(monkeypatch):
-    # A rate limit must not be reported as 22 broken entries, and must not go red.
+    # A rate limit must not be reported as 22 broken entries.
     def boom(sched, org):
         raise RuntimeError("API rate limit exceeded")
 

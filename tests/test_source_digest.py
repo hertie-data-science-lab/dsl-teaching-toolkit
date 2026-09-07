@@ -20,12 +20,18 @@ BERLIN = ZoneInfo("Europe/Berlin")
 NOW = datetime(2026, 8, 17, 12, 0, tzinfo=BERLIN)
 
 
-def _f(where: str, offset: timedelta | None, field: str = "course_source_path"):
+def _f(
+    where: str,
+    offset: timedelta | None,
+    field: str = "course_source_path",
+    lineno: int | None = None,
+):
     return SourceFault(
         where,
         "`cm/x` does not exist yet",
         NOW + offset if offset else None,
         field=field,
+        lineno=lineno,
     )
 
 
@@ -75,7 +81,7 @@ def test_the_body_carries_its_own_previous_state():
     # No committed state file and no database - the issue IS the record, so the digest
     # can tell "still broken" from "just got worse" with nothing but what it last wrote.
     body = sd.render_body([_f("releases.a", timedelta(hours=2))], NOW, "Course")
-    assert sd.read_state(body) == {"releases.a.course_source_path": "error"}
+    assert sd.read_state(body) == {"releases.a.course_source_path": "critical"}
 
 
 def test_a_body_this_module_did_not_write_reads_as_no_state():
@@ -102,45 +108,106 @@ def test_rungs_are_rendered_loudest_first():
     body = sd.render_body(
         [
             _f("releases.far", timedelta(days=40)),
-            _f("releases.near", timedelta(hours=3)),
+            _f("releases.fired", -timedelta(hours=1)),
+            _f("releases.tomorrow", timedelta(hours=3)),
+            _f("releases.near", timedelta(hours=30)),
             _f("releases.soon", timedelta(days=3)),
         ],
         NOW,
         "Course",
     )
     assert (
-        body.index("### ERROR") < body.index("### WARNING") < body.index("### ADVISORY")
+        body.index("### MISSED")
+        < body.index("### CRITICAL")
+        < body.index("### URGENT")
+        < body.index("### WARNING")
+        < body.index("### ADVISORY")
     )
+
+
+def test_every_rung_says_what_it_means():
+    # The rung is the only thing that tells a reader how much of their day this deserves,
+    # and the top one is not "deploys soon" - it has already failed to ship.
+    body = sd.render_body(
+        [
+            _f("releases.fired", -timedelta(hours=1)),
+            _f("releases.tomorrow", timedelta(hours=3)),
+            _f("releases.near", timedelta(hours=30)),
+            _f("releases.soon", timedelta(days=3)),
+            _f("releases.far", timedelta(days=40)),
+        ],
+        NOW,
+        "Course",
+    )
+    assert "Fired with nothing staged - the copy did not ship." in body
+    assert "**Fires within 24h.**" in body
+    assert "**Fires within 48h.**" in body
+    assert "**Fires within 7 days.**" in body
+    assert "Further out - listed so the picture is complete" in body
+
+
+def test_the_body_links_at_the_line_to_edit():
+    # `releases.lecture_02` still leaves faculty scrolling a file they wrote in August.
+    body = sd.render_body(
+        [_f("releases.a", timedelta(hours=3), lineno=36)], NOW, "Course", "Cohort"
+    )
+    assert (
+        "([schedule.yml:36](https://github.com/Cohort/classroom-config/blob/main/"
+        "schedule.yml#L36))"
+    ) in body
+
+
+def test_a_fault_whose_line_is_unknown_is_listed_without_one():
+    # The scan returns None for a line it cannot find, and a broken link is worse than no
+    # link - the fault itself still has to be reported.
+    body = sd.render_body(
+        [_f("releases.a", timedelta(hours=3))], NOW, "Course", "Cohort"
+    )
+    assert "**`releases.a`** -> `course_source_path`  " in body
+    assert "schedule.yml#L" not in body
 
 
 # ------------------------------------------------------------------------ transitions
 
 
 def test_a_new_advisory_is_not_news_but_a_new_warning_is():
-    current = {"a.f": "advisory", "b.f": "warning", "c.f": "error"}
-    appeared, escalated, cleared = sd.transitions({}, current)
-    assert appeared == ["b.f", "c.f"]  # the advisory stays quiet
-    assert (escalated, cleared) == ([], [])
+    current = {"a.f": "advisory", "b.f": "warning", "c.f": "critical"}
+    t = sd.transitions({}, current)
+    assert t.appeared == ["b.f", "c.f"]  # the advisory stays quiet
+    assert (t.escalated, t.cleared) == ([], [])
+
+
+def test_transitions_carry_the_rung_each_fault_landed_on():
+    # Who is told depends on the rung, not on the fact that something changed - so the
+    # notifier reads it from here rather than re-deriving it from the faults.
+    t = sd.transitions({"a.f": "warning"}, {"a.f": "missed", "b.f": "advisory"})
+    assert t.escalated == ["a.f"]
+    assert t.rung == {"a.f": sd.Severity.MISSED, "b.f": sd.Severity.ADVISORY}
+
+
+def test_no_transition_at_all_is_falsey():
+    assert not sd.transitions({"a.f": "warning"}, {"a.f": "warning"})
+    assert sd.transitions({}, {"a.f": "warning"})
 
 
 def test_escalation_is_reported_but_standing_still_is_not():
     previous = {"a.f": "warning", "b.f": "warning"}
-    current = {"a.f": "error", "b.f": "warning"}
-    appeared, escalated, _ = sd.transitions(previous, current)
-    assert escalated == ["a.f"]
-    assert appeared == []  # `b` is unchanged - an hourly tick must not re-announce it
+    current = {"a.f": "urgent", "b.f": "warning"}
+    t = sd.transitions(previous, current)
+    assert t.escalated == ["a.f"]
+    assert t.appeared == []  # `b` is unchanged - an hourly tick must not re-announce it
 
 
 def test_clearing_is_always_news_however_quietly_it_arrived():
     # It left from `advisory`, which never earned an email going in - but "it is fixed"
     # is the message that lets someone stop worrying, so it is always reported.
-    _, _, cleared = sd.transitions({"a.f": "advisory"}, {})
-    assert cleared == ["a.f"]
+    assert sd.transitions({"a.f": "advisory"}, {}).cleared == ["a.f"]
 
 
 def test_de_escalation_is_not_reported_as_a_change():
     # A date pushed back makes a fault less urgent. Nothing broke, so nobody is emailed.
-    assert sd.transitions({"a.f": "error"}, {"a.f": "warning"}) == ([], [], [])
+    t = sd.transitions({"a.f": "critical"}, {"a.f": "warning"})
+    assert (t.appeared, t.escalated, t.cleared) == ([], [], [])
 
 
 # ------------------------------------------------------------------------- sync + IO
@@ -150,14 +217,18 @@ def test_an_advisory_only_plan_opens_no_issue_at_all(gh):
     # Jan writes his whole term in August: 21 sources that do not exist yet, all of them
     # normal. Opening a ticket for that is the cry-wolf failure in a different channel.
     fake = gh([])
-    assert sd.sync("Cohort", "Course", [_f("releases.a", timedelta(days=60))], NOW) == 0
+    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(days=60))], NOW)
+    assert out.errors == 0
     assert fake.did("issue", "create") == []
     assert fake.did("issue", "comment") == []
 
 
 def test_the_first_warning_opens_the_issue(gh):
     fake = gh([])
-    assert sd.sync("Cohort", "Course", [_f("releases.a", timedelta(days=3))], NOW) == 0
+    assert (
+        sd.sync("Cohort", "Course", [_f("releases.a", timedelta(days=3))], NOW).errors
+        == 0
+    )
     created = fake.did("issue", "create")
     assert len(created) == 1
     assert sd.TITLE in created[0]
@@ -170,7 +241,8 @@ def test_a_quiet_tick_edits_the_body_and_says_nothing(gh):
     # email on a body edit) and NOT commented on - this is the noise control.
     body = sd.render_body([_f("releases.a", timedelta(days=3))], NOW, "Course")
     fake = gh([{"number": 7, "title": sd.TITLE, "body": body}])
-    assert sd.sync("Cohort", "Course", [_f("releases.a", timedelta(days=3))], NOW) == 0
+    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(days=3))], NOW)
+    assert out.errors == 0 and not out.transitions
     assert len(fake.did("issue", "edit")) == 1
     assert fake.did("issue", "comment") == []
 
@@ -178,28 +250,52 @@ def test_a_quiet_tick_edits_the_body_and_says_nothing(gh):
 def test_an_escalation_comments_and_mentions_the_instructors(gh):
     was = sd.render_body([_f("releases.a", timedelta(days=3))], NOW, "Course")
     fake = gh([{"number": 7, "title": sd.TITLE, "body": was}])
-    assert sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=3))], NOW) == 0
+    out = sd.sync(
+        "Cohort", "Course", [_f("releases.a", timedelta(hours=3), lineno=36)], NOW
+    )
+    assert out.errors == 0
     comments = fake.did("issue", "comment")
     assert len(comments) == 1
     text = comments[0][comments[0].index("--body") + 1]
-    assert "Escalated" in text and "now **error**" in text
+    assert "Escalated" in text and "now **critical**" in text
+    # The fix is one click from the notification, not a scroll through the file.
+    assert "schedule.yml#L36" in text
     # An issue only emails people it mentions - without this the comment is as silent as
     # the run summary it exists to improve on.
     assert "cc @Cohort/instructors" in text
 
 
+def test_sync_reports_the_transitions_and_the_issue_to_link_to(gh):
+    # What the notifier mails on top of the @mention: the rung each key crossed, the
+    # issue that holds the detail, and the faults themselves.
+    was = sd.render_body([_f("releases.a", timedelta(days=3))], NOW, "Course")
+    gh([{"number": 7, "title": sd.TITLE, "body": was}])
+    fault = _f("releases.a", timedelta(hours=3), lineno=36)
+    out = sd.sync("Cohort", "Course", [fault], NOW)
+    assert out.transitions.escalated == ["releases.a.course_source_path"]
+    assert out.transitions.rung == {
+        "releases.a.course_source_path": sd.Severity.CRITICAL
+    }
+    assert out.issue_url == "https://github.com/Cohort/classroom-config/issues/7"
+    assert out.faults_by_key == {"releases.a.course_source_path": fault}
+
+
 def test_the_last_fault_clearing_closes_the_issue(gh):
     was = sd.render_body([_f("releases.a", timedelta(hours=3))], NOW, "Course")
     fake = gh([{"number": 7, "title": sd.TITLE, "body": was}])
-    assert sd.sync("Cohort", "Course", [], NOW) == 0
+    out = sd.sync("Cohort", "Course", [], NOW)
+    assert out.errors == 0
     closed = fake.did("issue", "close")
     assert len(closed) == 1 and "7" in closed[0]
     assert fake.did("issue", "edit") == []
+    # "It is fixed" is a transition too - the notifier says so on the same channel.
+    assert out.transitions.cleared == ["releases.a.course_source_path"]
 
 
 def test_nothing_missing_and_no_issue_is_a_complete_no_op(gh):
     fake = gh([])
-    assert sd.sync("Cohort", "Course", [], NOW) == 0
+    out = sd.sync("Cohort", "Course", [], NOW)
+    assert out.errors == 0 and out.transitions is None
     assert fake.did("issue", "create") == fake.did("issue", "close") == []
 
 
@@ -222,7 +318,7 @@ def test_dry_run_touches_nothing(gh):
             [_f("releases.a", timedelta(hours=3))],
             NOW,
             dry_run=True,
-        )
+        ).errors
         == 0
     )
     assert fake.did("issue", "create") == fake.did("issue", "edit") == []
@@ -232,6 +328,6 @@ def test_the_field_reference_points_at_the_tier_the_org_runs(monkeypatch):
     # The runbook describes the engine the org actually runs; a trunk org sent to release's
     # docs reads a schema for code it does not have.
     body = sd.render_body(
-        [_f("releases.a", timedelta(hours=2))], NOW, "Course", None, "main"
+        [_f("releases.a", timedelta(hours=2))], NOW, "Course", "Cohort", None, "main"
     )
     assert "/blob/main/docs/07-schedule-releases.md" in body
