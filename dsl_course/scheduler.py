@@ -477,15 +477,25 @@ def _preflight_sources(
             f"{course_org} (worst: {worst})"
         )
     # Local, because everything downstream speaks about time to a human: the deadline
-    # faculty wrote, and the overnight window where a mail is held rather than sent.
+    # faculty wrote, and the overnight window where a notification is held rather than
+    # sent.
     local = schedule.in_cohort_zone(sched, now)
-    try:
-        # Who to tell, asked ONCE: the digest @mentions them and the mail is addressed to
-        # them, and asking git twice would be two reads and two chances to disagree.
-        routing = notify.route(cohort_org, course_org, faults, local)
-    except Exception as exc:
-        log_err(f"could not work out who to tell about {cohort_org}'s sources: {exc}")
-        routing = notify.Routing()
+    # Who to tell, asked ONCE and only if asked at all: the digest @mentions them and the
+    # mail is addressed to them, so asking git twice would be two reads and two chances to
+    # disagree - and `sync` calls this only on a tick with something to say, because the
+    # answer costs a blame query, a people.yml read and a commit lookup per repo.
+    routing = notify.Routing()
+
+    def whom() -> list[str]:
+        nonlocal routing
+        try:
+            routing = notify.route(cohort_org, course_org, faults, local)
+        except Exception as exc:
+            log_err(
+                f"could not work out who to tell about {cohort_org}'s sources: {exc}"
+            )
+        return routing.logins
+
     try:
         digest = source_digest.sync(
             cohort_org,
@@ -493,7 +503,7 @@ def _preflight_sources(
             faults,
             local,
             dry_run=dry_run,
-            mention=routing.logins,
+            resolve_mention=whom,
         )
     except Exception as exc:
         log_err(f"could not update {cohort_org}'s source digest: {exc}")

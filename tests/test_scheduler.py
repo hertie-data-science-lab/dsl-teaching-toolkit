@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
+from conftest import source_fault
 
 from dsl_course import collect as collect_mod
 from dsl_course import course, deploy, ghcli, notify, scheduler, seed, source_digest
@@ -24,7 +25,6 @@ from dsl_course.schedule import (
     Deploy,
     Release,
     Schedule,
-    SourceFault,
 )
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -2000,13 +2000,16 @@ def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None):
         "route",
         lambda *a, **k: seen.update(route=a) or notify.Routing(logins=["JanG"]),
     )
-    monkeypatch.setattr(
-        scheduler.source_digest,
-        "sync",
-        lambda *a, **k: (
-            seen.update(args=a, kw=k) or (digest or source_digest.DigestResult())
-        ),
-    )
+
+    def _sync(*a, **k):
+        seen.update(args=a, kw=k)
+        # `sync` decides whether to ask at all; a test that never called the resolver
+        # would be asserting the mention of a tick with nothing to say.
+        if k.get("resolve_mention"):
+            seen["mention"] = k["resolve_mention"]()
+        return digest or source_digest.DigestResult()
+
+    monkeypatch.setattr(scheduler.source_digest, "sync", _sync)
     monkeypatch.setattr(
         scheduler.notify,
         "notify_source_transitions",
@@ -2022,9 +2025,9 @@ def test_a_missed_rung_source_leaves_the_exit_code_alone(monkeypatch):
     # No rung goes red, the top one included. A source nobody staged is faculty's to fix
     # and the digest issue is where they hear about it; spending the exit code on it meant
     # up to eight red runs an hour mailing a bot account about a folder it cannot write.
-    missed = SourceFault("releases.a", "gone", WHEN - timedelta(hours=2), "f")
-    critical = SourceFault("releases.b", "gone", WHEN + timedelta(hours=2), "f")
-    distant = SourceFault("releases.c", "gone", WHEN + timedelta(days=40), "f")
+    missed = source_fault("releases.a", fires=WHEN - timedelta(hours=2))
+    critical = source_fault("releases.b", fires=WHEN + timedelta(hours=2))
+    distant = source_fault("releases.c", fires=WHEN + timedelta(days=40))
     assert _preflight(monkeypatch, [missed])[0] == 0
     assert _preflight(monkeypatch, [critical])[0] == 0
     assert _preflight(monkeypatch, [distant])[0] == 0
@@ -2051,7 +2054,7 @@ def test_a_digest_error_is_reported_but_never_returned(monkeypatch):
 def test_preflight_reports_every_fault_however_distant(monkeypatch):
     # Severity gates who is TOLD, not what is listed: the issue body carries the lot, so
     # the advisories are there as context the moment one of them escalates.
-    distant = SourceFault("releases.b", "gone", WHEN + timedelta(days=40), "f")
+    distant = source_fault("releases.b", fires=WHEN + timedelta(days=40))
     _, seen = _preflight(monkeypatch, [distant])
     assert seen["args"][2] == [distant]
 
@@ -2089,7 +2092,7 @@ def test_a_source_check_that_cannot_run_is_not_read_as_everything_missing(monkey
 
 def test_preflight_passes_dry_run_through(monkeypatch):
     _, seen = _preflight(
-        monkeypatch, [SourceFault("releases.a", "gone", WHEN, "f")], dry_run=True
+        monkeypatch, [source_fault("releases.a", fires=WHEN)], dry_run=True
     )
     assert seen["kw"]["dry_run"] is True
 
@@ -2362,11 +2365,11 @@ def test_autograde_waits_for_a_completed_snapshot(monkeypatch):
 def test_who_to_tell_is_asked_once_and_handed_to_both_channels(monkeypatch):
     # The digest @mentions them and the mail is addressed to them. Asking git twice would
     # be two API reads and two chances for the issue and the email to disagree.
-    fault = SourceFault("releases.a", "gone", WHEN + timedelta(hours=3), "f")
+    fault = source_fault("releases.a", fires=WHEN + timedelta(hours=3))
     digest = source_digest.DigestResult(faults_by_key={fault.key: fault})
     _, seen = _preflight(monkeypatch, [fault], digest=digest)
     assert seen["route"][:2] == ("Cohort-Org", "Course-Org")
-    assert seen["kw"]["mention"] == ["JanG"]
+    assert seen["mention"] == ["JanG"]
     assert seen["mailed"][2] is digest
     assert seen["mailed"][4].logins == ["JanG"]
 
@@ -2437,5 +2440,5 @@ def test_a_routing_that_raised_still_lets_the_digest_speak(monkeypatch, capsys):
         )
         == 0
     )
-    assert seen["kw"]["mention"] == []
+    assert seen["kw"]["resolve_mention"]() == []
     assert "could not work out who to tell" in capsys.readouterr().err
