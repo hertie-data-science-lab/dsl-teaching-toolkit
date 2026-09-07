@@ -22,8 +22,10 @@ release cron down with it - the same contract the digest has.
 PUBLIC LOG RULE: every faculty workflow runs in a PUBLIC repo, so nothing here logs an
 address. Counts on stdout; a handle or a masked address only through `log.log_person`.
 
-Usage (the step appended to every cron - see `workflows_render._CRON_MAIL`):
-    gh api "repos/$REPO/actions/jobs/$JOB/logs" | tail -n 30 \
+Usage (the step appended to every cron - see `workflows_render._CRON_MAIL`). The tail is
+the failed step's OWN log, teed as it ran: this step runs inside the still-running job, so
+the jobs API cannot be asked which job failed.
+    tail -n 30 "$RUNNER_TEMP/run.log" \
       | python3 -m dsl_course.notify run-failed --course-org ORG \
           --workflow "Scheduled release" --run-url URL
 """
