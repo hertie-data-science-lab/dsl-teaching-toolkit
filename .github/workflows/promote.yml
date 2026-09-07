@@ -1,38 +1,34 @@
-name: Promote
+name: Promote to release
 
-# Move a deployment tier forward. `staging` is what the demo course org runs, `release` is
-# what every real org runs (dsl_course/central.py, and each org's own `central_ref:`), and
-# both are always FAST-FORWARDS of `main` - they carry no commits of their own.
+# Move the `release` tier forward. `release` is what every real org runs (the default in
+# dsl_course/central.py, and each org's own `central_ref:`); `main` is the trunk, and what
+# the demo course org runs - so whatever is promoted here has already been live in a real
+# org since it merged.
 #
-# That invariant is enforced here, not by convention: the promoted commit must be on
-# main's history, and it must be a descendant of the tier's current tip. So this workflow
-# can only ever move a tier forward along main - it cannot rewrite a tier's history, and
-# there is therefore no way to use it to ship something main has never seen.
+# `release` carries no commits of its own: it is always a FAST-FORWARD of `main`. That
+# invariant is enforced here, not by convention: the promoted commit must be on main's
+# history, and it must be a descendant of `release`'s current tip. So this workflow can
+# only ever move `release` forward along main - it cannot rewrite its history, and there is
+# therefore no way to use it to ship something main has never seen.
 #
 # Rollback is a `git revert` on main, promoted forward; pinning one org to the last good SHA
 # is the way to move faster than that (see docs-admin-arch/central-admin.md).
 #
 # Who can run it: dispatching a workflow needs write on this repo, which is the same gate
-# every seeded workflow in every org uses. Promoting to `release` is gated a second time by
-# the `release` environment's required reviewers - see docs-admin-arch/central-admin.md.
+# every seeded workflow in every org uses. There is no approval gate on top of that - the
+# demo course org has been running this code off `main` since it merged, which is where the
+# confidence to press this comes from.
 
 on:
   workflow_dispatch:
     inputs:
-      to:
-        description: "Tier to promote"
-        required: true
-        type: choice
-        options:
-          - staging
-          - release
       ref:
-        description: "What to promote (default: main -> staging, staging -> release). A branch, tag or full SHA on main's history - everything up to it ships."
+        description: "What to promote (default: main's tip). A branch, tag or full SHA on main's history - everything up to it ships."
         required: false
-        default: ""
+        default: "main"
         type: string
       refresh_orgs:
-        description: "Refresh every org at that tier now, rather than waiting for tonight's cron"
+        description: "Refresh every org on `release` now, rather than waiting for tonight's cron"
         required: false
         default: true
         type: boolean
@@ -45,11 +41,6 @@ jobs:
   promote:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # The tier being promoted to, as a deployment environment: `release` carries the
-    # maintainer as a required reviewer, so a release promotion pauses for a human, while a
-    # staging soak stays one click. GitHub creates a named environment on first use, so an
-    # environment with no rules is simply no extra gate.
-    environment: ${{ inputs.to }}
     permissions:
       contents: read
     outputs:
@@ -72,7 +63,9 @@ jobs:
           PROMOTE_DEPLOY_KEY: ${{ secrets.PROMOTE_DEPLOY_KEY }}
           # `gh api meta` is a public, unauthenticated endpoint; gh just wants a token.
           GH_TOKEN: ${{ github.token }}
-          TIER: ${{ inputs.to }}
+          # The one tier this workflow moves. `main` is not promoted to - it is where
+          # promotions come FROM.
+          TIER: release
           SOURCE_INPUT: ${{ inputs.ref }}
         run: |
           set -eo pipefail
@@ -93,13 +86,10 @@ jobs:
           # narrows the window between the tip read below and the lease it becomes.
           git fetch --quiet origin "+refs/heads/*:refs/remotes/origin/*"
 
-          # staging is promoted from main, release from what has already soaked on staging.
-          # Overridable, to promote a point on main short of its tip - a tier is a
-          # fast-forward, so this chooses HOW FAR up main to move, never which commits to
-          # take: naming a commit ships it and everything before it.
-          default_source=main
-          [ "$TIER" = "release" ] && default_source=staging
-          source="${SOURCE_INPUT:-$default_source}"
+          # main's tip by default. Overridable, to promote a point on main short of it -
+          # `release` is a fast-forward, so this chooses HOW FAR up main to move, never
+          # which commits to take: naming a commit ships it and everything before it.
+          source="${SOURCE_INPUT:-main}"
 
           # A branch name resolves through origin/; a tag or SHA does not.
           new=$(git rev-parse --verify --quiet "refs/remotes/origin/$source^{commit}" \
@@ -154,6 +144,8 @@ jobs:
   # which the nightly "Refresh actions" cron does within 24h. This runs it now, so a
   # promotion is a deploy rather than a deploy that happens overnight.
   #
+  # `release` only: an org on `main` is refreshed by the merge that moved main, not by this.
+  #
   # It runs the refresh HERE, from the commit just promoted, rather than dispatching each
   # org's own "Refresh actions": that workflow checks the toolkit out at the ref frozen in
   # the org's own workflow file, so an org whose `central_ref:` has just moved between tiers
@@ -184,7 +176,7 @@ jobs:
           # seed refresh propagates the bot token as a repo secret, and ghcli.bot_token
           # refuses to publish one that is only GH_TOKEN.
           DSL_BOT_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
-          TIER: ${{ inputs.to }}
+          TIER: release
         run: |
           set -eo pipefail
           # list_orgs exits non-zero when it could not read SOME org's dsl-course.yml, and

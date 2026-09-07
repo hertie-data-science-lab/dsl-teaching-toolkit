@@ -107,19 +107,54 @@ def _promote_job() -> dict:
     return SHIPPED_WORKFLOWS[".github/workflows/promote.yml"]["jobs"]["promote"]
 
 
-def test_promote_pushes_the_tiers_with_a_deploy_key_not_the_bot():
-    # The tier branches carry a ruleset whose only bypass actor is "deploy keys", which no
+def _fast_forward_step() -> dict:
+    return next(
+        s
+        for s in _promote_job()["steps"]
+        if s.get("name", "").startswith("Fast-forward")
+    )
+
+
+def test_promote_pushes_the_tier_with_a_deploy_key_not_the_bot():
+    # `release` carries a ruleset whose only bypass actor is "deploy keys", which no
     # account and no Actions token can be - so a bot token in this job is both the account
     # push that ruleset exists to refuse and a far wider credential than a push needs.
-    job = _promote_job()
-    assert "DSL_BOT_TOKEN" not in yaml.safe_dump(job)
-    step = next(s for s in job["steps"] if s.get("name", "").startswith("Fast-forward"))
+    assert "DSL_BOT_TOKEN" not in yaml.safe_dump(_promote_job())
+    step = _fast_forward_step()
     assert step["env"]["PROMOTE_DEPLOY_KEY"] == "${{ secrets.PROMOTE_DEPLOY_KEY }}"
     assert 'git remote set-url origin "git@github.com:' in step["run"]
     # ssh-keyscan trusts whatever answers, so it would have written a substituted
     # github.com's key into known_hosts and pushed the deploy key straight at it.
     assert "ssh-keyscan" not in step["run"]
     assert "gh api meta --jq '.ssh_keys[]'" in step["run"]
+
+
+def test_promote_moves_release_only_and_promotes_mains_tip_by_default():
+    # There is one tier to promote TO, so it is not an input: `main` is where a promotion
+    # comes FROM - the demo course org runs it, refreshed by the merge itself.
+    doc = SHIPPED_WORKFLOWS[".github/workflows/promote.yml"]
+    trigger = doc.get("on", doc.get(True))
+    inputs = trigger["workflow_dispatch"]["inputs"]
+    assert "to" not in inputs
+    assert inputs["ref"]["default"] == "main"
+    assert _fast_forward_step()["env"]["TIER"] == "release"
+
+
+def test_promote_is_gated_on_write_here_and_nothing_else():
+    # The `release` environment's required reviewer was the gate back when a promotion was
+    # the first time code ran in any org. It no longer is - main is live in the demo org -
+    # so the deliberate act is the press, and the review happened on the PR.
+    assert "environment" not in _promote_job()
+
+
+def test_promote_can_only_fast_forward_release_along_main():
+    # The two guards that make this workflow unable to ship what main has not seen, and
+    # unable to rewrite the tier. Without the first, a commit off a fork could be pushed
+    # to `release`; without the second, a promotion could take `release` backwards.
+    run = _fast_forward_step()["run"]
+    assert 'git merge-base --is-ancestor "$new" origin/main' in run
+    assert 'git merge-base --is-ancestor "$tip" "$new"' in run
+    assert '--force-with-lease="refs/heads/$TIER:$tip"' in run
 
 
 def _promote_refresh_job() -> dict:
