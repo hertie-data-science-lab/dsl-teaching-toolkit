@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 import yaml
 from conftest import source_fault
 
-from dsl_course import mailer, schedule
+from dsl_course import mailer, schedule, source_digest
 from dsl_course.schedule import SOURCE_WARN_WINDOW, hours
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -92,11 +92,26 @@ def test_the_workflow_posts_the_comment_rather_than_building_it():
     assert comment["working-directory"] == "central"
 
 
-def test_the_comment_says_where_the_durable_record_is():
-    # The one thing the engine cannot know: which repo this workflow is running in.
+def test_the_comment_links_the_digest_issue_rather_than_a_search_for_it():
+    # The one thing the engine cannot know: which repo this workflow is running in, and
+    # which issue in it holds the record. A search link was what it used to say - the
+    # reader had to find the issue themselves, on a query that also matches the parser's.
     comment = _step("Comment on the push")
     assert "The generated GitHub record issue is" in comment["run"]
-    assert "classroom-config/issues" in comment["run"]
+    assert "gh issue list" in comment["run"]
+    # `--search` is a word match; the title is compared client-side, and read from the
+    # environment rather than spliced into the jq program.
+    assert "select(.title == env.TITLE)" in comment["run"]
+    # ...and only when nothing is open does it fall back to a search.
+    assert "issues?q=" in comment["run"]
+
+
+def test_the_digest_title_comes_from_the_engine_that_writes_the_issue():
+    # Every lookup of that issue matches the title EXACTLY, so a copy in this template
+    # stops finding it the day the wording changes - silently, on the one line meant to
+    # point at it.
+    assert "python3 -m dsl_course.source_digest --title" in _step("Comment")["run"]
+    assert source_digest.TITLE not in RAW
 
 
 def test_a_commit_comment_needs_contents_write():
@@ -164,7 +179,21 @@ def test_each_listed_row_is_the_engines_own_line():
     # `SourceFault.line()` is dash-separated in this order precisely so every surface can
     # reuse it whole rather than re-arranging it.
     fault = _fault("releases.lecture_02", timedelta(hours=3), 131)
-    assert f"- {fault.line()}" in schedule.source_comment([fault], NOW)
+    body = schedule.source_comment([fault], NOW, "Cohort-f2026")
+    assert f"- {fault.line(fault.cite('Cohort-f2026'))}" in body
+
+
+def test_the_citation_is_a_link_at_the_line_that_needs_editing():
+    # A commit comment is markdown, and the whole point of saying this on the push is that
+    # the fix is one click away rather than a scroll through a file written in August.
+    fault = _fault("releases.lecture_02", timedelta(hours=3), 131)
+    body = schedule.source_comment([fault], NOW, "Cohort-f2026")
+    assert (
+        "[`schedule.yml:131`](https://github.com/Cohort-f2026/classroom-config/blob/main"
+        "/schedule.yml#L131)"
+    ) in body
+    # No cohort to build a URL from - run by hand, off a runner - and it is plain code.
+    assert "](" not in schedule.source_comment([fault], NOW)
 
 
 def test_the_comment_tells_the_pusher_what_happens_next():

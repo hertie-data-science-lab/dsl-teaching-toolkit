@@ -1302,6 +1302,17 @@ class SourceFault:
         report, the fix sentence - so all of them cite the file the same way."""
         return f"{SCHEDULE_PATH}:{self.lineno}" if self.lineno else SCHEDULE_PATH
 
+    def cite(self, cohort_org: str = "") -> str:
+        """`at` for a MARKDOWN surface: a link to the exact line where the line and the
+        cohort are both known, plain code where either is not.
+
+        Every markdown surface - the digest body, its transition comment, the commit
+        comment on the push - cites the file through this, so the fix is one click from
+        wherever somebody first hears about it rather than a scroll through a file they
+        wrote in August."""
+        url = deep_link(cohort_org, self)
+        return f"[`{self.at}`]({url})" if url else f"`{self.at}`"
+
     @property
     def due(self) -> str:
         """The moment this fault bites, zone and all - see `zone_name`."""
@@ -1367,14 +1378,19 @@ class SourceFault:
             at=self.at, course_org=course_org, repo=self.repo, field=self.field
         )
 
-    def line(self) -> str:
+    def line(self, cite: str | None = None) -> str:
         """The one-line form, everywhere: the entry, the field, the line, what is wrong and
         when it bites.
 
         It names the FIELD as well as the entry, because "something is wrong with
         lecture-2" is not an instruction. Dash-separated, in this order, because the
-        commit-time validator lists these lines verbatim (see `source_comment`)."""
-        at = f" - {self.at}" if self.lineno else ""
+        commit-time validator lists these lines verbatim (see `source_comment`).
+
+        `cite` replaces the plain `schedule.yml:36` with the caller's own rendering of it -
+        the markdown deep link, on the surfaces that are markdown. The rest of the line is
+        the same line, because a reader comparing the commit comment with the run summary
+        is reading about the same fault."""
+        at = f" - {cite or self.at}" if self.lineno else ""
         when = f"fires {self.due}" if self.fires else self.due
         return f"{self.where} -> {self.field}{at} - {self.what} - {when}"
 
@@ -1515,6 +1531,20 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
     return out
 
 
+def deep_link(cohort_org: str, fault: SourceFault) -> str | None:
+    """The GitHub URL of the exact line to edit, or None when the line - or the cohort it
+    is in - is not known.
+
+    `main` is hard-coded because that is the only branch anything reads schedule.yml from,
+    the cohort's own workflows included."""
+    if not cohort_org or not fault.lineno:
+        return None
+    return (
+        f"https://github.com/{cohort_org}/{CONFIG_REPO}/blob/main/{SCHEDULE_PATH}"
+        f"#L{fault.lineno}"
+    )
+
+
 def source_report(faults: list[SourceFault], now: datetime, course_org: str) -> str:
     """The `--check-sources` half of the CLI report: every fault, loudest first, with the
     rung it sits at and the sentence that explains why distance is what decides.
@@ -1541,7 +1571,9 @@ def source_report(faults: list[SourceFault], now: datetime, course_org: str) -> 
     )
 
 
-def source_comment(faults: list[SourceFault], now: datetime) -> str:
+def source_comment(
+    faults: list[SourceFault], now: datetime, cohort_org: str = ""
+) -> str:
     """The comment to leave on a push that plans a release with nothing to ship, or "" when
     there is nothing to say.
 
@@ -1553,7 +1585,12 @@ def source_comment(faults: list[SourceFault], now: datetime) -> str:
     Built here rather than in the workflow's shell, which grepped the report above back
     for a rung prefix: the pattern matched some rungs and not others, silently, and it
     counted an entry that had ALREADY fired as one "inside 24h" - which is a different
-    thing to say to somebody and needs its own line."""
+    thing to say to somebody and needs its own line.
+
+    `cohort_org` turns each citation into a link at the line (`SourceFault.cite`). A
+    commit comment is markdown, and the whole point of saying this on the push is that the
+    fix is one click away; without the org there is no URL to build, and the line is cited
+    as code."""
     loud = sorted(
         (f for f in faults if f.severity(now) >= NOTIFY_FROM),
         key=lambda f: -f.severity(now),
@@ -1570,12 +1607,12 @@ def source_comment(faults: list[SourceFault], now: datetime) -> str:
                 f"{hours(SOURCE_WARN_WINDOW)}h whose materials are not in the course "
                 f"org:"
             ),
-            *(f"- {f.line()}" for f in coming),
+            *(f"- {f.line(f.cite(cohort_org))}" for f in coming),
         ]
     if fired:
         out += [
             f"{len(fired)} planned release(s) have already fired with nothing to ship:",
-            *(f"- {f.line()}" for f in fired),
+            *(f"- {f.line(f.cite(cohort_org))}" for f in fired),
         ]
     out += ["", "You will get one email about each as its deadline nears."]
     return "\n".join(out)
@@ -1911,7 +1948,14 @@ def main() -> int:
         # Everything the steps after this one act on is written by the process that KNOWS
         # it. The run used to grep the report above back for a rung prefix and rebuild the
         # comment in a shell, which matched some rungs and not others, silently.
-        comment = source_comment(faults, now)
+        # The cohort is what makes a citation a LINK. Off a runner it is named on the
+        # command line; in the cohort's own validate-schedule run the checkout is a copy
+        # of central, so the org comes from the ambient GitHub environment instead.
+        comment = source_comment(
+            faults,
+            now,
+            args.cohort_org or os.environ.get("GITHUB_REPOSITORY_OWNER", ""),
+        )
         if args.annotate:
             for f in sorted(faults, key=lambda f: -f.severity(now)):
                 # Straight to stderr as a workflow command, where Actions renders it

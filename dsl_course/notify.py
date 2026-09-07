@@ -48,9 +48,10 @@ from .schedule import (
     SOURCE_URGENT_WINDOW,
     Severity,
     SourceFault,
+    deep_link,
     hours,
 )
-from .source_digest import DigestResult, deep_link
+from .source_digest import DigestResult
 
 # How much of the deadline is left, in the subject. Formatted from the windows themselves,
 # so moving a rung cannot leave a hand-typed number of hours in somebody's inbox.

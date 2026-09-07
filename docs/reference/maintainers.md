@@ -53,9 +53,9 @@ Things whose *literal spelling* is depended on from outside Python:
 
 - **CLI module names.** Seeded workflows and templates invoke `python3 -m dsl_course.<x>`:
   `assign`, `bootstrap_course`, `collect`, `deploy`, `enrol_codes`, `grades`, `list_orgs`,
-  `notify`, `scaffold`, `schedule`, `scheduler`, `seed`, `site`, `status`, `syllabus`,
-  `sync_faculty`, `sync_membership`, `sync_roster`, `sync_teams`. A rename strands every org
-  until it refreshes.
+  `notify`, `scaffold`, `schedule`, `scheduler`, `seed`, `site`, `source_digest`, `status`,
+  `syllabus`, `sync_faculty`, `sync_membership`, `sync_roster`, `sync_teams`. A rename
+  strands every org until it refreshes.
 - **`roster.FIELDS` / `roster.normalise_role` / `teams.FIELDS`** are re-implemented in the
   shipped JavaScript (`templates/welcome/onboard.yml`, `team-formation.yml`), which cites them by
   name. Change a column and change both sides.

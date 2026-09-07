@@ -31,8 +31,10 @@ instructors team is the fallback.
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import NamedTuple
@@ -107,25 +109,10 @@ class Context(NamedTuple):
     mention: tuple[str, ...] = ()
 
 
-def deep_link(cohort_org: str, fault: SourceFault) -> str | None:
-    """The GitHub URL of the exact line to edit, or None when the line is not known.
-
-    `main` is hard-coded because that is the only branch anything reads schedule.yml from
-    - the cohort's own workflows included."""
-    if not cohort_org or not fault.lineno:
-        return None
-    return (
-        f"https://github.com/{cohort_org}/{CONFIG_REPO}/blob/main/{SCHEDULE_PATH}"
-        f"#L{fault.lineno}"
-    )
-
-
 def _cite(cohort_org: str, fault: SourceFault | None) -> str:
-    """`schedule.yml:36` as a link where the line is known, as code where it is not."""
-    if fault is None:
-        return f"`{SCHEDULE_PATH}`"
-    url = deep_link(cohort_org, fault)
-    return f"[`{fault.at}`]({url})" if url else f"`{fault.at}`"
+    """`SourceFault.cite`, plus the one case a fault cannot answer for: a key whose fault
+    is GONE, which is the CLEARED line - and there is no line to point at any more."""
+    return fault.cite(cohort_org) if fault else f"`{SCHEDULE_PATH}`"
 
 
 def _mention(ctx: Context) -> str:
@@ -524,3 +511,27 @@ def sync(
         + (f" (held until {QUIET_UNTIL}:00)" if in_quiet_hours(now) else "")
     )
     return result
+
+
+def main() -> int:
+    """`--title` prints the digest issue's exact title, and nothing else.
+
+    A CLI for one constant, because the alternative is a copy of it in the cohort's
+    validate-schedule template - and every lookup of this issue matches the title
+    EXACTLY (see `issues.find_issues`), so a copy stops finding the issue the day the
+    wording changes, silently, on the one line that was meant to point at it."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--title",
+        action="store_true",
+        help="print the digest issue's exact title - what a workflow searches for to "
+        "link the record it has just written to",
+    )
+    if not parser.parse_args().title:
+        parser.error("nothing to do - pass --title")
+    print(TITLE)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -142,7 +142,7 @@ jobs:
       # the line is still here. `sources_notify` and comment.txt are both written by the
       # process that knows the rung (dsl_course.schedule --annotate --comment-file), so
       # this step decides nothing - it posts what it was handed, and adds the one thing
-      # only the workflow knows: where this repo's digest issue lives.
+      # only the workflow knows: where this repo's digest issue actually is.
       - name: Comment on the push about a release with no materials
         if: github.event_name == 'push' && steps.validate.outputs.sources_notify == 'true'
         working-directory: central
@@ -150,11 +150,23 @@ jobs:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
-          COHORT: ${{ github.repository_owner }}
         run: |
           [ -s comment.txt ] || exit 0
-          body=$(printf '%s\nThe generated GitHub record issue is https://github.com/%s/classroom-config/issues?q=is%%3Aissue+is%%3Aopen+schedule.yml.\n' \
-            "$(cat comment.txt)" "$COHORT")
+          # The title comes from the engine that writes the issue. Every lookup of it
+          # matches EXACTLY, so a copy typed here would stop finding the issue the day
+          # the wording changed - and this line would point at a search finding nothing.
+          title=$(python3 -m dsl_course.source_digest --title)
+          # `--search` is a WORD match, so the exact-title filter is client-side. jq reads
+          # the title from the environment rather than from its own program text: it is
+          # engine output, not a string to splice into an expression.
+          url=$(TITLE="$title" gh issue list --repo "$REPO" --state open \
+            --search "$title in:title" --json url,title \
+            --jq 'map(select(.title == env.TITLE))[0].url // empty') || true
+          # Nothing open yet: this push is often what opens it, on the scheduler's next
+          # tick. A search is then the honest answer - it holds the issue within a minute.
+          [ -n "$url" ] || url="https://github.com/$REPO/issues?q=is%3Aissue+is%3Aopen+schedule.yml"
+          body=$(printf '%s\nThe generated GitHub record issue is %s.\n' \
+            "$(cat comment.txt)" "$url")
           gh api "repos/$REPO/commits/$SHA/comments" -f body="$body" >/dev/null
 
       - name: Open an issue naming what was dropped
