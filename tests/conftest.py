@@ -14,7 +14,17 @@ import subprocess
 import pytest
 import yaml
 
-from dsl_course import central, ghcli, grades, repos, roster, schedule, site, teams
+from dsl_course import (
+    bootstrap_course,
+    central,
+    ghcli,
+    grades,
+    repos,
+    roster,
+    schedule,
+    site,
+    teams,
+)
 
 # students.csv's header row, DERIVED from the columns the engine declares rather than
 # re-typed. `roster.FIELDS` is a frozen public contract (the shipped JavaScript spells the
@@ -107,6 +117,35 @@ def _clear_process_memos():
     schedule._schedule_text.cache_clear()
     grades._grading_text.cache_clear()
     ghcli.bot_login.cache_clear()
+
+
+def stub_bootstrap(monkeypatch) -> None:
+    """Neutralise everything a bootstrap does EXCEPT the site sync - the org-level gh/git
+    layer, the repo seeding and the summary output. Shared: two test files now drive
+    `bootstrap_course.main`, and a per-file copy is how one of them ends up stubbing a
+    step the other has since renamed."""
+    bc = bootstrap_course
+    # Every configuration step reports a failure count that _run threads into its exit
+    # code and into the closing summary - a clean stub reports zero failures.
+    for name in (
+        "converge_org_settings",
+        "create_default_teams",
+        "grant_button_access",
+        "setup_cohort_extras",
+        "seed_workflows",
+        "create_profile_repo",
+    ):
+        monkeypatch.setattr(bc, name, lambda *a, **k: 0)
+    monkeypatch.setattr(bc, "preflight", lambda org: True)
+    monkeypatch.setattr(bc, "add_course_admins", lambda org, handles: 0)
+    monkeypatch.setattr(bc, "validate_secret_presence", lambda org, secret: True)
+    monkeypatch.setattr(bc, "put_file", lambda *a, **k: True)
+    monkeypatch.setattr(bc, "register_cohort", lambda course, cohort: True)
+    monkeypatch.setattr(bc, "update_profile_readme", lambda *a, **k: 0)
+    monkeypatch.setattr(bc.sync_faculty, "sync", lambda course, cohorts=None: 0)
+    # The org's tier is read off its (not yet written) dsl-course.yml; a bootstrap test is
+    # about what the run does, not which ref it seeds at.
+    monkeypatch.setattr(bc, "central_ref_for", lambda org: "release")
 
 
 def workflow_inputs(rendered: str) -> dict:

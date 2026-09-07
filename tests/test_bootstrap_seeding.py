@@ -52,7 +52,7 @@ from dsl_course import (
 from dsl_course import bootstrap_course as bc
 from dsl_course.central import CENTRAL
 from dsl_course.repos import Converged
-from tests.conftest import repo_row
+from tests.conftest import repo_row, stub_bootstrap
 
 # Derived from the seeding tables, so a sixth config file cannot silently miss the set
 # these tests police - which is the whole point of the tables existing.
@@ -737,38 +737,12 @@ def test_cohort_extras_reds_when_a_user_file_seed_fails(fake, monkeypatch):
 # ------------------------------------------ the one initial site sync a bootstrap does
 
 
-def _stub_bootstrap(monkeypatch) -> None:
-    """Neutralise everything a cohort bootstrap does EXCEPT the site sync - the org-level
-    gh/git layer, the repo seeding (covered above) and the summary output."""
-    # Every configuration step reports a failure count that _run threads into its exit
-    # code and into the closing summary - a clean stub reports zero failures.
-    for name in (
-        "converge_org_settings",
-        "create_default_teams",
-        "grant_button_access",
-        "setup_cohort_extras",
-        "seed_workflows",
-        "create_profile_repo",
-    ):
-        monkeypatch.setattr(bc, name, lambda *a, **k: 0)
-    monkeypatch.setattr(bc, "preflight", lambda org: True)
-    monkeypatch.setattr(bc, "add_course_admins", lambda org, handles: 0)
-    monkeypatch.setattr(bc, "validate_secret_presence", lambda org, secret: True)
-    monkeypatch.setattr(bc, "put_file", lambda *a, **k: True)
-    monkeypatch.setattr(bc, "register_cohort", lambda course, cohort: True)
-    monkeypatch.setattr(bc, "update_profile_readme", lambda *a, **k: 0)
-    monkeypatch.setattr(bc.sync_faculty, "sync", lambda course, cohorts=None: 0)
-    # The org's tier is read off its (not yet written) dsl-course.yml; every test here
-    # is about what bootstrap seeds, not which ref it seeds at.
-    monkeypatch.setattr(bc, "central_ref_for", lambda org: "release")
-
-
 def test_cohort_bootstrap_runs_one_initial_site_sync(monkeypatch):
     # Without it a fresh cohort site keeps the website template's placeholders ("Fall
     # 2025", "Course Name (Code)") until the first successful "Sync site" - which in the
     # live incident never came, because the cohort's schedule.yml stopped parsing.
     synced: list[tuple[str, str]] = []
-    _stub_bootstrap(monkeypatch)
+    stub_bootstrap(monkeypatch)
     monkeypatch.setattr(bc.site, "sync_site", lambda c, o: synced.append((c, o)) or 0)
     monkeypatch.setattr(
         "sys.argv",
@@ -794,7 +768,7 @@ def _raises(c, o):
 def test_bootstrap_survives_a_failing_initial_site_sync(monkeypatch, capsys, outcome):
     # Best effort: Pages provisioning can lag right behind repo creation, and the org is
     # already configured by this point - a hiccup must not fail the bootstrap.
-    _stub_bootstrap(monkeypatch)
+    stub_bootstrap(monkeypatch)
     monkeypatch.setattr(bc.site, "sync_site", outcome)
     monkeypatch.setattr(
         "sys.argv",
@@ -819,7 +793,7 @@ def test_bootstrap_reports_an_unreachable_api_instead_of_a_traceback(
     # repo listing behind the profile README) now raises rather than reporting an absent
     # file or an empty org. Bootstrap runs from a button, so that has to land as an [err]
     # line and a red run, not a Python traceback halfway down the log.
-    _stub_bootstrap(monkeypatch)
+    stub_bootstrap(monkeypatch)
 
     def boom(org, org_name=None, course_name=None, **kwargs):
         raise RuntimeError("could not list repos in Course-Org: gh: HTTP 502")
@@ -1269,7 +1243,7 @@ def test_propagate_secret_refuses_a_personal_gh_token(monkeypatch, capsys):
     # already guards: publishing a maintainer's personal PAT here hands it to every
     # workflow in .github/welcome/classroom-config. Refuse, and red the bootstrap - a
     # silent skip leaves an org whose buttons all fail weeks later with no auth.
-    _stub_bootstrap(monkeypatch)
+    stub_bootstrap(monkeypatch)
     monkeypatch.delenv("DSL_BOT_TOKEN", raising=False)
     monkeypatch.setenv("GH_TOKEN", "ghp_personal")
     published: list = []
@@ -1288,7 +1262,7 @@ def test_propagate_secret_refuses_a_personal_gh_token(monkeypatch, capsys):
 def test_propagate_secret_reds_when_the_org_secret_write_fails(monkeypatch, capsys):
     # set_org_secret returns False on a failed write; that used to be dropped, reporting a
     # green bootstrap for an org whose workflows have no token.
-    _stub_bootstrap(monkeypatch)
+    stub_bootstrap(monkeypatch)
     monkeypatch.setenv("DSL_BOT_TOKEN", "s3cret")
     monkeypatch.setattr(bc, "set_org_secret", lambda *a: False)
     monkeypatch.setattr(
@@ -1337,7 +1311,7 @@ def test_set_secret_refuses_an_empty_secret_file(monkeypatch, capsys, tmp_path):
     # An empty/whitespace file used to write an EMPTY org secret and report success -
     # every seeded workflow then fails with "set the GH_TOKEN environment variable"
     # weeks later, with a green bootstrap behind it.
-    _stub_bootstrap(monkeypatch)
+    stub_bootstrap(monkeypatch)
     published: list = []
     monkeypatch.setattr(bc, "set_org_secret", lambda *a: published.append(a) or True)
     empty = tmp_path / "token.txt"
@@ -1361,7 +1335,7 @@ def test_course_bootstrap_reds_when_workflow_seeding_fails(monkeypatch, capsys):
     # All 17 org workflows failing to write (e.g. the token lost `workflow` scope) used to
     # exit 0 - a half-configured org that reports success. seed_workflows' failure count is
     # now threaded into the bootstrap exit code.
-    _stub_bootstrap(monkeypatch)
+    stub_bootstrap(monkeypatch)
     monkeypatch.setattr(bc, "seed_workflows", lambda org, ref: 17)
     monkeypatch.setattr("sys.argv", ["bootstrap_course", "--org", "Course-Org"])
 
@@ -1383,7 +1357,7 @@ def _cohort_argv() -> list[str]:
 def test_cohort_bootstrap_reds_when_registration_fails(monkeypatch, capsys):
     # register_cohort returns False on a failed registry write: a cohort invisible to
     # discover_cohorts is invisible to every nightly sync, so it must red the bootstrap.
-    _stub_bootstrap(monkeypatch)
+    stub_bootstrap(monkeypatch)
     monkeypatch.setattr(bc, "register_cohort", lambda course, cohort: False)
     monkeypatch.setattr(bc.site, "sync_site", lambda c, o: 0)
     monkeypatch.setattr("sys.argv", _cohort_argv())
@@ -1395,7 +1369,7 @@ def test_cohort_bootstrap_reds_when_registration_fails(monkeypatch, capsys):
 
 
 def test_cohort_bootstrap_reds_when_faculty_sync_reports_errors(monkeypatch, capsys):
-    _stub_bootstrap(monkeypatch)
+    stub_bootstrap(monkeypatch)
     monkeypatch.setattr(bc.sync_faculty, "sync", lambda course, cohorts=None: 2)
     monkeypatch.setattr(bc.site, "sync_site", lambda c, o: 0)
     monkeypatch.setattr("sys.argv", _cohort_argv())
@@ -1406,7 +1380,7 @@ def test_cohort_bootstrap_reds_when_faculty_sync_reports_errors(monkeypatch, cap
 
 def test_cohort_bootstrap_reds_when_student_repos_half_seeded(monkeypatch, capsys):
     # setup_cohort_extras returns the count of welcome/config-sample writes that failed.
-    _stub_bootstrap(monkeypatch)
+    stub_bootstrap(monkeypatch)
     monkeypatch.setattr(bc, "setup_cohort_extras", lambda org, ref: 4)
     monkeypatch.setattr(bc.site, "sync_site", lambda c, o: 0)
     monkeypatch.setattr("sys.argv", _cohort_argv())
@@ -1565,7 +1539,7 @@ def test_an_untagged_github_repo_reds_the_bootstrap(monkeypatch):
 def test_a_missing_bot_token_reds_the_bootstrap(monkeypatch, capsys):
     # It used to print a WARNING and exit 0, so an org could be handed over with no
     # token at all - every seeded workflow in it fails on its first run, weeks later.
-    _stub_bootstrap(monkeypatch)
+    stub_bootstrap(monkeypatch)
     monkeypatch.setattr(bc, "validate_secret_presence", lambda org, secret: False)
     monkeypatch.setattr("sys.argv", ["bootstrap_course", "--org", "Course-Org"])
 
@@ -1576,7 +1550,7 @@ def test_a_missing_bot_token_reds_the_bootstrap(monkeypatch, capsys):
 def test_the_summary_names_the_step_that_failed(monkeypatch, capsys):
     # The closing block used to assert every line whatever happened, so an operator read
     # a configured org off a run that configured nothing.
-    _stub_bootstrap(monkeypatch)
+    stub_bootstrap(monkeypatch)
     monkeypatch.setattr(bc, "converge_org_settings", lambda org: 1)
     monkeypatch.setattr("sys.argv", ["bootstrap_course", "--org", "Course-Org"])
 
@@ -1588,7 +1562,7 @@ def test_the_summary_names_the_step_that_failed(monkeypatch, capsys):
 
 
 def test_a_clean_run_still_reads_as_complete(monkeypatch, capsys):
-    _stub_bootstrap(monkeypatch)
+    stub_bootstrap(monkeypatch)
     monkeypatch.setattr("sys.argv", ["bootstrap_course", "--org", "Course-Org"])
 
     assert bc.main() == 0
