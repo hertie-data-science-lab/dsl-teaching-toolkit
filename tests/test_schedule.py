@@ -1521,7 +1521,9 @@ def test_missing_sources_names_the_path_that_will_ship_nothing(monkeypatch):
     out = [f.line() for f in schedule.source_faults(s, "Course-Org")]
     assert len(out) == 1
     assert out[0].startswith("releases.lecture-2 -> course_source_path (due ")
-    assert "`cm/lectures/02_b` does not exist yet" in out[0]
+    # The WHOLE address of the thing that is missing: the notification tells somebody
+    # where to push, and `cm/lectures/02_b` alone leaves them guessing which org.
+    assert "Course-Org/cm/lectures/02_b does not exist" in out[0]
 
 
 def test_a_source_withheld_by_a_releaseignore_is_a_fault_at_commit_time(monkeypatch):
@@ -1536,7 +1538,7 @@ def test_a_source_withheld_by_a_releaseignore_is_a_fault_at_commit_time(monkeypa
     out = [f.line() for f in schedule.source_faults(s, "Course-Org")]
     assert len(out) == 1
     assert out[0].startswith("releases.lecture-1 -> course_source_path (due ")
-    assert "is withheld by a `.releaseignore`" in out[0]
+    assert "the files exist but cm/.releaseignore keeps them back" in out[0]
 
 
 def test_a_withheld_source_never_escalates_past_a_warning(monkeypatch):
@@ -1603,7 +1605,7 @@ def test_missing_sources_reports_a_repo_that_is_not_there_at_all(monkeypatch):
     _org(monkeypatch, {})
     s = Schedule(releases=[_release("lecture-1", "lectures/01_a", repo="typo-repo")])
     out = [f.line() for f in schedule.source_faults(s, "Course-Org")]
-    assert len(out) == 1 and "no repo `Course-Org/typo-repo`" in out[0]
+    assert len(out) == 1 and "no repo Course-Org/typo-repo (or it is empty)" in out[0]
 
 
 def test_missing_sources_checks_an_assignments_template_repo(monkeypatch):
@@ -1665,8 +1667,8 @@ def test_the_severity_ladder_scales_with_distance_to_the_fire_time(monkeypatch):
     # The same missing folder is a note in August and a failure the night before the
     # lecture. Distance is the whole signal - without it the check either cries wolf on
     # every term planned up front, or says nothing when it finally matters. Five rungs,
-    # because who is told changes on the way down: instructors from a week out, the
-    # maintainer once it is a day away.
+    # because how loudly it is said changes on the way down: the digest issue and a mail
+    # to the people git names from a day out, the maintainer copied in the last six hours.
     now = datetime(2026, 9, 1, 12, 0, tzinfo=BERLIN)
     S = schedule.Severity
 
@@ -1674,12 +1676,13 @@ def test_the_severity_ladder_scales_with_distance_to_the_fire_time(monkeypatch):
         return schedule.SourceFault("releases.x", "gone", when, "f").severity(now)
 
     assert at(now + timedelta(days=30)) is S.ADVISORY
-    assert at(now + timedelta(days=8)) is S.ADVISORY
-    assert at(now + timedelta(days=6)) is S.WARNING
-    assert at(now + timedelta(hours=49)) is S.WARNING
-    assert at(now + timedelta(hours=47)) is S.URGENT
-    assert at(now + timedelta(hours=25)) is S.URGENT
-    assert at(now + timedelta(hours=23)) is S.CRITICAL
+    assert at(now + timedelta(days=2)) is S.ADVISORY
+    assert at(now + timedelta(hours=25)) is S.ADVISORY
+    assert at(now + timedelta(hours=23)) is S.WARNING
+    assert at(now + timedelta(hours=13)) is S.WARNING
+    assert at(now + timedelta(hours=11)) is S.URGENT
+    assert at(now + timedelta(hours=7)) is S.URGENT
+    assert at(now + timedelta(hours=5)) is S.CRITICAL
     assert at(now + timedelta(minutes=1)) is S.CRITICAL
     # At the fire time and after it: the copy did not ship. Going quiet after the fact is
     # the one behaviour that would make this check worthless.

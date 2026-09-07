@@ -28,13 +28,16 @@ def _f(
     offset: timedelta | None,
     field: str = "course_source_path",
     lineno: int | None = None,
+    repo: str = "cm",
 ):
     return SourceFault(
         where,
-        "`cm/x` does not exist yet",
+        f"Course/{repo}/x does not exist",
         NOW + offset if offset else None,
         field=field,
         lineno=lineno,
+        repo=repo,
+        path="x",
     )
 
 
@@ -103,7 +106,7 @@ def test_the_body_names_the_field_to_edit_not_just_the_entry():
     body = sd.render_body(
         [_f("assignments.a1", None, field="course_source_repo")], NOW, "Course"
     )
-    assert "**`assignments.a1`** -> `course_source_repo`" in body
+    assert "**assignments.a1 -> course_source_repo**" in body
     assert "no date (tbc)" in body
 
 
@@ -113,8 +116,8 @@ def test_rungs_are_rendered_loudest_first():
             _f("releases.far", timedelta(days=40)),
             _f("releases.fired", -timedelta(hours=1)),
             _f("releases.tomorrow", timedelta(hours=3)),
-            _f("releases.near", timedelta(hours=30)),
-            _f("releases.soon", timedelta(days=3)),
+            _f("releases.near", timedelta(hours=10)),
+            _f("releases.soon", timedelta(hours=20)),
         ],
         NOW,
         "Course",
@@ -124,29 +127,71 @@ def test_rungs_are_rendered_loudest_first():
         < body.index("### CRITICAL")
         < body.index("### URGENT")
         < body.index("### WARNING")
-        < body.index("### ADVISORY")
+        < body.index("### advisory")
     )
 
 
-def test_every_rung_says_what_it_means():
+def test_every_rung_heading_carries_its_own_deadline():
     # The rung is the only thing that tells a reader how much of their day this deserves,
-    # and the top one is not "deploys soon" - it has already failed to ship.
+    # and the hours are in the heading so "URGENT" is a number rather than a mood. The
+    # top rung is not "deploys soon" - it has already failed to ship.
     body = sd.render_body(
         [
             _f("releases.fired", -timedelta(hours=1)),
             _f("releases.tomorrow", timedelta(hours=3)),
-            _f("releases.near", timedelta(hours=30)),
-            _f("releases.soon", timedelta(days=3)),
+            _f("releases.near", timedelta(hours=10)),
+            _f("releases.soon", timedelta(hours=20)),
             _f("releases.far", timedelta(days=40)),
         ],
         NOW,
         "Course",
     )
-    assert "Fired with nothing staged - the copy did not ship." in body
-    assert "**Fires within 24h.**" in body
-    assert "**Fires within 48h.**" in body
-    assert "**Fires within 7 days.**" in body
-    assert "Further out - listed so the picture is complete" in body
+    assert "### MISSED (1)" in body
+    assert "### CRITICAL (6h) (1)" in body
+    assert "### URGENT (12h) (1)" in body
+    assert "### WARNING (24h) (1)" in body
+    assert "### advisory (1)" in body
+    # A fault that has already fired did not "fire" in the future tense.
+    assert "_fired " in body and "_fires " in body
+
+
+def test_the_body_carries_the_one_sentence_that_would_fix_each_fault():
+    # The issue and the mail say the SAME remedy, because both ask the fault - an issue
+    # and an email disagreeing about the fix is worse than either on its own.
+    body = sd.render_body(
+        [_f("releases.a", timedelta(hours=3), lineno=36)], NOW, "Course", "Cohort"
+    )
+    assert "|  fix: push the materials to that folder in Course/cm," in body
+
+
+def test_the_body_addresses_the_people_git_named():
+    # A team mention reaches everybody and is therefore what nobody reads. The planner of
+    # the line and the committer of the repo are the two people who can act.
+    body = sd.render_body(
+        [_f("releases.a", timedelta(hours=3))],
+        NOW,
+        "Course",
+        "Cohort",
+        mention=["JanG", "cpj97"],
+    )
+    assert "cc @JanG @cpj97" in body
+    assert "Cohort/instructors" not in body
+
+
+def test_with_nobody_named_the_body_falls_back_to_the_team():
+    body = sd.render_body(
+        [_f("releases.a", timedelta(hours=3))], NOW, "Course", "Cohort"
+    )
+    assert "cc @Cohort/instructors" in body
+
+
+def test_the_body_tells_the_reader_not_to_close_it_by_hand():
+    # Closing it fixes nothing in the file and the next tick re-opens it. Saying so is
+    # cheaper than the state adoption that has to cope with it (see adopted_state).
+    body = sd.render_body(
+        [_f("releases.a", timedelta(hours=3))], NOW, "Course", "Cohort"
+    )
+    assert "**Do not close or edit this issue by hand.**" in body
 
 
 def test_the_body_links_at_the_line_to_edit():
@@ -155,8 +200,8 @@ def test_the_body_links_at_the_line_to_edit():
         [_f("releases.a", timedelta(hours=3), lineno=36)], NOW, "Course", "Cohort"
     )
     assert (
-        "([schedule.yml:36](https://github.com/Cohort/classroom-config/blob/main/"
-        "schedule.yml#L36))"
+        "at [`schedule.yml:36`](https://github.com/Cohort/classroom-config/blob/main/"
+        "schedule.yml#L36)"
     ) in body
 
 
@@ -166,7 +211,7 @@ def test_a_fault_whose_line_is_unknown_is_listed_without_one():
     body = sd.render_body(
         [_f("releases.a", timedelta(hours=3))], NOW, "Course", "Cohort"
     )
-    assert "**`releases.a`** -> `course_source_path`  " in body
+    assert "**releases.a -> course_source_path** at `schedule.yml`" in body
     assert "schedule.yml#L" not in body
 
 
@@ -229,7 +274,7 @@ def test_an_advisory_only_plan_opens_no_issue_at_all(gh):
 def test_the_first_warning_opens_the_issue(gh):
     fake = gh([])
     assert (
-        sd.sync("Cohort", "Course", [_f("releases.a", timedelta(days=3))], NOW).errors
+        sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=20))], NOW).errors
         == 0
     )
     created = fake.did("issue", "create")
@@ -244,23 +289,23 @@ def test_the_tick_that_opens_the_issue_still_reports_its_url(gh):
     # just opened is printed by `gh issue create` and nowhere else - so without it the
     # mail could not link the record it was summarising.
     gh([])
-    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(days=3))], NOW)
+    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=20))], NOW)
     assert out.issue_url == CREATED_URL
 
 
 def test_a_quiet_tick_edits_the_body_and_says_nothing(gh):
     # The hourly cron re-runs with nothing changed. The body is refreshed (GitHub does not
     # email on a body edit) and NOT commented on - this is the noise control.
-    body = sd.render_body([_f("releases.a", timedelta(days=3))], NOW, "Course")
+    body = sd.render_body([_f("releases.a", timedelta(hours=20))], NOW, "Course")
     fake = gh([{"number": 7, "title": sd.TITLE, "body": body}])
-    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(days=3))], NOW)
+    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=20))], NOW)
     assert out.errors == 0 and not out.transitions
     assert len(fake.did("issue", "edit")) == 1
     assert fake.did("issue", "comment") == []
 
 
 def test_an_escalation_comments_and_mentions_the_instructors(gh):
-    was = sd.render_body([_f("releases.a", timedelta(days=3))], NOW, "Course")
+    was = sd.render_body([_f("releases.a", timedelta(hours=20))], NOW, "Course")
     fake = gh([{"number": 7, "title": sd.TITLE, "body": was}])
     out = sd.sync(
         "Cohort", "Course", [_f("releases.a", timedelta(hours=3), lineno=36)], NOW
@@ -269,7 +314,7 @@ def test_an_escalation_comments_and_mentions_the_instructors(gh):
     comments = fake.did("issue", "comment")
     assert len(comments) == 1
     text = comments[0][comments[0].index("--body") + 1]
-    assert "Escalated" in text and "now **critical**" in text
+    assert "Escalated" in text and "now **CRITICAL**" in text
     # The fix is one click from the notification, not a scroll through the file.
     assert "schedule.yml#L36" in text
     # An issue only emails people it mentions - without this the comment is as silent as
@@ -280,7 +325,7 @@ def test_an_escalation_comments_and_mentions_the_instructors(gh):
 def test_sync_reports_the_transitions_and_the_issue_to_link_to(gh):
     # What the notifier mails on top of the @mention: the rung each key crossed, the
     # issue that holds the detail, and the faults themselves.
-    was = sd.render_body([_f("releases.a", timedelta(days=3))], NOW, "Course")
+    was = sd.render_body([_f("releases.a", timedelta(hours=20))], NOW, "Course")
     gh([{"number": 7, "title": sd.TITLE, "body": was}])
     fault = _f("releases.a", timedelta(hours=3), lineno=36)
     out = sd.sync("Cohort", "Course", [fault], NOW)
@@ -316,7 +361,7 @@ def test_an_issue_a_human_filed_is_never_adopted_and_rewritten(gh):
     # back in the results. Rewriting their issue out from under them would be worse than
     # opening a second one.
     fake = gh([{"number": 3, "title": "re: " + sd.TITLE, "body": "my notes"}])
-    sd.sync("Cohort", "Course", [_f("releases.a", timedelta(days=3))], NOW)
+    sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=20))], NOW)
     assert fake.did("issue", "edit") == []
     assert len(fake.did("issue", "create")) == 1
 
