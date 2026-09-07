@@ -67,7 +67,7 @@ TITLE = "schedule.yml: planned releases cite sources not staged in the course or
 # nobody can act on for five hours has woken somebody for nothing, and that is the fastest
 # way to have a channel muted. Local hours, in the cohort's own zone - 02:00 in a
 # datacentre is nobody's night.
-QUIET_FROM = 22
+QUIET_FROM = 23
 QUIET_UNTIL = 7
 
 # The state markers this module keeps in the issue body. Two, because they answer

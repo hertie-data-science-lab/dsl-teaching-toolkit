@@ -628,7 +628,8 @@ _FIRED_AT_SIX = -timedelta(hours=6)
 
 def test_the_quiet_window_is_the_night_in_the_cohorts_own_zone():
     assert sd.in_quiet_hours(NIGHT)
-    assert sd.in_quiet_hours(datetime(2026, 8, 17, 22, 0, tzinfo=BERLIN))
+    assert sd.in_quiet_hours(datetime(2026, 8, 17, 23, 0, tzinfo=BERLIN))
+    assert not sd.in_quiet_hours(datetime(2026, 8, 17, 22, 59, tzinfo=BERLIN))
     assert sd.in_quiet_hours(datetime(2026, 8, 17, 6, 59, tzinfo=BERLIN))
     assert not sd.in_quiet_hours(MORNING)
     assert not sd.in_quiet_hours(NOW)
