@@ -1042,11 +1042,14 @@ def _repo_paths(course_org: str, repo: str) -> set[str] | None:
 # How close a missing source has to be to its fire time before it stops being "not
 # written yet" and starts being a fault. A term planned up front names paths nobody has
 # authored, which is why distance is what separates the normal state from the broken one.
-# Three windows rather than one, because who is told changes as the moment approaches
-# (see source_digest): instructors from a week out, the maintainer once it is a day away.
-SOURCE_WARN_WINDOW = timedelta(days=7)
-SOURCE_URGENT_WINDOW = timedelta(hours=48)
-SOURCE_CRITICAL_WINDOW = timedelta(hours=24)
+# Three windows rather than one, because how loudly it is said changes as the moment
+# approaches: the first rung opens the digest issue and mails the people git names, the
+# second says how little time is left, and the maintainer joins at the third. They
+# are deliberately tight - a day, half a day, a quarter of a day - because a source is
+# staged in minutes once somebody knows, and a week of warnings is a week of ignoring them.
+SOURCE_WARN_WINDOW = timedelta(hours=24)
+SOURCE_URGENT_WINDOW = timedelta(hours=12)
+SOURCE_CRITICAL_WINDOW = timedelta(hours=6)
 
 
 class Severity(IntEnum):
@@ -1072,10 +1075,29 @@ def _window_blurb() -> str:
     """The ladder in one sentence, formatted from the windows themselves so changing one
     cannot leave three hand-written prose copies claiming the old numbers."""
     return (
-        f"advisory until {SOURCE_WARN_WINDOW.days} days out, then a warning, urgent "
+        f"advisory until {_hours(SOURCE_WARN_WINDOW)}h out, then a warning, urgent "
         f"inside {_hours(SOURCE_URGENT_WINDOW)}h, critical inside "
         f"{_hours(SOURCE_CRITICAL_WINDOW)}h, missed once it has fired"
     )
+
+
+def in_cohort_zone(sched: Schedule, when: datetime) -> datetime:
+    """The same instant, told in the cohort's own zone.
+
+    The scheduler ticks in UTC, but everything a notification says about time is local by
+    definition: a deadline faculty wrote as 08:00 Berlin, and a quiet window where 02:00
+    means somebody's actual night rather than 02:00 in a datacentre."""
+    return when.astimezone(_tz(sched.timezone))
+
+
+def zone_name(when: datetime) -> str:
+    """The zone as faculty wrote it in schedule.yml (`Europe/Berlin`), not the abbreviation
+    in force that week.
+
+    A notification that says 08:00 without saying whose 08:00 is a notification about
+    nothing, and `%Z` answers `CEST` - which is not a string anybody can look up against
+    the `timezone:` line they typed."""
+    return getattr(when.tzinfo, "key", "") or when.strftime("%Z")
 
 
 def locate(text: str, where: str, field: str) -> int | None:
@@ -1158,6 +1180,19 @@ class SourceFault:
     # `locate`). Every surface turns it into `schedule.yml:36` and a deep link, because
     # the entry name alone still leaves faculty scrolling a file they wrote in August.
     lineno: int | None = None
+    # The source repo the entry names (`course-materials-f2026`). `what` spells it inside
+    # a `<org>/<repo>/<path>` phrase, which reads well and parses badly - the fault mail
+    # has to name `<course_org>/<repo>` as the place to go and stage the thing.
+    repo: str = ""
+    # The path inside that repo, where the entry names one (an assignment names only the
+    # repo). Carried rather than re-read out of `what`, so a link into the repo is built
+    # from the value the check used and not from parsing a sentence.
+    path: str = ""
+    # Whether a `.releaseignore` is what holds this path back, rather than the path being
+    # absent. The FIELD to edit is `course_source_path` either way, so the field cannot
+    # carry this - and the two want opposite instructions: one says push the files, the
+    # other says they are already there and something is deliberately withholding them.
+    withheld: bool = False
 
     @property
     def key(self) -> str:
@@ -1168,7 +1203,10 @@ class SourceFault:
 
     @property
     def due(self) -> str:
-        return f"{self.fires:%a %d %b %Y, %H:%M}" if self.fires else "no date (tbc)"
+        """The moment this fault bites, zone and all - see `zone_name`."""
+        if self.fires is None:
+            return "no date (tbc)"
+        return f"{self.fires:%a %d %b %Y, %H:%M} {zone_name(self.fires)}"
 
     def severity(self, now: datetime) -> Severity:
         """How loud this should be at `now` - see the SOURCE_*_WINDOW constants.
@@ -1192,6 +1230,37 @@ class SourceFault:
         else:
             rung = Severity.ADVISORY
         return min(rung, self.ceiling)
+
+    def fix(self, course_org: str, rung: Severity) -> str:
+        """What would put this right, in one sentence, lower-case and unpunctuated at the
+        front so a caller can prefix it with `fix:`.
+
+        Here rather than in the notifier because BOTH channels say it - the digest issue
+        body and the mail - and a fault whose issue and whose email disagree about the
+        remedy is worse than either on its own. The rung only matters at the top: once a
+        release has fired, the instruction is no longer "fix it by Wednesday"."""
+        if self.withheld:
+            return f"remove the pattern, or change {self.field}."
+        if self.field == "course_source_repo":
+            at = f"{SCHEDULE_PATH}:{self.lineno}" if self.lineno else SCHEDULE_PATH
+            if self.where.startswith("assignments."):
+                return (
+                    f"create the assignment template repo named on {at} in {course_org} "
+                    f"and push the starter files to it, or correct the line above."
+                )
+            return (
+                f"create the repo named on {at} in {course_org} and push its files, or "
+                f"correct the line above."
+            )
+        if rung is Severity.MISSED:
+            return (
+                "push the materials to that folder now - the next 15-minute tick "
+                "releases them. Nothing else is needed."
+            )
+        return (
+            f"push the materials to that folder in {course_org}/{self.repo}, or correct "
+            f"the path on the line above."
+        )
 
     def line(self) -> str:
         """The one-line form, everywhere. It names the FIELD as well as the entry, because
@@ -1248,11 +1317,11 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
             out.extend(
                 SourceFault(
                     where,
-                    f"no repo `{course_org}/{repo}` (or it is empty) - nothing to "
-                    f"release from",
+                    f"no repo {course_org}/{repo} (or it is empty)",
                     fires,
                     field="course_source_repo",
                     lineno=locate(sched.raw, where, "course_source_repo"),
+                    repo=repo,
                 )
                 for _, where, fires in wanted[repo]
             )
@@ -1289,12 +1358,14 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                 out.append(
                     SourceFault(
                         where,
-                        f"`{repo}/{clean}` is withheld by a `{RELEASEIGNORE}` - this copy "
-                        f"ships nothing",
+                        f"the files exist but {repo}/{RELEASEIGNORE} keeps them back",
                         fires,
                         field="course_source_path",
                         ceiling=Severity.WARNING,
                         lineno=locate(sched.raw, where, "course_source_path"),
+                        repo=repo,
+                        path=clean,
+                        withheld=True,
                     )
                 )
                 continue
@@ -1303,10 +1374,12 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
             out.append(
                 SourceFault(
                     where,
-                    f"`{repo}/{clean}` does not exist yet - this copy ships nothing",
+                    f"{course_org}/{repo}/{clean} does not exist",
                     fires,
                     field="course_source_path",
                     lineno=locate(sched.raw, where, "course_source_path"),
+                    repo=repo,
+                    path=clean,
                 )
             )
     return out
