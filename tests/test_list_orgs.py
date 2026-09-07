@@ -58,7 +58,7 @@ def test_the_tree_nests_each_cohort_under_its_own_course_org(monkeypatch):
             "readable": True,
             "course_name": "Deep Learning",
             "course_code": "E1",
-            "central_ref": "staging",
+            "central_ref": "main",
             "url": "u1",
         },
         {
@@ -77,7 +77,7 @@ def test_the_tree_nests_each_cohort_under_its_own_course_org(monkeypatch):
     out = list_orgs.render_tree(orgs, cohorts)
     assert out == (
         # the tier each course runs, so a promotion can be aimed without a second page
-        "- **[C1](u1)** - Deep Learning - E1 - toolkit `staging`\n"
+        "- **[C1](u1)** - Deep Learning - E1 - toolkit `main`\n"
         "    - [C1-f2025](u3)\n"
         "    - [C1-f2026](u4)\n"
         # a course org running nothing says so, rather than being an absence
@@ -248,16 +248,16 @@ def test_each_course_org_reports_the_toolkit_tier_it_runs(monkeypatch):
     # The inventory is where a maintainer checks what a promotion would move, so the tier
     # has to come off the same metadata read the page already makes - and an org that
     # declares nothing reports the default rather than a blank.
-    monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Soak", "Live"])
+    monkeypatch.setattr(list_orgs, "_tagged_orgs", lambda topic: ["Trunk", "Live"])
     monkeypatch.setattr(
         list_orgs,
         "org_meta",
-        lambda org: {"central_ref": "staging"} if org == "Soak" else {},
+        lambda org: {"central_ref": "main"} if org == "Trunk" else {},
     )
 
     assert [(o["org"], o["central_ref"]) for o in list_orgs.discover_course_orgs()] == [
         ("Live", "release"),
-        ("Soak", "staging"),
+        ("Trunk", "main"),
     ]
 
 
@@ -271,14 +271,14 @@ def test_one_unreadable_org_does_not_hide_every_other_one(monkeypatch, capsys):
     def meta(org):
         if org == "Bad":
             raise RuntimeError("Bad/.github/dsl-course.yml is not a YAML mapping")
-        return {"central_ref": "staging"}
+        return {"central_ref": "main"}
 
     monkeypatch.setattr(list_orgs, "org_meta", meta)
 
     orgs = list_orgs.discover_course_orgs()
     assert [(o["org"], o["central_ref"]) for o in orgs] == [
         ("Bad", None),
-        ("Good", "staging"),
+        ("Good", "main"),
     ]
     assert list_orgs.unreadable(orgs, []) == ["Bad"]
     assert "Bad" in capsys.readouterr().err

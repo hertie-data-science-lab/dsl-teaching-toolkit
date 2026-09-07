@@ -6,7 +6,7 @@ workflows: nothing is called in-process, because what this is testing is the wir
 between a click, a cron, a token and a repo - the part unit tests deliberately do not
 touch.
 
-Run it after Promote to staging and before Promote to release:
+Run it after the merge to main has refreshed the demo org, and before Promote:
 
     DSL_E2E=1 \\
     DSL_ORG_ALLOWLIST=hertie-dsl-demo-course-e1234,hertie-dsl-demo-f2026 \\
@@ -74,7 +74,7 @@ COLLECT_SUBMISSIONS = "collect-submissions.yml"
 DISTRIBUTE_GRADES = "distribute-grades.yml"
 
 # The tier the demo org must be on for this to be testing what is about to be released.
-EXPECTED_TIER = "staging"
+EXPECTED_TIER = "main"
 
 SUBMISSION = "submission.py"
 
@@ -178,7 +178,7 @@ def _preflight(run_id: str) -> None:
 
     Each of these has been a wasted run: a token without `delete_repo` ends with the whole
     run still sitting in the org; an org still on `release` tests last month's code; a
-    staging branch that is not this checkout tests somebody else's; a workflow file in
+    trunk that is not this checkout tests somebody else's; a workflow file in
     the org that is not the one this tip renders means the buttons this run
     presses are not the buttons under review; a missing roster row hands out to nobody;
     and a namespace that is not empty means a previous run is still lying around and its

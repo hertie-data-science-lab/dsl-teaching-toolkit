@@ -229,9 +229,9 @@ def test_dry_run_touches_nothing(gh):
 
 
 def test_the_field_reference_points_at_the_tier_the_org_runs(monkeypatch):
-    # The runbook describes the engine the org actually runs; a staging org sent to main's
+    # The runbook describes the engine the org actually runs; a trunk org sent to release's
     # docs reads a schema for code it does not have.
     body = sd.render_body(
-        [_f("releases.a", timedelta(hours=2))], NOW, "Course", None, "staging"
+        [_f("releases.a", timedelta(hours=2))], NOW, "Course", None, "main"
     )
-    assert "/blob/staging/docs/07-schedule-releases.md" in body
+    assert "/blob/main/docs/07-schedule-releases.md" in body

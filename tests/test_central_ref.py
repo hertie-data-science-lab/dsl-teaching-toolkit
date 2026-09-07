@@ -34,9 +34,15 @@ def _configs(monkeypatch, files: dict[str, dict]) -> None:
 # ------------------------------------------------------ what a declaration resolves to
 
 
+def test_the_tiers_are_the_trunk_and_the_release_branch():
+    # Two tiers along one linear history: `main` is the trunk, and what the demo course org
+    # runs; `release` is every real org. `staging` sat between them until 2026-09-07.
+    assert central.TIERS == ("main", "release")
+
+
 def test_a_course_org_runs_the_tier_it_declares(monkeypatch):
-    _configs(monkeypatch, {"Course": {"central_ref": "staging"}})
-    assert discovery.central_ref_for("Course") == "staging"
+    _configs(monkeypatch, {"Course": {"central_ref": "main"}})
+    assert discovery.central_ref_for("Course") == "main"
 
 
 def test_a_cohort_inherits_the_tier_of_the_course_org_it_points_at(monkeypatch):
@@ -46,11 +52,11 @@ def test_a_cohort_inherits_the_tier_of_the_course_org_it_points_at(monkeypatch):
     _configs(
         monkeypatch,
         {
-            "Cohort-f2026": {"course": "Course", "central_ref": "main"},
-            "Course": {"central_ref": "staging"},
+            "Cohort-f2026": {"course": "Course", "central_ref": "release"},
+            "Course": {"central_ref": "main"},
         },
     )
-    assert discovery.central_ref_for("Cohort-f2026") == "staging"
+    assert discovery.central_ref_for("Cohort-f2026") == "main"
 
 
 def test_an_org_that_declares_nothing_runs_the_default(monkeypatch):
@@ -77,6 +83,14 @@ def test_junk_is_refused_and_names_the_file(monkeypatch):
         discovery.central_ref_for("Course")
     assert "stagign" in str(exc.value)
     assert "Course/.github/dsl-course.yml" in str(exc.value)
+
+
+def test_the_retired_staging_tier_is_junk_like_any_other(monkeypatch):
+    # There is no compatibility shim for it: an org whose file still says `staging` goes
+    # red and gets fixed, rather than quietly running a tier that no longer exists.
+    _configs(monkeypatch, {"Course": {"central_ref": "staging"}})
+    with pytest.raises(central.MissingCentralRef, match="not one of main, release"):
+        discovery.central_ref_for("Course")
 
 
 def test_an_abbreviated_sha_is_junk(monkeypatch):
@@ -116,13 +130,13 @@ def test_every_org_level_workflow_is_pinned_to_the_orgs_ref(monkeypatch):
         lambda org, repo, files, message, **k: written.update(files) or True,
     )
 
-    assert seed.seed_github_workflows("Course", "staging") == 0
+    assert seed.seed_github_workflows("Course", "main") == 0
     assert written
     for path, content in written.items():
         raw = content.decode()
         assert CENTRAL_REF_PLACEHOLDER not in raw, path
         refs = _central_checkout_refs(raw)
-        assert refs and set(refs) == {"staging"}, path
+        assert refs and set(refs) == {"main"}, path
 
 
 def test_the_run_from_repo_buttons_are_pinned_too(monkeypatch):
@@ -137,14 +151,14 @@ def test_the_run_from_repo_buttons_are_pinned_too(monkeypatch):
 
     assert (
         workflows_place.push_content_workflows(
-            "Course", "course-materials-f2026", ["Cohort-f2026"], [], "staging"
+            "Course", "course-materials-f2026", ["Cohort-f2026"], [], "main"
         )
         == 0
     )
     assert written
     for path, content in written.items():
         refs = _central_checkout_refs(content.decode())
-        assert refs and set(refs) == {"staging"}, path
+        assert refs and set(refs) == {"main"}, path
 
 
 def test_a_cohorts_schedule_validator_is_pinned_to_the_inherited_ref(monkeypatch):
@@ -155,23 +169,23 @@ def test_a_cohorts_schedule_validator_is_pinned_to_the_inherited_ref(monkeypatch
         lambda org, repo, files, message, **k: written.update(files) or True,
     )
 
-    assert welcome.refresh_classroom_system_files("Cohort-f2026", "staging") == 0
+    assert welcome.refresh_classroom_system_files("Cohort-f2026", "main") == 0
     raw = written[".github/workflows/validate-schedule.yml"].decode()
     assert CENTRAL_REF_PLACEHOLDER not in raw
-    assert _central_checkout_refs(raw) == ["staging"]
+    assert _central_checkout_refs(raw) == ["main"]
     # Its failure issue links the field reference too, and at the same ref.
-    assert f"{CENTRAL}/blob/staging/docs/07-schedule-releases.md" in raw.replace(
+    assert f"{CENTRAL}/blob/main/docs/07-schedule-releases.md" in raw.replace(
         "%s", CENTRAL
     )
 
 
 def test_the_faculty_landing_page_links_the_docs_at_the_orgs_ref():
-    # The runbooks describe the engine the org is actually running; a staging org sent to
-    # the release docs reads instructions for code it does not have.
+    # The runbooks describe the engine the org is actually running; an org on the trunk
+    # sent to the release docs reads instructions for code it does not have.
     page = profile_readme.render_profile_readme(
-        "Course", "Course", "Deep Learning", [], False, [], central_ref="staging"
+        "Course", "Course", "Deep Learning", [], False, [], central_ref="main"
     )
-    assert f"https://github.com/{CENTRAL}/blob/staging/docs/README.md" in page
+    assert f"https://github.com/{CENTRAL}/blob/main/docs/README.md" in page
     assert "/blob/release/" not in page
 
 

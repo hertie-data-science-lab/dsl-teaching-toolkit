@@ -155,14 +155,15 @@ def test_promote_refresh_carries_both_bot_tokens():
     assert env["DSL_BOT_TOKEN"] == "${{ secrets.DSL_BOT_TOKEN }}"
 
 
-def test_bootstrap_org_offers_no_dev_tier():
-    # `main` is the dev tier - nobody live. An org bootstrapped onto it runs every merge
-    # as production the moment it lands, with no promotion in between; a soak goes on
-    # staging, which is what that tier is for.
+def test_bootstrap_org_offers_the_two_tiers_and_defaults_to_release():
+    # `main` runs every merge from the moment it lands, which is the demo course org's job
+    # and nobody else's - so it is offered (that org has to be bootstrappable) but it is
+    # never the default a real course gets by pressing the button.
     doc = SHIPPED_WORKFLOWS[".github/workflows/bootstrap-org.yml"]
     trigger = doc.get("on", doc.get(True))
-    options = trigger["workflow_dispatch"]["inputs"]["central_ref"]["options"]
-    assert options == ["release", "staging"]
+    central_ref = trigger["workflow_dispatch"]["inputs"]["central_ref"]
+    assert central_ref["options"] == ["release", "main"]
+    assert central_ref["default"] == "release"
 
 
 def test_the_site_deploys_on_a_push_to_main_or_master():

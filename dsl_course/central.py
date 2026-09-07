@@ -15,21 +15,22 @@ from .log import log_err
 
 CENTRAL = "hertie-data-science-lab/dsl-teaching-toolkit"
 
-# The three deployment tiers, in promotion order. `main` is dev (CI only, nobody live),
-# `staging` is the demo course org and its cohorts, `release` is every real org. Both tier
-# branches are fast-forwards of `main` - see .github/workflows/promote.yml and
-# docs-admin-arch/central-admin.md.
-TIERS = ("main", "staging", "release")
+# The two deployment tiers, in promotion order. `main` is the trunk - PRs squash-merge
+# here, and it is what the demo course org and its cohorts run; `release` is every real
+# org. `release` carries no commits of its own: it is always a fast-forward of `main` - see
+# .github/workflows/promote.yml and docs-admin-arch/central-admin.md.
+TIERS = ("main", "release")
 
 # The DEFAULT ref a seeded workflow runs the engine from, for any org that does not say
 # otherwise in its own `.github/dsl-course.yml` `central_ref:`.
 #
 # `release`, not `main`. Every seeded workflow in every org checks the engine out at run
 # time, so whatever sits on this ref IS production, in every live course, from the moment
-# it lands - a merge on a Tuesday afternoon reaches a release running that evening with no
-# deploy step in between and no way to try it anywhere first. Promoting main to `release`
-# deliberately puts a decision in that gap; rollback is a revert on `main` promoted
-# forward, which every org picks up on its next run rather than needing a re-seed.
+# it lands - a merge on a Tuesday afternoon would reach a release running that evening with
+# no deploy step in between. Promoting main to `release` deliberately puts a decision in
+# that gap, and the demo course org runs `main`, so every merge is exercised in a real org
+# first. Rollback is a revert on `main` promoted forward, which every org picks up on its
+# next run rather than needing a re-seed.
 CENTRAL_REF = "release"
 
 # What the renderers and the seeded templates leave where the ref goes, so a workflow is
