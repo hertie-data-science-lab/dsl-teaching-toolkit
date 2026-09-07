@@ -12,9 +12,8 @@ So the issue is STATE and its comments are EVENTS:
   grouped by rung. GitHub does not email on a body edit, so this is free to run hourly.
 - a **comment** is posted when a fault APPEARS at the quietest reported rung, when one
   ESCALATES towards its deadline, and when one CLEARS (see `_comment`).
-- the **mail** beside it (`notify`) goes to the same people on every reported rung, and is
-  HELD overnight: see `in_quiet_hours` and `_mail_plan`, whose ledger rides in the body
-  too.
+- the **mail** beside it (`notify`) goes to the same people on every reported rung, and
+  neither it nor the comment goes out overnight: see `in_quiet_hours`.
 - the issue **closes itself** when the last fault clears.
 
 Previous state rides along in the body as an HTML comment (invisible when rendered), so
@@ -25,29 +24,33 @@ new and mail the cohort about all of it again.
 
 Who is @mentioned is decided by git, not by the team: `notify.route` names the planner of
 the line and the last committer of the repo, and the same people are the mail's To line.
-The cohort's instructors team is the fallback.
+That answer costs several API reads, so it is asked for only on a tick with something to
+say, and the logins it gave ride in the body too - see `resolve_mention`. The cohort's
+instructors team is the fallback.
 """
 
 from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import timedelta
 from typing import NamedTuple
 
 from .central import CENTRAL, CENTRAL_REF
 from .discovery import central_ref_for
-from .issues import close_issues_titled, find_closed_issue, find_issue, upsert_issue
+from .issues import close_issues_titled, find_issues, issue_url, upsert_issue
 from .log import log_err, log_ok, log_step
 from .schedule import (
     CONFIG_REPO,
+    NOTIFY_FROM,
     SCHEDULE_PATH,
     SOURCE_CRITICAL_WINDOW,
     SOURCE_URGENT_WINDOW,
     SOURCE_WARN_WINDOW,
     Severity,
     SourceFault,
+    hours,
     worst_severity,
     zone_name,
 )
@@ -56,51 +59,51 @@ from .schedule import (
 # that varied with the faults would never match, and every run would open a new issue.
 TITLE = "schedule.yml: planned releases cite sources not staged in the course org"
 
-# The rung at which anything is said at all. Below it the fault is real and listed, but a
-# session nobody has written yet is the normal state of a term planned months ahead, so it
-# does not earn a notification.
-NOTIFY_FROM = Severity.WARNING
-
-# The rung at which a MAIL goes out. The same one: a release a day away with nothing to
-# ship is already an emergency by the standards of a term, and an issue comment is only
-# read by somebody who reads GitHub notifications. Kept as its own name because the two
-# are separate decisions that happen to agree, and it lives here rather than in `notify`
-# because the ledger that defers a mail overnight is part of this issue's state.
-MAIL_FROM = NOTIFY_FROM
-
-# When mail is held. A rung crossed at 02:00 is real and the issue says so at 02:00; the
-# EMAIL waits for the morning, because a notification nobody can act on for five hours has
-# woken somebody for nothing, and that is the fastest way to have a channel muted. Local
-# hours, in the cohort's own zone - 02:00 in a datacentre is nobody's night.
+# When a notification is held. A rung crossed at 02:00 is real and the issue's BODY says
+# so at 02:00; the comment and the email wait for the morning, because a notification
+# nobody can act on for five hours has woken somebody for nothing, and that is the fastest
+# way to have a channel muted. Local hours, in the cohort's own zone - 02:00 in a
+# datacentre is nobody's night.
 QUIET_FROM = 22
 QUIET_UNTIL = 7
 
-_STATE_RE = re.compile(r"<!-- dsl-source-state: (\{.*?\}) -->", re.DOTALL)
-# A SECOND marker rather than a richer first one: every live cohort has a body carrying the
-# flat `{key: severity}` state, and re-shaping it would make the next tick read no previous
-# state at all - which reports every standing fault as new and mails the lot.
-_PENDING_RE = re.compile(r"<!-- dsl-source-pending: (\{.*?\}) -->", re.DOTALL)
+# The state markers this module keeps in the issue body. Two, because they answer
+# different questions and a body that has only ever carried one must still read: a missing
+# marker is "nothing recorded", which is the right answer for both.
+_STATE = "state"  # {fault key: the rung it was last reported at}
+_MENTION = "mention"  # the logins git named, reused by a tick with nothing to ask
+_MARKER_RE = "<!-- dsl-source-{name}: (.*?) -->"
 
 
 def in_quiet_hours(when) -> bool:
     """Whether `when` - which must already be in the COHORT's zone - is inside the window
-    where mail is held. See QUIET_FROM."""
+    where a notification is held. See QUIET_FROM."""
     return when.hour >= QUIET_FROM or when.hour < QUIET_UNTIL
-
-
-def _h(window: timedelta) -> int:
-    return int(window.total_seconds() // 3600)
 
 
 # The heading each rung is listed under. The hours are formatted from the windows, so
 # moving a rung cannot leave a heading claiming the old deadline.
 _RUNG_HEADING = {
     Severity.MISSED: "MISSED",
-    Severity.CRITICAL: f"CRITICAL ({_h(SOURCE_CRITICAL_WINDOW)}h)",
-    Severity.URGENT: f"URGENT ({_h(SOURCE_URGENT_WINDOW)}h)",
-    Severity.WARNING: f"WARNING ({_h(SOURCE_WARN_WINDOW)}h)",
+    Severity.CRITICAL: f"CRITICAL ({hours(SOURCE_CRITICAL_WINDOW)}h)",
+    Severity.URGENT: f"URGENT ({hours(SOURCE_URGENT_WINDOW)}h)",
+    Severity.WARNING: f"WARNING ({hours(SOURCE_WARN_WINDOW)}h)",
     Severity.ADVISORY: "advisory",
 }
+
+
+class Context(NamedTuple):
+    """Who and where one digest is about: the orgs, the tier whose docs to cite, and the
+    logins to @mention.
+
+    One value rather than four positional arguments threaded through the body renderer and
+    the comment renderer, which is how the two ended up disagreeing about which was
+    which."""
+
+    course_org: str
+    cohort_org: str = ""
+    central_ref: str = CENTRAL_REF
+    mention: tuple[str, ...] = ()
 
 
 def deep_link(cohort_org: str, fault: SourceFault) -> str | None:
@@ -118,21 +121,20 @@ def deep_link(cohort_org: str, fault: SourceFault) -> str | None:
 
 def _cite(cohort_org: str, fault: SourceFault | None) -> str:
     """`schedule.yml:36` as a link where the line is known, as code where it is not."""
-    if fault is None or not fault.lineno:
+    if fault is None:
         return f"`{SCHEDULE_PATH}`"
-    where = f"{SCHEDULE_PATH}:{fault.lineno}"
     url = deep_link(cohort_org, fault)
-    return f"[`{where}`]({url})" if url else f"`{where}`"
+    return f"[`{fault.at}`]({url})" if url else f"`{fault.at}`"
 
 
-def _mention(cohort_org: str, logins: list[str] | None) -> str:
+def _mention(ctx: Context) -> str:
     """`cc @who`, falling back to the cohort's instructors team.
 
     A team mention reaches everybody and is therefore what nobody reads; the fallback is
     for a line git could not attribute to anyone in people.yml."""
-    if logins:
-        return "cc " + " ".join(f"@{login}" for login in logins)
-    return f"cc @{cohort_org}/instructors"
+    if ctx.mention:
+        return "cc " + " ".join(f"@{login}" for login in ctx.mention)
+    return f"cc @{ctx.cohort_org}/instructors"
 
 
 class Transitions(NamedTuple):
@@ -157,89 +159,39 @@ class DigestResult:
     issue to link to, and the faults themselves (their lines, their due dates)."""
 
     errors: int = 0
-    transitions: Transitions | None = None
     # The digest issue itself, so the mail beside it can link the full list. Populated on
     # the tick that OPENS the issue too - `upsert_issue` reports the URL `gh issue create`
     # printed - which is the tick a first-appeared notification goes out on. None only
     # when there is no issue (nothing has reached the notify rung) or the write failed.
     issue_url: str | None = None
     faults_by_key: dict[str, SourceFault] = field(default_factory=dict)
-    # What the notifier owes an email for, and the rung to say it at: this tick's
-    # crossings plus anything held overnight, or nothing at all inside the quiet window.
-    # Decided here because the ledger that defers a mail is part of the issue's state, and
-    # two modules keeping the same clock is two clocks (see `_mail_plan`).
+    # What the notifier owes an email for, and the rung to say it at. Empty inside the
+    # quiet window, where the crossing is deliberately left unrecorded so that the first
+    # tick after 07:00 finds it and says it once (see `_announce`).
     mail: dict[str, Severity] = field(default_factory=dict)
 
 
-def read_state(body: str) -> dict[str, str]:
-    """The severity each fault was last reported at, recovered from a digest body. `{}` for
-    a body this module did not write (or an issue that does not exist yet)."""
-    m = _STATE_RE.search(body or "")
+def _read_marker(body: str, name: str, default):
+    """The JSON in `<!-- dsl-source-<name>: ... -->`, or `default` for a body that does not
+    carry that marker, carries junk in it, or was written before the marker existed.
+
+    One reader for every piece of state this issue keeps in its own body: an unreadable
+    marker must degrade to "nothing recorded" rather than raise inside a release tick, and
+    a second copy of that rule is a second chance to get it wrong."""
+    m = re.search(_MARKER_RE.format(name=name), body or "", re.DOTALL)
     if not m:
-        return {}
+        return default
     try:
-        state = json.loads(m.group(1))
+        value = json.loads(m.group(1))
     except json.JSONDecodeError:
-        return {}
-    return state if isinstance(state, dict) else {}
+        return default
+    return value if isinstance(value, type(default)) else default
 
 
-def read_pending(body: str) -> dict[str, str]:
-    """The mails this issue owes but has not sent, recovered from its own body. `{}` for a
-    body written before quiet hours existed, which is the right answer: nothing is owed."""
-    m = _PENDING_RE.search(body or "")
-    if not m:
-        return {}
-    try:
-        held = json.loads(m.group(1))
-    except json.JSONDecodeError:
-        return {}
-    return held if isinstance(held, dict) else {}
-
-
-def _mail_plan(
-    changed: Transitions,
-    held: dict[str, str],
-    current: dict[str, str],
-    now,
-) -> tuple[dict[str, Severity], dict[str, str]]:
-    """`(what to mail now, what stays held)` - the quiet-hours ledger.
-
-    A crossing inside the quiet window is recorded per key and delivered on the first tick
-    after it, at the LOUDEST rung it reached overnight: one mail in the morning, not the
-    three that crossing URGENT, CRITICAL and MISSED between 22:00 and 07:00 would send.
-
-    A fault that has CLEARED owes nobody a mail, whatever it was queued at - it shipped,
-    and an email about it arriving after the fact is worse than silence."""
-    crossed = {
-        k: _rung(current[k])
-        for k in changed.appeared + changed.escalated
-        if _rung(current[k]) >= MAIL_FROM
-    }
-    owed = {k: v for k, v in held.items() if k in current}
-    for k, rung in crossed.items():
-        if k not in owed or rung > _rung(owed[k]):
-            owed[k] = str(rung)
-    if in_quiet_hours(now):
-        return {}, owed
-    return {k: _rung(v) for k, v in owed.items()}, {}
-
-
-def adopted_state(repo: str) -> dict[str, str]:
-    """The state left behind by the newest CLOSED digest in `repo`, or `{}`.
-
-    Read only when there is no open issue to read state from. Somebody who closes this
-    issue by hand has not staged anything, so without this the next tick reports every
-    standing fault as newly appeared and mails the cohort about all of it again - which is
-    exactly the volume problem the whole design exists to avoid. A closed issue is never
-    ADOPTED (see `issues._titled`), only read."""
-    try:
-        found = find_closed_issue(repo, TITLE)
-    except RuntimeError as exc:
-        # Not worth failing over: the worst case is one re-notification.
-        log_err(f"could not look for a closed digest in {repo}: {exc}")
-        return {}
-    return read_state(found[1]) if found else {}
+def _write_marker(name: str, value) -> str:
+    """One state marker, as the HTML comment the body ends with (invisible when
+    rendered)."""
+    return f"<!-- dsl-source-{name}: {json.dumps(value, sort_keys=True)} -->"
 
 
 def current_state(faults: list[SourceFault], now) -> dict[str, str]:
@@ -285,30 +237,57 @@ def transitions(previous: dict[str, str], current: dict[str, str]) -> Transition
     )
 
 
+def _announce(
+    changed: Transitions, previous: dict[str, str], current: dict[str, str], now
+) -> tuple[dict[str, str], Transitions]:
+    """`(the state to STORE, the transitions to say out loud)` - the quiet window, and the
+    whole of it.
+
+    Outside the window both are simply what was computed. Inside it, every key whose
+    crossing would notify somebody is written back at the rung it was ALREADY reported at
+    (an appearance is not written at all), and dropped from what is announced. The next
+    tick therefore recomputes the very same transition against the very same previous
+    rung - and the first one at or after 07:00 says it once, at whatever rung the fault
+    has reached by then. Two rungs crossed overnight are one morning notification, because
+    what matters in the morning is how bad it is now, not the order it got there.
+
+    A ledger of owed mails did this before, and it had to be merged, aged and spent
+    correctly on every path out of `sync`. This holds no debt: it declines to record the
+    crossing, and being stateless it cannot deliver the same notification twice however
+    the clock jumps.
+
+    CLEARED keys are announced immediately whatever the hour: the issue closes itself and
+    nobody is emailed about it, so there is no notification to hold."""
+    if not in_quiet_hours(now):
+        return current, changed
+    stored = dict(current)
+    for key in changed.appeared:
+        stored.pop(key, None)
+    for key in changed.escalated:
+        stored[key] = previous[key]
+    return stored, Transitions([], [], changed.cleared, changed.rung)
+
+
 def render_body(
     faults: list[SourceFault],
     now,
-    course_org: str,
-    cohort_org: str = "",
+    ctx: Context,
     state: dict[str, str] | None = None,
-    central_ref: str = CENTRAL_REF,
-    mention: list[str] | None = None,
-    held: dict[str, str] | None = None,
 ) -> str:
-    """The whole issue body: the current list grouped by rung, plus the state marker.
+    """The whole issue body: the current list grouped by rung, plus the state markers.
 
     Every line names the FIELD to edit, not just the entry - "something is wrong with
     lecture-2" is not an instruction, `releases.lecture_02 -> course_source_path` is -
     carries the one sentence that would fix it (`SourceFault.fix`, shared with the mail so
-    the two cannot disagree), and links straight at the line in `cohort_org`'s
-    schedule.yml when the scan found it.
+    the two cannot disagree), and links straight at the line in the cohort's schedule.yml
+    when the parser found it.
 
-    `state` is the map the caller computed transitions against; passing it makes "the
-    marker matches what was compared" true by construction rather than by both sides
-    recomputing it from the same inputs and happening to agree.
+    `state` is the map the caller decided to record; passing it makes "the marker matches
+    what was compared" true by construction rather than by both sides recomputing it from
+    the same inputs and happening to agree.
 
-    `central_ref` is the tier this org runs, so the field reference points at the docs for
-    the engine that will read the file - not at whatever `main` says today."""
+    `ctx.central_ref` is the tier this org runs, so the field reference points at the docs
+    for the engine that will read the file - not at whatever `main` says today."""
     by_rung: dict[Severity, list[SourceFault]] = {}
     for f in faults:
         by_rung.setdefault(f.severity(now), []).append(f)
@@ -319,7 +298,7 @@ def render_body(
             f"this issue by hand.** Fix the file and this issue closes itself."
         ),
         "",
-        _mention(cohort_org, mention),
+        _mention(ctx),
     ]
     for rung in sorted(by_rung, reverse=True):  # loudest first
         rows = by_rung[rung]
@@ -331,33 +310,24 @@ def render_body(
                 else "_no date (tbc)_"
             )
             out.append(
-                f"- **{f.where} -> {f.field}** at {_cite(cohort_org, f)}  \n  "
-                f"{f.what}  |  fix: {f.fix(course_org, rung)}  \n  {when}"
+                f"- **{f.where} -> {f.field}** at {_cite(ctx.cohort_org, f)}  \n  "
+                f"{f.what}  |  fix: {f.fix(ctx.course_org, rung)}  \n  {when}"
             )
-    marker = json.dumps(
-        current_state(faults, now) if state is None else state, sort_keys=True
-    )
     out += [
         "",
         "---",
         (
-            f"Field reference: https://github.com/{CENTRAL}/blob/{central_ref}"
+            f"Field reference: https://github.com/{CENTRAL}/blob/{ctx.central_ref}"
             f"/docs/07-schedule-releases.md"
         ),
         "",
-        f"<!-- dsl-source-state: {marker} -->",
-        f"<!-- dsl-source-pending: {json.dumps(held or {}, sort_keys=True)} -->",
+        _write_marker(_STATE, current_state(faults, now) if state is None else state),
+        _write_marker(_MENTION, list(ctx.mention)),
     ]
     return "\n".join(out)
 
 
-def _comment(
-    t: Transitions,
-    faults: dict[str, SourceFault],
-    now,
-    cohort_org: str = "",
-    mention: list[str] | None = None,
-) -> str:
+def _comment(t: Transitions, faults: dict[str, SourceFault], now, ctx: Context) -> str:
     """The transition comment - short on purpose. It is an email subject line more than a
     document; the body above is where the detail lives.
 
@@ -369,7 +339,7 @@ def _comment(
     design exists to avoid."""
 
     def cite(k: str) -> str:
-        return _cite(cohort_org, faults.get(k))
+        return _cite(ctx.cohort_org, faults.get(k))
 
     parts = []
     if t.escalated:
@@ -383,7 +353,7 @@ def _comment(
     quiet = [k for k in t.appeared if t.rung[k] == NOTIFY_FROM]
     if quiet:
         parts.append(
-            f"**New** (fires within {_h(SOURCE_WARN_WINDOW)}h):\n"
+            f"**New** (fires within {hours(SOURCE_WARN_WINDOW)}h):\n"
             + "\n".join(f"- `{k}` - {cite(k)}" for k in quiet)
         )
     if t.cleared:
@@ -394,7 +364,7 @@ def _comment(
         )
     if not parts:
         return ""
-    return "\n\n".join([*parts, _mention(cohort_org, mention)])
+    return "\n\n".join([*parts, _mention(ctx)])
 
 
 def sync(
@@ -403,29 +373,37 @@ def sync(
     faults: list[SourceFault],
     now,
     dry_run: bool = False,
-    mention: list[str] | None = None,
+    resolve_mention: Callable[[], list[str]] | None = None,
 ) -> DigestResult:
     """Bring this cohort's digest issue in line with `faults`. Reports what it did - the
-    error count, and the transitions a notifier can mail on top of the @mention.
+    error count, and what a notifier owes an email for on top of the @mention.
 
-    `mention` is the logins git named for these faults (`notify.route`), so the comment
-    reaches the same people the mail is addressed to.
+    `resolve_mention` is asked who git names for these faults (`notify.route`) and is
+    called ONLY on a tick that has something to say: a comment to post, an issue to open,
+    or a mail owed. An hourly tick with a standing fault has none of those, so it reuses
+    the logins the last body recorded and spends no API call at all - which matters,
+    because the answer costs a blame query, a people.yml read and a commit lookup per
+    repo, every fifteen minutes for as long as the fault stands.
 
     Never raises past the caller's isolation and never fails a run: a notification that
     could not be delivered must not take a release cron down with it."""
     repo = f"{cohort_org}/{CONFIG_REPO}"
     by_key = {f.key: f for f in faults}
-    # Read first, and not only to decide create-vs-edit: the PREVIOUS state rides along in
-    # the body, and it is what tells "still broken" from "just got worse".
+    # ONE listing, open and closed together. The PREVIOUS state rides along in the body,
+    # and where there is no open issue to read it from, the newest CLOSED one is where it
+    # is: somebody who closes this issue by hand has not staged anything, so without
+    # adopting what it left behind the next tick reports every standing fault as newly
+    # appeared and notifies the cohort about all of it again.
     try:
-        existing = find_issue(repo, TITLE)
+        found = find_issues(repo, TITLE)
     except RuntimeError as exc:
         log_err(str(exc))
         return DigestResult(errors=1, faults_by_key=by_key)
-    url = f"https://github.com/{repo}/issues/{existing[0]}" if existing else None
+    open_issue, closed = found.open, found.last_closed
+    url = issue_url(repo, open_issue.number) if open_issue else None
 
     if not faults:
-        if existing:
+        if open_issue:
             if dry_run:
                 log_step(f"[dry-run] would close the source digest in {repo}")
                 return DigestResult(issue_url=url)
@@ -437,64 +415,65 @@ def sync(
             ):
                 return DigestResult(errors=1, issue_url=url)
             log_ok(f"source digest cleared and closed in {repo}")
-            # Everything the issue held is now staged, and the caller may still want to
-            # say so: the cleared keys are the previous state, read off the body.
-            return DigestResult(
-                transitions=transitions(read_state(existing[1]), {}), issue_url=url
-            )
-        return DigestResult()
+        return DigestResult(issue_url=url)
 
     # Nothing has reached the notify rung and there is no issue to keep current, so this
     # stays silent: an advisory-only plan is a term written ahead of time, not a fault.
-    if not existing and worst_severity(faults, now) < NOTIFY_FROM:
+    if not open_issue and worst_severity(faults, now) < NOTIFY_FROM:
         return DigestResult(faults_by_key=by_key)
 
-    previous = read_state(existing[1]) if existing else adopted_state(repo)
+    body = open_issue.body if open_issue else (closed.body if closed else "")
+    previous = _read_marker(body, _STATE, {})
     current = current_state(faults, now)
-    changed = transitions(previous, current)
-    to_mail, still_held = _mail_plan(
-        changed, read_pending(existing[1]) if existing else {}, current, now
-    )
+    state, changed = _announce(transitions(previous, current), previous, current, now)
+    mail = {k: changed.rung[k] for k in changed.appeared + changed.escalated}
     # A ref that cannot be resolved is not worth failing a notification over - the
     # digest's own contract is that it never takes a release cron down.
     try:
         ref = central_ref_for(course_org)
     except RuntimeError:
         ref = CENTRAL_REF
-    body = render_body(
-        faults, now, course_org, cohort_org, current, ref, mention, still_held
+    # A comment is the only half of this that emails anyone, so a tick with no transition
+    # to announce and no issue to open has nobody to name: it reuses what the last body
+    # recorded. `changed` covers the mail too - every key owed one is a key in it.
+    speaking = bool(changed) or not open_issue
+    mention = (
+        tuple(resolve_mention() or ())
+        if speaking and resolve_mention
+        else tuple(_read_marker(body, _MENTION, []))
     )
-    note = _comment(changed, by_key, now, cohort_org, mention)
+    ctx = Context(course_org, cohort_org, ref, mention)
+    note = _comment(changed, by_key, now, ctx)
+    result = DigestResult(issue_url=url, faults_by_key=by_key, mail=mail)
     if dry_run:
         moved = changed.appeared + changed.escalated + changed.cleared
         log_step(
-            f"[dry-run] would {'update' if existing else 'open'} the source digest in "
+            f"[dry-run] would {'update' if open_issue else 'open'} the source digest in "
             f"{repo} ({len(faults)} fault(s)"
             + (f"; comment: {len(moved)} transition(s))" if note else ")")
         )
-        return DigestResult(
-            transitions=changed, issue_url=url, faults_by_key=by_key, mail=to_mail
-        )
+        return result
 
-    # A comment is the only half of this that emails anyone, so it is posted ONLY for a
-    # transition - and `upsert_issue` withholds it on an issue it had to CREATE, which
-    # notifies on its own.
-    wrote = upsert_issue(repo, TITLE, body, comment=note or None)
+    # `upsert_issue` withholds the comment on an issue it had to CREATE, which notifies on
+    # its own; `existing` is the listing above, so it does not search again.
+    wrote = upsert_issue(
+        repo,
+        TITLE,
+        render_body(faults, now, ctx, state),
+        comment=note or None,
+        existing=open_issue,
+    )
     # `url` is None on the tick that had to CREATE the issue, and that is exactly the tick
     # a notifier has something to say - so take the URL the create printed.
-    url = url or wrote.url
+    result.issue_url = url or wrote.url
     if wrote.errors:
-        return DigestResult(errors=1, issue_url=url, faults_by_key=by_key)
+        result.errors = 1
+        result.mail = {}
+        return result
     log_ok(
         f"source digest in {repo}: {len(faults)} fault(s), "
         f"{len(changed.appeared)} new, {len(changed.escalated)} escalated, "
         f"{len(changed.cleared)} cleared"
-        + (
-            f", {len(still_held)} mail(s) held until {QUIET_UNTIL}:00"
-            if still_held
-            else ""
-        )
+        + (f" (held until {QUIET_UNTIL}:00)" if in_quiet_hours(now) else "")
     )
-    return DigestResult(
-        transitions=changed, issue_url=url, faults_by_key=by_key, mail=to_mail
-    )
+    return result
