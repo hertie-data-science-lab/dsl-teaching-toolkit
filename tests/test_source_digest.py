@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import CREATED_ISSUE_URL, issue_row, source_fault
 
+from dsl_course import schedule
 from dsl_course import source_digest as sd
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -393,6 +394,25 @@ def test_an_old_shaped_key_still_escalates_from_the_rung_it_recorded(gh):
     assert out.mail == {fault.key: sd.Severity.CRITICAL}
     (comment,) = fake.did("issue", "comment")
     assert "Escalated" in comment[comment.index("--body") + 1]
+
+
+def test_a_withheld_source_is_listed_and_commented_on_but_never_mailed(gh):
+    # It caps at WARNING, which is the rung the mail starts at, so without a rule of its
+    # own it mails on appearance - about files that ARE in the org, held back by a pattern
+    # faculty wrote deliberately. The issue can be read and revisited; an inbox cannot.
+    withheld = source_fault(
+        "releases.a",
+        "the files exist but cm/.releaseignore keeps them back",
+        NOW + timedelta(hours=3),
+        kind=schedule.FaultKind.WITHHELD,
+        ceiling=sd.Severity.WARNING,
+        path="x",
+    )
+    fake = gh([])
+    out = sd.sync("Cohort", "Course", [withheld], NOW)
+    assert out.mail == {}
+    (created,) = fake.did("issue", "create")
+    assert "keeps them back" in created[created.index("--body") + 1]
 
 
 def test_the_last_fault_clearing_closes_the_issue(gh):

@@ -48,6 +48,7 @@ from .schedule import (
     SOURCE_CRITICAL_WINDOW,
     SOURCE_URGENT_WINDOW,
     SOURCE_WARN_WINDOW,
+    FaultKind,
     Severity,
     SourceFault,
     hours,
@@ -463,7 +464,16 @@ def sync(
     previous = migrated(_read_marker(body, _STATE, {}), faults)
     current = current_state(faults, now)
     state, changed = _announce(transitions(previous, current), previous, current, now)
-    mail = {k: changed.rung[k] for k in changed.appeared + changed.escalated}
+    # A `.releaseignore`-withheld source is listed and commented on, and mailed to nobody.
+    # Its ceiling is WARNING, which is NOTIFY_FROM itself, so without this it earns a mail
+    # the moment it appears - about files that are in the org, held back by a pattern
+    # faculty wrote on purpose. The issue is the right surface for a decision somebody may
+    # want to revisit; an inbox is not.
+    mail = {
+        k: changed.rung[k]
+        for k in changed.appeared + changed.escalated
+        if by_key[k].kind is not FaultKind.WITHHELD
+    }
     # A ref that cannot be resolved is not worth failing a notification over - the
     # digest's own contract is that it never takes a release cron down.
     try:
