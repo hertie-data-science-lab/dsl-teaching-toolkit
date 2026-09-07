@@ -9,24 +9,23 @@ nothing else), and a course org the toolkit could not read at all (infrastructur
 plus a mail to the maintainer). Sending any of them down another's channel is how a fault
 gets the wrong name and closes itself without being fixed.
 
-The comment-building shell is EXECUTED against a real `--check-sources` report, because
-the property under test lives in a grep and a sed: which rungs it keeps.
+The comment's TEXT belongs to the engine (`schedule.source_comment`), which is where it is
+asserted; what is asserted here is that the workflow posts it rather than rebuilding it -
+the step used to grep the report for a rung prefix, which matched some rungs and not
+others, and counted an already-fired entry among the ones still to come.
 """
 
 from __future__ import annotations
 
-import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import yaml
+from conftest import source_fault
 
-from dsl_course.schedule import (
-    SOURCE_WARN_WINDOW,
-    Severity,
-    SourceFault,
-)
+from dsl_course import mailer, schedule
+from dsl_course.schedule import SOURCE_WARN_WINDOW, hours
 
 BERLIN = ZoneInfo("Europe/Berlin")
 NOW = datetime(2026, 9, 7, 12, 0, tzinfo=BERLIN)
@@ -63,11 +62,22 @@ def test_only_the_infrastructure_failure_emails_the_maintainer():
         "failure() && steps.course.outputs.org == '' "
         "&& github.event_name != 'workflow_dispatch'"
     )
-    assert "--run-failed" in mail["run"]
-    assert "--log-failed" in mail["run"]
-    # It can only mail if it carries the transport and knows where to send.
-    assert "GRAPH_CLIENT_CERT" in mail["env"]
-    assert mail["env"]["DSL_MAINTAINER_EMAIL"] == "${{ secrets.DSL_MAINTAINER_EMAIL }}"
+    assert "dsl_course.notify run-failed" in mail["run"]
+    # The FAILED JOB's log, by id: `gh run view --log-failed` downloads and unzips every
+    # job in the run to print thirty lines from one of them.
+    assert 'select(.conclusion == "failure")' in mail["run"]
+    assert "actions/jobs/$job/logs" in mail["run"]
+
+
+def test_the_mail_step_carries_exactly_the_env_the_mailer_reads():
+    # Derived from the names the mailer reads, not typed here: a rename that reached
+    # production would leave every org silently unable to say who to mail, on a step that
+    # only ever runs when something is already broken.
+    mail = _step("Email the maintainer")
+    expected = (*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV)
+    assert [k for k in mail["env"] if k in expected] == list(expected)
+    for name in expected:
+        assert mail["env"][name] == "${{ secrets." + name + " }}"
 
 
 def test_the_commit_comment_only_fires_on_a_push():
@@ -77,17 +87,30 @@ def test_the_commit_comment_only_fires_on_a_push():
     assert step["if"].startswith("github.event_name == 'push'")
 
 
-def test_the_commit_comment_is_gated_on_the_rung_the_engine_reported():
-    # Re-deriving a severity by grepping the report is what this replaces: the pattern
-    # matched some rungs and not others, silently. `sources_worst` is written by the
-    # process that knows it.
+def test_the_commit_comment_is_gated_on_one_answer_from_the_engine():
+    # It used to enumerate the rung names an `if:` should fire on - a list a new rung falls
+    # out of silently. One boolean, written by the process that knows.
     step = _step("Comment on the push")
-    for rung in (Severity.WARNING, Severity.URGENT, Severity.CRITICAL, Severity.MISSED):
-        assert f"sources_worst == '{rung}'" in step["if"], rung
-    # An advisory is a term written in August. Commenting on those teaches faculty to
-    # scroll past this.
-    assert "'advisory'" not in step["if"]
-    assert "'none'" not in step["if"]
+    assert "steps.validate.outputs.sources_notify == 'true'" in step["if"]
+    assert "sources_worst" not in RAW
+
+
+def test_the_workflow_posts_the_comment_rather_than_building_it():
+    # A shell re-arranging a sentence is a shell that gets it wrong on the one line that
+    # matters, and this one dropped the rungs its pattern did not list.
+    validate, comment = _step("Validate schedule.yml"), _step("Comment on the push")
+    assert "--comment-file comment.txt" in validate["run"]
+    assert "cat comment.txt" in comment["run"]
+    assert "grep" not in comment["run"] and "sed" not in comment["run"]
+    # The engine wrote it into the checkout the validate step ran in.
+    assert comment["working-directory"] == "central"
+
+
+def test_the_comment_says_where_the_durable_record_is():
+    # The one thing the engine cannot know: which repo this workflow is running in.
+    comment = _step("Comment on the push")
+    assert "The generated GitHub record issue is" in comment["run"]
+    assert "classroom-config/issues" in comment["run"]
 
 
 def test_a_commit_comment_needs_contents_write():
@@ -97,44 +120,14 @@ def test_a_commit_comment_needs_contents_write():
     assert doc["permissions"] == {"contents": "write", "issues": "write"}
 
 
-def _report(now: datetime, faults: list[SourceFault]) -> str:
-    """The `--check-sources` block of a real CLI report, built the way `main` builds it."""
-    lines = [f"  {len(faults)} SOURCE(S) NOT IN Course-Org YET:"]
-    lines += [
-        f"    [{f.severity(now)}] {f.line()}"
-        for f in sorted(faults, key=lambda f: -f.severity(now))
-    ]
-    return "\n".join(
-        [*lines, "", "  A source you have not written yet looks like this"]
-    )
+# ------------------------------------------------------- the text the step is handed
 
 
-def _run_comment_step(report: str) -> str:
-    """Execute the comment step's script with `gh` faked, and return the body it built."""
-    step = _step("Comment on the push")
-    script = step["run"].replace(
-        'gh api "repos/$REPO/commits/$SHA/comments" -f body="$body" >/dev/null',
-        'printf "%s" "$body"',
-    )
-    return subprocess.run(
-        ["bash", "-e", "-c", script],
-        env={
-            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
-            "REPORT": report,
-            "COHORT": "C-f2026",
-        },
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-
-
-def _fault(where: str, offset: timedelta, lineno: int) -> SourceFault:
-    return SourceFault(
+def _fault(where: str, offset: timedelta, lineno: int):
+    return source_fault(
         where,
         "Course-Org/cm/lectures/02 does not exist",
         NOW + offset,
-        field="course_source_path",
         lineno=lineno,
         repo="cm",
         path="lectures/02",
@@ -142,54 +135,64 @@ def _fault(where: str, offset: timedelta, lineno: int) -> SourceFault:
 
 
 def test_the_comment_keeps_the_imminent_faults_and_drops_the_distant_ones():
-    body = _run_comment_step(
-        _report(
-            NOW,
-            [
-                _fault("releases.lecture_02", timedelta(hours=3), 131),
-                _fault("releases.lecture_03", timedelta(hours=20), 140),
-                _fault("releases.lecture_09", timedelta(days=60), 300),
-            ],
-        )
+    body = schedule.source_comment(
+        [
+            _fault("releases.lecture_02", timedelta(hours=3), 131),
+            _fault("releases.lecture_03", timedelta(hours=20), 140),
+            _fault("releases.lecture_09", timedelta(days=60), 300),
+        ],
+        NOW,
     )
-    assert "planned release(s) inside" in body
+    assert body.startswith(
+        f"This push leaves 2 planned release(s) inside {hours(SOURCE_WARN_WINDOW)}h"
+    )
     assert "releases.lecture_02" in body
     assert "releases.lecture_03" in body
     assert "releases.lecture_09" not in body  # the digest issue holds that one
 
 
-def test_the_comment_counts_what_it_actually_listed():
-    body = _run_comment_step(
-        _report(
-            NOW,
-            [
-                _fault("releases.a", timedelta(hours=3), 10),
-                _fault("releases.b", timedelta(days=60), 20),
-            ],
-        )
+def test_an_entry_that_has_already_fired_is_not_counted_as_one_still_to_come():
+    # "inside 24h" is a promise about the future, and a release that has already shipped
+    # nothing needs a different sentence - and its own line.
+    body = schedule.source_comment(
+        [
+            _fault("releases.lecture_01", -timedelta(hours=2), 120),
+            _fault("releases.lecture_02", timedelta(hours=3), 131),
+        ],
+        NOW,
     )
-    assert body.startswith("This push leaves 1 planned release(s) inside ")
-    assert f"inside {int(SOURCE_WARN_WINDOW.total_seconds() // 3600)}h" in body
+    assert "This push leaves 1 planned release(s) inside" in body
+    assert "1 planned release(s) have already fired with nothing to ship:" in body
+    assert body.index("releases.lecture_01") > body.index("releases.lecture_02")
 
 
-def test_the_comment_says_where_the_durable_record_is():
-    body = _run_comment_step(
-        _report(NOW, [_fault("releases.a", timedelta(hours=3), 10)])
-    )
-    assert "You will get one email about each as its deadline nears." in body
-    assert "C-f2026/classroom-config/issues" in body
-
-
-def test_a_report_with_nothing_imminent_writes_no_comment():
+def test_a_plan_with_nothing_imminent_writes_no_comment():
     assert (
-        _run_comment_step(_report(NOW, [_fault("releases.a", timedelta(days=60), 10)]))
+        schedule.source_comment([_fault("releases.a", timedelta(days=60), 10)], NOW)
         == ""
     )
+    assert schedule.source_comment([], NOW) == ""
 
 
-def test_each_listed_row_is_the_engines_own_line_with_only_the_rung_stripped():
-    # The shell must not re-arrange a sentence: `SourceFault.line()` is dash-separated in
-    # this order precisely so the comment can reuse it whole.
+def test_each_listed_row_is_the_engines_own_line():
+    # `SourceFault.line()` is dash-separated in this order precisely so every surface can
+    # reuse it whole rather than re-arranging it.
     fault = _fault("releases.lecture_02", timedelta(hours=3), 131)
-    body = _run_comment_step(_report(NOW, [fault]))
-    assert f"- {fault.line()}" in body
+    assert f"- {fault.line()}" in schedule.source_comment([fault], NOW)
+
+
+def test_the_comment_tells_the_pusher_what_happens_next():
+    body = schedule.source_comment([_fault("releases.a", timedelta(hours=3), 10)], NOW)
+    assert body.endswith("You will get one email about each as its deadline nears.")
+
+
+def test_the_run_summary_is_the_engines_report_not_a_second_rendering():
+    # The workflow appends the CLI's stdout verbatim; asserting the report here rather
+    # than re-implementing it is what stops the two drifting.
+    fault = _fault("releases.a", timedelta(hours=3), 10)
+    report = schedule.source_report([fault], NOW, "Course-Org")
+    assert report.startswith("  1 SOURCE(S) NOT IN Course-Org YET:")
+    assert f"    [critical] {fault.line()}" in report
+    assert schedule.source_report([], NOW, "Course-Org") == (
+        "  every source in the plan exists in Course-Org"
+    )

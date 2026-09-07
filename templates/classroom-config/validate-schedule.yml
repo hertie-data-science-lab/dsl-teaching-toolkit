@@ -27,9 +27,13 @@ name: Validate schedule
 # "entries the scheduler cannot read" and close it on the next clean parse, staged or not.
 #
 # What a source fault DOES get here is a commit comment, and only when the release is
-# inside 24h. That is the one moment this workflow can say something the scheduler cannot:
-# the person who just pushed is still at their keyboard, and the alternative is finding out
-# from an email tomorrow. Distant faults get nothing - the digest issue holds them.
+# close enough that somebody is meant to hear about it. That is the one moment this
+# workflow can say something the scheduler cannot: the person who just pushed is still at
+# their keyboard, and the alternative is finding out from an email tomorrow. Distant faults
+# get nothing - the digest issue holds them. The comment's TEXT is written by the engine
+# (`--comment-file`), not assembled here: this step used to grep the report back for a rung
+# prefix, which matched some rungs and not others, and counted an entry that had already
+# fired among the ones still to come.
 
 on:
   push:
@@ -101,7 +105,7 @@ jobs:
             echo "::error::could not read this cohort's dsl-course.yml - the source check cannot run. This is not a fault in your file - the toolkit could not reach the course org; the maintainer has been emailed."
             exit 1
           fi
-          check="--check-sources $COURSE_ORG --annotate"
+          check="--check-sources $COURSE_ORG --annotate --comment-file comment.txt"
           # stdout is the report; the ::warning:: annotations go to stderr, so they reach
           # the job log (where Actions renders them against schedule.yml in the commit's
           # own diff) without landing in the summary as raw workflow-command text.
@@ -127,27 +131,22 @@ jobs:
           exit 0
 
       # The push that planned it is the cheapest moment to say so: the person who wrote
-      # the line is still here. Only inside 24h - a term written in August names folders
-      # nobody has authored, and commenting on every one of those would train faculty to
-      # scroll past this. `sources_worst` is written by the process that knows the rung
-      # (dsl_course.schedule --annotate), never re-derived by grepping the report.
+      # the line is still here. `sources_notify` and comment.txt are both written by the
+      # process that knows the rung (dsl_course.schedule --annotate --comment-file), so
+      # this step decides nothing - it posts what it was handed, and adds the one thing
+      # only the workflow knows: where this repo's digest issue lives.
       - name: Comment on the push about a release with no materials
-        if: github.event_name == 'push' && (steps.validate.outputs.sources_worst == 'warning' || steps.validate.outputs.sources_worst == 'urgent' || steps.validate.outputs.sources_worst == 'critical' || steps.validate.outputs.sources_worst == 'missed')
+        if: github.event_name == 'push' && steps.validate.outputs.sources_notify == 'true'
+        working-directory: central
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
           COHORT: ${{ github.repository_owner }}
-          REPORT: ${{ steps.validate.outputs.report }}
         run: |
-          # The report already carries `[rung] <entry> -> <field> at schedule.yml:<n>` per
-          # fault; the distant ones are dropped here so the comment is only about what is
-          # about to ship nothing.
-          lines=$(printf '%s\n' "$REPORT" | grep -E '^ +\[(warning|urgent|critical|missed)\]' | sed -E 's/^ +\[[a-z]+\] /- /')
-          [ -z "$lines" ] && exit 0
-          n=$(printf '%s\n' "$lines" | wc -l | tr -d ' ')
-          body=$(printf 'This push leaves %s planned release(s) inside 24h whose materials are not in the course org:\n%s\n\nYou will get one email about each as its deadline nears. The generated GitHub record issue is https://github.com/%s/classroom-config/issues?q=is%%3Aissue+is%%3Aopen+schedule.yml.\n' \
-            "$n" "$lines" "$COHORT")
+          [ -s comment.txt ] || exit 0
+          body=$(printf '%s\nThe generated GitHub record issue is https://github.com/%s/classroom-config/issues?q=is%%3Aissue+is%%3Aopen+schedule.yml.\n' \
+            "$(cat comment.txt)" "$COHORT")
           gh api "repos/$REPO/commits/$SHA/comments" -f body="$body" >/dev/null
 
       - name: Open an issue naming what was dropped
@@ -206,6 +205,8 @@ jobs:
           GRAPH_SENDER: ${{ secrets.GRAPH_SENDER }}
           DSL_MAINTAINER_EMAIL: ${{ secrets.DSL_MAINTAINER_EMAIL }}
         run: |
-          gh run view "$GITHUB_RUN_ID" --repo "$REPO" --log-failed 2>/dev/null | tail -n 30 \
-            | python3 -m dsl_course.notify --run-failed --course-org "$COHORT" \
+          job=$(gh api "repos/$REPO/actions/runs/$GITHUB_RUN_ID/jobs" \
+            --jq '[.jobs[] | select(.conclusion == "failure")][0].id' 2>/dev/null) || true
+          gh api "repos/$REPO/actions/jobs/$job/logs" 2>/dev/null | tail -n 30 \
+            | python3 -m dsl_course.notify run-failed --course-org "$COHORT" \
                 --workflow "$WORKFLOW" --run-url "$RUN_URL" || true
