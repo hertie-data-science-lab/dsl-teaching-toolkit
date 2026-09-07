@@ -46,6 +46,7 @@ from .schedule import (
     SCHEDULE_PATH,
     SOURCE_CRITICAL_WINDOW,
     SOURCE_URGENT_WINDOW,
+    FaultKind,
     Severity,
     SourceFault,
     deep_link,
@@ -235,14 +236,22 @@ def _anchor(url: str, text: str) -> str:
 
 
 def _folder_link(course_org: str, fault: SourceFault) -> str | None:
-    """A link into the repo the materials belong in - the folder's PARENT, because the
-    folder itself is exactly what is not there yet.
+    """A link to the place the materials belong - the folder's PARENT, because the folder
+    itself is exactly what is not there yet.
+
+    A MISSING_REPO fault links the COURSE ORG instead: the repo is the thing that is
+    absent, so `<repo>/tree/main/<folder>` inside it is a 404 in an email whose whole job
+    is to say where to go. The org is where the repo has to be created, and it is the one
+    URL that is certainly there.
 
     `main` because every repo this toolkit creates has one, and a branch lookup per fault
     would be an API call to decorate an email."""
     if not fault.repo:
         return None
-    base = f"https://github.com/{course_org}/{fault.repo}"
+    org = f"https://github.com/{course_org}"
+    if fault.kind is FaultKind.MISSING_REPO:
+        return _anchor(org, course_org)
+    base = f"{org}/{fault.repo}"
     parent = fault.path.rpartition("/")[0]
     if not parent:
         return _anchor(base, fault.repo)

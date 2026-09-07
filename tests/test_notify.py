@@ -375,6 +375,21 @@ def test_a_missing_assignment_template_says_to_create_the_repo(wired):
         in body
     )
     assert "handout fires" in body
+    # ...and it links the ORG the repo has to be created in. A `tree/main/` URL inside a
+    # repo that does not exist is a 404 on the one line saying where to go.
+    assert f'<a href="https://github.com/{COURSE}">' in body
+    assert "tree/main" not in body
+
+
+def test_a_release_whose_source_repo_is_missing_links_the_org_too(wired):
+    # Same fault, from a `releases:` deploy rather than an assignment - so it carries a
+    # path as well, and the path is not somewhere that can be linked either.
+    fault = _fault(field="course_source_repo")
+    sent = wired(blame={131: "JanG"}, committer=None)
+    routing = notify.route(COHORT, COURSE, [fault], NOW)
+    _run([fault], Severity.URGENT, routing)
+    assert f'<a href="https://github.com/{COURSE}">' in sent.one["body"]
+    assert "tree/main" not in sent.one["body"]
 
 
 def test_a_value_a_faculty_member_typed_cannot_break_out_of_the_html(wired):

@@ -327,7 +327,9 @@ def render_body(
     ]
     for rung in sorted(by_rung, reverse=True):  # loudest first
         rows = by_rung[rung]
-        out += ["", f"### {_RUNG_HEADING[rung]} ({len(rows)})", ""]
+        # No count in the heading: the rows are right under it, and a number that has to
+        # agree with them is a number that can disagree with them.
+        out += ["", f"### {_RUNG_HEADING[rung]}", ""]
         for f in sorted(rows, key=lambda f: (f.fires is None, f.fires or now)):
             when = (
                 f"_{'fired' if rung is Severity.MISSED else 'fires'} {f.due}_"

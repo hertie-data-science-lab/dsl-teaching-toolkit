@@ -115,11 +115,14 @@ def test_every_rung_heading_carries_its_own_deadline():
         NOW,
         COURSE,
     )
-    assert "### MISSED (1)" in body
-    assert "### CRITICAL (6h) (1)" in body
-    assert "### URGENT (12h) (1)" in body
-    assert "### WARNING (24h) (1)" in body
-    assert "### advisory (1)" in body
+    assert "### MISSED\n" in body
+    assert "### CRITICAL (6h)\n" in body
+    assert "### URGENT (12h)\n" in body
+    assert "### WARNING (24h)\n" in body
+    assert "### advisory\n" in body
+    # The hours are the DEADLINE, not a count of the rows under the heading - those are
+    # right there, and a number that has to agree with them can disagree with them.
+    assert "(2)" not in body
     # A fault that has already fired did not "fire" in the future tense.
     assert "_fired " in body and "_fires " in body
 
