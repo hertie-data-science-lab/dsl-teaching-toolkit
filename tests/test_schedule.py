@@ -1495,7 +1495,7 @@ def test_validate_cli_reports_an_unreadable_cohort_schedule(monkeypatch, capsys)
 def _org(monkeypatch, trees: dict[str, list[str]]):
     """Fake a course org as {repo: [every path in it]}. A repo absent from `trees` does not
     exist; one mapped to [] exists but is empty."""
-    monkeypatch.setattr(schedule, "repo_exists", lambda org, repo: repo in trees)
+    monkeypatch.setattr(schedule, "repo_missing", lambda org, repo: repo not in trees)
     monkeypatch.setattr(schedule, "default_branch", lambda org, repo: "main")
     monkeypatch.setattr(
         schedule,
@@ -1635,9 +1635,9 @@ def test_a_whole_repo_release_only_needs_the_repo(monkeypatch):
     assert [f.line() for f in schedule.source_faults(s, "Course-Org")] == []
 
 
-def test_an_unreadable_repo_is_never_reported_as_missing(monkeypatch):
+def test_an_unreadable_repo_is_never_reported_as_missing(monkeypatch, capsys):
     # A rate limit must not turn every source in the plan into a phantom typo.
-    monkeypatch.setattr(schedule, "repo_exists", lambda org, repo: True)
+    monkeypatch.setattr(schedule, "repo_missing", lambda org, repo: False)
     monkeypatch.setattr(schedule, "default_branch", lambda org, repo: "main")
 
     def boom(org, repo, branch, kind=""):
@@ -1646,11 +1646,33 @@ def test_an_unreadable_repo_is_never_reported_as_missing(monkeypatch):
     monkeypatch.setattr(schedule, "repo_tree", boom)
     s = Schedule(releases=[_release("lecture-1", "lectures/01_a")])
     assert [f.line() for f in schedule.source_faults(s, "Course-Org")] == []
+    # ...and it says so, so a silent tick is not mistaken for a clean one.
+    assert "[skip] could not read Course-Org/cm" in capsys.readouterr().out
+
+
+def test_only_a_404_says_the_repo_is_not_there(monkeypatch):
+    # Absence here is an email telling faculty their materials are not in the course org,
+    # hours before a lecture. The optimistic `repo_exists` reads a 403 or a 5xx as absent,
+    # which is exactly the wrong answer to send somebody.
+    monkeypatch.setattr(schedule, "repo_missing", lambda org, repo: False)
+    monkeypatch.setattr(schedule, "default_branch", lambda org, repo: "main")
+
+    def unreadable(org, repo, branch, kind=""):
+        raise RuntimeError("HTTP 403: rate limit")
+
+    monkeypatch.setattr(schedule, "repo_tree", unreadable)
+    s = Schedule(releases=[_release("lecture-1", "lectures/01_a", repo="gone")])
+    assert schedule.source_faults(s, "Course-Org") == []
+    # A positive 404, and the same plan reports the repo.
+    monkeypatch.setattr(schedule, "repo_missing", lambda org, repo: True)
+    (fault,) = schedule.source_faults(s, "Course-Org")
+    assert fault.kind is schedule.FaultKind.MISSING_REPO
+    assert fault.what == "no repo Course-Org/gone (or it is empty)"
 
 
 def test_one_tree_fetch_per_repo_however_many_deploys(monkeypatch):
     calls: list[str] = []
-    monkeypatch.setattr(schedule, "repo_exists", lambda org, repo: True)
+    monkeypatch.setattr(schedule, "repo_missing", lambda org, repo: False)
     monkeypatch.setattr(schedule, "default_branch", lambda org, repo: "main")
 
     def counting(org, repo, branch, kind=""):

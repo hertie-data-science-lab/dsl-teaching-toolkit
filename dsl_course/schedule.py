@@ -85,7 +85,7 @@ from .course import CONFIG_REPO, coerce_date
 from .gh_contents import get_file_content, get_file_with_sha, put_file, repo_tree
 from .log import log, log_err, log_step
 from .releaseignore import RELEASEIGNORE, excluded_in_tree
-from .repos import default_branch, repo_exists
+from .repos import default_branch, repo_missing
 
 SCHEDULE_PATH = "schedule.yml"
 DEFAULT_TZ = "Europe/Berlin"
@@ -1104,7 +1104,7 @@ def _repo_paths(course_org: str, repo: str) -> set[str] | None:
     and the commit-time validator and the hourly pre-flight each ask about the same
     handful of materials repos from several entries. `tests/conftest.py` clears it.
 
-    Kept distinct from "the repo is not there" (the caller asks `repo_exists` first),
+    Kept distinct from "the repo is not there" (the caller asks `repo_missing` first),
     because the two want opposite handling: an absent repo is a fault worth naming, an
     unreadable one must be passed over in silence. `default_branch` is the fail-loud twin
     on purpose - `default_branch(fallback="main")` guesses when it cannot read the repo,
@@ -1451,11 +1451,23 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
         # Absent-or-empty is asked separately from unreadable, because they want opposite
         # answers: a repo that is not there is the typo this check exists to catch, while
         # a repo that cannot be READ must be passed over in silence.
-        paths = (
-            _repo_paths(course_org, repo) if repo_exists(course_org, repo) else set()
-        )
-        if paths is None:
-            continue  # could not read it - say nothing rather than cry wolf
+        #
+        # `repo_missing` and not the optimistic `repo_exists`, which reads a 403, a 5xx or
+        # a rate limit as absence: absence here becomes an email telling faculty their
+        # materials are not in the course org, hours before a lecture. Only a 404 says
+        # that. A read that failed some other way falls through to the tree fetch, which
+        # fails the same way and is passed over below.
+        paths: set[str] | None = set()
+        if not repo_missing(course_org, repo):
+            paths = _repo_paths(course_org, repo)
+            if paths is None:
+                # Could not tell. Say nothing rather than cry wolf about every source in
+                # the plan - and say out loud that this tick did not check them.
+                log(
+                    f"  [skip] could not read {course_org}/{repo} - its sources are not "
+                    f"checked this tick"
+                )
+                continue
         if not paths:
             out.extend(
                 SourceFault(
