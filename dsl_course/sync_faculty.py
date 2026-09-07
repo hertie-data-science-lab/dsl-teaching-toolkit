@@ -19,11 +19,16 @@ Two independent flows, split by role rather than by "stability":
   its own team, so there's no "which cohort wins" ambiguity and no
   accumulate-forever list.
 
-Each person entry requires `github_handle` (the only field that grants access);
-`start`/`end` (optional ISO dates) bound when they're active, giving auto-rotation
-with no manual removal step. Every reconcile here is FULL (add + remove) - a lapsed
-`end` date or a deleted entry revokes access on the next sync, same as an edit to
-students.csv/teams.csv.
+Each person entry requires `github_handle` (the only field that grants access) and, for
+an instructor or a TA, `email` (the only way a notification reaches them - see
+`teaching_contacts`); `start`/`end` (optional ISO dates) bound when they're active,
+giving auto-rotation with no manual removal step. Every reconcile here is FULL
+(add + remove) - a lapsed `end` date or a deleted entry revokes access on the next sync,
+same as an edit to students.csv/teams.csv.
+
+A missing or malformed `email` is reported and does NOT withhold access: a cohort that
+has not filled it in keeps working (and keeps getting the @mention on its digest issue)
+rather than losing its team on the next sync.
 
 Usage:
     python3 -m dsl_course.sync_faculty --course-org hertie-dsl-demo-course-e1234
@@ -34,6 +39,8 @@ from __future__ import annotations
 import argparse
 import sys
 from datetime import date
+from functools import cache
+from typing import NamedTuple
 
 from .access import grant_team_repo_access
 from .course import (
@@ -58,16 +65,33 @@ ROLE_TEAM = {
     "course_admins": COURSE_ADMIN_TEAM,
 }
 COHORT_PEOPLE_PATH = "people.yml"
+# The roles a cohort declares: its teaching team, the people a notification is addressed
+# to and therefore the entries `email:` is required on. course_admins is course-level and
+# notified through the course org, not a cohort's people.yml.
+TEACHING_ROLES = ("instructors", "teaching_assistants")
 
 
 # --------------------------------------------------------------------------- pure core
+
+
+def valid_email(value: object) -> str | None:
+    """A declared address as written, or None when it is absent or cannot be one (no `@`
+    with something either side). NEVER log the return value or the input: an address is
+    personal data and every faculty workflow runs in a public repo. Report the role and
+    the handle instead."""
+    text = str(value or "").strip()
+    local, _, domain = text.partition("@")
+    return text if local and domain else None
 
 
 def parse_faculty_from_meta(meta: dict) -> dict[str, list[dict]]:
     """Parse an already-loaded config mapping's `people:` block (course org's
     dsl-course.yml, or a cohort's people.yml - same schema) for the roles in ROLE_TEAM.
     Only entries with a `github_handle` grant access; a named entry without one is a
-    legitimate display-only card (noted, not an error), anything else is junk (flagged)."""
+    legitimate display-only card (noted, not an error), anything else is junk (flagged).
+
+    An instructor/TA entry with no usable `email:` is an error line naming the role and
+    the handle - the entry still grants access, it just cannot be notified."""
     people = meta.get("people")
     if not isinstance(people, dict):
         return {}
@@ -77,6 +101,12 @@ def parse_faculty_from_meta(meta: dict) -> dict[str, list[dict]]:
         for p in people.get(role) or []:
             if isinstance(p, dict) and p.get("github_handle"):
                 entries.append(p)
+                if role in TEACHING_ROLES and valid_email(p.get("email")) is None:
+                    log_err(
+                        f"  ! {role} entry {p['github_handle']} has no usable `email:` "
+                        f"- it is required (access still granted, but this person is "
+                        f"not notified): see {COHORT_PEOPLE_PATH}"
+                    )
             elif isinstance(p, dict) and p.get("name"):
                 log(
                     f"  ({role} entry '{p['name']}' has no github_handle - "
@@ -118,6 +148,69 @@ def desired_team_members(
 def _desired_for(faculty: dict[str, list[dict]], team: str, today: str) -> set[str]:
     """This team's desired active handles from a parsed faculty dict."""
     return desired_team_members(faculty, today).get(team, set())
+
+
+def _active_teaching_entries(
+    faculty: dict[str, list[dict]], today: str
+) -> list[tuple[str, dict]]:
+    """`(role, entry)` for every parsed instructor/TA entry active on `today` (an ISO date
+    string), in declaration order - this cohort's teaching team as it stands today.
+
+    The role rides along because who gets COPIED on a notification depends on it: a mail
+    addressed to a TA copies the instructors. Reading it back off the entry afterwards
+    would mean iterating people.yml a second way."""
+    return [
+        (role, p)
+        for role in TEACHING_ROLES
+        for p in faculty.get(role) or []
+        if active_today(p.get("start"), p.get("end"), today)
+    ]
+
+
+class Contact(NamedTuple):
+    """One reachable member of a cohort's teaching team.
+
+    All three fields travel together because a notification needs all three: the handle is
+    what git blame and an @mention speak, the address is what the mail uses, and the role
+    decides who is copied."""
+
+    handle: str
+    email: str
+    role: str
+
+    @property
+    def is_ta(self) -> bool:
+        return self.role == "teaching_assistants"
+
+
+def teaching_contacts(faculty: dict[str, list[dict]], today: str) -> list[Contact]:
+    """The instructors and TAs active on `today` (an ISO date string) that a notification
+    can actually reach, in declaration order.
+
+    A parsed faculty dict and a clock, exactly like `without_email`: the caller reads
+    people.yml once and both answers are about the same tick. Taking the raw `people:`
+    mapping instead meant a second parse - and a second `date.today()`, which is not the
+    clock a scheduler run is reasoning about.
+
+    Entries with no usable `email:` are left out - `parse_faculty_from_meta` has already
+    reported them and `without_email` names the handles. Log a length, or a handle through
+    `log_person`; never an address."""
+    out: list[Contact] = []
+    for role, p in _active_teaching_entries(faculty, today):
+        email = valid_email(p.get("email"))
+        if email:
+            out.append(Contact(str(p["github_handle"]), email, role))
+    return out
+
+
+def without_email(faculty: dict[str, list[dict]], today: str) -> list[str]:
+    """The handles of active instructors/TAs no notification can reach. Handles, which
+    are public and loggable; the addresses themselves never leave this module."""
+    return [
+        str(p["github_handle"])
+        for _role, p in _active_teaching_entries(faculty, today)
+        if valid_email(p.get("email")) is None
+    ]
 
 
 def _cohort_roles_only(faculty: dict[str, list[dict]]) -> dict[str, list[dict]]:
@@ -164,12 +257,19 @@ def load_faculty(course_org: str) -> dict[str, list[dict]] | None:
     return parse_faculty_from_meta(meta)
 
 
+@cache
 def load_cohort_faculty(cohort_org: str) -> dict[str, list[dict]] | None:
     """Fetch + parse this cohort's own classroom-config/people.yml - instructors/TAs
     only (no course_admins key here; that role stays exclusively course-level).
 
     Returns None when people.yml is genuinely ABSENT (do not prune); a present-but-empty
-    people block parses to {} and legitimately empties the team."""
+    people block parses to {} and legitimately empties the team.
+
+    THE door to a cohort's people.yml, and memoised per process like `repos._repo`: a
+    release tick asks it who to notify, `status` asks it who is unreachable, and the file
+    changes only when somebody edits it. The memo also means the "no usable `email:`"
+    error lines are printed once per run rather than once per reader.
+    `tests/conftest.py` clears it."""
     meta = load_yaml_config(cohort_org, CONFIG_REPO, COHORT_PEOPLE_PATH)
     if meta is None:
         return None

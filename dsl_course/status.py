@@ -81,6 +81,17 @@ def _row(
 _SECRETS_URL = "https://github.com/organizations/{org}/settings/secrets/actions"
 
 
+def _maintainer_note() -> str:
+    """Where a fault mail would go, appended to the transport row. The NAME only.
+
+    Unset is not a fault - `mailer.maintainer_address` falls back to the send mailbox - so
+    it never changes the row's verdict, but an org that has never had it propagated is
+    otherwise indistinguishable from one that has."""
+    if (os.environ.get(mailer.MAINTAINER_ENV) or "").strip():
+        return f"; {mailer.MAINTAINER_ENV} set"
+    return f"; {mailer.MAINTAINER_ENV} unset - fault mail goes to GRAPH_SENDER"
+
+
 def _transport_detail() -> tuple[bool, str]:
     """Whether this run can send email at all, and why not. `(usable, detail)`.
 
@@ -93,18 +104,22 @@ def _transport_detail() -> tuple[bool, str]:
     Names, never values: the verdict comes from `mailer.graph_config_from_env`, and the
     names come from `mailer.GRAPH_ENV`, so a renamed secret cannot leave this row lying.
     The table is appended to the step summary of a PUBLIC repo - not one secret's contents
-    goes into it, `GRAPH_SENDER` included."""
+    goes into it, `GRAPH_SENDER` and `DSL_MAINTAINER_EMAIL` included."""
     unset = [n for n in mailer.GRAPH_ENV if not (os.environ.get(n) or "").strip()]
     cost = " - Send codes and Distribute grades mail nobody"
     if len(unset) == len(mailer.GRAPH_ENV):
-        return False, f"no GRAPH_* secrets set{cost}"
-    if unset:
-        return False, f"unset or blank: {', '.join(unset)}{cost}"
-    if mailer.graph_config_from_env() is None:
+        usable, detail = False, f"no GRAPH_* secrets set{cost}"
+    elif unset:
+        usable, detail = False, f"unset or blank: {', '.join(unset)}{cost}"
+    elif mailer.graph_config_from_env() is None:
         # Set, and still unusable - a line break inside a single-line value is what
         # `gh secret set < file` leaves behind. Named by the helper's own log line.
-        return False, f"the GRAPH_* secrets are set but unusable{cost}"
-    return True, f"all {len(mailer.GRAPH_ENV)} GRAPH_* secrets set"
+        usable, detail = False, f"the GRAPH_* secrets are set but unusable{cost}"
+    else:
+        usable, detail = True, f"all {len(mailer.GRAPH_ENV)} GRAPH_* secrets set"
+    # Appended once, at the one exit: where the mail goes is true of every verdict above,
+    # and four returns each remembering to add it is three chances to forget.
+    return usable, detail + _maintainer_note()
 
 
 def render_markdown(course_org: str, cohort_org: str, data: dict[str, dict]) -> str:
@@ -211,9 +226,9 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         tier,
     )
 
-    # Org-level configuration, not per-cohort: the GRAPH_* secrets are read from the
-    # workflow env of the COURSE org, so this row belongs with B1/B6/B7 even though every
-    # mail path it gates is a cohort action.
+    # Org-level configuration, not per-cohort: the GRAPH_* secrets and the maintainer
+    # address are read from the workflow env of the COURSE org, so this row belongs with
+    # B1/B6/B7 even though every mail path it gates is a cohort action.
     transport_ok, transport = _transport_detail()
     data["B8"] = _row(
         "B8",
@@ -311,6 +326,16 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         cohort_faculty, date.today().isoformat()
     )
     n_instructors = len(cohort_desired.get("instructors", set()))
+    # `email:` is required on every instructor/TA entry - it is the only way a fault
+    # reaches the person who can fix it - and an entry missing one still gets access, so
+    # nothing else here would show the gap. Counts only: this table is appended to the
+    # step summary of a PUBLIC repo, and the run log names the handles.
+    unreachable = sync_faculty.without_email(cohort_faculty, date.today().isoformat())
+    no_email = (
+        f"WARNING: {len(unreachable)} without email, see the run log"
+        if unreachable
+        else ""
+    )
     data["C7"] = _row(
         "C7",
         f"Instructors/TAs ({sync_faculty.COHORT_PEOPLE_PATH})",
@@ -319,7 +344,11 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         sync_faculty.COHORT_PEOPLE_PATH,
         cohort_branch,
         bool(n_instructors),
-        f"{n_instructors} active" if n_instructors else "",
+        " - ".join(
+            p
+            for p in (f"{n_instructors} active" if n_instructors else "", no_email)
+            if p
+        ),
     )
 
     return data

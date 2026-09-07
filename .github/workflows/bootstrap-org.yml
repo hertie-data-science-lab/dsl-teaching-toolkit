@@ -96,6 +96,11 @@ jobs:
           ORG_NAME: ${{ inputs.org_name }}
           COURSE_CODE: ${{ inputs.course_code }}
           CENTRAL_REF: ${{ inputs.central_ref }}
+          # A repository VARIABLE, not a secret: it is the toolkit maintainer's address,
+          # and a masked value could not be read back to check it. --propagate-secret
+          # copies it onto the new org so its seeded workflows can mail a fault home.
+          # Unset here just means the org falls back to the GRAPH_SENDER mailbox.
+          DSL_MAINTAINER_EMAIL: ${{ vars.DSL_MAINTAINER_EMAIL }}
         run: |
           # Recorded in the org's own dsl-course.yml, so the tier this run checked out is
           # the tier the org keeps running once the nightly refresh takes over.

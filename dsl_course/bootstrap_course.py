@@ -1,7 +1,8 @@
 """bootstrap-course -- one-time setup for a new course org.
 
 Sets up org-level infrastructure that persists across semesters:
-- DSL_BOT_TOKEN secret (required for all workflows)
+- DSL_BOT_TOKEN secret (required for all workflows), and DSL_MAINTAINER_EMAIL where the
+  run's env carries it (where the seeded workflows mail a fault)
 - Faculty teams (instructors, course-admin); cohort bootstrap adds students + auditors
 - Org settings (base permissions, member repo creation, 2FA where every member has it)
 - Profile README (.github repo with description)
@@ -20,9 +21,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
-from . import scaffold, seed, site, sync_faculty
+from . import mailer, scaffold, seed, site, sync_faculty
 from .access import COHORT_WRITE_REPOS, COURSE_TEAM_ACCESS, grant_team_repo_access
 from .central import pin_central_ref, resolve_central_ref
 from .course import (
@@ -165,6 +167,33 @@ def set_org_secret(org: str, secret_name: str, secret_value: str) -> bool:
             log_err(f"failed to set repo secret on {org}/{r}: {rout[:200]}")
             mirror_failures += 1
     return mirror_failures == 0
+
+
+def propagate_maintainer_email(org: str) -> int:
+    """Copy `DSL_MAINTAINER_EMAIL` from this run's env onto `org`. Failure count.
+
+    Where fault mail goes (`mailer.maintainer_address`): the seeded workflows read it out
+    of `secrets.DSL_MAINTAINER_EMAIL`, but centrally it is a repository VARIABLE on the
+    toolkit rather than a secret, because an address is not a credential -
+    `.github/workflows/bootstrap-org.yml` passes `vars.DSL_MAINTAINER_EMAIL` in as env.
+
+    It travels by `set_org_secret` all the same: that is the one route that reaches a
+    Free-plan org's public `.github` (where the scheduler and the send workflows run) AND
+    mirrors into its private infra repos.
+
+    Unset is a normal state and never fails a bootstrap - an org without it mails the
+    shared send mailbox instead - so this logs one `[skip]` and returns 0. A failed WRITE
+    does count: the address was meant to be there and now silently is not.
+
+    Never logs the address, only the name: this runs in a public repo's Actions log."""
+    address = (os.environ.get(mailer.MAINTAINER_ENV) or "").strip()
+    if not address:
+        log(
+            f"  [skip] {mailer.MAINTAINER_ENV} not in this run's env - fault mail from "
+            f"{org} falls back to GRAPH_SENDER"
+        )
+        return 0
+    return 0 if set_org_secret(org, mailer.MAINTAINER_ENV, address) else 1
 
 
 def create_default_teams(org: str) -> int:
@@ -686,7 +715,8 @@ def main() -> int:
         "--propagate-secret",
         action="store_true",
         help="Set DSL_BOT_TOKEN on this org to the DSL_BOT_TOKEN env value "
-        "(lets the central bootstrap auto-provision the token - no manual per-org step).",
+        "(lets the central bootstrap auto-provision the token - no manual per-org step). "
+        "Also propagates DSL_MAINTAINER_EMAIL when this run's env carries it.",
     )
     parser.add_argument(
         "--admins",
@@ -944,6 +974,11 @@ def _run(args: argparse.Namespace) -> int:
                 f"https://github.com/{args.org}/settings/secrets/actions"
             )
     steps.append((secret_failures, "DSL_BOT_TOKEN secret validated (or set)"))
+
+    # 4b. Where this org's fault mail goes. Propagated on the same flag as the token, and
+    # only there: a run given no --propagate-secret has no central env to copy from.
+    if args.propagate_secret:
+        steps.append((propagate_maintainer_email(args.org), ""))
 
     # 5. Generate the org-overview README now that all repos exist (clickable index).
     steps.append(

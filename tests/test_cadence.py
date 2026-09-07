@@ -16,7 +16,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from dsl_course import cadence
+from dsl_course import cadence, issues
 from dsl_course.schedule import AssignmentEntry, Deploy, Release, Schedule
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -333,7 +333,7 @@ class _Issues:
 
     def upsert(self, repo, title, body, comment=None):
         self.upserted.append((repo, title, body, comment))
-        return self.rc
+        return issues.Upserted(self.rc)
 
     def close(self, repo, title, comment=None):
         self.closed.append((repo, title, comment))

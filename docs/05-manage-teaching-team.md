@@ -6,7 +6,7 @@ Give an instructor, TA, faculty assistant or guest lecturer access to a course -
 
 - A bootstrapped [course org](01-new-course-org.md), 
 - A bootstrapped [cohort](04-new-cohort-org.md).
-- Instructors' **GitHub handles**. That is the only required field; everything else is display.
+- Instructors' **GitHub handles** and **email addresses**. Those are the two required fields; everything else is display.
 
 ---
 
@@ -37,13 +37,17 @@ There is no need to edit GitHub team directly. This provides an auditable histor
    people:
      instructors:
        - github_handle: "janedoe"        # required 
+         email: "jane@example.org"       # required
          name: "Prof. Jane Doe"          # optional, from here down
          title: "Professor of ..."
          photo: "/_images/pp/jane.jpg"   
          url: "https://.../jane"
      teaching_assistants:
        - github_handle: "henrycgbaker"
+         email: "another@example.org"
    ```
+
+   `email` is required and private: it is where this cohort's notifications go (a schedule fault, a source that has not been staged), and nothing publishes it. Add `show_email: true` to an entry to show that address on the cohort site's staff card. A `course_admins` entry needs no `email`.
 
    Or **course org** → `.github` → `dsl-course.yml` (course-wide admin):
 

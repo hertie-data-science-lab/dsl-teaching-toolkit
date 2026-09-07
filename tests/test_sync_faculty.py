@@ -234,3 +234,120 @@ def test_desired_for_filters_to_one_team():
     assert sync_faculty._desired_for(faculty, "course-admin", "2026-10-01") == {
         "adminhandle"
     }
+
+
+# --------------------------------------------------------------- `email:`, the one field
+# an instructor/TA entry needs beyond the handle. It is what a notification is sent to, so
+# an entry missing it is reported - and never fixed by withholding access, which would
+# take the cohort's team away over a field nobody has filled in yet.
+
+
+def test_valid_email_accepts_an_address_and_rejects_everything_else():
+    assert sync_faculty.valid_email("  jane@example.org  ") == "jane@example.org"
+    for junk in (None, "", "jane", "@example.org", "jane@", "@", 12345):
+        assert sync_faculty.valid_email(junk) is None, junk
+
+
+def test_parse_faculty_reports_a_teaching_entry_that_cannot_be_notified(capsys):
+    # Missing and malformed are one fault with one fix, and both keep the grant: the
+    # entry is still parsed (and therefore still reconciled into the team).
+    raw = """
+people:
+  instructors:
+    - github_handle: janedoe
+      name: "Prof. Jane Doe"
+  teaching_assistants:
+    - github_handle: anOther
+      email: "not-an-address"
+  course_admins:
+    - github_handle: adminhandle
+"""
+    faculty = _parse(raw)
+    assert [p["github_handle"] for p in faculty["instructors"]] == ["janedoe"]
+    assert [p["github_handle"] for p in faculty["teaching_assistants"]] == ["anOther"]
+    err = capsys.readouterr().err
+    assert "instructors entry janedoe" in err
+    assert "teaching_assistants entry anOther" in err
+    assert "`email:`" in err
+    # course_admins is notified through the course org, not a cohort's people.yml
+    assert "adminhandle" not in err
+    # the declared value is personal data: the report names the handle, never the address
+    assert "not-an-address" not in err
+
+
+def test_teaching_contacts_carries_the_handle_the_address_and_the_role():
+    # All three, from one pass over people.yml: a notification is ADDRESSED by email,
+    # ATTRIBUTED by handle (git blame speaks handles) and COPIED by role. Reading the role
+    # back off the entry afterwards would mean iterating the file a second way.
+    faculty = sync_faculty.parse_faculty_from_meta(
+        yaml.safe_load("""
+people:
+  instructors:
+    - github_handle: janedoe
+      email: "jane@example.org"
+    - github_handle: nomail
+      name: "No Address"
+    - github_handle: future-hire
+      email: "later@example.org"
+      start: "2999-09-01"
+  teaching_assistants:
+    - github_handle: alex
+      email: "alex@example.org"
+    - github_handle: lapsed-ta
+      email: "gone@example.org"
+      end: "2000-01-31"
+""")
+    )
+    # Declaration order, instructors before TAs; an entry with no usable address is left
+    # out (`without_email` names those), and `start`/`end` bound who is active today.
+    assert sync_faculty.teaching_contacts(faculty, "2026-10-01") == [
+        sync_faculty.Contact("janedoe", "jane@example.org", "instructors"),
+        sync_faculty.Contact("alex", "alex@example.org", "teaching_assistants"),
+    ]
+    # `is_ta` is what decides who is copied, so it is asserted rather than assumed.
+    assert [c.is_ta for c in sync_faculty.teaching_contacts(faculty, "2026-10-01")] == [
+        False,
+        True,
+    ]
+
+
+def test_teaching_contacts_takes_the_same_faculty_and_clock_as_without_email():
+    # One parse of people.yml and one clock answer both questions: who a notification can
+    # reach, and who it cannot. Two signatures meant two parses and two `date.today()`
+    # calls, neither of them the clock a scheduler tick is reasoning about.
+    faculty = sync_faculty.parse_faculty_from_meta(
+        yaml.safe_load("""
+people:
+  instructors:
+    - github_handle: janedoe
+      email: "jane@example.org"
+    - github_handle: nomail
+""")
+    )
+    assert [
+        c.handle for c in sync_faculty.teaching_contacts(faculty, "2026-10-01")
+    ] == ["janedoe"]
+    assert sync_faculty.without_email(faculty, "2026-10-01") == ["nomail"]
+
+
+def test_teaching_contacts_with_no_people_block_is_empty():
+    assert sync_faculty.teaching_contacts({}, "2026-10-01") == []
+
+
+def test_without_email_names_the_active_handles_no_notification_reaches():
+    faculty = {
+        "instructors": [
+            {"github_handle": "janedoe", "email": "jane@example.org"},
+            {"github_handle": "nomail"},
+        ],
+        "teaching_assistants": [
+            {"github_handle": "anOther", "email": "not-an-address"},
+            {"github_handle": "lapsed-ta", "end": "2026-01-31"},
+        ],
+        # course-level, and notified through the course org
+        "course_admins": [{"github_handle": "adminhandle"}],
+    }
+    assert sync_faculty.without_email(faculty, today="2026-10-01") == [
+        "nomail",
+        "anOther",
+    ]

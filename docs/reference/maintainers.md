@@ -53,8 +53,9 @@ Things whose *literal spelling* is depended on from outside Python:
 
 - **CLI module names.** Seeded workflows and templates invoke `python3 -m dsl_course.<x>`:
   `assign`, `bootstrap_course`, `collect`, `deploy`, `enrol_codes`, `grades`, `list_orgs`,
-  `scaffold`, `schedule`, `scheduler`, `seed`, `site`, `status`, `syllabus`, `sync_faculty`,
-  `sync_membership`, `sync_roster`, `sync_teams`. A rename strands every org until it refreshes.
+  `notify`, `scaffold`, `schedule`, `scheduler`, `seed`, `site`, `source_digest`, `status`,
+  `syllabus`, `sync_faculty`, `sync_membership`, `sync_roster`, `sync_teams`. A rename
+  strands every org until it refreshes.
 - **`roster.FIELDS` / `roster.normalise_role` / `teams.FIELDS`** are re-implemented in the
   shipped JavaScript (`templates/welcome/onboard.yml`, `team-formation.yml`), which cites them by
   name. Change a column and change both sides.
@@ -85,6 +86,51 @@ Things whose *literal spelling* is depended on from outside Python:
   marked file would still read as untouched and be rewritten by the nightly refresh -
   faculty's patterns gone, and whatever they withheld shipping again on a green run. The
   price is that its wording cannot be improved in a repo that already has it.
+
+## Secrets an org carries
+
+Two values are published onto an org by the toolkit itself, both through
+`bootstrap_course.set_org_secret` - which scopes the org secret to the infra repos that
+exist and then mirrors it as a repo secret onto the private ones, because on GitHub Free a
+`selected` org secret is never delivered to a private repo:
+
+| Value | Held centrally as | Reaches an org via |
+|---|---|---|
+| `DSL_BOT_TOKEN` | a secret on this repo | Bootstrap with `set_secret: true`; `seed refresh` also mirrors it onto each content repo |
+| `DSL_MAINTAINER_EMAIL` | a repository **variable** on this repo | Bootstrap with `set_secret: true`, and Bootstrap cohort forwards it to a cohort |
+
+`DSL_MAINTAINER_EMAIL` is where fault mail goes. A variable centrally and a secret on the
+org: an address is not a credential (and a masked secret cannot be read back to check it),
+but a seeded workflow can only read it from `secrets.`. `mailer.maintainer_address` falls
+back to `GRAPH_SENDER` when it is absent, so an org without it mails the shared send mailbox
+rather than nobody, and `Check cohort setup` reports which of the two an org is on.
+
+Nothing converges it. "Refresh actions" runs INSIDE the course org and cannot read this
+repo's variables, so an org bootstrapped before the variable existed gets it once, by hand:
+
+    gh secret set DSL_MAINTAINER_EMAIL --org <course-org> \
+      --visibility selected --repos .github --body '<address>'
+
+`.github` is the only infra repo a COURSE org has, and it is public, so no mirror is needed
+there. (Re-running Bootstrap on the org with `set_secret: true` does the same thing and is
+the documented idempotent-repair path.) Cohort orgs need nothing, and that is a constraint,
+not an omission: every fault mail is sent from the course org's `.github`, so **no workflow
+seeded into a cohort may wire the mail env** - a cohort carries `DSL_BOT_TOKEN` and nothing
+else, and a step reading `GRAPH_*` there resolves to empty and sends to nobody while
+reading as a channel that works. `Validate schedule` therefore asks for the maintainer in
+its annotation instead of emailing them
+(`tests/test_validate_schedule_template.py` enforces it).
+
+Nothing converges a cohort's addresses either. `email:` is required on every instructor and
+TA entry in a cohort's `classroom-config/people.yml`, and that file is INSTRUCTOR-OWNED, so
+no refresh can fill it in: until somebody edits it by hand the whole feature is inert on
+that cohort - every fault still opens its digest issue and still @mentions the instructors
+team, and no email goes anywhere. `Check cohort setup`'s C7 row counts the entries without
+one, and the run log names the handles.
+
+The four `GRAPH_*` transport secrets are a one-time central setup, set by hand per org and
+never propagated:
+[central-admin.md](../../docs-admin-arch/central-admin.md#email).
 
 ## File ownership
 
@@ -158,6 +204,11 @@ No cron may sit on minute 0/15/30/45 and no two daily ones may share a slot - Gi
 most contended minutes first (on `0 * * * *` the scheduler was delivered 6 ticks a day, not 24),
 and membership must write the teams that Sync site then reads. Both rules are enforced by
 `tests/test_renderers.py`; the reasoning sits above the cron literals in `workflows_render`.
+
+**A content fault never reds a cron.** A source the plan cites and the org has not got is
+faculty's to fix, so it is delivered by the cohort's digest issue and an email to the people git
+names for that line - never by the exit code. A red X on any of the five crons means the run
+itself broke, which is why the maintainer is emailed its log tail.
 
 ## The scheduler's two drivers
 

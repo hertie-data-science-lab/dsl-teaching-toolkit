@@ -1,0 +1,544 @@
+"""dsl-course notify -- the email that rides beside a notification issue.
+
+Two mails, each about a fault whose own channel reaches nobody in time:
+
+- `notify_source_transitions` mails the people git names when a source the release plan
+  cites crosses a rung of the ladder. The digest issue (`source_digest`) is the durable
+  record; the mail is what reaches somebody who is not reading GitHub notifications that
+  week. One mail per tick per recipient set, covering every transition of that tick.
+- `notify_run_failed` mails the MAINTAINER when an unattended run genuinely broke. The
+  `<workflow> is failing` issue every cron files is the record; GitHub's own
+  scheduled-failure email goes to whoever last committed the workflow file, which is
+  always the bot, which is to say nobody.
+
+WHO IS TOLD is decided by git, not by a mailing list (`route`): the planner of the
+schedule.yml line and the last committer of the materials repo it names are the two people
+who can act, and telling the whole teaching team about every entry is how a notification
+stops being read. The whole team is the FALLBACK, for a line nobody can be named for.
+
+Neither mail ever fails a run. A notification that could not be delivered must not take a
+release cron down with it - the same contract the digest has.
+
+PUBLIC LOG RULE: every faculty workflow runs in a PUBLIC repo, so nothing here logs an
+address. Counts on stdout; a handle or a masked address only through `log.log_person`.
+
+Usage (the step appended to every cron - see `workflows_render._CRON_MAIL`). The tail is
+the failed step's OWN log, teed as it ran: this step runs inside the still-running job, so
+the jobs API cannot be asked which job failed.
+    tail -n 30 "$RUNNER_TEMP/run.log" \
+      | python3 -m dsl_course.notify run-failed --course-org ORG \
+          --workflow "Scheduled release" --run-url URL
+"""
+
+from __future__ import annotations
+
+import argparse
+import html
+import sys
+from collections.abc import Iterable
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import NamedTuple
+
+from . import ghcli, mailer, sync_faculty
+from .gh_contents import blame_logins, last_committer
+from .log import log, log_err, log_ok, log_person
+from .schedule import (
+    NOTIFY_FROM,
+    SCHEDULE_PATH,
+    SOURCE_CRITICAL_WINDOW,
+    SOURCE_URGENT_WINDOW,
+    FaultKind,
+    Severity,
+    SourceFault,
+    deep_link,
+    hours,
+)
+from .source_digest import DigestResult
+
+# How much of the deadline is left, in the subject. Formatted from the windows themselves,
+# so moving a rung cannot leave a hand-typed number of hours in somebody's inbox.
+_SUFFIX = {
+    Severity.URGENT: f" ({hours(SOURCE_URGENT_WINDOW)}h)",
+    Severity.CRITICAL: f" ({hours(SOURCE_CRITICAL_WINDOW)}h)",
+}
+
+# The first two rungs say the same thing, because the same thing is true: the materials
+# are not there and the release will ship nothing. Only the hours differ, and the subject
+# line carries those - so the sentence is written once and both rungs point at it.
+_NOT_STAGED = (
+    "Your schedule.yml plans a release whose materials are not in the course org yet. "
+    "It will ship nothing to students until they are staged."
+)
+
+_INTRO = {
+    Severity.WARNING: _NOT_STAGED,
+    Severity.URGENT: _NOT_STAGED,
+    Severity.CRITICAL: (
+        f"This release fires within {hours(SOURCE_CRITICAL_WINDOW)} hours and will ship "
+        f"nothing as things stand."
+    ),
+    Severity.MISSED: (
+        "This release fired and shipped nothing, because its materials were not in the "
+        "course org."
+    ),
+}
+
+# Every value in the block is padded to this column so the four labels line up in a
+# proportional-font client - which is the whole reason the block is a `<pre>`.
+_LABEL_WIDTH = 15
+
+
+# --------------------------------------------------------------------- who to tell
+
+
+class Unsent(NamedTuple):
+    """What a tick could not deliver: how many addressees went unmailed, and the fault
+    keys their message carried.
+
+    The keys are the point. A count alone said only that something had gone wrong, into a
+    run log nobody reads, while the digest had already recorded the new rung - so the mail
+    was owed once, failed once, and was never owed again. Handed to
+    `source_digest.hold`, they un-record the crossing and the next tick owes it afresh."""
+
+    addressees: int = 0
+    keys: tuple[str, ...] = ()
+
+
+class Routed(NamedTuple):
+    """The addressees of one fault: `to` acts on it, `cc` is told it happened."""
+
+    to: tuple[str, ...]
+    cc: tuple[str, ...]
+
+
+@dataclass
+class Routing:
+    """Who to tell about this tick's faults, and who to @mention on the issue.
+
+    `logins` is what the digest comment mentions - the same people the mail is addressed
+    to, so the two channels reach one set of humans. Empty means git could name nobody in
+    people.yml, and the digest falls back to the cohort's instructors team."""
+
+    by_key: dict[str, Routed] = field(default_factory=dict)
+    logins: list[str] = field(default_factory=list)
+
+
+def _addresses(emails: Iterable[str]) -> tuple[str, ...]:
+    """Addresses in declaration order, once each, case-insensitively.
+
+    Two people.yml entries sharing a mailbox are one recipient, and a shared address
+    written two ways is the same mailbox. One implementation, because a second copy of
+    this rule is a second answer to "have we already told them"."""
+    out: dict[str, str] = {}
+    for email in emails:
+        out.setdefault(email.lower(), email)
+    return tuple(out.values())
+
+
+def _blame(cohort_org: str) -> dict[int, str]:
+    """Who wrote each line of this cohort's schedule.yml. `{}` when it cannot be read.
+
+    A blame that failed must not read as "nobody wrote this": absence here degrades to
+    mailing the whole teaching team, which is noisier but never wrong."""
+    try:
+        return blame_logins(cohort_org, sync_faculty.CONFIG_REPO, SCHEDULE_PATH)
+    except Exception as exc:
+        log(
+            f"  [skip] could not read who wrote {SCHEDULE_PATH} in {cohort_org} "
+            f"({type(exc).__name__}) - notifying the whole teaching team"
+        )
+        return {}
+
+
+def _last_committer(course_org: str, repo: str) -> str | None:
+    """Who last committed to a materials or template repo, or None if it cannot be told."""
+    try:
+        return last_committer(course_org, repo)
+    except Exception as exc:
+        log(
+            f"  [skip] could not read who last committed to {course_org}/{repo} "
+            f"({type(exc).__name__})"
+        )
+        return None
+
+
+def _bot() -> str:
+    """The token's own login, lower-cased, or "" when it cannot be read.
+
+    Skipped as a committer: the bot writes `handout_datetime` back into schedule.yml and
+    seeds every repo, so on a file it has touched it is the blame answer for lines nobody
+    at the school has ever edited."""
+    try:
+        return ghcli.bot_login().lower()
+    except Exception:
+        return ""
+
+
+def route(
+    cohort_org: str, course_org: str, faults: list[SourceFault], now: datetime
+) -> Routing:
+    """Work out who hears about each fault, once per tick.
+
+    The digest's @mention and the mail's To line are the same answer, so it is asked once
+    and both channels are handed it - asking git twice would be two API reads and two
+    chances to disagree. `source_digest.sync` calls this only on a tick that has something
+    to say; an hourly tick with a standing fault reuses what the last one found.
+
+    Only faults at or above the digest's own threshold are routed - below it nothing is
+    said on either channel, so nothing needs addressing and a quiet tick costs no API
+    calls at all."""
+    loud = [f for f in faults if f.severity(now) >= NOTIFY_FROM]
+    if not loud:
+        return Routing()
+    try:
+        faculty = sync_faculty.load_cohort_faculty(cohort_org) or {}
+    except Exception as exc:
+        log_err(f"could not read {cohort_org}'s people.yml ({exc})")
+        faculty = {}
+    contacts = sync_faculty.teaching_contacts(faculty, now.date().isoformat())
+    by_handle = {c.handle.lower(): c for c in contacts}
+    everyone = _addresses(c.email for c in contacts)
+    instructors = _addresses(c.email for c in contacts if not c.is_ta)
+
+    blame = _blame(cohort_org)
+    bot = _bot()
+    committers: dict[str, str | None] = {}
+    routed: dict[str, Routed] = {}
+    mention: list[str] = []
+    unaddressable: set[str] = set()
+    for f in loud:
+        if f.repo and f.repo not in committers:
+            committers[f.repo] = _last_committer(course_org, f.repo)
+        named: list[str] = []
+        for login in (
+            blame.get(f.lineno) if f.lineno else None,
+            committers.get(f.repo),
+        ):
+            if login and login.lower() != bot and login not in named:
+                named.append(login)
+        matched = [by_handle[n.lower()] for n in named if n.lower() in by_handle]
+        unaddressable |= {n for n in named if n.lower() not in by_handle}
+        if matched:
+            to = _addresses(c.email for c in matched)
+            # The instructors are copied when a TA is addressed, because a TA staging a
+            # lecture folder is doing it on somebody's behalf.
+            cc = (
+                tuple(a for a in instructors if a not in to)
+                if any(c.is_ta for c in matched)
+                else ()
+            )
+            mention += [c.handle for c in matched]
+            routed[f.key] = Routed(to, cc)
+        else:
+            # Git named nobody in people.yml: the team is the fallback, and there is
+            # nobody in particular to copy because everybody is already in `to`.
+            routed[f.key] = Routed(everyone, ())
+    if unaddressable:
+        # Count only, in a public log. The handles themselves are public but the line
+        # says who is not on the teaching team, which is a judgement about a person.
+        log(f"  [skip] {len(unaddressable)} addressee(s) without email in people.yml")
+        for handle in sorted(unaddressable):
+            log_person(f"    no people.yml address: {handle}")
+    return Routing(routed, sorted(dict.fromkeys(mention)))
+
+
+# ---------------------------------------------------------------------- the mail
+
+
+def _anchor(url: str, text: str) -> str:
+    return f'<a href="{html.escape(url, quote=True)}">{html.escape(text)}</a>'
+
+
+def _folder_link(course_org: str, fault: SourceFault) -> str | None:
+    """A link to the place the materials belong - the folder's PARENT, because the folder
+    itself is exactly what is not there yet.
+
+    A MISSING_REPO fault links the COURSE ORG instead: the repo is the thing that is
+    absent, so `<repo>/tree/main/<folder>` inside it is a 404 in an email whose whole job
+    is to say where to go. The org is where the repo has to be created, and it is the one
+    URL that is certainly there.
+
+    `main` because every repo this toolkit creates has one, and a branch lookup per fault
+    would be an API call to decorate an email."""
+    if not fault.repo:
+        return None
+    org = f"https://github.com/{course_org}"
+    if fault.kind is FaultKind.MISSING_REPO:
+        return _anchor(org, course_org)
+    base = f"{org}/{fault.repo}"
+    parent = fault.path.rpartition("/")[0]
+    if not parent:
+        return _anchor(base, fault.repo)
+    return _anchor(f"{base}/tree/main/{parent}", f"{fault.repo}/{parent}")
+
+
+def _row_html(label: str, markup: str) -> str:
+    """One line of the block whose value is already MARKUP - the links row, built out of
+    `_anchor`, which escapes as it goes. An empty label is that row: it carries links
+    rather than a labelled value, and sits flush with the labels above it."""
+    if not label:
+        return f"  {markup}"
+    return f"  <b>{label}</b>{' ' * max(1, _LABEL_WIDTH - len(label))}{markup}"
+
+
+def _row(label: str, value: str) -> str:
+    """One labelled line of the block, value ESCAPED and aligned to `_LABEL_WIDTH`.
+
+    Escaped HERE and not at the call sites: every value in the block came out of a
+    faculty-authored schedule.yml, and `course_source_path: <tbc>` unescaped swallows the
+    rest of the mail - the fix sentence and the links with it."""
+    return _row_html(label, html.escape(value))
+
+
+def _block(cohort_org: str, course_org: str, fault: SourceFault, now: datetime) -> str:
+    """One fault, as the labelled `<pre>` block the appendix specifies.
+
+    Whether the moment has PASSED is read off the clock and not off the rung. A rung can
+    be held below MISSED by its ceiling - that is what `.releaseignore` withholding does -
+    and the date has still gone by, so "fix by: release fires <yesterday>" is not an
+    instruction anybody can follow."""
+    fired = fault.fires is not None and fault.fires <= now
+    rows = [
+        _row("error line:", f"{fault.at} - {fault.where} -> {fault.field}"),
+        _row("error content:", fault.what),
+        _row(
+            "fired:" if fired else "fix by:",
+            fault.due if fired else f"{fault.moment} fires {fault.due}",
+        ),
+    ]
+    # The folder first, because staging the materials is the fix; the schedule line
+    # second, because correcting the path is the other one.
+    line_url = deep_link(cohort_org, fault)
+    links = [
+        link
+        for link in (
+            _folder_link(course_org, fault),
+            _anchor(line_url, f"{SCHEDULE_PATH}#L{fault.lineno}") if line_url else None,
+        )
+        if link
+    ]
+    if links:
+        rows.append(_row_html("", "  |  ".join(links)))
+    return "<pre>" + "\n".join(rows) + "</pre>"
+
+
+def _subject(cohort_org: str, fault: SourceFault, rung: Severity, others: int) -> str:
+    """The subject, named for the loudest entry in the mail.
+
+    `others` is how many more faults share the mail. The appendix's format names one
+    entry, and grouping by recipient set can put two in one message, so the count is
+    appended rather than the subject naming neither."""
+    entry = fault.where.partition(".")[2] or fault.where
+    if rung is Severity.MISSED:
+        out = f"[{cohort_org}] {entry} released nothing - materials still missing"
+    else:
+        out = (
+            f"[{cohort_org}] {entry} materials missing - releases "
+            f"{fault.due_short}{_SUFFIX.get(rung, '')}"
+        )
+    return out + (f" (+{others} more)" if others else "")
+
+
+def _mail(
+    cohort_org: str,
+    course_org: str,
+    digest: DigestResult,
+    keys: list[str],
+    loudest: Severity,
+    now: datetime,
+) -> tuple[str, str]:
+    """The (subject, HTML body) of one message: intro, a block and a fix per fault, and
+    the issue that holds the history."""
+    parts = [f"<p>{_INTRO[loudest]}</p>"]
+    for key in keys:
+        fault = digest.faults_by_key[key]
+        rung = digest.mail[key]
+        parts.append(_block(cohort_org, course_org, fault, now))
+        parts.append(f"<p><b>fix:</b> {html.escape(fault.fix(course_org, rung))}</p>")
+    if digest.issue_url:
+        parts.append(
+            f"<p>Record and history: {_anchor(digest.issue_url, digest.issue_url)}</p>"
+        )
+    first = digest.faults_by_key[keys[0]]
+    return _subject(cohort_org, first, loudest, len(keys) - 1), "\n".join(parts) + "\n"
+
+
+def notify_source_transitions(
+    cohort_org: str,
+    course_org: str,
+    digest: DigestResult,
+    now: datetime,
+    routing: Routing,
+    *,
+    dry_run: bool,
+) -> Unsent:
+    """Mail what the digest says is owed. Reports what did NOT go out; never raises.
+
+    `digest.mail` is the whole decision: which faults crossed a mailing rung, and the rung
+    to speak at. A fault that only reached the digest's own rung is carried by the issue
+    alone, a crossing inside the quiet window is not owed until the morning, and a CLEARED
+    fault is mailed to nobody - the issue closes itself, and an inbox does not need to be
+    told a problem stopped existing.
+
+    `now` is the tick's clock. No rung is recomputed against it - every rung comes off
+    `digest`, so the mail and the digest comment can never disagree about how loud a fault
+    has become - but whether a deadline has PASSED is read off it, because a ceiling can
+    hold a rung below MISSED while the date has gone by all the same."""
+    events: list[str] = []
+    try:
+        # The mail IS the fault's own lines, so a key the digest owes a mail for but could
+        # not hand over has nothing to say. Not expected; not worth a KeyError inside a
+        # release run.
+        events = [
+            k for k in digest.mail if k in digest.faults_by_key and k in routing.by_key
+        ]
+        if not events:
+            return Unsent()
+        maintainer = mailer.maintainer_address()
+        # One message per recipient SET, not per fault: two entries the same person
+        # planned are one conversation.
+        groups: dict[Routed, list[str]] = {}
+        for key in events:
+            groups.setdefault(routing.by_key[key], []).append(key)
+        # Neither of these is HELD: an org with no addresses and an org with no transport
+        # are standing states, and holding the crossing would make every tick for the rest
+        # of the term recompute a notification that cannot be delivered - and comment on
+        # it again each time.
+        if not any(g.to for g in groups):
+            log(
+                f"  [skip] no notification address for {cohort_org} - the digest "
+                f"@mention is the only channel"
+            )
+            return Unsent()
+        if not dry_run and mailer.graph_config_from_env() is None:
+            log("  [skip] mail not configured - issue @mention only")
+            return Unsent()
+        messages: list[mailer.Message] = []
+        addressed = 0
+        for routed, keys in groups.items():
+            if not routed.to:
+                continue
+            keys.sort(key=lambda k: (-digest.mail[k], k))
+            loudest = digest.mail[keys[0]]
+            subject, body = _mail(cohort_org, course_org, digest, keys, loudest, now)
+            # The maintainer is copied at the two rungs where a release is about to ship
+            # nothing, or already has. Not at the quieter two: those are still faculty's
+            # own day, and a maintainer copied on every one of them stops reading them.
+            copies = list(routed.cc)
+            if maintainer and loudest >= Severity.CRITICAL:
+                copies.append(maintainer)
+            if dry_run:
+                log(f"  [dry-run] would mail {len(routed.to)} recipient(s): {subject}")
+                for to in routed.to:
+                    log_person(f"    would mail {mailer.mask_email(to)}")
+                continue
+            # One message for the whole group: the text is identical for everybody on the
+            # line, and a copy per recipient pays the rate limiter's slot for each.
+            messages.append(mailer.Message(routed.to, subject, body, tuple(copies)))
+            addressed += len(routed.to)
+        if not messages:
+            return Unsent()
+        # One batch, so the Graph token is minted once however many groups this tick has.
+        sent = mailer.send_bulk(messages, html=True)
+        # Which GROUPS did not land, not just how many addresses: a group is one Graph
+        # POST for one message, so its recipients are all in or all out, and the keys that
+        # message carried are exactly what has to be owed again.
+        delivered = set(sent)
+        held: list[str] = []
+        unmailed = 0
+        for routed, keys in groups.items():
+            if not routed.to or delivered.issuperset(routed.to):
+                continue
+            held += keys
+            unmailed += len(routed.to)
+        if held:
+            log_err(
+                f"mailed {len(sent)} of {addressed} recipient(s); {unmailed} on "
+                f"{len(held)} source fault(s) were not reached - held for the next tick"
+            )
+            return Unsent(unmailed, tuple(held))
+        log_ok(
+            f"mailed {len(sent)} recipient(s) in {len(messages)} message(s) about "
+            f"{len(events)} source fault(s)"
+        )
+        return Unsent()
+    except Exception as exc:
+        # Inside a release cron. Whatever went wrong - an unreadable people.yml, a
+        # credential Graph refused - the release itself is the job. Nothing went out, so
+        # everything this tick owed is held.
+        log_err(
+            f"could not mail {cohort_org}'s source faults ({type(exc).__name__}): {exc}"
+        )
+        return Unsent(1, tuple(events))
+
+
+# ------------------------------------------------------------------ a failed run
+
+
+# What of the failed step's log the maintainer gets. Enough to recognise the fault without
+# turning a mail into a log file; the run URL is right above it either way.
+_TAIL_LINES = 30
+_TAIL_BYTES = 4096
+
+
+def _tail(text: str) -> str:
+    """The last few lines of a log, capped in bytes as well as lines - one line of a
+    stack-trace dump can be very long indeed."""
+    lines = (text or "").strip().splitlines()[-_TAIL_LINES:]
+    raw = "\n".join(lines).encode()[-_TAIL_BYTES:]
+    return raw.decode(errors="replace")
+
+
+def notify_run_failed(course_org: str, workflow: str, run_url: str, tail: str) -> int:
+    """Mail the maintainer that an unattended run broke. Returns the failure count.
+
+    The maintainer alone: a run that failed is the toolkit's problem, not the teaching
+    team's, and the log tail can carry anything the job was doing when it died - so it
+    goes to one mailbox and is never echoed into the public run log."""
+    to = mailer.maintainer_address()
+    if to is None:
+        log(
+            f"  [skip] mail not configured - the failure issue in {course_org} is the "
+            f"only channel"
+        )
+        return 0
+    subject = f"[{course_org}] {workflow} is failing"
+    body = "\n".join(
+        [run_url, "", "Last lines of the failed step:", "", _tail(tail), ""]
+    )
+    try:
+        sent = mailer.send_bulk([mailer.Message(to, subject, body)])
+    except Exception as exc:
+        log_err(f"could not mail the maintainer about {workflow} ({exc})")
+        return 1
+    if not sent:
+        return 1
+    log_ok(f"mailed the maintainer about {workflow} in {course_org}")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    # A subcommand rather than a flag: `--run-failed` was `required=True` and
+    # `store_true`, which is a switch that can only ever be on - and a second mail here
+    # would have had to be a second such switch, mutually exclusive with the first.
+    commands = parser.add_subparsers(dest="command", required=True)
+    failed = commands.add_parser(
+        "run-failed",
+        help="mail the maintainer about a failed unattended run, reading the failed "
+        "step's log tail from stdin",
+    )
+    failed.add_argument("--course-org", required=True)
+    failed.add_argument("--workflow", required=True)
+    failed.add_argument("--run-url", required=True)
+    args = parser.parse_args()
+    # Always 0. This runs in the `if: failure()` tail of a cron that has already failed
+    # for its own reasons; a notifier that reddened the run a second time would say
+    # nothing new and would hide the recovery when the next green run closes the issue.
+    notify_run_failed(args.course_org, args.workflow, args.run_url, sys.stdin.read())
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

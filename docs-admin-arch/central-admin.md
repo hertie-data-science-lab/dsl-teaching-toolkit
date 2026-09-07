@@ -83,6 +83,16 @@ republishes it. Rotation is still a per-org Bootstrap run from central.
 Enrolment-code and grade emails go through `dsl_course.mailer` under a **tenant-level mail
 credential** - a one-time central setup, not per course. `dry_run` previews need nothing.
 
+The same mailbox sends two **fault** emails, which nobody presses a button for. A cohort's
+teaching team is emailed about a planned release whose materials are not staged, addressed to
+whoever git says wrote the line (`notify.notify_source_transitions`, HTML); and the maintainer
+is emailed the log tail of any cron that fails (`notify.notify_run_failed`, plain text), to
+`DSL_MAINTAINER_EMAIL` or, unset, to `GRAPH_SENDER` itself. Neither can fail a run, and each is
+rationed its own way: the source mail goes out only when a fault CROSSES a rung (and is held
+overnight), while the run-failure mail rides the failing issue's 6h throttle, so a cron that
+fails every 15 minutes mails four times a day. See
+[Failure semantics](architecture.md#failure-semantics).
+
 Four secrets: `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_CERT`, `GRAPH_SENDER`. The
 Entra app holds the **Mail.Send** application permission (admin-consented) and sends as the
 shared mailbox `datasciencelab@hertie-school.org`. There is no SMTP fallback: the tenant
@@ -110,6 +120,19 @@ Set the secrets once as **org** secrets on each course org (`--visibility all`);
 workflows run in that org's public `.github`, so no per-repo propagation is needed. A `dry_run`
 acquires a token after printing its preview, so a credential that is SET but wrong reds the
 run. An org with no secrets at all still previews green, saying the preview proves nothing.
+
+A fifth value, `DSL_MAINTAINER_EMAIL`, is not part of the transport: the four `GRAPH_*`
+secrets say *how* to send, this one says *who hears* when a release or a cohort's schedule
+breaks. It is the toolkit maintainer's inbox, not a course's.
+
+Centrally it is a repository **variable** on the toolkit, not a secret - an address is not a
+credential, and a masked secret cannot be read back to check it. `bootstrap-org.yml` passes
+it into the run's env, and Bootstrap propagates it onto the new course org as an org secret
+(the only route that reaches a Free-plan org's public `.github`, where the scheduler runs);
+Bootstrap cohort forwards it down to a cohort. Unset on an org, fault mail goes to
+`GRAPH_SENDER` instead, so a gap is a mail in the wrong inbox rather than a mail lost.
+Nothing converges it onto an org bootstrapped before it existed - that is one command, in
+[maintainers.md](../docs/reference/maintainers.md#secrets-an-org-carries).
 
 **Status: live on `hertie-dsl-demo-course-e1234`, `hertie-intro-to-data-science-c11`,
 `hertie-maths-data-science-C23` and `hertie-nlp-e1282`.**

@@ -121,6 +121,48 @@ def test_people_yaml_passes_every_declared_display_field_through():
         assert access_only not in out
 
 
+def test_people_yaml_keeps_the_declared_email_off_the_card_by_default():
+    # `email:` is REQUIRED in people.yml (it is what a fault notification is sent to), so
+    # publishing it by default would put an address given for notifications on a public
+    # website - for every instructor and TA of every cohort, without anyone opting in.
+    meta = {
+        "people": {
+            "instructors": [
+                {"name": "Prof. Jane", "title": "Professor", "email": "jane@x.org"}
+            ],
+            "teaching_assistants": [{"name": "Alex TA", "email": "alex@x.org"}],
+        }
+    }
+    out = site_repo.people_yaml("Some-Cohort-f2026", meta, edit_at="people.yml")
+    assert "jane@x.org" not in out
+    assert "alex@x.org" not in out
+    assert 'title: "Professor"' in out  # the rest of the card is untouched
+
+
+def test_people_yaml_publishes_the_email_only_on_an_exact_show_email_true():
+    # The opt-in, and it must fail closed: a `show_email` a maintainer mistyped (`"yes"`)
+    # would otherwise publish an address nobody agreed to publish. `show_email` itself is
+    # a switch this side consumes and must never reach the site either.
+    meta = {
+        "people": {
+            "instructors": [
+                {"name": "Prof. Jane", "email": "jane@x.org", "show_email": True},
+                {"name": "Dr Sam", "email": "sam@x.org", "show_email": "yes"},
+            ],
+            "teaching_assistants": [
+                {"name": "Alex TA", "email": "alex@x.org", "show_email": False}
+            ],
+        }
+    }
+    out = site_repo.people_yaml("Some-Cohort-f2026", meta, edit_at="people.yml")
+    assert 'email: "jane@x.org"' in out  # opted in
+    assert "sam@x.org" not in out  # not the string "yes"
+    assert "alex@x.org" not in out  # opted out explicitly
+    # CARD_ORDER puts a published address after `name`, so the file has a stable shape
+    assert out.index('name: "Prof. Jane"') < out.index('email: "jane@x.org"')
+    assert "show_email" not in out  # none of the three values
+
+
 def test_replacing_a_config_scalar_touches_only_the_named_key():
     cfg = 'course_name: "old"\ncourse_code: "X"\n'
     out = site_repo._replace_config_scalar(cfg, "course_name", "Deep Learning")

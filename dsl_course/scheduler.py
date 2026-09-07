@@ -75,7 +75,7 @@ import json
 import sys
 from datetime import datetime, timezone
 
-from . import cadence, schedule, site, source_digest
+from . import cadence, notify, schedule, site, source_digest
 from .assign import provision_all, solution_released
 from .collect import (
     SnapshotResult,
@@ -455,13 +455,16 @@ def _preflight_sources(
     dry_run: bool,
 ) -> int:
     """Check the plan's sources against the course org and keep the cohort's digest issue
-    in step. Returns the error count.
+    in step. Always returns 0.
 
-    Exactly one thing here fails the run: a source at the ERROR rung, which is a deploy
-    about to ship nothing. Everything else - a check that could not run, a digest that
-    could not be written - is logged and swallowed. The distinction is the point: a
-    RELEASE problem is worth a red X on the cron, a NOTIFICATION problem is not worth
-    stopping a release for."""
+    Nothing here fails the run, at any rung. A source nobody has staged is a CONTENT
+    fault, and it is delivered where the people who can fix it are looking: the cohort's
+    digest issue, which @mentions the instructors and links the line to edit, plus the
+    mail `notify` sends the same people off the same transitions. The exit code belongs to
+    the run itself - it broke, or it did not - and a missing source used to spend it on
+    every tick, up to eight red runs an hour mailing a bot account about a folder only
+    faculty can write. The signature keeps its int so the caller's `errors +=` reads the
+    same as every other phase."""
     try:
         faults = schedule.source_faults(sched, course_org)
     except Exception as exc:
@@ -473,17 +476,61 @@ def _preflight_sources(
             f"{len(faults)} source(s) in {cohort_org}'s plan not staged in "
             f"{course_org} (worst: {worst})"
         )
+    # Local, because everything downstream speaks about time to a human: the deadline
+    # faculty wrote, and the overnight window where a notification is held rather than
+    # sent.
+    local = schedule.in_cohort_zone(sched, now)
+    # Who to tell, asked ONCE and only if asked at all: the digest @mentions them and the
+    # mail is addressed to them, so asking git twice would be two reads and two chances to
+    # disagree - and `sync` calls this only on a tick with something to say, because the
+    # answer costs a blame query, a people.yml read and a commit lookup per repo.
+    routing = notify.Routing()
+
+    def whom() -> list[str]:
+        nonlocal routing
+        try:
+            routing = notify.route(cohort_org, course_org, faults, local)
+        except Exception as exc:
+            log_err(
+                f"could not work out who to tell about {cohort_org}'s sources: {exc}"
+            )
+        return routing.logins
+
     try:
-        source_digest.sync(cohort_org, course_org, faults, now, dry_run=dry_run)
+        digest = source_digest.sync(
+            cohort_org,
+            course_org,
+            faults,
+            local,
+            dry_run=dry_run,
+            resolve_mention=whom,
+        )
     except Exception as exc:
         log_err(f"could not update {cohort_org}'s source digest: {exc}")
-    if worst == schedule.Severity.ERROR:
-        log_err(
-            f"{cohort_org}: a source due within "
-            f"{int(schedule.SOURCE_ERROR_WINDOW.total_seconds() // 3600)}h is not staged "
-            f"in {course_org} - that deploy will ship nothing"
+        return 0
+    if digest.errors:
+        # `sync` has already said what went wrong, line by line. Recorded here and NOT
+        # returned: an undelivered notification must not stop a release.
+        log_step(
+            f"{cohort_org}'s source digest: {digest.errors} error(s) - not delivered"
         )
-        return 1
+    try:
+        # The mail beside the @mention, for the transitions the digest just recorded. It
+        # counts its own failures and never raises; this catch is for the one it did not
+        # foresee, on the same terms as the digest above - a release is not worth a
+        # notification.
+        unsent = notify.notify_source_transitions(
+            cohort_org, course_org, digest, local, routing, dry_run=dry_run
+        )
+        # A mail that did not go out is un-RECORDED rather than lost. The digest has
+        # already written the new rung, so without this the notification was owed once,
+        # failed once and was never owed again - and the log line saying so was the only
+        # trace. Putting the previous rung back makes the next tick recompute the very
+        # same crossing and say it once (`source_digest.hold`).
+        if unsent.keys and not dry_run:
+            source_digest.hold(cohort_org, {k: digest.was.get(k) for k in unsent.keys})
+    except Exception as exc:
+        log_err(f"could not mail {cohort_org}'s source faults: {exc}")
     return 0
 
 
@@ -608,8 +655,8 @@ def _release_phase(
     # at its moment, which is far too late to write the thing. This is the only unattended
     # surface that notices - the commit-time validator only ever runs when someone edits
     # schedule.yml, and a plan written in August and forgotten is exactly the case that
-    # needs catching. Never fatal to the run: an undelivered warning must not stop a
-    # release (see source_digest.sync).
+    # needs catching. Never fatal to the run, at any rung: the fault is faculty's to fix
+    # and the digest issue is how they hear about it (see _preflight_sources).
     errors += _preflight_sources(course_org, cohort_org, sched, now, dry_run)
 
     if dry_run:

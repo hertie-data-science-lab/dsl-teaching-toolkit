@@ -230,11 +230,15 @@ def _run_preamble(minutes: int = _TIMEOUT_DEFAULT) -> str:
 # whether a send could: its mail-transport row reads the very same variables, and without
 # them it would report "unset" on every org whatever the truth.
 # A plain string (not the f-string body) so the GitHub `${{ }}` is literal.
-# Derived from the names the mailer actually reads, so a rename cannot leave an org
+# Derived from the names the mailer actually reads - the four GRAPH_* transport secrets
+# plus DSL_MAINTAINER_EMAIL, where fault mail goes - so a rename cannot leave an org
 # silently unconfigured. GRAPH_CLIENT_CERT holds certificate + private key in one
-# multi-line secret; there is no GRAPH_CLIENT_SECRET.
+# multi-line secret; there is no GRAPH_CLIENT_SECRET. DSL_MAINTAINER_EMAIL is an ADDRESS
+# and is held centrally as a repository variable, but it travels to an org as an org
+# secret (bootstrap_course propagates it), so it is read from `secrets.` like the rest.
 _MAIL_ENV = "\n".join(
-    f"          {name}: ${{{{ secrets.{name} }}}}" for name in mailer.GRAPH_ENV
+    f"          {name}: ${{{{ secrets.{name} }}}}"
+    for name in (*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV)
 )
 
 # Fail CLOSED: only an explicit `false` sends. Any other value - "True", "1", a blank from
@@ -267,6 +271,13 @@ _DRY_RUN_GATE = (
 # each workflow keeps its own issue (a shared title would let one recovery close another's
 # open failure) with no per-renderer string to keep in step with the `name:` above it.
 #
+# The issue is the DURABLE record - it survives a mailbox, it is where a second failure
+# comments, and it closes itself on the recovery. The mail beside it (`_CRON_MAIL`) is how
+# the MAINTAINER hears at all: the only person who can fix a broken run, and the one person
+# GitHub's own scheduled-failure email never reaches. Both are throttled together off the
+# notice step's `report` output, so a run cannot mail without filing and cannot file
+# without mailing.
+#
 # A workflow whose unattended jobs run CONCURRENTLY has to go further, and `scope` is how:
 # the scheduler releases and grades in two jobs (grading once per cohort), which fail
 # independently, and on a shared title the green one closes the red one's issue - then the
@@ -282,6 +293,47 @@ _DRY_RUN_GATE = (
 # is the guard. `source_digest._open_issue` matches client-side for the same reason.
 _SCOPE = "__CRON_ISSUE_SCOPE__"  # replaced per job; see _fill_scope
 _SCOPE_ENV = "__CRON_SCOPE_ENV__"  # any env the scope's shell fragment reads
+
+# Where a cron step keeps its own output for the mail step below to tail. The runner's
+# temp directory, so it is per JOB - the scheduler's grading matrix runs a leg per cohort,
+# each on its own runner, and a shared path would let one cohort's mail carry another's log.
+_RUN_LOG = '"$RUNNER_TEMP/run.log"'
+
+# Appended to the main `run:` command of every cron step the mail below reports on, so the
+# step writes the log the mail sends. `tee` and not a redirect, because the log has to stay
+# in the run's own output as well - that is what the failure issue links to.
+#
+# `exit "${PIPESTATUS[0]}"` is what keeps the step RED: the exit status of a pipeline is
+# its last command's, which is `tee`, which succeeds - so under the runner's `bash -e` a
+# teed failure would go green. It is the last line of the block for the same reason.
+_TEE_RUN_LOG = f' 2>&1 | tee {_RUN_LOG}\n          exit "${{PIPESTATUS[0]}}"'
+
+# The mail that reaches the maintainer, gated on the notice step having actually reported.
+# The step's OWN log, teed to `_RUN_LOG` by the step itself, rather than fetched back from
+# the jobs API: this step runs INSIDE the still-running job, whose `conclusion` is null
+# until the run ends, so a lookup for the failed job matched nothing here and mailed an
+# empty tail - and on the grading matrix it could match a different cohort's leg.
+# `2>/dev/null` and `|| true` because a job that died before the teeing step ran leaves no
+# log at all, and a missing tail must not lose the mail as well: the run URL is in it
+# either way. The CLI always exits 0: this job has already failed for its own reasons, and
+# reddening it twice would say nothing new. Piped, so the tail never becomes an argv a
+# shell could reinterpret.
+_CRON_MAIL_TEMPLATE = (
+    """      - name: Email the maintainer the failed step's log
+        if: (failure() || cancelled()) && github.event_name != 'workflow_dispatch' && steps.notice.outputs.report == 'true'
+        env:
+          WORKFLOW: ${{ github.workflow }}
+          COURSE: ${{ github.repository_owner }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+"""
+    + _MAIL_ENV
+    + f"""
+        run: |
+          tail -n 30 {_RUN_LOG} 2>/dev/null \\
+            | python3 -m dsl_course.notify run-failed --course-org "$COURSE" \\
+                --workflow "$WORKFLOW" --run-url "$RUN_URL" || true
+"""
+)
 
 _CRON_CLOSE_TEMPLATE = (
     """      - name: Close the failure issue once a run succeeds
@@ -308,6 +360,7 @@ _CRON_CLOSE_TEMPLATE = (
 # exists to surface.
 _CRON_NOTICE_TEMPLATE = (
     """      - name: Report an unattended failure as an issue
+        id: notice
         if: (failure() || cancelled()) && github.event_name != 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
@@ -324,13 +377,20 @@ _CRON_NOTICE_TEMPLATE = (
           # A filed issue emails only the repo's watchers, which in practice is nobody, so
           # the FIRST report mentions the org's admins; course-admin, not instructors,
           # because broken infrastructure is not the teaching staff's problem.
+          # Teaching staff read these too (course-admin is mentioned below), and a
+          # broken run is not theirs to fix - so the note says who is already on it.
+          note=$(printf '%s\\nThe toolkit maintainer has been emailed the log - nothing for teaching staff to do.\\n' "$note")
           body=$(printf '%s\\ncc @%s/course-admin\\n' "$note" "${REPO%%/*}")
           # The step runs under `bash -e`, so an unguarded capture would abort the step on a
           # transient search failure - before the `gh issue create` that is the whole point.
           # No dedupe hit just means we file a fresh issue.
           existing=$(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number,title,updatedAt --jq "map(select(.title == \\"$title\\"))[0] | select(.) | \\"\\(.number) \\(.updatedAt)\\"") || true
+          # `report` is what gates the mail step below, so the two channels fire
+          # together: a maintainer who gets an email can always find the issue it came
+          # from, and a thread that is being kept quiet does not mail either.
           if [ -z "$existing" ]; then
             gh issue create --repo "$REPO" --title "$title" --body "$body"
+            echo "report=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           # Already open. The scheduler fails on EVERY tick while a fault stands, and a
@@ -342,10 +402,13 @@ _CRON_NOTICE_TEMPLATE = (
           last=$(date -u -d "${existing#* }" +%s 2>/dev/null || echo 0)
           if [ $(( $(date -u +%s) - last )) -lt 21600 ]; then
             echo "already reported within the last 6h - see issue ${existing%% *}"
+            echo "report=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           gh issue comment "${existing%% *}" --repo "$REPO" --body "$note"
+          echo "report=true" >> "$GITHUB_OUTPUT"
 """
+    + _CRON_MAIL_TEMPLATE
     + _CRON_CLOSE_TEMPLATE
 )
 
@@ -715,7 +778,7 @@ on:
             schedule) args+=(--all-cohorts) ;;
             repository_dispatch) [ -n "$DISPATCH_COHORT" ] && args+=(--cohort-org "$DISPATCH_COHORT") ;;
           esac
-          python3 -m dsl_course.sync_membership "${{args[@]}}"
+          python3 -m dsl_course.sync_membership "${{args[@]}}"{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""
 
 
@@ -861,6 +924,11 @@ on:
           DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
           COHORT: ${{{{ inputs.cohort_org }}}}
+          # Forwarded, not looked up: this runs in the COURSE org, whose own bootstrap
+          # propagated the address here, so --propagate-secret can pass it down to the
+          # cohort. Empty on a course org that never got one - the cohort then falls back
+          # to GRAPH_SENDER like everything else.
+          DSL_MAINTAINER_EMAIL: ${{{{ secrets.DSL_MAINTAINER_EMAIL }}}}
         run: |
           python3 -m dsl_course.bootstrap_course --org "$COHORT" --org-name "$COHORT" \\
             --cohort --course "$COURSE" --propagate-secret
@@ -931,6 +999,11 @@ on:
           DRY_RUN: ${{{{ inputs.dry_run }}}}
           EVENT: ${{{{ github.event_name }}}}
           DRIVER: ${{{{ github.event.client_payload.driver }}}}
+# A source the plan cites and the org has not got is emailed to the people git names for
+# it, from this step (see dsl_course.notify) - so the release pass carries the transport
+# alongside the token. Without it the digest issue's @mention is the only channel, which
+# reaches whoever happens to read GitHub notifications that week.
+{_MAIL_ENV}
         run: |
           gh auth setup-git
           # Which driver delivered this tick. The run history is the only record of that,
@@ -939,7 +1012,7 @@ on:
           echo "delivered by event=$EVENT driver=${{DRIVER:-none}}"
           args=(--course-org "$COURSE" --all-cohorts --skip-autograde)
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
-          python3 -m dsl_course.scheduler "${{args[@]}}"
+          python3 -m dsl_course.scheduler "${{args[@]}}"{_TEE_RUN_LOG}
 {_CRON_NOTICE}  autograde:
     needs: [release]
     # always(), because grading is gated on the durable snapshot marker, not on this run's
@@ -962,7 +1035,7 @@ on:
           gh auth setup-git
           args=(--course-org "$COURSE" --cohort-org "$COHORT" --autograde-only)
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
-          python3 -m dsl_course.scheduler "${{args[@]}}"
+          python3 -m dsl_course.scheduler "${{args[@]}}"{_TEE_RUN_LOG}
 {_AUTOGRADE_NOTICE}"""
 
 
@@ -1026,7 +1099,7 @@ on:
           DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
         run: |
-          python3 -m dsl_course.seed refresh --course-org "$COURSE"
+          python3 -m dsl_course.seed refresh --course-org "$COURSE"{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""
 
 
@@ -1215,7 +1288,7 @@ on:
                 args+=(--all-cohorts)
               fi ;;
           esac
-          python3 -m dsl_course.site sync "${{args[@]}}"
+          python3 -m dsl_course.site sync "${{args[@]}}"{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""
 
 
@@ -1293,5 +1366,5 @@ on:
           COURSE_ORG: ${{{{ github.repository_owner }}}}
         run: |
           gh auth setup-git
-          python3 -m dsl_course.site public-sync --course-org "$COURSE_ORG"
+          python3 -m dsl_course.site public-sync --course-org "$COURSE_ORG"{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""

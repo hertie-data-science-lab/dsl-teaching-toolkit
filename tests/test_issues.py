@@ -10,6 +10,7 @@ on an issue that already existed, because a new one notifies by being created.
 from __future__ import annotations
 
 import pytest
+from conftest import CREATED_ISSUE_URL, issue_row
 
 from dsl_course import issues
 
@@ -17,52 +18,8 @@ REPO = "Cohort-f2026/classroom-config"
 TITLE = "Scheduled release: late delivery"
 
 
-class _Gh:
-    """A recording fake for the two ghcli entry points this module uses - `gh` for the
-    writes, `gh_json` for the listing - with every call captured.
-
-    The listing goes through `gh_json` because that is the one that parses stdout alone; a
-    read that failed reaches the code as an exception, which is what `gh_json` raises."""
-
-    def __init__(
-        self, rows: list[dict] | None = None, list_code: int = 0, write_code: int = 0
-    ):
-        self.rows = rows or []
-        self.list_code = list_code
-        self.write_code = write_code
-        self.calls: list[tuple[str, ...]] = []
-
-    def __call__(self, *args, **kwargs):
-        self.calls.append(args)
-        return self.write_code, "boom" if self.write_code else ""
-
-    def json(self, *args, **kwargs):
-        self.calls.append(args)
-        if self.list_code != 0:
-            raise RuntimeError(f"`gh issue list` failed (exit {self.list_code}): boom")
-        return self.rows
-
-    def did(self, *prefix) -> list[tuple[str, ...]]:
-        return [c for c in self.calls if c[: len(prefix)] == prefix]
-
-    def body_of(self, *prefix) -> str:
-        (call,) = self.did(*prefix)
-        return call[call.index("--body") + 1]
-
-
-@pytest.fixture
-def gh(monkeypatch):
-    def _make(rows=None, list_code=0, write_code=0):
-        fake = _Gh(rows, list_code, write_code)
-        monkeypatch.setattr(issues, "gh", fake)
-        monkeypatch.setattr(issues, "gh_json", fake.json)
-        return fake
-
-    return _make
-
-
 def _issue(number: int, title: str, body: str = "") -> dict:
-    return {"number": number, "title": title, "body": body}
+    return issue_row(number, title, body)
 
 
 # ------------------------------------------------------------------ the exact-title match
@@ -75,12 +32,12 @@ def test_an_issue_a_human_filed_quoting_the_title_is_not_ours(gh):
 
 def test_the_exact_title_is_found_among_the_near_misses(gh):
     gh([_issue(3, f"re: {TITLE}"), _issue(7, TITLE, "the body")])
-    assert issues.find_issue(REPO, TITLE) == (7, "the body")
+    assert issues.find_issue(REPO, TITLE) == issues.Issue(7, "the body")
 
 
 def test_a_human_quoting_the_title_is_never_rewritten_but_gets_a_neighbour(gh):
     fake = gh([_issue(3, f"re: {TITLE}", "my notes")])
-    assert issues.upsert_issue(REPO, TITLE, "ours") == 0
+    assert issues.upsert_issue(REPO, TITLE, "ours").errors == 0
     assert fake.did("issue", "edit") == []
     assert len(fake.did("issue", "create")) == 1
 
@@ -123,10 +80,10 @@ def test_an_advisory_on_stderr_does_not_spoil_a_good_listing(monkeypatch):
     # which catches RuntimeError: one advisory would have aborted a release tick.
     _gh_process(
         monkeypatch,
-        stdout=f'[{{"number": 7, "title": "{TITLE}", "body": "the body"}}]',
+        stdout=f'[{{"number": 7, "title": "{TITLE}", "body": "the body", "state": "OPEN"}}]',
         stderr="! A new release of gh is available\n",
     )
-    assert issues.find_issue(REPO, TITLE) == (7, "the body")
+    assert issues.find_issue(REPO, TITLE) == issues.Issue(7, "the body")
 
 
 def test_a_listing_that_is_not_json_raises_a_runtime_error(monkeypatch):
@@ -138,7 +95,7 @@ def test_a_listing_that_is_not_json_raises_a_runtime_error(monkeypatch):
 
 def test_an_unreadable_listing_makes_upsert_fail_without_writing(gh):
     fake = gh([], list_code=1)
-    assert issues.upsert_issue(REPO, TITLE, "ours") == 1
+    assert issues.upsert_issue(REPO, TITLE, "ours").errors == 1
     assert fake.did("issue", "create") == fake.did("issue", "edit") == []
 
 
@@ -147,7 +104,7 @@ def test_an_unreadable_listing_makes_upsert_fail_without_writing(gh):
 
 def test_upsert_creates_when_there_is_nothing_open(gh):
     fake = gh([])
-    assert issues.upsert_issue(REPO, TITLE, "the body") == 0
+    assert issues.upsert_issue(REPO, TITLE, "the body").errors == 0
     (created,) = fake.did("issue", "create")
     assert created[created.index("--title") + 1] == TITLE
     assert fake.body_of("issue", "create") == "the body"
@@ -155,7 +112,7 @@ def test_upsert_creates_when_there_is_nothing_open(gh):
 
 def test_upsert_edits_the_open_issue_in_place(gh):
     fake = gh([_issue(7, TITLE, "stale body")])
-    assert issues.upsert_issue(REPO, TITLE, "fresh body") == 0
+    assert issues.upsert_issue(REPO, TITLE, "fresh body").errors == 0
     assert fake.did("issue", "create") == []
     (edited,) = fake.did("issue", "edit")
     assert edited[2] == "7"
@@ -164,7 +121,25 @@ def test_upsert_edits_the_open_issue_in_place(gh):
 
 def test_a_failed_write_is_counted_not_swallowed(gh):
     gh([], write_code=1)
-    assert issues.upsert_issue(REPO, TITLE, "the body") == 1
+    assert issues.upsert_issue(REPO, TITLE, "the body").errors == 1
+
+
+def test_an_opened_issue_reports_the_url_it_was_given(gh):
+    # The tick that OPENS the issue is the tick a notifier has something to say, and the
+    # number is printed by `gh issue create` and nowhere else - so a bare count left the
+    # mail beside the issue unable to link it.
+    gh([])
+    assert issues.upsert_issue(REPO, TITLE, "the body").url == CREATED_ISSUE_URL
+
+
+def test_an_edited_issue_reports_the_url_of_the_issue_it_found(gh):
+    gh([_issue(7, TITLE, "stale body")])
+    assert issues.upsert_issue(REPO, TITLE, "fresh").url.endswith("/issues/7")
+
+
+def test_a_write_that_printed_no_url_reports_none_rather_than_guessing(gh):
+    gh([], write_code=1)
+    assert issues.upsert_issue(REPO, TITLE, "the body").url is None
 
 
 # ------------------------------------------------------------------------ the comment rule
@@ -174,11 +149,17 @@ def test_a_comment_is_posted_only_on_an_issue_that_already_existed(gh):
     # A brand-new issue emails everyone watching by being created; a comment repeating
     # itself on top of that is the noise this whole shape exists to avoid.
     fake = gh([])
-    assert issues.upsert_issue(REPO, TITLE, "body", comment="something changed") == 0
+    assert (
+        issues.upsert_issue(REPO, TITLE, "body", comment="something changed").errors
+        == 0
+    )
     assert fake.did("issue", "comment") == []
 
     fake = gh([_issue(7, TITLE, "stale")])
-    assert issues.upsert_issue(REPO, TITLE, "body", comment="something changed") == 0
+    assert (
+        issues.upsert_issue(REPO, TITLE, "body", comment="something changed").errors
+        == 0
+    )
     (commented,) = fake.did("issue", "comment")
     assert commented[2] == "7"
     assert fake.body_of("issue", "comment") == "something changed"
@@ -188,9 +169,66 @@ def test_no_comment_means_a_silent_body_edit(gh):
     # The hourly case: GitHub does not email on a body edit, so a tick with nothing new to
     # say refreshes the body and stays quiet.
     fake = gh([_issue(7, TITLE, "stale")])
-    assert issues.upsert_issue(REPO, TITLE, "body") == 0
+    assert issues.upsert_issue(REPO, TITLE, "body").errors == 0
     assert len(fake.did("issue", "edit")) == 1
     assert fake.did("issue", "comment") == []
+
+
+# ------------------------------------------------------------- the issue somebody closed
+
+
+def test_both_halves_of_the_title_come_back_from_one_search(gh):
+    # A caller whose state lives in the body it last wrote needs the newest thing it
+    # wrote, open or closed - and asking for the closed half separately is a second
+    # listing on every tick that has no open issue.
+    fake = gh(
+        [_issue(11, TITLE, "current")],
+        closed=[_issue(3, TITLE, "older"), _issue(9, TITLE, "newest")],
+    )
+    found = issues.find_issues(REPO, TITLE)
+    assert found.open == issues.Issue(11, "current")
+    assert found.last_closed == issues.Issue(9, "newest", closed=True)
+    (listed,) = fake.did("issue", "list")
+    assert listed[listed.index("--state") + 1] == "all"
+
+
+def test_a_closed_issue_a_human_titled_similarly_is_not_ours_either(gh):
+    gh([], closed=[_issue(3, f"re: {TITLE}", "my notes")])
+    assert issues.find_issues(REPO, TITLE) == (None, None)
+
+
+def test_nothing_of_that_title_at_all_is_two_nones(gh):
+    gh([])
+    assert issues.find_issues(REPO, TITLE) == (None, None)
+
+
+# ---------------------------------------------------------- the listing already made
+
+
+def test_upsert_uses_the_listing_the_caller_already_made(gh):
+    # Every consumer reads the body for its own previous state before deciding what to
+    # write, so a second search here is a second listing on every tick.
+    fake = gh([_issue(7, TITLE, "stale")])
+    found = issues.find_issues(REPO, TITLE)
+    assert issues.upsert_issue(REPO, TITLE, "fresh", existing=found.open).errors == 0
+    assert len(fake.did("issue", "list")) == 1
+    assert fake.body_of("issue", "edit") == "fresh"
+
+
+def test_a_caller_that_looked_and_found_nothing_is_not_asked_again(gh):
+    # `existing=None` is an ANSWER - "I looked, nothing is open" - and it must not read as
+    # "I did not look", or the tick that has to CREATE searches twice.
+    fake = gh([])
+    issues.find_issues(REPO, TITLE)
+    assert issues.upsert_issue(REPO, TITLE, "ours", existing=None).errors == 0
+    assert len(fake.did("issue", "list")) == 1
+    assert len(fake.did("issue", "create")) == 1
+
+
+def test_the_issue_url_is_spelled_once_for_every_caller():
+    # A mail links the record it is summarising, and two format strings for one URL is one
+    # rename away from linking nowhere.
+    assert issues.issue_url(REPO, 7) == f"https://github.com/{REPO}/issues/7"
 
 
 # -------------------------------------------------------------------------------- closing

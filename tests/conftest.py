@@ -10,11 +10,25 @@ that only asserts we wrote the call we wrote; its real failure modes need a live
 from __future__ import annotations
 
 import subprocess
+from datetime import datetime
 
 import pytest
 import yaml
 
-from dsl_course import central, ghcli, grades, repos, roster, schedule, site, teams
+from dsl_course import (
+    bootstrap_course,
+    central,
+    gh_contents,
+    ghcli,
+    grades,
+    issues,
+    repos,
+    roster,
+    schedule,
+    site,
+    sync_faculty,
+    teams,
+)
 
 # students.csv's header row, DERIVED from the columns the engine declares rather than
 # re-typed. `roster.FIELDS` is a frozen public contract (the shipped JavaScript spells the
@@ -94,19 +108,166 @@ def _the_central_ref_is_present(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _clear_process_memos():
-    """The per-process memos a single CLI run is entitled to keep: a repo's tree, a repo's
-    metadata, whether a central ref exists, the three classroom-config files a run
-    re-reads (students.csv, teams.csv, schedule.yml) and the login the token belongs to.
-    Tests reuse the same org/repo names with different fakes, so clear them between
-    tests."""
+    """The per-process memos a single CLI run is entitled to keep: a repo's tree and its
+    paths, a repo's metadata and its last committer, whether a central ref exists, the
+    classroom-config files a run re-reads (students.csv, teams.csv, schedule.yml,
+    people.yml) and the login the token belongs to. Tests reuse the same org/repo names
+    with different fakes, so clear them between tests."""
     site._repo_tree.cache_clear()
     central.central_ref_exists.cache_clear()
     repos._repo.cache_clear()
     roster._roster_text.cache_clear()
     teams._teams_text.cache_clear()
     schedule._schedule_text.cache_clear()
+    schedule._repo_paths.cache_clear()
     grades._grading_text.cache_clear()
+    gh_contents.last_committer.cache_clear()
+    sync_faculty.load_cohort_faculty.cache_clear()
     ghcli.bot_login.cache_clear()
+
+
+def stub_bootstrap(monkeypatch) -> None:
+    """Neutralise everything a bootstrap does EXCEPT the site sync - the org-level gh/git
+    layer, the repo seeding and the summary output. Shared: two test files now drive
+    `bootstrap_course.main`, and a per-file copy is how one of them ends up stubbing a
+    step the other has since renamed."""
+    bc = bootstrap_course
+    # Every configuration step reports a failure count that _run threads into its exit
+    # code and into the closing summary - a clean stub reports zero failures.
+    for name in (
+        "converge_org_settings",
+        "create_default_teams",
+        "grant_button_access",
+        "setup_cohort_extras",
+        "seed_workflows",
+        "create_profile_repo",
+    ):
+        monkeypatch.setattr(bc, name, lambda *a, **k: 0)
+    monkeypatch.setattr(bc, "preflight", lambda org: True)
+    monkeypatch.setattr(bc, "add_course_admins", lambda org, handles: 0)
+    monkeypatch.setattr(bc, "validate_secret_presence", lambda org, secret: True)
+    monkeypatch.setattr(bc, "put_file", lambda *a, **k: True)
+    monkeypatch.setattr(bc, "register_cohort", lambda course, cohort: True)
+    monkeypatch.setattr(bc, "update_profile_readme", lambda *a, **k: 0)
+    monkeypatch.setattr(bc.sync_faculty, "sync", lambda course, cohorts=None: 0)
+    # The org's tier is read off its (not yet written) dsl-course.yml; a bootstrap test is
+    # about what the run does, not which ref it seeds at.
+    monkeypatch.setattr(bc, "central_ref_for", lambda org: "release")
+
+
+# What the `gh issue create` in `GhFake` prints.
+CREATED_ISSUE_URL = "https://github.com/Cohort/classroom-config/issues/12"
+
+
+class GhFake:
+    """A recording fake for the two `ghcli` entry points the issue helpers use - `gh` for
+    the writes, `gh_json` for the listing - with every call captured.
+
+    Shared, because four test files each grew their own copy and they disagreed about the
+    one thing that matters: the listing goes through `gh_json` (which parses stdout ALONE,
+    so a `gh` advisory on stderr cannot spoil it) and a read that failed reaches the code
+    as the exception `gh_json` raises.
+
+    `rows` is the OPEN issues and `closed` the closed ones; each row is stamped with its
+    state, so a test says which list a row is in and never both."""
+
+    def __init__(
+        self,
+        rows: list[dict] | None = None,
+        closed: list[dict] | None = None,
+        list_code: int = 0,
+        write_code: int = 0,
+        created_url: str = CREATED_ISSUE_URL,
+    ):
+        self.rows = [{**r, "state": "OPEN"} for r in rows or []]
+        self.closed = [{**r, "state": "CLOSED"} for r in closed or []]
+        self.list_code = list_code
+        self.write_code = write_code
+        self.created_url = created_url
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, *args, **kwargs):
+        self.calls.append(args)
+        if self.write_code:
+            return self.write_code, "boom"
+        # What `gh issue create` really prints - the new issue's URL, which is the only
+        # place a caller can learn the number of an issue it has just opened.
+        return 0, f"{self.created_url}\n" if args[:2] == ("issue", "create") else ""
+
+    def json(self, *args, **kwargs):
+        self.calls.append(args)
+        if self.list_code != 0:
+            raise RuntimeError(f"`gh issue list` failed (exit {self.list_code}): boom")
+        state = args[args.index("--state") + 1] if "--state" in args else "open"
+        if state == "closed":
+            return self.closed
+        if state == "all":
+            return self.rows + self.closed
+        return self.rows
+
+    def did(self, *prefix) -> list[tuple[str, ...]]:
+        return [c for c in self.calls if c[: len(prefix)] == prefix]
+
+    def body_of(self, *prefix) -> str:
+        (call,) = self.did(*prefix)
+        return call[call.index("--body") + 1]
+
+
+@pytest.fixture
+def gh(monkeypatch):
+    """A `GhFake` wired into `dsl_course.issues`, which is where every self-updating issue
+    in the toolkit reaches `gh`."""
+
+    def _make(rows=None, closed=None, list_code=0, write_code=0) -> GhFake:
+        fake = GhFake(rows, closed, list_code, write_code)
+        monkeypatch.setattr(issues, "gh", fake)
+        monkeypatch.setattr(issues, "gh_json", fake.json)
+        return fake
+
+    return _make
+
+
+def issue_row(number: int, title: str, body: str = "") -> dict:
+    """One row of the `gh issue list --json number,body,title,state` listing. `GhFake`
+    stamps the state, from whichever of its two lists the row was put in."""
+    return {"number": number, "title": title, "body": body}
+
+
+def source_fault(
+    where: str = "releases.lecture_02",
+    what: str = "Course-Org/cm/lectures/02_lecture does not exist",
+    fires: datetime | None = None,
+    *,
+    field: str = "course_source_path",
+    kind: schedule.FaultKind | None = None,
+    lineno: int | None = None,
+    repo: str = "cm",
+    path: str = "lectures/02_lecture",
+    ceiling: schedule.Severity = schedule.Severity.MISSED,
+) -> schedule.SourceFault:
+    """A `SourceFault` for a test that is about what a fault DOES, not how one is built.
+
+    `kind` defaults to whatever `field` implies, which is what `source_faults` sets for a
+    plain missing source - the case every notification test wants. Four test files carried
+    their own builder and each defaulted a different field, so a fault's `key`, its line
+    citation and its fix sentence were each pinned against a different shape."""
+    if kind is None:
+        kind = (
+            schedule.FaultKind.MISSING_REPO
+            if field == "course_source_repo"
+            else schedule.FaultKind.MISSING_PATH
+        )
+    return schedule.SourceFault(
+        where,
+        what,
+        fires,
+        field=field,
+        kind=kind,
+        ceiling=ceiling,
+        lineno=lineno,
+        repo=repo,
+        path=path,
+    )
 
 
 def workflow_inputs(rendered: str) -> dict:

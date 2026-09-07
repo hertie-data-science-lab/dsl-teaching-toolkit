@@ -15,16 +15,16 @@ from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
+from conftest import source_fault
 
 from dsl_course import collect as collect_mod
-from dsl_course import course, deploy, ghcli, scheduler, seed
+from dsl_course import course, deploy, ghcli, notify, scheduler, seed, source_digest
 from dsl_course.grades import _DEFAULT_SPEC as DEFAULT_SPEC
 from dsl_course.schedule import (
     AssignmentEntry,
     Deploy,
     Release,
     Schedule,
-    SourceFault,
 )
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -91,7 +91,9 @@ def _no_source_preflight(monkeypatch):
     I/O. These tests are about the release/snapshot/autograde phases, so it is stubbed to
     "everything is staged" by default; the pre-flight has its own tests below."""
     monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [])
-    monkeypatch.setattr(scheduler.source_digest, "sync", lambda *a, **k: 0)
+    monkeypatch.setattr(
+        scheduler.source_digest, "sync", lambda *a, **k: source_digest.DigestResult()
+    )
 
 
 def _r(label: str, when: datetime, **kw) -> Release:
@@ -1986,14 +1988,32 @@ def test_a_cohort_listing_that_cannot_be_read_says_so_and_goes_red(
 # ----------------------------------------------------- source pre-flight (unattended)
 
 
-def _preflight(monkeypatch, faults, now=WHEN, dry_run=False):
-    """Drive _preflight_sources with a fixed fault list, capturing the digest call."""
+def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None):
+    """Drive _preflight_sources with a fixed fault list, capturing every call it makes.
+
+    Routing is stubbed too: it reads blame and people.yml over the API, and what these
+    tests are about is the exit code and what the phases are handed."""
     seen: dict = {}
     monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: faults)
     monkeypatch.setattr(
-        scheduler.source_digest,
-        "sync",
-        lambda *a, **k: seen.update(args=a, kw=k) or 0,
+        scheduler.notify,
+        "route",
+        lambda *a, **k: seen.update(route=a) or notify.Routing(logins=["JanG"]),
+    )
+
+    def _sync(*a, **k):
+        seen.update(args=a, kw=k)
+        # `sync` decides whether to ask at all; a test that never called the resolver
+        # would be asserting the mention of a tick with nothing to say.
+        if k.get("resolve_mention"):
+            seen["mention"] = k["resolve_mention"]()
+        return digest or source_digest.DigestResult()
+
+    monkeypatch.setattr(scheduler.source_digest, "sync", _sync)
+    monkeypatch.setattr(
+        scheduler.notify,
+        "notify_source_transitions",
+        lambda *a, **k: seen.update(mailed=a, mail_kw=k) or notify.Unsent(),
     )
     rc = scheduler._preflight_sources(
         "Course-Org", "Cohort-Org", Schedule(), now, dry_run
@@ -2001,20 +2021,93 @@ def _preflight(monkeypatch, faults, now=WHEN, dry_run=False):
     return rc, seen
 
 
-def test_preflight_fails_the_run_only_for_a_source_about_to_ship_nothing(monkeypatch):
-    # The whole ladder exists so this is the ONLY rung that goes red. A term written up
-    # front is all advisories, and red-Xing that trains everyone to ignore the cron.
-    imminent = SourceFault("releases.a", "gone", WHEN + timedelta(hours=2), "f")
-    distant = SourceFault("releases.b", "gone", WHEN + timedelta(days=40), "f")
-    assert _preflight(monkeypatch, [imminent])[0] == 1
+def test_a_missed_rung_source_leaves_the_exit_code_alone(monkeypatch):
+    # No rung goes red, the top one included. A source nobody staged is faculty's to fix
+    # and the digest issue is where they hear about it; spending the exit code on it meant
+    # up to eight red runs an hour mailing a bot account about a folder it cannot write.
+    missed = source_fault("releases.a", fires=WHEN - timedelta(hours=2))
+    critical = source_fault("releases.b", fires=WHEN + timedelta(hours=2))
+    distant = source_fault("releases.c", fires=WHEN + timedelta(days=40))
+    assert _preflight(monkeypatch, [missed])[0] == 0
+    assert _preflight(monkeypatch, [critical])[0] == 0
     assert _preflight(monkeypatch, [distant])[0] == 0
     assert _preflight(monkeypatch, [])[0] == 0
 
 
+def test_a_mail_that_did_not_go_out_puts_the_digests_record_back(monkeypatch):
+    # The digest wrote the new rung before the mail was attempted, so a failed send has to
+    # un-record the crossing or the notification is owed once, fails once and is never
+    # owed again.
+    fault = source_fault("releases.a", fires=WHEN + timedelta(hours=2))
+    digest = source_digest.DigestResult(
+        faults_by_key={fault.key: fault},
+        mail={fault.key: scheduler.schedule.Severity.CRITICAL},
+        was={fault.key: "warning"},
+    )
+    held: dict = {}
+    monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [fault])
+    monkeypatch.setattr(scheduler.notify, "route", lambda *a, **k: notify.Routing())
+    monkeypatch.setattr(scheduler.source_digest, "sync", lambda *a, **k: digest)
+    monkeypatch.setattr(
+        scheduler.notify,
+        "notify_source_transitions",
+        lambda *a, **k: notify.Unsent(1, (fault.key,)),
+    )
+    monkeypatch.setattr(
+        scheduler.source_digest,
+        "hold",
+        lambda org, keys: held.update(org=org, keys=keys) or 0,
+    )
+    assert (
+        scheduler._preflight_sources(
+            "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+        )
+        == 0
+    )
+    assert held == {"org": "Cohort-Org", "keys": {fault.key: "warning"}}
+
+
+def test_a_dry_run_holds_nothing(monkeypatch):
+    fault = source_fault("releases.a", fires=WHEN + timedelta(hours=2))
+    calls: list = []
+    monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [fault])
+    monkeypatch.setattr(scheduler.notify, "route", lambda *a, **k: notify.Routing())
+    monkeypatch.setattr(
+        scheduler.source_digest, "sync", lambda *a, **k: source_digest.DigestResult()
+    )
+    monkeypatch.setattr(
+        scheduler.notify,
+        "notify_source_transitions",
+        lambda *a, **k: notify.Unsent(1, (fault.key,)),
+    )
+    monkeypatch.setattr(
+        scheduler.source_digest, "hold", lambda *a, **k: calls.append(a) or 0
+    )
+    scheduler._preflight_sources("Course-Org", "Cohort-Org", Schedule(), WHEN, True)
+    assert calls == []
+
+
+def test_a_digest_error_is_reported_but_never_returned(monkeypatch):
+    # The digest counts its own failures; the pre-flight reads them so the run log says so,
+    # and still returns 0 - an undelivered notification must not stop a release.
+    monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [])
+    monkeypatch.setattr(
+        scheduler.source_digest,
+        "sync",
+        lambda *a, **k: source_digest.DigestResult(errors=1),
+    )
+    assert (
+        scheduler._preflight_sources(
+            "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+        )
+        == 0
+    )
+
+
 def test_preflight_reports_every_fault_however_distant(monkeypatch):
-    # Severity gates the RED X, not the digest: the issue body lists the lot, so the
-    # advisories are there as context the moment one of them escalates.
-    distant = SourceFault("releases.b", "gone", WHEN + timedelta(days=40), "f")
+    # Severity gates who is TOLD, not what is listed: the issue body carries the lot, so
+    # the advisories are there as context the moment one of them escalates.
+    distant = source_fault("releases.b", fires=WHEN + timedelta(days=40))
     _, seen = _preflight(monkeypatch, [distant])
     assert seen["args"][2] == [distant]
 
@@ -2037,7 +2130,7 @@ def test_a_digest_that_cannot_be_written_never_stops_a_release(monkeypatch):
 
 
 def test_a_source_check_that_cannot_run_is_not_read_as_everything_missing(monkeypatch):
-    # A rate limit must not be reported as 22 broken entries, and must not go red.
+    # A rate limit must not be reported as 22 broken entries.
     def boom(sched, org):
         raise RuntimeError("API rate limit exceeded")
 
@@ -2052,7 +2145,7 @@ def test_a_source_check_that_cannot_run_is_not_read_as_everything_missing(monkey
 
 def test_preflight_passes_dry_run_through(monkeypatch):
     _, seen = _preflight(
-        monkeypatch, [SourceFault("releases.a", "gone", WHEN, "f")], dry_run=True
+        monkeypatch, [source_fault("releases.a", fires=WHEN)], dry_run=True
     )
     assert seen["kw"]["dry_run"] is True
 
@@ -2320,3 +2413,85 @@ def test_autograde_waits_for_a_completed_snapshot(monkeypatch):
     monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name: {"anna": "sha"})
     assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
     assert len(graded) == 1
+
+
+def test_who_to_tell_is_asked_once_and_handed_to_both_channels(monkeypatch):
+    # The digest @mentions them and the mail is addressed to them. Asking git twice would
+    # be two API reads and two chances for the issue and the email to disagree.
+    fault = source_fault("releases.a", fires=WHEN + timedelta(hours=3))
+    digest = source_digest.DigestResult(faults_by_key={fault.key: fault})
+    _, seen = _preflight(monkeypatch, [fault], digest=digest)
+    assert seen["route"][:2] == ("Cohort-Org", "Course-Org")
+    assert seen["mention"] == ["JanG"]
+    assert seen["mailed"][2] is digest
+    assert seen["mailed"][4].logins == ["JanG"]
+
+
+def test_every_phase_reads_the_clock_in_the_cohorts_own_zone(monkeypatch):
+    # The tick is UTC; the deadline faculty wrote and the window where mail is held are
+    # both local. A quiet-hours decision made in UTC holds the wrong five hours.
+    sched = Schedule(timezone="Australia/Sydney")
+    monkeypatch.setattr(scheduler.schedule, "source_faults", lambda s, org: [])
+    seen: dict = {}
+    monkeypatch.setattr(scheduler.notify, "route", lambda *a, **k: notify.Routing())
+    monkeypatch.setattr(
+        scheduler.source_digest,
+        "sync",
+        lambda *a, **k: seen.update(now=a[3]) or source_digest.DigestResult(),
+    )
+    monkeypatch.setattr(
+        scheduler.notify, "notify_source_transitions", lambda *a, **k: notify.Unsent()
+    )
+    scheduler._preflight_sources("Course-Org", "Cohort-Org", sched, WHEN, False)
+    assert str(seen["now"].tzinfo) == "Australia/Sydney"
+    assert seen["now"] == WHEN  # the same instant, told differently
+
+
+def test_a_notifier_that_raised_never_changes_the_exit_code(monkeypatch, capsys):
+    # Same contract as the digest: this runs inside the release cron, and an undelivered
+    # notification is not worth a release.
+    monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [])
+    monkeypatch.setattr(scheduler.notify, "route", lambda *a, **k: notify.Routing())
+    monkeypatch.setattr(
+        scheduler.source_digest, "sync", lambda *a, **k: source_digest.DigestResult()
+    )
+
+    def boom(*a, **k):
+        raise RuntimeError("Graph is having a day")
+
+    monkeypatch.setattr(scheduler.notify, "notify_source_transitions", boom)
+    assert (
+        scheduler._preflight_sources(
+            "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+        )
+        == 0
+    )
+    assert "could not mail" in capsys.readouterr().err
+
+
+def test_a_routing_that_raised_still_lets_the_digest_speak(monkeypatch, capsys):
+    # Blame is a nicety - it decides WHO hears. Losing it must not lose the issue, which
+    # falls back to @mentioning the cohort's instructors team.
+    monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [])
+    seen: dict = {}
+    monkeypatch.setattr(
+        scheduler.notify, "notify_source_transitions", lambda *a, **k: notify.Unsent()
+    )
+    monkeypatch.setattr(
+        scheduler.source_digest,
+        "sync",
+        lambda *a, **k: seen.update(kw=k) or source_digest.DigestResult(),
+    )
+
+    def boom(*a, **k):
+        raise RuntimeError("GraphQL is having a day")
+
+    monkeypatch.setattr(scheduler.notify, "route", boom)
+    assert (
+        scheduler._preflight_sources(
+            "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+        )
+        == 0
+    )
+    assert seen["kw"]["resolve_mention"]() == []
+    assert "could not work out who to tell" in capsys.readouterr().err

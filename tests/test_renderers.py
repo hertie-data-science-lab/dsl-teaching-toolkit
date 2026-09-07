@@ -1067,6 +1067,57 @@ def _assert_reports_a_failure(opener: dict) -> None:
     assert ") || true" in opener["run"]
     # `permissions: {}` leaves the ambient token unable to file anything.
     assert opener["env"]["GH_TOKEN"] == "${{ secrets.DSL_BOT_TOKEN }}"
+    # Teaching staff are cc'd on this issue and a broken run is not theirs to fix, so it
+    # says who is already on it rather than leaving them to wonder.
+    assert "The toolkit maintainer has been emailed the log" in opener["run"]
+    # And it publishes whether it actually reported, which is what gates the mail step.
+    assert opener["id"] == "notice"
+    assert opener["run"].count("report=true") == 2  # created, and commented
+    assert "report=false" in opener["run"]
+
+
+def _assert_emails_the_maintainer(step: dict) -> None:
+    # The issue is the durable record; this is the only channel the MAINTAINER is on.
+    # GitHub's own scheduled-failure email goes to whoever last committed the workflow
+    # file, which is always the bot, which is to say nobody.
+    # The step's OWN log, teed by the step that failed. The jobs API cannot answer this
+    # from in here: the job is still RUNNING, so its `conclusion` is null and a lookup
+    # for the failed job mailed an empty tail - and on the grading matrix it could match
+    # another cohort's leg.
+    assert f"tail -n 30 {workflows_render._RUN_LOG}" in step["run"]
+    assert "actions/runs" not in step["run"]
+    assert "dsl_course.notify run-failed" in step["run"]
+    # Piped, never interpolated: a log tail is arbitrary text and must not become argv.
+    assert "${{" not in step["run"]
+    # A job that died before the teeing step ran leaves no log, and a missing tail must
+    # not lose the mail as well - the run URL is in it either way. This job has also
+    # already failed for its own reasons; reddening it twice says nothing new.
+    assert "|| true" in step["run"]
+    # Throttled WITH the issue, off the notice step's own output, so a maintainer who gets
+    # an email can always find the issue it came from - and a thread being kept quiet for
+    # six hours does not mail either.
+    assert "steps.notice.outputs.report == 'true'" in step["if"]
+    assert "cancelled()" in step["if"]
+    assert "github.event_name != 'workflow_dispatch'" in step["if"]
+    # It can only mail if it carries the transport.
+    assert set(mailer.GRAPH_ENV) <= set(step["env"])
+    assert step["env"][mailer.MAINTAINER_ENV] == _secret_ref(mailer.MAINTAINER_ENV)
+    assert step["env"]["COURSE"] == "${{ github.repository_owner }}"
+
+
+def _assert_the_reported_step_writes_its_log(job: dict, where: str) -> None:
+    """The mail above tails a log, so the step it reports on has to write one."""
+    teed = [i for i, s in enumerate(job["steps"]) if "| tee " in s.get("run", "")]
+    assert len(teed) == 1, where
+    step = job["steps"][teed[0]]
+    assert workflows_render._RUN_LOG in step["run"], where
+    # A pipeline's exit status is its LAST command's - `tee`, which succeeds - so without
+    # this the failure the mail exists for would leave the step green and report nothing.
+    assert step["run"].rstrip().endswith('exit "${PIPESTATUS[0]}"'), where
+    mail = next(
+        i for i, s in enumerate(job["steps"]) if "dsl_course.notify" in s.get("run", "")
+    )
+    assert teed[0] < mail, where
 
 
 # Two OPEN issues whose titles the search cannot tell apart: every word of the release
@@ -1083,6 +1134,15 @@ _OPEN_ISSUES = [
         "updatedAt": "2020-01-01T00:00:00Z",
     },
 ]
+
+
+def _step_outputs(path: Path) -> dict[str, str]:
+    """The `name=value` lines a step wrote to $GITHUB_OUTPUT."""
+    if not path.exists():
+        return {}
+    return dict(
+        line.split("=", 1) for line in path.read_text().splitlines() if "=" in line
+    )
 
 
 def _run_issue_step(
@@ -1113,12 +1173,15 @@ def _run_issue_step(
     fake.chmod(0o755)
     log = work / "gh.log"
     log.write_text("")
+    outputs = work / "github_output"
+    outputs.write_text("")
     subprocess.run(
         # `bash -e`, which is how GitHub runs a `run:` block.
         ["bash", "-e", "-c", step["run"]],
         env={
             "PATH": f"{work}:{os.environ['PATH']}",
             "LOG": str(log),
+            "GITHUB_OUTPUT": str(outputs),
             "ISSUES": str(work / "issues.json"),
             "WORKFLOW": "Scheduled release",
             "REPO": "Course-Org/.github",
@@ -1175,10 +1238,15 @@ def test_every_cron_files_and_closes_its_own_failure_issue(name):
     ]
     assert reporting, f"{name}: nothing reports its unattended failures"
     for job_name, job in reporting:
-        openers = [s for s in job["steps"] if "failure()" in s.get("if", "")]
-        # ONE per job. The scheduler releases and grades in two CONCURRENT jobs, so the
-        # contract is per job now - but two notices in one job still double-file.
+        failing = [s for s in job["steps"] if "failure()" in s.get("if", "")]
+        openers = [s for s in failing if "gh issue create" in s.get("run", "")]
+        mailers = [s for s in failing if "dsl_course.notify" in s.get("run", "")]
+        # ONE of each per job: the durable issue, and the mail that is how the maintainer
+        # hears at all. The scheduler releases and grades in two CONCURRENT jobs, so the
+        # contract is per job - but two notices in one job still double-file.
         assert len(openers) == 1, f"{name}.{job_name}"
+        assert len(mailers) == 1, f"{name}.{job_name}: nobody emails the maintainer"
+        assert len(failing) == 2, f"{name}.{job_name}"
         (opener,) = openers
         # ...and the job is UNGATED. check-team only runs on workflow_dispatch, so a job
         # that needs it is SKIPPED on the cron - parking the notice on a trailing gated job
@@ -1187,6 +1255,8 @@ def test_every_cron_files_and_closes_its_own_failure_issue(name):
             f"{name}: the notice rides {job_name}, which is skipped on the cron"
         )
         _assert_reports_a_failure(opener)
+        _assert_emails_the_maintainer(mailers[0])
+        _assert_the_reported_step_writes_its_log(job, f"{name}.{job_name}")
 
     # "Fix it and re-run" is how a human confirms the recovery, so EVERY job a human can
     # dispatch closes the ticket too - not just the schedule-gated one carrying the notice.
@@ -1464,7 +1534,15 @@ MAIL_SENDERS = ("send_codes", "distribute_grades")
 # same variables through `mailer.graph_config_from_env`), and a workflow that does not
 # carry them would report "unset" on every org whatever the truth. That is the exact
 # fiction an unattended codes send leans on when it says a person will read the row.
-MAIL_ENV_CARRIERS = MAIL_SENDERS + ("status",)
+# ...plus the scheduler, which mails a cohort about a source it has not staged, and
+# every cron, whose failure step mails the maintainer the log (asserted per cron in
+# test_every_cron_files_and_closes_its_own_failure_issue).
+MAIL_ENV_CARRIERS = MAIL_SENDERS + ("status", "scheduler")
+
+
+def _secret_ref(name: str) -> str:
+    """How a rendered workflow spells "read `name` out of this org's secrets"."""
+    return f"${{{{ secrets.{name} }}}}"
 
 
 def test_the_one_mail_button_left_defaults_to_a_dry_run():
@@ -1513,3 +1591,25 @@ def test_every_mail_sender_carries_every_transport_secret(name):
         for step in job.get("steps", []):
             step_env.update(step.get("env") or {})
     assert set(mailer.GRAPH_ENV) <= set(step_env)
+    # WHERE a fault mail goes rides in the same env as the transport that sends it: a
+    # workflow carrying one and not the other can mail, and has nobody to tell.
+    assert step_env[mailer.MAINTAINER_ENV] == _secret_ref(mailer.MAINTAINER_ENV)
+
+
+def test_the_release_pass_itself_carries_the_transport():
+    # The source-fault mail goes out from this step, not from a trailing one - so the env
+    # has to be on the step that runs `dsl_course.scheduler`, and the sweep above would
+    # be satisfied by the failure step's copy alone.
+    steps = workflow_jobs(ALL_RENDERED["scheduler"])["release"]["steps"]
+    step = next(s for s in steps if "--all-cohorts" in str(s.get("run", "")))
+    assert set(mailer.GRAPH_ENV) <= set(step["env"])
+    assert step["env"][mailer.MAINTAINER_ENV] == _secret_ref(mailer.MAINTAINER_ENV)
+
+
+def test_a_cohort_bootstrap_forwards_the_maintainer_address_to_the_new_org():
+    # It runs in the COURSE org, which has the address as an org secret already, and
+    # --propagate-secret is what copies it down. A cohort org left without it is one whose
+    # own seeded workflows fall back to the shared send mailbox.
+    steps = workflow_jobs(ALL_RENDERED["bootstrap_cohort"])["bootstrap-cohort"]["steps"]
+    step = next(s for s in steps if "--propagate-secret" in str(s.get("run", "")))
+    assert step["env"][mailer.MAINTAINER_ENV] == _secret_ref(mailer.MAINTAINER_ENV)

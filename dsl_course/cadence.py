@@ -562,7 +562,7 @@ def report_course(course_org: str, verdict: Verdict, dry_run: bool = False) -> i
                 DRIVER_TITLE,
                 _driver_body(course_org, verdict),
                 comment=_driver_comment(course_org, verdict) if changed else None,
-            )
+            ).errors
         if not verdict.dispatch_on_cadence:
             # Seen inside DS01_DEAD but not yet back on cadence. Nothing to open (the
             # dispatcher is alive) and nothing to close (one fire after an outage is not a
@@ -629,7 +629,7 @@ def report_cohort(
             LATE_TITLE,
             _late_body(course_org, cohort_org, verdict, items),
             comment=_late_comment(cohort_org, new, verdict.now) if new else None,
-        )
+        ).errors
     except Exception as exc:
         log_err(f"could not report {cohort_org}'s late deliveries: {exc}")
         return 1
