@@ -232,6 +232,31 @@ def test_de_escalation_is_not_reported_as_a_change():
 # ------------------------------------------------- state written by an older version
 
 
+@pytest.mark.parametrize("offset", [timedelta(hours=3), -timedelta(hours=1)])
+def test_a_rung_name_this_ladder_no_longer_has_is_not_an_escalation(gh, offset):
+    # Live bodies record `error`, the rung that became `urgent` and `critical`. Read as
+    # the quietest rung it made every standing fault an escalation on the first tick after
+    # the deploy, whatever it had actually been reported at.
+    fault = _f("releases.a", offset)
+    fake = gh(_open(fault, state={fault.key: "error"}))
+    out = sd.sync("Cohort", "Course", [fault], NOW)
+    assert out.mail == {}
+    assert fake.did("issue", "comment") == []
+    # ...and the marker is rewritten in this ladder's own vocabulary, so it happens once.
+    assert _state(fake.body_of("issue", "edit")) == {
+        fault.key: str(fault.severity(NOW))
+    }
+
+
+def test_an_unreadable_previous_rung_still_clears(gh):
+    # "It is fixed" is decided by the key being gone, not by the rung it left from.
+    fault = _f("releases.a", timedelta(hours=3))
+    fake = gh(_open(state={fault.key: "error"}))
+    sd.sync("Cohort", "Course", [], NOW)
+    (closed,) = fake.did("issue", "close")
+    assert "7" in closed
+
+
 def test_an_old_shaped_key_is_matched_to_the_fault_it_belongs_to():
     # `key` gained `[path]` after these issues were opened, so every one of them carries
     # `<where>.<field>`. Renamed, not read as-is: as-is it is a fault that cleared and a

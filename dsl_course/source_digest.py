@@ -200,13 +200,20 @@ def current_state(faults: list[SourceFault], now) -> dict[str, str]:
     return {f.key: str(f.severity(now)) for f in faults}
 
 
-def _rung(name: str) -> Severity:
-    """A severity name back into the ordered value. An unreadable one reads as the quietest
-    rung, so a hand-edited body can only ever under-report a transition, never invent one."""
+def _rung(name: str) -> Severity | None:
+    """A severity name back into the ordered value, or None for a name this version of the
+    ladder does not have.
+
+    None rather than the quietest rung, which is what it used to be: the ladder was
+    renamed on the way in (`error` became `urgent` and `critical`), so every issue open at
+    that moment records a rung that no longer exists. Read as ADVISORY, each of those
+    faults is an ESCALATION on the first tick after the deploy - a comment and a mail
+    apiece, about nothing that changed. An unreadable rung is no information at all, and
+    `transitions` treats a key it cannot read as already sitting where it now sits."""
     try:
         return Severity[name.upper()]
-    except KeyError:
-        return Severity.ADVISORY
+    except (AttributeError, KeyError):
+        return None
 
 
 def migrated(previous: dict[str, str], faults: list[SourceFault]) -> dict[str, str]:
@@ -246,26 +253,25 @@ def transitions(previous: dict[str, str], current: dict[str, str]) -> Transition
 
     `appeared` and `escalated` are held to NOTIFY_FROM - a new advisory is not news. A
     `cleared` fault is always news whatever rung it left from, because "it is fixed" is
-    the message that lets someone stop worrying about it."""
+    the message that lets someone stop worrying about it.
+
+    A previous rung this version cannot read (see `_rung`) is not an escalation: there is
+    no earlier rung to have climbed from, so the body is simply rewritten and the key
+    stands at whatever it stands at now."""
+    at = {k: _rung(sev) or Severity.ADVISORY for k, sev in current.items()}
     appeared = [
-        k
-        for k, sev in current.items()
-        if k not in previous and _rung(sev) >= NOTIFY_FROM
+        k for k, rung in at.items() if k not in previous and rung >= NOTIFY_FROM
     ]
     escalated = [
         k
-        for k, sev in current.items()
+        for k, rung in at.items()
         if k in previous
-        and _rung(sev) > _rung(previous[k])
-        and _rung(sev) >= NOTIFY_FROM
+        and (was := _rung(previous[k])) is not None
+        and rung > was
+        and rung >= NOTIFY_FROM
     ]
     cleared = [k for k in previous if k not in current]
-    return Transitions(
-        sorted(appeared),
-        sorted(escalated),
-        sorted(cleared),
-        {k: _rung(sev) for k, sev in current.items()},
-    )
+    return Transitions(sorted(appeared), sorted(escalated), sorted(cleared), at)
 
 
 def _announce(
