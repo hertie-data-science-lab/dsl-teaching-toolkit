@@ -11,7 +11,11 @@ what is unique to that template.
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -255,13 +259,111 @@ def test_a_merge_to_main_fans_out_over_the_main_tier():
     }
 
 
-def test_the_fan_out_is_green_when_no_org_runs_the_tier():
-    # Every merge runs it, and nothing is on `main` until the demo course is moved there -
-    # an empty selection has to be a run that says so, not one that fails.
-    run = _refresh_step()["run"]
-    assert "select(.central_ref == $tier)" in run
-    assert '[ -n "$orgs" ] || echo "_No course org runs' in run
-    assert "failed=0" in run
+needs_a_runner_shell = pytest.mark.skipif(
+    shutil.which("bash") is None or shutil.which("jq") is None,
+    reason="the fan-out is shell: it needs the bash and jq a runner has",
+)
+
+
+def _run_fan_out(tmp_path: Path, inventory, tier: str = "main"):
+    """Execute the fan-out's own `run:` script, with `python3` stubbed.
+
+    Grepping the script for the guards it should contain proved only that the words were
+    there. What matters here is which BRANCH a given inventory takes - green with a
+    warning, or red - and a branch is only ever proved by taking it. The stub answers
+    `list_orgs` with `inventory` and reports every `seed refresh` as a success, so what is
+    under test is the shell and nothing else.
+
+    Returns (exit code, everything the step printed, what it wrote to the job summary).
+    """
+    text = inventory if isinstance(inventory, str) else json.dumps(inventory)
+    (tmp_path / "inventory.json").write_text(text)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "python3"
+    stub.write_text(
+        f"""#!/bin/sh
+case "$*" in
+  *list_orgs*) cat {tmp_path / "inventory.json"} ;;
+  *seed*refresh*) echo "refreshed: $*" ;;
+  *) echo "the fan-out called something unexpected: $*" >&2; exit 99 ;;
+esac
+"""
+    )
+    stub.chmod(0o755)
+    script = tmp_path / "fan-out.sh"
+    script.write_text(_refresh_step()["run"])
+    summary = tmp_path / "summary.md"
+    summary.touch()
+    done = subprocess.run(
+        ["bash", str(script)],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
+            "TIER": tier,
+            "GITHUB_STEP_SUMMARY": str(summary),
+            "GH_TOKEN": "stub",
+            "DSL_BOT_TOKEN": "stub",
+        },
+    )
+    return done.returncode, done.stdout + done.stderr, summary.read_text()
+
+
+def _org(name: str, **extra) -> dict:
+    return {"org": name, "readable": True, "central_ref": "release", **extra}
+
+
+@needs_a_runner_shell
+def test_the_fan_out_is_green_when_no_org_runs_the_tier(tmp_path):
+    # Every merge to main runs this, and nothing was on `main` until the demo course was
+    # moved there - an empty selection has to be a run that says so, not one that fails.
+    code, out, summary = _run_fan_out(tmp_path, {"course_orgs": [_org("Live")]})
+    assert code == 0, out
+    assert "_No course org runs `main`._" in summary
+    assert "refreshed:" not in out
+
+
+@needs_a_runner_shell
+def test_one_orgs_retired_tier_does_not_red_every_merge(tmp_path):
+    # A readable file declaring something that is not a tier is that org's own bug, and it
+    # is not on this tier by any reading - so it is warned about and the orgs that ARE on
+    # the tier still deploy.
+    code, out, summary = _run_fan_out(
+        tmp_path,
+        {
+            "course_orgs": [
+                _org("Demo", central_ref="main"),
+                _org("Typo", central_ref=None),
+            ]
+        },
+    )
+    assert code == 0, out
+    assert "::warning::Typo declares" in out
+    assert "refreshed:" in out and "Demo" in out
+    assert "Demo - refreshed" in summary
+
+
+@needs_a_runner_shell
+def test_an_unreadable_org_still_reds_the_fan_out(tmp_path):
+    # The other null: nothing can say which tier that org is on, so it may well be one
+    # this deploy was meant to reach.
+    code, out, summary = _run_fan_out(
+        tmp_path,
+        {"course_orgs": [_org("Broken", readable=False, central_ref=None)]},
+    )
+    assert code == 1, out
+    assert "could not be read" in summary
+
+
+@needs_a_runner_shell
+def test_an_empty_inventory_fails_the_fan_out(tmp_path):
+    # `jq` over an empty capture answers "no orgs" for every selection, so this used to be
+    # a green run reporting nothing to do - a deploy that never happened.
+    code, out, _ = _run_fan_out(tmp_path, "")
+    assert code == 1, out
+    assert "::error::no inventory" in out
 
 
 def test_the_fan_out_carries_both_bot_tokens():
