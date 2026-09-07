@@ -25,16 +25,18 @@ on:
         required: false
         default: ""
       central_ref:
-        # `main` is the trunk: an org bootstrapped onto it runs every merge from the moment
-        # it lands, which is the demo course org's job and nobody else's. Every real course
-        # takes the default.
+        # `release` is the only option, deliberately. An org bootstrapped onto `main` takes
+        # every merge the moment it lands, which is the demo course org's job and nobody
+        # else's - and a dropdown is where somebody picks the wrong one at 9pm. A new org
+        # that really belongs on the trunk is bootstrapped here and then moved by hand:
+        # edit its `central_ref:` and run Refresh actions (central-admin.md, "Putting an
+        # org on a tier").
         description: "Toolkit tier the new org runs (and that this run bootstraps it with)"
         required: true
         type: choice
         default: "release"
         options:
           - release
-          - main
 
 # Every step here authenticates with DSL_BOT_TOKEN (org creation and team lookups are far
 # beyond anything the ambient token could do); the bootstrap job re-declares contents: read

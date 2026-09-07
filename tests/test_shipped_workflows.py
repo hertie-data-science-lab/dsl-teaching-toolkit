@@ -379,14 +379,14 @@ def test_the_fan_out_carries_both_bot_tokens():
         }
 
 
-def test_bootstrap_org_offers_the_two_tiers_and_defaults_to_release():
-    # `main` runs every merge from the moment it lands, which is the demo course org's job
-    # and nobody else's - so it is offered (that org has to be bootstrappable) but it is
-    # never the default a real course gets by pressing the button.
+def test_bootstrap_org_offers_no_tier_but_release():
+    # An org bootstrapped onto `main` takes every merge the moment it lands, which is the
+    # demo course org's job and nobody else's - and a dropdown is where somebody picks the
+    # wrong one. The one org that belongs on the trunk is moved there by hand afterwards.
     doc = SHIPPED_WORKFLOWS[".github/workflows/bootstrap-org.yml"]
     trigger = doc.get("on", doc.get(True))
     central_ref = trigger["workflow_dispatch"]["inputs"]["central_ref"]
-    assert central_ref["options"] == ["release", "main"]
+    assert central_ref["options"] == ["release"]
     assert central_ref["default"] == "release"
 
 

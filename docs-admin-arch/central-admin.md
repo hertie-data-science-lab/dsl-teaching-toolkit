@@ -261,13 +261,17 @@ tier until 2026-09-07 and is now junk like any other typo: the demo course org w
 `main` and refreshed green before that change merged, and the `staging` branch is deleted
 after the merge.
 
-A new org is bootstrapped straight onto a tier by **Bootstrap Course Org**'s `central_ref`
-input (default `release`). It does two things at once: the run checks the toolkit out at
-that ref, and it records the ref in the new org's `dsl-course.yml`. So the code that
-provisions the org is the same code its workflows will run - bootstrapping from `main` and
-rendering at `release` would leave the org with two different engines. `--central-ref` is
-refused together with `--cohort`: a cohort inherits its course org's tier, so the nightly
-refresh would undo it.
+**Bootstrap Course Org** offers `release` and nothing else. It does two things at once:
+the run checks the toolkit out at that ref, and it records the ref in the new org's
+`dsl-course.yml` - so the code that provisions the org is the same code its workflows will
+run, where bootstrapping from `main` and rendering at `release` would leave the org with two
+different engines. The trunk is not on the menu because an org bootstrapped onto it takes
+every merge the moment it lands: an org that really belongs there is bootstrapped onto
+`release` and then moved by hand, as above.
+
+The CLI is wider than the button - `--central-ref` takes any tier or SHA - but it is refused
+together with `--cohort`: a cohort inherits its course org's tier, so the nightly refresh
+would undo it.
 
 ## What orgs exist
 
