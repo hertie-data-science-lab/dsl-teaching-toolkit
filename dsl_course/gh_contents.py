@@ -10,6 +10,7 @@ import hashlib
 import io
 import json
 from collections.abc import Iterable
+from functools import cache
 from typing import Any
 
 import yaml
@@ -627,13 +628,18 @@ def blame_logins(
     return out
 
 
+@cache
 def last_committer(org: str, repo: str) -> str | None:
     """The login that made `repo`'s most recent commit on its default branch, or None when
     there is nobody to name (an empty repo, an unlinked commit email).
 
     The other half of "who should hear about this": a release whose materials are missing
     concerns whoever is writing that repo as much as whoever planned the line. Raises on a
-    read it could not make, for the reason `blame_logins` does."""
+    read it could not make, for the reason `blame_logins` does.
+
+    Memoised per process, like `repos._repo`: several entries in one plan point into the
+    same materials repo, and its last commit does not change under a run.
+    `tests/conftest.py` clears it."""
     rows = gh_json("api", f"repos/{org}/{repo}/commits?per_page=1")
     if not rows:
         return None
