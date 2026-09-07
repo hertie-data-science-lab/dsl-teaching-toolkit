@@ -521,6 +521,70 @@ def test_the_body_is_written_from_one_listing_not_two(gh):
     assert len(fake.did("issue", "list")) == 1
 
 
+# ----------------------------------------------------- a notification that was not sent
+
+
+def test_sync_says_what_rung_each_mailed_key_was_last_reported_at(gh):
+    # What `hold` needs to put the record back. Absent for a key that had never been
+    # reported at all - an appearance, which has to be un-recorded rather than lowered.
+    gh(_open(_f("releases.a", timedelta(hours=20))))
+    escalating = _f("releases.a", timedelta(hours=3))
+    assert sd.sync("Cohort", "Course", [escalating], NOW).was == (
+        {escalating.key: "warning"}
+    )
+    gh([])
+    appearing = _f("releases.b", timedelta(hours=20))
+    assert sd.sync("Cohort", "Course", [appearing], NOW).was == {appearing.key: None}
+
+
+def test_holding_puts_the_previous_rung_back_so_the_next_tick_owes_it_again(gh):
+    fault = _f("releases.a", timedelta(hours=3))
+    fake = gh(_open(fault, state={fault.key: "critical"}))
+    assert sd.hold("Cohort", {fault.key: "warning"}) == 0
+    assert _state(fake.body_of("issue", "edit")) == {fault.key: "warning"}
+    # The rest of the body is untouched: only the marker is patched.
+    assert "### CRITICAL" in fake.body_of("issue", "edit")
+
+
+def test_holding_an_appearance_un_records_it_entirely(gh):
+    fault = _f("releases.a", timedelta(hours=3))
+    fake = gh(_open(fault, state={fault.key: "critical"}))
+    assert sd.hold("Cohort", {fault.key: None}) == 0
+    assert _state(fake.body_of("issue", "edit")) == {}
+
+
+def test_holding_nothing_writes_nothing(gh):
+    fake = gh(_open(_f("releases.a", timedelta(hours=3))))
+    assert sd.hold("Cohort", {}) == 0
+    assert fake.did("issue", "list") == fake.did("issue", "edit") == []
+
+
+def test_holding_against_no_open_issue_is_a_no_op(gh):
+    # Nothing recorded the crossing either, so the next tick finds it as new regardless.
+    fake = gh([])
+    assert sd.hold("Cohort", {"releases.a[x].course_source_path": "warning"}) == 0
+    assert fake.did("issue", "edit") == []
+
+
+def test_a_held_crossing_is_announced_again_on_the_next_tick(gh):
+    # The whole point, in two ticks: the mail failed, the rung went back, and the tick
+    # after it owes the very same escalation once.
+    fault = _f("releases.a", timedelta(hours=3))
+    fake = gh(_open(fault, state={fault.key: "warning"}))
+    first = sd.sync("Cohort", "Course", [fault], NOW)
+    assert first.mail == {fault.key: sd.Severity.CRITICAL}
+    sd.hold("Cohort", {k: first.was[k] for k in first.mail})
+    # Two edits now: the tick's own body, then the patch putting the marker back.
+    held = fake.did("issue", "edit")[-1]
+    body = held[held.index("--body") + 1]
+    assert _state(body) == {fault.key: "warning"}
+
+    fake = gh([issue_row(7, sd.TITLE, body)])
+    assert sd.sync("Cohort", "Course", [fault], NOW).mail == (
+        {fault.key: sd.Severity.CRITICAL}
+    )
+
+
 # ------------------------------------------------------------------- quiet hours
 
 # 02:00 and 07:05 in the cohort's zone. The window is LOCAL on purpose: the scheduler

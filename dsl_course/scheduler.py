@@ -519,9 +519,16 @@ def _preflight_sources(
         # counts its own failures and never raises; this catch is for the one it did not
         # foresee, on the same terms as the digest above - a release is not worth a
         # notification.
-        notify.notify_source_transitions(
+        unsent = notify.notify_source_transitions(
             cohort_org, course_org, digest, local, routing, dry_run=dry_run
         )
+        # A mail that did not go out is un-RECORDED rather than lost. The digest has
+        # already written the new rung, so without this the notification was owed once,
+        # failed once and was never owed again - and the log line saying so was the only
+        # trace. Putting the previous rung back makes the next tick recompute the very
+        # same crossing and say it once (`source_digest.hold`).
+        if unsent.keys and not dry_run:
+            source_digest.hold(cohort_org, {k: digest.was.get(k) for k in unsent.keys})
     except Exception as exc:
         log_err(f"could not mail {cohort_org}'s source faults: {exc}")
     return 0

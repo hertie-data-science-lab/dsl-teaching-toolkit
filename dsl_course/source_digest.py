@@ -157,6 +157,10 @@ class DigestResult:
     # quiet window, where the crossing is deliberately left unrecorded so that the first
     # tick after 07:00 finds it and says it once (see `_announce`).
     mail: dict[str, Severity] = field(default_factory=dict)
+    # For each of those keys, the rung it was last REPORTED at - None for one that had
+    # never been reported. A send that failed hands these back to `hold`, which puts the
+    # record where it was so the next tick owes the same notification again.
+    was: dict[str, str | None] = field(default_factory=dict)
 
 
 def _read_marker(body: str, name: str, default):
@@ -420,6 +424,58 @@ def _comment(t: Transitions, faults: dict[str, SourceFault], now, ctx: Context) 
     return "\n\n".join([*parts, _mention(ctx)])
 
 
+def hold(cohort_org: str, held: dict[str, str | None]) -> int:
+    """Put the state marker back where it was for `held` - a rung name to re-record, or
+    None for a key that had never been recorded. Returns the error count.
+
+    This is the quiet window's trick, spent on a delivery failure instead of on the hour:
+    the crossing is simply NOT recorded, so the next tick recomputes the very same
+    transition and says it once. Nothing is queued - a marker is state, not a debt - so a
+    failure that repeats cannot deliver twice, and a runner destroyed mid-tick loses
+    nothing but a retry.
+
+    A second write rather than a reordering, because the first mail LINKS the issue this
+    tick had to create: the body has to be written before there is anything to link. So
+    the body is written, the mail is sent, and only a failure comes back here."""
+    if not held:
+        return 0
+    repo = f"{cohort_org}/{CONFIG_REPO}"
+    try:
+        found = find_issues(repo, TITLE)
+    except RuntimeError as exc:
+        log_err(str(exc))
+        return 1
+    if not found.open:
+        # No open issue means nothing recorded the crossing either, so there is nothing
+        # to put back and the next tick will find it as new regardless.
+        return 0
+    body = found.open.body or ""
+    state = dict(_read_marker(body, _STATE, {}))
+    for key, rung in held.items():
+        if rung is None:
+            state.pop(key, None)
+        else:
+            state[key] = rung
+    # A body with no marker at all is one somebody rewrote by hand; appending would leave
+    # two, and `_read_marker` takes the first. Left alone, it reads as "nothing recorded",
+    # which is what a held mail wants anyway.
+    if not re.search(_MARKER_RE.format(name=_STATE), body, re.DOTALL):
+        return 0
+    patched = re.sub(
+        _MARKER_RE.format(name=_STATE),
+        # A function, not a replacement string: the marker is JSON, and a backslash in it
+        # would be read as a group reference.
+        lambda _m: _write_marker(_STATE, state),
+        body,
+        count=1,
+        flags=re.DOTALL,
+    )
+    errors = upsert_issue(repo, TITLE, patched, existing=found.open).errors
+    if not errors:
+        log_ok(f"{len(held)} held notification(s) put back in {repo} for the next tick")
+    return errors
+
+
 def sync(
     cohort_org: str,
     course_org: str,
@@ -510,7 +566,12 @@ def sync(
     )
     ctx = Context(course_org, cohort_org, ref, mention)
     note = _comment(changed, by_key, now, ctx)
-    result = DigestResult(issue_url=url, faults_by_key=by_key, mail=mail)
+    result = DigestResult(
+        issue_url=url,
+        faults_by_key=by_key,
+        mail=mail,
+        was={k: previous.get(k) for k in mail},
+    )
     if dry_run:
         moved = changed.appeared + changed.escalated + changed.cleared
         log_step(

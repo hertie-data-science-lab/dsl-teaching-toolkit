@@ -2013,7 +2013,7 @@ def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None):
     monkeypatch.setattr(
         scheduler.notify,
         "notify_source_transitions",
-        lambda *a, **k: seen.update(mailed=a, mail_kw=k) or 0,
+        lambda *a, **k: seen.update(mailed=a, mail_kw=k) or notify.Unsent(),
     )
     rc = scheduler._preflight_sources(
         "Course-Org", "Cohort-Org", Schedule(), now, dry_run
@@ -2032,6 +2032,59 @@ def test_a_missed_rung_source_leaves_the_exit_code_alone(monkeypatch):
     assert _preflight(monkeypatch, [critical])[0] == 0
     assert _preflight(monkeypatch, [distant])[0] == 0
     assert _preflight(monkeypatch, [])[0] == 0
+
+
+def test_a_mail_that_did_not_go_out_puts_the_digests_record_back(monkeypatch):
+    # The digest wrote the new rung before the mail was attempted, so a failed send has to
+    # un-record the crossing or the notification is owed once, fails once and is never
+    # owed again.
+    fault = source_fault("releases.a", fires=WHEN + timedelta(hours=2))
+    digest = source_digest.DigestResult(
+        faults_by_key={fault.key: fault},
+        mail={fault.key: scheduler.schedule.Severity.CRITICAL},
+        was={fault.key: "warning"},
+    )
+    held: dict = {}
+    monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [fault])
+    monkeypatch.setattr(scheduler.notify, "route", lambda *a, **k: notify.Routing())
+    monkeypatch.setattr(scheduler.source_digest, "sync", lambda *a, **k: digest)
+    monkeypatch.setattr(
+        scheduler.notify,
+        "notify_source_transitions",
+        lambda *a, **k: notify.Unsent(1, (fault.key,)),
+    )
+    monkeypatch.setattr(
+        scheduler.source_digest,
+        "hold",
+        lambda org, keys: held.update(org=org, keys=keys) or 0,
+    )
+    assert (
+        scheduler._preflight_sources(
+            "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+        )
+        == 0
+    )
+    assert held == {"org": "Cohort-Org", "keys": {fault.key: "warning"}}
+
+
+def test_a_dry_run_holds_nothing(monkeypatch):
+    fault = source_fault("releases.a", fires=WHEN + timedelta(hours=2))
+    calls: list = []
+    monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [fault])
+    monkeypatch.setattr(scheduler.notify, "route", lambda *a, **k: notify.Routing())
+    monkeypatch.setattr(
+        scheduler.source_digest, "sync", lambda *a, **k: source_digest.DigestResult()
+    )
+    monkeypatch.setattr(
+        scheduler.notify,
+        "notify_source_transitions",
+        lambda *a, **k: notify.Unsent(1, (fault.key,)),
+    )
+    monkeypatch.setattr(
+        scheduler.source_digest, "hold", lambda *a, **k: calls.append(a) or 0
+    )
+    scheduler._preflight_sources("Course-Org", "Cohort-Org", Schedule(), WHEN, True)
+    assert calls == []
 
 
 def test_a_digest_error_is_reported_but_never_returned(monkeypatch):
@@ -2387,7 +2440,7 @@ def test_every_phase_reads_the_clock_in_the_cohorts_own_zone(monkeypatch):
         lambda *a, **k: seen.update(now=a[3]) or source_digest.DigestResult(),
     )
     monkeypatch.setattr(
-        scheduler.notify, "notify_source_transitions", lambda *a, **k: 0
+        scheduler.notify, "notify_source_transitions", lambda *a, **k: notify.Unsent()
     )
     scheduler._preflight_sources("Course-Org", "Cohort-Org", sched, WHEN, False)
     assert str(seen["now"].tzinfo) == "Australia/Sydney"
@@ -2422,7 +2475,7 @@ def test_a_routing_that_raised_still_lets_the_digest_speak(monkeypatch, capsys):
     monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [])
     seen: dict = {}
     monkeypatch.setattr(
-        scheduler.notify, "notify_source_transitions", lambda *a, **k: 0
+        scheduler.notify, "notify_source_transitions", lambda *a, **k: notify.Unsent()
     )
     monkeypatch.setattr(
         scheduler.source_digest,

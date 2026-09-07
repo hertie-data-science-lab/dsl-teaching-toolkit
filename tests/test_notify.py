@@ -149,6 +149,13 @@ def wired(monkeypatch):
 
 
 def _run(faults, rung, routing, dry_run=False):
+    """The notifier, reporting how many addressees it FAILED to reach - which is what
+    most of these tests are about. `_unsent` is for the two that look at which faults
+    were held for the next tick."""
+    return _unsent(faults, rung, routing, dry_run).addressees
+
+
+def _unsent(faults, rung, routing, dry_run=False) -> notify.Unsent:
     return notify.notify_source_transitions(
         COHORT, COURSE, _digest(faults, rung), NOW, routing, dry_run=dry_run
     )
@@ -438,15 +445,17 @@ def test_nothing_owed_sends_nothing(wired):
         notify.notify_source_transitions(
             COHORT, COURSE, digest, NOW, notify.Routing(), dry_run=False
         )
-        == 0
+        == notify.Unsent()
     )
     assert sent.batches == []
 
 
 def test_a_cohort_with_no_addresses_at_all_says_so_once(wired, capsys):
+    # ...and holds nothing: no address is a standing state, and a held crossing would be
+    # recomputed - and commented on - every tick for the rest of the term.
     sent = wired(blame={}, committer=None, people={"people": {}})
     routing = notify.route(COHORT, COURSE, [_fault()], NOW)
-    assert _run([_fault()], Severity.URGENT, routing) == 0
+    assert _unsent([_fault()], Severity.URGENT, routing) == notify.Unsent()
     assert sent.batches == []
     assert "[skip] no notification address for" in capsys.readouterr().out
 
@@ -454,7 +463,7 @@ def test_a_cohort_with_no_addresses_at_all_says_so_once(wired, capsys):
 def test_an_org_with_no_mail_transport_says_so_once(wired, capsys):
     sent = wired(blame={131: "JanG"}, committer=None, configured=False)
     routing = notify.route(COHORT, COURSE, [_fault()], NOW)
-    assert _run([_fault()], Severity.URGENT, routing) == 0
+    assert _unsent([_fault()], Severity.URGENT, routing) == notify.Unsent()
     assert sent.batches == []
     assert "[skip] mail not configured - issue @mention only" in capsys.readouterr().out
 
@@ -462,7 +471,9 @@ def test_an_org_with_no_mail_transport_says_so_once(wired, capsys):
 def test_a_dry_run_previews_and_sends_nothing(wired, capsys):
     sent = wired(blame={131: "JanG"}, committer=None)
     routing = notify.route(COHORT, COURSE, [_fault()], NOW)
-    assert _run([_fault()], Severity.URGENT, routing, dry_run=True) == 0
+    assert _unsent([_fault()], Severity.URGENT, routing, dry_run=True) == (
+        notify.Unsent()
+    )
     assert sent.batches == []
     assert "[dry-run] would mail 1 recipient(s)" in capsys.readouterr().out
 
@@ -476,8 +487,36 @@ def test_a_transport_that_raised_is_counted_not_propagated(monkeypatch, wired, c
 
     monkeypatch.setattr(notify.mailer, "send_bulk", boom)
     routing = notify.route(COHORT, COURSE, [_fault()], NOW)
-    assert _run([_fault()], Severity.URGENT, routing) == 1
+    # Nothing went out, so everything this tick owed is handed back to be owed again.
+    assert _unsent([_fault()], Severity.URGENT, routing) == notify.Unsent(1, (_KEY,))
     assert "could not mail" in capsys.readouterr().err
+
+
+def test_a_message_that_did_not_land_is_reported_and_handed_back(
+    monkeypatch, wired, capsys
+):
+    # The digest has already recorded the new rung by now, so a mail that failed here was
+    # owed once, failed once and would never be owed again. The keys go back.
+    wired(blame={131: "JanG"}, committer=None)
+    monkeypatch.setattr(notify.mailer, "send_bulk", lambda *a, **k: [])
+    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    assert _unsent([_fault()], Severity.URGENT, routing) == notify.Unsent(1, (_KEY,))
+    err = capsys.readouterr().err
+    assert "were not reached - held for the next tick" in err
+    assert "[err]" in err
+
+
+def test_one_group_failing_does_not_hold_the_group_that_landed(monkeypatch, wired):
+    # A group is one Graph POST for one message, so its recipients are all in or all out -
+    # and the other group's fault has been delivered and must not be said twice.
+    a = _fault("releases.lecture_02", lineno=131)
+    b = _fault("releases.lecture_03", lineno=140)
+    wired(blame={131: "JanG", 140: "cpj97"}, committer=None)
+    monkeypatch.setattr(notify.mailer, "send_bulk", lambda ms, **k: ["jan@x.edu"])
+    routing = notify.route(COHORT, COURSE, [a, b], NOW)
+    out = _unsent([a, b], Severity.URGENT, routing)
+    assert out.keys == (b.key,)
+    assert out.addressees == 1
 
 
 # ------------------------------------------------------------- the public log rule
@@ -515,7 +554,7 @@ def test_the_transport_itself_names_nobody_in_the_log(monkeypatch, capsys, wired
     monkeypatch.setattr(notify.mailer, "_graph_token", lambda cfg: "tok")
     monkeypatch.setattr(notify.mailer, "_graph_send_one", _post)
     routing = notify.route(COHORT, COURSE, [_fault()], NOW)
-    assert _run([_fault()], Severity.CRITICAL, routing) == 0
+    assert _unsent([_fault()], Severity.CRITICAL, routing) == notify.Unsent()
     printed = capsys.readouterr()
     for line in (printed.out + printed.err).splitlines():
         assert "@x.edu" not in line and "***@" not in line, line

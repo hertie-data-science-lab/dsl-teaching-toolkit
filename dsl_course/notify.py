@@ -90,6 +90,19 @@ _LABEL_WIDTH = 15
 # --------------------------------------------------------------------- who to tell
 
 
+class Unsent(NamedTuple):
+    """What a tick could not deliver: how many addressees went unmailed, and the fault
+    keys their message carried.
+
+    The keys are the point. A count alone said only that something had gone wrong, into a
+    run log nobody reads, while the digest had already recorded the new rung - so the mail
+    was owed once, failed once, and was never owed again. Handed to
+    `source_digest.hold`, they un-record the crossing and the next tick owes it afresh."""
+
+    addressees: int = 0
+    keys: tuple[str, ...] = ()
+
+
 class Routed(NamedTuple):
     """The addressees of one fault: `to` acts on it, `cc` is told it happened."""
 
@@ -357,8 +370,8 @@ def notify_source_transitions(
     routing: Routing,
     *,
     dry_run: bool,
-) -> int:
-    """Mail what the digest says is owed. Returns the failure count; never raises.
+) -> Unsent:
+    """Mail what the digest says is owed. Reports what did NOT go out; never raises.
 
     `digest.mail` is the whole decision: which faults crossed a mailing rung, and the rung
     to speak at. A fault that only reached the digest's own rung is carried by the issue
@@ -370,6 +383,7 @@ def notify_source_transitions(
     `digest`, so the mail and the digest comment can never disagree about how loud a fault
     has become - but whether a deadline has PASSED is read off it, because a ceiling can
     hold a rung below MISSED while the date has gone by all the same."""
+    events: list[str] = []
     try:
         # The mail IS the fault's own lines, so a key the digest owes a mail for but could
         # not hand over has nothing to say. Not expected; not worth a KeyError inside a
@@ -378,22 +392,26 @@ def notify_source_transitions(
             k for k in digest.mail if k in digest.faults_by_key and k in routing.by_key
         ]
         if not events:
-            return 0
+            return Unsent()
         maintainer = mailer.maintainer_address()
         # One message per recipient SET, not per fault: two entries the same person
         # planned are one conversation.
         groups: dict[Routed, list[str]] = {}
         for key in events:
             groups.setdefault(routing.by_key[key], []).append(key)
+        # Neither of these is HELD: an org with no addresses and an org with no transport
+        # are standing states, and holding the crossing would make every tick for the rest
+        # of the term recompute a notification that cannot be delivered - and comment on
+        # it again each time.
         if not any(g.to for g in groups):
             log(
                 f"  [skip] no notification address for {cohort_org} - the digest "
                 f"@mention is the only channel"
             )
-            return 0
+            return Unsent()
         if not dry_run and mailer.graph_config_from_env() is None:
             log("  [skip] mail not configured - issue @mention only")
-            return 0
+            return Unsent()
         messages: list[mailer.Message] = []
         addressed = 0
         for routed, keys in groups.items():
@@ -418,21 +436,39 @@ def notify_source_transitions(
             messages.append(mailer.Message(routed.to, subject, body, tuple(copies)))
             addressed += len(routed.to)
         if not messages:
-            return 0
+            return Unsent()
         # One batch, so the Graph token is minted once however many groups this tick has.
         sent = mailer.send_bulk(messages, html=True)
+        # Which GROUPS did not land, not just how many addresses: a group is one Graph
+        # POST for one message, so its recipients are all in or all out, and the keys that
+        # message carried are exactly what has to be owed again.
+        delivered = set(sent)
+        held: list[str] = []
+        unmailed = 0
+        for routed, keys in groups.items():
+            if not routed.to or delivered.issuperset(routed.to):
+                continue
+            held += keys
+            unmailed += len(routed.to)
+        if held:
+            log_err(
+                f"mailed {len(sent)} of {addressed} recipient(s); {unmailed} on "
+                f"{len(held)} source fault(s) were not reached - held for the next tick"
+            )
+            return Unsent(unmailed, tuple(held))
         log_ok(
             f"mailed {len(sent)} recipient(s) in {len(messages)} message(s) about "
             f"{len(events)} source fault(s)"
         )
-        return addressed - len(sent)
+        return Unsent()
     except Exception as exc:
         # Inside a release cron. Whatever went wrong - an unreadable people.yml, a
-        # credential Graph refused - the release itself is the job.
+        # credential Graph refused - the release itself is the job. Nothing went out, so
+        # everything this tick owed is held.
         log_err(
             f"could not mail {cohort_org}'s source faults ({type(exc).__name__}): {exc}"
         )
-        return 1
+        return Unsent(1, tuple(events))
 
 
 # ------------------------------------------------------------------ a failed run
