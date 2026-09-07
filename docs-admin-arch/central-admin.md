@@ -87,8 +87,11 @@ The same mailbox sends two **fault** emails, which nobody presses a button for. 
 teaching team is emailed about a planned release whose materials are not staged, addressed to
 whoever git says wrote the line (`notify.notify_source_transitions`, HTML); and the maintainer
 is emailed the log tail of any cron that fails (`notify.notify_run_failed`, plain text), to
-`DSL_MAINTAINER_EMAIL` or, unset, to `GRAPH_SENDER` itself. Both are throttled and neither can
-fail a run - see [Failure semantics](architecture.md#failure-semantics).
+`DSL_MAINTAINER_EMAIL` or, unset, to `GRAPH_SENDER` itself. Neither can fail a run, and each is
+rationed its own way: the source mail goes out only when a fault CROSSES a rung (and is held
+overnight), while the run-failure mail rides the failing issue's 6h throttle, so a cron that
+fails every 15 minutes mails four times a day. See
+[Failure semantics](architecture.md#failure-semantics).
 
 Four secrets: `GRAPH_TENANT_ID`, `GRAPH_CLIENT_ID`, `GRAPH_CLIENT_CERT`, `GRAPH_SENDER`. The
 Entra app holds the **Mail.Send** application permission (admin-consented) and sends as the

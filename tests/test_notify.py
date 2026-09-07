@@ -202,8 +202,8 @@ def test_a_committer_who_is_not_teaching_staff_falls_back_to_the_team(wired):
 
 
 def test_a_fault_with_no_line_number_falls_back_to_the_team(wired):
-    # `locate` returns None for a line it cannot find, and blaming line `None` would
-    # address the mail to whoever happens to own line 1.
+    # The parser records no line for an entry it could not place (`schedule._LineLoader`),
+    # and blaming line `None` would address the mail to whoever happens to own line 1.
     wired(blame={131: "JanG"}, committer=None)
     routed = notify.route(COHORT, COURSE, [_fault(lineno=None)], NOW).by_key[_KEY]
     assert set(routed.to) == {"jan@x.edu", "cam@x.edu"}

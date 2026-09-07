@@ -544,8 +544,11 @@ file · tree · team · repo list`"]
 - **A notification is not worth a release.** `notify` and `source_digest` both count their own
   failures and return them; `_preflight_sources` logs the count and still returns 0, and wraps
   each in its own `except`. The mail is also **held between 22:00 and 07:00** in the cohort's
-  zone, with the debt recorded in the digest issue's own body - so the state that decides whether
-  somebody gets woken up survives a runner that is destroyed every tick.
+  zone - and a hold is not a queue: nothing records a debt, the crossing is simply written back
+  at the rung it was already reported at, so the next tick recomputes the same transition and
+  the first one after 07:00 says it once. A send that FAILED is held the same way
+  (`source_digest.hold`), which is what makes it retried at all. Being stateless, neither can
+  deliver the same notification twice however the clock or the runner behaves.
 - **Courtesy paths never fail their caller.** The site's overwrite notice logs loudly and leaves
   the exit code untouched - by the time it runs the site is already published, and letting it
   redden the cron would invert the incident it exists to prevent.
