@@ -21,11 +21,15 @@ name: Validate schedule
 #
 # The red X and the issue above are the DROPPED-ENTRY channel and nothing else. The run
 # also checks whether the plan's sources exist in the course org, but that answer changes
-# week to week (a lecture nobody has written yet is normal in August), so it is reported as
-# ::warning:: annotations on a green run and never touches the exit code. Escalating one of
-# those to a failure is the scheduler's job, which files its own, separately-titled
-# digest issue - routing it through here would name the fault "entries the scheduler cannot
-# read" and close it on the next clean parse, staged or not.
+# week to week (a lecture nobody has written yet is normal in August), so it never touches
+# the exit code. Escalating one of those to a failure is the scheduler's job, which files
+# its own, separately-titled digest issue - routing it through here would name the fault
+# "entries the scheduler cannot read" and close it on the next clean parse, staged or not.
+#
+# What a source fault DOES get here is a commit comment, and only when the release is
+# inside 24h. That is the one moment this workflow can say something the scheduler cannot:
+# the person who just pushed is still at their keyboard, and the alternative is finding out
+# from an email tomorrow. Distant faults get nothing - the digest issue holds them.
 
 on:
   push:
@@ -37,12 +41,14 @@ on:
       - schedule.yml
   workflow_dispatch:
 
-# contents: read is what the ambient GITHUB_TOKEN needs to check this private repo out.
-# issues: write is the escalation path this workflow exists for (see the header); the issue
-# steps below run on DSL_BOT_TOKEN, so this is the declared intent rather than the token in
-# use, and it stays at the two scopes rather than the default all.
+# contents: write covers both things this job does to the repo it runs in: checking it
+# out, and leaving a comment on the pushed commit (a commit comment is under the Contents
+# permission, not Issues - the endpoint is repos/.../commits/<sha>/comments).
+# issues: write is the escalation path this workflow exists for (see the header). Every
+# write below actually runs on DSL_BOT_TOKEN, so this block is the declared intent rather
+# than the token in use, and it stays at the two scopes rather than the default all.
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 jobs:
@@ -67,11 +73,12 @@ jobs:
 
       # The course org this cohort belongs to, read from its own dsl-course.yml (the same
       # single source of truth dispatch-sync.yml reads - no org name baked in at bootstrap
-      # time). Only the source check needs it, and that check is advisory, so a failure to
-      # resolve it leaves this empty and the check is skipped rather than breaking the run.
+      # time). A cohort's dsl-course.yml is SYSTEM-OWNED and always names `course:`, so an
+      # empty answer here is an API error or a token that lost its scope - infrastructure,
+      # not anything in the file that was just pushed. It used to be swallowed, which meant
+      # the source check silently stopped running and every push looked clean.
       - name: Resolve the course org
         id: course
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           COHORT_ORG: ${{ github.repository_owner }}
@@ -90,12 +97,11 @@ jobs:
           COURSE_ORG: ${{ steps.course.outputs.org }}
         run: |
           set +e
-          check=""
-          if [ -n "$COURSE_ORG" ]; then
-            check="--check-sources $COURSE_ORG --annotate"
-          else
-            echo "::notice::could not resolve this cohort's course org - the source check did not run"
+          if [ -z "$COURSE_ORG" ]; then
+            echo "::error::could not read this cohort's dsl-course.yml - the source check cannot run. This is not a fault in your file - the toolkit could not reach the course org; the maintainer has been emailed."
+            exit 1
           fi
+          check="--check-sources $COURSE_ORG --annotate"
           # stdout is the report; the ::warning:: annotations go to stderr, so they reach
           # the job log (where Actions renders them against schedule.yml in the commit's
           # own diff) without landing in the summary as raw workflow-command text.
@@ -119,6 +125,30 @@ jobs:
             echo "REPORT_EOF_ba31d7c94f68"
           } >> "$GITHUB_OUTPUT"
           exit 0
+
+      # The push that planned it is the cheapest moment to say so: the person who wrote
+      # the line is still here. Only inside 24h - a term written in August names folders
+      # nobody has authored, and commenting on every one of those would train faculty to
+      # scroll past this. `sources_worst` is written by the process that knows the rung
+      # (dsl_course.schedule --annotate), never re-derived by grepping the report.
+      - name: Comment on the push about a release with no materials
+        if: github.event_name == 'push' && (steps.validate.outputs.sources_worst == 'warning' || steps.validate.outputs.sources_worst == 'urgent' || steps.validate.outputs.sources_worst == 'critical' || steps.validate.outputs.sources_worst == 'missed')
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          COHORT: ${{ github.repository_owner }}
+          REPORT: ${{ steps.validate.outputs.report }}
+        run: |
+          # The report already carries `[rung] <entry> -> <field> at schedule.yml:<n>` per
+          # fault; the distant ones are dropped here so the comment is only about what is
+          # about to ship nothing.
+          lines=$(printf '%s\n' "$REPORT" | grep -E '^ +\[(warning|urgent|critical|missed)\]' | sed -E 's/^ +\[[a-z]+\] /- /')
+          [ -z "$lines" ] && exit 0
+          n=$(printf '%s\n' "$lines" | wc -l | tr -d ' ')
+          body=$(printf 'This push leaves %s planned release(s) inside 24h whose materials are not in the course org:\n%s\n\nYou will get one email about each as its deadline nears. The generated GitHub record issue is https://github.com/%s/classroom-config/issues?q=is%%3Aissue+is%%3Aopen+schedule.yml.\n' \
+            "$n" "$lines" "$COHORT")
+          gh api "repos/$REPO/commits/$SHA/comments" -f body="$body" >/dev/null
 
       - name: Open an issue naming what was dropped
         if: steps.validate.outputs.rc != '0' && github.event_name == 'push'
@@ -157,3 +187,25 @@ jobs:
         run: |
           echo "::error file=schedule.yml::schedule.yml has entries the scheduler cannot read - see the run summary"
           exit 1
+
+      # ONLY for the infrastructure failure above - an empty course org means the toolkit
+      # could not read this cohort's own dsl-course.yml, which is nothing faculty can fix.
+      # A DROPPED ENTRY is faculty's own file and resolves the org perfectly well, so it
+      # never reaches here: that one is reported by the red X and the issue.
+      - name: Email the maintainer when the course org cannot be read
+        if: failure() && steps.course.outputs.org == '' && github.event_name != 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          WORKFLOW: ${{ github.workflow }}
+          REPO: ${{ github.repository }}
+          COHORT: ${{ github.repository_owner }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GRAPH_TENANT_ID: ${{ secrets.GRAPH_TENANT_ID }}
+          GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
+          GRAPH_CLIENT_CERT: ${{ secrets.GRAPH_CLIENT_CERT }}
+          GRAPH_SENDER: ${{ secrets.GRAPH_SENDER }}
+          DSL_MAINTAINER_EMAIL: ${{ secrets.DSL_MAINTAINER_EMAIL }}
+        run: |
+          gh run view "$GITHUB_RUN_ID" --repo "$REPO" --log-failed 2>/dev/null | tail -n 30 \
+            | python3 -m dsl_course.notify --run-failed --course-org "$COHORT" \
+                --workflow "$WORKFLOW" --run-url "$RUN_URL" || true
