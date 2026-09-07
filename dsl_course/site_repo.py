@@ -528,20 +528,29 @@ def _team_people(course_org: str, team: str) -> list[tuple[str, str, str]]:
 # card shows. These keys drive the grant and are never rendered; everything else is
 # display and is passed through to `_data/people.yml` as-is.
 ACCESS_ONLY = ("github_handle", "start", "end")
+# ...and `show_email`, which is a display SWITCH this module consumes rather than a value
+# the theme reads. Publishing the switch itself would put a bare `show_email: "False"` on
+# a public card.
+NOT_ON_CARD = ACCESS_ONLY + ("show_email",)
 # Our config spelling -> the key the Jekyll theme reads.
 CARD_ALIASES = {"photo": "profile_pic", "url": "webpage"}
 # Leading keys, so a generated file has a stable, readable order.
-CARD_ORDER = ("name", "profile_pic", "webpage", "title")
+CARD_ORDER = ("name", "profile_pic", "webpage", "title", "email")
 
 
 def _card(entry: dict) -> dict:
-    """One person entry -> the card dict written into `_data/people.yml`: drop the
-    access-only keys, rename `photo`/`url` to the theme's names, keep everything else
-    the course declared. Ordered by CARD_ORDER first, then the extras alphabetically."""
+    """One person entry -> the card dict written into `_data/people.yml`: drop the keys
+    the theme never reads, rename `photo`/`url` to the theme's names, keep everything else
+    the course declared. Ordered by CARD_ORDER first, then the extras alphabetically.
+
+    `email` is on the card by default - it is how a student reaches the teaching team.
+    `show_email: false` keeps one person's address off the PUBLIC site while leaving it in
+    people.yml, where the notifier still reads it."""
+    hidden = NOT_ON_CARD if entry.get("show_email", True) else NOT_ON_CARD + ("email",)
     card = {
         CARD_ALIASES.get(k, k): "" if v is None else str(v)
         for k, v in entry.items()
-        if k not in ACCESS_ONLY
+        if k not in hidden
     }
     ordered = {k: card[k] for k in CARD_ORDER if k in card}
     ordered.update({k: card[k] for k in sorted(card) if k not in ordered})
@@ -567,20 +576,24 @@ def _people_from_meta(meta: dict) -> tuple[list[dict], list[dict]] | None:
               start: ...
               end: ...
               name: ...
+              email: <address>
+              show_email: false     # optional - keep the address off the card
               photo: <img-url>
               url: <bio-link>
               title: ...
           teaching_assistants:
             - github_handle: ...
               name: ...
+              email: ...
               photo: ...
               url: ...
               title: ...
 
     Every declared field is passed through to the card: `photo`/`url` are renamed to the
-    theme's `profile_pic`/`webpage`, ACCESS_ONLY keys are dropped (they govern the GitHub
-    grant, not the display), and anything else a course chooses to add rides along
-    verbatim, so a new field needs a theme change but no change here.
+    theme's `profile_pic`/`webpage`, NOT_ON_CARD keys are dropped (they govern the GitHub
+    grant or, for `show_email`, the card itself - not the display), and anything else a
+    course chooses to add rides along verbatim, so a new field needs a theme change but no
+    change here.
     """
     people = meta.get("people") if isinstance(meta, dict) else None
     if not isinstance(people, dict):

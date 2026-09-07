@@ -121,6 +121,43 @@ def test_people_yaml_passes_every_declared_display_field_through():
         assert access_only not in out
 
 
+def test_people_yaml_publishes_the_declared_email_by_default():
+    # `email:` is required in people.yml (it is what a notification is sent to) and is on
+    # the card unless the person opts out - how a student reaches the teaching team.
+    meta = {
+        "people": {
+            "instructors": [
+                {"name": "Prof. Jane", "title": "Professor", "email": "jane@x.org"}
+            ],
+            "teaching_assistants": [{"name": "Alex TA", "email": "alex@x.org"}],
+        }
+    }
+    out = site_repo.people_yaml("Some-Cohort-f2026", meta, edit_at="people.yml")
+    assert 'email: "jane@x.org"' in out
+    assert 'email: "alex@x.org"' in out
+    # CARD_ORDER puts it after `title`, so the generated file has a stable shape
+    assert out.index('title: "Professor"') < out.index('email: "jane@x.org"')
+
+
+def test_people_yaml_show_email_false_keeps_the_address_off_the_public_card():
+    # The opt-out: still declared (and still notified), just not published. `show_email`
+    # itself is a switch this side consumes and must never appear on the site either.
+    meta = {
+        "people": {
+            "instructors": [
+                {"name": "Prof. Jane", "email": "jane@x.org", "show_email": False}
+            ],
+            "teaching_assistants": [
+                {"name": "Alex TA", "email": "alex@x.org", "show_email": True}
+            ],
+        }
+    }
+    out = site_repo.people_yaml("Some-Cohort-f2026", meta, edit_at="people.yml")
+    assert "jane@x.org" not in out
+    assert 'email: "alex@x.org"' in out  # opted in - unchanged
+    assert "show_email" not in out  # neither the false nor the true one
+
+
 def test_replacing_a_config_scalar_touches_only_the_named_key():
     cfg = 'course_name: "old"\ncourse_code: "X"\n'
     out = site_repo._replace_config_scalar(cfg, "course_name", "Deep Learning")
