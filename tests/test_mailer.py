@@ -88,9 +88,9 @@ def test_retries_are_capped_and_the_failure_is_reported(monkeypatch, capsys):
     assert mailer._graph_send_one(CFG, "tok", ONE) is False
     assert len(calls) == mailer._MAX_SEND_ATTEMPTS
     err = capsys.readouterr().err
-    assert "failed (429)" in err
-    assert "ada@x.edu" not in err  # the public log only ever sees the mask
-    assert "a***@x.edu" in err
+    assert "send to 1 recipient(s) failed (429)" in err
+    # A count, not a mask: the public log names nobody at all.
+    assert "ada@x.edu" not in err and "a***@" not in err
 
 
 def test_a_permanent_failure_is_not_retried(monkeypatch):
@@ -109,8 +109,10 @@ def test_one_throttled_recipient_does_not_stop_the_batch(monkeypatch, capsys):
     )
     assert sent == ["bo@x.edu"]  # ada gave up after three attempts; bo still went out
     captured = capsys.readouterr()
-    assert "sent -> b***@x.edu" in captured.out
-    assert "send to a***@x.edu failed (429)" in captured.err
+    assert "sent -> 1 recipient(s)" in captured.out
+    assert "send to 1 recipient(s) failed (429)" in captured.err
+    # ...and neither line names anybody: this prints into a public repo's run log.
+    assert "@x.edu" not in captured.out + captured.err
 
 
 @pytest.mark.parametrize(
@@ -271,7 +273,7 @@ def test_a_dry_run_proves_the_credential_after_it_prints_the_preview(
     monkeypatch.setattr(mailer, "_graph_token", lambda cfg: None)
     with pytest.raises(RuntimeError):
         mailer.send_bulk([ONE], dry_run=True)
-    assert "would send -> a***@x.edu" in capsys.readouterr().out
+    assert "would send -> 1 recipient(s)" in capsys.readouterr().out
 
 
 def test_a_good_credential_says_which_mailbox_it_would_send_as(monkeypatch, capsys):
@@ -288,7 +290,7 @@ def test_a_dry_run_with_no_transport_configured_still_previews_offline(
         monkeypatch.delenv(key, raising=False)
     assert mailer.send_bulk([ONE], dry_run=True) == ["ada@x.edu"]
     captured = capsys.readouterr()
-    assert "would send -> a***@x.edu" in captured.out
+    assert "would send -> 1 recipient(s)" in captured.out
     assert "proves nothing about a send" in captured.err
 
 
@@ -359,13 +361,22 @@ def test_a_plain_three_tuple_is_still_a_message(monkeypatch):
     assert seen[0]["toRecipients"] == [{"emailAddress": {"address": "ada@x.edu"}}]
 
 
-def test_a_group_is_masked_as_a_whole_in_the_run_log(monkeypatch, capsys):
-    # Every workflow runs in a PUBLIC repo, so its log is world-readable.
+def test_a_group_is_counted_not_named_in_the_run_log(monkeypatch, capsys):
+    # Every workflow runs in a PUBLIC repo, so its log is world-readable - and a mask is
+    # not anonymity: `a***@x.edu` beside a cohort's people.yml is a name.
     _payloads(monkeypatch)
     mailer.send_bulk([mailer.Message(("ada@x.edu", "bo@x.edu"), "Subj", "Body")])
     out = capsys.readouterr().out
-    assert "sent -> a***@x.edu, b***@x.edu" in out
-    assert "ada@" not in out
+    assert "sent -> 2 recipient(s)" in out
+    assert "ada@" not in out and "a***@" not in out
+
+
+def test_the_masked_form_is_there_for_somebody_running_the_cli(monkeypatch, capsys):
+    # Told apart locally with DSL_VERBOSE=1, which no rendered workflow sets.
+    monkeypatch.setenv("DSL_VERBOSE", "1")
+    _payloads(monkeypatch)
+    mailer.send_bulk([mailer.Message(("ada@x.edu", "bo@x.edu"), "Subj", "Body")])
+    assert "sent -> a***@x.edu, b***@x.edu" in capsys.readouterr().out
 
 
 def test_a_dry_run_counts_the_copies_without_naming_them(monkeypatch, capsys):

@@ -46,7 +46,7 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 
 from . import roster
-from .log import log, log_err, log_ok
+from .log import log, log_err, log_ok, log_person
 
 
 class Message(NamedTuple):
@@ -364,22 +364,28 @@ def _graph_send_one(
             # cohort their enrolment codes, and the log said only "failed (429)".
             wait = retry_after_seconds(response_headers)
             log(
-                f"  [wait] send to {_masked(to)} got {status}, "
+                f"  [wait] send to {len(to)} recipient(s) got {status}, "
                 f"retry {attempt}/{_MAX_SEND_ATTEMPTS - 1} in {wait:g}s"
             )
+            log_person(f"    [wait] {_masked(to)}")
             time.sleep(wait)
             continue
         # Status only: a Graph error body echoes the request, recipient included.
         # The last attempt cannot `continue` (the guard above requires another to come),
         # so every path out of this loop is one of the two returns.
-        log_err(f"send to {_masked(to)} failed ({status})")
+        log_err(f"send to {len(to)} recipient(s) failed ({status})")
+        log_person(f"    failed: {_masked(to)}")
         return False
 
 
 def _masked(addresses: tuple[str, ...]) -> str:
-    """A message's recipients, masked, for the run log - `a***@x.edu, b***@x.edu`. Enough
-    to tell two sends apart, not enough to identify either: every workflow runs in a
-    PUBLIC repo."""
+    """A message's recipients, masked - `a***@x.edu, b***@x.edu`. Enough to tell two sends
+    apart, not enough to identify either.
+
+    For `log_person` ONLY, which prints under `DSL_VERBOSE=1` and is set by no rendered
+    workflow. A mask is not anonymity: `j***@pm.me` beside a cohort's people.yml is a
+    name, and every one of these workflows runs in a PUBLIC repo. What the run log gets is
+    a count."""
     return ", ".join(mask_email(a) for a in addresses)
 
 
@@ -417,7 +423,8 @@ def _send_via_graph(
             # slower Graph is, and the budget stops meaning a predictable message count.
             time.sleep(max(0.0, started + index * _SEND_INTERVAL - time.monotonic()))
         if _graph_send_one(cfg, token, msg, html):
-            log_ok(f"sent -> {_masked(msg.recipients)}")
+            log_ok(f"sent -> {len(msg.recipients)} recipient(s)")
+            log_person(f"    sent -> {_masked(msg.recipients)}")
             sent.extend(msg.recipients)
     return sent
 
@@ -471,7 +478,8 @@ def send_bulk(
     batch = [m if isinstance(m, Message) else Message(*m) for m in messages]
     if dry_run:
         for msg in batch:
-            log(f"  would send -> {_masked(msg.recipients)}: {msg.subject}")
+            log(f"  would send -> {len(msg.recipients)} recipient(s): {msg.subject}")
+            log_person(f"    would send -> {_masked(msg.recipients)}")
             if msg.cc:
                 # Count only: a Cc list is other people's addresses in a public run log.
                 log(f"  ...copying {len(msg.cc)} address(es)")

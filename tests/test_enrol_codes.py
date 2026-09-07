@@ -82,7 +82,9 @@ def test_mailer_dry_run_previews_without_config(capsys):
     # address in full.
     out = capsys.readouterr().out
     assert "dsl-abc123" not in out and "Ada" not in out and "ada@x.edu" not in out
-    assert "a***@x.edu" in out and "Subj" in out
+    # Not even the mask: `a***@x.edu` beside a roster is a name. A count and the subject.
+    assert "a***@" not in out
+    assert "would send -> 1 recipient(s): Subj" in out
 
 
 def test_a_real_send_never_prints_the_sample(capsys, monkeypatch):

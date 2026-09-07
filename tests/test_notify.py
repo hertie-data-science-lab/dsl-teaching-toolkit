@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import source_fault
 
-from dsl_course import notify, source_digest
+from dsl_course import mailer, notify, source_digest
 from dsl_course.schedule import Severity, SourceFault
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -27,6 +27,9 @@ NOW = datetime(2026, 9, 7, 12, 0, tzinfo=BERLIN)
 COHORT = "Cohort-f2026"
 COURSE = "Course-Org"
 ISSUE = "https://github.com/Cohort-f2026/classroom-config/issues/7"
+# The real `send_bulk`, kept before the `wired` fixture replaces it, so one test can put
+# it back and exercise the log lines the transport itself prints.
+_REAL_SEND_BULK = mailer.send_bulk
 # `_fault`'s identity: the entry, the deploy's own path, the field. Two deploys under one
 # entry are two faults, so the path is part of it.
 _KEY = "releases.lecture_02[students/lectures/02_lecture].course_source_path"
@@ -455,6 +458,33 @@ def test_no_line_this_module_prints_carries_an_address(wired, capsys):
     # the Cc line.
     assert sent.one["to"] == ["cam@x.edu"]
     assert sent.one["cc"] == ["jan@x.edu", "maint@x.edu"]
+
+
+def test_the_transport_itself_names_nobody_in_the_log(monkeypatch, capsys, wired):
+    # The test above stubs `send_bulk`, which is where the notifier's own counts are
+    # printed - so the rule is pinned again through the real batch loop, with nothing
+    # removed but the Graph POST. That loop used to log `sent -> j***@pm.me` per message,
+    # and its retry and failure lines named the group too.
+    wired(blame={131: "cpj97"}, committer=None)
+    posted = []
+
+    def _post(cfg, token, msg, html=False):
+        posted.append(msg)
+        return True
+
+    monkeypatch.setattr(notify.mailer, "send_bulk", _REAL_SEND_BULK)
+    monkeypatch.setattr(notify.mailer, "_graph_token", lambda cfg: "tok")
+    monkeypatch.setattr(notify.mailer, "_graph_send_one", _post)
+    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    assert _run([_fault()], Severity.CRITICAL, routing) == 0
+    printed = capsys.readouterr()
+    for line in (printed.out + printed.err).splitlines():
+        assert "@x.edu" not in line and "***@" not in line, line
+    assert "sent -> 1 recipient(s)" in printed.out
+    # ...and the send itself really was addressed: the log is what is quiet, not the mail.
+    assert [(m.recipients, m.cc) for m in posted] == [
+        (("cam@x.edu",), ("jan@x.edu", "maint@x.edu"))
+    ]
 
 
 # ------------------------------------------------------------------ a failed run
