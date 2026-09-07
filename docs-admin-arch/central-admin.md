@@ -149,6 +149,11 @@ that declares `central_ref: main` - the demo course org - out of the merged comm
 engine and the rendered workflow shapes land together instead of the shapes waiting for that
 org's 05:27 cron. An empty selection (no org on `main`) is a green run that says so.
 
+Two merges close together cannot overlap (the workflow holds a `deploy-main` concurrency
+group), but a run here can still overlap the org's own 05:27 **Refresh actions**: both write
+the same rendered files, so the worst case is a stale render that the next cron converges -
+known, and accepted rather than guarded.
+
 ### Check the demo org before you promote
 
 **This inspection is the gate to `release`.** There is no approval environment on Promote,
