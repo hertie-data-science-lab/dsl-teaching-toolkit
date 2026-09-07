@@ -39,6 +39,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import NamedTuple
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -47,8 +48,29 @@ from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from . import roster
 from .log import log, log_err, log_ok
 
-# A single message: (recipient, subject, body).
-Message = tuple[str, str, str]
+
+class Message(NamedTuple):
+    """One outgoing message: who it goes to, what it says, and who is copied.
+
+    `to` is a GROUP - one Graph POST addressed to all of them - because a fault mail is
+    the same text for everybody on the line, and a per-recipient loop pays the rate
+    limiter's send slot for each identical copy. The two roster senders pass a single
+    address, which is the same thing with one recipient in the group, and their per-message
+    loop is the point there: each student's mail is a different mail.
+
+    `cc` is per MESSAGE rather than per batch, so a tick that mails three recipient groups
+    - each copying different instructors - is still one batch and therefore one token."""
+
+    to: str | tuple[str, ...]
+    subject: str
+    body: str
+    cc: tuple[str, ...] = ()
+
+    @property
+    def recipients(self) -> tuple[str, ...]:
+        """`to` as a group, whether it was written as one address or several."""
+        return (self.to,) if isinstance(self.to, str) else tuple(self.to)
+
 
 _AUTHORITY = "https://login.microsoftonline.com"
 _GRAPH = "https://graph.microsoft.com/v1.0"
@@ -310,21 +332,23 @@ def _graph_token(cfg: GraphConfig) -> str | None:
 def _graph_send_one(
     cfg: GraphConfig,
     token: str,
-    to: str,
-    subject: str,
-    body: str,
+    msg: Message,
     html: bool = False,
-    cc: tuple[str, ...] = (),
 ) -> bool:
     """Send one message via `users/{sender}/sendMail`. Returns True on 200/202.
 
-    `html` sends the body as HTML instead of plain text; `cc` is a real Cc line - see
-    `send_bulk`."""
+    One POST however many recipients `msg.to` names - `toRecipients` is a list, and the
+    mail is identical for all of them. `html` sends the body as HTML instead of plain
+    text; `msg.cc` is a real Cc line - see `send_bulk`."""
     url = f"{_GRAPH}/users/{urllib.parse.quote(cfg.sender)}/sendMail"
+    to = msg.recipients
+    # A recipient who is also on the Cc line would get two copies of one mail.
+    addressed = {a.lower() for a in to}
+    cc = tuple(a for a in msg.cc if a.lower() not in addressed)
     message: dict = {
-        "subject": subject,
-        "body": {"contentType": "HTML" if html else "Text", "content": body},
-        "toRecipients": [{"emailAddress": {"address": to}}],
+        "subject": msg.subject,
+        "body": {"contentType": "HTML" if html else "Text", "content": msg.body},
+        "toRecipients": [{"emailAddress": {"address": a}} for a in to],
     }
     if cc:
         message["ccRecipients"] = [{"emailAddress": {"address": a}} for a in cc]
@@ -340,7 +364,7 @@ def _graph_send_one(
             # cohort their enrolment codes, and the log said only "failed (429)".
             wait = retry_after_seconds(response_headers)
             log(
-                f"  [wait] send to {mask_email(to)} got {status}, "
+                f"  [wait] send to {_masked(to)} got {status}, "
                 f"retry {attempt}/{_MAX_SEND_ATTEMPTS - 1} in {wait:g}s"
             )
             time.sleep(wait)
@@ -348,15 +372,21 @@ def _graph_send_one(
         # Status only: a Graph error body echoes the request, recipient included.
         # The last attempt cannot `continue` (the guard above requires another to come),
         # so every path out of this loop is one of the two returns.
-        log_err(f"send to {mask_email(to)} failed ({status})")
+        log_err(f"send to {_masked(to)} failed ({status})")
         return False
+
+
+def _masked(addresses: tuple[str, ...]) -> str:
+    """A message's recipients, masked, for the run log - `a***@x.edu, b***@x.edu`. Enough
+    to tell two sends apart, not enough to identify either: every workflow runs in a
+    PUBLIC repo."""
+    return ", ".join(mask_email(a) for a in addresses)
 
 
 def _send_via_graph(
     cfg: GraphConfig,
     messages: list[Message],
     html: bool = False,
-    cc: tuple[str, ...] = (),
 ) -> list[str]:
     """Send the whole batch on one token. Returns the recipients that actually went out.
 
@@ -374,7 +404,7 @@ def _send_via_graph(
         )
     sent: list[str] = []
     started = time.monotonic()
-    for index, (to, subject, body) in enumerate(messages):
+    for index, msg in enumerate(messages):
         if index:
             if time.monotonic() - started > _BATCH_BUDGET:
                 log_err(
@@ -386,11 +416,9 @@ def _send_via_graph(
             # to each send's round-trip, so the real rate drifts below the target the
             # slower Graph is, and the budget stops meaning a predictable message count.
             time.sleep(max(0.0, started + index * _SEND_INTERVAL - time.monotonic()))
-        # A recipient who is also on the Cc line would get two copies of one mail.
-        copies = tuple(a for a in cc if a.lower() != to.lower())
-        if _graph_send_one(cfg, token, to, subject, body, html, copies):
-            log_ok(f"sent -> {mask_email(to)}")
-            sent.append(to)
+        if _graph_send_one(cfg, token, msg, html):
+            log_ok(f"sent -> {_masked(msg.recipients)}")
+            sent.extend(msg.recipients)
     return sent
 
 
@@ -424,7 +452,6 @@ def send_bulk(
     dry_run: bool = False,
     sample: str | None = None,
     html: bool = False,
-    cc: list[str] | None = None,
 ) -> list[str]:
     """Preview (dry_run) or send a batch. Returns the recipients previewed/sent.
 
@@ -437,32 +464,29 @@ def send_bulk(
     `messages`, and it is printed once, under `SAMPLE_HEADER`, so faculty can proof-read
     the email before a real send.
 
-    `html` sends every body in the batch as HTML, and `cc` puts a real Cc line on every
-    message in it. Both per BATCH, not per message: a batch is one mail to a list of
-    recipients, and the two roster senders (enrolment codes, grade notifications) send
-    plain text to one student at a time with nobody copied. The flags exist for the fault
-    mails, which are marked up and which copy the instructors when a TA is addressed (see
-    `notify`). A real Cc rather than more To recipients, because who else was told is the
-    point of copying them. The caller owns the escaping."""
-    copies = tuple(cc or ())
+    `html` sends every body in the batch as HTML - per BATCH, because the two roster
+    senders send plain text and the fault mails are all marked up. Recipients and Cc are
+    per MESSAGE (see `Message`). Plain 3-tuples are accepted for the roster senders, whose
+    messages carry nobody on Cc. The caller owns the escaping."""
+    batch = [m if isinstance(m, Message) else Message(*m) for m in messages]
     if dry_run:
-        for to, subject, _body in messages:
-            log(f"  would send -> {mask_email(to)}: {subject}")
-        if copies:
-            # Count only: a Cc list is other people's addresses in a public run log.
-            log(f"  ...copying {len(copies)} address(es)")
+        for msg in batch:
+            log(f"  would send -> {_masked(msg.recipients)}: {msg.subject}")
+            if msg.cc:
+                # Count only: a Cc list is other people's addresses in a public run log.
+                log(f"  ...copying {len(msg.cc)} address(es)")
         if sample:
             log(SAMPLE_HEADER)
             log(sample)
-        log_ok(f"DRY-RUN previewed {len(messages)} message(s) - nothing sent")
+        log_ok(f"DRY-RUN previewed {len(batch)} message(s) - nothing sent")
         preflight()
-        return [to for to, _subject, _body in messages]
+        return [a for msg in batch for a in msg.recipients]
 
     graph = graph_config_from_env()
     if graph is None:
         log_err("No mail transport configured - set the GRAPH_* secrets. Nothing sent.")
         return []
-    return _send_via_graph(graph, messages, html, copies)
+    return _send_via_graph(graph, batch, html)
 
 
 def sample_message_of(

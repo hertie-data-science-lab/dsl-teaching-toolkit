@@ -12,7 +12,7 @@ import pytest
 from dsl_course import mailer
 
 CFG = mailer.GraphConfig("tenant", "client", "secret", "bot@x.edu")
-ONE = ("ada@x.edu", "Subj", "Body")
+ONE = mailer.Message("ada@x.edu", "Subj", "Body")
 
 
 @pytest.fixture(autouse=True)
@@ -71,21 +71,21 @@ def _payloads(monkeypatch) -> list[dict]:
 
 def test_a_throttled_send_is_retried_and_succeeds(monkeypatch, _no_sleeping):
     calls = _replies(monkeypatch, [(429, {"Retry-After": "2"}), (202, {})])
-    assert mailer._graph_send_one(CFG, "tok", *ONE) is True
+    assert mailer._graph_send_one(CFG, "tok", ONE) is True
     assert len(calls) == 2
     assert _no_sleeping == [2.0]  # the server's own wait, honoured
 
 
 def test_a_transient_5xx_is_retried(monkeypatch, _no_sleeping):
     calls = _replies(monkeypatch, [(503, {}), (200, {})])
-    assert mailer._graph_send_one(CFG, "tok", *ONE) is True
+    assert mailer._graph_send_one(CFG, "tok", ONE) is True
     assert len(calls) == 2
     assert _no_sleeping == [mailer._RETRY_AFTER_DEFAULT]  # no header -> the default
 
 
 def test_retries_are_capped_and_the_failure_is_reported(monkeypatch, capsys):
     calls = _replies(monkeypatch, [(429, {}), (429, {}), (429, {})])
-    assert mailer._graph_send_one(CFG, "tok", *ONE) is False
+    assert mailer._graph_send_one(CFG, "tok", ONE) is False
     assert len(calls) == mailer._MAX_SEND_ATTEMPTS
     err = capsys.readouterr().err
     assert "failed (429)" in err
@@ -95,7 +95,7 @@ def test_retries_are_capped_and_the_failure_is_reported(monkeypatch, capsys):
 
 def test_a_permanent_failure_is_not_retried(monkeypatch):
     calls = _replies(monkeypatch, [(400, {})])
-    assert mailer._graph_send_one(CFG, "tok", *ONE) is False
+    assert mailer._graph_send_one(CFG, "tok", ONE) is False
     assert len(calls) == 1  # a malformed recipient will not fix itself
 
 
@@ -104,7 +104,9 @@ def test_one_throttled_recipient_does_not_stop_the_batch(monkeypatch, capsys):
     # says WHO actually landed.
     _replies(monkeypatch, [(429, {})] * 3 + [(202, {})])
     monkeypatch.setattr(mailer, "_graph_token", lambda cfg: "tok")
-    sent = mailer._send_via_graph(CFG, [ONE, ("bo@x.edu", "Subj", "Body")])
+    sent = mailer._send_via_graph(
+        CFG, [ONE, mailer.Message("bo@x.edu", "Subj", "Body")]
+    )
     assert sent == ["bo@x.edu"]  # ada gave up after three attempts; bo still went out
     captured = capsys.readouterr()
     assert "sent -> b***@x.edu" in captured.out
@@ -234,8 +236,8 @@ def test_the_batch_is_paced_below_the_graph_rate_limit(monkeypatch, _no_sleeping
     # 30 and then pays the retry ladder per recipient, serially, against a 30-minute job.
     _replies(monkeypatch, [(202, {})] * 3)
     monkeypatch.setattr(mailer, "_graph_token", lambda cfg: "tok")
-    messages = [(f"s{i}@x.edu", "Subj", "Body") for i in range(3)]
-    assert mailer._send_via_graph(CFG, messages) == [m[0] for m in messages]
+    messages = [mailer.Message(f"s{i}@x.edu", "Subj", "Body") for i in range(3)]
+    assert mailer._send_via_graph(CFG, messages) == [m.to for m in messages]
     assert _no_sleeping == [mailer._SEND_INTERVAL] * 2  # n-1: the first is not delayed
     assert mailer.time.monotonic() == 2 * mailer._SEND_INTERVAL
 
@@ -250,7 +252,7 @@ def test_a_batch_that_runs_out_of_budget_stops_and_says_re_run(
     # Budget shorter than one slot: message two still goes (nothing has elapsed when it
     # is checked), message three finds it spent.
     monkeypatch.setattr(mailer, "_BATCH_BUDGET", mailer._SEND_INTERVAL / 2)
-    messages = [(f"s{i}@x.edu", "Subj", "Body") for i in range(3)]
+    messages = [mailer.Message(f"s{i}@x.edu", "Subj", "Body") for i in range(3)]
     assert mailer._send_via_graph(CFG, messages) == ["s0@x.edu", "s1@x.edu"]
     assert (
         "stopped after 2 of 3 message(s) - re-run to continue"
@@ -313,7 +315,7 @@ def test_a_cc_is_a_real_cc_line_not_another_recipient(monkeypatch):
     # Who ELSE was told is the whole point of copying them: a TA's fault mail copies the
     # instructors, and fanning that out as more To recipients hides it from everybody.
     seen = _payloads(monkeypatch)
-    mailer.send_bulk([ONE], cc=["boss@x.edu"])
+    mailer.send_bulk([ONE._replace(cc=("boss@x.edu",))])
     assert seen[0]["ccRecipients"] == [{"emailAddress": {"address": "boss@x.edu"}}]
 
 
@@ -326,13 +328,49 @@ def test_no_cc_means_no_cc_field_at_all(monkeypatch):
 def test_a_recipient_on_its_own_cc_line_is_not_sent_two_copies(monkeypatch):
     # The fallback To set is the whole teaching team, and the instructors are also the Cc.
     seen = _payloads(monkeypatch)
-    mailer.send_bulk([ONE], cc=["ADA@x.edu", "boss@x.edu"])
+    mailer.send_bulk([ONE._replace(cc=("ADA@x.edu", "boss@x.edu"))])
     assert seen[0]["ccRecipients"] == [{"emailAddress": {"address": "boss@x.edu"}}]
+
+
+# --------------------------------------------------- one message, a group of recipients
+
+
+def test_a_group_of_recipients_is_one_send_not_one_each(monkeypatch):
+    # A fault mail is the same text for everybody on the line, and a copy per recipient
+    # pays the rate limiter's 2.5s slot for each - so the whole group is one POST, with
+    # every address on `toRecipients`.
+    seen = _payloads(monkeypatch)
+    sent = mailer.send_bulk([mailer.Message(("ada@x.edu", "bo@x.edu"), "Subj", "Body")])
+    assert len(seen) == 1
+    assert seen[0]["toRecipients"] == [
+        {"emailAddress": {"address": "ada@x.edu"}},
+        {"emailAddress": {"address": "bo@x.edu"}},
+    ]
+    # Addresses, not a count: the caller records who was mailed so a re-run does not mail
+    # them again.
+    assert sent == ["ada@x.edu", "bo@x.edu"]
+
+
+def test_a_plain_three_tuple_is_still_a_message(monkeypatch):
+    # The two roster senders build one per student and copy nobody; asking them to name a
+    # group of one would be ceremony for its own sake.
+    seen = _payloads(monkeypatch)
+    assert mailer.send_bulk([("ada@x.edu", "Subj", "Body")]) == ["ada@x.edu"]
+    assert seen[0]["toRecipients"] == [{"emailAddress": {"address": "ada@x.edu"}}]
+
+
+def test_a_group_is_masked_as_a_whole_in_the_run_log(monkeypatch, capsys):
+    # Every workflow runs in a PUBLIC repo, so its log is world-readable.
+    _payloads(monkeypatch)
+    mailer.send_bulk([mailer.Message(("ada@x.edu", "bo@x.edu"), "Subj", "Body")])
+    out = capsys.readouterr().out
+    assert "sent -> a***@x.edu, b***@x.edu" in out
+    assert "ada@" not in out
 
 
 def test_a_dry_run_counts_the_copies_without_naming_them(monkeypatch, capsys):
     # A Cc list is other people's addresses, and this preview prints into a public log.
-    mailer.send_bulk([ONE], dry_run=True, cc=["boss@x.edu"])
+    mailer.send_bulk([ONE._replace(cc=("boss@x.edu",))], dry_run=True)
     out = capsys.readouterr().out
     assert "...copying 1 address(es)" in out
     assert "boss@x.edu" not in out
