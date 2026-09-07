@@ -26,9 +26,11 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "What to promote (default: main's tip; a branch, tag or full SHA on main's history - everything up to it ships). Promote only once a manual end-to-end inspection of the demo course org, which tracks main, has passed - issues, comments, mails, run logs, site. The test suite is not the gate."
-        required: false
-        default: "main"
+        # No default, and `main` least of all: a default would promote whatever main's tip
+        # happens to be at the moment of the click, which is not necessarily the commit
+        # anybody inspected. Naming it is the conscious act this workflow is made of.
+        description: "The 40-character SHA the demo course org was inspected at - the head commit of the Deploy main run that refreshed it (that org's own Refresh log names its tier, `main`, not the commit). A branch name still works, but naming the commit is the point: everything on main up to it ships. Promote only once a manual end-to-end inspection of the demo course org has passed - issues, comments, mails, run logs, site. The test suite is not the gate."
+        required: true
         type: string
       refresh_orgs:
         description: "Refresh every org on `release` now, rather than waiting for tonight's cron"
@@ -89,10 +91,15 @@ jobs:
           # narrows the window between the tip read below and the lease it becomes.
           git fetch --quiet origin "+refs/heads/*:refs/remotes/origin/*"
 
-          # main's tip by default. Overridable, to promote a point on main short of it -
-          # `release` is a fast-forward, so this chooses HOW FAR up main to move, never
-          # which commits to take: naming a commit ships it and everything before it.
-          source="${SOURCE_INPUT:-main}"
+          # No fallback: an empty input is a dispatch that named nothing, and the one
+          # thing this must never do is guess. `release` is a fast-forward, so the input
+          # chooses HOW FAR up main to move, never which commits to take - naming a commit
+          # ships it and everything before it.
+          source="$SOURCE_INPUT"
+          if [ -z "$source" ]; then
+            echo "::error::name what to promote - the SHA the demo course org was inspected at."
+            exit 1
+          fi
 
           # A branch name resolves through origin/; a tag or SHA does not.
           new=$(git rev-parse --verify --quiet "refs/remotes/origin/$source^{commit}" \
@@ -119,16 +126,11 @@ jobs:
             exit 1
           fi
 
-          # --force-with-lease, never a bare -f: the lease is the tip verified above (empty
-          # when the branch does not exist yet, which asserts exactly that), so a tier moved
-          # by someone else since aborts the run rather than being overwritten. The push is
-          # a fast-forward either way - the lease only closes the gap between the check and
-          # the push.
-          git push --force-with-lease="refs/heads/$TIER:$tip" origin "$new:refs/heads/$TIER"
-          echo "sha=$new" >> "$GITHUB_OUTPUT"
-
+          # What this is about to ship, printed BEFORE the push and into the run log as
+          # well as the summary: a listing that only appears afterwards cannot help anyone
+          # watching the run notice that it is shipping more than they meant.
           {
-            echo "## Promoted \`$source\` to \`$TIER\`"
+            echo "## Promoting \`$source\` to \`$TIER\`"
             echo
             echo "- from: \`${tip:-(new branch)}\`"
             echo "- to:   \`$new\`"
@@ -140,9 +142,18 @@ jobs:
               git --no-pager log --oneline "$tip..$new"
               echo '```'
             elif [ "$tip" = "$new" ]; then
-              echo "_Already there - nothing moved._"
+              echo "_Already there - nothing to move._"
             fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+          # --force-with-lease, never a bare -f: the lease is the tip verified above (empty
+          # when the branch does not exist yet, which asserts exactly that), so a tier moved
+          # by someone else since aborts the run rather than being overwritten. The push is
+          # a fast-forward either way - the lease only closes the gap between the check and
+          # the push.
+          git push --force-with-lease="refs/heads/$TIER:$tip" origin "$new:refs/heads/$TIER"
+          echo "sha=$new" >> "$GITHUB_OUTPUT"
+          printf '\n**Pushed.** `%s` is now `%s`.\n' "$TIER" "$new" >> "$GITHUB_STEP_SUMMARY"
 
   # A promotion changes nothing in an org until that org next re-renders its workflows,
   # which the nightly "Refresh actions" cron does within 24h. This runs it now, so a

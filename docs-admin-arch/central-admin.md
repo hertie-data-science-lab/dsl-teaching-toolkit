@@ -169,7 +169,13 @@ nightly refresh:
 
 Run **Promote to release** (Actions tab of this repo) once the manual end-to-end inspection
 of the demo org above has passed - that inspection is the gate, and nothing in the workflow
-enforces it. `ref:` defaults to `main`; name a commit to stop the promotion there.
+enforces it.
+
+`ref:` is required and has **no default**. Name the 40-character SHA the demo org was
+inspected at - the head commit of the **Deploy main** run that refreshed it. `main` as a
+default would have shipped whatever its tip was at the moment of the click, which is not
+necessarily the commit anybody looked at; everything on main up to the commit named ships.
+The run prints that list of commits before it pushes.
 
 Promote refuses anything that is not both on `main`'s history and a descendant of `release`'s
 current tip, so it can only ever move `release` forward - it cannot rewrite it, and cannot

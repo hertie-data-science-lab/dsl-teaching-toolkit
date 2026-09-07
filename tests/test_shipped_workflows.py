@@ -135,15 +135,22 @@ def test_promote_pushes_the_tier_with_a_deploy_key_not_the_bot():
     assert "gh api meta --jq '.ssh_keys[]'" in step["run"]
 
 
-def test_promote_moves_release_only_and_promotes_mains_tip_by_default():
+def test_promote_moves_release_only_and_makes_the_operator_name_the_commit():
     # There is one tier to promote TO, so it is not an input: `main` is where a promotion
     # comes FROM - the demo course org runs it, refreshed by the merge itself.
+    #
+    # And what to promote has NO default. `main` as a default would ship whatever its tip
+    # happened to be at the moment of the click, which is not necessarily the commit
+    # anybody inspected on the demo org.
     doc = SHIPPED_WORKFLOWS[".github/workflows/promote.yml"]
     trigger = doc.get("on", doc.get(True))
     inputs = trigger["workflow_dispatch"]["inputs"]
     assert "to" not in inputs
-    assert inputs["ref"]["default"] == "main"
+    assert inputs["ref"]["required"] is True
+    assert "default" not in inputs["ref"]
     assert _fast_forward_step()["env"]["TIER"] == "release"
+    # And an empty one is refused rather than falling back to a ref.
+    assert 'echo "::error::name what to promote' in _fast_forward_step()["run"]
 
 
 def test_promote_is_gated_on_write_here_and_nothing_else():
@@ -161,6 +168,16 @@ def test_promote_names_the_demo_org_inspection_as_its_gate():
     trigger = doc.get("on", doc.get(True))
     description = trigger["workflow_dispatch"]["inputs"]["ref"]["description"]
     assert "inspection of the demo course org" in description
+
+
+def test_promote_lists_what_it_will_ship_before_it_ships_it():
+    # A listing printed after the push tells whoever is watching what already happened.
+    run = _fast_forward_step()["run"]
+    listing = run.index("Commits this puts on")
+    push = run.index("git push --force-with-lease")
+    assert listing < push
+    # And into the run log, not only the job summary, which is written at the end.
+    assert 'tee -a "$GITHUB_STEP_SUMMARY"' in run
 
 
 def test_promote_can_only_fast_forward_release_along_main():
