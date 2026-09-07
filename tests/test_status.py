@@ -149,8 +149,11 @@ def test_c7_is_quiet_when_every_entry_can_be_notified(monkeypatch):
 
 
 def _transport_row(monkeypatch, **secrets):
-    for name in mailer.GRAPH_ENV:
-        value = secrets.get(name, "set")
+    # DSL_MAINTAINER_EMAIL rides in the same workflow env and is reported in the same row,
+    # so it defaults to ABSENT here: a value exported in the shell that runs the tests
+    # must not be what decides this row.
+    for name in (*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV):
+        value = secrets.get(name, None if name == mailer.MAINTAINER_ENV else "set")
         if value is None:
             monkeypatch.delenv(name, raising=False)
         else:
@@ -183,6 +186,29 @@ def test_b8_names_the_half_of_a_half_configured_transport_that_is_missing(monkey
 
 
 def test_b8_never_prints_a_secret_value(monkeypatch):
-    # The table is appended to $GITHUB_STEP_SUMMARY of a PUBLIC repo.
-    row = _transport_row(monkeypatch, GRAPH_SENDER="mailbox@example.org")
+    # The table is appended to $GITHUB_STEP_SUMMARY of a PUBLIC repo. Both addresses are
+    # real inboxes, and the maintainer's is a person's.
+    row = _transport_row(
+        monkeypatch,
+        GRAPH_SENDER="mailbox@example.org",
+        DSL_MAINTAINER_EMAIL="maintainer@example.org",
+    )
     assert "mailbox@example.org" not in row["detail"]
+    assert "maintainer@example.org" not in row["detail"]
+
+
+def test_b8_says_whether_this_org_can_mail_a_fault_home(monkeypatch):
+    # Propagated by bootstrap, and by nothing else - an org that never got it is otherwise
+    # indistinguishable from one that did, until a fault goes to the shared mailbox.
+    row = _transport_row(monkeypatch, DSL_MAINTAINER_EMAIL="maintainer@example.org")
+    assert row["status"] == "ok"
+    assert f"{mailer.MAINTAINER_ENV} set" in row["detail"]
+
+
+def test_b8_stays_ok_when_only_the_maintainer_address_is_missing(monkeypatch):
+    # Not a fault: mailer.maintainer_address falls back to GRAPH_SENDER, and a row that
+    # went MISSING over an optional address would train faculty to ignore it.
+    row = _transport_row(monkeypatch)
+    assert row["status"] == "ok"
+    assert f"{mailer.MAINTAINER_ENV} unset" in row["detail"]
+    assert "GRAPH_SENDER" in row["detail"]

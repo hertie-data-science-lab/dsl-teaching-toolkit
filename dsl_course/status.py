@@ -81,6 +81,17 @@ def _row(
 _SECRETS_URL = "https://github.com/organizations/{org}/settings/secrets/actions"
 
 
+def _maintainer_note() -> str:
+    """Where a fault mail would go, appended to the transport row. The NAME only.
+
+    Unset is not a fault - `mailer.maintainer_address` falls back to the send mailbox - so
+    it never changes the row's verdict, but an org that has never had it propagated is
+    otherwise indistinguishable from one that has."""
+    if (os.environ.get(mailer.MAINTAINER_ENV) or "").strip():
+        return f"; {mailer.MAINTAINER_ENV} set"
+    return f"; {mailer.MAINTAINER_ENV} unset - fault mail goes to GRAPH_SENDER"
+
+
 def _transport_detail() -> tuple[bool, str]:
     """Whether this run can send email at all, and why not. `(usable, detail)`.
 
@@ -93,18 +104,19 @@ def _transport_detail() -> tuple[bool, str]:
     Names, never values: the verdict comes from `mailer.graph_config_from_env`, and the
     names come from `mailer.GRAPH_ENV`, so a renamed secret cannot leave this row lying.
     The table is appended to the step summary of a PUBLIC repo - not one secret's contents
-    goes into it, `GRAPH_SENDER` included."""
+    goes into it, `GRAPH_SENDER` and `DSL_MAINTAINER_EMAIL` included."""
     unset = [n for n in mailer.GRAPH_ENV if not (os.environ.get(n) or "").strip()]
     cost = " - Send codes and Distribute grades mail nobody"
+    note = _maintainer_note()
     if len(unset) == len(mailer.GRAPH_ENV):
-        return False, f"no GRAPH_* secrets set{cost}"
+        return False, f"no GRAPH_* secrets set{cost}{note}"
     if unset:
-        return False, f"unset or blank: {', '.join(unset)}{cost}"
+        return False, f"unset or blank: {', '.join(unset)}{cost}{note}"
     if mailer.graph_config_from_env() is None:
         # Set, and still unusable - a line break inside a single-line value is what
         # `gh secret set < file` leaves behind. Named by the helper's own log line.
-        return False, f"the GRAPH_* secrets are set but unusable{cost}"
-    return True, f"all {len(mailer.GRAPH_ENV)} GRAPH_* secrets set"
+        return False, f"the GRAPH_* secrets are set but unusable{cost}{note}"
+    return True, f"all {len(mailer.GRAPH_ENV)} GRAPH_* secrets set{note}"
 
 
 def render_markdown(course_org: str, cohort_org: str, data: dict[str, dict]) -> str:
@@ -211,9 +223,9 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         tier,
     )
 
-    # Org-level configuration, not per-cohort: the GRAPH_* secrets are read from the
-    # workflow env of the COURSE org, so this row belongs with B1/B6/B7 even though every
-    # mail path it gates is a cohort action.
+    # Org-level configuration, not per-cohort: the GRAPH_* secrets and the maintainer
+    # address are read from the workflow env of the COURSE org, so this row belongs with
+    # B1/B6/B7 even though every mail path it gates is a cohort action.
     transport_ok, transport = _transport_detail()
     data["B8"] = _row(
         "B8",
