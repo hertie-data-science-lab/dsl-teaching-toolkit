@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import sys
 from datetime import date
+from typing import NamedTuple
 
 from .access import grant_team_repo_access
 from .course import (
@@ -148,31 +149,65 @@ def _desired_for(faculty: dict[str, list[dict]], team: str, today: str) -> set[s
     return desired_team_members(faculty, today).get(team, set())
 
 
-def _active_teaching_entries(faculty: dict[str, list[dict]], today: str) -> list[dict]:
-    """The parsed instructor/TA entries active on `today` (an ISO date string), in
-    declaration order - this cohort's teaching team as it stands today."""
+def _active_teaching_entries(
+    faculty: dict[str, list[dict]], today: str
+) -> list[tuple[str, dict]]:
+    """`(role, entry)` for every parsed instructor/TA entry active on `today` (an ISO date
+    string), in declaration order - this cohort's teaching team as it stands today.
+
+    The role rides along because who gets COPIED on a notification depends on it: a mail
+    addressed to a TA copies the instructors. Reading it back off the entry afterwards
+    would mean iterating people.yml a second way."""
     return [
-        p
+        (role, p)
         for role in TEACHING_ROLES
         for p in faculty.get(role) or []
         if active_today(p.get("start"), p.get("end"), today)
     ]
 
 
-def notification_emails(meta: dict) -> list[str]:
-    """The deduplicated addresses of the active instructors and TAs declared in an
-    already-loaded `people:` block - who a notification about this cohort goes to.
+class Contact(NamedTuple):
+    """One reachable member of a cohort's teaching team.
 
-    Entries with no usable `email:` are skipped (`parse_faculty_from_meta` has already
-    reported them). Log the LENGTH of this list, never its contents."""
+    All three fields travel together because a notification needs all three: the handle is
+    what git blame and an @mention speak, the address is what the mail uses, and the role
+    decides who is copied."""
+
+    handle: str
+    email: str
+    role: str
+
+    @property
+    def is_ta(self) -> bool:
+        return self.role == "teaching_assistants"
+
+
+def teaching_contacts(meta: dict) -> list[Contact]:
+    """The active instructors and TAs of an already-loaded `people:` block that a
+    notification can actually reach, in declaration order.
+
+    Entries with no usable `email:` are left out - `parse_faculty_from_meta` has already
+    reported them and `without_email` names the handles. Log a length, or a handle through
+    `log_person`; never an address."""
     faculty = parse_faculty_from_meta(meta)
+    out: list[Contact] = []
+    for role, p in _active_teaching_entries(faculty, date.today().isoformat()):
+        email = valid_email(p.get("email"))
+        if email:
+            out.append(Contact(str(p["github_handle"]), email, role))
+    return out
+
+
+def notification_emails(meta: dict) -> list[str]:
+    """Every address `teaching_contacts` found, deduplicated case-insensitively - the
+    whole teaching team, which is what a notification falls back to when git cannot say
+    who to tell. Log the LENGTH of this list, never its contents."""
     out: list[str] = []
     seen: set[str] = set()
-    for p in _active_teaching_entries(faculty, date.today().isoformat()):
-        email = valid_email(p.get("email"))
-        if email and email.lower() not in seen:
-            seen.add(email.lower())
-            out.append(email)
+    for contact in teaching_contacts(meta):
+        if contact.email.lower() not in seen:
+            seen.add(contact.email.lower())
+            out.append(contact.email)
     return out
 
 
@@ -181,7 +216,7 @@ def without_email(faculty: dict[str, list[dict]], today: str) -> list[str]:
     are public and loggable; the addresses themselves never leave this module."""
     return [
         str(p["github_handle"])
-        for p in _active_teaching_entries(faculty, today)
+        for _role, p in _active_teaching_entries(faculty, today)
         if valid_email(p.get("email")) is None
     ]
 
