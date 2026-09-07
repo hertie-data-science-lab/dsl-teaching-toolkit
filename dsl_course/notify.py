@@ -41,6 +41,8 @@ from datetime import datetime
 from typing import NamedTuple
 
 from . import ghcli, mailer, sync_faculty
+from .course import term_tag
+from .discovery import course_name_of
 from .gh_contents import blame_logins, last_committer
 from .log import log, log_err, log_ok, log_person
 from .schedule import (
@@ -48,6 +50,7 @@ from .schedule import (
     SCHEDULE_PATH,
     SOURCE_CRITICAL_WINDOW,
     SOURCE_URGENT_WINDOW,
+    SOURCE_WARN_WINDOW,
     FaultKind,
     Severity,
     SourceFault,
@@ -58,9 +61,10 @@ from .source_digest import DigestResult
 
 # How much of the deadline is left, in the subject. Formatted from the windows themselves,
 # so moving a rung cannot leave a hand-typed number of hours in somebody's inbox.
-_SUFFIX = {
-    Severity.URGENT: f" ({hours(SOURCE_URGENT_WINDOW)}h)",
-    Severity.CRITICAL: f" ({hours(SOURCE_CRITICAL_WINDOW)}h)",
+_LEFT = {
+    Severity.WARNING: f"{hours(SOURCE_WARN_WINDOW)}h left",
+    Severity.URGENT: f"{hours(SOURCE_URGENT_WINDOW)}h left",
+    Severity.CRITICAL: f"{hours(SOURCE_CRITICAL_WINDOW)}h left",
 }
 
 # The first two rungs say the same thing, because the same thing is true: the materials
@@ -83,11 +87,6 @@ _INTRO = {
         "course org."
     ),
 }
-
-# Every value in the block is padded to this column so the four labels line up in a
-# proportional-font client - which is the whole reason the block is a `<pre>`.
-_LABEL_WIDTH = 15
-
 
 # --------------------------------------------------------------------- who to tell
 
@@ -250,94 +249,124 @@ def _anchor(url: str, text: str) -> str:
     return f'<a href="{html.escape(url, quote=True)}">{html.escape(text)}</a>'
 
 
-def _folder_link(course_org: str, fault: SourceFault) -> str | None:
-    """A link to the place the materials belong - the folder's PARENT, because the folder
-    itself is exactly what is not there yet.
+def _place_link(course_org: str, fault: SourceFault) -> tuple[str, str] | None:
+    """`(text, url)` for the place the fix happens, as the fix sentence names it.
 
-    A MISSING_REPO fault links the COURSE ORG instead: the repo is the thing that is
-    absent, so `<repo>/tree/main/<folder>` inside it is a 404 in an email whose whole job
-    is to say where to go. The org is where the repo has to be created, and it is the one
-    URL that is certainly there.
+    A missing PATH names `<course_org>/<repo>`, linked to the folder's PARENT - the folder
+    itself is exactly what is not there yet. A missing REPO names the course org alone,
+    linked to the org: the repo is the thing that is absent, so a URL inside it is a 404
+    in an email whose whole job is to say where to go.
 
     `main` because every repo this toolkit creates has one, and a branch lookup per fault
     would be an API call to decorate an email."""
-    if not fault.repo:
-        return None
-    org = f"https://github.com/{course_org}"
-    if fault.kind is FaultKind.MISSING_REPO:
-        return _anchor(org, course_org)
-    base = f"{org}/{fault.repo}"
+    org_url = f"https://github.com/{course_org}"
+    if fault.kind is FaultKind.MISSING_REPO or not fault.repo:
+        return course_org, org_url
     parent = fault.path.rpartition("/")[0]
-    if not parent:
-        return _anchor(base, fault.repo)
-    return _anchor(f"{base}/tree/main/{parent}", f"{fault.repo}/{parent}")
+    url = f"{org_url}/{fault.repo}" + (f"/tree/main/{parent}" if parent else "")
+    return f"{course_org}/{fault.repo}", url
 
 
-def _row_html(label: str, markup: str) -> str:
-    """One line of the block whose value is already MARKUP - the links row, built out of
-    `_anchor`, which escapes as it goes. An empty label is that row: it carries links
-    rather than a labelled value, and sits flush with the labels above it."""
-    if not label:
-        return f"  {markup}"
-    return f"  <b>{label}</b>{' ' * max(1, _LABEL_WIDTH - len(label))}{markup}"
+def _linked(text: str, name: str, url: str) -> str:
+    """`text`, HTML-escaped, with its first mention of `name` turned into a link. A text
+    that does not mention it comes back escaped and otherwise untouched."""
+    escaped = html.escape(text)
+    target = html.escape(name)
+    return escaped.replace(target, _anchor(url, name), 1)
 
 
-def _row(label: str, value: str) -> str:
-    """One labelled line of the block, value ESCAPED and aligned to `_LABEL_WIDTH`.
+def _content(fault: SourceFault) -> str:
+    """The `error content:` cell: what is missing, named as the thing the entry points at
+    rather than as a URL - the link lives on the fix row, this row says what is wrong."""
+    if fault.kind is FaultKind.MISSING_PATH and fault.path:
+        return (
+            f"the specified path <code>{html.escape(fault.path)}</code> does not exist."
+        )
+    if fault.kind is FaultKind.MISSING_REPO and fault.repo:
+        return (
+            f"the specified repo <code>{html.escape(fault.repo)}</code> does not exist "
+            f"or is empty."
+        )
+    return html.escape(fault.what)
 
-    Escaped HERE and not at the call sites: every value in the block came out of a
-    faculty-authored schedule.yml, and `course_source_path: <tbc>` unescaped swallows the
-    rest of the mail - the fix sentence and the links with it."""
-    return _row_html(label, html.escape(value))
+
+def _rows(rows: list[tuple[str, str]]) -> str:
+    """A two-column table: bold lower-case labels down the left, values already MARKUP
+    on the right. A table rather than a `<pre>`, so the values wrap and read in the
+    client's own face instead of arriving as a code snippet."""
+    cells = "".join(
+        f'<tr><td style="padding:0 1em 0.25em 0;white-space:nowrap;vertical-align:top">'
+        f'<b>{label}</b></td><td style="padding:0 0 0.25em 0">{markup}</td></tr>'
+        for label, markup in rows
+    )
+    return f'<table style="border-collapse:collapse">{cells}</table>'
 
 
-def _block(cohort_org: str, course_org: str, fault: SourceFault, now: datetime) -> str:
-    """One fault, as the labelled `<pre>` block the appendix specifies.
+def _block(
+    cohort_org: str,
+    course_org: str,
+    fault: SourceFault,
+    rung: Severity,
+    issue_url: str | None,
+    now: datetime,
+) -> str:
+    """One fault, as the labelled table the appendix specifies.
 
     Whether the moment has PASSED is read off the clock and not off the rung. A rung can
     be held below MISSED by its ceiling - that is what `.releaseignore` withholding does -
     and the date has still gone by, so "fix by: release fires <yesterday>" is not an
     instruction anybody can follow."""
     fired = fault.fires is not None and fault.fires <= now
-    rows = [
-        _row("error line:", f"{fault.at} - {fault.where} -> {fault.field}"),
-        _row("error content:", fault.what),
-        _row(
-            "fired:" if fired else "fix by:",
-            fault.due if fired else f"{fault.moment} fires {fault.due}",
-        ),
-    ]
-    # The folder first, because staging the materials is the fix; the schedule line
-    # second, because correcting the path is the other one.
     line_url = deep_link(cohort_org, fault)
-    links = [
-        link
-        for link in (
-            _folder_link(course_org, fault),
-            _anchor(line_url, f"{SCHEDULE_PATH}#L{fault.lineno}") if line_url else None,
-        )
-        if link
+    where = html.escape(f" - {fault.where} -> {fault.field}")
+    at = _anchor(line_url, fault.at) if line_url else html.escape(fault.at)
+    fix = fault.fix(course_org, rung)
+    place = _place_link(course_org, fault)
+    rows = [
+        ("error line:", at + where),
+        ("error content:", _content(fault)),
+        (
+            "fired:" if fired else "fix by date:",
+            html.escape(fault.due if fired else f"{fault.moment} fires {fault.due}"),
+        ),
+        ("to fix:", _linked(fix, *place) if place else html.escape(fix)),
     ]
-    if links:
-        rows.append(_row_html("", "  |  ".join(links)))
-    return "<pre>" + "\n".join(rows) + "</pre>"
+    if issue_url:
+        rows.append(("GH issue record:", _anchor(issue_url, issue_url)))
+    return _rows(rows)
 
 
-def _subject(cohort_org: str, fault: SourceFault, rung: Severity, others: int) -> str:
+def _course_label(course_org: str, cohort_org: str) -> str:
+    """`Deep Learning (Demo) f2026`: the course's display name and the cohort's term tag,
+    which is how a reader tells two cohorts of one course apart in a subject line. The
+    org slug stands in for a course that declares no name."""
+    name = course_name_of(course_org) or course_org
+    tag = term_tag(cohort_org)
+    return f"{name} {tag}" if tag else name
+
+
+def _subject(
+    label: str, faults: list[SourceFault], rung: Severity, now: datetime
+) -> str:
     """The subject, named for the loudest entry in the mail.
 
-    `others` is how many more faults share the mail. The appendix's format names one
-    entry, and grouping by recipient set can put two in one message, so the count is
-    appended rather than the subject naming neither."""
-    entry = fault.where.partition(".")[2] or fault.where
-    if rung is Severity.MISSED:
-        out = f"[{cohort_org}] {entry} released nothing - materials still missing"
+    `[<course> <tag>] Missing materials: <entry> fires <when> - <n>h left`, or `fired
+    <when> - nothing shipped` once the moment has gone. Grouping by recipient set can put
+    two entries in one message; then it counts them and names the nearest deadline."""
+    first = faults[0]
+    fired = first.fires is not None and first.fires <= now
+    when = (
+        f"{first.fires:%a} {first.fires.day} {first.fires:%b} {first.fires:%H:%M}"
+        if first.fires
+        else "no date (tbc)"
+    )
+    entry = first.where.partition(".")[2] or first.where
+    what = f"{len(faults)} {first.moment}s, next" if len(faults) > 1 else entry
+    if fired:
+        tail = f"fired {when} - nothing shipped"
     else:
-        out = (
-            f"[{cohort_org}] {entry} materials missing - releases "
-            f"{fault.due_short}{_SUFFIX.get(rung, '')}"
-        )
-    return out + (f" (+{others} more)" if others else "")
+        tail = f"fires {when}" + (f" - {_LEFT[rung]}" if rung in _LEFT else "")
+    return f"[{label}] Missing materials: {what} {tail}"
 
 
 def _mail(
@@ -348,20 +377,23 @@ def _mail(
     loudest: Severity,
     now: datetime,
 ) -> tuple[str, str]:
-    """The (subject, HTML body) of one message: intro, a block and a fix per fault, and
-    the issue that holds the history."""
-    parts = [f"<p>{_INTRO[loudest]}</p>"]
-    for key in keys:
-        fault = digest.faults_by_key[key]
-        rung = digest.mail[key]
-        parts.append(_block(cohort_org, course_org, fault, now))
-        parts.append(f"<p><b>fix:</b> {html.escape(fault.fix(course_org, rung))}</p>")
-    if digest.issue_url:
+    """The (subject, HTML body) of one message: who sends it, why, and a table per fault
+    that ends on the issue holding the history."""
+    label = _course_label(course_org, cohort_org)
+    org_url = f"https://github.com/{course_org}"
+    sender = html.escape(course_name_of(course_org) or course_org)
+    parts = [
+        f"<p>This is an automated email sent on behalf of {sender}.</p>",
+        f"<p>{_linked(_INTRO[loudest], 'course org', org_url)}</p>",
+    ]
+    faults = [digest.faults_by_key[k] for k in keys]
+    for key, fault in zip(keys, faults, strict=True):
         parts.append(
-            f"<p>Record and history: {_anchor(digest.issue_url, digest.issue_url)}</p>"
+            _block(
+                cohort_org, course_org, fault, digest.mail[key], digest.issue_url, now
+            )
         )
-    first = digest.faults_by_key[keys[0]]
-    return _subject(cohort_org, first, loudest, len(keys) - 1), "\n".join(parts) + "\n"
+    return _subject(label, faults, loudest, now), "\n".join(parts) + "\n"
 
 
 def notify_source_transitions(

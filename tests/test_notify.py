@@ -135,6 +135,7 @@ def wired(monkeypatch):
             ),
         )
         monkeypatch.setattr(notify.ghcli, "bot_login", lambda: "dsl-bot")
+        monkeypatch.setattr(notify, "course_name_of", lambda org: "Course Name")
         monkeypatch.setattr(notify.mailer, "maintainer_address", lambda: maintainer)
         monkeypatch.setattr(
             notify.mailer,
@@ -308,30 +309,36 @@ def test_two_faults_from_one_person_share_a_single_mail(wired):
     routing = notify.route(COHORT, COURSE, [a, b], NOW)
     _run([a, b], Severity.URGENT, routing)
     assert sent.one["to"] == ["jan@x.edu"]
-    assert "(+1 more)" in sent.one["subject"]
+    assert "Missing materials: 2 releases, next fires" in sent.one["subject"]
     assert sent.one["body"].count("<b>error line:</b>") == 2
 
 
 @pytest.mark.parametrize(
-    ("rung", "expected"),
+    ("rung", "fires", "expected"),
     [
+        (Severity.WARNING, timedelta(hours=3), "fires Mon 7 Sep 15:00 - 24h left"),
+        (Severity.URGENT, timedelta(hours=3), "fires Mon 7 Sep 15:00 - 12h left"),
+        (Severity.CRITICAL, timedelta(hours=3), "fires Mon 7 Sep 15:00 - 6h left"),
         (
-            Severity.WARNING,
-            "materials missing - releases Mon 7 Sep 15:00 Europe/Berlin",
+            Severity.MISSED,
+            -timedelta(hours=1),
+            "fired Mon 7 Sep 11:00 - nothing shipped",
         ),
-        (Severity.URGENT, "(12h)"),
-        (Severity.CRITICAL, "(6h)"),
-        (Severity.MISSED, "released nothing - materials still missing"),
     ],
 )
-def test_the_subject_says_which_entry_and_how_long_is_left(wired, rung, expected):
-    # The subject is what decides whether this gets opened today. It names the entry and
-    # the deadline, with the zone - a time without a zone is a time about nothing.
+def test_the_subject_says_which_entry_and_how_long_is_left(
+    wired, rung, fires, expected
+):
+    # The subject is what decides whether this gets opened today. It names the course and
+    # cohort a reader teaches, the entry, the deadline, and how much of it is left - the
+    # zone lives in the body, where the same moment is spelled out in full.
+    fault = _fault(fires=fires)
     sent = wired(blame={131: "JanG"}, committer=None)
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
-    _run([_fault()], rung, routing)
-    assert sent.one["subject"].startswith(f"[{COHORT}] lecture_02 ")
-    assert expected in sent.one["subject"]
+    routing = notify.route(COHORT, COURSE, [fault], NOW)
+    _run([fault], rung, routing)
+    assert sent.one["subject"] == (
+        f"[Course Name f2026] Missing materials: lecture_02 {expected}"
+    )
 
 
 def test_the_body_names_the_line_the_content_the_deadline_and_both_links(wired):
@@ -339,19 +346,38 @@ def test_the_body_names_the_line_the_content_the_deadline_and_both_links(wired):
     routing = notify.route(COHORT, COURSE, [_fault()], NOW)
     _run([_fault()], Severity.URGENT, routing)
     body = sent.one["body"]
-    assert "<b>error line:</b>" in body
-    assert "schedule.yml:131 - releases.lecture_02 -&gt; course_source_path" in body
-    assert f"<b>error content:</b> {COURSE}/course-materials-f2026/" in body
+    assert body.startswith(
+        "<p>This is an automated email sent on behalf of Course Name.</p>"
+    )
+    # The intro links the course org the materials belong in.
+    assert f'<a href="https://github.com/{COURSE}">course org</a> yet.' in body
+    # The line reference IS the deep link, then the entry and the field it names.
+    line = f"https://github.com/{COHORT}/classroom-config/blob/main/schedule.yml#L131"
     assert (
-        "<b>fix by:</b>        release fires Mon 07 Sep 2026, 15:00 Europe/Berlin"
+        f'<b>error line:</b></td><td style="padding:0 0 0.25em 0">'
+        f'<a href="{line}">schedule.yml:131</a> - releases.lecture_02 -&gt; '
+        f"course_source_path</td>"
+    ) in body
+    # The content names the path as a path, not as a URL - the link is on the fix row.
+    assert (
+        "the specified path <code>students/lectures/02_lecture</code> does not exist."
         in body
     )
-    # The folder to push to comes FIRST, because staging the materials is the fix; the
-    # schedule line second, because correcting the path is the other one.
-    folder = "course-materials-f2026/tree/main/students/lectures"
-    assert body.index(folder) < body.index("schedule.yml#L131")
-    assert "<b>fix:</b> push the materials to that folder in" in body
-    assert f'Record and history: <a href="{ISSUE}">' in body
+    assert "<b>fix by date:</b>" in body
+    assert "release fires Mon 07 Sep 2026, 15:00 Europe/Berlin" in body
+    # The fix names the repo to push to, linked to the folder's PARENT: the folder itself
+    # is exactly what is not there yet.
+    folder = f"https://github.com/{COURSE}/course-materials-f2026/tree/main/students/lectures"
+    assert (
+        f'<b>to fix:</b></td><td style="padding:0 0 0.25em 0">push the materials to '
+        f'that folder in <a href="{folder}">{COURSE}/course-materials-f2026</a>, or '
+        f"correct the path on the line above.</td>"
+    ) in body
+    assert (
+        f'<b>GH issue record:</b></td><td style="padding:0 0 0.25em 0"><a href="{ISSUE}">'
+        in body
+    )
+    assert "<pre>" not in body
     assert sent.one["html"] is True
 
 
@@ -364,7 +390,7 @@ def test_a_missed_release_is_told_in_the_past_tense(wired):
     _run([fired], Severity.MISSED, routing)
     body = sent.one["body"]
     assert "<b>fired:</b>" in body
-    assert "<b>fix by:</b>" not in body
+    assert "<b>fix by date:</b>" not in body
     assert "the next 15-minute tick releases them" in body
 
 
@@ -386,7 +412,7 @@ def test_a_deadline_that_has_passed_is_past_tense_whatever_the_rung(wired):
     routing = notify.route(COHORT, COURSE, [fault], NOW)
     _run([fault], Severity.WARNING, routing)
     assert "<b>fired:</b>" in sent.one["body"]
-    assert "<b>fix by:</b>" not in sent.one["body"]
+    assert "<b>fix by date:</b>" not in sent.one["body"]
 
 
 def test_a_missing_assignment_template_says_to_create_the_repo(wired):
@@ -402,13 +428,16 @@ def test_a_missing_assignment_template_says_to_create_the_repo(wired):
     _run([fault], Severity.URGENT, routing)
     body = sent.one["body"]
     assert (
-        "<b>fix:</b> create the assignment template repo named on schedule.yml:131"
+        "the specified repo <code>assignment-2-f2026</code> does not exist or is empty."
         in body
     )
     assert "handout fires" in body
-    # ...and it links the ORG the repo has to be created in. A `tree/main/` URL inside a
-    # repo that does not exist is a 404 on the one line saying where to go.
-    assert f'<a href="https://github.com/{COURSE}">' in body
+    # ...and the fix links the ORG the repo has to be created in. A `tree/main/` URL
+    # inside a repo that does not exist is a 404 on the one line saying where to go.
+    assert (
+        f"create the assignment template repo named on schedule.yml:131 in "
+        f'<a href="https://github.com/{COURSE}">{COURSE}</a> and push' in body
+    )
     assert "tree/main" not in body
 
 
