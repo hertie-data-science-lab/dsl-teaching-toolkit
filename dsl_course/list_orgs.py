@@ -90,7 +90,7 @@ def discover_course_orgs() -> list[dict]:
 
     An org whose metadata could not be read is carried through with `readable: False` and
     a null tier rather than dropped: the page must still show it (an absence reads as
-    "deleted"), and a null matches no tier, so Promote's fan-out skips exactly that org
+    "deleted"), and a null matches no tier, so the deploy fan-out skips exactly that org
     and refreshes the rest.
     """
     orgs = []
@@ -113,7 +113,7 @@ def discover_course_orgs() -> list[dict]:
                 # The deployment tier this course (and every cohort under it) runs. Read
                 # off the metadata already fetched, so the page costs no extra call to say
                 # which orgs a promotion would move. A tier that does not resolve is null,
-                # like an unreadable one: it matches no tier, so Promote's fan-out names
+                # like an unreadable one: it matches no tier, so the deploy fan-out names
                 # the org and skips it rather than refreshing it at a guessed ref.
                 "central_ref": _tier_or_none(owner, declared)
                 if meta is not None
@@ -158,7 +158,7 @@ def _metadata_or_none(org: str) -> dict | None:
     fully generated, so a transient failure read as "declares nothing" would file a cohort
     under Course orgs and rewrite the page around it.
 
-    That abort is the right answer for the inventory itself (see `main`), but Promote's
+    That abort is the right answer for the inventory itself (see `main`), but the deploy
     fan-out reads the same listing to decide which orgs to refresh, and one org's typo
     leaving the whole estate un-refreshed is not a trade worth making. So the failure is
     logged and localised to that org here, and the caller decides."""
@@ -269,7 +269,7 @@ def main() -> int:
         return 1
 
     # An org this run could not read must not be reported as if the listing were
-    # complete. The inventory still prints - Promote reads the JSON, and a null tier is a
+    # complete. The inventory still prints - the fan-out reads the JSON, and a null tier is a
     # value it can act on - but the exit code says the picture is partial.
     partial = unreadable(orgs, cohorts)
     if partial:

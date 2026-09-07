@@ -450,12 +450,12 @@ non-bot commit sits on it - a reviewer's correction is never clobbered.
 Seeded workflow YAML is frozen in each org at seed time, while the engine it calls is always
 checked out from central at **that org's** ref - `central_ref:` in its course org's
 `.github/dsl-course.yml`, defaulting to `central.CENTRAL_REF` (`release`); cohorts inherit
-their course org's. A merge to `main` changes nothing in any live course: promoting it to
-`staging` (the demo org) and then `release` is a deliberate second act, and a rollback is a
-revert on `main` promoted forward, which every org picks up on its next run with no re-seed.
-Engine changes therefore land on the first press after a promotion; *workflow shape* changes
-land because every course org re-seeds itself nightly - and the Promote workflow dispatches
-that refresh rather than leaving it to the cron. See
+their course org's. A merge to `main` changes nothing in a REAL course: it deploys to the
+demo org, which runs `main`, and promoting it to `release` is a deliberate second act. A
+rollback is a revert on `main` promoted forward, which every org picks up on its next run with
+no re-seed. Engine changes therefore land on the first press after a deploy; *workflow shape*
+changes land because every course org re-seeds itself nightly - and both the merge and the
+promotion fan that refresh out themselves rather than leaving it to the cron. See
 [central-admin.md](central-admin.md#deploying-the-toolkit).
 
 ```mermaid

@@ -4,19 +4,23 @@ For whoever maintains **this repo**. Everything here is a constraint the code de
 only its comments record. If you run a course rather than the toolkit, you want
 [the runbooks](../README.md) instead.
 
-## A merge to main is not a deploy
+## A merge to main is a deploy - to the demo org
 
 Every seeded workflow, in every bootstrapped org, checks this repo out at the ref **that org**
 runs - `central_ref:` in its course org's `.github/dsl-course.yml`, defaulting to
-`central.CENTRAL_REF` (`release`). Landing on `main` therefore changes nothing anywhere.
+`central.CENTRAL_REF` (`release`).
 
-Deploying is promoting: `main` -> `staging` (the demo org) -> `release` (everything else), via
-the **Promote** workflow, which can only fast-forward a tier along main's history. Engine
-changes are then live on the next press in each org; workflow *shapes* (inputs, jobs, crons)
-are re-rendered by each org's nightly **Refresh actions**, and Promote runs that refresh itself
-out of the promoted checkout so they land at once. Rollback is a `git revert` on `main`,
-promoted forward - never a force-push.
-Tiers, soak checklist and the full rollback procedure:
+Two tiers, along one linear history. PRs squash-merge to `main`, which is what the demo
+course org runs, and **Deploy main** fans the refresh out to every org on `main` as the merge
+lands - so a change is live there within minutes, and that is where it gets validated. Real
+orgs run `release`, which moves only when someone presses **Promote to release**: it can only
+fast-forward `release` along main's history, and there is no approval gate on it. Engine
+changes are live on the next press in each org; workflow *shapes* (inputs, jobs, crons) are
+re-rendered by the same fan-out, and by each org's nightly **Refresh actions**. Rollback is a
+`git revert` on `main`, promoted forward - never a force-push. `central_ref:` may be `main`,
+`release`, or a full 40-character SHA on main's history; the `staging` tier was retired and
+its branch deleted on 2026-09-07.
+Tiers, the pre-promotion checklist and the full rollback procedure:
 [central-admin.md](../../docs-admin-arch/central-admin.md#deploying-the-toolkit).
 
 ## Doc filenames are a public API
@@ -206,7 +210,7 @@ CI and every seeded workflow run 3.12. Conventions:
 `tests/e2e` drives the REAL seeded workflows against the demo tier: New assignment ->
 schedule block -> Scheduled release (handout) -> a genuine student push -> Scheduled release
 (snapshot + autograde), then puts both orgs back. It proves the wiring unit tests cannot -
-a click, a cron, a token and a repo - and it is the gate between **Promote to staging and
+a click, a cron, a token and a repo - and it is the gate between **merging to main and
 Promote to release**. Two scheduler passes are needed because `scheduler.run` snapshots
 before it hands out.
 
@@ -226,7 +230,7 @@ Three fences, and all three must hold. `DSL_ORG_ALLOWLIST` refuses any WRITE (`g
 push`) outside the orgs it names - opt-in, unset everywhere else, and it raises rather than
 returning a failure pair, which `repo_exists` would read as absence. `tests/e2e/allowlist.py`
 names the two demo orgs as a literal; `DSL_E2E_ORGS` may only NARROW that. Preflight refuses
-to start unless the course org declares `central_ref: staging`, `staging` is this checkout's
+to start unless the course org declares `central_ref: main`, `main` is this checkout's
 HEAD, every workflow the org holds is byte-for-byte what this checkout renders for it, the
 test student has a roster row, and the run's namespace is empty.
 
