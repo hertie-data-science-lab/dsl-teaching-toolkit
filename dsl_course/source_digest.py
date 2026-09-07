@@ -361,11 +361,12 @@ def _comment(
     """The transition comment - short on purpose. It is an email subject line more than a
     document; the body above is where the detail lives.
 
-    ESCALATED and CLEARED always. An APPEARANCE only at the quietest reported rung: above
-    it the mail is the notification and a comment saying the same thing again is the noise
-    this design exists to avoid, but at WARNING nothing is mailed at all, so without this
-    a fault appearing while the issue is already open would produce no notification of any
-    kind until its 48h mail."""
+    ESCALATED and CLEARED always. An APPEARANCE only at the QUIETEST reported rung, which
+    is where a fault normally enters this issue: it starts the thread, so the escalations
+    and the clearing have something to be a history of. A fault that appears already
+    louder than that - an entry written the day before it fires - gets no comment, because
+    the body lists it and the mail is out; a comment repeating that is the noise this whole
+    design exists to avoid."""
 
     def cite(k: str) -> str:
         return _cite(cohort_org, faults.get(k))

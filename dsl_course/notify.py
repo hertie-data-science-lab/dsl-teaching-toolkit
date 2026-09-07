@@ -390,7 +390,8 @@ def notify_source_transitions(
             loudest = digest.mail[keys[0]]
             subject, body = _mail(cohort_org, course_org, digest, keys, loudest)
             # The maintainer is copied at the two rungs where a release is about to ship
-            # nothing, or already has - not at 48h, which is still faculty's own week.
+            # nothing, or already has. Not at the quieter two: those are still faculty's
+            # own day, and a maintainer copied on every one of them stops reading them.
             copies = list(routed.cc)
             if maintainer and loudest >= Severity.CRITICAL:
                 copies.append(maintainer)
