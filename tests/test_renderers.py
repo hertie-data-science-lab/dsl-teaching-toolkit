@@ -1080,9 +1080,12 @@ def _assert_emails_the_maintainer(step: dict) -> None:
     # The issue is the durable record; this is the only channel the MAINTAINER is on.
     # GitHub's own scheduled-failure email goes to whoever last committed the workflow
     # file, which is always the bot, which is to say nobody.
-    assert "--log-failed" in step["run"]  # the failing STEP's output, not the whole job
+    # The FAILED JOB's log, fetched by id: `gh run view --log-failed` downloads and
+    # unzips every job in the run to print thirty lines from one of them.
+    assert 'select(.conclusion == "failure")' in step["run"]
+    assert "actions/jobs/$job/logs" in step["run"]
     assert "tail -n 30" in step["run"]
-    assert "--run-failed" in step["run"]
+    assert "dsl_course.notify run-failed" in step["run"]
     # Piped, never interpolated: a log tail is arbitrary text and must not become argv.
     assert "${{" not in step["run"]
     # A log that cannot be fetched must not lose the mail as well, and this job has

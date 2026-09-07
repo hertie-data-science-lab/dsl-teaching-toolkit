@@ -295,11 +295,13 @@ _SCOPE = "__CRON_ISSUE_SCOPE__"  # replaced per job; see _fill_scope
 _SCOPE_ENV = "__CRON_SCOPE_ENV__"  # any env the scope's shell fragment reads
 
 # The mail that reaches the maintainer, gated on the notice step having actually reported.
-# `--log-failed` is the only way to get the failing STEP's output rather than the whole
-# job's, and it is guarded (`|| true`) because a log that cannot be fetched - a run whose
-# logs are still being assembled - must not lose the mail as well. The CLI always exits 0:
-# this job has already failed for its own reasons, and reddening it twice would say nothing
-# new. Piped, so the tail never becomes an argv a shell could reinterpret.
+# The FAILED JOB's log, not the run's: `gh run view --log-failed` downloads and unzips
+# every job in the run, which on the scheduler is one archive per cohort to print thirty
+# lines from. Both calls are guarded (`|| true`) because a log that cannot be fetched - a
+# run whose logs are still being assembled, a job id the listing did not carry - must not
+# lose the mail as well. The CLI always exits 0: this job has already failed for its own
+# reasons, and reddening it twice would say nothing new. Piped, so the tail never becomes
+# an argv a shell could reinterpret.
 _CRON_MAIL_TEMPLATE = (
     """      - name: Email the maintainer the failed step's log
         if: (failure() || cancelled()) && github.event_name != 'workflow_dispatch' && steps.notice.outputs.report == 'true'
@@ -313,8 +315,10 @@ _CRON_MAIL_TEMPLATE = (
     + _MAIL_ENV
     + """
         run: |
-          gh run view "$GITHUB_RUN_ID" --repo "$REPO" --log-failed 2>/dev/null | tail -n 30 \\
-            | python3 -m dsl_course.notify --run-failed --course-org "$COURSE" \\
+          job=$(gh api "repos/$REPO/actions/runs/$GITHUB_RUN_ID/jobs" \\
+            --jq '[.jobs[] | select(.conclusion == "failure")][0].id' 2>/dev/null) || true
+          gh api "repos/$REPO/actions/jobs/$job/logs" 2>/dev/null | tail -n 30 \\
+            | python3 -m dsl_course.notify run-failed --course-org "$COURSE" \\
                 --workflow "$WORKFLOW" --run-url "$RUN_URL" || true
 """
 )
