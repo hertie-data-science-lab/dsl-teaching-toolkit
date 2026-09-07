@@ -241,8 +241,15 @@ To put the demo course on the trunk, set **`central_ref: main`** in
 `hertie-dsl-demo-course-e1234/.github/dsl-course.yml` and run **Refresh actions** in that org;
 its cohorts follow. Valid values are `main`, `release`, or a full 40-character commit SHA on
 `main`'s history; anything else is refused, and the org keeps the workflows it already has
-until someone fixes the key. `staging` was the third tier until 2026-09-07 - it is now junk
-like any other typo.
+until someone fixes the key.
+
+**Always in this order: edit `central_ref:`, run that org's Refresh actions, then retire the
+ref it used to run.** An org's seeded workflows check the toolkit out at the ref they were
+rendered with, so deleting a ref an org still points at takes its whole Actions tab down -
+Refresh included, which is the one button that would have healed it. `staging` was a third
+tier until 2026-09-07 and is now junk like any other typo: the demo course org was moved to
+`main` and refreshed green before that change merged, and the `staging` branch is deleted
+after the merge.
 
 A new org is bootstrapped straight onto a tier by **Bootstrap Course Org**'s `central_ref`
 input (default `release`). It does two things at once: the run checks the toolkit out at

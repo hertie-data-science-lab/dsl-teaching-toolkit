@@ -22,8 +22,14 @@ inspection.
 Engine changes are live on the next press in each org; workflow *shapes* (inputs, jobs, crons)
 are re-rendered by the same fan-out, and by each org's nightly **Refresh actions**. Rollback is
 a `git revert` on `main`, promoted forward - never a force-push. `central_ref:` may be `main`,
-`release`, or a full 40-character SHA on main's history; the `staging` tier was retired and
-its branch deleted on 2026-09-07.
+`release`, or a full 40-character SHA on main's history.
+
+An org's seeded workflows check the toolkit out at **the ref they were rendered with**, so
+moving an org between refs is always: edit `central_ref:`, run that org's **Refresh actions**,
+*then* retire the old ref. Deleting a ref an org is still rendered against takes down its
+whole Actions tab, Refresh included. That is the order the `staging` retirement followed:
+2026-09-07, the demo course org was moved to `main` and refreshed green before this change
+merged, and the `staging` branch is deleted after the merge.
 Tiers, the pre-promotion checklist and the full rollback procedure:
 [central-admin.md](../../docs-admin-arch/central-admin.md#deploying-the-toolkit).
 
