@@ -34,13 +34,34 @@ from .log import log_err
 _LIST_LIMIT = "100"
 
 
-def _titled(repo: str, title: str, state: str = "open") -> list[tuple[int, str]]:
-    """(number, body) for every issue in `repo` titled EXACTLY `title`, lowest number
-    first. Raises when the listing could not be read: absence has to be a real answer.
+def issue_url(repo: str, number: int) -> str:
+    """The web URL of one issue. Spelled once, because a caller that had to OPEN the issue
+    and one that found it already open both need it, and two format strings for one URL is
+    one rename away from a mail linking nowhere."""
+    return f"https://github.com/{repo}/issues/{number}"
 
-    Open issues by default. A closed one must not be ADOPTED - the point of closing is
+
+class Issue(NamedTuple):
+    """One issue found by its exact title: its number, the body it carries, and whether it
+    is closed.
+
+    The BODY travels with it because the callers keep their previous state in it (an HTML
+    comment, invisible when rendered) - so one listing answers both "is it open?" and
+    "what did we last say?" without a second read."""
+
+    number: int
+    body: str
+    closed: bool = False
+
+
+def _titled(repo: str, title: str, state: str = "open") -> list[Issue]:
+    """Every issue in `repo` titled EXACTLY `title`, lowest number first. Raises when the
+    listing could not be read: absence has to be a real answer.
+
+    Open issues by default; `state="all"` is for a caller that wants both halves in one
+    search (see `find_issues`). A closed one must not be ADOPTED - the point of closing is
     that the condition cleared, so the next occurrence is a new issue and a new
-    notification - but `find_closed_issue` READS one, for the state it left behind.
+    notification - only READ, for the state it left behind.
 
     Read through `gh_json`, which parses stdout ALONE: `gh` hands back stdout and stderr
     joined, so one advisory on stderr (a token nearing expiry, an update notice) beside a
@@ -61,23 +82,23 @@ def _titled(repo: str, title: str, state: str = "open") -> list[tuple[int, str]]
             "--limit",
             _LIST_LIMIT,
             "--json",
-            "number,body,title",
+            "number,body,title,state",
         )
     except (RuntimeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"could not list issues in {repo}: {exc}") from exc
     return [
-        (r["number"], r.get("body") or "")
+        Issue(
+            r["number"],
+            r.get("body") or "",
+            str(r.get("state") or "OPEN").upper() != "OPEN",
+        )
         for r in sorted(rows, key=lambda r: r["number"])
         if r.get("title") == title
     ]
 
 
-def find_issue(repo: str, title: str) -> tuple[int, str] | None:
-    """(number, body) of the open issue in `repo` with this exact title, or None.
-
-    The BODY comes back with it because the callers keep their previous state in it (an
-    HTML comment, invisible when rendered) - so one listing answers both "is it open?" and
-    "what did we last say?" without a second read."""
+def find_issue(repo: str, title: str) -> Issue | None:
+    """The open issue in `repo` with this exact title, or None."""
     found = _titled(repo, title)
     return found[0] if found else None
 
@@ -96,40 +117,75 @@ class Upserted(NamedTuple):
     url: str | None = None
 
 
-# What `gh issue create` prints on success. Matched rather than read off a line position:
+class Titled(NamedTuple):
+    """Both halves of one exact-title search: the issue that is open, and the newest one
+    that is closed.
+
+    For a caller whose state lives in the body it last wrote (see `source_digest`). When
+    somebody closes that issue by hand nothing has actually been fixed, and re-opening
+    from a blank slate reports every standing fault as new and notifies about all of it
+    again - so it wants the closed body too, and asking for it in a second search is a
+    second listing on every tick that has no open issue."""
+
+    open: Issue | None
+    last_closed: Issue | None
+
+
+def find_issues(repo: str, title: str) -> Titled:
+    """The open issue with this exact title and the newest closed one, in ONE search.
+
+    Newest closed by number, which is the order they were opened in."""
+    found = _titled(repo, title, state="all")
+    closed = [i for i in found if i.closed]
+    return Titled(
+        next((i for i in found if not i.closed), None),
+        closed[-1] if closed else None,
+    )
+
+
+class _Unasked:
+    """The `existing=` default: the caller has not looked.
+
+    A type of its own because `None` is already an answer - "I looked, and no issue is
+    open" - and a default of None could not tell the two apart. It would then search
+    again on exactly the tick that has to CREATE."""
+
+
+_UNASKED = _Unasked()
+
+# What `gh issue create` prints on success, and the only place a caller can learn the
+# number of an issue it has just opened. Matched rather than read off a line position:
 # `gh` hands stdout and stderr back joined, so an advisory can arrive above or below it.
 _ISSUE_URL = re.compile(r"https://\S+/issues/\d+")
 
 
-def find_closed_issue(repo: str, title: str) -> tuple[int, str] | None:
-    """(number, body) of the NEWEST closed issue in `repo` with this exact title, or None.
-
-    For a caller whose state lives in the body it last wrote (see `source_digest`): when
-    somebody closes that issue by hand nothing has actually been fixed, and re-opening
-    from a blank slate reports every standing fault as new and notifies about all of it
-    again. Newest by number, which is the order they were opened in."""
-    found = _titled(repo, title, state="closed")
-    return found[-1] if found else None
-
-
 def upsert_issue(
-    repo: str, title: str, body: str, comment: str | None = None
+    repo: str,
+    title: str,
+    body: str,
+    comment: str | None = None,
+    existing: Issue | None | _Unasked = _UNASKED,
 ) -> Upserted:
     """Make `repo`'s issue titled `title` say `body` - editing it if it is open, opening it
     if it is not. Reports the error count and the issue's URL (see `Upserted`).
 
     `comment` is posted only when the issue ALREADY existed: a new issue emails everyone
     watching by being created, so a comment saying the same thing again is noise. Pass it
-    only for a transition the caller wants a human to hear about."""
-    try:
-        existing = find_issue(repo, title)
-    except RuntimeError as exc:
-        log_err(str(exc))
-        return Upserted(1)
+    only for a transition the caller wants a human to hear about.
+
+    `existing` is a `find_issue` result the caller has already fetched - every consumer
+    reads the body for its own previous state before deciding what to write, so without
+    this the search runs twice per tick."""
+    if existing is _UNASKED:
+        try:
+            existing = find_issue(repo, title)
+        except RuntimeError as exc:
+            log_err(str(exc))
+            return Upserted(1)
     if existing:
-        url = f"https://github.com/{repo}/issues/{existing[0]}"
+        url = issue_url(repo, existing.number)
         code, out = gh(
-            "issue", "edit", str(existing[0]), "--repo", repo, "--body", body
+            "issue", "edit", str(existing.number), "--repo", repo, "--body", body
         )
     else:
         code, out = gh(
@@ -142,7 +198,7 @@ def upsert_issue(
         return Upserted(1, url)
     if comment and existing:
         code, out = gh(
-            "issue", "comment", str(existing[0]), "--repo", repo, "--body", comment
+            "issue", "comment", str(existing.number), "--repo", repo, "--body", comment
         )
         if code != 0:
             log_err(f"could not comment on `{title}` in {repo}: {out[:200]}")
@@ -163,8 +219,8 @@ def close_issues_titled(repo: str, title: str, comment: str | None = None) -> in
         log_err(str(exc))
         return 1
     errors = 0
-    for number, _body in found:
-        args = ["issue", "close", str(number), "--repo", repo]
+    for issue in found:
+        args = ["issue", "close", str(issue.number), "--repo", repo]
         if comment:
             args += ["--comment", comment]
         code, out = gh(*args)
