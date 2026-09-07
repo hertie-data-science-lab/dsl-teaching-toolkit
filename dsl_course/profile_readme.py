@@ -188,7 +188,7 @@ def render_profile_readme(
     """Org overview. Cohort orgs get a student-facing page; course orgs a faculty & instructors one.
 
     `central_ref` is the ref of the central toolkit this org runs (discovery.central_ref_for);
-    the faculty page links into the docs at it, so an org on `staging` reads the staging docs
+    the faculty page links into the docs at it, so an org on `main` reads the trunk's docs
     rather than a runbook for engine code it is not running."""
     if is_cohort:
         return f"""<!-- INSTRUCTOR-OWNED - this is the page students land on, so it is yours to word.

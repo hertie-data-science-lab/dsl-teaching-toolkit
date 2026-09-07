@@ -117,25 +117,22 @@ run. An org with no secrets at all still previews green, saying the preview prov
 ## Deploying the toolkit
 
 Every seeded workflow in every org checks this repo out at run time, so whatever sits on the
-ref an org runs **is** that org's engine. Three tiers, three branches:
+ref an org runs **is** that org's engine. Two tiers, two branches:
 
 | Tier | Branch | Runs on |
 |---|---|---|
-| dev | `main` | nobody - CI only. PRs squash-merge here exactly as before |
-| staging | `staging` | the demo course org and its cohorts |
+| trunk | `main` | the demo course org and its cohorts. PRs squash-merge here |
 | release | `release` | every real org, and the default for one that declares nothing |
 
-`staging` and `release` never carry commits of their own: both are always fast-forwards of
-`main`. An org's tier is `central_ref:` in its **course** org's `.github/dsl-course.yml`;
-cohorts inherit it. The [inventory report](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml) shows it per course org, and
+`release` never carries commits of its own: it is always a fast-forward of `main`. An org's
+tier is `central_ref:` in its **course** org's `.github/dsl-course.yml`; cohorts inherit it. The [inventory report](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml) shows it per course org, and
 **Check cohort setup** shows it per cohort.
 
-Neither tier branch exists until someone makes it, and `central.CENTRAL_REF` is already
+`release` does not exist until someone makes it, and `central.CENTRAL_REF` is already
 `release`. **Order, on first setup:**
 
-1. Merge to `main`.
-2. Run **Promote** with `to: staging`, then `to: release`. The first run of each creates
-   that branch from `main`.
+1. Merge to `main`. **Deploy main** refreshes every org on `main` as it lands.
+2. Run **Promote to release**. The first run creates the branch from `main`.
 3. Verify one org: open a workflow in its `.github` repo and check the checkout step's
    `ref:` is the tier you expect.
 
@@ -145,34 +142,57 @@ org's existing workflows alone** - stale workflows that run beat current workflo
 cannot check anything out. So a forgotten tier branch costs a red cron, not an org whose
 whole Actions tab (Refresh included) fails at checkout forever.
 
-### Promote
+### Deploy main
 
-Run **Promote** (Actions tab of this repo) with `to: staging`, then, once it has soaked,
-`to: release`. `ref:` defaults to `main` for staging and `staging` for release; name a
-commit to promote only that one.
+Nothing to press. **Deploy main** runs on every push to `main` and refreshes every course org
+that declares `central_ref: main` - the demo course org - out of the merged commit, so the
+engine and the rendered workflow shapes land together instead of the shapes waiting for that
+org's 05:27 cron. An empty selection (no org on `main`) is a green run that says so.
 
-Promote refuses anything that is not both on `main`'s history and a descendant of the tier's
-current tip, so it can only ever move a tier forward - it cannot rewrite one, and cannot ship
-what `main` has not seen. It then runs each course org's refresh itself, out of the promoted
-checkout, so they converge in minutes rather than at the next 05:27 cron - and so an org that
-has just changed tier is re-rendered by the tier it is joining, not the one it is leaving.
+Two merges close together cannot overlap (the workflow holds a `deploy-main` concurrency
+group), but a run here can still overlap the org's own 05:27 **Refresh actions**: both write
+the same rendered files, so the worst case is a stale render that the next cron converges -
+known, and accepted rather than guarded.
 
-Anyone with write on this repo can run it; promoting to `release` then waits on the
-environment's required reviewers. Nothing else can push to either tier branch - see
-[Protecting the tiers](#protecting-the-tiers-set-by-hand).
+### Check the demo org before you promote
 
-### Soak on staging
+**This inspection is the gate to `release`.** There is no approval environment on Promote,
+and a green test suite is not a substitute: a person has to read what the demo org actually
+did. The merge has already deployed to the demo course org (`hertie-dsl-demo-course-e1234`)
+and both its cohorts (`hertie-dsl-demo-f2025`, `hertie-dsl-demo-f2026`), end to end - issues,
+issue comments, the mails that went out, the run logs and the cohort site. A day covers one
+nightly refresh:
 
-After promoting to `staging`, check the demo course org (`hertie-dsl-demo-course-e1234`) and
-both its cohorts (`hertie-dsl-demo-f2025`, `hertie-dsl-demo-f2026`) before promoting on. A day
-covers one nightly refresh:
-
-- [ ] **Refresh actions** green, both the Promote-triggered run and the next nightly cron
+- [ ] **Deploy main** green, and so is the org's own next nightly **Refresh actions**
 - [ ] one **Scheduled release** tick green (a dry run is enough if nothing is due)
 - [ ] a **Join** issue with a deliberately wrong code is rejected as usual
 - [ ] **Check cohort setup**'s mail-transport row reads `all 4 GRAPH_* secrets set` (the codes send has no preview mode - this row is how the credential is checked without mailing a cohort)
-- [ ] `DSL_E2E=1 pytest tests/e2e -q` green (the end-to-end harness - the gate between staging and release; see [maintainers.md](../docs/reference/maintainers.md#end-to-end-harness) for the env it needs)
+- [ ] `DSL_E2E=1 pytest tests/e2e -q` green (the end-to-end harness - run against the demo org before promoting, never instead of reading it; see [maintainers.md](../docs/reference/maintainers.md#end-to-end-harness) for the env it needs)
 - [ ] no failure issue opened in `hertie-dsl-demo-course-e1234/.github`
+
+### Promote to release
+
+Run **Promote to release** (Actions tab of this repo) once the manual end-to-end inspection
+of the demo org above has passed - that inspection is the gate, and nothing in the workflow
+enforces it.
+
+`ref:` is required and has **no default**. Name the 40-character SHA the demo org was
+inspected at - the head commit of the **Deploy main** run that refreshed it. `main` as a
+default would have shipped whatever its tip was at the moment of the click, which is not
+necessarily the commit anybody looked at; everything on main up to the commit named ships.
+The run prints that list of commits before it pushes.
+
+Promote refuses anything that is not both on `main`'s history and a descendant of `release`'s
+current tip, so it can only ever move `release` forward - it cannot rewrite it, and cannot
+ship what `main` has not seen. It then runs each course org's refresh itself, out of the
+promoted checkout, so they converge in minutes rather than at the next 05:27 cron - and so an
+org that has just changed tier is re-rendered by the tier it is joining, not the one it is
+leaving.
+
+Anyone with write on this repo can run it, and there is no approval environment on top of
+that: the code has been live in the demo org since it merged, and the gate is that somebody
+looked at it there. Nothing else can push to `release` - see
+[Protecting the tiers](#protecting-the-tiers-set-by-hand).
 
 ### Rollback
 
@@ -184,8 +204,9 @@ immediately.
 
 **Then fix it properly: revert on `main`, and promote.**
 
-1. `git revert <the bad commit>` on a branch, PR it, squash-merge to `main` as usual.
-2. Run **Promote** with `to: staging`, then `to: release`.
+1. `git revert <the bad commit>` on a branch, PR it, squash-merge to `main` as usual -
+   which deploys the revert to the demo org on its own.
+2. Run **Promote to release**.
 3. Unpin whatever you pinned in step 1.
 
 Promotion is a fast-forward, so it ships **everything on `main` up to the commit named**,
@@ -198,13 +219,14 @@ history CI never ran.
 **An org that already picked the bad build up** has nothing to undo - orgs keep no copy of
 the engine, they check it out per run, so the next run uses the reverted code. The exception
 is rendered workflow *shape* (inputs, jobs, crons), which is frozen in the org until its next
-**Refresh actions**; Promote dispatches that, and any faculty member can re-run it by hand.
+**Refresh actions**; the merge and the promotion each fan that out, and any faculty member can
+re-run it by hand.
 
 ### Protecting the tiers (set by hand)
 
 Promote's checks are worth nothing on their own: `faculty` and `instructors` both hold write
 here, so without this any of them can `git push origin whatever:release` and put unreviewed
-code straight into every live org. Three settings, none of them in code:
+code straight into every live org. Two settings, neither of them in code:
 
 1. **A repo deploy key with write, as `PROMOTE_DEPLOY_KEY`.** Promote pushes as that key,
    not as `GITHUB_TOKEN` or the bot: a deploy key is scoped to this repo alone, and it is
@@ -214,35 +236,47 @@ code straight into every live org. Three settings, none of them in code:
    private half to Settings -> Secrets and variables -> Actions -> `PROMOTE_DEPLOY_KEY`.
    **The DSL bot holds `read` here** - it reads across orgs for Promote's refresh fan-out
    and never pushes.
-2. **A repository ruleset on `staging` and `release`** (Settings -> Rules -> New branch
-   ruleset): target both branches, *Restrict updates*, *Restrict deletions*, *Block force
-   pushes*, *Require linear history*, and set the bypass list to **Deploy keys** only.
-   Promote passes `--force-with-lease` purely as a concurrency guard; every push it makes
-   is a fast-forward, so blocking force pushes never blocks it.
-3. **Create the `release` environment** (Settings -> Environments) with the maintainer as
-   **required reviewer** (self-approval allowed) and its deployment branch policy set to
-   `main` only. Promote's job runs in the environment named by its `to:` input, so a release
-   promotion waits for an approval and a staging soak does not.
+2. **A repository ruleset on `release`** (Settings -> Rules -> New branch ruleset): target
+   that branch, *Restrict updates*, *Restrict deletions*, *Block force pushes*, *Require
+   linear history*, and set the bypass list to **Deploy keys** only. Promote passes
+   `--force-with-lease` purely as a concurrency guard; every push it makes is a
+   fast-forward, so blocking force pushes never blocks it.
 On `main`: PR only, with **both** `ci.yml` jobs required - `pytest` **and**
-`jekyll-contract`. Required checks are named by hand and a job can only be named after it
-has reported on `main` at least once, so land a new CI job first and require it after.
+`jekyll-contract` - and those checks set **strict** (*Require branches to be up to date
+before merging*). Strict is load-bearing, not tidiness: **Deploy main** deploys every merge
+to the demo org with no CI gate of its own, and the whole argument for that is that a commit
+reaching `main` was green *as the tree it creates* - which a stale squash would not have
+been. Required checks are named by hand and a job can only be named after it has reported on
+`main` at least once, so land a new CI job first and require it after.
 
 ### Putting an org on a tier
 
 `central_ref:` is documented (commented out) in every course org's `.github/dsl-course.yml`.
-To put the demo course on staging, set **`central_ref: staging`** in
+To put the demo course on the trunk, set **`central_ref: main`** in
 `hertie-dsl-demo-course-e1234/.github/dsl-course.yml` and run **Refresh actions** in that org;
-its cohorts follow. Valid values are `main`, `staging`, `release`, or a full 40-character
-commit SHA on `main`'s history; anything else is refused, and the org keeps the workflows it
-already has until someone fixes the key.
+its cohorts follow. Valid values are `main`, `release`, or a full 40-character commit SHA on
+`main`'s history; anything else is refused, and the org keeps the workflows it already has
+until someone fixes the key.
 
-A new org is bootstrapped straight onto a tier by **Bootstrap Course Org**'s `central_ref`
-input (default `release`). It does two things at once: the run checks the toolkit out at
-that ref, and it records the ref in the new org's `dsl-course.yml`. So the code that
-provisions the org is the same code its workflows will run - bootstrapping from `main` and
-rendering at `release` would leave the org with two different engines. `--central-ref` is
-refused together with `--cohort`: a cohort inherits its course org's tier, so the nightly
-refresh would undo it.
+**Always in this order: edit `central_ref:`, run that org's Refresh actions, then retire the
+ref it used to run.** An org's seeded workflows check the toolkit out at the ref they were
+rendered with, so deleting a ref an org still points at takes its whole Actions tab down -
+Refresh included, which is the one button that would have healed it. `staging` was a third
+tier until 2026-09-07 and is now junk like any other typo: the demo course org was moved to
+`main` and refreshed green before that change merged, and the `staging` branch is deleted
+after the merge.
+
+**Bootstrap Course Org** offers `release` and nothing else. It does two things at once:
+the run checks the toolkit out at that ref, and it records the ref in the new org's
+`dsl-course.yml` - so the code that provisions the org is the same code its workflows will
+run, where bootstrapping from `main` and rendering at `release` would leave the org with two
+different engines. The trunk is not on the menu because an org bootstrapped onto it takes
+every merge the moment it lands: an org that really belongs there is bootstrapped onto
+`release` and then moved by hand, as above.
+
+The CLI is wider than the button - `--central-ref` takes any tier or SHA - but it is refused
+together with `--cohort`: a cohort inherits its course org's tier, so the nightly refresh
+would undo it.
 
 ## What orgs exist
 

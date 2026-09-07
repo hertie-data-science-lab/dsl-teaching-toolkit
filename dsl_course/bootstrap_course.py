@@ -332,7 +332,7 @@ def _course_metadata(
     `central_ref` writes the deployment tier this course runs (--central-ref) as a live
     key. Omitted, the file declares nothing and the course runs `central.CENTRAL_REF` -
     which is what every real course should do; the demo course is the one that is meant to
-    sit on `staging`. It is appended rather than templated in beside `course_code` because
+    sit on `main`. It is appended rather than templated in beside `course_code` because
     the template is itself parsed as YAML by the shipped-workflow sweep, so it cannot carry
     a placeholder on a line of its own."""
     identity = template("course/dsl-course.yml").format(
@@ -677,7 +677,7 @@ def main() -> int:
         "--central-ref",
         default=None,
         help="Which tier of the central toolkit this course org's seeded workflows run "
-        "the engine from: main, staging, release (default), or a full commit SHA. Written "
+        "the engine from: main, release (default), or a full commit SHA. Written "
         "to .github/dsl-course.yml as `central_ref:`. Course orgs only - a cohort inherits "
         "its course org's, so the two flags together are refused. Only the demo course "
         "should sit anywhere but release.",

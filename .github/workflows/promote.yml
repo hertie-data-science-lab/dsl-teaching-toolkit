@@ -1,38 +1,39 @@
-name: Promote
+name: Promote to release
 
-# Move a deployment tier forward. `staging` is what the demo course org runs, `release` is
-# what every real org runs (dsl_course/central.py, and each org's own `central_ref:`), and
-# both are always FAST-FORWARDS of `main` - they carry no commits of their own.
+# Move the `release` tier forward. `release` is what every real org runs (the default in
+# dsl_course/central.py, and each org's own `central_ref:`); `main` is the trunk, and what
+# the demo course org runs - so whatever is promoted here has already been live in a real
+# org since it merged.
 #
-# That invariant is enforced here, not by convention: the promoted commit must be on
-# main's history, and it must be a descendant of the tier's current tip. So this workflow
-# can only ever move a tier forward along main - it cannot rewrite a tier's history, and
-# there is therefore no way to use it to ship something main has never seen.
+# `release` carries no commits of its own: it is always a FAST-FORWARD of `main`. That
+# invariant is enforced here, not by convention: the promoted commit must be on main's
+# history, and it must be a descendant of `release`'s current tip. So this workflow can
+# only ever move `release` forward along main - it cannot rewrite its history, and there is
+# therefore no way to use it to ship something main has never seen.
 #
 # Rollback is a `git revert` on main, promoted forward; pinning one org to the last good SHA
 # is the way to move faster than that (see docs-admin-arch/central-admin.md).
 #
 # Who can run it: dispatching a workflow needs write on this repo, which is the same gate
-# every seeded workflow in every org uses. Promoting to `release` is gated a second time by
-# the `release` environment's required reviewers - see docs-admin-arch/central-admin.md.
+# every seeded workflow in every org uses. There is no approval environment on top of that,
+# because the gate is not a second click: press this ONLY after a manual end-to-end
+# INSPECTION of the demo course org - which tracks `main`, so it has been running this code
+# since it merged - has passed. A person reads the issues, the comments, the mails that went
+# out, the run logs and the cohort site. A green test suite is not that inspection and does
+# not stand in for it.
 
 on:
   workflow_dispatch:
     inputs:
-      to:
-        description: "Tier to promote"
-        required: true
-        type: choice
-        options:
-          - staging
-          - release
       ref:
-        description: "What to promote (default: main -> staging, staging -> release). A branch, tag or full SHA on main's history - everything up to it ships."
-        required: false
-        default: ""
+        # No default, and `main` least of all: a default would promote whatever main's tip
+        # happens to be at the moment of the click, which is not necessarily the commit
+        # anybody inspected. Naming it is the conscious act this workflow is made of.
+        description: "The 40-character SHA the demo course org was inspected at - the head commit of the Deploy main run that refreshed it (that org's own Refresh log names its tier, `main`, not the commit). A branch name still works, but naming the commit is the point: everything on main up to it ships. Promote only once a manual end-to-end inspection of the demo course org has passed - issues, comments, mails, run logs, site. The test suite is not the gate."
+        required: true
         type: string
       refresh_orgs:
-        description: "Refresh every org at that tier now, rather than waiting for tonight's cron"
+        description: "Refresh every org on `release` now, rather than waiting for tonight's cron"
         required: false
         default: true
         type: boolean
@@ -45,11 +46,6 @@ jobs:
   promote:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # The tier being promoted to, as a deployment environment: `release` carries the
-    # maintainer as a required reviewer, so a release promotion pauses for a human, while a
-    # staging soak stays one click. GitHub creates a named environment on first use, so an
-    # environment with no rules is simply no extra gate.
-    environment: ${{ inputs.to }}
     permissions:
       contents: read
     outputs:
@@ -59,9 +55,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
-          # The push below is the DEPLOY KEY's, not GITHUB_TOKEN's: the tier branches carry
-          # a ruleset whose only bypass actor is "deploy keys", which no account and no
-          # Actions token can be - so this workflow is the one way a tier moves. Checkout's
+          # The push below is the DEPLOY KEY's, not GITHUB_TOKEN's: `release` carries a
+          # ruleset whose only bypass actor is "deploy keys", which no account and no
+          # Actions token can be - so this workflow is the one way it moves. Checkout's
           # own credentials would win over the key (it writes an auth header into the repo
           # config, and https beats the ssh remote set below), so they are not persisted.
           persist-credentials: false
@@ -72,7 +68,9 @@ jobs:
           PROMOTE_DEPLOY_KEY: ${{ secrets.PROMOTE_DEPLOY_KEY }}
           # `gh api meta` is a public, unauthenticated endpoint; gh just wants a token.
           GH_TOKEN: ${{ github.token }}
-          TIER: ${{ inputs.to }}
+          # The one tier this workflow moves. `main` is not promoted to - it is where
+          # promotions come FROM.
+          TIER: release
           SOURCE_INPUT: ${{ inputs.ref }}
         run: |
           set -eo pipefail
@@ -88,18 +86,20 @@ jobs:
           eval "$(ssh-agent -s)"
           printf '%s\n' "$PROMOTE_DEPLOY_KEY" | ssh-add -
           git remote set-url origin "git@github.com:$GITHUB_REPOSITORY.git"
-          # fetch-depth: 0 already brings every branch and tag, so origin/main and both
-          # tier tips are here before this runs. Re-fetched anyway: one cheap call, and it
+          # fetch-depth: 0 already brings every branch and tag, so origin/main and
+          # release's tip are here before this runs. Re-fetched anyway: one cheap call, and it
           # narrows the window between the tip read below and the lease it becomes.
           git fetch --quiet origin "+refs/heads/*:refs/remotes/origin/*"
 
-          # staging is promoted from main, release from what has already soaked on staging.
-          # Overridable, to promote a point on main short of its tip - a tier is a
-          # fast-forward, so this chooses HOW FAR up main to move, never which commits to
-          # take: naming a commit ships it and everything before it.
-          default_source=main
-          [ "$TIER" = "release" ] && default_source=staging
-          source="${SOURCE_INPUT:-$default_source}"
+          # No fallback: an empty input is a dispatch that named nothing, and the one
+          # thing this must never do is guess. `release` is a fast-forward, so the input
+          # chooses HOW FAR up main to move, never which commits to take - naming a commit
+          # ships it and everything before it.
+          source="$SOURCE_INPUT"
+          if [ -z "$source" ]; then
+            echo "::error::name what to promote - the SHA the demo course org was inspected at."
+            exit 1
+          fi
 
           # A branch name resolves through origin/; a tag or SHA does not.
           new=$(git rev-parse --verify --quiet "refs/remotes/origin/$source^{commit}" \
@@ -109,11 +109,12 @@ jobs:
             exit 1
           fi
 
-          # THE invariant: every tier is a fast-forward of main. Enforced before the tier
-          # check, because a commit off main's history is the more serious mistake - it
-          # would put code into production that main, and therefore CI and review, never saw.
+          # THE invariant: `release` is a fast-forward of main. Enforced before the
+          # descendant check, because a commit off main's history is the more serious
+          # mistake - it would put code into production that main, and therefore CI and
+          # review, never saw.
           if ! git merge-base --is-ancestor "$new" origin/main; then
-            echo "::error::$source ($new) is not on main's history. Every tier is a fast-forward of main - land the change on main first (a rollback is a revert on main), then promote it."
+            echo "::error::$source ($new) is not on main's history. Every promotion is a fast-forward of main - land the change on main first (a rollback is a revert on main), then promote it."
             exit 1
           fi
 
@@ -125,16 +126,11 @@ jobs:
             exit 1
           fi
 
-          # --force-with-lease, never a bare -f: the lease is the tip verified above (empty
-          # when the branch does not exist yet, which asserts exactly that), so a tier moved
-          # by someone else since aborts the run rather than being overwritten. The push is
-          # a fast-forward either way - the lease only closes the gap between the check and
-          # the push.
-          git push --force-with-lease="refs/heads/$TIER:$tip" origin "$new:refs/heads/$TIER"
-          echo "sha=$new" >> "$GITHUB_OUTPUT"
-
+          # What this is about to ship, printed BEFORE the push and into the run log as
+          # well as the summary: a listing that only appears afterwards cannot help anyone
+          # watching the run notice that it is shipping more than they meant.
           {
-            echo "## Promoted \`$source\` to \`$TIER\`"
+            echo "## Promoting \`$source\` to \`$TIER\`"
             echo
             echo "- from: \`${tip:-(new branch)}\`"
             echo "- to:   \`$new\`"
@@ -146,79 +142,32 @@ jobs:
               git --no-pager log --oneline "$tip..$new"
               echo '```'
             elif [ "$tip" = "$new" ]; then
-              echo "_Already there - nothing moved._"
+              echo "_Already there - nothing to move._"
             fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+          # --force-with-lease, never a bare -f: the lease is the tip verified above (empty
+          # when the branch does not exist yet, which asserts exactly that), so a tier moved
+          # by someone else since aborts the run rather than being overwritten. The push is
+          # a fast-forward either way - the lease only closes the gap between the check and
+          # the push.
+          git push --force-with-lease="refs/heads/$TIER:$tip" origin "$new:refs/heads/$TIER"
+          echo "sha=$new" >> "$GITHUB_OUTPUT"
+          printf '\n**Pushed.** `%s` is now `%s`.\n' "$TIER" "$new" >> "$GITHUB_STEP_SUMMARY"
 
   # A promotion changes nothing in an org until that org next re-renders its workflows,
   # which the nightly "Refresh actions" cron does within 24h. This runs it now, so a
   # promotion is a deploy rather than a deploy that happens overnight.
   #
-  # It runs the refresh HERE, from the commit just promoted, rather than dispatching each
-  # org's own "Refresh actions": that workflow checks the toolkit out at the ref frozen in
-  # the org's own workflow file, so an org whose `central_ref:` has just moved between tiers
-  # would be re-rendered by the tier it is leaving and never converge. The bot is an owner
-  # of every course org; GITHUB_TOKEN sees only this repo and could not.
+  # The same fan-out a merge to main runs for the orgs on `main`; only the tier differs.
   refresh-orgs:
     needs: promote
     if: ${{ inputs.refresh_orgs }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
     permissions:
       contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
-        with:
-          # The promoted commit, not whatever ref the run was dispatched from.
-          ref: ${{ needs.promote.outputs.sha }}
-          persist-credentials: false
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
-        with:
-          python-version: "3.12"
-          cache: pip
-      - run: pip install -r requirements.txt
-
-      - name: Refresh every org on this tier
-        env:
-          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
-          # seed refresh propagates the bot token as a repo secret, and ghcli.bot_token
-          # refuses to publish one that is only GH_TOKEN.
-          DSL_BOT_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
-          TIER: ${{ inputs.to }}
-        run: |
-          set -eo pipefail
-          # list_orgs exits non-zero when it could not read SOME org's dsl-course.yml, and
-          # still prints the rest. One org's malformed file must not leave the whole
-          # estate un-refreshed, so that exit is tolerated here - but only if an inventory
-          # actually came back; an empty capture fails the jq below, as it should.
-          inventory=$(python3 -m dsl_course.list_orgs) \
-            || echo "::warning::list_orgs could not read every org - see the log; refreshing the ones it could"
-          # Cohort orgs are not listed: a course org's refresh converges every cohort
-          # registered under it in the same run.
-          orgs=$(jq -r --arg tier "$TIER" '.course_orgs[] | select(.central_ref == $tier) | .org' <<<"$inventory")
-          # A null tier is an org whose metadata could not be read, so nothing can say
-          # which tier it is on. Named in the summary rather than passed over in silence:
-          # it may well be an org this promotion was meant to reach.
-          unknown=$(jq -r '.course_orgs[] | select(.central_ref == null) | .org' <<<"$inventory")
-          {
-            echo "## Refresh on \`$TIER\`"
-            echo
-            [ -n "$orgs" ] || echo "_No course org runs \`$TIER\`._"
-          } >> "$GITHUB_STEP_SUMMARY"
-          failed=0
-          for org in $orgs; do
-            # Every org is attempted: one org's refresh failing must not strand the rest.
-            if python3 -m dsl_course.seed refresh --course-org "$org"; then
-              echo "- $org - refreshed" >> "$GITHUB_STEP_SUMMARY"
-            else
-              # Not fatal to the promotion - it has already landed, and the org's own
-              # nightly cron converges it within 24h - but it must not read as green.
-              echo "- $org - **refresh failed**, it converges on tonight's cron" >> "$GITHUB_STEP_SUMMARY"
-              failed=1
-            fi
-          done
-          for org in $unknown; do
-            echo "- $org - **skipped**, its \`dsl-course.yml\` could not be read" >> "$GITHUB_STEP_SUMMARY"
-            failed=1
-          done
-          exit "$failed"
+    uses: ./.github/workflows/refresh-tier.yml
+    with:
+      tier: release
+      ref: ${{ needs.promote.outputs.sha }}
+    secrets:
+      DSL_BOT_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}

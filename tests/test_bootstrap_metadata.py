@@ -219,7 +219,7 @@ def test_a_cohort_cannot_be_bootstrapped_onto_its_own_tier(monkeypatch, capsys):
             "--course",
             "Course-Org",
             "--central-ref",
-            "staging",
+            "main",
         ],
     )
     assert bc.main() == 1

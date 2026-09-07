@@ -35,6 +35,6 @@ def _live_gh(monkeypatch):
     `subprocess.run` is what lets a call leave the process at all, and `central.gh` is
     stubbed to answer "the ref is there" - which is precisely the preflight fact this
     harness must check for real, since the whole run is about whether the demo tier is on
-    `staging`."""
+    `main`."""
     monkeypatch.setattr(subprocess, "run", _REAL_RUN)
     monkeypatch.setattr(central, "gh", ghcli.gh)

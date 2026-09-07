@@ -151,11 +151,11 @@ def fake(monkeypatch):
 def test_every_seeded_doc_link_names_the_orgs_own_tier(fake):
     # The scaffolds link the runbooks by absolute URL. They named `main` whatever the org
     # ran, so a release cohort read the schema of code nobody had promoted yet.
-    bc.setup_cohort_extras("Cohort-f2026", "staging")
+    bc.setup_cohort_extras("Cohort-f2026", "main")
     for path in ("schedule.yml", "people.yml"):
         body = fake.files[("classroom-config", path)]
-        assert f"{CENTRAL}/blob/staging/docs/" in body, path
-        assert f"{CENTRAL}/blob/main/docs/" not in body, path
+        assert f"{CENTRAL}/blob/main/docs/" in body, path
+        assert f"{CENTRAL}/blob/release/docs/" not in body, path
 
 
 def test_fresh_cohort_seeds_every_file(fake):

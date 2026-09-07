@@ -554,6 +554,19 @@ def test_the_live_pipeline_module_imports(monkeypatch):
     assert {module.COURSE_ORG, module.COHORT_ORG} == set(allowlist.DEMO_ORGS)
 
 
+def test_a_central_ref_that_no_longer_resolves_is_reported_not_raised(monkeypatch):
+    # `staging` stopped being a tier on 2026-09-07. A MissingCentralRef out of the tier
+    # read would abort the preflight with a traceback that says neither what the org runs
+    # nor that it is the wrong thing; the preflight's own assertion says both.
+    module = _pipeline_module(monkeypatch)
+    monkeypatch.setattr(
+        module.gh_contents,
+        "get_file_content",
+        lambda org, repo, path: "central_ref: staging\n",
+    )
+    assert module._declared_tier() == "staging"
+
+
 def test_the_block_the_harness_really_inserts_is_valid_yaml(monkeypatch):
     """The fenced text goes into a file the scheduler parses every fifteen minutes: an
     indentation slip here would not fail the harness, it would fail the cohort."""
