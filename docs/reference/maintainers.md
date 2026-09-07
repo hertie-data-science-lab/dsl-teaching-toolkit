@@ -86,6 +86,39 @@ Things whose *literal spelling* is depended on from outside Python:
   faculty's patterns gone, and whatever they withheld shipping again on a green run. The
   price is that its wording cannot be improved in a repo that already has it.
 
+## Secrets an org carries
+
+Two values are published onto an org by the toolkit itself, both through
+`bootstrap_course.set_org_secret` - which scopes the org secret to the infra repos that
+exist and then mirrors it as a repo secret onto the private ones, because on GitHub Free a
+`selected` org secret is never delivered to a private repo:
+
+| Value | Held centrally as | Reaches an org via |
+|---|---|---|
+| `DSL_BOT_TOKEN` | a secret on this repo | Bootstrap with `set_secret: true`; `seed refresh` also mirrors it onto each content repo |
+| `DSL_MAINTAINER_EMAIL` | a repository **variable** on this repo | Bootstrap with `set_secret: true`, and Bootstrap cohort forwards it to a cohort |
+
+`DSL_MAINTAINER_EMAIL` is where fault mail goes. A variable centrally and a secret on the
+org: an address is not a credential (and a masked secret cannot be read back to check it),
+but a seeded workflow can only read it from `secrets.`. `mailer.maintainer_address` falls
+back to `GRAPH_SENDER` when it is absent, so an org without it mails the shared send mailbox
+rather than nobody, and `Check cohort setup` reports which of the two an org is on.
+
+Nothing converges it. "Refresh actions" runs INSIDE the course org and cannot read this
+repo's variables, so an org bootstrapped before the variable existed gets it once, by hand:
+
+    gh secret set DSL_MAINTAINER_EMAIL --org <course-org> \
+      --visibility selected --repos .github --body '<address>'
+
+`.github` is the only infra repo a COURSE org has, and it is public, so no mirror is needed
+there. (Re-running Bootstrap on the org with `set_secret: true` does the same thing and is
+the documented idempotent-repair path.) Cohort orgs need nothing: the mail that names the
+maintainer is sent from the course org's `.github`.
+
+The four `GRAPH_*` transport secrets are a one-time central setup, set by hand per org and
+never propagated:
+[central-admin.md](../../docs-admin-arch/central-admin.md#email).
+
 ## File ownership
 
 Seeded files carry their owner on the first line, and the write site enforces it:

@@ -111,6 +111,19 @@ workflows run in that org's public `.github`, so no per-repo propagation is need
 acquires a token after printing its preview, so a credential that is SET but wrong reds the
 run. An org with no secrets at all still previews green, saying the preview proves nothing.
 
+A fifth value, `DSL_MAINTAINER_EMAIL`, is not part of the transport: the four `GRAPH_*`
+secrets say *how* to send, this one says *who hears* when a release or a cohort's schedule
+breaks. It is the toolkit maintainer's inbox, not a course's.
+
+Centrally it is a repository **variable** on the toolkit, not a secret - an address is not a
+credential, and a masked secret cannot be read back to check it. `bootstrap-org.yml` passes
+it into the run's env, and Bootstrap propagates it onto the new course org as an org secret
+(the only route that reaches a Free-plan org's public `.github`, where the scheduler runs);
+Bootstrap cohort forwards it down to a cohort. Unset on an org, fault mail goes to
+`GRAPH_SENDER` instead, so a gap is a mail in the wrong inbox rather than a mail lost.
+Nothing converges it onto an org bootstrapped before it existed - that is one command, in
+[maintainers.md](../docs/reference/maintainers.md#secrets-an-org-carries).
+
 **Status: live on `hertie-dsl-demo-course-e1234`, `hertie-intro-to-data-science-c11`,
 `hertie-maths-data-science-C23` and `hertie-nlp-e1282`.**
 
