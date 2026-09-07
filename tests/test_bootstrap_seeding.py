@@ -348,7 +348,7 @@ def test_the_seeded_people_stub_teaches_every_required_field(fake):
             assert sync_faculty.valid_email(person.get("email")), (
                 f"{role}: {person['github_handle']}"
             )
-    assert "show_email" in stub  # ...and how to keep the address off the public card
+    assert "show_email" in stub  # ...and how to opt that private address onto the card
 
 
 def test_cohort_tag_derivation():

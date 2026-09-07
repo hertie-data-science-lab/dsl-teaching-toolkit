@@ -47,7 +47,7 @@ There is no need to edit GitHub team directly. This provides an auditable histor
          email: "another@example.org"
    ```
 
-   `email` is where this cohort's notifications go (a schedule fault, a source that has not been staged), and it is shown on the cohort site's staff card. Add `show_email: false` to an entry to keep the address off the public site; notifications still reach it. A `course_admins` entry needs no `email`.
+   `email` is required and private: it is where this cohort's notifications go (a schedule fault, a source that has not been staged), and nothing publishes it. Add `show_email: true` to an entry to show that address on the cohort site's staff card. A `course_admins` entry needs no `email`.
 
    Or **course org** → `.github` → `dsl-course.yml` (course-wide admin):
 
