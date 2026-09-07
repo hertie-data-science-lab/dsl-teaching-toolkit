@@ -122,8 +122,10 @@ class DigestResult:
 
     errors: int = 0
     transitions: Transitions | None = None
-    # None when the digest had to OPEN the issue: `gh issue create` prints the URL but
-    # `upsert_issue` reports only a count, and a fresh issue notifies by being created.
+    # The digest issue itself, so the mail beside it can link the full list. Populated on
+    # the tick that OPENS the issue too - `upsert_issue` reports the URL `gh issue create`
+    # printed - which is the tick a first-appeared notification goes out on. None only
+    # when there is no issue (nothing has reached the notify rung) or the write failed.
     issue_url: str | None = None
     faults_by_key: dict[str, SourceFault] = field(default_factory=dict)
 
@@ -345,12 +347,16 @@ def sync(
     # A comment is the only half of this that emails anyone, so it is posted ONLY for a
     # transition - and `upsert_issue` withholds it on an issue it had to CREATE, which
     # notifies on its own.
-    if upsert_issue(
+    wrote = upsert_issue(
         repo,
         TITLE,
         body,
         comment=f"{note}\n\ncc @{cohort_org}/instructors" if note else None,
-    ):
+    )
+    # `url` is None on the tick that had to CREATE the issue, and that is exactly the tick
+    # a notifier has something to say - so take the URL the create printed.
+    url = url or wrote.url
+    if wrote.errors:
         return DigestResult(errors=1, issue_url=url, faults_by_key=by_key)
     log_ok(
         f"source digest in {repo}: {len(faults)} fault(s), "

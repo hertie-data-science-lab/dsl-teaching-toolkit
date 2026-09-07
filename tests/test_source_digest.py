@@ -18,6 +18,9 @@ from dsl_course.schedule import SourceFault
 
 BERLIN = ZoneInfo("Europe/Berlin")
 NOW = datetime(2026, 8, 17, 12, 0, tzinfo=BERLIN)
+# What `gh issue create` prints, and the only place the number of a just-opened issue
+# comes from.
+CREATED_URL = "https://github.com/Cohort/classroom-config/issues/12"
 
 
 def _f(
@@ -47,7 +50,7 @@ class _Gh:
 
     def __call__(self, *args, **kwargs):
         self.calls.append(args)
-        return 0, ""
+        return 0, f"{CREATED_URL}\n" if args[:2] == ("issue", "create") else ""
 
     def json(self, *args, **kwargs):
         self.calls.append(args)
@@ -234,6 +237,15 @@ def test_the_first_warning_opens_the_issue(gh):
     assert sd.TITLE in created[0]
     # A brand-new issue notifies by being created; a comment on top would double up.
     assert fake.did("issue", "comment") == []
+
+
+def test_the_tick_that_opens_the_issue_still_reports_its_url(gh):
+    # The first-appeared mail goes out on exactly this tick, and the number of an issue
+    # just opened is printed by `gh issue create` and nowhere else - so without it the
+    # mail could not link the record it was summarising.
+    gh([])
+    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(days=3))], NOW)
+    assert out.issue_url == CREATED_URL
 
 
 def test_a_quiet_tick_edits_the_body_and_says_nothing(gh):

@@ -15,6 +15,7 @@ from dsl_course import issues
 
 REPO = "Cohort-f2026/classroom-config"
 TITLE = "Scheduled release: late delivery"
+CREATED_URL = f"https://github.com/{REPO}/issues/12"
 
 
 class _Gh:
@@ -34,7 +35,11 @@ class _Gh:
 
     def __call__(self, *args, **kwargs):
         self.calls.append(args)
-        return self.write_code, "boom" if self.write_code else ""
+        if self.write_code:
+            return self.write_code, "boom"
+        # What `gh issue create` really prints - the new issue's URL, which is the only
+        # place a caller can learn the number of an issue it has just opened.
+        return 0, f"{CREATED_URL}\n" if args[:2] == ("issue", "create") else ""
 
     def json(self, *args, **kwargs):
         self.calls.append(args)
@@ -80,7 +85,7 @@ def test_the_exact_title_is_found_among_the_near_misses(gh):
 
 def test_a_human_quoting_the_title_is_never_rewritten_but_gets_a_neighbour(gh):
     fake = gh([_issue(3, f"re: {TITLE}", "my notes")])
-    assert issues.upsert_issue(REPO, TITLE, "ours") == 0
+    assert issues.upsert_issue(REPO, TITLE, "ours").errors == 0
     assert fake.did("issue", "edit") == []
     assert len(fake.did("issue", "create")) == 1
 
@@ -138,7 +143,7 @@ def test_a_listing_that_is_not_json_raises_a_runtime_error(monkeypatch):
 
 def test_an_unreadable_listing_makes_upsert_fail_without_writing(gh):
     fake = gh([], list_code=1)
-    assert issues.upsert_issue(REPO, TITLE, "ours") == 1
+    assert issues.upsert_issue(REPO, TITLE, "ours").errors == 1
     assert fake.did("issue", "create") == fake.did("issue", "edit") == []
 
 
@@ -147,7 +152,7 @@ def test_an_unreadable_listing_makes_upsert_fail_without_writing(gh):
 
 def test_upsert_creates_when_there_is_nothing_open(gh):
     fake = gh([])
-    assert issues.upsert_issue(REPO, TITLE, "the body") == 0
+    assert issues.upsert_issue(REPO, TITLE, "the body").errors == 0
     (created,) = fake.did("issue", "create")
     assert created[created.index("--title") + 1] == TITLE
     assert fake.body_of("issue", "create") == "the body"
@@ -155,7 +160,7 @@ def test_upsert_creates_when_there_is_nothing_open(gh):
 
 def test_upsert_edits_the_open_issue_in_place(gh):
     fake = gh([_issue(7, TITLE, "stale body")])
-    assert issues.upsert_issue(REPO, TITLE, "fresh body") == 0
+    assert issues.upsert_issue(REPO, TITLE, "fresh body").errors == 0
     assert fake.did("issue", "create") == []
     (edited,) = fake.did("issue", "edit")
     assert edited[2] == "7"
@@ -164,7 +169,25 @@ def test_upsert_edits_the_open_issue_in_place(gh):
 
 def test_a_failed_write_is_counted_not_swallowed(gh):
     gh([], write_code=1)
-    assert issues.upsert_issue(REPO, TITLE, "the body") == 1
+    assert issues.upsert_issue(REPO, TITLE, "the body").errors == 1
+
+
+def test_an_opened_issue_reports_the_url_it_was_given(gh):
+    # The tick that OPENS the issue is the tick a notifier has something to say, and the
+    # number is printed by `gh issue create` and nowhere else - so a bare count left the
+    # mail beside the issue unable to link it.
+    gh([])
+    assert issues.upsert_issue(REPO, TITLE, "the body").url == CREATED_URL
+
+
+def test_an_edited_issue_reports_the_url_of_the_issue_it_found(gh):
+    gh([_issue(7, TITLE, "stale body")])
+    assert issues.upsert_issue(REPO, TITLE, "fresh").url.endswith("/issues/7")
+
+
+def test_a_write_that_printed_no_url_reports_none_rather_than_guessing(gh):
+    gh([], write_code=1)
+    assert issues.upsert_issue(REPO, TITLE, "the body").url is None
 
 
 # ------------------------------------------------------------------------ the comment rule
@@ -174,11 +197,11 @@ def test_a_comment_is_posted_only_on_an_issue_that_already_existed(gh):
     # A brand-new issue emails everyone watching by being created; a comment repeating
     # itself on top of that is the noise this whole shape exists to avoid.
     fake = gh([])
-    assert issues.upsert_issue(REPO, TITLE, "body", comment="something changed") == 0
+    assert issues.upsert_issue(REPO, TITLE, "body", comment="something changed").errors == 0
     assert fake.did("issue", "comment") == []
 
     fake = gh([_issue(7, TITLE, "stale")])
-    assert issues.upsert_issue(REPO, TITLE, "body", comment="something changed") == 0
+    assert issues.upsert_issue(REPO, TITLE, "body", comment="something changed").errors == 0
     (commented,) = fake.did("issue", "comment")
     assert commented[2] == "7"
     assert fake.body_of("issue", "comment") == "something changed"
@@ -188,7 +211,7 @@ def test_no_comment_means_a_silent_body_edit(gh):
     # The hourly case: GitHub does not email on a body edit, so a tick with nothing new to
     # say refreshes the body and stays quiet.
     fake = gh([_issue(7, TITLE, "stale")])
-    assert issues.upsert_issue(REPO, TITLE, "body") == 0
+    assert issues.upsert_issue(REPO, TITLE, "body").errors == 0
     assert len(fake.did("issue", "edit")) == 1
     assert fake.did("issue", "comment") == []
 

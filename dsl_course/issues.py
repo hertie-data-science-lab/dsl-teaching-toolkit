@@ -22,6 +22,8 @@ not "there is no issue", and inventing that answer would open a duplicate every 
 from __future__ import annotations
 
 import json
+import re
+from typing import NamedTuple
 
 from .ghcli import gh, gh_json
 from .log import log_err
@@ -79,9 +81,30 @@ def find_issue(repo: str, title: str) -> tuple[int, str] | None:
     return found[0] if found else None
 
 
-def upsert_issue(repo: str, title: str, body: str, comment: str | None = None) -> int:
+class Upserted(NamedTuple):
+    """What one `upsert_issue` did: the error count its callers fold into their own, and
+    the issue's URL where there is one.
+
+    The URL is here for the notification that rides ALONGSIDE the issue. A caller that had
+    to OPEN the issue this tick knew its number nowhere else - `gh issue create` prints it
+    and the return used to be a bare count - so the mail it sent beside the issue could not
+    link the record it was summarising. None when the write failed, or when `gh` printed
+    no URL."""
+
+    errors: int
+    url: str | None = None
+
+
+# What `gh issue create` prints on success. Matched rather than read off a line position:
+# `gh` hands stdout and stderr back joined, so an advisory can arrive above or below it.
+_ISSUE_URL = re.compile(r"https://\S+/issues/\d+")
+
+
+def upsert_issue(
+    repo: str, title: str, body: str, comment: str | None = None
+) -> Upserted:
     """Make `repo`'s issue titled `title` say `body` - editing it if it is open, opening it
-    if it is not. Returns the error count.
+    if it is not. Reports the error count and the issue's URL (see `Upserted`).
 
     `comment` is posted only when the issue ALREADY existed: a new issue emails everyone
     watching by being created, so a comment saying the same thing again is noise. Pass it
@@ -90,8 +113,9 @@ def upsert_issue(repo: str, title: str, body: str, comment: str | None = None) -
         existing = find_issue(repo, title)
     except RuntimeError as exc:
         log_err(str(exc))
-        return 1
+        return Upserted(1)
     if existing:
+        url = f"https://github.com/{repo}/issues/{existing[0]}"
         code, out = gh(
             "issue", "edit", str(existing[0]), "--repo", repo, "--body", body
         )
@@ -99,17 +123,19 @@ def upsert_issue(repo: str, title: str, body: str, comment: str | None = None) -
         code, out = gh(
             "issue", "create", "--repo", repo, "--title", title, "--body", body
         )
+        found = _ISSUE_URL.search(out or "")
+        url = found.group(0) if found else None
     if code != 0:
         log_err(f"could not write `{title}` in {repo}: {out[:200]}")
-        return 1
+        return Upserted(1, url)
     if comment and existing:
         code, out = gh(
             "issue", "comment", str(existing[0]), "--repo", repo, "--body", comment
         )
         if code != 0:
             log_err(f"could not comment on `{title}` in {repo}: {out[:200]}")
-            return 1
-    return 0
+            return Upserted(1, url)
+    return Upserted(0, url)
 
 
 def close_issues_titled(repo: str, title: str, comment: str | None = None) -> int:
