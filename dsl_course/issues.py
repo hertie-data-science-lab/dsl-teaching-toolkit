@@ -34,12 +34,13 @@ from .log import log_err
 _LIST_LIMIT = "100"
 
 
-def _titled(repo: str, title: str) -> list[tuple[int, str]]:
-    """(number, body) for every OPEN issue in `repo` titled EXACTLY `title`, lowest number
+def _titled(repo: str, title: str, state: str = "open") -> list[tuple[int, str]]:
+    """(number, body) for every issue in `repo` titled EXACTLY `title`, lowest number
     first. Raises when the listing could not be read: absence has to be a real answer.
 
-    Only open issues. A closed one must not be adopted - the point of closing is that the
-    condition cleared, so the next occurrence is a new issue and a new notification.
+    Open issues by default. A closed one must not be ADOPTED - the point of closing is
+    that the condition cleared, so the next occurrence is a new issue and a new
+    notification - but `find_closed_issue` READS one, for the state it left behind.
 
     Read through `gh_json`, which parses stdout ALONE: `gh` hands back stdout and stderr
     joined, so one advisory on stderr (a token nearing expiry, an update notice) beside a
@@ -54,7 +55,7 @@ def _titled(repo: str, title: str) -> list[tuple[int, str]]:
             "--repo",
             repo,
             "--state",
-            "open",
+            state,
             "--search",
             f"{title} in:title",
             "--limit",
@@ -98,6 +99,17 @@ class Upserted(NamedTuple):
 # What `gh issue create` prints on success. Matched rather than read off a line position:
 # `gh` hands stdout and stderr back joined, so an advisory can arrive above or below it.
 _ISSUE_URL = re.compile(r"https://\S+/issues/\d+")
+
+
+def find_closed_issue(repo: str, title: str) -> tuple[int, str] | None:
+    """(number, body) of the NEWEST closed issue in `repo` with this exact title, or None.
+
+    For a caller whose state lives in the body it last wrote (see `source_digest`): when
+    somebody closes that issue by hand nothing has actually been fixed, and re-opening
+    from a blank slate reports every standing fault as new and notifies about all of it
+    again. Newest by number, which is the order they were opened in."""
+    found = _titled(repo, title, state="closed")
+    return found[-1] if found else None
 
 
 def upsert_issue(

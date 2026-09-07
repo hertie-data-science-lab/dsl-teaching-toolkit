@@ -14,7 +14,7 @@ from typing import Any
 
 import yaml
 
-from .ghcli import gh, is_missing_resource
+from .ghcli import gh, gh_json, is_missing_resource
 from .log import log_err, log_err_person, log_skip
 from .repos import default_branch
 
@@ -557,6 +557,87 @@ def repo_tree(org: str, repo: str, branch: str, kind: str = "") -> tuple[str, ..
     return tuple(
         sorted(_tree(org, repo, branch, f'"\\(.truncated)", (.tree[]{select} | .path)'))
     )
+
+
+# ------------------------------------------------------------------------- who wrote it
+
+# Blame, because a notification has to reach the person who can act on it and the only
+# record of who planned a release is the commit that wrote the line. REST has no blame
+# endpoint, so this is the one GraphQL document in the package. `author.user` is null for a
+# commit whose email is not linked to any GitHub account, which is why every caller has to
+# cope with a line nobody can be named for.
+_BLAME_QUERY = """
+query($owner: String!, $name: String!, $ref: String!, $path: String!) {
+  repository(owner: $owner, name: $name) {
+    ref(qualifiedName: $ref) {
+      target {
+        ... on Commit {
+          blame(path: $path) {
+            ranges {
+              startingLine
+              endingLine
+              commit { author { user { login } } }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def blame_logins(
+    org: str, repo: str, path: str, ref: str = "refs/heads/main"
+) -> dict[int, str]:
+    """`{line number: the login that last wrote it}` for one file, 1-based.
+
+    Lines whose commit author is not a linked GitHub account are simply absent, as are all
+    of them when the file (or the ref) is not there - the answer is "cannot say who", which
+    every caller already has a fallback for. Anything that could not be READ raises, on the
+    same rule as `get_file_content`: absence has to be a real answer, and a rate limit
+    reported as "nobody wrote this" would silently address a notification to the wrong
+    people."""
+    doc = gh_json(
+        "api",
+        "graphql",
+        "-f",
+        f"query={_BLAME_QUERY}",
+        "-f",
+        f"owner={org}",
+        "-f",
+        f"name={repo}",
+        "-f",
+        f"ref={ref}",
+        "-f",
+        f"path={path}",
+    )
+    node = ((doc or {}).get("data") or {}).get("repository") or {}
+    for step in ("ref", "target", "blame"):
+        node = (node or {}).get(step) or {}
+    out: dict[int, str] = {}
+    for r in node.get("ranges") or []:
+        login = (((r.get("commit") or {}).get("author") or {}).get("user") or {}).get(
+            "login"
+        )
+        if not login:
+            continue
+        for line in range(int(r["startingLine"]), int(r["endingLine"]) + 1):
+            out[line] = login
+    return out
+
+
+def last_committer(org: str, repo: str) -> str | None:
+    """The login that made `repo`'s most recent commit on its default branch, or None when
+    there is nobody to name (an empty repo, an unlinked commit email).
+
+    The other half of "who should hear about this": a release whose materials are missing
+    concerns whoever is writing that repo as much as whoever planned the line. Raises on a
+    read it could not make, for the reason `blame_logins` does."""
+    rows = gh_json("api", f"repos/{org}/{repo}/commits?per_page=1")
+    if not rows:
+        return None
+    return ((rows[0] or {}).get("author") or {}).get("login") or None
 
 
 def load_yaml_config(org: str, repo: str, path: str) -> dict | None:
