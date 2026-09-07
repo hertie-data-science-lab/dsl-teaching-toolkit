@@ -176,6 +176,37 @@ def test_a_mangled_request_is_a_transport_failure_not_a_traceback(monkeypatch):
     assert b"control characters" in raw
 
 
+# ------------------------------------------------------------ where fault mail goes
+
+
+def test_the_maintainer_address_prefers_its_own_variable(monkeypatch):
+    # DSL_MAINTAINER_EMAIL is the toolkit maintainer; GRAPH_SENDER is the shared mailbox
+    # the toolkit sends AS. When both are set the maintainer wins - the fallback exists
+    # only so that an org nobody propagated the address to still mails somebody.
+    _graph_env(monkeypatch)
+    monkeypatch.setenv(mailer.MAINTAINER_ENV, "maintainer@x.edu")
+    assert mailer.maintainer_address() == "maintainer@x.edu"
+
+
+@pytest.mark.parametrize("value", [None, "", "  "], ids=["unset", "blank", "spaces"])
+def test_without_it_fault_mail_falls_back_to_the_send_mailbox(monkeypatch, value):
+    # An empty org secret reads as an empty env value, and mailing "" mails nobody.
+    _graph_env(monkeypatch)
+    if value is None:
+        monkeypatch.delenv(mailer.MAINTAINER_ENV, raising=False)
+    else:
+        monkeypatch.setenv(mailer.MAINTAINER_ENV, value)
+    assert mailer.maintainer_address() == "bot@x.edu"
+
+
+def test_no_address_anywhere_is_none_rather_than_an_empty_string(monkeypatch):
+    # The caller says "mail not configured" once and carries on; "" would be handed to
+    # Graph as a recipient and fail per message instead.
+    for key in (*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV):
+        monkeypatch.delenv(key, raising=False)
+    assert mailer.maintainer_address() is None
+
+
 # ------------------------------------------------------------------- pacing and the budget
 
 

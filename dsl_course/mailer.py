@@ -78,6 +78,12 @@ GRAPH_ENV = ("GRAPH_TENANT_ID", "GRAPH_CLIENT_ID", "GRAPH_CLIENT_CERT", "GRAPH_S
 # Every one of these is interpolated into a URL or a header. The certificate is NOT here:
 # a PEM is multi-line by construction.
 _SINGLE_LINE = ("GRAPH_TENANT_ID", "GRAPH_CLIENT_ID", "GRAPH_SENDER")
+# Where fault mail goes: the toolkit MAINTAINER's address, not a per-course one. Held
+# centrally as a repository variable on the toolkit (an address is not a credential) and
+# propagated onto each course org by `bootstrap_course`, which is why the workflows read it
+# out of `secrets.` like the rest of the mail env. `workflows_render._MAIL_ENV` carries it
+# alongside GRAPH_ENV, so a rename cannot leave an org silently unaddressed.
+MAINTAINER_ENV = "DSL_MAINTAINER_EMAIL"
 
 
 def graph_config_from_env() -> GraphConfig | None:
@@ -111,6 +117,23 @@ def graph_config_from_env() -> GraphConfig | None:
         cert_pem=found["GRAPH_CLIENT_CERT"],
         sender=found["GRAPH_SENDER"],
     )
+
+
+def maintainer_address() -> str | None:
+    """Where to mail the toolkit maintainer about a fault, or None if nowhere.
+
+    `DSL_MAINTAINER_EMAIL` when the org has it, else `GRAPH_SENDER` - the shared mailbox
+    the toolkit already sends AS is a mailbox the maintainer can read, which beats a fault
+    nobody hears about. None only when neither is set, and then the caller says so once
+    and carries on.
+
+    Never logged: every faculty workflow runs in a PUBLIC repo. Log the NAME, or
+    `mask_email` of the value."""
+    for name in (MAINTAINER_ENV, "GRAPH_SENDER"):
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            return value
+    return None
 
 
 def _b64url(raw: bytes) -> str:
