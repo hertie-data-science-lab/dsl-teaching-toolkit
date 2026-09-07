@@ -340,6 +340,33 @@ def test_the_tick_that_opens_the_issue_still_reports_its_url(gh):
     assert out.issue_url == CREATED_ISSUE_URL
 
 
+def test_an_appearance_at_the_quietest_reported_rung_starts_the_thread(gh):
+    # This is where a fault normally ENTERS the issue, and the comment is what the
+    # escalations and the clearing are a history of.
+    fault = _f("releases.a", timedelta(hours=20))
+    fake = gh(_open(state={}))
+    out = sd.sync("Cohort", "Course", [fault], NOW)
+    assert out.mail == {fault.key: sd.Severity.WARNING}
+    (comment,) = fake.did("issue", "comment")
+    assert "**New**" in comment[comment.index("--body") + 1]
+
+
+@pytest.mark.parametrize("offset", [timedelta(hours=3), -timedelta(hours=1)])
+def test_an_appearance_already_louder_than_that_is_mailed_and_not_commented(gh, offset):
+    # An entry written the day before it fires, or one already past its moment. The body
+    # LISTS it and the mail is out; a comment repeating that is the noise this whole
+    # design exists to avoid - so the rule is the QUIETEST reported rung exactly, not
+    # "at or above it".
+    fault = _f("releases.a", offset)
+    fake = gh(_open(state={}))
+    out = sd.sync("Cohort", "Course", [fault], NOW)
+    assert out.mail == {fault.key: fault.severity(NOW)}
+    assert fault.severity(NOW) > sd.NOTIFY_FROM
+    assert fake.did("issue", "comment") == []
+    # ...and the body is still rewritten, so the issue lists it either way.
+    assert "releases.a" in fake.body_of("issue", "edit")
+
+
 def test_a_quiet_tick_edits_the_body_and_says_nothing(gh):
     # The hourly cron re-runs with nothing changed. The body is refreshed (GitHub does not
     # email on a body edit) and NOT commented on - this is the noise control.
