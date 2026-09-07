@@ -8,11 +8,13 @@ default).
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import pytest
+from conftest import source_fault
 
 from dsl_course import course, schedule
 from dsl_course.schedule import (
@@ -1673,7 +1675,7 @@ def test_the_severity_ladder_scales_with_distance_to_the_fire_time(monkeypatch):
     S = schedule.Severity
 
     def at(when):
-        return schedule.SourceFault("releases.x", "gone", when, "f").severity(now)
+        return source_fault("releases.x", fires=when).severity(now)
 
     assert at(now + timedelta(days=30)) is S.ADVISORY
     assert at(now + timedelta(days=2)) is S.ADVISORY
@@ -1694,8 +1696,9 @@ def test_the_severity_ladder_scales_with_distance_to_the_fire_time(monkeypatch):
 
 # --------------------------------------------------------- the line of the file to edit
 
-# One entry per rung's worth of shapes: a nested deploy, a flat assignment field, a
-# comment between entries, and a second entry whose fields must not be borrowed.
+# One entry per shape that has to carry a line: a nested deploy, a flat assignment field,
+# a comment between entries, and a release with TWO deploys - which is the case a scan of
+# the text got wrong, giving the second one the first one's line.
 _LOCATABLE = """\
 timezone: Europe/Berlin
 
@@ -1711,6 +1714,8 @@ releases:
     deploy:
       - course_source_repo: cm
         course_source_path: lectures/02_lecture
+      - course_source_repo: cm
+        course_source_path: readings/02_readings
 
 assignments:
   assignment-2:
@@ -1719,83 +1724,102 @@ assignments:
 """
 
 
-def test_locate_finds_a_deploy_field_under_its_release_entry():
-    # `yaml.safe_load` drops positions, so this is a scan of the text - and the entry key
-    # is what anchors it, not the first `course_source_path` in the file.
-    assert schedule.locate(_LOCATABLE, "releases.lecture_01", "course_source_path") == 9
-    assert (
-        schedule.locate(_LOCATABLE, "releases.lecture_02", "course_source_path") == 14
+def _parsed(tmp_path, text: str = _LOCATABLE) -> Schedule:
+    f = tmp_path / "schedule.yml"
+    f.write_text(text)
+    sched, error = schedule.load_file(str(f))
+    assert error is None
+    return sched
+
+
+def test_every_deploy_knows_the_line_it_is_written_on(tmp_path):
+    # Captured by the loader that read the file, not scanned for afterwards: a scan found
+    # the entry key and then the first matching field under it, so the SECOND deploy of an
+    # entry was reported - and deep-linked - at the first one's line.
+    sched = _parsed(tmp_path)
+    lines = {r.label: [d.lineno for d in r.deploy] for r in sched.releases}
+    assert lines == {"lecture_01": [8], "lecture_02": [13, 15]}
+
+
+def test_an_assignment_entry_knows_its_own_line(tmp_path):
+    # The entry's own first key, which is where a reader looking for `course_source_repo`
+    # starts: close enough for a link, and never wrong about the entry.
+    assert _parsed(tmp_path).assignments["assignment-2"].lineno == 20
+
+
+def test_a_dict_built_by_hand_has_no_line_and_says_so(tmp_path):
+    # Every consumer already treats a missing line as "not known" and shows the fault
+    # without a deep link, so a caller that parsed the YAML itself is not a special case.
+    sched = schedule.parse(
+        {
+            "releases": {
+                "a": {
+                    "event_datetime": "2026-09-08T10:00",
+                    "deploy": [{"course_source_repo": "cm", "course_source_path": "x"}],
+                }
+            }
+        }
     )
-    assert (
-        schedule.locate(_LOCATABLE, "releases.lecture_02", "course_source_repo") == 13
-    )
+    assert sched.releases[0].deploy[0].lineno is None
 
 
-def test_locate_finds_a_field_written_flat_on_an_assignment():
-    assert (
-        schedule.locate(_LOCATABLE, "assignments.assignment-2", "course_source_repo")
-        == 19
-    )
+def test_the_line_stamp_never_reaches_the_parsed_plan(tmp_path):
+    # The loader marks every mapping, and the parse takes the mark off as it consumes it.
+    # Left behind it would read as an unrecognised key - or, in a label loop, as an entry.
+    sched = _parsed(tmp_path)
+    assert sched.dropped == []
+    assert [r.label for r in sched.releases] == ["lecture_01", "lecture_02"]
+    assert list(sched.assignments) == ["assignment-2"]
+    assert "__line__" not in json.dumps(asdict(sched), default=str)
 
 
-def test_locate_reports_nothing_it_cannot_be_sure_of():
-    # A link to the wrong line is worse than no link: the caller shows the fault without
-    # one. A field the entry does not have, an entry that is not there, a section that is
-    # not there, and a `where` that is not a path at all.
-    assert (
-        schedule.locate(_LOCATABLE, "assignments.assignment-2", "course_source_path")
-        is None
-    )
-    assert (
-        schedule.locate(_LOCATABLE, "releases.lecture_99", "course_source_path") is None
-    )
-    assert schedule.locate(_LOCATABLE, "events.open_day", "event_datetime") is None
-    assert schedule.locate(_LOCATABLE, "releases", "course_source_path") is None
-    assert schedule.locate("", "releases.lecture_01", "course_source_path") is None
-
-
-def test_locate_never_reads_a_commented_out_entry_as_a_real_one():
+def test_a_commented_out_entry_is_not_read_as_a_real_one(tmp_path):
     # The seeded schedule.yml ships its whole schema commented out, and a cohort that has
     # not written a plan yet has nothing else in the file.
-    text = (
+    sched = _parsed(
+        tmp_path,
         "# releases:\n"
         "#   lecture_01:\n"
         "#     deploy:\n"
         "#       - course_source_path: lectures/01_lecture\n"
         "releases:\n"
         "  lecture_01:\n"
+        "    event_datetime: 2026-09-08T10:00\n"
         "    deploy:\n"
-        "      - course_source_path: lectures/01_lecture\n"
+        "      - course_source_repo: cm\n"
+        "        course_source_path: lectures/01_lecture\n",
     )
-    assert schedule.locate(text, "releases.lecture_01", "course_source_path") == 8
+    assert sched.releases[0].deploy[0].lineno == 9
 
 
 def test_a_fault_carries_the_line_it_is_written_on(monkeypatch, tmp_path):
-    f = tmp_path / "schedule.yml"
-    f.write_text(_LOCATABLE)
     _org(monkeypatch, {"cm": ["lectures", "lectures/01_lecture"]})
-    sched, error = schedule.load_file(str(f))
-    assert error is None
-    faults = {f.where: f for f in schedule.source_faults(sched, "Course-Org")}
-    assert faults["releases.lecture_02"].lineno == 14
+    faults = {
+        f.path: f for f in schedule.source_faults(_parsed(tmp_path), "Course-Org")
+    }
+    assert faults["lectures/02_lecture"].lineno == 13
+    # Two deploys under one entry are two faults at two lines, and two identities - keyed
+    # on the entry alone the second inherited the first's recorded rung.
+    assert faults["readings/02_readings"].lineno == 15
+    assert faults["readings/02_readings"].key == (
+        "releases.lecture_02[readings/02_readings].course_source_path"
+    )
     # The row shape the commit comment reuses verbatim: entry, field, line, fault, when.
-    assert faults["releases.lecture_02"].line() == (
-        "releases.lecture_02 -> course_source_path - schedule.yml:14 - "
+    assert faults["lectures/02_lecture"].line() == (
+        "releases.lecture_02 -> course_source_path - schedule.yml:13 - "
         "Course-Org/cm/lectures/02_lecture does not exist - "
         "fires Tue 15 Sep 2026, 10:00 Europe/Berlin"
     )
 
 
-def test_the_json_dump_prints_the_plan_not_the_file(monkeypatch, capsys, tmp_path):
-    # `raw` is kept only so a fault can cite a line; echoing the whole YAML back would
-    # bury the parse the caller asked to see.
+def test_the_json_dump_is_the_plan_the_parser_understood(monkeypatch, capsys, tmp_path):
     f = tmp_path / "schedule.yml"
     f.write_text(_LOCATABLE)
     monkeypatch.setattr("sys.argv", ["schedule", "--file", str(f)])
     assert schedule.main() == 0
     dumped = json.loads(capsys.readouterr().out)
-    assert "raw" not in dumped
     assert dumped["timezone"] == "Europe/Berlin"
+    assert dumped["releases"][0]["deploy"][0]["lineno"] == 8
 
 
 def test_a_deploy_datetime_dates_the_fault_not_the_class(monkeypatch):
@@ -1848,7 +1872,7 @@ def test_a_distant_missing_source_reports_but_keeps_the_run_green(
     # The rung, and the line of the file to go and edit - the entry name alone still
     # leaves faculty scrolling a plan they wrote in August.
     assert (
-        "    [advisory] releases.lecture-1 -> course_source_path - schedule.yml:6"
+        "    [advisory] releases.lecture-1 -> course_source_path - schedule.yml:5"
     ) in out
     assert "OK: nothing dropped" in out
 
@@ -1918,7 +1942,7 @@ def test_annotations_are_emitted_by_the_process_that_knows_the_severity(
     # `line=` is what puts the annotation on the offending line of the diff rather than at
     # the top of the file.
     assert (
-        "::warning file=schedule.yml,line=6::releases.lecture-1 -> course_source_path"
+        "::warning file=schedule.yml,line=5::releases.lecture-1 -> course_source_path"
     ) in captured.err
     assert "::warning" not in captured.out
 
@@ -1945,23 +1969,24 @@ def _annotated(monkeypatch, tmp_path, sched_file, output: Path | None = None) ->
     assert schedule.main() == 0
 
 
-def test_the_worst_rung_is_reported_to_the_workflow_that_asked(
+def test_whether_anyone_is_told_is_reported_to_the_workflow_that_asked(
     monkeypatch, capsys, tmp_path
 ):
     # The step after this one decides whether to comment on the push, and it used to do it
     # by grepping the report for a severity prefix - which silently matched only some of
-    # the rungs. The process that KNOWS the rung is the one that should say it.
+    # the rungs. ONE boolean, written by the process that knows: a list of rung names in
+    # an `if:` is a list a new rung falls out of.
     _org(monkeypatch, {"cm": ["lectures"]})
     out = tmp_path / "step_output"
     _annotated(monkeypatch, tmp_path, _imminent(tmp_path), out)
     capsys.readouterr()
-    assert out.read_text().splitlines() == ["sources_worst=missed"]
+    assert out.read_text().splitlines() == ["sources_notify=true"]
 
 
 def test_a_plan_with_every_source_staged_says_so_rather_than_saying_nothing(
     monkeypatch, capsys, tmp_path
 ):
-    # `none`, not an absent output: a step reading it must never have to tell "no faults"
+    # `false`, not an absent output: a step reading it must never have to tell "no faults"
     # from "the check did not run".
     f = tmp_path / "schedule.yml"
     f.write_text(
@@ -1976,7 +2001,7 @@ def test_a_plan_with_every_source_staged_says_so_rather_than_saying_nothing(
     out = tmp_path / "step_output"
     _annotated(monkeypatch, tmp_path, f, out)
     capsys.readouterr()
-    assert out.read_text().splitlines() == ["sources_worst=none"]
+    assert out.read_text().splitlines() == ["sources_notify=false"]
 
 
 def test_run_by_hand_the_annotations_still_work_with_no_step_output(
@@ -2012,9 +2037,9 @@ def test_without_annotate_nothing_workflow_shaped_is_emitted(
 def test_worst_severity_is_the_loudest_not_the_first(monkeypatch):
     now = datetime(2026, 9, 1, 12, 0, tzinfo=BERLIN)
     faults = [
-        schedule.SourceFault("a", "gone", now + timedelta(days=40), "f"),
-        schedule.SourceFault("b", "gone", now + timedelta(hours=2), "f"),
-        schedule.SourceFault("c", "gone", now + timedelta(days=5), "f"),
+        source_fault("a", fires=now + timedelta(days=40)),
+        source_fault("b", fires=now + timedelta(hours=2)),
+        source_fault("c", fires=now + timedelta(days=5)),
     ]
     assert schedule.worst_severity(faults, now) is schedule.Severity.CRITICAL
     assert schedule.worst_severity([], now) is None
