@@ -63,10 +63,14 @@ jobs:
           set -eo pipefail
           # list_orgs exits non-zero when it could not read SOME org's dsl-course.yml, and
           # still prints the rest. One org's malformed file must not leave the whole
-          # estate un-refreshed, so that exit is tolerated here - but only if an inventory
-          # actually came back; an empty capture fails the jq below, as it should.
+          # estate un-refreshed, so that exit is tolerated here.
           inventory=$(python3 -m dsl_course.list_orgs) \
             || echo "::warning::list_orgs could not read every org - see the log; refreshing the ones it could"
+          # Nothing at all is a different failure, and it has to be loud: `jq` over an
+          # empty document answers "no orgs" for every selection below, so the run would
+          # refresh nothing, say "_No course org runs_", and go green on a deploy that
+          # never happened.
+          [ -n "$inventory" ] || { echo "::error::no inventory - list_orgs produced nothing"; exit 1; }
           # Cohort orgs are not listed: a course org's refresh converges every cohort
           # registered under it in the same run.
           orgs=$(jq -r --arg tier "$TIER" '.course_orgs[] | select(.central_ref == $tier) | .org' <<<"$inventory")
