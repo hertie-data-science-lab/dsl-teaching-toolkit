@@ -308,20 +308,27 @@ def _graph_token(cfg: GraphConfig) -> str | None:
 
 
 def _graph_send_one(
-    cfg: GraphConfig, token: str, to: str, subject: str, body: str
+    cfg: GraphConfig,
+    token: str,
+    to: str,
+    subject: str,
+    body: str,
+    html: bool = False,
+    cc: tuple[str, ...] = (),
 ) -> bool:
-    """Send one message via `users/{sender}/sendMail`. Returns True on 200/202."""
+    """Send one message via `users/{sender}/sendMail`. Returns True on 200/202.
+
+    `html` sends the body as HTML instead of plain text; `cc` is a real Cc line - see
+    `send_bulk`."""
     url = f"{_GRAPH}/users/{urllib.parse.quote(cfg.sender)}/sendMail"
-    payload = json.dumps(
-        {
-            "message": {
-                "subject": subject,
-                "body": {"contentType": "Text", "content": body},
-                "toRecipients": [{"emailAddress": {"address": to}}],
-            },
-            "saveToSentItems": False,
-        }
-    ).encode()
+    message: dict = {
+        "subject": subject,
+        "body": {"contentType": "HTML" if html else "Text", "content": body},
+        "toRecipients": [{"emailAddress": {"address": to}}],
+    }
+    if cc:
+        message["ccRecipients"] = [{"emailAddress": {"address": a}} for a in cc]
+    payload = json.dumps({"message": message, "saveToSentItems": False}).encode()
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     for attempt in range(1, _MAX_SEND_ATTEMPTS + 1):
         status, _raw, response_headers = _post(url, payload, headers)
@@ -345,7 +352,12 @@ def _graph_send_one(
         return False
 
 
-def _send_via_graph(cfg: GraphConfig, messages: list[Message]) -> list[str]:
+def _send_via_graph(
+    cfg: GraphConfig,
+    messages: list[Message],
+    html: bool = False,
+    cc: tuple[str, ...] = (),
+) -> list[str]:
     """Send the whole batch on one token. Returns the recipients that actually went out.
 
     Addresses, not a count: the caller records who was mailed so a re-run does not mail
@@ -374,7 +386,9 @@ def _send_via_graph(cfg: GraphConfig, messages: list[Message]) -> list[str]:
             # to each send's round-trip, so the real rate drifts below the target the
             # slower Graph is, and the budget stops meaning a predictable message count.
             time.sleep(max(0.0, started + index * _SEND_INTERVAL - time.monotonic()))
-        if _graph_send_one(cfg, token, to, subject, body):
+        # A recipient who is also on the Cc line would get two copies of one mail.
+        copies = tuple(a for a in cc if a.lower() != to.lower())
+        if _graph_send_one(cfg, token, to, subject, body, html, copies):
             log_ok(f"sent -> {mask_email(to)}")
             sent.append(to)
     return sent
@@ -406,7 +420,11 @@ def preflight() -> None:
 
 
 def send_bulk(
-    messages: list[Message], dry_run: bool = False, sample: str | None = None
+    messages: list[Message],
+    dry_run: bool = False,
+    sample: str | None = None,
+    html: bool = False,
+    cc: list[str] | None = None,
 ) -> list[str]:
     """Preview (dry_run) or send a batch. Returns the recipients previewed/sent.
 
@@ -417,10 +435,22 @@ def send_bulk(
     `sample` is the one thing a masked list cannot give a reviewer - the wording. It is a
     body the CALLER rendered from placeholders (`<name>`, `<code>`), never one of
     `messages`, and it is printed once, under `SAMPLE_HEADER`, so faculty can proof-read
-    the email before a real send."""
+    the email before a real send.
+
+    `html` sends every body in the batch as HTML, and `cc` puts a real Cc line on every
+    message in it. Both per BATCH, not per message: a batch is one mail to a list of
+    recipients, and the two roster senders (enrolment codes, grade notifications) send
+    plain text to one student at a time with nobody copied. The flags exist for the fault
+    mails, which are marked up and which copy the instructors when a TA is addressed (see
+    `notify`). A real Cc rather than more To recipients, because who else was told is the
+    point of copying them. The caller owns the escaping."""
+    copies = tuple(cc or ())
     if dry_run:
         for to, subject, _body in messages:
             log(f"  would send -> {mask_email(to)}: {subject}")
+        if copies:
+            # Count only: a Cc list is other people's addresses in a public run log.
+            log(f"  ...copying {len(copies)} address(es)")
         if sample:
             log(SAMPLE_HEADER)
             log(sample)
@@ -432,7 +462,7 @@ def send_bulk(
     if graph is None:
         log_err("No mail transport configured - set the GRAPH_* secrets. Nothing sent.")
         return []
-    return _send_via_graph(graph, messages)
+    return _send_via_graph(graph, messages, html, copies)
 
 
 def sample_message_of(
