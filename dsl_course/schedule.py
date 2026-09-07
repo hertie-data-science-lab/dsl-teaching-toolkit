@@ -68,6 +68,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from dataclasses import asdict, dataclass, field
@@ -1263,11 +1264,18 @@ class SourceFault:
         )
 
     def line(self) -> str:
-        """The one-line form, everywhere. It names the FIELD as well as the entry, because
-        "something is wrong with lecture-2" is not an instruction - and it is the CLI
-        report, on the commit faculty just pushed, that most needs to say so."""
-        at = f" at {SCHEDULE_PATH}:{self.lineno}" if self.lineno else ""
-        return f"{self.where} -> {self.field}{at} (due {self.due}): {self.what}"
+        """The one-line form, everywhere: the entry, the field, the line, what is wrong and
+        when it bites.
+
+        It names the FIELD as well as the entry, because "something is wrong with
+        lecture-2" is not an instruction. Dash-separated, in this order, because the
+        commit-time validator turns these very lines into the comment on the push (see
+        `validate-schedule.yml`) by stripping the rung prefix and nothing else - a shell
+        re-arranging a sentence is a shell that gets it wrong on the one line that
+        matters."""
+        at = f" - {SCHEDULE_PATH}:{self.lineno}" if self.lineno else ""
+        when = f"fires {self.due}" if self.fires else self.due
+        return f"{self.where} -> {self.field}{at} - {self.what} - {when}"
 
 
 def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
@@ -1626,6 +1634,22 @@ def record_handout(cohort_org: str, slug: str, stamp: str | None = None) -> None
         )
 
 
+def _write_output(line: str) -> None:
+    """Append one `name=value` to the workflow's step output, when there is one.
+
+    Off a runner `GITHUB_OUTPUT` is unset and this is a no-op, which is what keeps
+    `--annotate` usable by hand."""
+    path = os.environ.get("GITHUB_OUTPUT")
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"{line}\n")
+    except OSError as exc:
+        # A report the next step cannot read is not worth failing a validation over.
+        log_err(f"could not write to GITHUB_OUTPUT: {exc}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     source = parser.add_mutually_exclusive_group(required=True)
@@ -1650,7 +1674,8 @@ def main() -> int:
         "--annotate",
         action="store_true",
         help="also emit each source fault to stderr as a GitHub Actions ::warning:: "
-        "against schedule.yml, so it shows on the commit's own diff view",
+        "against schedule.yml, so it shows on the commit's own diff view, and write "
+        "`sources_worst=<severity>` to $GITHUB_OUTPUT for the steps that follow",
     )
     args = parser.parse_args()
 
@@ -1712,6 +1737,13 @@ def main() -> int:
             )
         else:
             print(f"  every source in the plan exists in {args.check_sources}")
+        if args.annotate:
+            # The loudest rung, for the steps after this one. Written by the process that
+            # KNOWS it, for the same reason the annotations are: a workflow re-deriving a
+            # severity by grepping the report above matched some of the rungs and not
+            # others, silently. `none` rather than an absent output, so a step reading it
+            # never has to tell "no faults" from "the check did not run".
+            _write_output(f"sources_worst={worst_severity(faults, now) or 'none'}")
     # The source check never touches the verdict, exactly as --check-sources promises. A
     # source missing in August is not a broken file, and folding it into `rc` also meant
     # riding the dropped-entry channel - which opens an issue titled "entries the

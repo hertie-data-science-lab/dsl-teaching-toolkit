@@ -1520,7 +1520,7 @@ def test_missing_sources_names_the_path_that_will_ship_nothing(monkeypatch):
     )
     out = [f.line() for f in schedule.source_faults(s, "Course-Org")]
     assert len(out) == 1
-    assert out[0].startswith("releases.lecture-2 -> course_source_path (due ")
+    assert out[0].startswith("releases.lecture-2 -> course_source_path - ")
     # The WHOLE address of the thing that is missing: the notification tells somebody
     # where to push, and `cm/lectures/02_b` alone leaves them guessing which org.
     assert "Course-Org/cm/lectures/02_b does not exist" in out[0]
@@ -1537,7 +1537,7 @@ def test_a_source_withheld_by_a_releaseignore_is_a_fault_at_commit_time(monkeypa
     s = Schedule(releases=[_release("lecture-1", "lectures/01_a")])
     out = [f.line() for f in schedule.source_faults(s, "Course-Org")]
     assert len(out) == 1
-    assert out[0].startswith("releases.lecture-1 -> course_source_path (due ")
+    assert out[0].startswith("releases.lecture-1 -> course_source_path - ")
     assert "the files exist but cm/.releaseignore keeps them back" in out[0]
 
 
@@ -1778,7 +1778,12 @@ def test_a_fault_carries_the_line_it_is_written_on(monkeypatch, tmp_path):
     assert error is None
     faults = {f.where: f for f in schedule.source_faults(sched, "Course-Org")}
     assert faults["releases.lecture_02"].lineno == 14
-    assert "at schedule.yml:14 (due " in faults["releases.lecture_02"].line()
+    # The row shape the commit comment reuses verbatim: entry, field, line, fault, when.
+    assert faults["releases.lecture_02"].line() == (
+        "releases.lecture_02 -> course_source_path - schedule.yml:14 - "
+        "Course-Org/cm/lectures/02_lecture does not exist - "
+        "fires Tue 15 Sep 2026, 10:00 Europe/Berlin"
+    )
 
 
 def test_the_json_dump_prints_the_plan_not_the_file(monkeypatch, capsys, tmp_path):
@@ -1843,7 +1848,7 @@ def test_a_distant_missing_source_reports_but_keeps_the_run_green(
     # The rung, and the line of the file to go and edit - the entry name alone still
     # leaves faculty scrolling a plan they wrote in August.
     assert (
-        "    [advisory] releases.lecture-1 -> course_source_path at schedule.yml:6"
+        "    [advisory] releases.lecture-1 -> course_source_path - schedule.yml:6"
     ) in out
     assert "OK: nothing dropped" in out
 
@@ -1916,6 +1921,72 @@ def test_annotations_are_emitted_by_the_process_that_knows_the_severity(
         "::warning file=schedule.yml,line=6::releases.lecture-1 -> course_source_path"
     ) in captured.err
     assert "::warning" not in captured.out
+
+
+def _annotated(monkeypatch, tmp_path, sched_file, output: Path | None = None) -> None:
+    """Run `--validate --check-sources --annotate` against a file, optionally with a
+    workflow step output to write into."""
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "schedule",
+            "--file",
+            str(sched_file),
+            "--validate",
+            "--check-sources",
+            "Course-Org",
+            "--annotate",
+        ],
+    )
+    if output is not None:
+        monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    else:
+        monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    assert schedule.main() == 0
+
+
+def test_the_worst_rung_is_reported_to_the_workflow_that_asked(
+    monkeypatch, capsys, tmp_path
+):
+    # The step after this one decides whether to comment on the push, and it used to do it
+    # by grepping the report for a severity prefix - which silently matched only some of
+    # the rungs. The process that KNOWS the rung is the one that should say it.
+    _org(monkeypatch, {"cm": ["lectures"]})
+    out = tmp_path / "step_output"
+    _annotated(monkeypatch, tmp_path, _imminent(tmp_path), out)
+    capsys.readouterr()
+    assert out.read_text().splitlines() == ["sources_worst=missed"]
+
+
+def test_a_plan_with_every_source_staged_says_so_rather_than_saying_nothing(
+    monkeypatch, capsys, tmp_path
+):
+    # `none`, not an absent output: a step reading it must never have to tell "no faults"
+    # from "the check did not run".
+    f = tmp_path / "schedule.yml"
+    f.write_text(
+        "releases:\n"
+        "  lecture-1:\n"
+        "    event_datetime: 2099-09-08T10:00\n"
+        "    deploy:\n"
+        "      - course_source_repo: cm\n"
+        "        course_source_path: lectures/01_a\n"
+    )
+    _org(monkeypatch, {"cm": ["lectures", "lectures/01_a"]})
+    out = tmp_path / "step_output"
+    _annotated(monkeypatch, tmp_path, f, out)
+    capsys.readouterr()
+    assert out.read_text().splitlines() == ["sources_worst=none"]
+
+
+def test_run_by_hand_the_annotations_still_work_with_no_step_output(
+    monkeypatch, capsys, tmp_path
+):
+    # `--annotate` has to stay usable off a runner: a maintainer checking a cohort's plan
+    # locally must not need to invent a GITHUB_OUTPUT for it.
+    _org(monkeypatch, {"cm": ["lectures"]})
+    _annotated(monkeypatch, tmp_path, _imminent(tmp_path))
+    assert "::warning file=schedule.yml" in capsys.readouterr().err
 
 
 def test_without_annotate_nothing_workflow_shaped_is_emitted(
