@@ -333,6 +333,24 @@ def test_seeded_scaffolds_render_this_cohorts_tag(fake):
         assert "{tag}" not in content and "{year" not in content, f"{repo}/{path}"
 
 
+def test_the_seeded_people_stub_teaches_every_required_field(fake):
+    # The commented skeleton IS the schema a fresh cohort is handed. Uncommenting it must
+    # yield entries the real parser accepts with nothing missing - `email:` included,
+    # since an entry without one is granted access but can never be notified.
+    bc.setup_cohort_extras("Deep-Learning-f2027", "release")
+    stub = fake.files[("classroom-config", "people.yml")]
+    block = "# people:" + stub.split("# people:", 1)[1]
+    uncommented = "\n".join(line.removeprefix("# ") for line in block.splitlines())
+    faculty = sync_faculty.parse_faculty_from_meta(yaml.safe_load(uncommented) or {})
+    assert faculty["instructors"] and faculty["teaching_assistants"]
+    for role in sync_faculty.TEACHING_ROLES:
+        for person in faculty[role]:
+            assert sync_faculty.valid_email(person.get("email")), (
+                f"{role}: {person['github_handle']}"
+            )
+    assert "show_email" in stub  # ...and how to keep the address off the public card
+
+
 def test_cohort_tag_derivation():
     assert bc._tag_and_year("Deep-Learning-f2027") == ("f2027", 2027)
     assert bc._tag_and_year("Stats-S2030") == ("s2030", 2030)
