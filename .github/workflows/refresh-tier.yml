@@ -70,10 +70,15 @@ jobs:
           # Cohort orgs are not listed: a course org's refresh converges every cohort
           # registered under it in the same run.
           orgs=$(jq -r --arg tier "$TIER" '.course_orgs[] | select(.central_ref == $tier) | .org' <<<"$inventory")
-          # A null tier is an org whose metadata could not be read, so nothing can say
-          # which tier it is on. Named in the summary rather than passed over in silence:
-          # it may well be an org this deploy was meant to reach.
-          unknown=$(jq -r '.course_orgs[] | select(.central_ref == null) | .org' <<<"$inventory")
+          # A null tier has two causes, and only one of them is this deploy's problem.
+          # An UNREADABLE dsl-course.yml means nothing can say which tier that org is on,
+          # so it may well be an org this deploy was meant to reach: that reds the run.
+          unreadable=$(jq -r '.course_orgs[] | select(.readable == false) | .org' <<<"$inventory")
+          # A file that reads fine and declares something that is not a tier - a typo, or
+          # `staging` after 2026-09-07 - is that one org's own bug. It is not on this tier
+          # by any reading of it, so it is warned about and skipped: every merge to main
+          # runs this, and one org's typo must not red all of them.
+          not_a_tier=$(jq -r '.course_orgs[] | select(.readable == true and .central_ref == null) | .org' <<<"$inventory")
           {
             echo "## Refresh on \`$TIER\`"
             echo
@@ -91,8 +96,12 @@ jobs:
               failed=1
             fi
           done
-          for org in $unknown; do
+          for org in $unreadable; do
             echo "- $org - **skipped**, its \`dsl-course.yml\` could not be read" >> "$GITHUB_STEP_SUMMARY"
             failed=1
+          done
+          for org in $not_a_tier; do
+            echo "::warning::$org declares a \`central_ref:\` that is not a tier - not refreshed, and nothing here can fix it"
+            echo "- $org - **skipped**, its \`central_ref:\` is not a tier" >> "$GITHUB_STEP_SUMMARY"
           done
           exit "$failed"
