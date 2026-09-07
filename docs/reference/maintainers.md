@@ -113,8 +113,13 @@ repo's variables, so an org bootstrapped before the variable existed gets it onc
 
 `.github` is the only infra repo a COURSE org has, and it is public, so no mirror is needed
 there. (Re-running Bootstrap on the org with `set_secret: true` does the same thing and is
-the documented idempotent-repair path.) Cohort orgs need nothing: the mail that names the
-maintainer is sent from the course org's `.github`.
+the documented idempotent-repair path.) Cohort orgs need nothing, and that is a constraint,
+not an omission: every fault mail is sent from the course org's `.github`, so **no workflow
+seeded into a cohort may wire the mail env** - a cohort carries `DSL_BOT_TOKEN` and nothing
+else, and a step reading `GRAPH_*` there resolves to empty and sends to nobody while
+reading as a channel that works. `Validate schedule` therefore asks for the maintainer in
+its annotation instead of emailing them
+(`tests/test_validate_schedule_template.py` enforces it).
 
 Nothing converges a cohort's addresses either. `email:` is required on every instructor and
 TA entry in a cohort's `classroom-config/people.yml`, and that file is INSTRUCTOR-OWNED, so

@@ -6,8 +6,8 @@ test_shipped_workflows.py. What is unique here is the routing of three DIFFERENT
 that all arrive in one run: an entry the parser dropped (faculty's file, red X plus an
 issue), a source the course org has not got (faculty's file, a comment on the push and
 nothing else), and a course org the toolkit could not read at all (infrastructure, red X
-plus a mail to the maintainer). Sending any of them down another's channel is how a fault
-gets the wrong name and closes itself without being fixed.
+and an annotation that asks for the maintainer). Sending any of them down another's channel
+is how a fault gets the wrong name and closes itself without being fixed.
 
 The comment's TEXT belongs to the engine (`schedule.source_comment`), which is where it is
 asserted; what is asserted here is that the workflow posts it rather than rebuilding it -
@@ -54,30 +54,16 @@ def test_an_unreadable_course_org_is_a_failure_not_a_skipped_check():
     assert "::notice::" not in validate["run"]
 
 
-def test_only_the_infrastructure_failure_emails_the_maintainer():
-    # A dropped entry is faculty's own YAML and resolves the course org perfectly well, so
-    # it must never reach this step - the red X and the assigned issue are its channel.
-    mail = _step("Email the maintainer")
-    assert mail["if"] == (
-        "failure() && steps.course.outputs.org == '' "
-        "&& github.event_name != 'workflow_dispatch'"
-    )
-    assert "dsl_course.notify run-failed" in mail["run"]
-    # The FAILED JOB's log, by id: `gh run view --log-failed` downloads and unzips every
-    # job in the run to print thirty lines from one of them.
-    assert 'select(.conclusion == "failure")' in mail["run"]
-    assert "actions/jobs/$job/logs" in mail["run"]
-
-
-def test_the_mail_step_carries_exactly_the_env_the_mailer_reads():
-    # Derived from the names the mailer reads, not typed here: a rename that reached
-    # production would leave every org silently unable to say who to mail, on a step that
-    # only ever runs when something is already broken.
-    mail = _step("Email the maintainer")
-    expected = (*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV)
-    assert [k for k in mail["env"] if k in expected] == list(expected)
-    for name in expected:
-        assert mail["env"][name] == "${{ secrets." + name + " }}"
+def test_nothing_in_the_cohort_template_pretends_it_can_send_mail():
+    # A cohort org carries DSL_BOT_TOKEN and nothing else. GRAPH_* and
+    # DSL_MAINTAINER_EMAIL are set on COURSE orgs and nothing propagates them down, so a
+    # mail step here would resolve to empty secrets and send to nobody - while reading, in
+    # the file and in the docs, as a channel that works. The infrastructure verdict is
+    # delivered by the red X and by an annotation that asks for the maintainer by name.
+    wired = {k for s in JOB["steps"] for k in s.get("env", {})}
+    assert wired.isdisjoint({*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV})
+    assert "dsl_course.notify" not in RAW
+    assert "Tell the maintainer." in _step("Validate schedule.yml")["run"]
 
 
 def test_the_commit_comment_only_fires_on_a_push():

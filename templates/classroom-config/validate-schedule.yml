@@ -19,6 +19,14 @@ name: Validate schedule
 # checker - could drift, and its failure mode is the worst one available: passing a file
 # the scheduler will silently drop entries from.
 #
+# A THIRD verdict arrives here and has no channel of its own: an empty course org means
+# the toolkit could not read this cohort's own dsl-course.yml, which is nothing faculty can
+# fix. It reds the run and says so in the annotation, and the annotation asks for the
+# maintainer by name - it cannot email them. A cohort org carries DSL_BOT_TOKEN and nothing
+# else: the GRAPH_* transport and DSL_MAINTAINER_EMAIL are set on COURSE orgs, nothing
+# propagates them down here, and a mail step wired to secrets an org does not have sends to
+# nobody while reading as a channel that works.
+#
 # The red X and the issue above are the DROPPED-ENTRY channel and nothing else. The run
 # also checks whether the plan's sources exist in the course org, but that answer changes
 # week to week (a lecture nobody has written yet is normal in August), so it never touches
@@ -102,7 +110,7 @@ jobs:
         run: |
           set +e
           if [ -z "$COURSE_ORG" ]; then
-            echo "::error::could not read this cohort's dsl-course.yml - the source check cannot run. This is not a fault in your file - the toolkit could not reach the course org; the maintainer has been emailed."
+            echo "::error::could not read this cohort's dsl-course.yml - the source check cannot run. This is not a fault in your file - the toolkit could not reach the course org. Tell the maintainer."
             exit 1
           fi
           check="--check-sources $COURSE_ORG --annotate --comment-file comment.txt"
@@ -186,27 +194,3 @@ jobs:
         run: |
           echo "::error file=schedule.yml::schedule.yml has entries the scheduler cannot read - see the run summary"
           exit 1
-
-      # ONLY for the infrastructure failure above - an empty course org means the toolkit
-      # could not read this cohort's own dsl-course.yml, which is nothing faculty can fix.
-      # A DROPPED ENTRY is faculty's own file and resolves the org perfectly well, so it
-      # never reaches here: that one is reported by the red X and the issue.
-      - name: Email the maintainer when the course org cannot be read
-        if: failure() && steps.course.outputs.org == '' && github.event_name != 'workflow_dispatch'
-        env:
-          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
-          WORKFLOW: ${{ github.workflow }}
-          REPO: ${{ github.repository }}
-          COHORT: ${{ github.repository_owner }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          GRAPH_TENANT_ID: ${{ secrets.GRAPH_TENANT_ID }}
-          GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
-          GRAPH_CLIENT_CERT: ${{ secrets.GRAPH_CLIENT_CERT }}
-          GRAPH_SENDER: ${{ secrets.GRAPH_SENDER }}
-          DSL_MAINTAINER_EMAIL: ${{ secrets.DSL_MAINTAINER_EMAIL }}
-        run: |
-          job=$(gh api "repos/$REPO/actions/runs/$GITHUB_RUN_ID/jobs" \
-            --jq '[.jobs[] | select(.conclusion == "failure")][0].id' 2>/dev/null) || true
-          gh api "repos/$REPO/actions/jobs/$job/logs" 2>/dev/null | tail -n 30 \
-            | python3 -m dsl_course.notify run-failed --course-org "$COHORT" \
-                --workflow "$WORKFLOW" --run-url "$RUN_URL" || true
