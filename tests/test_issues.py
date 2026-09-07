@@ -197,11 +197,17 @@ def test_a_comment_is_posted_only_on_an_issue_that_already_existed(gh):
     # A brand-new issue emails everyone watching by being created; a comment repeating
     # itself on top of that is the noise this whole shape exists to avoid.
     fake = gh([])
-    assert issues.upsert_issue(REPO, TITLE, "body", comment="something changed").errors == 0
+    assert (
+        issues.upsert_issue(REPO, TITLE, "body", comment="something changed").errors
+        == 0
+    )
     assert fake.did("issue", "comment") == []
 
     fake = gh([_issue(7, TITLE, "stale")])
-    assert issues.upsert_issue(REPO, TITLE, "body", comment="something changed").errors == 0
+    assert (
+        issues.upsert_issue(REPO, TITLE, "body", comment="something changed").errors
+        == 0
+    )
     (commented,) = fake.did("issue", "comment")
     assert commented[2] == "7"
     assert fake.body_of("issue", "comment") == "something changed"
@@ -214,6 +220,28 @@ def test_no_comment_means_a_silent_body_edit(gh):
     assert issues.upsert_issue(REPO, TITLE, "body").errors == 0
     assert len(fake.did("issue", "edit")) == 1
     assert fake.did("issue", "comment") == []
+
+
+# ------------------------------------------------------------- the issue somebody closed
+
+
+def test_the_newest_closed_issue_of_that_title_is_the_one_read(gh):
+    # A caller whose state lives in the body it last wrote needs the LAST thing it wrote,
+    # and a cohort that has been through this before has several closed ones.
+    fake = gh([_issue(3, TITLE, "older"), _issue(9, TITLE, "newest")])
+    assert issues.find_closed_issue(REPO, TITLE) == (9, "newest")
+    (listed,) = fake.did("issue", "list")
+    assert listed[listed.index("--state") + 1] == "closed"
+
+
+def test_a_closed_issue_a_human_titled_similarly_is_not_ours_either(gh):
+    gh([_issue(3, f"re: {TITLE}", "my notes")])
+    assert issues.find_closed_issue(REPO, TITLE) is None
+
+
+def test_no_closed_issue_at_all_is_none(gh):
+    gh([])
+    assert issues.find_closed_issue(REPO, TITLE) is None
 
 
 # -------------------------------------------------------------------------------- closing
