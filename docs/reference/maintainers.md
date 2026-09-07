@@ -53,8 +53,9 @@ Things whose *literal spelling* is depended on from outside Python:
 
 - **CLI module names.** Seeded workflows and templates invoke `python3 -m dsl_course.<x>`:
   `assign`, `bootstrap_course`, `collect`, `deploy`, `enrol_codes`, `grades`, `list_orgs`,
-  `scaffold`, `schedule`, `scheduler`, `seed`, `site`, `status`, `syllabus`, `sync_faculty`,
-  `sync_membership`, `sync_roster`, `sync_teams`. A rename strands every org until it refreshes.
+  `notify`, `scaffold`, `schedule`, `scheduler`, `seed`, `site`, `status`, `syllabus`,
+  `sync_faculty`, `sync_membership`, `sync_roster`, `sync_teams`. A rename strands every org
+  until it refreshes.
 - **`roster.FIELDS` / `roster.normalise_role` / `teams.FIELDS`** are re-implemented in the
   shipped JavaScript (`templates/welcome/onboard.yml`, `team-formation.yml`), which cites them by
   name. Change a column and change both sides.
@@ -114,6 +115,13 @@ repo's variables, so an org bootstrapped before the variable existed gets it onc
 there. (Re-running Bootstrap on the org with `set_secret: true` does the same thing and is
 the documented idempotent-repair path.) Cohort orgs need nothing: the mail that names the
 maintainer is sent from the course org's `.github`.
+
+Nothing converges a cohort's addresses either. `email:` is required on every instructor and
+TA entry in a cohort's `classroom-config/people.yml`, and that file is INSTRUCTOR-OWNED, so
+no refresh can fill it in: until somebody edits it by hand the whole feature is inert on
+that cohort - every fault still opens its digest issue and still @mentions the instructors
+team, and no email goes anywhere. `Check cohort setup`'s C7 row counts the entries without
+one, and the run log names the handles.
 
 The four `GRAPH_*` transport secrets are a one-time central setup, set by hand per org and
 never propagated:
