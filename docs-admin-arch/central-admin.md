@@ -237,8 +237,12 @@ code straight into every live org. Two settings, neither of them in code:
    `--force-with-lease` purely as a concurrency guard; every push it makes is a
    fast-forward, so blocking force pushes never blocks it.
 On `main`: PR only, with **both** `ci.yml` jobs required - `pytest` **and**
-`jekyll-contract`. Required checks are named by hand and a job can only be named after it
-has reported on `main` at least once, so land a new CI job first and require it after.
+`jekyll-contract` - and those checks set **strict** (*Require branches to be up to date
+before merging*). Strict is load-bearing, not tidiness: **Deploy main** deploys every merge
+to the demo org with no CI gate of its own, and the whole argument for that is that a commit
+reaching `main` was green *as the tree it creates* - which a stale squash would not have
+been. Required checks are named by hand and a job can only be named after it has reported on
+`main` at least once, so land a new CI job first and require it after.
 
 ### Putting an org on a tier
 

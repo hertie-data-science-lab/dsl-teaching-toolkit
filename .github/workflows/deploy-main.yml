@@ -7,9 +7,12 @@ name: Deploy main
 #
 # Real orgs are untouched: they run `release`, and only "Promote to release" moves that.
 #
-# There is no CI gate in front of this. `main` is PR-only with both ci.yml jobs required, so
-# a commit that gets here has already been green on its own head - and the demo org is where
-# a merge is supposed to be tried, not something to be protected from one.
+# There is no CI gate in front of this, and what makes that safe is a repo setting rather
+# than anything in this file: `main` is PR-only with both ci.yml jobs required AND those
+# checks are STRICT ("require branches to be up to date before merging"), so a stale squash
+# cannot merge and every commit arriving here was green as the tree it actually creates.
+# Loosen that and this starts deploying combinations CI never ran. Either way the demo org is
+# where a merge is meant to be tried, not something to be protected from one.
 
 on:
   push:
