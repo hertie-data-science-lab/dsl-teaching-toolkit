@@ -144,73 +144,15 @@ jobs:
   # which the nightly "Refresh actions" cron does within 24h. This runs it now, so a
   # promotion is a deploy rather than a deploy that happens overnight.
   #
-  # `release` only: an org on `main` is refreshed by the merge that moved main, not by this.
-  #
-  # It runs the refresh HERE, from the commit just promoted, rather than dispatching each
-  # org's own "Refresh actions": that workflow checks the toolkit out at the ref frozen in
-  # the org's own workflow file, so an org whose `central_ref:` has just moved between tiers
-  # would be re-rendered by the tier it is leaving and never converge. The bot is an owner
-  # of every course org; GITHUB_TOKEN sees only this repo and could not.
+  # The same fan-out a merge to main runs for the orgs on `main`; only the tier differs.
   refresh-orgs:
     needs: promote
     if: ${{ inputs.refresh_orgs }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
     permissions:
       contents: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
-        with:
-          # The promoted commit, not whatever ref the run was dispatched from.
-          ref: ${{ needs.promote.outputs.sha }}
-          persist-credentials: false
-      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
-        with:
-          python-version: "3.12"
-          cache: pip
-      - run: pip install -r requirements.txt
-
-      - name: Refresh every org on this tier
-        env:
-          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
-          # seed refresh propagates the bot token as a repo secret, and ghcli.bot_token
-          # refuses to publish one that is only GH_TOKEN.
-          DSL_BOT_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
-          TIER: release
-        run: |
-          set -eo pipefail
-          # list_orgs exits non-zero when it could not read SOME org's dsl-course.yml, and
-          # still prints the rest. One org's malformed file must not leave the whole
-          # estate un-refreshed, so that exit is tolerated here - but only if an inventory
-          # actually came back; an empty capture fails the jq below, as it should.
-          inventory=$(python3 -m dsl_course.list_orgs) \
-            || echo "::warning::list_orgs could not read every org - see the log; refreshing the ones it could"
-          # Cohort orgs are not listed: a course org's refresh converges every cohort
-          # registered under it in the same run.
-          orgs=$(jq -r --arg tier "$TIER" '.course_orgs[] | select(.central_ref == $tier) | .org' <<<"$inventory")
-          # A null tier is an org whose metadata could not be read, so nothing can say
-          # which tier it is on. Named in the summary rather than passed over in silence:
-          # it may well be an org this promotion was meant to reach.
-          unknown=$(jq -r '.course_orgs[] | select(.central_ref == null) | .org' <<<"$inventory")
-          {
-            echo "## Refresh on \`$TIER\`"
-            echo
-            [ -n "$orgs" ] || echo "_No course org runs \`$TIER\`._"
-          } >> "$GITHUB_STEP_SUMMARY"
-          failed=0
-          for org in $orgs; do
-            # Every org is attempted: one org's refresh failing must not strand the rest.
-            if python3 -m dsl_course.seed refresh --course-org "$org"; then
-              echo "- $org - refreshed" >> "$GITHUB_STEP_SUMMARY"
-            else
-              # Not fatal to the promotion - it has already landed, and the org's own
-              # nightly cron converges it within 24h - but it must not read as green.
-              echo "- $org - **refresh failed**, it converges on tonight's cron" >> "$GITHUB_STEP_SUMMARY"
-              failed=1
-            fi
-          done
-          for org in $unknown; do
-            echo "- $org - **skipped**, its \`dsl-course.yml\` could not be read" >> "$GITHUB_STEP_SUMMARY"
-            failed=1
-          done
-          exit "$failed"
+    uses: ./.github/workflows/refresh-tier.yml
+    with:
+      tier: release
+      ref: ${{ needs.promote.outputs.sha }}
+    secrets:
+      DSL_BOT_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}

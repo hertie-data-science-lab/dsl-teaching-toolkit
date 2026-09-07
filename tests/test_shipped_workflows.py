@@ -37,10 +37,10 @@ SHIPPED_WORKFLOWS = _shipped_workflows()
 
 
 def test_the_shipped_workflow_sweep_sees_them_all():
-    # ci, bootstrap-org, promote, refresh-inventory, token-canary, both dispatchers,
-    # validate-schedule, onboard, team-formation - a broken glob would make the tests
-    # below vacuous.
-    assert len(SHIPPED_WORKFLOWS) >= 10
+    # ci, bootstrap-org, promote, deploy-main, refresh-tier, refresh-inventory,
+    # token-canary, both dispatchers, validate-schedule, onboard, team-formation - a broken
+    # glob would make the tests below vacuous.
+    assert len(SHIPPED_WORKFLOWS) >= 12
 
 
 @pytest.mark.parametrize("rel", sorted(SHIPPED_WORKFLOWS))
@@ -48,6 +48,12 @@ def test_shipped_workflows_declare_permissions_and_bound_their_jobs(rel):
     doc = SHIPPED_WORKFLOWS[rel]
     assert "permissions" in doc, f"{rel} takes the default token scopes"
     for name, job in doc["jobs"].items():
+        if "uses" in job:
+            # GitHub refuses `timeout-minutes` on a job that calls a reusable workflow.
+            # What it runs is that workflow's own jobs, which are in this sweep too, so
+            # the bound is asserted there rather than lost.
+            assert "permissions" in job, f"{rel}:{name}"
+            continue
         assert isinstance(job.get("timeout-minutes"), int), f"{rel}:{name}"
 
 
@@ -157,37 +163,91 @@ def test_promote_can_only_fast_forward_release_along_main():
     assert '--force-with-lease="refs/heads/$TIER:$tip"' in run
 
 
-def _promote_refresh_job() -> dict:
-    return SHIPPED_WORKFLOWS[".github/workflows/promote.yml"]["jobs"]["refresh-orgs"]
+FAN_OUT = "./.github/workflows/refresh-tier.yml"
+
+
+def _fan_out_job() -> dict:
+    return SHIPPED_WORKFLOWS[".github/workflows/refresh-tier.yml"]["jobs"][
+        "refresh-orgs"
+    ]
 
 
 def _refresh_step() -> dict:
     return next(
         s
-        for s in _promote_refresh_job()["steps"]
+        for s in _fan_out_job()["steps"]
         if s.get("name") == "Refresh every org on this tier"
     )
 
 
-def test_promote_refreshes_orgs_from_the_promoted_checkout():
-    # The fan-out must run the refresh IN PROCESS, from the code that was just promoted.
+def _caller(workflow: str) -> dict:
+    return SHIPPED_WORKFLOWS[f".github/workflows/{workflow}"]["jobs"]["refresh-orgs"]
+
+
+def test_both_tiers_deploy_through_the_same_fan_out():
+    # One implementation, called twice. Two copies would drift, and the tier nobody was
+    # looking at would be the one that stopped converging.
+    assert _caller("promote.yml")["uses"] == FAN_OUT
+    assert _caller("deploy-main.yml")["uses"] == FAN_OUT
+
+
+def test_the_fan_out_refreshes_orgs_from_the_deployed_checkout():
+    # It must run the refresh IN PROCESS, from the code the tier now points at.
     # Dispatching each org's own "Refresh actions" instead runs the toolkit at the ref
     # already baked into that org's workflow file, so an org whose central_ref has just
     # changed tier is re-rendered by the OLD tier's code and never converges.
-    job = _promote_refresh_job()
+    job = _fan_out_job()
     checkout = next(s for s in job["steps"] if "checkout" in s.get("uses", ""))
-    assert checkout["with"]["ref"] == "${{ needs.promote.outputs.sha }}"
+    assert checkout["with"]["ref"] == "${{ inputs.ref }}"
     run = _refresh_step()["run"]
     assert "python3 -m dsl_course.seed refresh --course-org" in run
     assert "gh workflow run refresh-actions.yml" not in run
 
 
-def test_promote_refresh_carries_both_bot_tokens():
+def test_promote_fans_out_over_release_at_the_commit_it_pushed():
+    # The promoted commit, not the ref the run was dispatched from.
+    caller = _caller("promote.yml")
+    assert caller["with"] == {
+        "tier": "release",
+        "ref": "${{ needs.promote.outputs.sha }}",
+    }
+    assert caller["needs"] == "promote"
+
+
+def test_a_merge_to_main_fans_out_over_the_main_tier():
+    # A merge to main IS the deploy to the demo course org, which declares
+    # `central_ref: main` - so the shapes land with the engine instead of waiting for the
+    # org's own 05:27 cron.
+    doc = SHIPPED_WORKFLOWS[".github/workflows/deploy-main.yml"]
+    trigger = doc.get("on", doc.get(True))
+    assert trigger == {"push": {"branches": ["main"]}}
+    assert doc["concurrency"] == {"group": "deploy-main", "cancel-in-progress": False}
+    assert _caller("deploy-main.yml")["with"] == {
+        "tier": "main",
+        "ref": "${{ github.sha }}",
+    }
+
+
+def test_the_fan_out_is_green_when_no_org_runs_the_tier():
+    # Every merge runs it, and nothing is on `main` until the demo course is moved there -
+    # an empty selection has to be a run that says so, not one that fails.
+    run = _refresh_step()["run"]
+    assert "select(.central_ref == $tier)" in run
+    assert '[ -n "$orgs" ] || echo "_No course org runs' in run
+    assert "failed=0" in run
+
+
+def test_the_fan_out_carries_both_bot_tokens():
     # seed refresh reads GH_TOKEN for the API and DSL_BOT_TOKEN to propagate the repo
     # secret (ghcli.bot_token refuses to publish a token that is only GH_TOKEN).
     env = _refresh_step()["env"]
     assert env["GH_TOKEN"] == "${{ secrets.DSL_BOT_TOKEN }}"
     assert env["DSL_BOT_TOKEN"] == "${{ secrets.DSL_BOT_TOKEN }}"
+    # Passed explicitly by each caller rather than inherited wholesale.
+    for workflow in ("promote.yml", "deploy-main.yml"):
+        assert _caller(workflow)["secrets"] == {
+            "DSL_BOT_TOKEN": "${{ secrets.DSL_BOT_TOKEN }}"
+        }
 
 
 def test_bootstrap_org_offers_the_two_tiers_and_defaults_to_release():

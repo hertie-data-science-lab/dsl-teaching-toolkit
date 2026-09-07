@@ -1,0 +1,36 @@
+name: Deploy main
+
+# A merge to main IS a deploy - to the demo course org, which declares `central_ref: main`.
+# The engine moves the moment main does (every seeded workflow there checks this repo out at
+# run time); this re-renders the workflow SHAPES too, so a merge lands whole rather than
+# half now and half on tonight's 05:27 cron.
+#
+# Real orgs are untouched: they run `release`, and only "Promote to release" moves that.
+#
+# There is no CI gate in front of this. `main` is PR-only with both ci.yml jobs required, so
+# a commit that gets here has already been green on its own head - and the demo org is where
+# a merge is supposed to be tried, not something to be protected from one.
+
+on:
+  push:
+    branches: [main]
+
+# One deploy at a time. Two merges minutes apart would otherwise have two runs writing the
+# same files into the same org, and the loser to finish wins the file - which would leave
+# the org rendered from the older commit.
+concurrency:
+  group: deploy-main
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  refresh-orgs:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/refresh-tier.yml
+    with:
+      tier: main
+      ref: ${{ github.sha }}
+    secrets:
+      DSL_BOT_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}

@@ -1,0 +1,98 @@
+name: Refresh a tier
+
+# The fan-out half of a deploy: re-render every course org that declares the tier named
+# here, out of the commit of this repo named here. Called by "Deploy main" on every merge
+# and by "Promote to release" once `release` has moved - one implementation, so the two
+# tiers cannot drift into deploying differently.
+#
+# It runs the refresh HERE, from that commit, rather than dispatching each org's own
+# "Refresh actions": that workflow checks the toolkit out at the ref frozen in the org's own
+# workflow file, so an org whose `central_ref:` has just moved between tiers would be
+# re-rendered by the tier it is leaving and never converge. The bot is an owner of every
+# course org; GITHUB_TOKEN sees only this repo and could not.
+#
+# An empty selection is a green run that says so: no org has to be on a tier for the tier
+# to be deployed.
+
+on:
+  workflow_call:
+    inputs:
+      tier:
+        description: "Refresh every course org whose `central_ref:` is this"
+        required: true
+        type: string
+      ref:
+        description: "The commit of this repo to render from - what that tier now points at"
+        required: true
+        type: string
+    secrets:
+      DSL_BOT_TOKEN:
+        description: "The bot, which is an owner of every course org"
+        required: true
+
+# The fan-out authenticates as the bot, so it needs nothing from the ambient token beyond
+# reading this repo.
+permissions: {}
+
+jobs:
+  refresh-orgs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
+        with:
+          # The commit the tier now points at, not whatever ref the caller was run from.
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5.6.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Refresh every org on this tier
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          # seed refresh propagates the bot token as a repo secret, and ghcli.bot_token
+          # refuses to publish one that is only GH_TOKEN.
+          DSL_BOT_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          TIER: ${{ inputs.tier }}
+        run: |
+          set -eo pipefail
+          # list_orgs exits non-zero when it could not read SOME org's dsl-course.yml, and
+          # still prints the rest. One org's malformed file must not leave the whole
+          # estate un-refreshed, so that exit is tolerated here - but only if an inventory
+          # actually came back; an empty capture fails the jq below, as it should.
+          inventory=$(python3 -m dsl_course.list_orgs) \
+            || echo "::warning::list_orgs could not read every org - see the log; refreshing the ones it could"
+          # Cohort orgs are not listed: a course org's refresh converges every cohort
+          # registered under it in the same run.
+          orgs=$(jq -r --arg tier "$TIER" '.course_orgs[] | select(.central_ref == $tier) | .org' <<<"$inventory")
+          # A null tier is an org whose metadata could not be read, so nothing can say
+          # which tier it is on. Named in the summary rather than passed over in silence:
+          # it may well be an org this deploy was meant to reach.
+          unknown=$(jq -r '.course_orgs[] | select(.central_ref == null) | .org' <<<"$inventory")
+          {
+            echo "## Refresh on \`$TIER\`"
+            echo
+            [ -n "$orgs" ] || echo "_No course org runs \`$TIER\`._"
+          } >> "$GITHUB_STEP_SUMMARY"
+          failed=0
+          for org in $orgs; do
+            # Every org is attempted: one org's refresh failing must not strand the rest.
+            if python3 -m dsl_course.seed refresh --course-org "$org"; then
+              echo "- $org - refreshed" >> "$GITHUB_STEP_SUMMARY"
+            else
+              # Not fatal to the deploy - the tier has already moved, and the org's own
+              # nightly cron converges it within 24h - but it must not read as green.
+              echo "- $org - **refresh failed**, it converges on tonight's cron" >> "$GITHUB_STEP_SUMMARY"
+              failed=1
+            fi
+          done
+          for org in $unknown; do
+            echo "- $org - **skipped**, its \`dsl-course.yml\` could not be read" >> "$GITHUB_STEP_SUMMARY"
+            failed=1
+          done
+          exit "$failed"
