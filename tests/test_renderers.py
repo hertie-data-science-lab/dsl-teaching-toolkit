@@ -1467,6 +1467,11 @@ MAIL_SENDERS = ("send_codes", "distribute_grades")
 MAIL_ENV_CARRIERS = MAIL_SENDERS + ("status",)
 
 
+def _secret_ref(name: str) -> str:
+    """How a rendered workflow spells "read `name` out of this org's secrets"."""
+    return f"${{{{ secrets.{name} }}}}"
+
+
 def test_the_one_mail_button_left_defaults_to_a_dry_run():
     # The entire safety rail on a button that emails a whole cohort, and until now it was
     # asserted nowhere: a renderer edit flipping it would have been green. Send enrolment
@@ -1513,3 +1518,15 @@ def test_every_mail_sender_carries_every_transport_secret(name):
         for step in job.get("steps", []):
             step_env.update(step.get("env") or {})
     assert set(mailer.GRAPH_ENV) <= set(step_env)
+    # WHERE a fault mail goes rides in the same env as the transport that sends it: a
+    # workflow carrying one and not the other can mail, and has nobody to tell.
+    assert step_env[mailer.MAINTAINER_ENV] == _secret_ref(mailer.MAINTAINER_ENV)
+
+
+def test_a_cohort_bootstrap_forwards_the_maintainer_address_to_the_new_org():
+    # It runs in the COURSE org, which has the address as an org secret already, and
+    # --propagate-secret is what copies it down. A cohort org left without it is one whose
+    # own seeded workflows fall back to the shared send mailbox.
+    steps = workflow_jobs(ALL_RENDERED["bootstrap_cohort"])["bootstrap-cohort"]["steps"]
+    step = next(s for s in steps if "--propagate-secret" in str(s.get("run", "")))
+    assert step["env"][mailer.MAINTAINER_ENV] == _secret_ref(mailer.MAINTAINER_ENV)

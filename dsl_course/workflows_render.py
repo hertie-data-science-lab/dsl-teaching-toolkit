@@ -230,11 +230,15 @@ def _run_preamble(minutes: int = _TIMEOUT_DEFAULT) -> str:
 # whether a send could: its mail-transport row reads the very same variables, and without
 # them it would report "unset" on every org whatever the truth.
 # A plain string (not the f-string body) so the GitHub `${{ }}` is literal.
-# Derived from the names the mailer actually reads, so a rename cannot leave an org
+# Derived from the names the mailer actually reads - the four GRAPH_* transport secrets
+# plus DSL_MAINTAINER_EMAIL, where fault mail goes - so a rename cannot leave an org
 # silently unconfigured. GRAPH_CLIENT_CERT holds certificate + private key in one
-# multi-line secret; there is no GRAPH_CLIENT_SECRET.
+# multi-line secret; there is no GRAPH_CLIENT_SECRET. DSL_MAINTAINER_EMAIL is an ADDRESS
+# and is held centrally as a repository variable, but it travels to an org as an org
+# secret (bootstrap_course propagates it), so it is read from `secrets.` like the rest.
 _MAIL_ENV = "\n".join(
-    f"          {name}: ${{{{ secrets.{name} }}}}" for name in mailer.GRAPH_ENV
+    f"          {name}: ${{{{ secrets.{name} }}}}"
+    for name in (*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV)
 )
 
 # Fail CLOSED: only an explicit `false` sends. Any other value - "True", "1", a blank from
@@ -861,6 +865,11 @@ on:
           DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
           COHORT: ${{{{ inputs.cohort_org }}}}
+          # Forwarded, not looked up: this runs in the COURSE org, whose own bootstrap
+          # propagated the address here, so --propagate-secret can pass it down to the
+          # cohort. Empty on a course org that never got one - the cohort then falls back
+          # to GRAPH_SENDER like everything else.
+          DSL_MAINTAINER_EMAIL: ${{{{ secrets.DSL_MAINTAINER_EMAIL }}}}
         run: |
           python3 -m dsl_course.bootstrap_course --org "$COHORT" --org-name "$COHORT" \\
             --cohort --course "$COURSE" --propagate-secret
