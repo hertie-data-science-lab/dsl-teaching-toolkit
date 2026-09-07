@@ -229,6 +229,45 @@ def test_de_escalation_is_not_reported_as_a_change():
     assert (t.appeared, t.escalated, t.cleared) == ([], [], [])
 
 
+# ------------------------------------------------- state written by an older version
+
+
+def test_an_old_shaped_key_is_matched_to_the_fault_it_belongs_to():
+    # `key` gained `[path]` after these issues were opened, so every one of them carries
+    # `<where>.<field>`. Renamed, not read as-is: as-is it is a fault that cleared and a
+    # fault that appeared, in the same tick.
+    fault = _f("releases.a", timedelta(hours=20))
+    assert sd.migrated({"releases.a.course_source_path": "warning"}, [fault]) == (
+        {fault.key: "warning"}
+    )
+
+
+def test_an_old_key_two_deploys_now_share_is_dropped_rather_than_guessed():
+    # These are the two faults the path was added to tell apart, and the recorded rung
+    # belonged to one of them. Dropping it makes the loudest appear again; keeping it
+    # would silence whichever one it was not.
+    both = [
+        source_fault("releases.a", fires=NOW + timedelta(hours=3), path=p, repo="cm")
+        for p in ("x", "y")
+    ]
+    assert sd.migrated({"releases.a.course_source_path": "warning"}, both) == {}
+
+
+def test_a_key_matching_nothing_today_is_left_alone_so_it_can_clear():
+    assert sd.migrated({"releases.gone.course_source_path": "urgent"}, []) == (
+        {"releases.gone.course_source_path": "urgent"}
+    )
+
+
+def test_a_body_carrying_both_shapes_keeps_the_rung_it_reported_at():
+    # A tick that ran mid-migration. The current-shaped key is the one the last comment
+    # was written from.
+    fault = _f("releases.a", timedelta(hours=20))
+    assert sd.migrated(
+        {"releases.a.course_source_path": "warning", fault.key: "critical"}, [fault]
+    ) == {fault.key: "critical"}
+
+
 # ------------------------------------------------------------------------- sync + IO
 
 
@@ -308,6 +347,27 @@ def test_sync_reports_what_is_owed_a_mail_and_the_issue_to_link_to(gh):
     assert out.mail == {"releases.a[x].course_source_path": sd.Severity.CRITICAL}
     assert out.issue_url == "https://github.com/Cohort/classroom-config/issues/7"
     assert out.faults_by_key == {"releases.a[x].course_source_path": fault}
+
+
+def test_a_digest_opened_before_the_key_changed_says_nothing_new(gh):
+    # The first tick after the deploy, against a live issue's own body. Neither a Cleared
+    # comment nor a fresh mail: nothing about this fault has changed.
+    fault = _f("releases.a", timedelta(hours=20))
+    fake = gh(_open(fault, state={"releases.a.course_source_path": "warning"}))
+    out = sd.sync("Cohort", "Course", [fault], NOW)
+    assert out.mail == {}
+    assert fake.did("issue", "comment") == []
+    # ...and the marker is rewritten in the current shape, so this runs once.
+    assert _state(fake.body_of("issue", "edit")) == {fault.key: "warning"}
+
+
+def test_an_old_shaped_key_still_escalates_from_the_rung_it_recorded(gh):
+    fault = _f("releases.a", timedelta(hours=3), lineno=36)
+    fake = gh(_open(state={"releases.a.course_source_path": "warning"}))
+    out = sd.sync("Cohort", "Course", [fault], NOW)
+    assert out.mail == {fault.key: sd.Severity.CRITICAL}
+    (comment,) = fake.did("issue", "comment")
+    assert "Escalated" in comment[comment.index("--body") + 1]
 
 
 def test_the_last_fault_clearing_closes_the_issue(gh):
