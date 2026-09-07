@@ -357,6 +357,29 @@ def render_body(
     return "\n".join(out)
 
 
+def cleared_body() -> str:
+    """What the issue is left saying once its last fault has gone - and, the load-bearing
+    half, an EMPTY state marker.
+
+    The body IS the record, and the record of a CLOSED issue is what the next tick adopts
+    if the fault comes back (see `sync`). Left as it stood, a fault that recurs at the
+    same rung or a quieter one is neither appeared nor escalated: the issue re-opens
+    carrying it and nobody is told anything at all. Blanked here - and only here, where
+    the digest closed the issue ITSELF - adoption keeps doing the job it exists for, which
+    is somebody closing the issue by hand while the fault still stands."""
+    return "\n".join(
+        [
+            (
+                f"Every entry in `{CONFIG_REPO}/{SCHEDULE_PATH}` was usable when this "
+                f"issue closed. It reopens on its own if that changes."
+            ),
+            "",
+            _write_marker(_STATE, {}),
+            _write_marker(_MENTION, []),
+        ]
+    )
+
+
 def _comment(t: Transitions, faults: dict[str, SourceFault], now, ctx: Context) -> str:
     """The transition comment - short on purpose. It is an email subject line more than a
     document; the body above is where the detail lives.
@@ -437,7 +460,11 @@ def sync(
             if dry_run:
                 log_step(f"[dry-run] would close the source digest in {repo}")
                 return DigestResult(issue_url=url)
-            if close_issues_titled(
+            # The body first, and with an empty state marker: see `cleared_body`. A write
+            # that failed leaves the issue open with its old body, which is the state this
+            # tick started in - so the next tick tries the whole thing again.
+            wrote = upsert_issue(repo, TITLE, cleared_body(), existing=open_issue)
+            if wrote.errors or close_issues_titled(
                 repo,
                 TITLE,
                 f"Every entry in {SCHEDULE_PATH} is now usable. Reopens on its own if "

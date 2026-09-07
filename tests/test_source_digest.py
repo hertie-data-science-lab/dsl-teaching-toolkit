@@ -446,10 +446,38 @@ def test_the_last_fault_clearing_closes_the_issue(gh):
     assert out.errors == 0 and out.mail == {}
     (closed,) = fake.did("issue", "close")
     assert "7" in closed
-    assert fake.did("issue", "edit") == []
     # It closes with the one sentence that says so; nobody is emailed that a problem
     # stopped existing.
     assert "is now usable" in closed[closed.index("--comment") + 1]
+    # ...and the body it leaves behind records nothing, because a closed body is what the
+    # next tick adopts (see below).
+    assert _state(fake.body_of("issue", "edit")) == {}
+
+
+def test_a_fault_that_comes_back_after_the_digest_closed_itself_is_news(gh):
+    # Three ticks. The state the digest itself left behind must not silence the return of
+    # the fault: at the same rung or a quieter one it is neither appeared nor escalated,
+    # and the issue re-opened carrying it with nobody told a thing.
+    fake = gh(_open(_f("releases.a", timedelta(hours=3))))
+    sd.sync("Cohort", "Course", [], NOW)
+    closed_body = fake.body_of("issue", "edit")
+
+    fake = gh([], closed=[issue_row(7, sd.TITLE, closed_body)])
+    fault = _f("releases.a", timedelta(hours=20))
+    out = sd.sync("Cohort", "Course", [fault], NOW)
+    assert out.mail == {fault.key: sd.Severity.WARNING}
+    assert len(fake.did("issue", "create")) == 1
+
+
+def test_an_issue_closed_by_hand_still_silences_what_it_left_standing(gh):
+    # The case adoption exists for: somebody closes the digest while the fault stands.
+    # Nothing was staged, so re-announcing every standing fault would mail the cohort
+    # about all of it again.
+    fault = _f("releases.a", timedelta(hours=3))
+    fake = gh([], closed=_open(fault))
+    out = sd.sync("Cohort", "Course", [fault], NOW)
+    assert out.mail == {}
+    assert len(fake.did("issue", "create")) == 1
 
 
 def test_nothing_missing_and_no_issue_is_a_complete_no_op(gh):
