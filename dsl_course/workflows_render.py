@@ -294,30 +294,42 @@ _DRY_RUN_GATE = (
 _SCOPE = "__CRON_ISSUE_SCOPE__"  # replaced per job; see _fill_scope
 _SCOPE_ENV = "__CRON_SCOPE_ENV__"  # any env the scope's shell fragment reads
 
+# Where a cron step keeps its own output for the mail step below to tail. The runner's
+# temp directory, so it is per JOB - the scheduler's grading matrix runs a leg per cohort,
+# each on its own runner, and a shared path would let one cohort's mail carry another's log.
+_RUN_LOG = '"$RUNNER_TEMP/run.log"'
+
+# Appended to the main `run:` command of every cron step the mail below reports on, so the
+# step writes the log the mail sends. `tee` and not a redirect, because the log has to stay
+# in the run's own output as well - that is what the failure issue links to.
+#
+# `exit "${PIPESTATUS[0]}"` is what keeps the step RED: the exit status of a pipeline is
+# its last command's, which is `tee`, which succeeds - so under the runner's `bash -e` a
+# teed failure would go green. It is the last line of the block for the same reason.
+_TEE_RUN_LOG = f' 2>&1 | tee {_RUN_LOG}\n          exit "${{PIPESTATUS[0]}}"'
+
 # The mail that reaches the maintainer, gated on the notice step having actually reported.
-# The FAILED JOB's log, not the run's: `gh run view --log-failed` downloads and unzips
-# every job in the run, which on the scheduler is one archive per cohort to print thirty
-# lines from. Both calls are guarded (`|| true`) because a log that cannot be fetched - a
-# run whose logs are still being assembled, a job id the listing did not carry - must not
-# lose the mail as well. The CLI always exits 0: this job has already failed for its own
-# reasons, and reddening it twice would say nothing new. Piped, so the tail never becomes
-# an argv a shell could reinterpret.
+# The step's OWN log, teed to `_RUN_LOG` by the step itself, rather than fetched back from
+# the jobs API: this step runs INSIDE the still-running job, whose `conclusion` is null
+# until the run ends, so a lookup for the failed job matched nothing here and mailed an
+# empty tail - and on the grading matrix it could match a different cohort's leg.
+# `2>/dev/null` and `|| true` because a job that died before the teeing step ran leaves no
+# log at all, and a missing tail must not lose the mail as well: the run URL is in it
+# either way. The CLI always exits 0: this job has already failed for its own reasons, and
+# reddening it twice would say nothing new. Piped, so the tail never becomes an argv a
+# shell could reinterpret.
 _CRON_MAIL_TEMPLATE = (
     """      - name: Email the maintainer the failed step's log
         if: (failure() || cancelled()) && github.event_name != 'workflow_dispatch' && steps.notice.outputs.report == 'true'
         env:
-          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           WORKFLOW: ${{ github.workflow }}
-          REPO: ${{ github.repository }}
           COURSE: ${{ github.repository_owner }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 """
     + _MAIL_ENV
-    + """
+    + f"""
         run: |
-          job=$(gh api "repos/$REPO/actions/runs/$GITHUB_RUN_ID/jobs" \\
-            --jq '[.jobs[] | select(.conclusion == "failure")][0].id' 2>/dev/null) || true
-          gh api "repos/$REPO/actions/jobs/$job/logs" 2>/dev/null | tail -n 30 \\
+          tail -n 30 {_RUN_LOG} 2>/dev/null \\
             | python3 -m dsl_course.notify run-failed --course-org "$COURSE" \\
                 --workflow "$WORKFLOW" --run-url "$RUN_URL" || true
 """
@@ -766,7 +778,7 @@ on:
             schedule) args+=(--all-cohorts) ;;
             repository_dispatch) [ -n "$DISPATCH_COHORT" ] && args+=(--cohort-org "$DISPATCH_COHORT") ;;
           esac
-          python3 -m dsl_course.sync_membership "${{args[@]}}"
+          python3 -m dsl_course.sync_membership "${{args[@]}}"{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""
 
 
@@ -1000,7 +1012,7 @@ on:
           echo "delivered by event=$EVENT driver=${{DRIVER:-none}}"
           args=(--course-org "$COURSE" --all-cohorts --skip-autograde)
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
-          python3 -m dsl_course.scheduler "${{args[@]}}"
+          python3 -m dsl_course.scheduler "${{args[@]}}"{_TEE_RUN_LOG}
 {_CRON_NOTICE}  autograde:
     needs: [release]
     # always(), because grading is gated on the durable snapshot marker, not on this run's
@@ -1023,7 +1035,7 @@ on:
           gh auth setup-git
           args=(--course-org "$COURSE" --cohort-org "$COHORT" --autograde-only)
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
-          python3 -m dsl_course.scheduler "${{args[@]}}"
+          python3 -m dsl_course.scheduler "${{args[@]}}"{_TEE_RUN_LOG}
 {_AUTOGRADE_NOTICE}"""
 
 
@@ -1087,7 +1099,7 @@ on:
           DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
         run: |
-          python3 -m dsl_course.seed refresh --course-org "$COURSE"
+          python3 -m dsl_course.seed refresh --course-org "$COURSE"{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""
 
 
@@ -1276,7 +1288,7 @@ on:
                 args+=(--all-cohorts)
               fi ;;
           esac
-          python3 -m dsl_course.site sync "${{args[@]}}"
+          python3 -m dsl_course.site sync "${{args[@]}}"{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""
 
 
@@ -1354,5 +1366,5 @@ on:
           COURSE_ORG: ${{{{ github.repository_owner }}}}
         run: |
           gh auth setup-git
-          python3 -m dsl_course.site public-sync --course-org "$COURSE_ORG"
+          python3 -m dsl_course.site public-sync --course-org "$COURSE_ORG"{_TEE_RUN_LOG}
 {_CRON_NOTICE}"""

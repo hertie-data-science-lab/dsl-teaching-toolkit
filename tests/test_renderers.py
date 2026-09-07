@@ -1080,16 +1080,18 @@ def _assert_emails_the_maintainer(step: dict) -> None:
     # The issue is the durable record; this is the only channel the MAINTAINER is on.
     # GitHub's own scheduled-failure email goes to whoever last committed the workflow
     # file, which is always the bot, which is to say nobody.
-    # The FAILED JOB's log, fetched by id: `gh run view --log-failed` downloads and
-    # unzips every job in the run to print thirty lines from one of them.
-    assert 'select(.conclusion == "failure")' in step["run"]
-    assert "actions/jobs/$job/logs" in step["run"]
-    assert "tail -n 30" in step["run"]
+    # The step's OWN log, teed by the step that failed. The jobs API cannot answer this
+    # from in here: the job is still RUNNING, so its `conclusion` is null and a lookup
+    # for the failed job mailed an empty tail - and on the grading matrix it could match
+    # another cohort's leg.
+    assert f"tail -n 30 {workflows_render._RUN_LOG}" in step["run"]
+    assert "actions/runs" not in step["run"]
     assert "dsl_course.notify run-failed" in step["run"]
     # Piped, never interpolated: a log tail is arbitrary text and must not become argv.
     assert "${{" not in step["run"]
-    # A log that cannot be fetched must not lose the mail as well, and this job has
-    # already failed for its own reasons - reddening it twice says nothing new.
+    # A job that died before the teeing step ran leaves no log, and a missing tail must
+    # not lose the mail as well - the run URL is in it either way. This job has also
+    # already failed for its own reasons; reddening it twice says nothing new.
     assert "|| true" in step["run"]
     # Throttled WITH the issue, off the notice step's own output, so a maintainer who gets
     # an email can always find the issue it came from - and a thread being kept quiet for
@@ -1101,6 +1103,21 @@ def _assert_emails_the_maintainer(step: dict) -> None:
     assert set(mailer.GRAPH_ENV) <= set(step["env"])
     assert step["env"][mailer.MAINTAINER_ENV] == _secret_ref(mailer.MAINTAINER_ENV)
     assert step["env"]["COURSE"] == "${{ github.repository_owner }}"
+
+
+def _assert_the_reported_step_writes_its_log(job: dict, where: str) -> None:
+    """The mail above tails a log, so the step it reports on has to write one."""
+    teed = [i for i, s in enumerate(job["steps"]) if "| tee " in s.get("run", "")]
+    assert len(teed) == 1, where
+    step = job["steps"][teed[0]]
+    assert workflows_render._RUN_LOG in step["run"], where
+    # A pipeline's exit status is its LAST command's - `tee`, which succeeds - so without
+    # this the failure the mail exists for would leave the step green and report nothing.
+    assert step["run"].rstrip().endswith('exit "${PIPESTATUS[0]}"'), where
+    mail = next(
+        i for i, s in enumerate(job["steps"]) if "dsl_course.notify" in s.get("run", "")
+    )
+    assert teed[0] < mail, where
 
 
 # Two OPEN issues whose titles the search cannot tell apart: every word of the release
@@ -1239,6 +1256,7 @@ def test_every_cron_files_and_closes_its_own_failure_issue(name):
         )
         _assert_reports_a_failure(opener)
         _assert_emails_the_maintainer(mailers[0])
+        _assert_the_reported_step_writes_its_log(job, f"{name}.{job_name}")
 
     # "Fix it and re-run" is how a human confirms the recovery, so EVERY job a human can
     # dispatch closes the ticket too - not just the schedule-gated one carrying the notice.
