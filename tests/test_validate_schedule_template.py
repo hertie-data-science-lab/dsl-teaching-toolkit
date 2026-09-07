@@ -46,12 +46,30 @@ def test_an_unreadable_course_org_is_a_failure_not_a_skipped_check():
     # silently stopped running and every push looked clean.
     resolve = _step("Resolve the course org")
     assert "continue-on-error" not in resolve
-    validate = _step("Validate schedule.yml")
-    assert "::error::could not read this cohort's dsl-course.yml" in validate["run"]
+    fail = _step("Fail the run because the course org")
+    assert fail["if"] == "steps.course.outputs.org == ''"
+    assert "::error::could not read this cohort's dsl-course.yml" in fail["run"]
+    assert "exit 1" in fail["run"]
     # ...and it says whose problem it is. Faculty reading a red X on their own push will
     # otherwise go looking through a file that is perfectly fine.
-    assert "not a fault in your file" in validate["run"]
-    assert "::notice::" not in validate["run"]
+    assert "not a fault in your file" in fail["run"]
+    assert "::notice::" not in RAW
+
+
+def test_the_parse_is_reported_even_when_the_course_org_cannot_be_read():
+    # Two verdicts, two channels. Failing the validate step for a missing org skipped
+    # every step after it - and those steps have no status function in their `if:`, so a
+    # push that dropped an entry went unreported because of an unrelated API blip.
+    validate = _step("Validate schedule.yml")
+    assert "--validate" in validate["run"]
+    assert validate["run"].rstrip().endswith("exit 0")
+    # The source check is what is conditional, not the parse.
+    assert 'if [ -n "$COURSE_ORG" ]; then' in validate["run"]
+    assert "--check-sources" in validate["run"]
+    # ...and the org failure is the LAST step, after the dropped-entry issue is opened,
+    # closed and annotated.
+    names = [s.get("name", "") for s in JOB["steps"]]
+    assert names[-1].startswith("Fail the run because the course org")
 
 
 def test_nothing_in_the_cohort_template_pretends_it_can_send_mail():
@@ -63,7 +81,7 @@ def test_nothing_in_the_cohort_template_pretends_it_can_send_mail():
     wired = {k for s in JOB["steps"] for k in s.get("env", {})}
     assert wired.isdisjoint({*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV})
     assert "dsl_course.notify" not in RAW
-    assert "Tell the maintainer." in _step("Validate schedule.yml")["run"]
+    assert "Tell the maintainer." in _step("Fail the run because the course org")["run"]
 
 
 def test_the_commit_comment_only_fires_on_a_push():

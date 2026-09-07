@@ -109,15 +109,21 @@ jobs:
           COURSE_ORG: ${{ steps.course.outputs.org }}
         run: |
           set +e
-          if [ -z "$COURSE_ORG" ]; then
-            echo "::error::could not read this cohort's dsl-course.yml - the source check cannot run. This is not a fault in your file - the toolkit could not reach the course org. Tell the maintainer."
-            exit 1
+          # The PARSE runs first and unconditionally. It is the verdict about the file
+          # that was just pushed, it needs nothing but that file, and its channel - the
+          # red X, the issue naming what was dropped, the close on the next clean push -
+          # hangs off the `rc` written below. Failing the step here for an empty course
+          # org skipped all of it: those steps have no status function in their `if:`, so
+          # a failed step above them means they never run, and a push that dropped an
+          # entry went unreported because an unrelated API call came back empty.
+          args=(--file ../cohort/schedule.yml --validate)
+          if [ -n "$COURSE_ORG" ]; then
+            args+=(--check-sources "$COURSE_ORG" --annotate --comment-file comment.txt)
           fi
-          check="--check-sources $COURSE_ORG --annotate --comment-file comment.txt"
           # stdout is the report; the ::warning:: annotations go to stderr, so they reach
           # the job log (where Actions renders them against schedule.yml in the commit's
           # own diff) without landing in the summary as raw workflow-command text.
-          python3 -m dsl_course.schedule --file ../cohort/schedule.yml --validate $check > report.txt
+          python3 -m dsl_course.schedule "${args[@]}" > report.txt
           echo "rc=$?" >> "$GITHUB_OUTPUT"
           {
             echo "## schedule.yml"
@@ -205,4 +211,17 @@ jobs:
         if: steps.validate.outputs.rc != '0'
         run: |
           echo "::error file=schedule.yml::schedule.yml has entries the scheduler cannot read - see the run summary"
+          exit 1
+
+      # LAST, so the dropped-entry channel above has already run. A cohort's dsl-course.yml
+      # is SYSTEM-OWNED and always names `course:`, so an empty answer is an API error or a
+      # token that lost its scope - infrastructure, and nothing in the file just pushed. It
+      # used to be swallowed, which meant the source check silently stopped running and
+      # every push looked clean; it then failed the validate step instead, which skipped
+      # everything after it. The annotation asks for the maintainer by name because this
+      # repo cannot email them - see the header.
+      - name: Fail the run because the course org could not be read
+        if: steps.course.outputs.org == ''
+        run: |
+          echo "::error::could not read this cohort's dsl-course.yml - the source check could not run. This is not a fault in your file - the toolkit could not reach the course org. Tell the maintainer."
           exit 1
