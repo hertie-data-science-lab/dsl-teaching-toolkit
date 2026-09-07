@@ -528,6 +528,12 @@ file · tree · team · repo list`"]
   site, Refresh actions, Publish course website) open - or comment on - an issue titled
   *"\<workflow\> is failing"* in the course org's `.github`, and close it on the next success. An
   open issue always means "still broken". Manual dispatch is exempt: someone is watching.
+- **A content fault is not a run fault.** A `schedule.yml` entry citing a source nobody has
+  staged never touches an exit code, at any rung on its ladder (`schedule.Severity`): it is
+  faculty's to fix, so it is delivered on the channel faculty watch - the cohort's source digest
+  issue, which `cc`s the instructors and links the line to edit. Spending the red X on it instead
+  meant up to eight failing runs an hour, each mailing the bot account about a folder only faculty
+  can write, and left the run's own health unreadable.
 - **Courtesy paths never fail their caller.** The site's overwrite notice logs loudly and leaves
   the exit code untouched - by the time it runs the site is already published, and letting it
   redden the cron would invert the incident it exists to prevent.

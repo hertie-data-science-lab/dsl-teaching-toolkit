@@ -284,17 +284,21 @@ So the sources are checked against the course org in two places: **Validate sche
 
 | Distance to the deploy | Severity | What you see |
 |---|---|---|
-| more than 7 days | advisory | a line in the run summary and a yellow annotation against `schedule.yml` in the commit. Nobody is emailed |
+| more than 7 days | advisory | a line in the run summary and a yellow annotation on the offending line of `schedule.yml` in the commit. Nobody is emailed |
 | 7 days or less | warning | the above, plus a **digest issue** in `classroom-config` - so it reaches your inbox rather than waiting to be found |
-| 48 hours or less, or already passed | **error** | the digest issue comments to say it escalated, and the **scheduled run goes red** |
+| 48 hours or less | **urgent** | the digest issue comments to say it escalated |
+| 24 hours or less | **critical** | it comments again, one rung louder |
+| the moment has passed | **missed** | the copy did not ship. A last comment, and the fault stays listed until the source is staged |
 
-**Validate schedule never goes red for a missing source, at any rung.** Its red X means one thing - an entry you wrote is not in your plan - and it clears when the file next parses cleanly. A missing source is not a broken file and doesn't clear when the file is edited, so it gets its own channel: annotations on the commit, and the digest issue below.
+**No rung reds the scheduled run.** A source nobody has written is content only faculty can write, so it is delivered where faculty are looking: the digest issue below, which `cc`s the cohort's instructors and points at the exact line to edit (`schedule.yml:36`, as a link). A red X on **Scheduled release** keeps the one meaning it has everywhere else - the run itself broke.
+
+**Validate schedule never goes red for a missing source either.** Its red X means one thing - an entry you wrote is not in your plan - and it clears when the file next parses cleanly. A missing source is not a broken file and doesn't clear when the file is edited, so it gets its own channel: annotations on the commit, and the digest issue below.
 
 ### The digest issue
 
 One issue per cohort, titled **"schedule.yml: planned releases cite sources not staged in the course org"**, kept current by the scheduler:
 
-- its **body** is rewritten every run and always lists everything currently missing, grouped by severity, each line naming the exact field to edit (`releases.lecture_02` → `course_source_path`). Editing a body doesn't email anyone, so this is free to happen on every tick.
+- its **body** is rewritten every run and always lists everything currently missing, grouped by severity, each line naming the exact field to edit (`releases.lecture_02` → `course_source_path`) and linking at its line in your `schedule.yml`. Editing a body doesn't email anyone, so this is free to happen on every tick.
 - it **comments** only when something crosses a rung - a fault appears at warning or above, or escalates. Comments *do* email, and they `cc @<cohort-org>/instructors`, so you hear the transitions and nothing else.
 - it **closes itself** when the last missing source is staged.
 
@@ -306,8 +310,8 @@ By hand: add `--check-sources <course-org>` to either `--validate` form above. E
 
 ```
   2 SOURCE(S) NOT IN hertie-dsl-demo-course-e1234 YET:
-    [error] releases.lecture_02 -> course_source_path (due Wed 19 Aug 2026, 08:00): `course-materials-f2026/lectures/02_lecture` does not exist yet - this copy ships nothing
-    [advisory] releases.lecture_09 -> course_source_path (due Wed 04 Nov 2026, 08:00): `course-materials-f2026/lectures/09_lecture` does not exist yet - this copy ships nothing
+    [critical] releases.lecture_02 -> course_source_path at schedule.yml:36 (due Wed 19 Aug 2026, 08:00): `course-materials-f2026/lectures/02_lecture` does not exist yet - this copy ships nothing
+    [advisory] releases.lecture_09 -> course_source_path at schedule.yml:184 (due Wed 04 Nov 2026, 08:00): `course-materials-f2026/lectures/09_lecture` does not exist yet - this copy ships nothing
 ```
 
 ## Dropped entries
