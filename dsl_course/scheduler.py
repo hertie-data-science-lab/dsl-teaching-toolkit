@@ -75,7 +75,7 @@ import json
 import sys
 from datetime import datetime, timezone
 
-from . import cadence, schedule, site, source_digest
+from . import cadence, notify, schedule, site, source_digest
 from .assign import provision_all, solution_released
 from .collect import (
     SnapshotResult,
@@ -459,11 +459,12 @@ def _preflight_sources(
 
     Nothing here fails the run, at any rung. A source nobody has staged is a CONTENT
     fault, and it is delivered where the people who can fix it are looking: the cohort's
-    digest issue, which @mentions the instructors and links the line to edit. The exit
-    code belongs to the run itself - it broke, or it did not - and a missing source used
-    to spend it on every tick, up to eight red runs an hour mailing a bot account about a
-    folder only faculty can write. The signature keeps its int so the caller's `errors +=`
-    reads the same as every other phase."""
+    digest issue, which @mentions the instructors and links the line to edit, plus the
+    mail `notify` sends the same people off the same transitions. The exit code belongs to
+    the run itself - it broke, or it did not - and a missing source used to spend it on
+    every tick, up to eight red runs an hour mailing a bot account about a folder only
+    faculty can write. The signature keeps its int so the caller's `errors +=` reads the
+    same as every other phase."""
     try:
         faults = schedule.source_faults(sched, course_org)
     except Exception as exc:
@@ -475,9 +476,24 @@ def _preflight_sources(
             f"{len(faults)} source(s) in {cohort_org}'s plan not staged in "
             f"{course_org} (worst: {worst})"
         )
+    # Local, because everything downstream speaks about time to a human: the deadline
+    # faculty wrote, and the overnight window where a mail is held rather than sent.
+    local = schedule.in_cohort_zone(sched, now)
+    try:
+        # Who to tell, asked ONCE: the digest @mentions them and the mail is addressed to
+        # them, and asking git twice would be two reads and two chances to disagree.
+        routing = notify.route(cohort_org, course_org, faults, local)
+    except Exception as exc:
+        log_err(f"could not work out who to tell about {cohort_org}'s sources: {exc}")
+        routing = notify.Routing()
     try:
         digest = source_digest.sync(
-            cohort_org, course_org, faults, now, dry_run=dry_run
+            cohort_org,
+            course_org,
+            faults,
+            local,
+            dry_run=dry_run,
+            mention=routing.logins,
         )
     except Exception as exc:
         log_err(f"could not update {cohort_org}'s source digest: {exc}")
@@ -488,6 +504,16 @@ def _preflight_sources(
         log_step(
             f"{cohort_org}'s source digest: {digest.errors} error(s) - not delivered"
         )
+    try:
+        # The mail beside the @mention, for the transitions the digest just recorded. It
+        # counts its own failures and never raises; this catch is for the one it did not
+        # foresee, on the same terms as the digest above - a release is not worth a
+        # notification.
+        notify.notify_source_transitions(
+            cohort_org, course_org, digest, local, routing, dry_run=dry_run
+        )
+    except Exception as exc:
+        log_err(f"could not mail {cohort_org}'s source faults: {exc}")
     return 0
 
 

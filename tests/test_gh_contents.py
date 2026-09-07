@@ -375,3 +375,103 @@ def test_an_untruncated_tree_drops_the_flag_line(monkeypatch):
     assert gh_contents.repo_tree("O", "R", "main") == ("a.md", "b.md")
     _record_gh(monkeypatch, [(0, "false\na.yml\tsha1")])
     assert gh_contents.repo_blob_shas("O", "R", "main") == {"a.yml": "sha1"}
+
+
+# --------------------------------------------------------------------- who wrote it
+
+_BLAME = {
+    "data": {
+        "repository": {
+            "ref": {
+                "target": {
+                    "blame": {
+                        "ranges": [
+                            {
+                                "startingLine": 1,
+                                "endingLine": 3,
+                                "commit": {"author": {"user": {"login": "JanG"}}},
+                            },
+                            {
+                                "startingLine": 4,
+                                "endingLine": 4,
+                                "commit": {"author": {"user": None}},
+                            },
+                            {
+                                "startingLine": 5,
+                                "endingLine": 5,
+                                "commit": {"author": {"user": {"login": "cpj97"}}},
+                            },
+                        ]
+                    }
+                }
+            }
+        }
+    }
+}
+
+
+def test_blame_maps_every_line_of_a_range_to_its_author(monkeypatch):
+    # A notification has to reach whoever wrote the faulty LINE, and the API answers in
+    # ranges - so a caller looking up line 3 would find nothing without the expansion.
+    monkeypatch.setattr(gh_contents, "gh_json", lambda *a, **k: _BLAME)
+    assert gh_contents.blame_logins("Org", "classroom-config", "schedule.yml") == {
+        1: "JanG",
+        2: "JanG",
+        3: "JanG",
+        5: "cpj97",
+    }
+
+
+def test_a_commit_from_an_unlinked_email_names_nobody(monkeypatch):
+    # `author.user` is null when the commit email belongs to no GitHub account. Line 4 is
+    # simply absent above, which reads as "cannot say who" - the fallback every caller has.
+    monkeypatch.setattr(gh_contents, "gh_json", lambda *a, **k: _BLAME)
+    assert 4 not in gh_contents.blame_logins("Org", "classroom-config", "schedule.yml")
+
+
+def test_a_missing_ref_or_file_blames_nobody_rather_than_raising(monkeypatch):
+    monkeypatch.setattr(
+        gh_contents, "gh_json", lambda *a, **k: {"data": {"repository": None}}
+    )
+    assert gh_contents.blame_logins("Org", "classroom-config", "schedule.yml") == {}
+
+
+def test_a_blame_that_could_not_be_read_raises(monkeypatch):
+    # Absence has to be a real answer: a rate limit reported as "nobody wrote this" would
+    # address a notification to the wrong people, silently.
+    def boom(*a, **k):
+        raise RuntimeError("API rate limit exceeded")
+
+    monkeypatch.setattr(gh_contents, "gh_json", boom)
+    with pytest.raises(RuntimeError):
+        gh_contents.blame_logins("Org", "classroom-config", "schedule.yml")
+
+
+def test_the_blame_query_is_a_read(monkeypatch):
+    # `ghcli` refuses a GraphQL document containing "mutation" as a write, and the org
+    # fence and the write pacer both sit on that test. A read must stay a read.
+    seen: list[tuple] = []
+    monkeypatch.setattr(
+        gh_contents, "gh_json", lambda *a, **k: seen.append(a) or {"data": {}}
+    )
+    gh_contents.blame_logins("Org", "classroom-config", "schedule.yml")
+    (args,) = seen
+    assert args[:2] == ("api", "graphql")
+    assert not any("mutation" in a for a in args)
+
+
+def test_the_last_committer_is_the_login_on_the_newest_commit(monkeypatch):
+    monkeypatch.setattr(
+        gh_contents, "gh_json", lambda *a, **k: [{"author": {"login": "cpj97"}}]
+    )
+    assert gh_contents.last_committer("Org", "course-materials-f2026") == "cpj97"
+
+
+def test_an_empty_repo_has_no_last_committer(monkeypatch):
+    monkeypatch.setattr(gh_contents, "gh_json", lambda *a, **k: [])
+    assert gh_contents.last_committer("Org", "course-materials-f2026") is None
+
+
+def test_a_newest_commit_from_an_unlinked_email_names_nobody(monkeypatch):
+    monkeypatch.setattr(gh_contents, "gh_json", lambda *a, **k: [{"author": None}])
+    assert gh_contents.last_committer("Org", "course-materials-f2026") is None

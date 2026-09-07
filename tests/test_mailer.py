@@ -5,6 +5,8 @@ Graph; everything asserted is what the module does with the answer it gets.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from dsl_course import mailer
@@ -45,6 +47,23 @@ def _replies(monkeypatch, answers):
 
     monkeypatch.setattr(mailer, "_post", fake_post)
     return calls
+
+
+def _payloads(monkeypatch) -> list[dict]:
+    """The `message` object of every sendMail this batch put on the wire.
+
+    The other stub keeps only the URL, and what these tests are about is the BODY: which
+    content type it declared and who was on the Cc line."""
+    seen: list[dict] = []
+
+    def fake_post(url, data, headers):
+        seen.append(json.loads(data)["message"])
+        return 202, b"", {}
+
+    monkeypatch.setattr(mailer, "_post", fake_post)
+    monkeypatch.setattr(mailer, "_graph_token", lambda cfg: "tok")
+    monkeypatch.setattr(mailer, "graph_config_from_env", lambda: CFG)
+    return seen
 
 
 # ------------------------------------------------------- throttling and transient 5xx
@@ -269,3 +288,51 @@ def test_a_dry_run_with_no_transport_configured_still_previews_offline(
     captured = capsys.readouterr()
     assert "would send -> a***@x.edu" in captured.out
     assert "proves nothing about a send" in captured.err
+
+
+# ------------------------------------------------------- HTML bodies and a real Cc
+
+
+def test_a_body_is_plain_text_unless_the_caller_asks_for_html(monkeypatch):
+    # The two roster senders are plain text by design: a grade notification marked up as
+    # HTML would render a student's own `<` as markup.
+    seen = _payloads(monkeypatch)
+    mailer.send_bulk([ONE])
+    assert seen[0]["body"]["contentType"] == "Text"
+
+
+def test_the_html_flag_reaches_graph_as_the_content_type(monkeypatch):
+    # The fault mails carry marked-up labels, and a body sent as Text renders them as
+    # literal `<b>` - which is worse than not marking them up at all.
+    seen = _payloads(monkeypatch)
+    mailer.send_bulk([ONE], html=True)
+    assert seen[0]["body"]["contentType"] == "HTML"
+
+
+def test_a_cc_is_a_real_cc_line_not_another_recipient(monkeypatch):
+    # Who ELSE was told is the whole point of copying them: a TA's fault mail copies the
+    # instructors, and fanning that out as more To recipients hides it from everybody.
+    seen = _payloads(monkeypatch)
+    mailer.send_bulk([ONE], cc=["boss@x.edu"])
+    assert seen[0]["ccRecipients"] == [{"emailAddress": {"address": "boss@x.edu"}}]
+
+
+def test_no_cc_means_no_cc_field_at_all(monkeypatch):
+    seen = _payloads(monkeypatch)
+    mailer.send_bulk([ONE])
+    assert "ccRecipients" not in seen[0]
+
+
+def test_a_recipient_on_its_own_cc_line_is_not_sent_two_copies(monkeypatch):
+    # The fallback To set is the whole teaching team, and the instructors are also the Cc.
+    seen = _payloads(monkeypatch)
+    mailer.send_bulk([ONE], cc=["ADA@x.edu", "boss@x.edu"])
+    assert seen[0]["ccRecipients"] == [{"emailAddress": {"address": "boss@x.edu"}}]
+
+
+def test_a_dry_run_counts_the_copies_without_naming_them(monkeypatch, capsys):
+    # A Cc list is other people's addresses, and this preview prints into a public log.
+    mailer.send_bulk([ONE], dry_run=True, cc=["boss@x.edu"])
+    out = capsys.readouterr().out
+    assert "...copying 1 address(es)" in out
+    assert "boss@x.edu" not in out

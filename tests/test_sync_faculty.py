@@ -303,6 +303,32 @@ people:
     ]
 
 
+def test_teaching_contacts_carries_the_handle_the_address_and_the_role():
+    # All three, from one pass over people.yml: a notification is ADDRESSED by email,
+    # ATTRIBUTED by handle (git blame speaks handles) and COPIED by role. Reading the role
+    # back off the entry afterwards would mean iterating the file a second way.
+    meta = yaml.safe_load("""
+people:
+  instructors:
+    - github_handle: janedoe
+      email: "jane@example.org"
+    - github_handle: nomail
+      name: "No Address"
+  teaching_assistants:
+    - github_handle: alex
+      email: "alex@example.org"
+    - github_handle: lapsed-ta
+      email: "gone@example.org"
+      end: "2000-01-31"
+""")
+    assert sync_faculty.teaching_contacts(meta) == [
+        sync_faculty.Contact("janedoe", "jane@example.org", "instructors"),
+        sync_faculty.Contact("alex", "alex@example.org", "teaching_assistants"),
+    ]
+    # `is_ta` is what decides who is copied, so it is asserted rather than assumed.
+    assert [c.is_ta for c in sync_faculty.teaching_contacts(meta)] == [False, True]
+
+
 def test_notification_emails_with_no_people_block_is_empty():
     assert sync_faculty.notification_emails({"org": "My-Course-E1"}) == []
 

@@ -47,8 +47,11 @@ class _Gh:
     The issue LISTING goes through `gh_json` (it parses stdout alone, so a gh advisory on
     stderr cannot spoil it), so that one is served by `json` below."""
 
-    def __init__(self, rows: list[dict] | None = None):
+    def __init__(
+        self, rows: list[dict] | None = None, closed: list[dict] | None = None
+    ):
         self.rows = rows or []
+        self.closed = closed or []
         self.calls: list[tuple[str, ...]] = []
 
     def __call__(self, *args, **kwargs):
@@ -57,16 +60,21 @@ class _Gh:
 
     def json(self, *args, **kwargs):
         self.calls.append(args)
-        return self.rows
+        state = args[args.index("--state") + 1] if "--state" in args else "open"
+        return self.closed if state == "closed" else self.rows
 
     def did(self, *prefix) -> list[tuple[str, ...]]:
         return [c for c in self.calls if c[: len(prefix)] == prefix]
 
+    def body_of(self, *prefix) -> str:
+        (call,) = self.did(*prefix)
+        return call[call.index("--body") + 1]
+
 
 @pytest.fixture
 def gh(monkeypatch):
-    def _make(rows=None):
-        fake = _Gh(rows)
+    def _make(rows=None, closed=None):
+        fake = _Gh(rows, closed)
         # The issue plumbing lives in `dsl_course.issues` now (`find_issue`/`upsert_issue`/
         # `close_issues_titled`); the digest's own logic is unchanged, so this is the same
         # recording fake one module further down.
@@ -388,3 +396,106 @@ def test_the_field_reference_points_at_the_tier_the_org_runs(monkeypatch):
         [_f("releases.a", timedelta(hours=2))], NOW, "Course", "Cohort", None, "main"
     )
     assert "/blob/main/docs/07-schedule-releases.md" in body
+
+
+# ------------------------------------------------------------------- quiet hours
+
+# 02:00 and 07:05 in the cohort's zone. The window is LOCAL on purpose: the scheduler
+# ticks in UTC, and 02:00 in a datacentre is nobody's night.
+NIGHT = datetime(2026, 8, 17, 2, 0, tzinfo=BERLIN)
+MORNING = datetime(2026, 8, 17, 7, 5, tzinfo=BERLIN)
+
+
+def _prior(state: dict[str, str], held: dict[str, str] | None = None) -> list[dict]:
+    """An OPEN digest whose body carries exactly this previous state and this ledger.
+
+    Written out rather than derived from a fault list at an earlier tick: what these tests
+    are about is the transition, and spelling the previous rung out is the difference
+    between a fixture that says so and one that happens to compute it."""
+    body = sd.render_body([], NOW, "Course", "Cohort", state, held=held)
+    return [{"number": 7, "title": sd.TITLE, "body": body}]
+
+
+# 05:00 and 06:00 on the day of NOW: one still to fire when the night tick runs, one that
+# has fired by the time the morning tick does.
+_KEY = "releases.a.course_source_path"
+_FIRES_AT_FIVE = -timedelta(hours=7)
+_FIRED_AT_SIX = -timedelta(hours=6)
+
+
+def test_the_quiet_window_is_the_night_in_the_cohorts_own_zone():
+    assert sd.in_quiet_hours(NIGHT)
+    assert sd.in_quiet_hours(datetime(2026, 8, 17, 22, 0, tzinfo=BERLIN))
+    assert sd.in_quiet_hours(datetime(2026, 8, 17, 6, 59, tzinfo=BERLIN))
+    assert not sd.in_quiet_hours(MORNING)
+    assert not sd.in_quiet_hours(NOW)
+
+
+def test_a_rung_crossed_at_two_in_the_morning_updates_the_issue_but_holds_the_mail(gh):
+    # Waking somebody at 02:00 about a folder they cannot push to until they are at a
+    # keyboard is how a notification channel gets muted. The ISSUE still says so at 02:00.
+    fake = gh(_prior({_KEY: "warning"}))
+    out = sd.sync("Cohort", "Course", [_f("releases.a", _FIRES_AT_FIVE)], NIGHT)
+    assert out.mail == {}
+    assert len(fake.did("issue", "edit")) == 1  # the body was still refreshed
+    assert fake.did("issue", "comment")  # and the escalation still commented
+    # ...and the debt is recorded in the body, which is the only state this has.
+    assert sd.read_pending(fake.body_of("issue", "edit")) == {_KEY: "critical"}
+
+
+def test_the_first_tick_after_seven_sends_one_mail_at_the_loudest_rung_held(gh):
+    # Two rungs crossed overnight owe ONE mail, not two: what matters in the morning is
+    # how bad it is now, not the order it got there.
+    fake = gh(_prior({_KEY: "critical"}, held={_KEY: "urgent"}))
+    out = sd.sync("Cohort", "Course", [_f("releases.a", _FIRED_AT_SIX)], MORNING)
+    assert out.mail == {_KEY: sd.Severity.MISSED}
+    # The ledger is spent, so a clock that jumps - a DST change, a cron catching up after
+    # an outage - cannot deliver the same mail twice.
+    assert sd.read_pending(fake.body_of("issue", "edit")) == {}
+
+
+def test_a_fault_that_cleared_overnight_owes_nobody_a_morning_mail(gh):
+    # It shipped. An email about it arriving after the fact is worse than silence.
+    gh(_prior({_KEY: "critical"}, held={_KEY: "critical"}))
+    out = sd.sync("Cohort", "Course", [], MORNING)
+    assert out.mail == {}
+    assert out.transitions.cleared == [_KEY]
+
+
+def test_a_rung_crossed_in_the_working_day_mails_at_once(gh):
+    gh(_prior({_KEY: "warning"}))
+    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
+    assert out.mail == {_KEY: sd.Severity.CRITICAL}
+
+
+def test_a_standing_fault_that_crossed_nothing_owes_no_mail(gh):
+    # The hourly case. Every tick sees the same fault at the same rung, and mailing on
+    # that is what "notify on transitions only" exists to prevent.
+    gh(_prior({_KEY: "missed"}))
+    out = sd.sync("Cohort", "Course", [_f("releases.a", _FIRED_AT_SIX)], MORNING)
+    assert out.mail == {}
+
+
+def test_a_body_written_before_quiet_hours_existed_owes_nothing():
+    # Every live cohort has one. Read as "everything is pending" it would mail the lot.
+    assert sd.read_pending("no marker here") == {}
+    assert sd.read_pending("<!-- dsl-source-pending: not json -->") == {}
+
+
+# ------------------------------------------------------- a digest closed by hand
+
+
+def test_re_opening_adopts_the_state_of_the_issue_somebody_closed(gh):
+    # Closing it staged nothing. Without adopting the state it left behind, the next tick
+    # reads every standing fault as newly appeared and mails the cohort about all of it.
+    gh([], closed=_prior({_KEY: "critical"}))
+    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
+    assert out.transitions.appeared == []
+    assert out.mail == {}
+
+
+def test_a_closed_issue_with_no_state_is_no_reason_not_to_report(gh):
+    gh([], closed=[{"number": 7, "title": sd.TITLE, "body": "hand-written"}])
+    out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
+    assert out.transitions.appeared == [_KEY]
+    assert out.mail == {_KEY: sd.Severity.CRITICAL}

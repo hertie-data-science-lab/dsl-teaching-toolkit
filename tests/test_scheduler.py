@@ -17,7 +17,7 @@ import pytest
 import yaml
 
 from dsl_course import collect as collect_mod
-from dsl_course import course, deploy, ghcli, scheduler, seed, source_digest
+from dsl_course import course, deploy, ghcli, notify, scheduler, seed, source_digest
 from dsl_course.grades import _DEFAULT_SPEC as DEFAULT_SPEC
 from dsl_course.schedule import (
     AssignmentEntry,
@@ -1988,14 +1988,29 @@ def test_a_cohort_listing_that_cannot_be_read_says_so_and_goes_red(
 # ----------------------------------------------------- source pre-flight (unattended)
 
 
-def _preflight(monkeypatch, faults, now=WHEN, dry_run=False):
-    """Drive _preflight_sources with a fixed fault list, capturing the digest call."""
+def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None):
+    """Drive _preflight_sources with a fixed fault list, capturing every call it makes.
+
+    Routing is stubbed too: it reads blame and people.yml over the API, and what these
+    tests are about is the exit code and what the phases are handed."""
     seen: dict = {}
     monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: faults)
     monkeypatch.setattr(
+        scheduler.notify,
+        "route",
+        lambda *a, **k: seen.update(route=a) or notify.Routing(logins=["JanG"]),
+    )
+    monkeypatch.setattr(
         scheduler.source_digest,
         "sync",
-        lambda *a, **k: seen.update(args=a, kw=k) or source_digest.DigestResult(),
+        lambda *a, **k: (
+            seen.update(args=a, kw=k) or (digest or source_digest.DigestResult())
+        ),
+    )
+    monkeypatch.setattr(
+        scheduler.notify,
+        "notify_source_transitions",
+        lambda *a, **k: seen.update(mailed=a, mail_kw=k) or 0,
     )
     rc = scheduler._preflight_sources(
         "Course-Org", "Cohort-Org", Schedule(), now, dry_run
@@ -2342,3 +2357,85 @@ def test_autograde_waits_for_a_completed_snapshot(monkeypatch):
     monkeypatch.setattr(scheduler, "load_snapshots", lambda org, name: {"anna": "sha"})
     assert scheduler._autograde_passed_deadlines("C", "K", sched, now, False) == 0
     assert len(graded) == 1
+
+
+def test_who_to_tell_is_asked_once_and_handed_to_both_channels(monkeypatch):
+    # The digest @mentions them and the mail is addressed to them. Asking git twice would
+    # be two API reads and two chances for the issue and the email to disagree.
+    fault = SourceFault("releases.a", "gone", WHEN + timedelta(hours=3), "f")
+    digest = source_digest.DigestResult(faults_by_key={fault.key: fault})
+    _, seen = _preflight(monkeypatch, [fault], digest=digest)
+    assert seen["route"][:2] == ("Cohort-Org", "Course-Org")
+    assert seen["kw"]["mention"] == ["JanG"]
+    assert seen["mailed"][2] is digest
+    assert seen["mailed"][4].logins == ["JanG"]
+
+
+def test_every_phase_reads_the_clock_in_the_cohorts_own_zone(monkeypatch):
+    # The tick is UTC; the deadline faculty wrote and the window where mail is held are
+    # both local. A quiet-hours decision made in UTC holds the wrong five hours.
+    sched = Schedule(timezone="Australia/Sydney")
+    monkeypatch.setattr(scheduler.schedule, "source_faults", lambda s, org: [])
+    seen: dict = {}
+    monkeypatch.setattr(scheduler.notify, "route", lambda *a, **k: notify.Routing())
+    monkeypatch.setattr(
+        scheduler.source_digest,
+        "sync",
+        lambda *a, **k: seen.update(now=a[3]) or source_digest.DigestResult(),
+    )
+    monkeypatch.setattr(
+        scheduler.notify, "notify_source_transitions", lambda *a, **k: 0
+    )
+    scheduler._preflight_sources("Course-Org", "Cohort-Org", sched, WHEN, False)
+    assert str(seen["now"].tzinfo) == "Australia/Sydney"
+    assert seen["now"] == WHEN  # the same instant, told differently
+
+
+def test_a_notifier_that_raised_never_changes_the_exit_code(monkeypatch, capsys):
+    # Same contract as the digest: this runs inside the release cron, and an undelivered
+    # notification is not worth a release.
+    monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [])
+    monkeypatch.setattr(scheduler.notify, "route", lambda *a, **k: notify.Routing())
+    monkeypatch.setattr(
+        scheduler.source_digest, "sync", lambda *a, **k: source_digest.DigestResult()
+    )
+
+    def boom(*a, **k):
+        raise RuntimeError("Graph is having a day")
+
+    monkeypatch.setattr(scheduler.notify, "notify_source_transitions", boom)
+    assert (
+        scheduler._preflight_sources(
+            "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+        )
+        == 0
+    )
+    assert "could not mail" in capsys.readouterr().err
+
+
+def test_a_routing_that_raised_still_lets_the_digest_speak(monkeypatch, capsys):
+    # Blame is a nicety - it decides WHO hears. Losing it must not lose the issue, which
+    # falls back to @mentioning the cohort's instructors team.
+    monkeypatch.setattr(scheduler.schedule, "source_faults", lambda sched, org: [])
+    seen: dict = {}
+    monkeypatch.setattr(
+        scheduler.notify, "notify_source_transitions", lambda *a, **k: 0
+    )
+    monkeypatch.setattr(
+        scheduler.source_digest,
+        "sync",
+        lambda *a, **k: seen.update(kw=k) or source_digest.DigestResult(),
+    )
+
+    def boom(*a, **k):
+        raise RuntimeError("GraphQL is having a day")
+
+    monkeypatch.setattr(scheduler.notify, "route", boom)
+    assert (
+        scheduler._preflight_sources(
+            "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+        )
+        == 0
+    )
+    assert seen["kw"]["mention"] == []
+    assert "could not work out who to tell" in capsys.readouterr().err
