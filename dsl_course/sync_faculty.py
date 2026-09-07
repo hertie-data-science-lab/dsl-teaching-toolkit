@@ -21,7 +21,7 @@ Two independent flows, split by role rather than by "stability":
 
 Each person entry requires `github_handle` (the only field that grants access) and, for
 an instructor or a TA, `email` (the only way a notification reaches them - see
-`notification_emails`); `start`/`end` (optional ISO dates) bound when they're active,
+`teaching_contacts`); `start`/`end` (optional ISO dates) bound when they're active,
 giving auto-rotation with no manual removal step. Every reconcile here is FULL
 (add + remove) - a lapsed `end` date or a deleted entry revokes access on the next sync,
 same as an edit to students.csv/teams.csv.
@@ -39,6 +39,7 @@ from __future__ import annotations
 import argparse
 import sys
 from datetime import date
+from functools import cache
 from typing import NamedTuple
 
 from .access import grant_team_repo_access
@@ -182,32 +183,23 @@ class Contact(NamedTuple):
         return self.role == "teaching_assistants"
 
 
-def teaching_contacts(meta: dict) -> list[Contact]:
-    """The active instructors and TAs of an already-loaded `people:` block that a
-    notification can actually reach, in declaration order.
+def teaching_contacts(faculty: dict[str, list[dict]], today: str) -> list[Contact]:
+    """The instructors and TAs active on `today` (an ISO date string) that a notification
+    can actually reach, in declaration order.
+
+    A parsed faculty dict and a clock, exactly like `without_email`: the caller reads
+    people.yml once and both answers are about the same tick. Taking the raw `people:`
+    mapping instead meant a second parse - and a second `date.today()`, which is not the
+    clock a scheduler run is reasoning about.
 
     Entries with no usable `email:` are left out - `parse_faculty_from_meta` has already
     reported them and `without_email` names the handles. Log a length, or a handle through
     `log_person`; never an address."""
-    faculty = parse_faculty_from_meta(meta)
     out: list[Contact] = []
-    for role, p in _active_teaching_entries(faculty, date.today().isoformat()):
+    for role, p in _active_teaching_entries(faculty, today):
         email = valid_email(p.get("email"))
         if email:
             out.append(Contact(str(p["github_handle"]), email, role))
-    return out
-
-
-def notification_emails(meta: dict) -> list[str]:
-    """Every address `teaching_contacts` found, deduplicated case-insensitively - the
-    whole teaching team, which is what a notification falls back to when git cannot say
-    who to tell. Log the LENGTH of this list, never its contents."""
-    out: list[str] = []
-    seen: set[str] = set()
-    for contact in teaching_contacts(meta):
-        if contact.email.lower() not in seen:
-            seen.add(contact.email.lower())
-            out.append(contact.email)
     return out
 
 
@@ -265,12 +257,19 @@ def load_faculty(course_org: str) -> dict[str, list[dict]] | None:
     return parse_faculty_from_meta(meta)
 
 
+@cache
 def load_cohort_faculty(cohort_org: str) -> dict[str, list[dict]] | None:
     """Fetch + parse this cohort's own classroom-config/people.yml - instructors/TAs
     only (no course_admins key here; that role stays exclusively course-level).
 
     Returns None when people.yml is genuinely ABSENT (do not prune); a present-but-empty
-    people block parses to {} and legitimately empties the team."""
+    people block parses to {} and legitimately empties the team.
+
+    THE door to a cohort's people.yml, and memoised per process like `repos._repo`: a
+    release tick asks it who to notify, `status` asks it who is unreachable, and the file
+    changes only when somebody edits it. The memo also means the "no usable `email:`"
+    error lines are printed once per run rather than once per reader.
+    `tests/conftest.py` clears it."""
     meta = load_yaml_config(cohort_org, CONFIG_REPO, COHORT_PEOPLE_PATH)
     if meta is None:
         return None

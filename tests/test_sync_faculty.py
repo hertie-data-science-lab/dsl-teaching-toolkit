@@ -275,8 +275,12 @@ people:
     assert "not-an-address" not in err
 
 
-def test_notification_emails_dedupes_skips_the_unreachable_and_honours_dates():
-    meta = yaml.safe_load("""
+def test_teaching_contacts_carries_the_handle_the_address_and_the_role():
+    # All three, from one pass over people.yml: a notification is ADDRESSED by email,
+    # ATTRIBUTED by handle (git blame speaks handles) and COPIED by role. Reading the role
+    # back off the entry afterwards would mean iterating the file a second way.
+    faculty = sync_faculty.parse_faculty_from_meta(
+        yaml.safe_load("""
 people:
   instructors:
     - github_handle: janedoe
@@ -287,50 +291,47 @@ people:
       email: "later@example.org"
       start: "2999-09-01"
   teaching_assistants:
-    - github_handle: anOther
-      email: "JANE@example.org"
     - github_handle: alex
       email: "alex@example.org"
     - github_handle: lapsed-ta
       email: "gone@example.org"
       end: "2000-01-31"
 """)
-    # declaration order, instructors before TAs; the second spelling of Jane's address is
-    # the same mailbox, so she is mailed once
-    assert sync_faculty.notification_emails(meta) == [
-        "jane@example.org",
-        "alex@example.org",
+    )
+    # Declaration order, instructors before TAs; an entry with no usable address is left
+    # out (`without_email` names those), and `start`/`end` bound who is active today.
+    assert sync_faculty.teaching_contacts(faculty, "2026-10-01") == [
+        sync_faculty.Contact("janedoe", "jane@example.org", "instructors"),
+        sync_faculty.Contact("alex", "alex@example.org", "teaching_assistants"),
+    ]
+    # `is_ta` is what decides who is copied, so it is asserted rather than assumed.
+    assert [c.is_ta for c in sync_faculty.teaching_contacts(faculty, "2026-10-01")] == [
+        False,
+        True,
     ]
 
 
-def test_teaching_contacts_carries_the_handle_the_address_and_the_role():
-    # All three, from one pass over people.yml: a notification is ADDRESSED by email,
-    # ATTRIBUTED by handle (git blame speaks handles) and COPIED by role. Reading the role
-    # back off the entry afterwards would mean iterating the file a second way.
-    meta = yaml.safe_load("""
+def test_teaching_contacts_takes_the_same_faculty_and_clock_as_without_email():
+    # One parse of people.yml and one clock answer both questions: who a notification can
+    # reach, and who it cannot. Two signatures meant two parses and two `date.today()`
+    # calls, neither of them the clock a scheduler tick is reasoning about.
+    faculty = sync_faculty.parse_faculty_from_meta(
+        yaml.safe_load("""
 people:
   instructors:
     - github_handle: janedoe
       email: "jane@example.org"
     - github_handle: nomail
-      name: "No Address"
-  teaching_assistants:
-    - github_handle: alex
-      email: "alex@example.org"
-    - github_handle: lapsed-ta
-      email: "gone@example.org"
-      end: "2000-01-31"
 """)
-    assert sync_faculty.teaching_contacts(meta) == [
-        sync_faculty.Contact("janedoe", "jane@example.org", "instructors"),
-        sync_faculty.Contact("alex", "alex@example.org", "teaching_assistants"),
-    ]
-    # `is_ta` is what decides who is copied, so it is asserted rather than assumed.
-    assert [c.is_ta for c in sync_faculty.teaching_contacts(meta)] == [False, True]
+    )
+    assert [
+        c.handle for c in sync_faculty.teaching_contacts(faculty, "2026-10-01")
+    ] == ["janedoe"]
+    assert sync_faculty.without_email(faculty, "2026-10-01") == ["nomail"]
 
 
-def test_notification_emails_with_no_people_block_is_empty():
-    assert sync_faculty.notification_emails({"org": "My-Course-E1"}) == []
+def test_teaching_contacts_with_no_people_block_is_empty():
+    assert sync_faculty.teaching_contacts({}, "2026-10-01") == []
 
 
 def test_without_email_names_the_active_handles_no_notification_reaches():

@@ -107,16 +107,19 @@ def _transport_detail() -> tuple[bool, str]:
     goes into it, `GRAPH_SENDER` and `DSL_MAINTAINER_EMAIL` included."""
     unset = [n for n in mailer.GRAPH_ENV if not (os.environ.get(n) or "").strip()]
     cost = " - Send codes and Distribute grades mail nobody"
-    note = _maintainer_note()
     if len(unset) == len(mailer.GRAPH_ENV):
-        return False, f"no GRAPH_* secrets set{cost}{note}"
-    if unset:
-        return False, f"unset or blank: {', '.join(unset)}{cost}{note}"
-    if mailer.graph_config_from_env() is None:
+        usable, detail = False, f"no GRAPH_* secrets set{cost}"
+    elif unset:
+        usable, detail = False, f"unset or blank: {', '.join(unset)}{cost}"
+    elif mailer.graph_config_from_env() is None:
         # Set, and still unusable - a line break inside a single-line value is what
         # `gh secret set < file` leaves behind. Named by the helper's own log line.
-        return False, f"the GRAPH_* secrets are set but unusable{cost}{note}"
-    return True, f"all {len(mailer.GRAPH_ENV)} GRAPH_* secrets set{note}"
+        usable, detail = False, f"the GRAPH_* secrets are set but unusable{cost}"
+    else:
+        usable, detail = True, f"all {len(mailer.GRAPH_ENV)} GRAPH_* secrets set"
+    # Appended once, at the one exit: where the mail goes is true of every verdict above,
+    # and four returns each remembering to add it is three chances to forget.
+    return usable, detail + _maintainer_note()
 
 
 def render_markdown(course_org: str, cohort_org: str, data: dict[str, dict]) -> str:
@@ -329,7 +332,7 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
     # step summary of a PUBLIC repo, and the run log names the handles.
     unreachable = sync_faculty.without_email(cohort_faculty, date.today().isoformat())
     no_email = (
-        f" - WARNING: {len(unreachable)} without email, see the run log"
+        f"WARNING: {len(unreachable)} without email, see the run log"
         if unreachable
         else ""
     )
@@ -341,7 +344,11 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         sync_faculty.COHORT_PEOPLE_PATH,
         cohort_branch,
         bool(n_instructors),
-        f"{n_instructors} active{no_email}" if n_instructors else no_email.lstrip(" -"),
+        " - ".join(
+            p
+            for p in (f"{n_instructors} active" if n_instructors else "", no_email)
+            if p
+        ),
     )
 
     return data
