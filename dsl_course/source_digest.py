@@ -331,8 +331,11 @@ def render_body(
         # agree with them is a number that can disagree with them.
         out += ["", f"### {_RUNG_HEADING[rung]}", ""]
         for f in sorted(rows, key=lambda f: (f.fires is None, f.fires or now)):
+            # Past or future is the CLOCK's answer, not the rung's: a withheld source is
+            # held at WARNING by its ceiling and its date goes by regardless, and "fires
+            # yesterday" reads as a plan rather than as a release that shipped nothing.
             when = (
-                f"_{'fired' if rung is Severity.MISSED else 'fires'} {f.due}_"
+                f"_{'fired' if f.fires <= now else 'fires'} {f.due}_"
                 if f.fires
                 else "_no date (tbc)_"
             )

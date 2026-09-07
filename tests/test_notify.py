@@ -349,13 +349,37 @@ def test_the_body_names_the_line_the_content_the_deadline_and_both_links(wired):
 
 
 def test_a_missed_release_is_told_in_the_past_tense(wired):
+    # A release whose moment has actually gone by - which is what MISSED means, and what
+    # the past tense below is read off (see `_block`).
+    fired = _fault(fires=-timedelta(hours=1))
     sent = wired(blame={131: "JanG"}, committer=None)
-    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
-    _run([_fault()], Severity.MISSED, routing)
+    routing = notify.route(COHORT, COURSE, [fired], NOW)
+    _run([fired], Severity.MISSED, routing)
     body = sent.one["body"]
     assert "<b>fired:</b>" in body
     assert "<b>fix by:</b>" not in body
     assert "the next 15-minute tick releases them" in body
+
+
+def test_a_deadline_that_has_passed_is_past_tense_whatever_the_rung(wired):
+    # A `.releaseignore`-withheld source is held at WARNING by its ceiling, and its date
+    # goes by all the same. Reading "fired" off the rung told somebody to fix by a moment
+    # that was yesterday.
+    fault = source_fault(
+        "releases.lecture_02",
+        "the files exist but cm/.releaseignore keeps them back",
+        NOW - timedelta(hours=2),
+        kind=notify.FaultKind.WITHHELD,
+        ceiling=Severity.WARNING,
+        lineno=131,
+        repo="cm",
+        path="lectures/02",
+    )
+    sent = wired(blame={131: "JanG"}, committer=None)
+    routing = notify.route(COHORT, COURSE, [fault], NOW)
+    _run([fault], Severity.WARNING, routing)
+    assert "<b>fired:</b>" in sent.one["body"]
+    assert "<b>fix by:</b>" not in sent.one["body"]
 
 
 def test_a_missing_assignment_template_says_to_create_the_repo(wired):

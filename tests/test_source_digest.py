@@ -418,6 +418,28 @@ def test_a_withheld_source_is_listed_and_commented_on_but_never_mailed(gh):
     assert "keeps them back" in created[created.index("--body") + 1]
 
 
+def test_the_body_says_fired_off_the_clock_and_not_off_the_rung():
+    # A withheld source caps at WARNING, so the rung never says MISSED - and the moment
+    # has still passed. "fires <yesterday>" reads as a plan rather than as a release that
+    # shipped nothing.
+    body = sd.render_body(
+        [
+            source_fault(
+                "releases.a",
+                "the files exist but cm/.releaseignore keeps them back",
+                NOW - timedelta(hours=2),
+                kind=schedule.FaultKind.WITHHELD,
+                ceiling=sd.Severity.WARNING,
+                path="x",
+            )
+        ],
+        NOW,
+        COHORT,
+    )
+    assert "### WARNING" in body
+    assert "_fired " in body and "_fires " not in body
+
+
 def test_the_last_fault_clearing_closes_the_issue(gh):
     fake = gh(_open(_f("releases.a", timedelta(hours=3))))
     out = sd.sync("Cohort", "Course", [], NOW)

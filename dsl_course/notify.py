@@ -276,9 +276,14 @@ def _row(label: str, value: str) -> str:
     return _row_html(label, html.escape(value))
 
 
-def _block(cohort_org: str, course_org: str, fault: SourceFault, rung: Severity) -> str:
-    """One fault, as the labelled `<pre>` block the appendix specifies."""
-    fired = rung is Severity.MISSED
+def _block(cohort_org: str, course_org: str, fault: SourceFault, now: datetime) -> str:
+    """One fault, as the labelled `<pre>` block the appendix specifies.
+
+    Whether the moment has PASSED is read off the clock and not off the rung. A rung can
+    be held below MISSED by its ceiling - that is what `.releaseignore` withholding does -
+    and the date has still gone by, so "fix by: release fires <yesterday>" is not an
+    instruction anybody can follow."""
+    fired = fault.fires is not None and fault.fires <= now
     rows = [
         _row("error line:", f"{fault.at} - {fault.where} -> {fault.field}"),
         _row("error content:", fault.what),
@@ -326,6 +331,7 @@ def _mail(
     digest: DigestResult,
     keys: list[str],
     loudest: Severity,
+    now: datetime,
 ) -> tuple[str, str]:
     """The (subject, HTML body) of one message: intro, a block and a fix per fault, and
     the issue that holds the history."""
@@ -333,7 +339,7 @@ def _mail(
     for key in keys:
         fault = digest.faults_by_key[key]
         rung = digest.mail[key]
-        parts.append(_block(cohort_org, course_org, fault, rung))
+        parts.append(_block(cohort_org, course_org, fault, now))
         parts.append(f"<p><b>fix:</b> {html.escape(fault.fix(course_org, rung))}</p>")
     if digest.issue_url:
         parts.append(
@@ -360,10 +366,10 @@ def notify_source_transitions(
     fault is mailed to nobody - the issue closes itself, and an inbox does not need to be
     told a problem stopped existing.
 
-    `now` is the tick's clock, kept in the signature because every phase of a scheduler
-    run takes it. Nothing here recomputes a rung or a date against it: they come off
-    `digest`, so the mail and the digest comment can never disagree about how loud a
-    fault has become."""
+    `now` is the tick's clock. No rung is recomputed against it - every rung comes off
+    `digest`, so the mail and the digest comment can never disagree about how loud a fault
+    has become - but whether a deadline has PASSED is read off it, because a ceiling can
+    hold a rung below MISSED while the date has gone by all the same."""
     try:
         # The mail IS the fault's own lines, so a key the digest owes a mail for but could
         # not hand over has nothing to say. Not expected; not worth a KeyError inside a
@@ -395,7 +401,7 @@ def notify_source_transitions(
                 continue
             keys.sort(key=lambda k: (-digest.mail[k], k))
             loudest = digest.mail[keys[0]]
-            subject, body = _mail(cohort_org, course_org, digest, keys, loudest)
+            subject, body = _mail(cohort_org, course_org, digest, keys, loudest, now)
             # The maintainer is copied at the two rungs where a release is about to ship
             # nothing, or already has. Not at the quieter two: those are still faculty's
             # own day, and a maintainer copied on every one of them stops reading them.
