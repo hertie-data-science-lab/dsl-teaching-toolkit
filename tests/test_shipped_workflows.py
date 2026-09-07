@@ -153,6 +153,16 @@ def test_promote_is_gated_on_write_here_and_nothing_else():
     assert "environment" not in _promote_job()
 
 
+def test_promote_names_the_demo_org_inspection_as_its_gate():
+    # Nothing in the workflow enforces the gate, because the gate is a person having read
+    # what the demo org actually did with this code - so the form itself has to say so to
+    # whoever is about to press the button.
+    doc = SHIPPED_WORKFLOWS[".github/workflows/promote.yml"]
+    trigger = doc.get("on", doc.get(True))
+    description = trigger["workflow_dispatch"]["inputs"]["ref"]["description"]
+    assert "inspection of the demo course org" in description
+
+
 def test_promote_can_only_fast_forward_release_along_main():
     # The two guards that make this workflow unable to ship what main has not seen, and
     # unable to rewrite the tier. Without the first, a commit off a fork could be pushed

@@ -11,13 +11,17 @@ runs - `central_ref:` in its course org's `.github/dsl-course.yml`, defaulting t
 `central.CENTRAL_REF` (`release`).
 
 Two tiers, along one linear history. PRs squash-merge to `main`, which is what the demo
-course org runs, and **Deploy main** fans the refresh out to every org on `main` as the merge
-lands - so a change is live there within minutes, and that is where it gets validated. Real
-orgs run `release`, which moves only when someone presses **Promote to release**: it can only
-fast-forward `release` along main's history, and there is no approval gate on it. Engine
-changes are live on the next press in each org; workflow *shapes* (inputs, jobs, crons) are
-re-rendered by the same fan-out, and by each org's nightly **Refresh actions**. Rollback is a
-`git revert` on `main`, promoted forward - never a force-push. `central_ref:` may be `main`,
+course org runs: **Deploy main** fans the refresh out to every org on `main` as the merge
+lands, so a change is live there within minutes. Real orgs run `release`, which moves only
+when someone presses **Promote to release** - a fast-forward along main's history, with no
+approval environment, because the gate is an INSPECTION. Press it only once a manual
+end-to-end look at the demo course org has passed: its issues, comments, the mails that went
+out, the run logs and the cohort site, read by a person. A green test suite is not that
+inspection.
+
+Engine changes are live on the next press in each org; workflow *shapes* (inputs, jobs, crons)
+are re-rendered by the same fan-out, and by each org's nightly **Refresh actions**. Rollback is
+a `git revert` on `main`, promoted forward - never a force-push. `central_ref:` may be `main`,
 `release`, or a full 40-character SHA on main's history; the `staging` tier was retired and
 its branch deleted on 2026-09-07.
 Tiers, the pre-promotion checklist and the full rollback procedure:
@@ -210,8 +214,8 @@ CI and every seeded workflow run 3.12. Conventions:
 `tests/e2e` drives the REAL seeded workflows against the demo tier: New assignment ->
 schedule block -> Scheduled release (handout) -> a genuine student push -> Scheduled release
 (snapshot + autograde), then puts both orgs back. It proves the wiring unit tests cannot -
-a click, a cron, a token and a repo - and it is the gate between **merging to main and
-Promote to release**. Two scheduler passes are needed because `scheduler.run` snapshots
+a click, a cron, a token and a repo - and it runs against the demo org between **merging to
+main and Promote to release**, alongside the manual inspection that is the actual gate. Two scheduler passes are needed because `scheduler.run` snapshots
 before it hands out.
 
     DSL_E2E=1 \

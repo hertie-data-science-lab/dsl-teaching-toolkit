@@ -151,21 +151,25 @@ org's 05:27 cron. An empty selection (no org on `main`) is a green run that says
 
 ### Check the demo org before you promote
 
-The merge has already deployed to the demo course org (`hertie-dsl-demo-course-e1234`) and
-both its cohorts (`hertie-dsl-demo-f2025`, `hertie-dsl-demo-f2026`). Check them before
-promoting on. A day covers one nightly refresh:
+**This inspection is the gate to `release`.** There is no approval environment on Promote,
+and a green test suite is not a substitute: a person has to read what the demo org actually
+did. The merge has already deployed to the demo course org (`hertie-dsl-demo-course-e1234`)
+and both its cohorts (`hertie-dsl-demo-f2025`, `hertie-dsl-demo-f2026`), end to end - issues,
+issue comments, the mails that went out, the run logs and the cohort site. A day covers one
+nightly refresh:
 
 - [ ] **Deploy main** green, and so is the org's own next nightly **Refresh actions**
 - [ ] one **Scheduled release** tick green (a dry run is enough if nothing is due)
 - [ ] a **Join** issue with a deliberately wrong code is rejected as usual
 - [ ] **Check cohort setup**'s mail-transport row reads `all 4 GRAPH_* secrets set` (the codes send has no preview mode - this row is how the credential is checked without mailing a cohort)
-- [ ] `DSL_E2E=1 pytest tests/e2e -q` green (the end-to-end harness - the gate between main and release; see [maintainers.md](../docs/reference/maintainers.md#end-to-end-harness) for the env it needs)
+- [ ] `DSL_E2E=1 pytest tests/e2e -q` green (the end-to-end harness - run against the demo org before promoting, never instead of reading it; see [maintainers.md](../docs/reference/maintainers.md#end-to-end-harness) for the env it needs)
 - [ ] no failure issue opened in `hertie-dsl-demo-course-e1234/.github`
 
 ### Promote to release
 
-Run **Promote to release** (Actions tab of this repo) once the change has been checked on the
-demo org. `ref:` defaults to `main`; name a commit to stop the promotion there.
+Run **Promote to release** (Actions tab of this repo) once the manual end-to-end inspection
+of the demo org above has passed - that inspection is the gate, and nothing in the workflow
+enforces it. `ref:` defaults to `main`; name a commit to stop the promotion there.
 
 Promote refuses anything that is not both on `main`'s history and a descendant of `release`'s
 current tip, so it can only ever move `release` forward - it cannot rewrite it, and cannot
@@ -174,9 +178,9 @@ promoted checkout, so they converge in minutes rather than at the next 05:27 cro
 org that has just changed tier is re-rendered by the tier it is joining, not the one it is
 leaving.
 
-Anyone with write on this repo can run it, and there is no approval gate on top of that: the
-code has been live in the demo org since it merged, and the review happened on the PR.
-Nothing else can push to `release` - see
+Anyone with write on this repo can run it, and there is no approval environment on top of
+that: the code has been live in the demo org since it merged, and the gate is that somebody
+looked at it there. Nothing else can push to `release` - see
 [Protecting the tiers](#protecting-the-tiers-set-by-hand).
 
 ### Rollback

@@ -15,15 +15,18 @@ name: Promote to release
 # is the way to move faster than that (see docs-admin-arch/central-admin.md).
 #
 # Who can run it: dispatching a workflow needs write on this repo, which is the same gate
-# every seeded workflow in every org uses. There is no approval gate on top of that - the
-# demo course org has been running this code off `main` since it merged, which is where the
-# confidence to press this comes from.
+# every seeded workflow in every org uses. There is no approval environment on top of that,
+# because the gate is not a second click: press this ONLY after a manual end-to-end
+# INSPECTION of the demo course org - which tracks `main`, so it has been running this code
+# since it merged - has passed. A person reads the issues, the comments, the mails that went
+# out, the run logs and the cohort site. A green test suite is not that inspection and does
+# not stand in for it.
 
 on:
   workflow_dispatch:
     inputs:
       ref:
-        description: "What to promote (default: main's tip). A branch, tag or full SHA on main's history - everything up to it ships."
+        description: "What to promote (default: main's tip; a branch, tag or full SHA on main's history - everything up to it ships). Promote only once a manual end-to-end inspection of the demo course org, which tracks main, has passed - issues, comments, mails, run logs, site. The test suite is not the gate."
         required: false
         default: "main"
         type: string
@@ -50,9 +53,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
           fetch-depth: 0
-          # The push below is the DEPLOY KEY's, not GITHUB_TOKEN's: the tier branches carry
-          # a ruleset whose only bypass actor is "deploy keys", which no account and no
-          # Actions token can be - so this workflow is the one way a tier moves. Checkout's
+          # The push below is the DEPLOY KEY's, not GITHUB_TOKEN's: `release` carries a
+          # ruleset whose only bypass actor is "deploy keys", which no account and no
+          # Actions token can be - so this workflow is the one way it moves. Checkout's
           # own credentials would win over the key (it writes an auth header into the repo
           # config, and https beats the ssh remote set below), so they are not persisted.
           persist-credentials: false
@@ -81,8 +84,8 @@ jobs:
           eval "$(ssh-agent -s)"
           printf '%s\n' "$PROMOTE_DEPLOY_KEY" | ssh-add -
           git remote set-url origin "git@github.com:$GITHUB_REPOSITORY.git"
-          # fetch-depth: 0 already brings every branch and tag, so origin/main and both
-          # tier tips are here before this runs. Re-fetched anyway: one cheap call, and it
+          # fetch-depth: 0 already brings every branch and tag, so origin/main and
+          # release's tip are here before this runs. Re-fetched anyway: one cheap call, and it
           # narrows the window between the tip read below and the lease it becomes.
           git fetch --quiet origin "+refs/heads/*:refs/remotes/origin/*"
 
@@ -99,11 +102,12 @@ jobs:
             exit 1
           fi
 
-          # THE invariant: every tier is a fast-forward of main. Enforced before the tier
-          # check, because a commit off main's history is the more serious mistake - it
-          # would put code into production that main, and therefore CI and review, never saw.
+          # THE invariant: `release` is a fast-forward of main. Enforced before the
+          # descendant check, because a commit off main's history is the more serious
+          # mistake - it would put code into production that main, and therefore CI and
+          # review, never saw.
           if ! git merge-base --is-ancestor "$new" origin/main; then
-            echo "::error::$source ($new) is not on main's history. Every tier is a fast-forward of main - land the change on main first (a rollback is a revert on main), then promote it."
+            echo "::error::$source ($new) is not on main's history. Every promotion is a fast-forward of main - land the change on main first (a rollback is a revert on main), then promote it."
             exit 1
           fi
 
