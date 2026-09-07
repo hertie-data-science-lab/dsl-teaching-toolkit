@@ -311,6 +311,16 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         cohort_faculty, date.today().isoformat()
     )
     n_instructors = len(cohort_desired.get("instructors", set()))
+    # `email:` is required on every instructor/TA entry - it is the only way a fault
+    # reaches the person who can fix it - and an entry missing one still gets access, so
+    # nothing else here would show the gap. Counts only: this table is appended to the
+    # step summary of a PUBLIC repo, and the run log names the handles.
+    unreachable = sync_faculty.without_email(cohort_faculty, date.today().isoformat())
+    no_email = (
+        f" - WARNING: {len(unreachable)} without email, see the run log"
+        if unreachable
+        else ""
+    )
     data["C7"] = _row(
         "C7",
         f"Instructors/TAs ({sync_faculty.COHORT_PEOPLE_PATH})",
@@ -319,7 +329,7 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         sync_faculty.COHORT_PEOPLE_PATH,
         cohort_branch,
         bool(n_instructors),
-        f"{n_instructors} active" if n_instructors else "",
+        f"{n_instructors} active{no_email}" if n_instructors else no_email.lstrip(" -"),
     )
 
     return data

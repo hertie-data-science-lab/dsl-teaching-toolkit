@@ -111,6 +111,36 @@ def test_main_walks_every_row_and_points_c7_at_classroom_config(monkeypatch, cap
     assert data["C7"]["path"] == "people.yml"
 
 
+def test_c7_says_how_many_of_the_teaching_team_cannot_be_notified(monkeypatch):
+    # `email:` is required but never withheld access, so an entry missing one looks
+    # perfectly healthy everywhere else. Counts, not handles: this table is appended to
+    # the step summary of a PUBLIC repo.
+    _stub_every_read(monkeypatch)
+    monkeypatch.setattr(
+        sync_faculty,
+        "load_cohort_faculty",
+        lambda org: {
+            "instructors": [{"github_handle": "janedoe", "email": "jane@x.org"}],
+            "teaching_assistants": [{"github_handle": "nomail"}],
+        },
+    )
+    row = status.collect("Course", "Cohort-f2026")["C7"]
+    assert row["detail"] == "2 active - WARNING: 1 without email, see the run log"
+    assert "nomail" not in row["detail"]
+
+
+def test_c7_is_quiet_when_every_entry_can_be_notified(monkeypatch):
+    _stub_every_read(monkeypatch)
+    monkeypatch.setattr(
+        sync_faculty,
+        "load_cohort_faculty",
+        lambda org: {
+            "instructors": [{"github_handle": "janedoe", "email": "jane@x.org"}]
+        },
+    )
+    assert status.collect("Course", "Cohort-f2026")["C7"]["detail"] == "1 active"
+
+
 # ------------------------------------------------------------- B8, the mail transport
 # The codes send runs unattended off a roster push, so nobody watches it discover that the
 # org has no transport to mail on. Nothing in status checked the GRAPH_* secrets: an org
