@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
+from conftest import source_fault
 
 from dsl_course import notify, source_digest
 from dsl_course.schedule import Severity, SourceFault
@@ -26,6 +27,9 @@ NOW = datetime(2026, 9, 7, 12, 0, tzinfo=BERLIN)
 COHORT = "Cohort-f2026"
 COURSE = "Course-Org"
 ISSUE = "https://github.com/Cohort-f2026/classroom-config/issues/7"
+# `_fault`'s identity: the entry, the deploy's own path, the field. Two deploys under one
+# entry are two faults, so the path is part of it.
+_KEY = "releases.lecture_02[students/lectures/02_lecture].course_source_path"
 
 # One instructor, one TA, one entry with no address at all - the three cases people.yml
 # really contains.
@@ -50,7 +54,7 @@ def _fault(
     path: str = "students/lectures/02_lecture",
     fires: timedelta = timedelta(hours=3),
 ) -> SourceFault:
-    return SourceFault(
+    return source_fault(
         where,
         f"{COURSE}/{repo}/{path} does not exist",
         NOW + fires,
@@ -65,9 +69,6 @@ def _digest(faults: list[SourceFault], rung: Severity) -> source_digest.DigestRe
     """A digest result that owes a mail for every one of `faults` at `rung`."""
     by_key = {f.key: f for f in faults}
     return source_digest.DigestResult(
-        transitions=source_digest.Transitions(
-            list(by_key), [], [], dict.fromkeys(by_key, rung)
-        ),
         issue_url=ISSUE,
         faults_by_key=by_key,
         mail=dict.fromkeys(by_key, rung),
@@ -75,22 +76,29 @@ def _digest(faults: list[SourceFault], rung: Severity) -> source_digest.DigestRe
 
 
 class _Sent:
-    """Every batch handed to `send_bulk`, in order."""
+    """Every MESSAGE handed to `send_bulk`, in order.
+
+    One batch per tick now - the token is minted once - so what a test looks at is the
+    messages inside it: who was on the To line as a group, who was copied, and the one
+    body they all got."""
 
     def __init__(self):
+        self.calls = 0
         self.batches: list[dict] = []
 
-    def __call__(self, messages, dry_run=False, sample=None, html=False, cc=None):
-        self.batches.append(
+    def __call__(self, messages, dry_run=False, sample=None, html=False):
+        self.calls += 1
+        self.batches += [
             {
-                "to": [m[0] for m in messages],
-                "subject": messages[0][1],
-                "body": messages[0][2],
+                "to": list(m.recipients),
+                "subject": m.subject,
+                "body": m.body,
+                "cc": list(m.cc),
                 "html": html,
-                "cc": list(cc or []),
             }
-        )
-        return [m[0] for m in messages]
+            for m in messages
+        ]
+        return [a for m in messages for a in m.recipients]
 
     @property
     def one(self) -> dict:
@@ -114,7 +122,15 @@ def wired(monkeypatch):
     ) -> _Sent:
         monkeypatch.setattr(notify, "blame_logins", lambda *a, **k: blame or {})
         monkeypatch.setattr(notify, "last_committer", lambda *a, **k: committer)
-        monkeypatch.setattr(notify, "load_yaml_config", lambda *a, **k: people)
+        monkeypatch.setattr(
+            notify.sync_faculty,
+            "load_cohort_faculty",
+            lambda *a, **k: (
+                notify.sync_faculty.parse_faculty_from_meta(people)
+                if people is not None
+                else None
+            ),
+        )
         monkeypatch.setattr(notify.ghcli, "bot_login", lambda: "dsl-bot")
         monkeypatch.setattr(notify.mailer, "maintainer_address", lambda: maintainer)
         monkeypatch.setattr(
@@ -143,7 +159,7 @@ def test_the_planner_of_the_line_and_the_repos_committer_are_both_told(wired):
     # Telling the whole teaching team about every entry is how a channel stops being read.
     wired(blame={131: "JanG"}, committer="cpj97")
     routing = notify.route(COHORT, COURSE, [_fault()], NOW)
-    assert routing.by_key["releases.lecture_02.course_source_path"].to == (
+    assert routing.by_key[_KEY].to == (
         "jan@x.edu",
         "cam@x.edu",
     )
@@ -154,18 +170,14 @@ def test_a_mail_to_a_ta_copies_the_instructors(wired):
     # A TA staging a lecture folder is doing it on somebody's behalf, and that somebody
     # needs to know the release is at risk without being the one asked to fix it.
     wired(blame={131: "cpj97"}, committer="cpj97")
-    routed = notify.route(COHORT, COURSE, [_fault()], NOW).by_key[
-        "releases.lecture_02.course_source_path"
-    ]
+    routed = notify.route(COHORT, COURSE, [_fault()], NOW).by_key[_KEY]
     assert routed.to == ("cam@x.edu",)
     assert routed.cc == ("jan@x.edu",)
 
 
 def test_a_mail_to_an_instructor_copies_nobody(wired):
     wired(blame={131: "JanG"}, committer="JanG")
-    routed = notify.route(COHORT, COURSE, [_fault()], NOW).by_key[
-        "releases.lecture_02.course_source_path"
-    ]
+    routed = notify.route(COHORT, COURSE, [_fault()], NOW).by_key[_KEY]
     assert routed == (("jan@x.edu",), ())
 
 
@@ -173,9 +185,7 @@ def test_a_committer_who_is_not_teaching_staff_falls_back_to_the_team(wired):
     # A course admin, or somebody who has left. There is no address for them, so the
     # people who can act are whoever is teaching the cohort now.
     wired(blame={131: "a-stranger"}, committer=None)
-    routed = notify.route(COHORT, COURSE, [_fault()], NOW).by_key[
-        "releases.lecture_02.course_source_path"
-    ]
+    routed = notify.route(COHORT, COURSE, [_fault()], NOW).by_key[_KEY]
     assert set(routed.to) == {"jan@x.edu", "cam@x.edu"}
     # Nobody in particular to copy - everybody is already addressed.
     assert routed.cc == ()
@@ -185,9 +195,7 @@ def test_a_fault_with_no_line_number_falls_back_to_the_team(wired):
     # `locate` returns None for a line it cannot find, and blaming line `None` would
     # address the mail to whoever happens to own line 1.
     wired(blame={131: "JanG"}, committer=None)
-    routed = notify.route(COHORT, COURSE, [_fault(lineno=None)], NOW).by_key[
-        "releases.lecture_02.course_source_path"
-    ]
+    routed = notify.route(COHORT, COURSE, [_fault(lineno=None)], NOW).by_key[_KEY]
     assert set(routed.to) == {"jan@x.edu", "cam@x.edu"}
 
 
@@ -196,7 +204,7 @@ def test_the_bot_is_never_the_person_to_tell(wired):
     # file it has touched it is the blame answer for lines nobody at the school wrote.
     wired(blame={131: "dsl-bot"}, committer="dsl-bot")
     routing = notify.route(COHORT, COURSE, [_fault()], NOW)
-    assert set(routing.by_key["releases.lecture_02.course_source_path"].to) == {
+    assert set(routing.by_key[_KEY].to) == {
         "jan@x.edu",
         "cam@x.edu",
     }
@@ -205,9 +213,9 @@ def test_the_bot_is_never_the_person_to_tell(wired):
 
 def test_the_same_person_named_twice_is_addressed_once(wired):
     wired(blame={131: "JanG"}, committer="jang")
-    assert notify.route(COHORT, COURSE, [_fault()], NOW).by_key[
-        "releases.lecture_02.course_source_path"
-    ].to == ("jan@x.edu",)
+    assert notify.route(COHORT, COURSE, [_fault()], NOW).by_key[_KEY].to == (
+        "jan@x.edu",
+    )
 
 
 def test_blame_that_could_not_be_read_is_not_read_as_nobody(monkeypatch, capsys, wired):
@@ -220,10 +228,7 @@ def test_blame_that_could_not_be_read_is_not_read_as_nobody(monkeypatch, capsys,
 
     monkeypatch.setattr(notify, "blame_logins", boom)
     routing = notify.route(COHORT, COURSE, [_fault()], NOW)
-    assert set(routing.by_key["releases.lecture_02.course_source_path"].to) == {
-        "jan@x.edu",
-        "cam@x.edu",
-    }
+    assert set(routing.by_key[_KEY].to) == {"jan@x.edu", "cam@x.edu"}
     assert "[skip] could not read who wrote schedule.yml" in capsys.readouterr().out
 
 
@@ -242,7 +247,7 @@ def test_a_distant_fault_is_routed_to_nobody_and_costs_no_api_call(monkeypatch):
         raise AssertionError("no read should happen for an advisory-only plan")
 
     monkeypatch.setattr(notify, "blame_logins", boom)
-    monkeypatch.setattr(notify, "load_yaml_config", boom)
+    monkeypatch.setattr(notify.sync_faculty, "load_cohort_faculty", boom)
     assert notify.route(COHORT, COURSE, [_fault(fires=timedelta(days=40))], NOW) == (
         notify.Routing()
     )
@@ -272,7 +277,18 @@ def test_two_committers_in_one_tick_get_a_mail_each(wired):
     sent = wired(blame={131: "JanG", 140: "cpj97"}, committer=None)
     routing = notify.route(COHORT, COURSE, [a, b], NOW)
     _run([a, b], Severity.URGENT, routing)
-    assert sorted(b["to"] for b in sent.batches) == [["cam@x.edu"], ["jan@x.edu"]]
+    assert sorted(m["to"] for m in sent.batches) == [["cam@x.edu"], ["jan@x.edu"]]
+    # ...in ONE batch, so the Graph token is minted once however many groups a tick has.
+    assert sent.calls == 1
+
+
+def test_a_whole_recipient_group_is_one_message(wired):
+    # The fault mail is the same text for everybody on the line, and a copy per recipient
+    # pays the rate limiter's send slot for each - so the group goes on one To line.
+    sent = wired(blame={131: "a-stranger"}, committer=None)
+    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    _run([_fault()], Severity.URGENT, routing)
+    assert sorted(sent.one["to"]) == ["cam@x.edu", "jan@x.edu"]
 
 
 def test_two_faults_from_one_person_share_a_single_mail(wired):
