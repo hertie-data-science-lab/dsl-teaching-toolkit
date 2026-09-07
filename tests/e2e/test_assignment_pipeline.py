@@ -124,10 +124,18 @@ def _cohort_timezone() -> ZoneInfo:
 
 
 def _declared_tier() -> str:
-    """The tier the course org says it runs, resolved the way every renderer resolves it."""
+    """The tier the course org says it runs, resolved the way every renderer resolves it.
+
+    A value that does not resolve is RETURNED as it stands rather than raised: a
+    `MissingCentralRef` traceback out of here says neither what the org runs nor that it is
+    the wrong thing, and the preflight assertion below says both. `staging` after
+    2026-09-07 is exactly that case."""
     text = gh_contents.get_file_content(COURSE_ORG, ".github", "dsl-course.yml")
     declared = (yaml.safe_load(text or "") or {}).get("central_ref")
-    return central.resolve_central_ref(declared, source=f"{COURSE_ORG}/.github")
+    try:
+        return central.resolve_central_ref(declared, source=f"{COURSE_ORG}/.github")
+    except central.MissingCentralRef:
+        return str(declared)
 
 
 CANNOT_DELETE = (
@@ -199,7 +207,7 @@ def _preflight(run_id: str) -> None:
     local = ghcli.git("rev-parse", "HEAD")[1].strip()
     assert tip["sha"] == local, (
         f"{EXPECTED_TIER} is at {tip['sha'][:8]} but this checkout is at {local[:8]} - "
-        "promote first, or check out what you are testing"
+        "`git checkout main && git pull`, or check out the SHA the demo org is running"
     )
 
     # The heartbeat says only that a refresh has EVER run here (see seed.HEARTBEAT_PATH):
