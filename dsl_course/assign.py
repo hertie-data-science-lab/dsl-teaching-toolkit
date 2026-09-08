@@ -136,7 +136,7 @@ def _template_is_ready(entry: dict | None, slug: str) -> bool:
     this needs no content check of its own: `_wait_for_content` gates both writes."""
     if entry is None:
         return False
-    wanted = {slug.lower().replace("_", "-"), ASSIGNMENT_TEMPLATE_TOPIC}
+    wanted = {topic_name(slug), ASSIGNMENT_TEMPLATE_TOPIC}
     return bool(entry.get("isTemplate")) and wanted <= set(entry.get("topics") or [])
 
 
