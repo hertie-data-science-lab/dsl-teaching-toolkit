@@ -17,51 +17,10 @@ from dsl_course import gh_contents, ghcli, grades, repos, roster
 from dsl_course.schedule import AssignmentEntry, Schedule
 from tests.conftest import ROSTER_HEADER
 
-
-def test_parse_grades_tolerates_blank_and_missing_columns():
-    text = (
-        "github_handle,team,team_score,individual_adjustment,final_grade,individual_comments\n"
-        "anna-adams,,,,88,Strong work\n"
-        "ben-baker, team-x , 85 , +4 , 89 , Good lead \n"
-    )
-    rows = grades.parse_grades(text)
-    assert [r.github_handle for r in rows] == ["anna-adams", "ben-baker"]
-    # values are stripped, never coerced
-    assert rows[1].team == "team-x" and rows[1].individual_adjustment == "+4"
-    assert rows[0].team == "" and rows[0].final_grade == "88"
+# ------------------------------------------------------ provisioning the gradebooks
 
 
-def test_a_retired_header_is_refused_rather_than_half_read():
-    # The rename left `github_handle`, `team` and `team_comments` untouched, so an
-    # un-migrated CSV would parse PARTIALLY: the row keeps its handle while every renamed
-    # cell reads blank. Nothing downstream can tell that apart from a legitimately sparse
-    # row, so a transition cohort would distribute gradebooks with every mark silently
-    # missing - green, and unnoticed until a student asked where their grade went.
-    text = (
-        "github_handle,team,auto,manual,team_grade,adjustment,final,comments,team_comments\n"
-        "ada-l,team-1,87,9,78,+4,B+,Nice work.,Team was solid.\n"
-    )
-    with pytest.raises(grades.RetiredGradeHeader) as exc:
-        grades.parse_grades(text)
-    # The message has to say what to rename to, or it just blocks without helping.
-    assert "final -> final_grade" in str(exc.value)
-
-
-def test_a_current_header_missing_optional_columns_still_parses():
-    # The guard keys on the RETIRED names specifically - a sparse but current header, and
-    # an extra column of the marker's own, are both still fine.
-    text = "github_handle,final_grade,rubric_notes\nada-l,B+,see the rubric tab\n"
-    (row,) = grades.parse_grades(text)
-    assert row.final_grade == "B+" and row.github_handle == "ada-l"
-
-
-# -------------------------------------------------------- write-once machine columns
-# `autograde_score` and `team` are filled by a machine but OWNED by whoever marks: a
-# non-empty cell is never overwritten, so a hand-corrected score survives every re-grade,
-# scheduled or manual. Only empty cells get filled.
-
-
-def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
+def test_ensure_gradebooks_skips_auditors(monkeypatch, capsys):
     # Auditors are never assessed, so they get no private gradebook repo. Dry-run keeps
     # this pure - the roster is the only input, and nothing is provisioned.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-student lines are verbose-only
@@ -72,7 +31,7 @@ def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
         "bob@uni.edu,Bob,,bob-b,44,dsl-def\n"  # blank role -> enrolled
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    assert grades.sync("COHORT", dry_run=True) == 0
+    assert grades.ensure_gradebooks("COHORT", dry_run=True) == 0
     out = capsys.readouterr().out
     assert "grades-ada-l" in out and "grades-bob-b" in out
     assert "eve-e" not in out
@@ -80,13 +39,13 @@ def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
     assert "1 auditor row(s) skipped" in out
 
 
-def test_gradebook_sync_names_no_student_in_a_public_log(monkeypatch, capsys):
+def test_ensure_gradebooks_names_no_student_in_a_public_log(monkeypatch, capsys):
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     students = roster.parse(
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    assert grades.sync("COHORT", dry_run=True) == 0
+    assert grades.ensure_gradebooks("COHORT", dry_run=True) == 0
     out = capsys.readouterr().out
     assert "ada-l" not in out
     assert "Syncing 1 gradebook repo(s)" in out  # the aggregate still reports
@@ -247,7 +206,7 @@ def test_a_gradebook_the_student_cannot_open_is_a_failure(monkeypatch):
 def test_a_new_gradebook_grants_faculty_read_and_an_existing_one_is_left_alone(
     monkeypatch,
 ):
-    # Read, not write: `distribute` rewrites grades.yml from grades/<slug>.csv, so a mark
+    # Read, not write: `distribute` rewrites grades.yml from the grading sheet, so a mark
     # corrected in the gradebook itself would be overwritten on the next run.
     #
     # At CREATION only. A team grant does not decay and the nightly sweep
@@ -409,19 +368,6 @@ def test_grade_notification_dry_run_carries_a_placeholder_sample(monkeypatch):
 # ------------------------------------------ render must not clobber a reviewer's edit (fix 16)
 
 
-def test_parse_grades_survives_an_excel_bom_and_refuses_a_semicolon_export():
-    # The BOM glued itself to the first header name, so every handle read "" and merge_auto
-    # folded every student onto one row - hand-entered marks destroyed. roster and teams
-    # already stripped it; this was the one hand-edited CSV that did not.
-    import pytest
-
-    text = "\ufeffgithub_handle,team,autograde_score\nada-l,,5\nbob-b,,3\n"
-    rows = grades.parse_grades(text)
-    assert [r.github_handle for r in rows] == ["ada-l", "bob-b"]
-    with pytest.raises(RuntimeError, match="semicolon"):
-        grades.parse_grades("github_handle;team;autograde_score\nada-l;;5\n")
-
-
 # ------------------------------- handles are one account whatever their casing (fix 3)
 
 
@@ -449,9 +395,9 @@ def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
 # ------------------------------------------- ONE listing instead of a probe per gradebook
 
 
-def _sync_run(monkeypatch, listing, handles=("ada-l", "bob-b")):
-    """grades.sync over `handles`, with `listing` (or an Exception) standing in for the
-    org listing. Returns (the orgs listed, the gradebooks created)."""
+def _ensure_run(monkeypatch, listing, handles=("ada-l", "bob-b")):
+    """`ensure_gradebooks` over `handles`, with `listing` (or an Exception) standing in
+    for the org listing. Returns (the orgs listed, the gradebooks created)."""
     students = roster.parse(
         ROSTER_HEADER
         + "\n"
@@ -478,11 +424,11 @@ def _sync_run(monkeypatch, listing, handles=("ada-l", "bob-b")):
     monkeypatch.setattr(grades, "set_repo_topics", lambda *a, **k: True)
     monkeypatch.setattr(grades, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
-    assert grades.sync("COHORT") == 0
+    assert grades.ensure_gradebooks("COHORT") == 0
     return listed, created
 
 
-def test_sync_lists_the_org_once_and_probes_no_gradebook(monkeypatch):
+def test_ensure_gradebooks_lists_the_org_once_and_probes_no_gradebook(monkeypatch):
     # A repo_exists per student cost a GET per student on every nightly sync, to ask what
     # one paginated listing already answers for the whole cohort.
     monkeypatch.setattr(
@@ -490,7 +436,7 @@ def test_sync_lists_the_org_once_and_probes_no_gradebook(monkeypatch):
         "repo_exists",
         lambda *a, **k: pytest.fail("a per-repo probe is back in the hot path"),
     )
-    listed, created = _sync_run(monkeypatch, [{"name": "grades-ada-l", "topics": []}])
+    listed, created = _ensure_run(monkeypatch, [{"name": "grades-ada-l", "topics": []}])
     assert listed == ["COHORT"], "one listing per run, not one per student"
     assert created == ["grades-bob-b"], "a listed gradebook was recreated"
 
@@ -502,7 +448,7 @@ def test_a_failed_listing_falls_back_to_probing_each_gradebook(monkeypatch):
     monkeypatch.setattr(
         grades, "repo_exists", lambda org, repo: probed.append(repo) or False
     )
-    listed, created = _sync_run(
+    listed, created = _ensure_run(
         monkeypatch, RuntimeError("could not list repos in COHORT: 502")
     )
     assert listed == ["COHORT"]
@@ -519,7 +465,7 @@ def test_a_dry_run_lists_nothing(monkeypatch):
     monkeypatch.setattr(
         grades, "list_org_repos", lambda org: pytest.fail("a dry run listed the org")
     )
-    assert grades.sync("COHORT", dry_run=True) == 0
+    assert grades.ensure_gradebooks("COHORT", dry_run=True) == 0
 
 
 # ------------------------------------------------------------------ distribute, end to end
@@ -563,11 +509,6 @@ _HELD_SHEET = _SHEET.replace("score_individual: 43", "score_individual: pass").r
 _HELD_TEAM_SHEET = _TEAM_SHEET.replace("score_group: 43", "score_group: pass").replace(
     "days_late: 0", "days_late: 2"
 )
-_LEGACY_CSV = (
-    "github_handle,team,autograde_score,manual_score,team_score,"
-    "individual_adjustment,final_grade,individual_comments,team_comments\n"
-    "ada-l,,,,,,77,Solid work,\n"
-)
 ROSTER_ADA = "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
 
 
@@ -588,7 +529,6 @@ def _distribute(
     tmp_path,
     *,
     sheets: dict[str, str] | None = None,
-    legacy: dict[str, str] | None = None,
     grading: str = _GRADING_YML,
     distributed: str | None = None,
     notified: str | None = None,
@@ -613,9 +553,6 @@ def _distribute(
     sheets = {"assignment-1": _SHEET} if sheets is None else sheets
     for slug, text in sheets.items():
         (cfg / grades.SHEETS_DIR / f"{slug}.yml").write_text(text)
-    for slug, text in (legacy or {}).items():
-        (cfg / grades.GRADES_DIR).mkdir(exist_ok=True)
-        (cfg / grades.GRADES_DIR / f"{slug}.csv").write_text(text)
     if distributed is not None:
         (cfg / grades.GRADEBOOK_DIR).mkdir(parents=True, exist_ok=True)
         (cfg / grades.DISTRIBUTED_PATH).write_text(distributed)
@@ -858,11 +795,20 @@ def test_distribute_can_be_narrowed_to_one_assignment(tmp_path, monkeypatch):
     assert "assignment-2" not in files["grades.yml"]
 
 
+def test_a_cohort_with_no_sheet_yet_distributes_nothing(tmp_path, monkeypatch, capsys):
+    # The sheet is the only source of marks, so an empty folder is "nothing has been
+    # handed out yet" - reported, and nothing written, rather than an empty run.
+    out = _distribute(monkeypatch, tmp_path, sheets={})
+    assert out["rc"] == 1
+    assert (out["comments"], out["gradebooks"], out["config"]) == ([], [], [])
+    assert f"no {grades.SHEETS_DIR}/ in COHORT" in capsys.readouterr().err
+
+
 def test_a_slug_no_sheet_matches_distributes_nothing(tmp_path, monkeypatch, capsys):
     out = _distribute(monkeypatch, tmp_path, assignment="assignment-9")
     assert out["rc"] == 1
     assert (out["comments"], out["gradebooks"], out["config"]) == ([], [], [])
-    assert "no grading sheet or grade CSV for `assignment-9`" in capsys.readouterr().err
+    assert "no grading sheet for `assignment-9`" in capsys.readouterr().err
 
 
 def test_the_dry_run_counts_units_with_questions_still_unmarked(
@@ -1199,23 +1145,6 @@ def test_the_dead_per_student_yaml_goes_whether_or_not_this_is_the_migration(
     assert grades.DISTRIBUTED_PATH in files
 
 
-def test_a_cohort_still_on_the_grade_csvs_gets_gradebooks_but_no_comments(
-    tmp_path, monkeypatch
-):
-    # A legacy CSV has no submission-unit structure to post against, and no timing - so
-    # the Submitted cell is BLANK rather than an accusation.
-    out = _distribute(
-        monkeypatch,
-        tmp_path,
-        sheets={},
-        legacy={"assignment-1": _LEGACY_CSV},
-    )
-    assert out["comments"] == [] and out["issues"] == []
-    ((_gb, files, _d),) = out["gradebooks"]
-    assert "| Neural networks | 77 |  |  |  |" in files["README.md"]
-    assert "not submitted" not in files["README.md"]
-
-
 def test_a_missing_submission_repo_is_a_counted_skip(tmp_path, monkeypatch, capsys):
     out = _distribute(monkeypatch, tmp_path, issue=None)
     assert out["comments"] == []
@@ -1223,9 +1152,9 @@ def test_a_missing_submission_repo_is_a_counted_skip(tmp_path, monkeypatch, caps
     assert '"skipped": 1' in capsys.readouterr().out
 
 
-# A handle no roster row claims. Both sources are hand-typed, and a transition cohort's
-# `grades/*.csv` carried six of these on the demo org: `ensure_gradebooks` had provisioned
-# nothing for them, so every one was a 404 naming `grades-<handle>` in a PUBLIC log.
+# A handle no roster row claims. A sheet is hand-typed, and the demo org carried six of
+# these: `ensure_gradebooks` had provisioned nothing for them, so every one was a 404
+# naming `grades-<handle>` in a PUBLIC log.
 _UNKNOWN_IN_THE_SHEET = (
     _SHEET
     + """\
@@ -1236,7 +1165,8 @@ _UNKNOWN_IN_THE_SHEET = (
     score_individual: 30
 """
 )
-_UNKNOWN_IN_THE_CSV = _LEGACY_CSV.replace("ada-l,", "mallory-m,")
+# A second assignment nobody on the roster is in, so two unknown marks are counted.
+_ONLY_A_STRANGER = _SHEET.replace("ada-l:", "mallory-m:")
 
 
 def test_marks_for_handles_not_on_the_roster_are_dropped_not_pushed(
@@ -1246,8 +1176,10 @@ def test_marks_for_handles_not_on_the_roster_are_dropped_not_pushed(
     out = _distribute(
         monkeypatch,
         tmp_path,
-        sheets={"assignment-1": _UNKNOWN_IN_THE_SHEET},
-        legacy={"assignment-2": _UNKNOWN_IN_THE_CSV},
+        sheets={
+            "assignment-1": _UNKNOWN_IN_THE_SHEET,
+            "assignment-2": _ONLY_A_STRANGER,
+        },
     )
     assert out["rc"] == 0
     # One gradebook, for the one student the roster has - not three.
@@ -1265,8 +1197,10 @@ def test_the_dry_run_says_how_many_marks_no_roster_row_claims(
     _distribute(
         monkeypatch,
         tmp_path,
-        sheets={"assignment-1": _UNKNOWN_IN_THE_SHEET},
-        legacy={"assignment-2": _UNKNOWN_IN_THE_CSV},
+        sheets={
+            "assignment-1": _UNKNOWN_IN_THE_SHEET,
+            "assignment-2": _ONLY_A_STRANGER,
+        },
         dry_run=True,
     )
     assert (

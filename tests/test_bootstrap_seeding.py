@@ -54,9 +54,9 @@ from dsl_course.central import CENTRAL
 from dsl_course.repos import Converged
 from tests.conftest import repo_row, stub_bootstrap
 
-# Derived from the seeding tables, so a sixth config file cannot silently miss the set
-# these tests police - which is the whole point of the tables existing.
-USER_OWNED = {*welcome.CLASSROOM_SCAFFOLDS, "grades/.gitkeep"}
+# Derived from the seeding table, so a fifth config file cannot silently miss the set
+# these tests police - which is the whole point of the table existing.
+USER_OWNED = set(welcome.CLASSROOM_SCAFFOLDS)
 SYSTEM_OWNED = {
     ".github/workflows/dispatch-sync.yml",
     ".github/workflows/dispatch-sync-site.yml",
@@ -197,7 +197,6 @@ def test_rerun_preserves_user_config_and_refreshes_workflows(fake):
         "people.yml": "people:\n  instructors:\n    - github_handle: profx\n",
         "teams.csv.sample": "team,members\nstale,sample\n",
         "README.md": "# stale contract from an older engine\n",
-        "grades/.gitkeep": "",
         ".github/workflows/dispatch-sync.yml": "name: stale dispatcher\n",
     }
     fake.files.update({("classroom-config", p): c for p, c in live.items()})
@@ -299,13 +298,13 @@ def test_a_create_only_write_commits_nothing_when_every_file_is_already_there(
 def test_seed_if_absent_skips_an_empty_existing_file(fake):
     # New contract: a skip means the file IS present as intended, so seed_if_absent returns
     # True (a success, not a failure) and attempts no write. get_file_content returns "" for
-    # an existing empty file (grades/.gitkeep) - falsy but present, so it still counts.
-    fake.files[("classroom-config", "grades/.gitkeep")] = ""
+    # an existing empty file - falsy but present, so it still counts.
+    fake.files[("classroom-config", "teams.csv")] = ""
     assert gh_contents.seed_if_absent(
-        "Cohort-f2026", "classroom-config", "grades/.gitkeep", b"x", "msg"
+        "Cohort-f2026", "classroom-config", "teams.csv", b"x", "msg"
     )
     assert fake.writes == []
-    assert "classroom-config/grades/.gitkeep" in fake.skips
+    assert "classroom-config/teams.csv" in fake.skips
 
 
 def test_seed_if_absent_returns_false_only_when_the_write_fails(monkeypatch):
@@ -481,11 +480,6 @@ def test_scaffold_and_sample_carry_the_engines_current_column_sets():
     # header-only scaffolds: nobody to enrol, and no team to provision, by accident
     assert roster.parse(welcome.template("classroom-config/students.csv")) == []
     assert teams.parse(welcome.template("classroom-config/teams.csv")) == {}
-    for path, source in welcome.CLASSROOM_SAMPLES.items():
-        if source.startswith("grades/"):
-            assert header(welcome.example_cohort_file(source)) == grades.GRADE_FIELDS, (
-                path
-            )
 
 
 def test_samples_carry_nothing_that_only_makes_sense_inside_this_repo():
@@ -1467,8 +1461,8 @@ def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypat
     # THE no-clobber invariant. refresh_classroom_system_files runs nightly against LIVE
     # cohorts, so every path it writes is a path overwritten from a template every night.
     # The cohort's own config - students.csv (enrol codes + onboarded handles), teams.csv,
-    # schedule.yml, people.yml, grades/ - is seeded create-if-missing at bootstrap and must
-    # stay that way; adding one of them to the refresh set would destroy a live roster
+    # schedule.yml, people.yml - is seeded create-if-missing at bootstrap and must stay
+    # that way; adding one of them to the refresh set would destroy a live roster
     # (which is exactly what happened once, in hertie-dsl-demo-f2026).
     #
     # Hard-coded on purpose: deriving the expectation from welcome.CLASSROOM_SYSTEM_FILES
@@ -1492,8 +1486,8 @@ def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypat
         ".github/workflows/validate-schedule.yml",
     }, (
         "the nightly refresh may only re-push SYSTEM-owned classroom-config files; a "
-        "USER-owned file here (students.csv, teams.csv, schedule.yml, people.yml, "
-        "grades/) would be overwritten from the template every night"
+        "USER-owned file here (students.csv, teams.csv, schedule.yml, people.yml) "
+        "would be overwritten from the template every night"
     )
     assert {repo for repo, _ in written} == {roster.CONFIG_REPO}
     # No path is written twice, so the count callers add up is one per file.

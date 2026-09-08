@@ -38,7 +38,7 @@ example-course/
     teams.csv                       # 3 project teams of 3-4 (auditors are refused from teams)
     schedule.yml                    # the full term: releases + due dates + events
     people.yml                      # this cohort's own instructors/TAs (real push access)
-    grades/*.csv                    # per-assignment grade tables (auto/manual/final)
+    grading_sheets/*.yml            # one marking sheet per assignment (individual + group)
 ```
 
 > NB: **`cohort-org/` is shipped, not just documented.** Every file in it is seeded into each

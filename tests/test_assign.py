@@ -1008,7 +1008,7 @@ def test_both_assignment_arms_grant_faculty_read(_provisioned, monkeypatch):
     # a non-owner instructor's access - and submission repos granted only the student. The
     # group arm RETURNS inside itself, so the grant must sit before the split or every team
     # project repo would go on granting nobody but the team. READ, not write: marking
-    # happens in classroom-config/grades/<slug>.csv, after the snapshot froze HEAD.
+    # happens in classroom-config/grading_sheets/<slug>.yml, after the snapshot froze HEAD.
     faculty = []
     monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: faculty.append(a))
     monkeypatch.setattr(assign, "add_collaborator", lambda *a, **k: True)

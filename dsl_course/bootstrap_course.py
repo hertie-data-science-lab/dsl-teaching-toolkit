@@ -74,9 +74,9 @@ def _profile_topics(is_cohort: bool, course_code: str = "") -> list[str]:
 # every re-run. The guard has to be per FILE, and it depends on who owns the file:
 #
 #   USER-owned - content faculty edit, or that the running system writes live state into.
-#   In a cohort: classroom-config/{students.csv, teams.csv, schedule.yml, people.yml,
-#   grades/** (except *.sample)} and welcome/README.md (the student landing page). On a
-#   course org: .github/dsl-course.yml (the faculty/course_admins SSOT). Seed these ONLY
+#   In a cohort: classroom-config/{students.csv, teams.csv, schedule.yml, people.yml} and
+#   welcome/README.md (the student landing page). On a course org: .github/dsl-course.yml
+#   (the faculty/course_admins SSOT). Seed these ONLY
 #   when absent (gh_contents.seed_if_absent) - rewriting them on a re-run destroys live enrolment
 #   state (roster rows, enrol codes, onboarded handles) and the faculty's schedule.
 #
@@ -247,7 +247,7 @@ def grant_button_access(org: str) -> int:
 # Every org is tightened to default_repository_permission=none, so without these grants
 # only org OWNERS can touch either repo - yet the whole faculty workflow lives in them:
 # `classroom-config` is what instructors edit (schedule.yml, students.csv, teams.csv,
-# people.yml) and read (grades/), and `welcome` is where they triage `needs-review`
+# people.yml, grading_sheets/), and `welcome` is where they triage `needs-review`
 # onboarding issues. Course orgs have neither repo, so this is cohort-only. Single-sourced
 # with the nightly sweep's floor (access.COHORT_WRITE_REPOS), so the two cannot disagree.
 COHORT_FACULTY_REPOS = sorted(COHORT_WRITE_REPOS - {".github"})
@@ -565,7 +565,7 @@ def setup_cohort_extras(org: str, central_ref: str) -> int:
         # One commit for the set: seeding a cohort's config is a single act, and writing it
         # file by file put a burst of near-identical `init:`/`docs: seed` commits at the top
         # of a repo faculty then work in by hand. Create-only is unchanged and still per
-        # file - a re-run that finds five of six present writes only the sixth.
+        # file - a re-run that finds three of the four present writes only the fourth.
         if not put_files(
             org,
             "classroom-config",
@@ -576,15 +576,14 @@ def setup_cohort_extras(org: str, central_ref: str) -> int:
                 .format(tag=tag, year=year, year_next=year + 1)
                 .encode()
                 for path, rel in CLASSROOM_SCAFFOLDS.items()
-            }
-            | {"grades/.gitkeep": b""},
-            "init: classroom-config scaffolds (roster, teams, schedule, people, grades)",
+            },
+            "init: classroom-config scaffolds (roster, teams, schedule, people)",
             create_only=True,
         ):
             failures += 1
         # SYSTEM-owned documentation, refreshed on every run so it never goes stale: a
         # `.sample` twin for every file in the worked example cohort. Samples keep the
-        # `.sample` suffix so the engine (sync_membership, sync_teams, grade sync) never
+        # `.sample` suffix so the engine (sync_membership, sync_teams, distribute) never
         # ingests them - only the real names; activation = copying rows into the real file.
         sample_failures = refresh_classroom_samples(org)
         if sample_failures:

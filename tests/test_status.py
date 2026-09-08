@@ -89,7 +89,7 @@ def _stub_every_read(monkeypatch):
     monkeypatch.setattr(status, "org_meta", lambda org: {"course_name": "Course"})
     monkeypatch.setattr(status, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(roster, "load", lambda org: [])
-    monkeypatch.setattr(grades, "load_grade_sources", lambda org: {})
+    monkeypatch.setattr(grades, "sheet_slugs", lambda org: [])
     monkeypatch.setattr(teams, "load", lambda org: {})
     monkeypatch.setattr(schedule, "load", lambda org: schedule.Schedule())
     monkeypatch.setattr(sync_faculty, "load_cohort_faculty", lambda org: None)

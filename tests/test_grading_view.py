@@ -17,7 +17,6 @@ from dsl_course import roster
 from dsl_course.grades import (
     NOTES_KEY,
     STUDENT_VIEW_KEYS,
-    GradeRow,
     SheetSpec,
     TeamResult,
     _cell,
@@ -517,29 +516,6 @@ def test_a_late_individual_comment_shows_the_arithmetic_done_to_the_work():
 
 
 # ------------------------------------------------------- the sources marks come from
-
-
-def test_a_cohort_still_marking_in_the_legacy_csv_distributes_the_same_way():
-    rows = [
-        GradeRow(
-            github_handle="ben-k",
-            team="team-alpha",
-            team_score="43",
-            individual_adjustment="-3",
-            final_grade="40",
-            individual_comments="See the team feedback.",
-            team_comments="Clean derivation.",
-        )
-    ]
-    view = build_gradebooks({"assignment-1": rows})["ben-k"]["assignment-1"]
-    assert view == {
-        "final_grade": "40",
-        "feedback": "See the team feedback.",
-        "team": "team-alpha",
-        "team_feedback": "Clean derivation.",
-    }
-    # The CSV's working columns have no student-visible home any more.
-    assert "43" not in render_readme("ben-k", {"assignment-1": view}, TITLES)
 
 
 def test_a_student_with_nothing_in_the_sheet_yet_has_no_gradebook_entry():

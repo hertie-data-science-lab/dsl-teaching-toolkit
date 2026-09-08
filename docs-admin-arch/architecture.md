@@ -52,7 +52,7 @@ is_template: main + solution branch`"]
     wel["`welcome
 Join course issue → onboard`"]
     ros["`classroom-config
-roster, teams, grades, snapshots, schedule, people`"]
+roster, teams, grading sheets, snapshots, schedule, people`"]
     cmat["`materials
 released lectures/readings`"]
     stu["`slug-handle
@@ -214,7 +214,7 @@ so an admin added via the Teams UI or a one-off `gh api` call must also be decla
 
 A **cohort** is bootstrapped from the course org's own **Bootstrap cohort** button (not the
 central action), given the empty cohort org's name. It runs the same `bootstrap_course` with
-`--cohort`: seeds `welcome` + `classroom-config` (roster, teams, grades, `schedule.yml`,
+`--cohort`: seeds `welcome` + `classroom-config` (roster, teams, `schedule.yml`,
 `people.yml`), creates the `students` + `auditors` teams, tightens permissions, scaffolds the
 website, applies the course's current `course_admins`, registers the cohort in the course's
 `cohort-courses-pages.yml`, and writes a small `.github/dsl-course.yml` **pointer** (`course:`,
@@ -439,11 +439,14 @@ OOM-killing the job and blocking the cohort's grading forever. Known, accepted r
 **no network isolation**, and graded code running in-process can forge its own report - which is
 why `autograde_score` is faculty-reviewed before distribution and never shown to students directly.
 
-**Grades** are three idempotent stages: `sync` creates a private `grades-<handle>` per onboarded
-enrolled student; `render` pivots the CSVs into a preview PR on branch `grades-update`; and
-`distribute` pushes each student's `grades.yml` and emails them. Machine-written cells
-(`autograde_score`, `team`) are **write-once**, and `render` refuses to force-push its branch if a
-non-bot commit sits on it - a reviewer's correction is never clobbered.
+**Grades** run from ONE file per assignment, `classroom-config/grading_sheets/<slug>.yml`, which
+`collect` creates at handout, refreshes each tick and seals at the cutoff. `distribute` then fans
+out what a grader typed there: a comment on each submission repo's Feedback issue, each student's
+private `grades-<handle>` gradebook (provisioned by `ensure_gradebooks` on the way in), the
+registrar export, and an email saying there is something new to read. Everything the toolkit owns
+sits under `info:`; everything else is the grader's and is never rewritten. Nothing is said twice -
+every send is recorded in `gradebook/distributed.csv`, so a re-run after one correction reaches one
+student.
 
 ## Convergence - the daily self-refresh
 
@@ -731,8 +734,8 @@ Self-contained - workflows and their Python implementation both live in this rep
     cohort repo additively, cloning every repo once per run. Shared by the button and the scheduler.
   - `assign` - freeze a cohort assignment template, then fan out per-student (or per-team) repos.
   - `collect` - the faculty-side autograder: deadline snapshots, pinned checkout, contained test
-    run, fire-once sentinels, `autograde_score` into the grade CSV.
-  - `grades` - gradebook repos (`sync`), the preview PR (`render`), fan-out + email (`distribute`).
+    run, fire-once sentinels, the autograde count into the grading sheet.
+  - `grades` - the grading sheet, gradebook repos, fan-out + email (`distribute`).
   - `enrol_codes` / `mailer` - generate + email enrolment codes; Graph (certificate-signed
     JWT assertion, no client secret).
   - `scaffold` - create structured materials / assignment repos + the website (cohort or course).

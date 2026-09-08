@@ -306,7 +306,7 @@ PUBLICATION_DENYLIST = (
     "solution",
     "solutions",
     "grading_config.yml",
-    "grading.yml",  # the pre-rename name, still on every template scaffolded before it
+    "grading.yml",  # the pre-rename name; the engine stopped reading it, this list has not
     "tests",
     ".env",
     ".env.*",
@@ -347,9 +347,9 @@ def has_denied_component(path: str) -> bool:
 # form of this rule that is true, which is also why it is short and stays short.
 #
 # The rule is "never copied out to students, never listed on a page" - NOT "never
-# committed". `.gitkeep` still does its job wherever this toolkit writes one (a cohort's
-# empty `grades/`, the site repo's own collections) and in a course's SOURCE repo, where
-# it is what holds an unwritten future session open until someone writes it.
+# committed". `.gitkeep` still does its job wherever this toolkit writes one (the scaffold's
+# empty `lectures/01_session-1/`, the site repo's own collections) and in a course's SOURCE
+# repo, where it is what holds an unwritten future session open until someone writes it.
 NEVER_MATERIAL = frozenset(
     {
         ".DS_Store",

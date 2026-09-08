@@ -2912,31 +2912,12 @@ def test_the_definition_is_read_from_grading_config_yml(monkeypatch):
     assert paths == ["grading_config.yml"]
 
 
-def test_the_old_grading_yml_still_defines_an_assignment(monkeypatch, capsys):
-    # Every template scaffolded before the rename still carries the old name. It is read,
-    # and its owner is told once - the memo above is what makes it once - what to rename.
-    def fake_get(org, repo, path, ref=""):
-        return "type: group" if path == collect.grades.LEGACY_GRADING_FILE else None
-
-    monkeypatch.setattr(collect.grades, "get_file_content", fake_get)
-    assert collect.load_grading_spec("Course", "assignment-4-f2026")["type"] == "group"
-    assert collect.load_grading_spec("Course", "assignment-4-f2026")["type"] == "group"
-    warnings = [
-        line
-        for line in capsys.readouterr().err.splitlines()
-        if "grading_config.yml" in line
-    ]
-    assert len(warnings) == 1
-    assert "rename to grading_config.yml" in warnings[0]
-    assert "stops working next term" in warnings[0]
-
-
-def test_a_template_with_neither_name_says_nothing(monkeypatch, capsys):
+def test_a_template_without_the_file_says_nothing(monkeypatch, capsys):
     # Plenty of assignments have no definition file at all; the defaults cover them, and a
-    # deprecation notice for a file nobody wrote would be noise on every tick.
+    # complaint about a file nobody wrote would be noise on every tick.
     monkeypatch.setattr(collect.grades, "get_file_content", lambda *a, **k: None)
     assert collect.load_grading_spec("Course", "assignment-9-f2026") == DEFAULT_SPEC
-    assert "rename to" not in capsys.readouterr().err
+    assert capsys.readouterr().err == ""
 
 
 @pytest.mark.parametrize(
