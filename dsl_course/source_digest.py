@@ -136,9 +136,9 @@ def sync(
     )
 
 
-def hold(cohort_org: str, held: dict[str, str | None]) -> int:
+def hold(cohort_org: str, held: dict[str, str | None], clock: int | None = None) -> int:
     """Un-record a crossing whose mail did not go out - see `config_digest.hold`."""
-    return _hold(SCHEDULE, cohort_org, held)
+    return _hold(SCHEDULE, cohort_org, held, clock)
 
 
 def main() -> int:

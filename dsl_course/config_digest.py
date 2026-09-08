@@ -316,6 +316,11 @@ class DigestResult:
     # copied on it. Counted over the IMMEDIATE faults alone: one with a deadline
     # escalates towards it instead, and is never age-reminded.
     reminder: str | None = None
+    # What the issue's reminder counter said BEFORE this tick bumped it, for the same
+    # reason `was` carries the previous rung: the body (counter and all) is written before
+    # the mail is attempted, so a send that failed hands this back to `hold`, which puts
+    # the counter where it was and lets the next tick owe the same reminder again.
+    reminder_was: int | None = None
 
 
 def _read_marker(body: str, name: str, default, key: str = "source"):
@@ -687,6 +692,7 @@ def _comment(
     now,
     ctx: Context,
     reminder: str | None = None,
+    reminded: list[str] | None = None,
 ) -> str:
     """The transition comment - short on purpose. It is an email subject line more than a
     document; the body above is where the detail lives.
@@ -699,7 +705,10 @@ def _comment(
     design exists to avoid.
 
     An age REMINDER is an escalation with no new rung to report: nothing about the fault
-    changed, the length of time it has stood did."""
+    changed, the length of time it has stood did. `reminded` is the keys it is about -
+    the IMMEDIATE ones, never every fault in the issue: schedule.yml carries both clocks,
+    and listing a source that fires in November under "unfixed for 2 days" says the wrong
+    thing about it and disagrees with the mail, which counts the same clock correctly."""
 
     def cite(k: str) -> str:
         return _cite(digest, ctx.cohort_org, faults.get(k))
@@ -716,7 +725,7 @@ def _comment(
     if reminder:
         parts.append(
             f"**Escalated** (unfixed for {reminder}):\n"
-            + "\n".join(f"- `{k}` - {cite(k)}" for k in sorted(faults))
+            + "\n".join(f"- `{k}` - {cite(k)}" for k in sorted(reminded or ()))
         )
     quiet = [k for k in t.appeared if t.rung[k] == NOTIFY_FROM]
     # Two headings, because one issue carries both clocks and only one of them is
@@ -744,9 +753,20 @@ def _comment(
     return "\n\n".join([*parts, _mention(digest, ctx)])
 
 
-def hold(digest: Digest, cohort_org: str, held: dict[str, str | None]) -> int:
+def hold(
+    digest: Digest,
+    cohort_org: str,
+    held: dict[str, str | None],
+    clock: int | None = None,
+) -> int:
     """Put the state marker back where it was for `held` - a rung name to re-record, or
     None for a key that had never been recorded. Returns the error count.
+
+    `clock` is the same undoing for the issue's own reminder counter, for a tick whose age
+    REMINDER did not go out. A reminder crosses no rung, so putting the rungs back is a
+    no-op for it - and the counter, already written, is what stops the next tick owing it
+    again. Without this the 48-hour letter is attempted once, fails once, and is never
+    owed again.
 
     This is the quiet window's trick, spent on a delivery failure instead of on the hour:
     the crossing is simply NOT recorded, so the next tick recomputes the very same
@@ -757,7 +777,7 @@ def hold(digest: Digest, cohort_org: str, held: dict[str, str | None]) -> int:
     A second write rather than a reordering, because the first mail LINKS the issue this
     tick had to create: the body has to be written before there is anything to link. So
     the body is written, the mail is sent, and only a failure comes back here."""
-    if not held:
+    if not held and clock is None:
         return 0
     repo = f"{cohort_org}/{digest.repo}"
     try:
@@ -784,19 +804,36 @@ def hold(digest: Digest, cohort_org: str, held: dict[str, str | None]) -> int:
     marker = _MARKER_RE.format(key=digest.state_key, name=_STATE)
     if not re.search(marker, body, re.DOTALL):
         return 0
-    patched = re.sub(
-        marker,
-        # A function, not a replacement string: the marker is JSON, and a backslash in it
-        # would be read as a group reference.
-        lambda _m: _write_marker(_STATE, state, digest.state_key),
+    patched = _patch_marker(body, _STATE, state, digest.state_key, marker)
+    if clock is not None:
+        # Only where the body already carries the counter - one that does not is an issue
+        # whose faults all have deadlines, which is never owed a reminder anyway.
+        clock_marker = _MARKER_RE.format(key=digest.state_key, name=_CLOCK)
+        if re.search(clock_marker, patched, re.DOTALL):
+            patched = _patch_marker(
+                patched, _CLOCK, {"sent": clock}, digest.state_key, clock_marker
+            )
+    errors = upsert_issue(repo, digest.title, patched, existing=found.open).errors
+    if not errors:
+        log_ok(
+            f"{len(held)} held notification(s) put back in {repo} for the next tick"
+            + (" (and the reminder it is owed)" if clock is not None else "")
+        )
+    return errors
+
+
+def _patch_marker(body: str, name: str, value, key: str, pattern: str) -> str:
+    """One marker rewritten in place, leaving the rest of the body exactly as it stands.
+
+    `re.sub` with a FUNCTION, not a replacement string: a marker is JSON, and a backslash
+    in it would be read as a group reference."""
+    return re.sub(
+        pattern,
+        lambda _m: _write_marker(name, value, key),
         body,
         count=1,
         flags=re.DOTALL,
     )
-    errors = upsert_issue(repo, digest.title, patched, existing=found.open).errors
-    if not errors:
-        log_ok(f"{len(held)} held notification(s) put back in {repo} for the next tick")
-    return errors
 
 
 def _due_reminder(oldest, now, sent: int) -> tuple[str | None, int]:
@@ -958,9 +995,8 @@ def sync(
     # is "unfixed for 2 days" would be a second, contradictory schedule for one fault.
     immediate = [f for f in faults if keeps_the_age_clock(f)]
     sent = _read_marker(body, _CLOCK, {}, digest.state_key).get("sent")
-    reminder, sent = _due_reminder(
-        oldest_seen(immediate, since), now, sent if isinstance(sent, int) else 0
-    )
+    was_sent = sent if isinstance(sent, int) else 0
+    reminder, sent = _due_reminder(oldest_seen(immediate, since), now, was_sent)
     if reminder:
         # Every immediate fault still open is in the reminder, at the rung it stands at:
         # the mail says what is unfixed, not what changed - nothing changed, that is the
@@ -986,13 +1022,16 @@ def sync(
         else tuple(_read_marker(body, _MENTION, [], digest.state_key))
     )
     ctx = Context(course_org, cohort_org, ref, mention)
-    note = _comment(digest, changed, by_key, now, ctx, reminder)
+    note = _comment(
+        digest, changed, by_key, now, ctx, reminder, [f.key for f in immediate]
+    )
     result = DigestResult(
         issue_url=url,
         faults_by_key=by_key,
         mail=mail,
         was={k: previous.get(k) for k in mail},
         reminder=reminder,
+        reminder_was=was_sent if reminder else None,
     )
     if dry_run:
         moved = changed.appeared + changed.escalated + changed.cleared

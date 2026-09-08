@@ -154,6 +154,38 @@ def test_a_reminder_comments_that_nothing_has_been_fixed(gh):
     assert f"- `{fault.key}`" in comment
 
 
+def test_a_reminder_names_only_the_faults_on_its_own_clock(gh):
+    # schedule.yml is the ONE issue carrying both clocks. A source that fires in November
+    # is counting down its own ladder; listed under "unfixed for 2 days" the comment
+    # promises a deadline it does not have and disagrees with the mail beside it, which
+    # counts the immediate faults alone.
+    schedule_digest = source_digest.SCHEDULE
+    dropped = ConfigFault(
+        "releases.week_02",
+        "not a mapping - the entry is dropped",
+        file="schedule.yml",
+        lineno=12,
+    )
+    later = source_fault("releases.week_09", fires=NOW + timedelta(days=60))
+    seen = {
+        dropped.key: (NOW - timedelta(days=3)).isoformat(),
+        later.key: NOW.isoformat(),
+    }
+    state = cd._state_marker(cd.current_state([dropped, later], NOW), seen)
+    body = (
+        cd.render_body(schedule_digest, [dropped, later], NOW, COHORT, state, seen)
+        + "\n"
+        + cd._write_marker(cd._CLOCK, {"sent": 0}, schedule_digest.state_key)
+    )
+    fake = gh([issue_row(7, schedule_digest.title, body)])
+    out = cd.sync(schedule_digest, "Cohort", "Course", [dropped, later], NOW)
+    assert out.reminder == "2 days"
+    assert set(out.mail) == {dropped.key}
+    comment = fake.body_of("issue", "comment")
+    assert f"- `{dropped.key}`" in comment
+    assert later.key not in comment
+
+
 def test_one_clock_per_issue_counted_from_the_oldest_fault(gh):
     old, new = _fault("row 4"), _fault("row 9", field="github_handle")
     seen = {
@@ -197,6 +229,29 @@ def test_a_scheduled_digest_still_holds(gh):
     gh([])
     out = source_digest.sync("Cohort", "Course", [fault], NIGHT)
     assert out.mail == {}
+
+
+def test_a_reminder_whose_mail_failed_is_owed_again_next_tick(gh):
+    # The counter is written with the body, BEFORE the mail is attempted. A send that
+    # failed has to put it back, or the 48-hour letter is attempted once, fails once and
+    # is never owed again - the one hole in "un-recorded, not lost".
+    fault = _fault()
+    seen = {fault.key: (NOW - timedelta(days=3)).isoformat()}
+    state = cd._state_marker(cd.current_state([fault], NOW), seen)
+    gh(_open(fault, state=state, since=seen, sent=0))
+    out = cd.sync(ROSTER, "Cohort", "Course", [fault], NOW)
+    assert (out.reminder, out.reminder_was) == ("2 days", 0)
+
+    # The mail did not go out. `hold` puts the counter back where it was.
+    body = (
+        cd.render_body(ROSTER, [fault], NOW, COHORT, state, seen)
+        + "\n"
+        + (cd._write_marker(cd._CLOCK, {"sent": 1}, ROSTER.state_key))
+    )
+    fake = gh([issue_row(7, ROSTER.title, body)])
+    assert cd.hold(ROSTER, "Cohort", {fault.key: "warning"}, out.reminder_was) == 0
+    put_back = fake.body_of("issue", "edit")
+    assert cd._read_marker(put_back, cd._CLOCK, {}, ROSTER.state_key) == {"sent": 0}
 
 
 # ------------------------------------------------------- one issue, several files in it

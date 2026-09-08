@@ -2104,7 +2104,7 @@ def test_a_mail_that_did_not_go_out_puts_the_digests_record_back(monkeypatch):
     monkeypatch.setattr(
         scheduler.source_digest,
         "hold",
-        lambda org, keys: held.update(org=org, keys=keys) or 0,
+        lambda org, keys, clock=None: held.update(org=org, keys=keys, clock=clock) or 0,
     )
     assert (
         scheduler._preflight_sources(
@@ -2112,7 +2112,7 @@ def test_a_mail_that_did_not_go_out_puts_the_digests_record_back(monkeypatch):
         )
         == 0
     )
-    assert held == {"org": "Cohort-Org", "keys": {fault.key: "warning"}}
+    assert held == {"org": "Cohort-Org", "keys": {fault.key: "warning"}, "clock": None}
 
 
 def test_a_dry_run_holds_nothing(monkeypatch):

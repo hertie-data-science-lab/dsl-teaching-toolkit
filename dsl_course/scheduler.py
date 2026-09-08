@@ -582,7 +582,11 @@ def _preflight_sources(
         # trace. Putting the previous rung back makes the next tick recompute the very
         # same crossing and say it once (`source_digest.hold`).
         if unsent.keys and not dry_run:
-            source_digest.hold(cohort_org, {k: digest.was.get(k) for k in unsent.keys})
+            source_digest.hold(
+                cohort_org,
+                {k: digest.was.get(k) for k in unsent.keys},
+                digest.reminder_was,
+            )
     except Exception as exc:
         log_err(f"could not mail {cohort_org}'s source faults: {exc}")
     return 0
@@ -710,7 +714,10 @@ def _sync_config_digest(
         # `config_digest.hold`.
         if unsent.keys and not dry_run:
             config_digest.hold(
-                spec, cohort_org, {k: digest.was.get(k) for k in unsent.keys}
+                spec,
+                cohort_org,
+                {k: digest.was.get(k) for k in unsent.keys},
+                digest.reminder_was,
             )
     except Exception as exc:
         log_err(f"could not mail {cohort_org}'s {spec.file} faults: {exc}")
