@@ -1,24 +1,41 @@
 # SYSTEM-OWNED - do not edit, edits here are overwritten. This workflow is
 # re-rendered from the central DSL teaching toolkit by 'Refresh actions' (nightly).
-name: Sync gradebooks
+name: Collect submissions
 
-# Ensures every onboarded student has a PRIVATE grades-<handle> repo (student = read) -
-# the single home for all their grades. Idempotent; safe to re-run after new enrolments.
+# Brings an assignment's grading sheet up to date NOW instead of waiting for the next
+# quarter-hour tick: it re-reads each submission repo's latest commit, refills the `info:`
+# block (submitted, days late, contributions) and posts any submission receipt still owed.
+#
+# It never freezes anything. The pin is frozen once, by the cron, at the assignment's
+# grading deadline - so a grader can press this as often as they like without moving what
+# anyone is marked on. Nothing is written to a student repo except that receipt.
 
 on:
   workflow_dispatch:
     inputs:
       cohort_org:
-        description: "Cohort org"
+        description: "Cohort org (submissions)"
         required: true
         type: choice
         default: "hertie-dsl-demo-f2026"
         options:
           - hertie-dsl-demo-f2026
+      course_source_repo:
+        description: "Course-org repo to hand out from"
+        required: true
+        type: choice
+        options:
+          - assignment-1
+          - assignment-2
+          - assignment-4-project
       dry_run:
-        description: "Preview only - list the gradebook repos that WOULD be created"
+        description: "Preview only - show what WOULD be refreshed"
         type: boolean
         default: false
+
+concurrency:
+  group: ${{ github.repository }}-collect-submissions
+  cancel-in-progress: false
 
 permissions: {}
 
@@ -42,10 +59,10 @@ jobs:
           cat /tmp/gherr || true
           exit 1
 
-  sync-gradebooks:
+  collect-submissions:
     needs: check-team
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
@@ -55,12 +72,14 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-      - name: Sync gradebooks
+      - name: Collect submissions
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          MASTER_ORG: ${{ github.repository_owner }}
           COHORT_ORG: ${{ inputs.cohort_org }}
+          COURSE_SOURCE_REPO: ${{ inputs.course_source_repo }}
           DRY_RUN: ${{ inputs.dry_run }}
         run: |
-          args=(--cohort-org "$COHORT_ORG")
+          args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG" --refresh-only)
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
-          python3 -m dsl_course.grades sync "${args[@]}"
+          python3 -m dsl_course.collect "${args[@]}"

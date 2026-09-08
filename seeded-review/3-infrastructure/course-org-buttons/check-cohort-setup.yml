@@ -63,5 +63,6 @@ jobs:
           GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
           GRAPH_CLIENT_CERT: ${{ secrets.GRAPH_CLIENT_CERT }}
           GRAPH_SENDER: ${{ secrets.GRAPH_SENDER }}
+          DSL_MAINTAINER_EMAIL: ${{ secrets.DSL_MAINTAINER_EMAIL }}
         run: |
           python3 -m dsl_course.status --course-org "$COURSE" --cohort-org "$COHORT_ORG" >> "$GITHUB_STEP_SUMMARY"
