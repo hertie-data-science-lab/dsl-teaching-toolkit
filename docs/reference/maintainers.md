@@ -182,7 +182,7 @@ spawned. What it guarantees, and what it does not:
 
 ## Secrets an org carries
 
-Two values are published onto an org by the toolkit itself, both through
+Three values are published onto an org by the toolkit itself, all through
 `bootstrap_course.set_org_secret` - which scopes the org secret to the infra repos that
 exist and then mirrors it as a repo secret onto the private ones, because on GitHub Free a
 `selected` org secret is never delivered to a private repo:
@@ -191,6 +191,7 @@ exist and then mirrors it as a repo secret onto the private ones, because on Git
 |---|---|---|
 | `DSL_BOT_TOKEN` | a secret on this repo | Bootstrap with `set_secret: true`; `seed refresh` also mirrors it onto each content repo |
 | `DSL_MAINTAINER_EMAIL` | a repository **variable** on this repo | Bootstrap with `set_secret: true`, and Bootstrap cohort forwards it to a cohort |
+| `DSL_COURSE_ADMIN_EMAILS` | a repository **variable** on this repo | Bootstrap with `set_secret: true`. COURSE orgs only - Bootstrap cohort does NOT forward it |
 
 `DSL_MAINTAINER_EMAIL` is where fault mail goes. A variable centrally and a secret on the
 org: an address is not a credential (and a masked secret cannot be read back to check it),
@@ -203,6 +204,22 @@ repo's variables, so an org bootstrapped before the variable existed gets it onc
 
     gh secret set DSL_MAINTAINER_EMAIL --org <course-org> \
       --visibility selected --repos .github --body '<address>'
+
+`DSL_COURSE_ADMIN_EMAILS` is the same arrangement one level down, and needs the same command
+with the same flags on an org bootstrapped before it existed:
+
+    gh secret set DSL_COURSE_ADMIN_EMAILS --org <course-org> \
+      --visibility selected --repos .github --body 'a@x.edu,b@x.edu'
+
+It is a comma-separated list of the course admins' addresses, and it is who hears about a
+fault in that course org's OWN config - `dsl-course.yml` and `cohort-courses-pages.yml`,
+which share one digest issue in the course org's `.github` (*dsl-course.yml / cohort registry
+has entries the sync cannot use*). An org secret and never an `email:` in `dsl-course.yml`:
+that file is public, and is itself one of the files these mails are about. Two steps read it
+- the scheduler's release pass and Sync membership's automatic job, both in the course org -
+and no other rendered workflow carries it (`tests/test_renderers.py` enforces both halves).
+Unset, the digest issue's `cc @<course>/course-admin` is the only channel and the run log
+says how many admins went unmailed.
 
 `.github` is the only infra repo a COURSE org has, and it is public, so no mirror is needed
 there. (Re-running Bootstrap on the org with `set_secret: true` does the same thing and is
@@ -352,6 +369,15 @@ and membership must write the teams that Sync site then reads. Both rules are en
 faculty's to fix, so it is delivered by the cohort's digest issue and an email to the people git
 names for that line - never by the exit code. A red X on any of the five crons means the run
 itself broke, which is why the maintainer is emailed its log tail.
+
+That holds one level up too. The COURSE org's own `dsl-course.yml` and `cohort-courses-pages.yml`
+are checked once per scheduler tick (`scheduler._preflight_course`) and again on a push to
+either, from Sync membership (`--check-course-config`); the two share one digest issue in the
+course org's `.github` and mail the course admins, from `DSL_COURSE_ADMIN_EMAILS` above, with
+the maintainer copied from the first message. Neither pass changes an exit code - though a
+registry nobody can parse still reds the scheduler tick that follows, because the cohort
+listing raises on it and there is genuinely nothing to release. That is why the check runs
+BEFORE the listing: reported there, or not at all.
 
 ## The scheduler's two drivers
 
