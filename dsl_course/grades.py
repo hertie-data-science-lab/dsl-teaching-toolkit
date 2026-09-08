@@ -98,7 +98,7 @@ _STARTER_README = (
     "| `submitted`, `days_late`, `penalty` | When your work was recorded, and what any "
     "late days cost. |\n"
     "| `team` | Group assignments only: the team you submitted with. |\n"
-    "| `team_comments` | Group assignments only: feedback shared with the whole team. |\n"
+    "| `team_feedback` | Group assignments only: feedback shared with the whole team. |\n"
 )
 
 
