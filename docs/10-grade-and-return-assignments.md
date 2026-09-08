@@ -44,7 +44,7 @@ teams:
 
 | Field | Owner | Student sees |
 | --- | --- | --- |
-| `info.submitted`, `info.days_late`, `info.contributions`, `info.autograde`, `info.submitted_note` | toolkit, refreshed until frozen | `submitted`, `days_late` |
+| `info.submitted`, `info.days_late`, `info.contributions`, `info.autograde`, `info.completion`, `info.submitted_note` | toolkit, refreshed until frozen | `submitted`, `days_late` |
 | `score_individual` (per question, or one value) | you | the total, and the breakdown behind it |
 | `feedback_group`, `feedback_individual` | you | yes (own + team) |
 | `score_group` | you | the team's, in the TEAM repo's comment - never in a member's gradebook |
@@ -125,6 +125,74 @@ hidden tests from its `solution` branch at the cutoff, against the frozen pin, i
 count lands in `info.autograde` (`7/9`) for your information only - it is never a mark by
 itself and a student never sees it. Per-test detail goes to `classroom-config/autograde/`.
 To regrade, delete `autograde/<slug>/`.
+
+### Tests in another language: `tests/run.sh`
+
+The hidden tests are pytest unless you say otherwise. Put a **`run.sh`** at the top of the
+tests directory and the sandbox runs *that* instead, with the same time limit, the same
+resource caps and the same stripped environment. Two variables are handed to it:
+
+| Variable | Is |
+|---|---|
+| `DSL_JUNIT_OUT` | an absolute path your script **must** write a JUnit XML to. That file is the result - passed/total out of it become `info.autograde` |
+| `DSL_SUBMISSION_DIR` | the absolute path of the student's submission |
+
+The script is run with `sh` (no `chmod` needed), from the runspace - *not* from inside the
+submission - so use `$DSL_SUBMISSION_DIR` for anything of the student's. Your **exit code is
+ignored**: a suite with failures exits non-zero and is still a perfectly good result.
+Writing no XML is the failure, and it is reported by name.
+
+R, with `testthat`:
+
+```sh
+#!/bin/sh
+# tests/run.sh - on the template's solution branch, beside your test-*.R files.
+set -eu
+DSL_TESTS_DIR=$(cd "$(dirname "$0")" && pwd)
+export DSL_TESTS_DIR
+Rscript -e '
+  library(testthat)
+  for (f in list.files(Sys.getenv("DSL_SUBMISSION_DIR"), "[.][Rr]$", full.names = TRUE))
+    source(f)
+  test_dir(Sys.getenv("DSL_TESTS_DIR"),
+           reporter = JunitReporter$new(file = Sys.getenv("DSL_JUNIT_OUT")))
+' || true          # a failing suite is a result, not an error
+```
+
+`JunitReporter` writes one `<testsuite>` per test file and every one of them is counted.
+Your grading runner has to have R and `testthat` on it - the toolkit installs Python's
+autograder dependencies and nothing else.
+
+## The completion check (notebooks)
+
+"Restart the kernel and run all cells before you hand in" is a rule a syllabus can state and
+nobody could check - until the cutoff, when the toolkit runs the notebook itself and writes
+one word into `info.completion`:
+
+| `info.completion` | Means |
+|---|---|
+| `ran-clean` | every cell executed and none raised |
+| `errors:3` | three cells raised - read the executed copy in `autograde/<slug>/` to see which |
+| `not-attempted` | the notebook is byte-for-byte the starter you handed out, or nothing was pushed |
+| `no-notebook` | the submission holds no `.ipynb` |
+| `timed-out` | the notebook never finished inside the time limit |
+| `did-not-run` | our runner could not execute it at all - tell the maintainer |
+
+Like `info.autograde` it is **information, never a mark**, and a student never sees it. The
+executed notebook is archived beside the result JSON as `autograde/<slug>/<key>.ipynb`,
+which is what you read when the state is `errors:N`.
+
+It is **on by default for `format: ipynb`** and off for everything else; `completion_check:
+true` / `false` in `grading_config.yml` overrides either way. It is independent of
+`autograde`, and that is the point - most notebook assignments are marked by hand.
+
+Two things it is worth writing the assignment for:
+
+- **It runs offline.** A notebook that downloads its data at run time reports `errors:N`.
+  Commit the data, or cache it in the repo.
+- **It runs the notebook, not your kernel.** Anything the notebook needs must be importable
+  on the grading runner, which has the toolkit's own dependencies and whatever your workflow
+  installs.
 
 ## Closing the cohort out
 

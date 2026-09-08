@@ -100,6 +100,33 @@ Things whose *literal spelling* is depended on from outside Python:
   faculty's patterns gone, and whatever they withheld shipping again on a green run. The
   price is that its wording cannot be improved in a repo that already has it.
 
+## The grading sandbox's two outward contracts
+
+`collect` runs student code, so what it promises the outside world is short and load-bearing:
+
+- **`tests/run.sh`** (`collect.RUN_SCRIPT`) on a template's `solution` branch replaces pytest.
+  It is run with `sh`, from the runspace, under `RUN_TIMEOUT` and the same rlimits, and is
+  handed `DSL_JUNIT_OUT` (an absolute path it must write a JUnit XML to - that XML *is* the
+  score) and `DSL_SUBMISSION_DIR` (the checkout). **Its exit code is ignored**; no XML is the
+  failure. Faculty write these by hand, in R and whatever comes next, so the three names are
+  frozen the way a CLI module name is - renaming one silently stops scoring an entire course
+  and the run still goes green. `score_from_junit` counts every `<testsuite>` in the file
+  because testthat writes one per test file.
+- **The completion check** executes the pinned notebook with `nbconvert --execute
+  --allow-errors` and records `ran-clean` / `errors:N` / `not-attempted` / `no-notebook` /
+  `timed-out` / `did-not-run` into `info.completion`, archiving the executed copy at
+  `autograde/<slug>/<key>.ipynb` under a 5 MiB cap. It needs **`ipykernel`** as well as
+  `nbconvert` (nbconvert converts without a kernel and cannot execute without one) - both
+  pinned in `requirements.txt`, which every seeded workflow installs; a runner without them
+  records the decision once and stays green rather than reporting a cohort of failures.
+  `not-attempted` is byte identity (`_blob_sha`) against the notebooks still on the
+  template's default branch, so **rewriting a template's `main` after handout makes every
+  submission look attempted** - which is the safe way round. It runs OFFLINE (the proxy
+  variables point at a dead port), which docs/10 tells faculty to write the assignment for.
+
+  It is independent of `autograde`: `collect` now reaches its target loop for a hand-marked
+  assignment, and only "no tests AND no completion check" is the exit that records a skip.
+
 ## Secrets an org carries
 
 Two values are published onto an org by the toolkit itself, both through

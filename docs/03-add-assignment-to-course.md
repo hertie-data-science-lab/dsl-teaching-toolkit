@@ -48,7 +48,11 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
    - For a partially machine-marked assignment set `autograde: true` in `grading_config.yml`:
       - put the hidden tests in `tests/` (path configurable via `grading_config.yml`'s `tests:` field) plain pytest files that `from starter import ...` and check the submission, run faculty-side only, never shipped to students. 
      - `info.autograde` in the grading sheet then shows how many of them each submission passed - a count for you to mark against, never the mark itself, and never shown to a student.
+     - Not a Python course? Put a `run.sh` in `tests/` and the sandbox runs that instead - [the recipe](10-grade-and-return-assignments.md#tests-in-another-language-testsrunsh).
      - Full grading flow: [Grade and return assignments](10-grade-and-return-assignments.md).
+   - A **notebook** assignment also gets a [completion check](10-grade-and-return-assignments.md#the-completion-check-notebooks)
+     at the cutoff, hand-marked or not: the toolkit runs the notebook and records whether it
+     goes top to bottom. `completion_check: false` in `grading_config.yml` turns it off.
 
 3. **Run Refresh actions** so the assignment dropdowns update.
 
