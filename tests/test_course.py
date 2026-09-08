@@ -42,6 +42,17 @@ def test_discover_sections_missing_root_returns_empty(tmp_path):
     assert course.discover_sections(tmp_path / "nope") == []
 
 
+def test_is_repo_root_knows_every_whole_repo_spelling():
+    # Faculty write all of these for "release everything", and two readers act on the
+    # answer: deploy._resolve_within resolves them to the clone root, and
+    # schedule.source_faults skips them. Encoded twice, the pair drifted - the validator
+    # reported "path does not exist" against a line the release ships in full.
+    for spelling in ("", "/", ".", "./", "//", " . "):
+        assert course.is_repo_root(spelling), spelling
+    for inside in ("labs", "/labs", "labs/", "./labs", "..", ".hidden"):
+        assert not course.is_repo_root(inside), inside
+
+
 def test_active_today_accepts_date_objects_as_bounds():
     # An unquoted `start: 2026-09-01` in people.yml parses to a datetime.date, not a
     # string; `today < start` used to raise TypeError: str < date.

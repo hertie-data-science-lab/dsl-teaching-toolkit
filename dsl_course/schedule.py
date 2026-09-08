@@ -81,7 +81,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
-from .course import CONFIG_REPO, coerce_date
+from .course import CONFIG_REPO, coerce_date, is_repo_root
 from .gh_contents import get_file_content, get_file_with_sha, put_file, repo_tree
 from .log import log, log_err, log_step
 from .releaseignore import RELEASEIGNORE, excluded_in_tree
@@ -1517,9 +1517,11 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
             withheld = set()
         for w in wanted[repo]:
             # "" is the assignment case: the repo IS the source, so its existence is all
-            # there is to check. `/` and `.` mean the whole repo, likewise.
+            # there is to check. `/` and `.` mean the whole repo, likewise - and which
+            # spellings those are is `course.is_repo_root`, the same rule the release
+            # itself resolves by (deploy._resolve_within).
             clean = w.path.strip("/").strip()
-            if clean in ("", "."):
+            if is_repo_root(w.path):
                 continue
             if clean in withheld:
                 # The file EXISTS, so nothing looks wrong - which is why this is worth
