@@ -320,12 +320,13 @@ def test_a_caller_collecting_faults_is_told_rather_than_raised_at(monkeypatch):
             ".github",
             "cohorts",
         )
-        # The COURSE org's registry, so the fix sentence is the course-level one and the
-        # citation points at the course org's own .github - not at a cohort's config repo.
-        assert fault.fix() == "correct the line above"
         # No line: the registry's shape is what is wrong, not one entry of it, so every
-        # surface cites the file bare rather than deep-linking a guess.
+        # surface cites the file bare rather than deep-linking a guess - and the fix
+        # sentence must not name a line either. The file's fallback (`faults.FIX`) says
+        # "correct the line above", which is an instruction about nothing here.
         assert fault.at == discovery.COHORTS_PATH and fault.lineno is None
+        assert "line above" not in fault.fix()
+        assert fault.fix().startswith(f"restore {discovery.COHORTS_PATH}")
 
 
 def test_a_registry_the_toolkit_can_read_leaves_no_fault(monkeypatch):

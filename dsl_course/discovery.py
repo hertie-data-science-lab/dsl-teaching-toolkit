@@ -187,6 +187,13 @@ def _registry_fault(what: str) -> ConfigFault:
         file=COHORTS_PATH,
         field="cohorts",
         in_repo=".github",
+        # Its own sentence, because every fault this builds is about the whole file and
+        # the file's fallback (`faults.FIX`) says "correct the line above" - which names a
+        # line that does not exist, under a citation with nothing to link to.
+        fix_text=(
+            f"restore {COHORTS_PATH} in the course org's `.github` as a `cohorts:` list "
+            f"of this course's cohort org names, one per line"
+        ),
     )
 
 

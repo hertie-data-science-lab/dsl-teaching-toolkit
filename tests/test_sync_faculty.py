@@ -530,6 +530,8 @@ def test_a_central_ref_nothing_can_be_pinned_to_is_a_fault(monkeypatch):
     (fault,) = found
     assert fault.field == "central_ref" and fault.lineno == 2
     assert "stays at its previous rendering" in fault.what
+    # This one DOES have a line, so the file's own sentence is the right instruction.
+    assert fault.fix() == "correct the line above"
 
 
 def test_a_course_config_that_is_absent_or_unreadable_is_itself_the_fault(monkeypatch):
@@ -546,6 +548,11 @@ def test_a_course_config_that_is_absent_or_unreadable_is_itself_the_fault(monkey
         # One sentence for both of the course org's files, because both cost the course
         # the same thing (`faults.CONSEQUENCE`).
         assert "the sync skips this course" in fault.consequence
+        # And no line, so the file's fallback sentence ("correct the line above") is an
+        # instruction about a line that is not there, under a bare filename with nothing
+        # to link to.
+        assert "line above" not in fault.fix()
+        assert fault.fix().startswith("restore dsl-course.yml")
 
 
 def test_a_course_config_that_could_not_be_READ_still_raises(monkeypatch):

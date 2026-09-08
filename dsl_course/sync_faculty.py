@@ -438,6 +438,17 @@ def _file_fault(what: str) -> ConfigFault:
     )
 
 
+# What to do about a `dsl-course.yml` that is missing, is not YAML, or is not a mapping.
+# The file's own fallback sentence (`faults.FIX`) says "correct the line above", which is
+# the right instruction for the one fault here that HAS a line (`central_ref:`) and no
+# instruction at all for the three that do not - there is no line above, and the citation
+# beside it is a bare filename with nothing to link to.
+_COURSE_FILE_FIX = (
+    f"restore {COURSE_CONFIG} in the course org's `.github` from the template and "
+    f"declare the course's admins and its `central_ref:` in it"
+)
+
+
 def _course_fault(what: str, field: str = "", lineno: int | None = None) -> ConfigFault:
     """One thing in the COURSE org's identity file the sync cannot use.
 
@@ -452,6 +463,7 @@ def _course_fault(what: str, field: str = "", lineno: int | None = None) -> Conf
         field=field,
         in_repo=".github",
         lineno=lineno,
+        fix_text="" if lineno else _COURSE_FILE_FIX,
     )
 
 
