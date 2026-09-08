@@ -123,6 +123,7 @@ from .derive import DeriveError, Filtered, filter_questions
 from .discovery import list_org_repos
 from .fs import copy_tree
 from .gh_contents import (
+    blob_sha,
     dump_csv,
     file_exists,
     get_file_content,
@@ -371,11 +372,21 @@ def parse_snapshots(text: str) -> dict[str, str]:
 
 
 def _sanitised_env() -> dict:
-    """A copy of the environment with every GitHub token stripped - student code must
-    never run with the bot token in scope."""
+    """The environment EVERY graded subprocess runs in - the one place the two rules that
+    never vary are written down.
+
+    No GitHub token: student code must never run with the bot credential in scope. And
+    `PYTHONSAFEPATH`, because all three of these run `python -m` somewhere the student can
+    write, which would otherwise put that directory on `sys.path[0]` and let a committed
+    `json.py` / `nbformat.py` be imported before the real one. A fourth subprocess site
+    added later inherits both by construction rather than by reading a comment.
+
+    What DOES vary is layered on by the caller: the hidden tests add their runspace
+    PYTHONPATH, the completion check takes the network away (`_completion_env`)."""
     env = dict(os.environ)
     for key in ("GH_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN", "GH_ENTERPRISE_TOKEN"):
         env.pop(key, None)
+    env["PYTHONSAFEPATH"] = "1"
     # Caps glibc arena proliferation, which would otherwise reserve a heap arena per core and
     # push a legitimate multi-threaded run past RLIMIT_DATA_BYTES.
     env["MALLOC_ARENA_MAX"] = "2"
@@ -1843,15 +1854,6 @@ _PROXY_VARS = (
 _CHECKPOINTS = ".ipynb_checkpoints"
 
 
-def _blob_sha(data: bytes) -> str:
-    """The git blob sha of `data` - `git hash-object` without the subprocess.
-
-    sha1 because that is the hash git's object names ARE, not because anything here rests
-    on it being hard to forge: it is compared against shas GitHub reported for the same
-    template, and the question it answers is "are these bytes the ones we handed out"."""
-    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
-
-
 @cache
 def _starter_notebook_shas(course_org: str, template: str) -> frozenset[str]:
     """The git blob shas of every notebook on the template's DEFAULT branch - the starters
@@ -1907,10 +1909,9 @@ def _completion_notebook(workdir: Path) -> Path | None:
 
 
 def _completion_env() -> dict:
-    """The environment the completion check executes a student's notebook in: no GitHub
-    token (`_sanitised_env`), no cwd on `sys.path` (PYTHONSAFEPATH), and no network."""
+    """The graded sandbox environment, plus the one thing only the completion check adds:
+    no network."""
     env = _sanitised_env()
-    env["PYTHONSAFEPATH"] = "1"
     for var in _PROXY_VARS:
         env[var] = COMPLETION_DEAD_PROXY
     for var in ("no_proxy", "NO_PROXY"):
@@ -1952,7 +1953,7 @@ def _check_completion(
     notebook = _completion_notebook(workdir)
     if notebook is None:
         return COMPLETION_NO_NOTEBOOK, None
-    if _blob_sha(notebook.read_bytes()) in starters:
+    if blob_sha(notebook.read_bytes()) in starters:
         return COMPLETION_NOT_ATTEMPTED, None
     out = run_root / "executed"
     out.mkdir(parents=True, exist_ok=True)
@@ -2012,14 +2013,14 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
     scores are faculty-reviewed before the grades pipeline distributes anything and are never
     shown to the student directly. See the `_STUDENT_TEST_RIGGING` note for where the
     trusted-out-of-band-result plugin would go if that ever needs closing."""
+    # `_sanitised_env` keeps cwd/'' off sys.path, so a committed `pytest.py` /
+    # `sitecustomize.py` can't shadow real modules. The submission is NOT put on PYTHONPATH
+    # either: every PYTHONPATH entry precedes the stdlib, so a student `json.py`/`operator.py`
+    # there would shadow a module the hidden tests import and let them force assertions.
+    # Instead the trusted hidden-tests conftest appends the submission to sys.path AFTER the
+    # stdlib (see the injection below), so a real module always wins the import while the
+    # submission's own uniquely-named module still resolves.
     env = _sanitised_env()
-    # Keep cwd/'' off sys.path so a committed `pytest.py`/`sitecustomize.py` can't shadow real
-    # modules. The submission is NOT put on PYTHONPATH: every PYTHONPATH entry precedes the
-    # stdlib, so a student `json.py`/`operator.py` there would shadow a module the hidden tests
-    # import and let them force assertions. Instead the trusted hidden-tests conftest appends
-    # the submission to sys.path AFTER the stdlib (see the injection below), so a real module
-    # always wins the import while the submission's own uniquely-named module still resolves.
-    env["PYTHONSAFEPATH"] = "1"
     _harden_checkout(workdir)
     # Convert every notebook the submission holds to an importable script first (Otter can
     # slot in here). Unconditional, and driven by what is actually in the checkout rather
@@ -2083,7 +2084,8 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
         env["PYTHONPATH"] = str(startup)
         report = Path(run) / "report.xml"
         runner = tests_dir / RUN_SCRIPT
-        if runner.is_file():
+        scripted = runner.is_file()
+        if scripted:
             # The escape hatch (see RUN_SCRIPT). The script says how to run this course's
             # tests and where the submission is; everything else about the sandbox is
             # unchanged, including that the report lands outside the checkout.
@@ -2123,7 +2125,7 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
             )
             return None
         if not report.exists():
-            if runner.is_file():
+            if scripted:
                 log_err(
                     f"  ! the hidden tests' `{RUN_SCRIPT}` wrote no report to "
                     f"${JUNIT_OUT_ENV} - nothing can be scored from this run"
@@ -2152,6 +2154,11 @@ GRADER_DOCUMENTS = (".ipynb", ".rmd", ".qmd")
 # vocabulary - these appear only in the run log's totals and never beside a name.
 GRADER_PDF = "pdf"
 GRADER_HTML = "html"  # nbconvert's PDF path needs LaTeX; this is the fallback
+# The engines nbconvert's `--to pdf` shells out to. A bare Actions runner has none of
+# them, so the PDF leg fails for EVERY submission - and each failure costs a whole
+# interpreter start and notebook render before the HTML leg does the work again. Asked
+# once per run instead (`_pdf_engine_present`), which is what the exporter would ask.
+_PDF_ENGINES = ("xelatex", "pdflatex", "lualatex")
 GRADER_SOURCE = "filtered source"  # nothing in the runner can render this format
 GRADER_NONE = "no marked questions"  # the assignment does not use the question fences
 GRADER_TOO_BIG = "too large to archive"  # past ARCHIVE_MAX_BYTES, for the same reason
@@ -2193,6 +2200,12 @@ def pick_grader_document(
     return best
 
 
+@cache
+def _pdf_engine_present() -> bool:
+    """Whether this runner can make a PDF at all - one `which` per run."""
+    return any(shutil.which(engine) for engine in _PDF_ENGINES)
+
+
 def _export_document(source: Path, env: dict) -> tuple[str, bytes]:
     """Render `source` for a grader: `(what it came to, the bytes to archive)`.
 
@@ -2203,7 +2216,8 @@ def _export_document(source: Path, env: dict) -> tuple[str, bytes]:
     student submissions, and rendering one must not run it."""
     if source.suffix.lower() != ".ipynb" or _grader_dep_missing("nbconvert"):
         return GRADER_SOURCE, source.read_bytes()
-    for fmt, verdict in ((GRADER_PDF, GRADER_PDF), ("html", GRADER_HTML)):
+    formats = (GRADER_PDF, GRADER_HTML) if _pdf_engine_present() else (GRADER_HTML,)
+    for fmt in formats:
         out = source.with_suffix(f".{fmt}")
         out.unlink(missing_ok=True)
         _run_limited(
@@ -2213,7 +2227,7 @@ def _export_document(source: Path, env: dict) -> tuple[str, bytes]:
             timeout=RUN_TIMEOUT,
         )
         if out.is_file():
-            return verdict, out.read_bytes()
+            return fmt, out.read_bytes()
     return GRADER_SOURCE, source.read_bytes()
 
 
@@ -2250,8 +2264,12 @@ def _grader_document_for(
             # of a plot-heavy notebook is base64 PNG all the way down, and one per student
             # makes classroom-config a repo nobody can clone.
             return GRADER_TOO_BIG
-        suffix = {GRADER_PDF: "pdf", GRADER_HTML: "html"}.get(
-            verdict, source.suffix.lstrip(".")
+        # The verdict for a rendered export IS its extension; only the fallback has to
+        # ask the file what it is.
+        suffix = (
+            verdict
+            if verdict in (GRADER_PDF, GRADER_HTML)
+            else source.suffix.lstrip(".")
         )
         # `person=True`: the PATH is `autograde/<slug>/<handle>.pdf`, and this log is
         # world-readable even where classroom-config is not.
@@ -2294,13 +2312,10 @@ def export_grader_documents(
         return
     log_step(f"Grader copies for {slug}: {len(targets)} target(s)")
     snapshots = load_snapshots(cohort_org, slug)
-    env = _sanitised_env()
     # `_export_document` runs `python -m jupyter` FROM the notebook's own directory (an
-    # exporter resolves the document's relative assets from there), which puts that
-    # directory on `sys.path[0]`. Without this a committed `nbformat.py` beside the
-    # notebook is imported and run as the grader - the same hazard `_run_tests` and
-    # `_completion_env` close, closed the same way.
-    env["PYTHONSAFEPATH"] = "1"
+    # exporter resolves a document's relative assets from there), so it needs the same
+    # sandbox environment the hidden tests and the completion check get.
+    env = _sanitised_env()
     tally: dict[str, int] = {}
     for repo, target_key, _members in targets:
         verdict = _grader_document_for(

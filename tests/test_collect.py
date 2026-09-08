@@ -2098,7 +2098,7 @@ def test_an_untouched_starter_is_not_attempted_and_is_never_executed(
     (work / "starter.ipynb").write_bytes(starter)
 
     state, executed = collect._check_completion(
-        work, frozenset({collect._blob_sha(starter)}), tmp_path / "run"
+        work, frozenset({collect.blob_sha(starter)}), tmp_path / "run"
     )
 
     assert state == collect.COMPLETION_NOT_ATTEMPTED
@@ -2113,7 +2113,7 @@ def test_one_byte_of_work_is_no_longer_the_starter(monkeypatch, tmp_path):
     (work / "starter.ipynb").write_bytes(_notebook_bytes("x = 1\n"))
 
     state, executed = collect._check_completion(
-        work, frozenset({collect._blob_sha(_notebook_bytes("pass\n"))}), tmp_path / "r"
+        work, frozenset({collect.blob_sha(_notebook_bytes("pass\n"))}), tmp_path / "r"
     )
 
     assert state == "errors:1"
@@ -4475,6 +4475,7 @@ def test_the_grader_copy_is_the_marked_questions_and_nothing_else(
     # No LaTeX and no browser on this runner: nbconvert writes nothing, so the fallback
     # chain runs to the end and the FILTERED SOURCE is what a grader gets.
     monkeypatch.setattr(collect, "_run_limited", lambda argv, **k: True)
+    monkeypatch.setattr(collect, "_pdf_engine_present", lambda: True)
 
     collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", False)
 
@@ -4488,18 +4489,42 @@ def test_the_grader_copy_is_the_marked_questions_and_nothing_else(
 def test_a_runner_with_latex_gets_a_pdf_and_one_without_falls_back(monkeypatch, capsys):
     _checkout(monkeypatch, {"submission.ipynb": _QUESTION_NB})
     written = _capture_archive(monkeypatch)
+    tried: list[str] = []
+
+    def renders(argv, *, cwd, env, timeout):
+        fmt = argv[argv.index("--to") + 1]
+        tried.append(fmt)
+        Path(argv[-1]).with_suffix(f".{fmt}").write_text("rendered")
+        return True
+
+    monkeypatch.setattr(collect, "_run_limited", renders)
+    monkeypatch.setattr(collect, "_pdf_engine_present", lambda: True)
+    collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", False)
+
+    assert tried == ["pdf"] and list(written) == ["autograde/a1/alice.pdf"]
+    assert "1 pdf" in capsys.readouterr().out
+
+
+def test_a_runner_without_latex_never_tries_to_make_a_pdf(monkeypatch, capsys):
+    # A bare Actions runner has no TeX, so `--to pdf` writes nothing for EVERY student -
+    # and each attempt costs an interpreter start and a full notebook render before the
+    # HTML leg does the work again. One `which` per run answers it instead.
+    _checkout(monkeypatch, {"submission.ipynb": _QUESTION_NB})
+    written = _capture_archive(monkeypatch)
+    tried: list[str] = []
 
     def only_html(argv, *, cwd, env, timeout):
-        # What a bare Actions runner does: `--to pdf` shells out to LaTeX and writes
-        # nothing, `--to html` succeeds. The verdict must come off the OUTPUT FILE.
         fmt = argv[argv.index("--to") + 1]
+        tried.append(fmt)
         if fmt == "html":
             Path(argv[-1]).with_suffix(".html").write_text("<html>Q1</html>")
         return True
 
     monkeypatch.setattr(collect, "_run_limited", only_html)
+    monkeypatch.setattr(collect, "_pdf_engine_present", lambda: False)
     collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", False)
 
+    assert tried == ["html"]  # not one doomed pdf render per submission
     assert list(written) == ["autograde/a1/alice.html"]
     # Counts only, and the log says which path the runner took.
     assert "1 html" in capsys.readouterr().out
