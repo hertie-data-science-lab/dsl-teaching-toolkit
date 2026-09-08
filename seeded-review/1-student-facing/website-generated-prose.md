@@ -186,18 +186,22 @@ Submit via `assignment-1-<your-handle>`
 ### 1.5 Download link names
 
 ```
-{singular-section} - {filename}          # e.g. "lecture - 01_slides.pdf"
-lecture - browse the folder              # the escape hatch when the list is narrowed
-lecture - handouts/ (3 files)            # a folder link in the default shape
+{filename}                               # e.g. "01_slides.pdf"
+browse the folder                        # the escape hatch when the list is narrowed
+handouts/ (3 files)                      # a folder link in the default shape
 ```
-`_singular` strips one trailing `s`, so a free-form section name survives: `lectures` ->
-`lecture`, `readings` -> `reading`, `faq` -> `faq`. Empty case is the literal `links: []`.
+Each link now carries its section (`lecture`, `lab`, `reading`, ...) as its own front-matter
+field rather than glued onto the name, so `name` is always the plain filename and every page
+reads the same text. `_singular` strips one trailing `s` for the section value: `lectures`
+-> `lecture`, `readings` -> `reading`, `faq` -> `faq`. Empty case is the literal `links: []`.
 
-> **The prefix is stripped on some pages and not others.** The Lectures / Labs / Readings
-> tabs remove it, so a student reads `01_slides.pdf`. The schedule's Details column and the
-> Updates box do NOT, so the same file reads `lecture - 01_slides.pdf` there, with a
-> `Download lecture - 01_slides.pdf` tooltip. One file, two names. Flag if you want that
-> settled one way.
+> **Fixed since the last round.** The name used to carry the section as a prefix
+> (`lecture - 01_slides.pdf`); the Lectures / Labs / Readings tabs stripped it back off for
+> display, but the schedule's Details column and the Updates box read the name raw, so the
+> same file showed as `01_slides.pdf` on one page and `lecture - 01_slides.pdf` (with a
+> `Download lecture - 01_slides.pdf` tooltip) on another. `section` is now a field a
+> template filters on instead of a string it has to parse, so every page shows the same
+> name.
 
 ### 1.6 Reading lists
 
@@ -223,6 +227,14 @@ The third line is either ``declared in the `people:` block`` or `auto-generated 
 org's instructors team`. Fallback featured card when nobody is declared at all: **`Course
 staff`**.
 
+A declared person may now carry `email:` (required upstream, for release-fault mail - see
+`people.yml`'s own header) and `show_email: true`. The card omits `email` unless
+`show_email` is exactly `true`: absent, `false`, or a typo like `"yes"` all keep it off, so
+a mistake fails closed rather than publishing an address. Where it is shown, the Home
+layout renders it as a `mailto:` link under the card's title. Neither instructor in the
+worked example sets `show_email`, so their `people.yml` cards carry no `email:` line and no
+address appears on the Home page.
+
 ### 1.8 `_data/materials.yml` (the All Materials index)
 
 ```
@@ -231,6 +243,12 @@ staff`**.
 ```
 Directory rows carry a file count, rendered as `— 12 files` / `— 1 file`; nested nodes as
 `(3 files)` / `(1 file)`.
+
+A short closed list of names that are never course material (`.DS_Store`, `.gitkeep`,
+`Thumbs.db`, `desktop.ini`, `__pycache__`, `.ipynb_checkpoints`) is now dropped here and
+from the download link lists in 1.5, wherever a machine left one in a released folder - not
+just at release time. Nothing else is filtered by name: a dotfile can still be real course
+material.
 
 ### 1.9 `_config.yml`
 
@@ -357,8 +375,8 @@ explain and no unreleased state.
   followed by the other files' **raw filenames as plain text**, no links. Raw filenames
   deliberately - deriving "Blitzstein 2019 ch.1" from `blitzstein-ch1.pdf` would be
   inventing a citation.
-- `actual-readings` copies and serves the files, which then appear as ordinary
-  `reading - <file>` links.
+- `actual-readings` copies and serves the files, which then appear as ordinary links
+  named for the file itself (see 1.5 for how a link's name and its section are now split).
 - `none` publishes nothing.
 
 `.releaseignore` is consulted **only on this path**, and only to suppress: in
@@ -420,8 +438,8 @@ released yet" for the whole term.
 
 Heading `Updates`, seven newest entries, and one of:
 ```
-New Lecture is up: Session 3 [lecture - 01_slides.pdf]
-New Lab is up: Lab 3 [lab - 01_worksheet.ipynb]
+New Lecture is up: Session 3 [01_slides.pdf]
+New Lab is up: Lab 3 [01_worksheet.ipynb]
 New Assignment released: [Assignment 1]
 ```
 plus, for a hand-written `_announcements/` entry, its own text. Exams, special events and
@@ -449,15 +467,16 @@ these are now genuinely the instructor's, not stale template defaults.
 
 ## 4. Notices worth a decision
 
-1. **The download-name prefix is stripped on three tabs and not on two others** (see 1.5).
-2. **The public Assignments tab's note is unreachable** (see 2.1).
-3. **The assignment page's `Download` block and the Assignments index's `problems (pdf)` /
+1. **The public Assignments tab's note is unreachable** (see 2.1).
+2. **The assignment page's `Download` block and the Assignments index's `problems (pdf)` /
    `attachments (zip)` links are dead** on generated sites - nothing writes the front matter
    they read (see 1.4).
-4. **`Teaching Assistants` renders on the public site over a permanently empty list.**
-5. **An unrecognised `type:` in `schedule.yml` renders a colourless row labelled with the raw
+3. **`Teaching Assistants` renders on the public site over a permanently empty list.**
+4. **An unrecognised `type:` in `schedule.yml` renders a colourless row labelled with the raw
    type.** Deliberate - it keeps the site up instead of failing the build - but the row is
    visibly odd and nothing warns anybody.
+
+*(The download-name prefix inconsistency flagged in the last round is now fixed - see 1.5.)*
 
 ---
 
