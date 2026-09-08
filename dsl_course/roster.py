@@ -207,13 +207,34 @@ def load(
 
     Returns None (after logging why) when the file can't be fetched at all - callers
     can then distinguish "roster missing/unreadable" (an error) from a roster that
-    exists but has no rows yet (a valid state for a freshly bootstrapped cohort)."""
+    exists but has no rows yet (a valid state for a freshly bootstrapped cohort).
+
+    An ABSENT file is a fault like any other row this parser cannot use: nobody is
+    enrolled and nobody is sent a code, which is the same cost as a header nobody can
+    read, and the only difference is that there is no line to point at. Recording it is
+    what stops the digest reporting an absent roster as a healthy one - an empty fault
+    list closes the issue and tells the cohort the file is fine. A read that FAILED does
+    not come through here at all: `get_file_content` returns None only for a 404 and
+    raises on everything else, so "we could not look" still reds the run that asked."""
     content = _roster_text(cohort_org)
     if content is None:
         log_err(
             f"Could not find {ROSTER_PATH} in {cohort_org}/{CONFIG_REPO} - "
             f"bootstrap the cohort first (bootstrap_course --cohort)."
         )
+        if faults is not None:
+            faults.append(
+                ConfigFault(
+                    ROSTER_PATH,
+                    "this file is missing, so no student is enrolled and no enrolment "
+                    "code is sent",
+                    file=ROSTER_PATH,
+                    fix_text=(
+                        "add the file with the header shown in the template, one row "
+                        "per student"
+                    ),
+                )
+            )
         return None
     return parse(content, faults)
 

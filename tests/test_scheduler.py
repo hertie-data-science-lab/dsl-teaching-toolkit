@@ -2555,28 +2555,45 @@ def _config_preflight(
     *,
     roster_faults=None,
     roster_raises=None,
+    roster_absent=False,
     sheet_faults=None,
     spec_faults=None,
+    vetted_against=None,
 ):
     """Drive `_preflight_configs` with every reader stubbed, capturing what each digest
-    was handed."""
+    was handed.
+
+    `vetted_against` is an out-parameter: a one-item list that ends up holding the
+    allowlist teams.csv was vetted against, which is how the roster's own state reaches
+    the teams check."""
     synced: dict = {}
     mailed: list = []
 
     def _roster(cohort, found=None):
         if found is not None:
             found.extend(roster_faults or [])
+            # What the real loader records for an absent file, so the digest sees the
+            # fault AND the caller sees the None that says "there was no allowlist".
+            if roster_absent:
+                found.append(
+                    ConfigFault(
+                        "students.csv", "this file is missing", file="students.csv"
+                    )
+                )
         if roster_raises:
             raise roster_raises
-        return []
+        return None if roster_absent else []
+
+    def _teams(cohort, found=None, known=None):
+        if vetted_against is not None:
+            vetted_against.append(known)
+        return {}
 
     monkeypatch.setattr(scheduler.roster, "load", _roster)
     monkeypatch.setattr(
         scheduler.sync_faculty, "read_cohort_people", lambda cohort, found: {}
     )
-    monkeypatch.setattr(
-        scheduler.teams, "load", lambda cohort, found=None, known=None: {}
-    )
+    monkeypatch.setattr(scheduler.teams, "load", _teams)
     monkeypatch.setattr(
         scheduler,
         "cohort_sheet_faults",
@@ -2654,6 +2671,30 @@ def test_an_unreadable_header_is_a_content_fault_not_a_read_failure(monkeypatch)
         monkeypatch, roster_faults=[fault], roster_raises=RuntimeError("header")
     )
     assert synced["students.csv"] == [fault]
+
+
+def test_an_absent_roster_is_a_fault_of_its_own_not_a_healthy_empty_one(monkeypatch):
+    # An empty fault list CLOSES the digest issue and tells the cohort students.csv is
+    # fine. A cohort with no students.csv at all enrols nobody, which is the loudest thing
+    # this file can be wrong about.
+    _rc, synced, _mailed = _config_preflight(monkeypatch, roster_absent=True)
+    (fault,) = synced["students.csv"]
+    assert fault.file == "students.csv" and "missing" in fault.what
+
+
+def test_an_absent_roster_does_not_report_every_teams_row_as_a_stranger(monkeypatch):
+    # The roster is the allowlist teams.csv is vetted against. Absent, it implies the
+    # EMPTY allowlist - and vetting against that files one "not an onboarded handle"
+    # fault per row, on top of the one fault that is actually true.
+    seen: list = []
+    _config_preflight(monkeypatch, roster_absent=True, vetted_against=seen)
+    assert seen == [None]
+
+
+def test_a_roster_that_was_read_still_vets_teams_against_it(monkeypatch):
+    seen: list = []
+    _config_preflight(monkeypatch, vetted_against=seen)
+    assert seen == [set()]
 
 
 def test_a_digest_that_cannot_be_written_never_touches_the_exit_code(monkeypatch):

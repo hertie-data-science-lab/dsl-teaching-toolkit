@@ -190,3 +190,21 @@ def test_a_clean_roster_has_no_faults():
 def test_a_caller_that_asks_for_nothing_gets_exactly_what_it_always_got():
     (student,) = roster.parse(f"{HEADER}\nada@uni.edu,Ada,audit,ada-l,42,,\n")
     assert student.role == roster.ROLE_ENROLLED
+
+
+def test_an_absent_roster_is_recorded_as_a_fault_not_just_logged(monkeypatch):
+    # `load` returning None used to be a fact only the caller knew, and the caller either
+    # reddened its run or shrugged. The digest that reports students.csv reads the fault
+    # list, and an EMPTY one is how it says "this file is fine" - so an absent roster with
+    # nothing recorded closes the issue on a cohort that enrols nobody.
+    monkeypatch.setattr(roster, "_roster_text", lambda org: None)
+    found: list = []
+    assert roster.load("Cohort-f2026", found) is None
+    (fault,) = found
+    assert fault.file == roster.ROSTER_PATH and fault.lineno is None
+    assert "missing" in fault.what and "no student is enrolled" in fault.what
+
+
+def test_a_caller_that_wants_no_faults_still_just_gets_none(monkeypatch):
+    monkeypatch.setattr(roster, "_roster_text", lambda org: None)
+    assert roster.load("Cohort-f2026") is None

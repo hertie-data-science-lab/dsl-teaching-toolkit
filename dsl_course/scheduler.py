@@ -625,14 +625,19 @@ def _config_faults(course_org: str, cohort_org: str, sched: schedule.Schedule) -
         config_digest.PEOPLE,
         lambda found: sync_faculty.read_cohort_people(cohort_org, found),
     )
-    students: list[roster.Student] = []
-    collect(
-        config_digest.ROSTER,
-        lambda found: students.extend(roster.load(cohort_org, found) or []),
-    )
+    students: list[roster.Student] | None = None
+
+    def read_roster(found: list) -> None:
+        nonlocal students
+        students = roster.load(cohort_org, found)
+
+    collect(config_digest.ROSTER, read_roster)
     # The roster is the allowlist teams.csv is vetted against, and only where it was
-    # actually read: an empty one would report every member as a stranger.
-    known = sync_teams.known_handles(students) if config_digest.ROSTER in out else None
+    # actually read: an empty one would report every member as a stranger. `None` is a
+    # roster that is ABSENT as well as one whose read failed - a cohort with no
+    # students.csv already has that fault in its own digest, and vetting against the
+    # empty set it implies would file one more teams.csv fault per row on top of it.
+    known = sync_teams.known_handles(students) if students is not None else None
     collect(config_digest.TEAMS, lambda found: teams.load(cohort_org, found, known))
     # The grading sheets, on this tick and no other: they have no push fast path, because a
     # sheet is edited all day while somebody marks and a mail per save would be a mail
