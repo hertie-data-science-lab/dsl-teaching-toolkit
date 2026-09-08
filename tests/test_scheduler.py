@@ -2670,3 +2670,162 @@ def test_a_digest_that_cannot_be_written_never_touches_the_exit_code(monkeypatch
         "Course-Org", "Cohort-Org", Schedule(), WHEN, False
     )
     assert rc == 0
+
+
+# ---------------------------------------------- the COURSE org's own config (unattended)
+#
+# dsl-course.yml and the cohort registry belong to the course, not to a cohort: one issue
+# for the whole course, once per tick, addressed to the admins rather than to a teaching
+# team. What matters is that it never reds the tick, that it is reported BEFORE the cohort
+# listing a malformed registry makes raise, and that "we could not look" leaves the issue
+# alone.
+
+
+def _course_preflight(
+    monkeypatch, *, config_faults=None, registry_faults=None, raises=None
+):
+    """Drive `_preflight_course` with both readers stubbed, capturing what the digest and
+    the mail were handed."""
+    seen: dict = {}
+
+    def _config(org, found):
+        if raises:
+            raise raises
+        found.extend(config_faults or [])
+        return {"course_admins": [{"github_handle": "jan-g"}]}
+
+    monkeypatch.setattr(scheduler.sync_faculty, "read_course_config", _config)
+    monkeypatch.setattr(
+        scheduler.discovery,
+        "read_cohort_registry",
+        lambda org, found: found.extend(registry_faults or []) or [],
+    )
+    monkeypatch.setattr(
+        scheduler.config_digest,
+        "sync",
+        lambda spec, *a, **k: (
+            seen.update(spec=spec, faults=a[2], mention=k["resolve_mention"]())
+            or config_digest.DigestResult()
+        ),
+    )
+    monkeypatch.setattr(
+        scheduler.notify,
+        "notify_config_faults",
+        lambda spec, *a, **k: seen.update(mailed=spec) or notify.Unsent(),
+    )
+    monkeypatch.setattr(
+        scheduler.notify, "route_course", lambda *a: notify.Routing({}, ["JanG"])
+    )
+    rc = scheduler._preflight_course("Course-Org", WHEN, False)
+    return rc, seen
+
+
+def _course_fault(file: str = "dsl-course.yml"):
+    return ConfigFault(
+        file, "this file is not valid YAML", file=file, field="", in_repo=".github"
+    )
+
+
+def test_both_course_files_reach_the_one_course_digest(monkeypatch):
+    registry = _course_fault("cohort-courses-pages.yml")
+    config = _course_fault()
+    rc, seen = _course_preflight(
+        monkeypatch, config_faults=[config], registry_faults=[registry]
+    )
+    assert rc == 0
+    assert seen["spec"] is config_digest.COURSE
+    assert seen["faults"] == [config, registry]
+    assert seen["mailed"] is config_digest.COURSE
+    # Course admins, not a cohort's teaching team - and git's answer on the @mention.
+    assert seen["mention"] == ["JanG"]
+
+
+def test_a_clean_course_config_still_syncs_so_the_issue_can_close(monkeypatch):
+    _rc, seen = _course_preflight(monkeypatch)
+    assert seen["faults"] == []
+
+
+def test_a_course_config_that_could_not_be_read_is_left_exactly_as_it_was(
+    monkeypatch, capsys
+):
+    # Syncing an empty list CLOSES the issue and tells the course its config is fine. A
+    # rate limit is not that.
+    rc, seen = _course_preflight(monkeypatch, raises=RuntimeError("rate limited"))
+    assert rc == 0 and "spec" not in seen
+    assert "could not read Course-Org's course config" in capsys.readouterr().err
+
+
+def test_the_course_preflight_never_touches_the_exit_code(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("the digest is unreachable")
+
+    monkeypatch.setattr(
+        scheduler, "_course_faults", lambda org: ([_course_fault()], set())
+    )
+    monkeypatch.setattr(scheduler.config_digest, "sync", boom)
+    assert scheduler._preflight_course("Course-Org", WHEN, False) == 0
+
+
+def test_the_course_config_is_checked_before_the_cohort_listing(monkeypatch):
+    # A registry nobody can parse is one of the faults this reports AND what makes the
+    # listing raise. Reported first, or never.
+    order: list[str] = []
+    monkeypatch.setattr(
+        scheduler, "_preflight_course", lambda *a: order.append("preflight") or 0
+    )
+
+    # None is what an unreadable listing looks like, which is exactly this case.
+    monkeypatch.setattr(
+        scheduler, "_registered_cohorts", lambda org: order.append("listing")
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "scheduler",
+            "--course-org",
+            "Course-Org",
+            "--all-cohorts",
+            "--skip-autograde",
+        ],
+    )
+    assert scheduler.main() == 1
+    assert order == ["preflight", "listing"]
+
+
+def test_the_grading_matrix_leg_is_not_the_courses_own_tick(monkeypatch):
+    # One issue per COURSE per tick. The autograde job runs once per cohort, and each leg
+    # opening (or commenting on) the course's digest would be one notification per cohort
+    # about one file.
+    called: list = []
+    monkeypatch.setattr(
+        scheduler, "_preflight_course", lambda *a: called.append(a) or 0
+    )
+    monkeypatch.setattr(scheduler, "_registered_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(scheduler, "run", lambda *a, **k: 0)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "scheduler",
+            "--course-org",
+            "Course-Org",
+            "--all-cohorts",
+            "--autograde-only",
+        ],
+    )
+    assert scheduler.main() == 0
+    assert called == []
+
+
+def test_the_sync_membership_fast_path_checks_and_exits_green(monkeypatch):
+    # What a push to dsl-course.yml or the registry runs. Never red: a config faculty have
+    # to fix is a content fault, and Sync membership must not go red for one.
+    called: list = []
+    monkeypatch.setattr(
+        scheduler, "_preflight_course", lambda *a: called.append(a) or 0
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        ["scheduler", "--course-org", "Course-Org", "--check-course-config"],
+    )
+    assert scheduler.main() == 0
+    assert [a[0] for a in called] == ["Course-Org"]
