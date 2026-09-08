@@ -898,14 +898,18 @@ def scaffold_assignment(
         sol = wd / "solution"
         sol.mkdir()
         solution_code = "def solve():\n    return 42  # TODO"
+        # `starter`, not `solution`: `derive` writes `solution/X` onto `main` as `X`, so a
+        # model answer called `solution.ipynb` derives a SECOND notebook beside the
+        # untouched starter instead of becoming it. The stem is the same contract on both
+        # branches (see `_STARTERS`).
         if fmt == "ipynb":
-            (sol / "solution.ipynb").write_text(
+            (sol / "starter.ipynb").write_text(
                 _notebook(
                     [f"# Assignment {number} - model solution (stub)"], solution_code
                 )
             )
         else:
-            (sol / "solution.py").write_text(
+            (sol / "starter.py").write_text(
                 f'"""Model solution for assignment {number} (stub)."""\n\n\n{solution_code}\n'
             )
         (sol / "README.md").write_text(

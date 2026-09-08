@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import gh_contents, ghcli, grades, releaseignore, scaffold
+from dsl_course import derive, gh_contents, ghcli, grades, releaseignore, scaffold
 
 
 class FakeRepo:
@@ -435,6 +435,19 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
     assert (spec.submit_via, spec.format, spec.autograde) == ("external", "ipynb", True)
     assert (spec.late_window_days, spec.late_penalty_per_day) == (7, "10%")
     assert written["grading_config.yml"].startswith("# INSTRUCTOR-OWNED")
+
+
+def test_the_model_answer_is_seeded_where_derive_reads_it(fake, monkeypatch):
+    # `derive` writes `solution/X` onto `main` as `X`. A model answer seeded as
+    # `solution/solution.ipynb` therefore derived a SECOND notebook beside the untouched
+    # `starter.ipynb` - two files, the derived one named "solution", and the hidden tests
+    # still importing the stub. One stem on both branches.
+    written = _solution_files(monkeypatch)
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", "ipynb") == 0
+    assert "solution/starter.ipynb" in written
+    assert derive.student_path("solution/starter.ipynb") == "starter.ipynb"
+    assert scaffold.scaffold_assignment("Org", "2", "f2026", "py") == 0
+    assert "solution/starter.py" in written
 
 
 def test_the_cutoff_switches_are_written_out_with_their_defaults(fake, monkeypatch):
