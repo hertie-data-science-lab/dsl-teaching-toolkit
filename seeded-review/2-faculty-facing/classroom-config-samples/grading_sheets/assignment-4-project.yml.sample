@@ -1,0 +1,75 @@
+# -------------------------------------------------------------------------------------------
+# GRADING SHEET · assignment-4-project · Group project · INSTRUCTOR-OWNED
+#
+# From grading_config.yml / schedule.yml (edit THERE, not here):
+#   group assignment · 50 points (Q1 15, Q2 15, Q3 10, Q4 10) · autograde off
+#   due Sun 15 Nov 2026 23:59 · late work to Sun 22 Nov 2026 23:59 at 10%/day
+# Status: OPEN - 2 of 2 teams have submitted; late pushes still update `info:` until the cutoff.
+#
+# Auto-filled by the toolkit (you never type these): every `info:` block. `submitted` and
+# `days_late` fill at the due date and refresh after each late push; `contributions` is read
+# from CONTRIBUTIONS.md at the same moments. All of them freeze at the cutoff.
+# You fill in: score_group (one value per question; max points shown beside each),
+# feedback_group, adjustment_individual, feedback_individual, notes_not_shared_with_students.
+# Anything you type is never touched. Nothing reaches a student until you run Distribute
+# grades. YAML comments you add are not preserved when the toolkit rewrites the file.
+# -------------------------------------------------------------------------------------------
+teams:
+  team-alpha:
+    info:                       # toolkit-owned, shown for information only - nothing is declared here
+      submitted: 2026-11-15T22:14+01:00
+      days_late: 0
+      contributions: |
+        Anna: model architecture. Ben: training loop.
+        Amara: evaluation harness. Jonas: write-up.
+    score_group:                # yours: the question names and maxima come from grading_config.yml
+      Q1: 14                    # /15
+      Q2: 13                    # /15
+      Q3: 10                    # /10
+      Q4: 6                     # /10
+    feedback_group: |
+      Excellent model design and a clear training story.
+      The evaluation section is thin - one baseline is not a comparison.
+    members:
+      anna-adams:
+        adjustment_individual: 4
+        feedback_individual: |
+          Led the architecture and carried the team's core work.
+        notes_not_shared_with_students:
+      ben-baker:
+        adjustment_individual:
+        feedback_individual:
+        notes_not_shared_with_students:
+      amara-okonjo:
+        adjustment_individual:
+        feedback_individual:
+        notes_not_shared_with_students:
+      jonas-bergstrom:
+        adjustment_individual: -2
+        feedback_individual:
+        notes_not_shared_with_students: contributions list says the write-up was left to others
+  team-beta:
+    info:                       # toolkit-owned, shown for information only - nothing is declared here
+      submitted: 2026-11-17T09:30+01:00
+      days_late: 2
+      contributions: (not filled in)
+    score_group:                # yours: the question names and maxima come from grading_config.yml
+      Q1: 12                    # /15
+      Q2: 11                    # /15
+      Q3: 8                     # /10
+      Q4:                       # /10
+    feedback_group: |
+      Good pipeline and docs; Q4 is missing. Two days late.
+    members:
+      carla-cohen:
+        adjustment_individual:
+        feedback_individual:
+        notes_not_shared_with_students:
+      dan-davies:
+        adjustment_individual:
+        feedback_individual:
+        notes_not_shared_with_students:
+      k-nowak-weiss:
+        adjustment_individual:
+        feedback_individual:
+        notes_not_shared_with_students:

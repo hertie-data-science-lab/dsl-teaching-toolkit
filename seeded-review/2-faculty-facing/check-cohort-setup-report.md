@@ -5,7 +5,7 @@
 | Course identity | OK | Deep Learning (Demo) | [edit](https://github.com/hertie-dsl-demo-course-e1234/.github/edit/main/dsl-course.yml) |
 | Course admins | OK | 1 active | [edit](https://github.com/hertie-dsl-demo-course-e1234/.github/edit/main/dsl-course.yml) |
 | Toolkit tier | not set (optional) | release (default) | [add](https://github.com/hertie-dsl-demo-course-e1234/.github/new/main?filename=dsl-course.yml) |
-| Mail transport | OK | all 4 GRAPH_* secrets set | [edit](https://github.com/organizations/hertie-dsl-demo-course-e1234/settings/secrets/actions) |
+| Mail transport | OK | all 4 GRAPH_* secrets set; DSL_MAINTAINER_EMAIL set | [edit](https://github.com/organizations/hertie-dsl-demo-course-e1234/settings/secrets/actions) |
 | Roster | OK | 11 student(s), 0 onboarded | [edit](https://github.com/hertie-dsl-demo-f2026/classroom-config/edit/main/students.csv) |
 | Grades | OK | 2 assignment(s) | [edit](https://github.com/hertie-dsl-demo-f2026/classroom-config/edit/main/grades) |
 | Teams | OK | 3 team(s) across 1 assignment(s) | [edit](https://github.com/hertie-dsl-demo-f2026/classroom-config/edit/main/teams.csv) |

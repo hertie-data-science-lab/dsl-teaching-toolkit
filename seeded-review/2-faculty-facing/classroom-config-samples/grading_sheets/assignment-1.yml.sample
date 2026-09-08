@@ -1,0 +1,35 @@
+# -------------------------------------------------------------------------------------------
+# GRADING SHEET · assignment-1 · Linear regression · INSTRUCTOR-OWNED
+#
+# From grading_config.yml / schedule.yml (edit THERE, not here):
+#   individual assignment · submitted outside GitHub · autograde off
+#   due Tue 13 Oct 2026 23:59 · no late arithmetic
+# Status: FROZEN Thu 15 Oct 2026 23:59
+#
+# Auto-filled by the toolkit: nothing. This assignment is submitted outside GitHub, so there is
+# no `info:` block and no late arithmetic.
+# You fill in: score_individual, adjustment_individual, feedback_individual,
+# notes_not_shared_with_students. Anything you type is never touched. Nothing reaches a student
+# until you run Distribute grades. YAML comments you add are not preserved when the toolkit
+# rewrites the file.
+# -------------------------------------------------------------------------------------------
+submissions:
+  anna-adams:
+    score_individual: 88
+    adjustment_individual:
+    feedback_individual: |
+      Clear, correct solution.
+      Watch the vectorised edge cases.
+    notes_not_shared_with_students:
+  ben-baker:
+    score_individual: 80
+    adjustment_individual: -6
+    feedback_individual: |
+      Right idea; the proof in Q3 is incomplete.
+    notes_not_shared_with_students: resubmission agreed by email
+  carla-cohen:
+    score_individual: 91
+    adjustment_individual:
+    feedback_individual: |
+      Excellent throughout.
+    notes_not_shared_with_students:

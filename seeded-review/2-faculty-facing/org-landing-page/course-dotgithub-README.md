@@ -14,7 +14,7 @@ Open the **[Actions tab](https://github.com/hertie-dsl-demo-course-e1234/.github
 1. **New materials repo** / **New assignment** - scaffold your content repos, then fill them in.
 2. Create an empty **cohort org** for the year, add the bot as an Owner, then run **Bootstrap cohort**.
 3. Each session: **Release materials** / **Release assignment** - or pre-schedule them in `schedule.yml` (recommended).
-4. Grading: **Grade assignment** -> **Sync gradebooks** -> **Render grades** -> **Distribute grades**.
+4. Grading: the sheet appears at handout -> **Collect submissions** (or wait for the cron) -> type the marks -> **Distribute grades** (dry run first).
 
 ## What's in here
 
