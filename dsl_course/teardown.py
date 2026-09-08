@@ -12,9 +12,10 @@ order, and the order is the whole design:
 
 Revoke before freeze, because an archived repo takes no collaborator change: a repo frozen
 before it is revoked keeps that grant for as long as it stays frozen. Seal last, because an
-archived `classroom-config` is already what `seed._live_cohorts` reads as "this cohort is
-finished, leave it frozen" - so until that step lands the cohort is still a live one, and a
-run that died half way is resumed simply by running it again. Every step is idempotent: a
+archived `classroom-config` is already what `seed.refresh`'s per-cohort loop reads as "this
+cohort is finished, leave it frozen" (`_live_cohorts` probes the ORG, never one of its
+repos) - so until that step lands the cohort is still a live one, and a run that died half
+way is resumed simply by running it again. Every step is idempotent: a
 repo already archived is passed over, a grant already revoked is a no-op, and a cohort whose
 `classroom-config` is archived is already closed out and does nothing at all.
 
