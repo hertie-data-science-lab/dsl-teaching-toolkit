@@ -34,12 +34,15 @@ Sample identifiers throughout: course org `hertie-dsl-demo-course-e1234`, cohort
 | `site-repo/index.md`, `schedule.md` | The two site pages whose prose is the instructor's | `templates/site-seed/` |
 | `site-repo/_data/*.yml` | Late policy and previous-offering data the site renders | `templates/site-seed/_data/` |
 | `emails/enrolment-code.txt` | Emailed enrolment code - rendered named AND degraded | `enrol_codes.code_message` |
-| `emails/grades-updated.txt` | Grade-release notification - rendered named AND degraded | `grades._email_updates` |
-| `gradebook-repo/README.md` | Landing page in their private `grades-<handle>` repo | `grades._STARTER_README` |
-| `gradebook-repo/grades.yml` | The grades file they open (shape + field names) | `grades.gradebook_entry` |
+| `emails/grades-updated.txt` | Grade-release notification - rendered named AND degraded | `grades.update_message` |
+| `gradebook-repo/README.md` | Landing page in their private `grades-<handle>` repo, before and after the first Distribute grades | `grades._STARTER_README`, `grades.render_readme` |
+| `gradebook-repo/grades.yml` | The grades file they open (shape + field names) | `grades.render_yaml`, `grades.student_view` |
 | `assignment-repo/README.*.md` | What a student sees in their own assignment repo | `dsl_course/scaffold.py` |
 | `assignment-repo/starter.*` | The starter they complete | `dsl_course/scaffold.py` |
 | `assignment-repo/solution-README.md` | Model-solution page, post-deadline | `dsl_course/scaffold.py` |
+| `assignment-repo/feedback-issue.md` | Feedback issue body opened at handout: individual/github, individual/external, group variants | `grades.feedback_body`, `grades.ensure_feedback_issue` |
+| `assignment-repo/submission-receipts.md` | Receipts posted on that issue at due date / late push / cutoff | `grades.receipt`, `grades.post_receipt` |
+| `assignment-repo/feedback-comment.md` | The comment Distribute grades posts, individual + team | `grades.individual_issue_body`, `grades.team_issue_body` |
 | `materials-repo/README.md` | Released to students with the README toggle | `scaffold.materials_readme` |
 | `materials-repo/SYLLABUS.md` | Syllabus stub, in the standard Hertie shape | `scaffold._SYLLABUS_STUB` |
 | `materials-repo/readings/01_session-1/READINGS.md` | The optional prose reading list seeded in each session's readings folder - public when released | `scaffold._READINGS_STUB` |
@@ -51,28 +54,28 @@ Sample identifiers throughout: course org `hertie-dsl-demo-course-e1234`, cohort
 | --- | --- | --- |
 | `classroom-config/README.md` | The schema contract - the main doc faculty read | `templates/classroom-config/README.md` |
 | `classroom-config/{students.csv,teams.csv,schedule.yml,people.yml}` | The four scaffolds faculty fill in | `templates/classroom-config/` |
-| `classroom-config-samples/*.sample` | Filled worked examples shipped beside each scaffold | `example-course/cohort-org/` |
+| `classroom-config-samples/*.sample` | Filled worked examples shipped beside each scaffold, including `grading_sheets/*.yml.sample` (replaces the retired `grades/*.csv.sample`) | `example-course/cohort-org/` |
 | `course-config/dsl-course.yml` | Course identity + admin SSOT (comments are the docs) | `templates/course/*` via `bootstrap_course._course_metadata` |
 | `course-config/people-*.yml` | The three fragments the admin block is assembled from | `templates/course/` |
 | `course-config/cohort-dsl-course.yml` | Cohort -> course pointer | `templates/cohort/dsl-course.yml` |
 | `materials-repo/MAINTAINING.md` | How to operate a materials repo | `scaffold._maintaining` |
 | `materials-repo/SYLLABUS.md.sample` | Filled syllabus example beside the stub - never released to students | `scaffold._syllabus_sample` |
 | `materials-repo/.releaseignore` | The withhold list - what a release must not copy out | `scaffold._RELEASEIGNORE_STUB` |
-| `assignment-repo/grading.*.yml` | Autograder config, one per `type:` (individual / group) | `scaffold._GRADING_YML` |
+| `assignment-repo/grading_config.*.yml` | Autograder config, one per `type:` (individual / group) | `scaffold._GRADING_YML` |
 | `assignment-repo/hidden-test*.py` | Hidden-test stubs faculty replace | `scaffold._HIDDEN_TEST_{PY,NOTEBOOK}` |
 | `assignment-repo/solution.*` | Model-solution stubs | `dsl_course/scaffold.py` |
 | `org-landing-page/course-profile-README.md` | Course org front page - the full action index | `profile_readme.render_profile_readme` |
 | `org-landing-page/*-dotgithub-README.md` | Orientation on landing in `.github` | `profile_readme.render_dotgithub_readme` |
 | `check-cohort-setup-report.md` | The "Check cohort setup" button's output | `status.render_markdown` |
-| `notifications.md` | **Issue + PR bodies** the system opens: grades preview PR, site-overwrite notice, cron-failure alert, schedule-validation failure, the missing-source digest; plus repo, team and label descriptions | `grades.py`, `site_repo.py`, `source_digest.py`, `repos.py`, `gh_teams.py`, `validate-schedule.yml` |
+| `notifications.md` | **Issue + PR/mail bodies** the system opens: the four-rung fault-mail ladder (warning/urgent/critical/missed), the run-failure mail, the missing-source digest body + its Escalated/Cleared comments, the schedule.yml commit comment, the two cadence alarm issues, the `<workflow> is failing` issue, the site-overwrite notice, schedule-validation failure, plus repo/team/label descriptions. The grades preview PR is gone - Render grades is retired. | `notify.py`, `source_digest.py`, `cadence.py`, `schedule.source_comment`, `site_repo.py`, `repos.py`, `gh_teams.py`, `validate-schedule.yml` |
 
 ### 3-infrastructure/
 
 Workflow YAML. Faculty read the **button names, input descriptions and header comments**;
 the rest is machinery. Edit the prose, leave the shell logic.
 
-- `course-org-buttons/` (18) - `dsl_course/workflows_render.py`, manifest in `seed.py`
-- `cohort-classroom-config/` (4) - `templates/classroom-config/`
+- `course-org-buttons/` (16) - `dsl_course/workflows_render.py`, manifest in `seed.py`
+- `cohort-classroom-config/` (5) - `templates/classroom-config/`
 - `cohort-welcome/` (2) - `templates/welcome/`; **edit `welcome-bot-messages.md` instead**
   for the student replies
 - `course-site-repo/` (1) - `templates/site/.github/workflows/deploy.yml`
@@ -94,17 +97,32 @@ the rest is machinery. Edit the prose, leave the shell logic.
 
 ## Ownership - which edits actually stick
 
-Checked against the code, not against last round's table: what `seed.refresh` rewrites on
-the nightly cron is what reaches the orgs already running.
+Checked against the code, not against last round's table (twice rotted already). What
+`seed.refresh` rewrites on the nightly cron reaches every org already running within 24h;
+a few file classes are instead rewritten by a different trigger a faculty member fires by
+hand (Distribute grades, Collect submissions) - called out below where that's the case.
 
 | Class | Files | Behaviour |
 | --- | --- | --- |
-| **SYSTEM** | every workflow in `3-infrastructure/`; the welcome **issue forms** and chooser config; `classroom-config/README.md`; all `*.sample` (incl. `SYLLABUS.md.sample`); `MAINTAINING.md`; cohort `dsl-course.yml`; the course profile README and both `.github` READMEs | Rewritten on every nightly refresh. Your edits propagate to **every existing org** within 24h. |
+| **SYSTEM** | every workflow in `3-infrastructure/` (incl. `dispatch-scheduled-release.yml`, `collect-submissions.yml`); the welcome **issue forms** and chooser config; `classroom-config/README.md`; all `*.sample` (incl. `SYLLABUS.md.sample` and `grading_sheets/*.yml.sample`); `MAINTAINING.md`; cohort `dsl-course.yml`; the course profile README and both `.github` READMEs | Rewritten by `seed.refresh` on every nightly cron. Your edits propagate to **every existing org** within 24h. |
 | **SYSTEM, in part** | cohort `profile/README.md` | Instructor-owned prose, except the region between the `dsl:repo-table` markers, which is regenerated whole on every refresh - and `retitle_renamed_org`, which rewrites a dead org name throughout. Edit the prose; do not hand-edit inside the markers. |
-| **USER, create-only** | `classroom-config/{students,teams,schedule,people}`; `welcome/README.md`; materials `README.md`, `SYLLABUS.md`, `readings/*/READINGS.md` and `.releaseignore`; the assignment READMEs and starters; the `site-repo/` pages and `_data/`; course `dsl-course.yml` | Seeded once, never rewritten. Your edits reach **newly bootstrapped orgs only** - existing ones keep what they have. |
+| **SYSTEM, toolkit-posted (not the nightly refresh)** | gradebook `README.md` + `grades.yml` | Not touched by `seed.refresh` at all. `README.md` starts as `grades._STARTER_README` at gradebook provisioning (`grades.provision_one`); `grades.yml` does not exist until the first **Distribute grades** run, which then replaces both wholesale, together, in one commit, every time it touches that student (`grades.render_readme` / `grades.render_yaml` off `grades.student_view`, written at `grades.py:2511-2512`). Editing either by hand is undone the next time that student is distributed to, not within 24h. |
+| **SYSTEM, regenerated in part** | `classroom-config/grading_sheets/*.yml` (per-cohort grader files - the `*.sample` beside them, above, is the only copy in this corpus) | Created at handout, then re-merged by `grades.merge_sheet` on every **Collect submissions** run and scheduler tick. The header comment and the `info:` block are toolkit-derived and re-emitted every write (`_sheet_header`, `_annotate`); every mark, note, feedback string and grader-invented key is copied through untouched (`_merged_block`). Frozen at the cutoff (`sheet_is_frozen`), after which even `info:` stops being re-derived. |
+| **USER, create-only** | `classroom-config/{students,teams,schedule,people}`; `welcome/README.md`; materials `README.md`, `SYLLABUS.md`, `readings/*/READINGS.md` and `.releaseignore`; the assignment READMEs and starters; `grading_config.*.yml`, `hidden-test*.py` and `solution.*` (written once by `scaffold_assignment`, on the assignment's `solution` branch); the `site-repo/` pages and `_data/`; course `dsl-course.yml` | Seeded once, never rewritten. Your edits reach **newly bootstrapped orgs / newly scaffolded repos only** - existing ones keep what they have. |
 
 > Consequence: editing a create-only scaffold changes nothing for live cohorts. If you want
 > a change to reach them, it has to go in a SYSTEM-owned file, or be propagated by hand.
+
+`assignment-repo/feedback-issue.md`, `submission-receipts.md` and `feedback-comment.md`,
+and everything rendered into `notifications.md` (and the `emails/` bodies) are **posted
+content, not seeded files** - there is nothing sitting in an org for a faculty member to
+hand-edit, so the ownership question above does not apply to them; a wording change goes
+into the generator (`grades.py`, `notify.py`, `source_digest.py`, `cadence.py`, `schedule.py`,
+`site_repo.py`) directly. The Feedback issue's body is fixed the moment
+`grades.ensure_feedback_issue` opens it at handout - a student closing it gets it reopened,
+but the body is never re-posted; the receipts and the Distribute-grades comment are
+additive, marker-gated comments appended to that same issue (`grades.post_receipt` /
+`post_marked_comment`), never a rewrite of anything already there.
 
 The `dsl-stub:` marker is **not** an ownership class. It marks a seeded file as still
 unwritten, and only `SYLLABUS.md` acts on it: `deploy._is_withheld_stub` reads it to keep
