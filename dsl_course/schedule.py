@@ -507,17 +507,16 @@ KNOWN_ASSIGNMENT = frozenset(
 # a typo, it is declaring something in a file that no longer reads it, and the message has
 # to say where the declaration went.
 _GRADING_CONFIG_HOME = "in the assignment's own grading_config.yml, on the course template's `solution` branch"
+# key -> what ignoring it here costs. Where it MOVED TO is the same sentence for both and
+# is built from the key at the flag site, so a third retired key cannot be filed under a
+# home that names a different setting.
 MOVED_ASSIGNMENT_KEYS = {
     "type": (
-        f"`type:` {_GRADING_CONFIG_HOME}",
-        (
-            "the assignment is handed out and graded in whatever shape grading_config.yml "
-            "declares - individual when it declares none"
-        ),
+        "the assignment is handed out and graded in whatever shape grading_config.yml "
+        "declares - individual when it declares none"
     ),
     "max_team_size": (
-        f"`max_team_size:` {_GRADING_CONFIG_HOME}",
-        "the 'Join team' flow uses the cap declared there, or the course default",
+        "the 'Join team' flow uses the cap declared there, or the course default"
     ),
 }
 KNOWN_EVENT = frozenset({"type", "title", "event_datetime", "tbc"})
@@ -808,10 +807,11 @@ def _parse_assignments(
             continue
         sources[source_repo] = str(slug)
         names[name] = str(slug)
-        for moved, (home, moved_cost) in MOVED_ASSIGNMENT_KEYS.items():
+        for moved, moved_cost in MOVED_ASSIGNMENT_KEYS.items():
             if moved in entry:
                 drops.append(
-                    f"{where}.{moved}: moved to {home} - ignored here, so {moved_cost}"
+                    f"{where}.{moved}: moved to `{moved}:` {_GRADING_CONFIG_HOME} - "
+                    f"ignored here, so {moved_cost}"
                 )
         _flag_unknown_keys(
             drops,
