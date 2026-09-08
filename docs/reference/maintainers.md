@@ -272,8 +272,8 @@ CI and every seeded workflow run 3.12. Conventions:
 schedule block -> Scheduled release (handout) -> a genuine student push -> Scheduled release
 (snapshot + autograde), then puts both orgs back. It proves the wiring unit tests cannot -
 a click, a cron, a token and a repo - and it runs against the demo org between **merging to
-main and Promote to release**, alongside the manual inspection that is the actual gate. Two scheduler passes are needed because `scheduler.run` snapshots
-before it hands out.
+main and Promote to release**, alongside the manual inspection that is the actual gate.
+Three scheduler passes are needed - handout, due, cutoff - for the reasons below.
 
     DSL_E2E=1 \
     DSL_ORG_ALLOWLIST=hertie-dsl-demo-course-e1234,hertie-dsl-demo-f2026 \
