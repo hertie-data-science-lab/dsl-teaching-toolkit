@@ -340,9 +340,7 @@ def test_assignment_reds_when_a_starter_seed_fails(fake, monkeypatch):
     # the assignment scaffold, matching scaffold_materials - a half-written template is not
     # a green "ready".
     _clone_ok(monkeypatch, _git_ok)
-    monkeypatch.setattr(
-        gh_contents, "put_file", lambda *a, **k: False
-    )  # USER seeds fail
+    monkeypatch.setattr(scaffold, "put_files", lambda *a, **k: False)  # USER seeds fail
     assert scaffold.scaffold_assignment("Org", "1", "f2026") == 1
 
 

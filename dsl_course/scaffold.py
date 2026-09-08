@@ -37,7 +37,7 @@ from .course import (
     pages_repo,
 )
 from .discovery import central_ref_for, discover_assignments, discover_cohorts
-from .gh_contents import put_files, seed_if_absent
+from .gh_contents import put_files
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
 from .grades import course_assignment_defaults
 from .log import log, log_err, log_ok, log_skip, log_step
@@ -301,14 +301,14 @@ def test_solve_runs():
 # The starter each `format` seeds on `main`. `none` seeds nothing at all - the raw-repo
 # option. A stub is a CONVENIENCE and nothing more: grading reads whatever is in the repo,
 # so a student who works in a notebook on a `py` assignment still grades.
-_STARTER_NAMES = {
-    "ipynb": "starter.ipynb",
-    "py": "starter.py",
-    "rmd": "starter.Rmd",
-    "qmd": "starter.qmd",
-    "latex": "starter.tex",
-}
 _STARTER_CODE = "def solve():\n    raise NotImplementedError  # TODO"
+_STARTERS = {
+    "ipynb": ("starter.ipynb", lambda title: _notebook([f"# {title}"], _STARTER_CODE)),
+    "py": ("starter.py", lambda title: f'"""{title}."""\n\n\n{_STARTER_CODE}\n'),
+    "rmd": ("starter.Rmd", lambda title: f"# {title}\n\n_Your work goes here._\n"),
+    "qmd": ("starter.qmd", lambda title: f"# {title}\n\n_Your work goes here._\n"),
+    "latex": ("starter.tex", lambda title: f"# {title}\n\n_Your work goes here._\n"),
+}
 # CONTRIBUTIONS.md goes into a GROUP assignment's `main` only. It carries the stub mark,
 # because `collect._contributions` reads it at the pin and has to tell an untouched
 # scaffold from a team that wrote nothing - "(not filled in)" is a fact about the team,
@@ -657,25 +657,24 @@ def scaffold_assignment(
     grant_tagged_team_access(org, repo, tag)
     # main: the brief, one starter stub, and (for a group assignment) CONTRIBUTIONS.md -
     # what students receive on generate. No tests, no autograder - grading runs
-    # faculty-side from the solution branch. Create-only: a re-run against a repo whose
-    # starter faculty have since authored must not revert it. Count a failed create-only
-    # seed (not a skip of a live file) so a half-written starter reds the scaffold,
-    # matching scaffold_materials rather than reporting a green "ready".
+    # faculty-side from the solution branch. ONE commit, create-only, exactly as
+    # scaffold_materials seeds its skeleton: a re-run against a repo whose starter faculty
+    # have since authored leaves it alone and logs the skip, and the repo they then author
+    # by hand opens on one `init:` line rather than three identical ones.
     seeds = {"README.md": _brief_stub(title, defaults)}
-    starter_name = _STARTER_NAMES.get(fmt)
-    if starter_name:
-        seeds[starter_name] = (
-            _notebook([f"# {title}"], _STARTER_CODE)
-            if fmt == "ipynb"
-            else f'"""{title}."""\n\n\n{_STARTER_CODE}\n'
-            if fmt == "py"
-            else f"# {title}\n\n_Your work goes here._\n"
-        )
+    if fmt in _STARTERS:
+        starter_name, build = _STARTERS[fmt]
+        seeds[starter_name] = build(title)
     if kind == "group":
         seeds["CONTRIBUTIONS.md"] = _CONTRIBUTIONS_STUB
-    seed_failures = sum(
-        not seed_if_absent(org, repo, path, text.encode(), "init: assignment starter")
-        for path, text in seeds.items()
+    # A failed create-only write (not a skip of a live file) reds the scaffold rather than
+    # reporting a green "ready" over a template missing its brief.
+    seeded = put_files(
+        org,
+        repo,
+        {path: text.encode() for path, text in seeds.items()},
+        "init: assignment starter",
+        create_only=True,
     )
     set_repo_topics(org, repo, [f"assignment-{number}", "assignment"])
 
@@ -782,10 +781,10 @@ def scaffold_assignment(
         ):
             log_err("  ! could not push the solution branch")
             return 1
-    if seed_failures:
+    if not seeded:
         log_err(
-            f"  ! {seed_failures} starter file(s) could not be written - the assignment "
-            f"template is incomplete"
+            "  ! the starter files could not be written - the assignment template is "
+            "incomplete"
         )
         return 1
     log_ok(f"assignment template ready: {org}/{repo} (main + solution)")
