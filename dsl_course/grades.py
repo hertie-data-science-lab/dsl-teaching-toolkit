@@ -1916,33 +1916,27 @@ def load_sheets(wd: Path) -> dict[str, dict]:
 # ---------------------------------------------------------------------- gh/git wiring
 
 
-def _config_dir_names(cohort_org: str, folder: str) -> list[str]:
-    """The file names in one folder of the cohort's classroom-config ([] when it has no
-    such folder - the normal state before the first handout, not a fault)."""
+def sheet_slugs(cohort_org: str) -> list[str]:
+    """The assignments this cohort has a grading sheet for, off ONE listing.
+
+    The names, not the sheets: the only caller is the setup checklist, which wants a count
+    and a yes/no. Downloading and parsing each file to get them cost a request per
+    assignment, and `parse_sheet` raises - so one sheet a grader had half-typed in the
+    browser took the whole checklist down with it.
+
+    [] where the folder does not exist, which is the normal state before the first handout
+    rather than a fault - and, `gh` being optimistic here, also where the listing failed;
+    the checklist reports that cohort as having no sheets yet, which is what it would say
+    anyway."""
     code, out = gh(
         "api",
-        f"repos/{cohort_org}/{CONFIG_REPO}/contents/{folder}",
+        f"repos/{cohort_org}/{CONFIG_REPO}/contents/{SHEETS_DIR}",
         "--jq",
         ".[].name",
     )
-    return sorted(out.splitlines()) if code == 0 else []
-
-
-def load_grade_sources(cohort_org: str) -> dict[str, dict]:
-    """Every grading sheet in the cohort's classroom-config, keyed by assignment slug."""
-    sheets: dict[str, dict] = {}
-    for name in _config_dir_names(cohort_org, SHEETS_DIR):
-        if not name.endswith(".yml"):
-            continue
-        content = get_file_content(cohort_org, CONFIG_REPO, f"{SHEETS_DIR}/{name}")
-        if content is not None:
-            sheets[name[:-4]] = parse_sheet(content)
-    if not sheets:
-        log_err(
-            f"no {SHEETS_DIR}/ in {cohort_org}/{CONFIG_REPO} - hand out an assignment "
-            f"(which creates its grading sheet) first"
-        )
-    return sheets
+    if code != 0:
+        return []
+    return sorted(n[:-4] for n in out.splitlines() if n.endswith(".yml"))
 
 
 def _existing_repos(cohort_org: str) -> dict[str, dict] | None:
@@ -2338,7 +2332,9 @@ def _hold_undecided(
     return held
 
 
-def _gradebook_files(handle: str, book: dict[str, dict], titles) -> dict[str, bytes]:
+def _gradebook_files(
+    handle: str, book: dict[str, dict], titles: dict[str, str]
+) -> dict[str, bytes]:
     """The two files a student's private gradebook holds: the data and the page."""
     return {
         "grades.yml": render_yaml({"student": handle, "assignments": book}).encode(),
@@ -2383,8 +2379,8 @@ def distribute(
     submission repo's Feedback issue, each student's private gradebook, the registrar's
     export, and an email saying there is something new to read.
 
-    ONE clone of classroom-config and one pass over it - the sheets, the transition CSVs
-    and `distributed.csv` are all read locally, so the only per-student calls left are the
+    ONE clone of classroom-config and one pass over it - the sheets and `distributed.csv`
+    are both read locally, so the only per-student calls left are the
     writes. Every one of those is skipped when `distributed.csv` says the same content has
     already gone out, which is what makes a correction to one grade reach one student.
 

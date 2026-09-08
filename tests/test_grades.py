@@ -20,7 +20,7 @@ from tests.conftest import ROSTER_HEADER
 # ------------------------------------------------------ provisioning the gradebooks
 
 
-def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
+def test_ensure_gradebooks_skips_auditors(monkeypatch, capsys):
     # Auditors are never assessed, so they get no private gradebook repo. Dry-run keeps
     # this pure - the roster is the only input, and nothing is provisioned.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-student lines are verbose-only
@@ -39,7 +39,7 @@ def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
     assert "1 auditor row(s) skipped" in out
 
 
-def test_gradebook_sync_names_no_student_in_a_public_log(monkeypatch, capsys):
+def test_ensure_gradebooks_names_no_student_in_a_public_log(monkeypatch, capsys):
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     students = roster.parse(
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
@@ -395,7 +395,7 @@ def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
 # ------------------------------------------- ONE listing instead of a probe per gradebook
 
 
-def _sync_run(monkeypatch, listing, handles=("ada-l", "bob-b")):
+def _ensure_run(monkeypatch, listing, handles=("ada-l", "bob-b")):
     """`ensure_gradebooks` over `handles`, with `listing` (or an Exception) standing in
     for the org listing. Returns (the orgs listed, the gradebooks created)."""
     students = roster.parse(
@@ -428,7 +428,7 @@ def _sync_run(monkeypatch, listing, handles=("ada-l", "bob-b")):
     return listed, created
 
 
-def test_sync_lists_the_org_once_and_probes_no_gradebook(monkeypatch):
+def test_ensure_gradebooks_lists_the_org_once_and_probes_no_gradebook(monkeypatch):
     # A repo_exists per student cost a GET per student on every nightly sync, to ask what
     # one paginated listing already answers for the whole cohort.
     monkeypatch.setattr(
@@ -436,7 +436,7 @@ def test_sync_lists_the_org_once_and_probes_no_gradebook(monkeypatch):
         "repo_exists",
         lambda *a, **k: pytest.fail("a per-repo probe is back in the hot path"),
     )
-    listed, created = _sync_run(monkeypatch, [{"name": "grades-ada-l", "topics": []}])
+    listed, created = _ensure_run(monkeypatch, [{"name": "grades-ada-l", "topics": []}])
     assert listed == ["COHORT"], "one listing per run, not one per student"
     assert created == ["grades-bob-b"], "a listed gradebook was recreated"
 
@@ -448,7 +448,7 @@ def test_a_failed_listing_falls_back_to_probing_each_gradebook(monkeypatch):
     monkeypatch.setattr(
         grades, "repo_exists", lambda org, repo: probed.append(repo) or False
     )
-    listed, created = _sync_run(
+    listed, created = _ensure_run(
         monkeypatch, RuntimeError("could not list repos in COHORT: 502")
     )
     assert listed == ["COHORT"]

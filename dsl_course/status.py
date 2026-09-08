@@ -255,7 +255,7 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         f"{len(students)} student(s), {onboarded} onboarded" if students else "",
     )
 
-    grade_sources = grades.load_grade_sources(cohort_org)
+    sheets = grades.sheet_slugs(cohort_org)
     data["C3"] = _row(
         "C3",
         "Grades",
@@ -263,8 +263,8 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         grades.CONFIG_REPO,
         grades.SHEETS_DIR,
         cohort_branch,
-        bool(grade_sources),
-        f"{len(grade_sources)} assignment(s)" if grade_sources else "",
+        bool(sheets),
+        f"{len(sheets)} assignment(s)" if sheets else "",
     )
 
     team_data = teams.load(cohort_org)
