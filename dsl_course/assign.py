@@ -388,11 +388,18 @@ PATCH_KEPT = "the student's own edit kept"
 PATCH_FAILED = "failed"
 
 
-def patch_marker(files: dict[str, bytes]) -> str:
+def corrected_digests(files: dict[str, bytes]) -> dict[str, str]:
+    """`{path: blob sha}` for the correction - computed ONCE for the whole run.
+
+    Every repo asks the same question of the same bytes ("is this already there? is it
+    still what the hand-out gave them?"), and the answer is a sha of the correction, not
+    of the repo. Hashing inside the loop re-read every corrected file per student."""
+    return {path: blob_sha(body) for path, body in files.items()}
+
+
+def patch_marker(digests: dict[str, str]) -> str:
     """The idempotence marker for one patch: a digest of what it writes."""
-    fingerprint = "\n".join(
-        f"{path}:{blob_sha(body)}" for path, body in sorted(files.items())
-    )
+    fingerprint = "\n".join(f"{path}:{sha}" for path, sha in sorted(digests.items()))
     return PATCH_MARKER.format(digest=blob_sha(fingerprint.encode())[:12])
 
 
@@ -451,6 +458,7 @@ def patch_targets(listing: list[dict], slug: str) -> list[str]:
 def _to_patch(
     live: dict[str, str],
     corrected: dict[str, bytes],
+    digests: dict[str, str],
     handout: dict[str, str],
     overwrite: bool,
 ) -> tuple[dict[str, bytes], list[str]]:
@@ -467,7 +475,7 @@ def _to_patch(
     kept: list[str] = []
     for path, body in corrected.items():
         current = live.get(path)
-        if current == blob_sha(body):
+        if current == digests[path]:
             continue
         if current is not None and current != handout.get(path) and not overwrite:
             kept.append(path)
@@ -480,6 +488,7 @@ def patch_one_repo(
     cohort_org: str,
     repo: str,
     corrected: dict[str, bytes],
+    digests: dict[str, str],
     handout: dict[str, str],
     overwrite: bool,
 ) -> tuple[str, list[str]]:
@@ -502,7 +511,7 @@ def patch_one_repo(
             f"{cohort_org}/{repo}",
         )
         return PATCH_FAILED, []
-    write, kept = _to_patch(live, corrected, handout, overwrite)
+    write, kept = _to_patch(live, corrected, digests, handout, overwrite)
     if kept:
         log_person(
             f"    {cohort_org}/{repo}: keeping the student's own {', '.join(kept)}"
@@ -609,12 +618,13 @@ def patch_released(
         return 0
 
     on = datetime.now(timezone.utc).date()
-    marker = patch_marker(corrected)
+    digests = corrected_digests(corrected)
+    marker = patch_marker(digests)
     tally: dict[str, int] = {}
     notes = 0
     for repo in targets:
         verdict, written = patch_one_repo(
-            cohort_org, repo, corrected, handout, overwrite
+            cohort_org, repo, corrected, digests, handout, overwrite
         )
         tally[verdict] = tally.get(verdict, 0) + 1
         if verdict == PATCHED and note_the_patch(cohort_org, repo, written, marker, on):
@@ -626,7 +636,9 @@ def patch_released(
     if tally.get(PATCH_FAILED):
         frozen = "deferred - a submission repo failed"
     else:
-        frozen, _ = patch_one_repo(cohort_org, cohort_slug, corrected, handout, True)
+        frozen, _ = patch_one_repo(
+            cohort_org, cohort_slug, corrected, digests, handout, True
+        )
     log(
         f"  {cohort_slug} (the frozen hand-out): {frozen}; "
         + "; ".join(f"{n} {what}" for what, n in sorted(tally.items()))

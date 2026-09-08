@@ -614,10 +614,9 @@ def render_central_release(source_repos: list[str], cohort_orgs: list[str]) -> s
     )
 
 
-_ASSIGNMENT_DESC = "Course-org repo to hand out from"
-
-
-def _assignment_input(assignments: list[str], description: str = "") -> str:
+def _assignment_input(
+    assignments: list[str], description: str = "Course-org repo to hand out from"
+) -> str:
     """Which assignment TEMPLATE a button acts on - a dropdown of the discovered ones, or
     free-text before any exists. Named as in schedule.yml: `course_source_repo`, on every
     per-assignment button, so one word means one thing across the whole Actions tab.
@@ -625,7 +624,6 @@ def _assignment_input(assignments: list[str], description: str = "") -> str:
     `description` is for the buttons that do not hand anything out (deriving a starter,
     patching a released one), where "hand out from" would be a lie about what the run does.
     """
-    description = description or _ASSIGNMENT_DESC
     if assignments:
         return _choice_input("course_source_repo", description, assignments)
     return (

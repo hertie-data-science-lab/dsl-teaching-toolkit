@@ -2096,6 +2096,8 @@ def test_the_note_reads_as_a_sentence_however_many_files_it_names():
 
 
 def test_the_marker_changes_when_the_correction_does():
-    first = assign.patch_marker({"starter.py": AS_HANDED_OUT})
-    assert first != assign.patch_marker({"starter.py": FIXED})
-    assert first == assign.patch_marker({"starter.py": AS_HANDED_OUT})
+    def marker(body):
+        return assign.patch_marker(assign.corrected_digests({"starter.py": body}))
+
+    assert marker(AS_HANDED_OUT) != marker(FIXED)
+    assert marker(AS_HANDED_OUT) == marker(AS_HANDED_OUT)
