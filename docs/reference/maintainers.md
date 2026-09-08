@@ -316,10 +316,11 @@ Three Scheduled-release dispatches are needed, not two: the pass that hands out 
 also collect, and the DUE date and the CUTOFF drive different passes (refresh, then
 freeze). Each schedule edit the run makes drives a tick of its own as well (the cohort's
 `dispatch-scheduled-release.yml` fires on the push), which the harness waits out before
-dispatching. One-off setup: `python3 -m dsl_course.grades sync --cohort-org <demo cohort>`
+dispatching. One-off setup:
+`python3 -c "from dsl_course import grades; grades.ensure_gradebooks('<demo cohort>')"`
 once, so the test student's `grades-<handle>` repo already exists - a repo the run created
-is drift the teardown cannot take back. (There is no button for it any more: Sync
-gradebooks was retired with the other two grading workflows.)
+is drift the teardown cannot take back. There is no button and no subcommand for it any
+more: `distribute` provisions the gradebooks it needs, and that is the only caller.
 
 ## Working conventions
 

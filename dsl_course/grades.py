@@ -2271,16 +2271,6 @@ def ensure_gradebooks(cohort_org: str, dry_run: bool = False) -> int:
     return 1 if any(k.startswith("failed") for k in results) else 0
 
 
-def sync(cohort_org: str, dry_run: bool = False) -> int:
-    """`ensure_gradebooks` under the name the seeded workflows still call.
-
-    UNDOCUMENTED and temporary: an org runs whichever toolkit ref its `central_ref` names,
-    so a `sync-gradebooks.yml` written before the rename keeps invoking this until that
-    org's nightly Refresh replaces the file. Removed in Phase 4, once every org has
-    refreshed past this."""
-    return ensure_gradebooks(cohort_org, dry_run=dry_run)
-
-
 # ---------------------------------------------------------------- what was distributed
 
 # One row per thing SAID, so a re-run says nothing twice and a failure is retried exactly
@@ -3022,38 +3012,31 @@ def _email_updates(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="action", required=True)
-    for name in ("sync", "distribute"):
-        p = sub.add_parser(name)
-        p.add_argument("--cohort-org", required=True)
-        if name == "sync":
-            p.add_argument("--dry-run", action="store_true")
-        if name == "distribute":
-            p.add_argument(
-                "--assignment",
-                default="",
-                help="One assignment slug; default is every sheet in the cohort.",
-            )
-            p.add_argument(
-                "--no-notify",
-                action="store_true",
-                help="Skip the email notification (just push the grades).",
-            )
-            # Default ON: the rendered workflow passes --dry-run / --no-dry-run
-            # explicitly, so a bare local invocation cannot send by accident.
-            # `sync --dry-run` above keeps store_true - it is not a mail path.
-            p.add_argument(
-                "--dry-run",
-                action=argparse.BooleanOptionalAction,
-                default=True,
-                help="Preview the grade emails; push nothing, send nothing (default).",
-            )
+    p = sub.add_parser("distribute")
+    p.add_argument("--cohort-org", required=True)
+    p.add_argument(
+        "--assignment",
+        default="",
+        help="One assignment slug; default is every sheet in the cohort.",
+    )
+    p.add_argument(
+        "--no-notify",
+        action="store_true",
+        help="Skip the email notification (just push the grades).",
+    )
+    # Default ON: the rendered workflow passes --dry-run / --no-dry-run explicitly, so a
+    # bare local invocation cannot send by accident.
+    p.add_argument(
+        "--dry-run",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Preview the grade emails; push nothing, send nothing (default).",
+    )
     args = parser.parse_args()
 
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
-        if args.action == "sync":
-            return sync(args.cohort_org, dry_run=args.dry_run)
         return distribute(
             args.cohort_org,
             notify=not args.no_notify,

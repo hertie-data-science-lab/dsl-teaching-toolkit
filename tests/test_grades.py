@@ -72,7 +72,7 @@ def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
         "bob@uni.edu,Bob,,bob-b,44,dsl-def\n"  # blank role -> enrolled
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    assert grades.sync("COHORT", dry_run=True) == 0
+    assert grades.ensure_gradebooks("COHORT", dry_run=True) == 0
     out = capsys.readouterr().out
     assert "grades-ada-l" in out and "grades-bob-b" in out
     assert "eve-e" not in out
@@ -86,7 +86,7 @@ def test_gradebook_sync_names_no_student_in_a_public_log(monkeypatch, capsys):
         ROSTER_HEADER + "\nada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc\n"
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    assert grades.sync("COHORT", dry_run=True) == 0
+    assert grades.ensure_gradebooks("COHORT", dry_run=True) == 0
     out = capsys.readouterr().out
     assert "ada-l" not in out
     assert "Syncing 1 gradebook repo(s)" in out  # the aggregate still reports
@@ -450,8 +450,8 @@ def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
 
 
 def _sync_run(monkeypatch, listing, handles=("ada-l", "bob-b")):
-    """grades.sync over `handles`, with `listing` (or an Exception) standing in for the
-    org listing. Returns (the orgs listed, the gradebooks created)."""
+    """`ensure_gradebooks` over `handles`, with `listing` (or an Exception) standing in
+    for the org listing. Returns (the orgs listed, the gradebooks created)."""
     students = roster.parse(
         ROSTER_HEADER
         + "\n"
@@ -478,7 +478,7 @@ def _sync_run(monkeypatch, listing, handles=("ada-l", "bob-b")):
     monkeypatch.setattr(grades, "set_repo_topics", lambda *a, **k: True)
     monkeypatch.setattr(grades, "grant_faculty", lambda *a, **k: None)
     monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
-    assert grades.sync("COHORT") == 0
+    assert grades.ensure_gradebooks("COHORT") == 0
     return listed, created
 
 
@@ -519,7 +519,7 @@ def test_a_dry_run_lists_nothing(monkeypatch):
     monkeypatch.setattr(
         grades, "list_org_repos", lambda org: pytest.fail("a dry run listed the org")
     )
-    assert grades.sync("COHORT", dry_run=True) == 0
+    assert grades.ensure_gradebooks("COHORT", dry_run=True) == 0
 
 
 # ------------------------------------------------------------------ distribute, end to end

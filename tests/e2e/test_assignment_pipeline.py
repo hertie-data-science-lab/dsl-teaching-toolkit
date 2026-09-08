@@ -20,9 +20,9 @@ harness print repo and handle names locally. Budget ~20-30 minutes of wall clock
 all of it waiting on Actions.
 
 One-off setup: the test student's `grades-<handle>` repo must already exist - run
-`python3 -m dsl_course.grades sync --cohort-org <cohort>` once (the Sync gradebooks button
-was retired). Distribute would otherwise create it, and a repo this run created is estate
-drift the teardown cannot take back - it is the student's namespace, not the run's.
+`python3 -c "from dsl_course import grades; grades.ensure_gradebooks('<cohort>')"` once.
+Distribute would otherwise create it, and a repo this run created is estate drift the
+teardown cannot take back - it is the student's namespace, not the run's.
 
 Everything this run creates is namespaced `assignment-90-<run id>`. If it dies halfway,
 `python -m tests.e2e.cleanup --run-id <run id>` puts the orgs back.
@@ -234,7 +234,7 @@ def _preflight(run_id: str) -> None:
 
     # Distribute provisions a missing gradebook, and a repo it created is estate drift no
     # namespace sweep can undo (it is not this run's namespace - it is the student's).
-    # `python3 -m dsl_course.grades sync` once by hand and this passes for ever after.
+    # Run `grades.ensure_gradebooks` once by hand and this passes for ever after.
     gradebook = f"{course.GRADEBOOK_PREFIX}{student.handle()}"
     assert gradebook in {row["name"] for row in discovery.list_org_repos(COHORT_ORG)}, (
         f"{gradebook} does not exist yet - distribute would create it and the teardown "
