@@ -171,6 +171,18 @@ COURSE = Digest(
     cc_maintainer=True,
 )
 
+# Every digest a COHORT has, in the order a reader meets the files. The pre-flight builds
+# its own map (each of these needs a different loader), so this exists for the surfaces
+# that only want to know WHICH issues a cohort can have standing - `status`, and the docs
+# check. Listed once so a seventh digest cannot be added and then quietly go unreported.
+COHORT_DIGESTS: tuple[Digest, ...] = (
+    PEOPLE,
+    ROSTER,
+    TEAMS,
+    GRADING_SHEETS,
+    GRADING_CONFIG,
+)
+
 # What closing one of these issues says. One string, because two issues are closed with
 # it - the one whose faults have all been fixed, and the one another has taken over.
 CLEARED_COMMENT = (

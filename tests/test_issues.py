@@ -260,3 +260,37 @@ def test_close_without_a_comment_passes_none(gh):
 def test_a_close_that_fails_is_counted(gh):
     gh([_issue(7, TITLE)], write_code=1)
     assert issues.close_issues_titled(REPO, TITLE) == 1
+
+
+# ------------------------------------------------------- every open title, in one listing
+
+
+def test_open_titles_answers_about_several_issues_in_one_read(gh):
+    # `status` asks about seven known titles at once. One search apiece is seven round
+    # trips for one table - and unlike a caller about to WRITE one of them, it needs no
+    # body and no closed twin.
+    fake = gh(
+        [_issue(3, TITLE), _issue(4, "people.yml has entries the sync cannot use")]
+    )
+    assert issues.open_titles(REPO) == {
+        TITLE,
+        "people.yml has entries the sync cannot use",
+    }
+    assert len(fake.did("issue", "list")) == 1
+
+
+def test_open_titles_is_the_whole_list_not_a_title_search(gh):
+    # No `--search`: the caller matches the titles it knows about itself, and a search
+    # term would silently cap the answer to whatever one phrase matched.
+    fake = gh([_issue(3, TITLE)])
+    issues.open_titles(REPO)
+    (listed,) = fake.did("issue", "list")
+    assert "--search" not in listed and "--state" in listed
+
+
+def test_a_listing_that_could_not_be_read_is_not_an_empty_one(gh):
+    # Absence has to be a real answer: a status table that read a rate limit as "nothing
+    # is open" would report a cohort with a broken roster as healthy.
+    gh([], list_code=1)
+    with pytest.raises(RuntimeError):
+        issues.open_titles(REPO)

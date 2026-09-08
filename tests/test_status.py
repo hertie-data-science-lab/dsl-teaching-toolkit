@@ -6,7 +6,17 @@ from __future__ import annotations
 
 import json
 
-from dsl_course import grades, mailer, roster, schedule, status, sync_faculty, teams
+from dsl_course import (
+    config_digest,
+    grades,
+    mailer,
+    roster,
+    schedule,
+    source_digest,
+    status,
+    sync_faculty,
+    teams,
+)
 
 _ROW = {
     "label": "x",
@@ -82,7 +92,7 @@ def test_markdown_mode_keeps_loader_chatter_off_stdout(monkeypatch, capsys):
     assert "Jane Doe" not in out and "# table" in out
 
 
-def _stub_every_read(monkeypatch):
+def _stub_every_read(monkeypatch, standing=None):
     """Answer each loader `collect()` reads with "this cohort is empty", so the real
     row-building runs end to end with no gh. `conftest._no_live_gh` catches any read
     this misses."""
@@ -93,6 +103,7 @@ def _stub_every_read(monkeypatch):
     monkeypatch.setattr(teams, "load", lambda org: {})
     monkeypatch.setattr(schedule, "load", lambda org: schedule.Schedule())
     monkeypatch.setattr(sync_faculty, "load_cohort_faculty", lambda org: None)
+    monkeypatch.setattr(status, "open_titles", lambda repo: set(standing or ()))
 
 
 def test_main_walks_every_row_and_points_c7_at_classroom_config(monkeypatch, capsys):
@@ -212,3 +223,74 @@ def test_b8_stays_ok_when_only_the_maintainer_address_is_missing(monkeypatch):
     assert row["status"] == "ok"
     assert f"{mailer.MAINTAINER_ENV} unset" in row["detail"]
     assert "GRAPH_SENDER" in row["detail"]
+
+
+# ------------------------------------------- the rows about faults, not about inputs
+#
+# C8 and C9 are the only rows that do not describe an input file: they say which of this
+# cohort's digest issues are standing. They exist so the table a faculty member opens
+# agrees with the mail already in their inbox - every other row can read perfectly while
+# a roster nobody can parse sits in an open issue.
+
+
+def test_c8_and_c9_are_clean_when_no_digest_issue_is_open(monkeypatch):
+    _stub_every_read(monkeypatch)
+    data = status.collect("Course", "Cohort-f2026")
+    assert data["C8"]["status"] == "ok"
+    assert data["C8"]["detail"] == "no source-fault issue open"
+    assert data["C9"]["status"] == "ok"
+    assert data["C9"]["detail"] == "config faults: 0 open"
+
+
+def test_c8_reports_the_release_plans_own_digest(monkeypatch):
+    _stub_every_read(monkeypatch, standing={source_digest.TITLE})
+    row = status.collect("Course", "Cohort-f2026")["C8"]
+    assert row["status"] == status.ATTENTION
+    assert row["detail"] == "the release plan cites sources nobody has staged"
+    assert row["edit_url"] == "https://github.com/Cohort-f2026/classroom-config/issues"
+
+
+def test_c9_names_the_files_whose_digest_issues_are_standing(monkeypatch):
+    _stub_every_read(
+        monkeypatch,
+        standing={config_digest.ROSTER.title, config_digest.TEAMS.title},
+    )
+    row = status.collect("Course", "Cohort-f2026")["C9"]
+    assert row["status"] == status.ATTENTION
+    assert row["detail"] == "config faults: 2 open - students.csv, teams.csv"
+
+
+def test_c9_covers_every_digest_a_cohort_can_have(monkeypatch):
+    # A seventh digest added without a line here would be a file this table never
+    # mentions, in the one place a reader goes to ask what is wrong.
+    _stub_every_read(
+        monkeypatch, standing={d.title for d in config_digest.COHORT_DIGESTS}
+    )
+    row = status.collect("Course", "Cohort-f2026")["C9"]
+    assert f"{len(config_digest.COHORT_DIGESTS)} open" in row["detail"]
+
+
+def test_the_schedule_digest_is_c8s_alone_and_never_counted_twice(monkeypatch):
+    # schedule.yml has its own row because its faults keep the other clock. It must not
+    # also appear in C9, or one broken file would read as two.
+    _stub_every_read(monkeypatch, standing={source_digest.TITLE})
+    data = status.collect("Course", "Cohort-f2026")
+    assert data["C9"]["detail"] == "config faults: 0 open"
+
+
+def test_a_fault_row_links_the_issue_list_in_both_states(monkeypatch):
+    md = status.render_markdown(
+        "Course",
+        "Cohort-f2026",
+        _data(C9={**_ROW, "status": status.ATTENTION, "link_text": "open"}),
+    )
+    assert "ATTENTION" in md and "[open](https://x/edit)" in md
+
+
+def test_c3_points_at_the_grading_sheets_folder(monkeypatch):
+    # It said `grades/`, a path retired in 2026-09 - so the one link a grader would
+    # follow from this table opened a file-creation form for a folder nothing reads.
+    _stub_every_read(monkeypatch)
+    row = status.collect("Course", "Cohort-f2026")["C3"]
+    assert row["path"] == "grading_sheets/"
+    assert "grading_sheets/" in row["label"] and "grading_sheets/" in row["edit_url"]
