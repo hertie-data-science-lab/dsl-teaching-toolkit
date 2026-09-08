@@ -306,7 +306,7 @@ PUBLICATION_DENYLIST = (
     "solution",
     "solutions",
     "grading_config.yml",
-    "grading.yml",  # the pre-rename name, still on every template scaffolded before it
+    "grading.yml",  # the pre-rename name; the engine stopped reading it, this list has not
     "tests",
     ".env",
     ".env.*",

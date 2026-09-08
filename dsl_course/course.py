@@ -239,7 +239,7 @@ def resolve_is_group(
 ) -> bool:
     """The SINGLE precedence for group-vs-individual, shared by every resolver.
 
-    An explicit force (the Grade-assignment workflow's checkbox / `--group`) wins; else the
+    An explicit force (a workflow's `group` input / `--group`) wins; else the
     COHORT's declaration - `assignments.<slug>.type` in classroom-config/schedule.yml, passed
     as `schedule_type`; else the template's design-time grading_config.yml `type:`, passed as
     `template_group` (True/False, or None when not consulted); else individual. Pure: each

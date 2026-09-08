@@ -167,9 +167,10 @@ _CHECK_TEAM = """  check-team:
 #     creates and configures a whole org and then converges it, and the scheduler's release
 #     job, whose `assignment` handout provisions one repo per student for every cohort at
 #     once - so two cohorts handing out on the same tick outlast the ordinary budget.
-# 120 covers the two jobs that grade: collect budgets 300s PER submission subprocess and
-#     walks a cohort serially - the manual Grade assignment button, and the scheduler's
-#     autograde job, which is one matrix leg per cohort.
+# 120 covers the jobs that grade: collect budgets 300s PER submission subprocess and walks
+#     a cohort serially - the manual Collect submissions button and the scheduler's
+#     autograde job, which is one matrix leg per cohort - and Distribute grades, which
+#     writes a gradebook, a comment and an email per student in series.
 _TIMEOUT_DEFAULT = 30
 _TIMEOUT_MANY_REPOS = 60
 _TIMEOUT_GRADING = 120

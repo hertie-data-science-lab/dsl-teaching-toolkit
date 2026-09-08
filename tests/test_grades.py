@@ -17,10 +17,7 @@ from dsl_course import gh_contents, ghcli, grades, repos, roster
 from dsl_course.schedule import AssignmentEntry, Schedule
 from tests.conftest import ROSTER_HEADER
 
-# -------------------------------------------------------- write-once machine columns
-# `autograde_score` and `team` are filled by a machine but OWNED by whoever marks: a
-# non-empty cell is never overwritten, so a hand-corrected score survives every re-grade,
-# scheduled or manual. Only empty cells get filled.
+# ------------------------------------------------------ provisioning the gradebooks
 
 
 def test_gradebook_sync_skips_auditors(monkeypatch, capsys):
