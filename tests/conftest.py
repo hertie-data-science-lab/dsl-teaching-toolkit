@@ -113,7 +113,8 @@ def _clear_process_memos():
     paths, a repo's metadata and its last committer, whether a central ref exists, the
     classroom-config files a run re-reads (students.csv, teams.csv, schedule.yml,
     people.yml), an assignment's definition, its course's defaults and its handed-out
-    starters, and the login the token belongs to. Tests reuse the same org/repo names
+    starters, whether this runner can isolate student code, and the login the token
+    belongs to. Tests reuse the same org/repo names
     with different fakes, so clear them between tests."""
     site._repo_tree.cache_clear()
     central.central_ref_exists.cache_clear()
@@ -125,6 +126,8 @@ def _clear_process_memos():
     grades._grading_text.cache_clear()
     grades.course_assignment_defaults.cache_clear()
     collect._starter_notebook_shas.cache_clear()
+    collect.sandbox_user.cache_clear()
+    collect.sandbox_unusable.cache_clear()
     gh_contents.last_committer.cache_clear()
     sync_faculty.load_cohort_faculty.cache_clear()
     ghcli.bot_login.cache_clear()

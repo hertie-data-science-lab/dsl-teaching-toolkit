@@ -105,7 +105,7 @@ import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -115,6 +115,7 @@ from pathlib import Path
 from . import course, grades, roster, schedule, sync_teams, teams
 from .course import (
     CONFIG_REPO,
+    SANDBOX_USER,
     SOLUTION_BRANCH,
     resolve_is_group,
     submission_repo,
@@ -1773,10 +1774,134 @@ def _grader_dep_missing(module: str) -> bool:
     return True
 
 
-def _run_limited(argv: list[str], *, cwd: str, env: dict, timeout: int) -> bool:
-    """Run `argv` in its OWN session/process group under `_apply_rlimits`. Returns True if it
-    exited on its own (ANY exit code - a non-zero pytest run is still a valid grading result),
-    False if it blew the wall-clock `timeout` and the whole group was killed.
+# --------------------------------------------------------------- the sandbox uid
+#
+# The boundary a graded subprocess is on the wrong side of is the UID, not the environment.
+# On Linux a process may read `/proc/<pid>/environ` of any process running as its own user,
+# and the grading process holds the org-owner PAT for the whole leg - so a notebook cell
+# doing `grep -l GH_TOKEN= /proc/*/environ` reads it straight out, whatever we stripped from
+# the child's own environment and whatever step ordering the workflow keeps. `_run_limited`
+# is the ONE place any of this is spawned from, so uid separation goes here and every
+# graded subprocess gets it by construction.
+#
+# In Actions the sandbox account is created once per job by the rendered preamble (see
+# workflows_render), and this fails CLOSED: no account, no `sudo -n`, nothing graded. Off a
+# runner - a maintainer's laptop - there is no account to sudo to and no bot token in the
+# environment either, so it degrades to the in-process sandbox and says so, once, loudly.
+_ACTIONS = "GITHUB_ACTIONS"
+
+SANDBOX_UNAVAILABLE = (
+    f"the `{SANDBOX_USER}` sandbox account is not usable on this runner (`sudo -n -u "
+    f"{SANDBOX_USER}` failed), and student code must never run as the process holding the "
+    f"bot token - nothing was executed"
+)
+_SANDBOX_LOCAL_WARNING = (
+    f"  ! running graded code as THIS user: there is no `{SANDBOX_USER}` account to drop "
+    f"to outside GitHub Actions. Anything a submission runs can read this process's "
+    f"environment and files. Local runs only - the unattended graders fail closed."
+)
+
+
+def _sudo(*args: str) -> bool:
+    """One non-interactive privileged helper command. True when it succeeded.
+
+    `-n` and never a prompt: this runs inside an unattended job, and a `sudo` that waits
+    for a password is a job that hangs until the six-hour ceiling. A runner without
+    passwordless sudo is a runner that grades nothing (see `sandbox_unusable`)."""
+    try:
+        return (
+            subprocess.run(
+                ["sudo", "-n", *args],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            ).returncode
+            == 0
+        )
+    except OSError:
+        return False  # no sudo binary at all
+
+
+@cache
+def sandbox_user() -> str:
+    """The account graded subprocesses run as, or `""` when they run as this process does.
+
+    Probed once per process, and only under Actions: on a laptop there is no such account,
+    and asking `sudo` about it would at best cost a password prompt in an interactive
+    terminal."""
+    if os.environ.get(_ACTIONS) != "true":
+        return ""
+    return SANDBOX_USER if _sudo("-u", SANDBOX_USER, "true") else ""
+
+
+@cache
+def sandbox_unusable() -> str:
+    """Why no student code may be run right now, or `""` when it may.
+
+    Asked ONCE per assignment, before anything clones a submission, so a runner without the
+    sandbox records one skip rather than grading a whole cohort as the token holder."""
+    if sandbox_user():
+        return ""
+    if os.environ.get(_ACTIONS) == "true":
+        return SANDBOX_UNAVAILABLE
+    log_err(_SANDBOX_LOCAL_WARNING)
+    return ""
+
+
+class SandboxUnavailable(RuntimeError):
+    """A graded subprocess was reached for on a runner that cannot isolate it.
+
+    A backstop, not a path anyone should hit: `collect` asks `sandbox_unusable` before it
+    reaches a target at all. It exists so a call site added later cannot quietly run
+    student code as the token holder."""
+
+
+def _sandbox_roots(paths: Iterable[str | Path]) -> list[Path]:
+    """The directory trees to hand to the sandbox user, one per temporary root.
+
+    Widened from each path to the outermost ancestor still inside the system temp
+    directory, because a `mkdtemp` root is mode 0700: chowning `…/tmpXYZ/sub` alone leaves
+    `…/tmpXYZ` unreadable to the sandbox user, which cannot then reach the checkout at all.
+    `/tmp` itself is world-traversable, so the widening stops there. A path outside the
+    temp directory is handed over as it stands."""
+    tmp = Path(tempfile.gettempdir()).resolve()
+    roots: list[Path] = []
+    for path in paths:
+        node = Path(path).resolve()
+        if tmp in node.parents:
+            while node.parent != tmp:
+                node = node.parent
+        if node not in roots:
+            roots.append(node)
+    return roots
+
+
+def _run_limited(
+    argv: list[str],
+    *,
+    cwd: str,
+    env: dict,
+    timeout: int,
+    writable: Iterable[str | Path] = (),
+) -> bool:
+    """Run `argv` AS THE SANDBOX USER, in its own session/process group under
+    `_apply_rlimits`. Returns True if it exited on its own (ANY exit code - a non-zero
+    pytest run is still a valid grading result), False if it blew the wall-clock `timeout`.
+
+    The single choke point every graded subprocess goes through, which is why the uid
+    separation lives here: the notebook execution, the notebook-to-script conversion, the
+    hidden tests / `run.sh`, and the grader's reading-copy export all arrive at this
+    function and none of them can opt out. `cwd` and `writable` name the trees the sandbox
+    user needs (widened to their temporary roots, see `_sandbox_roots`); they are chowned
+    to it before the run and back afterwards, so everything the grader reads next - the
+    executed notebook, the JUnit report, the rendered copy - is its own again.
+
+    Every sandbox process is killed by uid when this returns, however it returns. A
+    `fork(); setsid(); fork()` daemon escapes the process GROUP by definition, and this
+    function is called once per submission per stage: a survivor of student A's run would
+    otherwise still be alive while student B's clone sits in a predictable temp path, free
+    to read it, tamper with it, or forge the JUnit report B is scored on. `killpg` cannot
+    reach those processes at all once they run as another uid - only `pkill -u` can.
 
     `subprocess.run(timeout=)` SIGKILLs only the direct child, orphaning the grandchildren a
     fork/memory bomb spawns - and the bomb can OOM-kill the whole job before the timeout even
@@ -1790,31 +1915,69 @@ def _run_limited(argv: list[str], *, cwd: str, env: dict, timeout: int) -> bool:
     seconds) - a memory bomb wearing the runner's own uid. Discarding at the fd means the
     child's writes cost us nothing, and `proc.wait(timeout=)` replaces the `communicate()`
     that only existed to drain those pipes."""
-    proc = subprocess.Popen(
-        argv,
-        cwd=cwd,
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-        # The grading process is single-threaded, so the window between fork and exec runs no
-        # Python that could deadlock on a lock another thread held - the PLW1509 hazard.
-        preexec_fn=_apply_rlimits,  # noqa: PLW1509
-    )
+    if unusable := sandbox_unusable():
+        raise SandboxUnavailable(unusable)
+    user = sandbox_user()
+    roots = _sandbox_roots([cwd, *writable]) if user else []
+    for root in roots:
+        _sudo("chown", "-R", user, str(root))
+    # `env -i` and not sudo's own env handling: sudo's policy decides what survives, and
+    # what has to reach the child here is EXACTLY `_sanitised_env` - no more (the parent's
+    # leftovers) and no less (PATH, the proxy vars that take the network away). HOME and
+    # TMPDIR are re-pointed into the tree the sandbox user now owns, because the inherited
+    # ones belong to the runner's account: a `~/.jupyter` it cannot write is a stack of
+    # warnings on every submission, and a temp file it leaves outside the graded tree is
+    # one nothing cleans up.
+    spawn = argv
+    if user:
+        env = {**env, "HOME": str(roots[0]), "TMPDIR": str(roots[0])}
+        spawn = [
+            "sudo",
+            "-n",
+            "-u",
+            user,
+            "env",
+            "-i",
+            *(f"{name}={value}" for name, value in sorted(env.items())),
+            *argv,
+        ]
     try:
-        proc.wait(timeout=timeout)
-        return True
-    except subprocess.TimeoutExpired:
+        proc = subprocess.Popen(
+            spawn,
+            cwd=cwd,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            # The grading process is single-threaded, so the window between fork and exec runs no
+            # Python that could deadlock on a lock another thread held - the PLW1509 hazard.
+            preexec_fn=_apply_rlimits,  # noqa: PLW1509
+        )
         try:
-            # Kill proc.pid AS the group id, not `getpgid(proc.pid)`: start_new_session makes
-            # the child its own group leader (pgid == pid) at exec, and re-reading the pgid now
-            # would follow a child that has since setsid()'d away - killing its NEW group and
-            # leaving the original group's workers (the fork bomb) alive.
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            proc.kill()  # group already gone / kill not permitted - fall back to the child
-        proc.wait()  # reap the (killed) group leader so it isn't left a zombie
-        return False
+            proc.wait(timeout=timeout)
+            return True
+        except subprocess.TimeoutExpired:
+            try:
+                # Kill proc.pid AS the group id, not `getpgid(proc.pid)`: start_new_session makes
+                # the child its own group leader (pgid == pid) at exec, and re-reading the pgid now
+                # would follow a child that has since setsid()'d away - killing its NEW group and
+                # leaving the original group's workers (the fork bomb) alive. Under the sandbox
+                # this reaches `sudo` and nothing beyond it; the `pkill -u` below is what
+                # actually ends the run.
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                proc.kill()  # group already gone / kill not permitted - fall back to the child
+            proc.wait()  # reap the (killed) group leader so it isn't left a zombie
+            return False
+    finally:
+        # Whatever happened above - a clean exit, a timeout, an exception on the way in -
+        # nothing of this submission's may still be running when the next one is cloned.
+        # Kill FIRST, then take the files back: a survivor that outlived the chown would be
+        # writing into a tree the grader is about to read as its own.
+        if user:
+            _sudo("pkill", "-9", "-u", user)
+            for root in roots:
+                _sudo("chown", "-R", f"{os.getuid()}:{os.getgid()}", str(root))
 
 
 # ------------------------------------------------------------------ the completion check
@@ -2065,6 +2228,8 @@ def _check_completion(
         cwd=str(notebook.parent),
         env=_completion_env(),
         timeout=RUN_TIMEOUT,
+        # The executed copy lands under `run_root`, which is outside the checkout.
+        writable=(run_root,),
     ):
         log_err(
             f"  ! the completion check timed out after {RUN_TIMEOUT}s (process group "
@@ -2202,6 +2367,9 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
             cwd=run,
             env=env,
             timeout=RUN_TIMEOUT,
+            # The runspace is the cwd; the SUBMISSION is a second tree, and the tests
+            # import from it.
+            writable=(workdir,),
         )
         if not completed:
             log_err(
@@ -2614,7 +2782,14 @@ def collect(
     # no tests written) is exactly the one that wants it, and each of those returns from
     # this function a few lines further down. It never changes the exit code: see
     # `export_grader_documents`.
-    if gspec.grader_pdf:
+    # Whether student code may be run AT ALL, decided once and before anything clones a
+    # submission. Every stage below executes the students' own code, and on this runner
+    # that is only safe under a separate uid (see `sandbox_unusable`) - so a runner without
+    # one grades nothing rather than grading a cohort as the process holding the PAT. The
+    # reading-copy export is inside the fence too: it runs `python -m jupyter` from a
+    # directory the student wrote.
+    no_sandbox = sandbox_unusable()
+    if gspec.grader_pdf and not no_sandbox:
         export_grader_documents(cohort_org, slug, key, is_group, deadline, dry_run)
 
     def freeze_sheet(
@@ -2657,6 +2832,16 @@ def collect(
             f"next run seals it and then records"
         )
         return False
+
+    if no_sandbox:
+        # FAIL CLOSED. The sheet is still frozen - the deadline passed either way - and the
+        # skip is recorded like any other decision not to machine-mark, so the quarter-hour
+        # cron does not re-decide it and no target is ever executed. Fix the runner and
+        # delete `autograde/<slug>/` to grade it once.
+        log_err(f"  ! {no_sandbox}")
+        if not sealed():
+            return 1
+        return _record_skip(cohort_org, slug, no_sandbox, dry_run)
 
     with tempfile.TemporaryDirectory() as sd:
         soldir = Path(sd) / "sol"

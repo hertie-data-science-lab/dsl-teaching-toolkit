@@ -437,7 +437,7 @@ def _fake_nbconvert(monkeypatch, written_suffix: str | None):
     output (None = it wrote nothing at all); pytest always drops a passing junit report. The
     stub returns True (the process exited on its own) - the killpg/timeout path is False."""
 
-    def fake_run_limited(argv, *, cwd, env, timeout):
+    def fake_run_limited(argv, *, cwd, env, timeout, **_):
         if "nbconvert" in argv and written_suffix is not None:
             nb = Path(argv[-1])
             (nb.parent / (nb.stem + written_suffix)).write_text(
@@ -552,7 +552,7 @@ def test_run_tests_abandons_the_submission_on_the_first_convert_timeout(
     # timeout abandons the submission instead; the caller records the usual zero.
     calls: list[list[str]] = []
 
-    def always_times_out(argv, *, cwd, env, timeout):
+    def always_times_out(argv, *, cwd, env, timeout, **_):
         calls.append(argv)
         return False
 
@@ -1876,7 +1876,7 @@ def test_the_run_script_is_handed_the_report_path_the_submission_and_the_runspac
 ):
     seen: dict = {}
 
-    def fake_run_limited(argv, *, cwd, env, timeout):
+    def fake_run_limited(argv, *, cwd, env, timeout, **_):
         seen.update(argv=argv, cwd=cwd, env=env, timeout=timeout)
         Path(env[collect.JUNIT_OUT_ENV]).write_text(_JUNIT)
         return True
@@ -1952,7 +1952,7 @@ def test_a_run_script_is_never_looked_for_in_the_submission(monkeypatch, tmp_pat
     # checkout, which is never on this path - it would be a submission grading itself.
     spawned: list[list[str]] = []
 
-    def fake_run_limited(argv, *, cwd, env, timeout):
+    def fake_run_limited(argv, *, cwd, env, timeout, **_):
         spawned.append(argv)
         if "pytest" in argv:
             report = next(a for a in argv if a.startswith("--junitxml="))
@@ -1985,6 +1985,196 @@ def test_a_run_script_does_not_need_pytest_installed(monkeypatch, tmp_path):
     )
 
     assert collect._run_tests(work, tests)["score"] == 1
+
+
+def _sandboxed(monkeypatch, tmp_path=None, sudo_works: bool = True) -> list[list[str]]:
+    """Put the process where `collect` believes it is on a runner, with `sudo` answering.
+
+    Returns the privileged commands `collect` runs, in order - the probe, the chowns, the
+    kill. The `sudo` boundary is the stub; everything above it is the real code. `tmp_path`
+    stands in for the system temp directory, so a directory made directly under it has the
+    shape of a `mkdtemp` root (which is what `_sandbox_roots` widens to)."""
+    ran: list[list[str]] = []
+
+    def fake_sudo(*args: str) -> bool:
+        ran.append(list(args))
+        return sudo_works
+
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    monkeypatch.setattr(collect, "_sudo", fake_sudo)
+    if tmp_path is not None:
+        monkeypatch.setattr(collect.tempfile, "gettempdir", lambda: str(tmp_path))
+    collect.sandbox_user.cache_clear()
+    collect.sandbox_unusable.cache_clear()
+    return ran
+
+
+def test_the_tree_handed_over_is_the_whole_temporary_root(monkeypatch, tmp_path):
+    # A mkdtemp root is mode 0700: chowning `…/tmpXYZ/sub` alone leaves `…/tmpXYZ`
+    # unreadable to the sandbox user, which then cannot reach the checkout at all. So the
+    # hand-over widens to the outermost directory still inside the temp dir - and stops
+    # there, because /tmp itself is world-traversable and must not be touched.
+    monkeypatch.setattr(collect.tempfile, "gettempdir", lambda: str(tmp_path))
+    root = tmp_path / "tmpXYZ"
+    (root / "sub" / "deep").mkdir(parents=True)
+    outside = tmp_path.parent / "elsewhere"
+
+    assert collect._sandbox_roots([root / "sub" / "deep", root / "sub"]) == [root]
+    assert collect._sandbox_roots([outside]) == [outside.resolve()]
+
+
+def test_student_code_runs_as_a_different_user_than_the_token_holder(
+    monkeypatch, tmp_path
+):
+    # RELEASE-BLOCKING if this ever stops holding. Stripping the token from the child's
+    # environment is not the boundary: on Linux a process may read /proc/<pid>/environ of
+    # anything running as its own user, and this process holds the org-owner PAT for the
+    # whole grading leg. So `grep -l GH_TOKEN= /proc/*/environ` from a notebook cell reads
+    # it out, whatever we removed from the cell's own environment. The uid is the boundary.
+    _sandboxed(monkeypatch, tmp_path)
+    work = tmp_path / "tmpXYZ"
+    work.mkdir()
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(
+        collect.subprocess, "Popen", lambda argv, **kw: spawned.append(argv) or _Exits()
+    )
+
+    collect._run_limited(
+        [sys.executable, "-c", "pass"],
+        cwd=str(work),
+        env={"PATH": "/usr/bin", "PYTHONSAFEPATH": "1"},
+        timeout=1,
+    )
+
+    assert spawned[0] == [
+        "sudo",
+        "-n",
+        "-u",
+        collect.SANDBOX_USER,
+        "env",
+        "-i",
+        # EXACTLY the sanitised environment - `env -i` rather than sudo's own policy, which
+        # decides for itself what survives. HOME and TMPDIR are re-pointed into the tree
+        # the sandbox user was just given; the runner's own are not writable by it.
+        f"HOME={work}",
+        "PATH=/usr/bin",
+        "PYTHONSAFEPATH=1",
+        f"TMPDIR={work}",
+        sys.executable,
+        "-c",
+        "pass",
+    ]
+
+
+def test_the_graded_tree_is_handed_over_and_taken_back_around_every_run(
+    monkeypatch, tmp_path
+):
+    ran = _sandboxed(monkeypatch, tmp_path)
+    monkeypatch.setattr(collect.subprocess, "Popen", lambda argv, **kw: _Exits())
+    work = tmp_path / "sub"
+    work.mkdir()
+
+    collect._run_limited(
+        ["/bin/true"], cwd=str(work), env={}, timeout=1, writable=(tmp_path / "run",)
+    )
+
+    # The probe, then the two trees handed over, then the kill, then the two taken back.
+    assert ran[0] == ["-u", collect.SANDBOX_USER, "true"]
+    assert ran[1:3] == [
+        ["chown", "-R", collect.SANDBOX_USER, str(work)],
+        ["chown", "-R", collect.SANDBOX_USER, str(tmp_path / "run")],
+    ]
+    # Killed BEFORE the tree is taken back: a survivor that outlived the chown would be
+    # writing into a directory the grader is about to read as its own.
+    assert ran[3] == ["pkill", "-9", "-u", collect.SANDBOX_USER]
+    mine = f"{os.getuid()}:{os.getgid()}"
+    assert ran[4:] == [
+        ["chown", "-R", mine, str(work)],
+        ["chown", "-R", mine, str(tmp_path / "run")],
+    ]
+
+
+def test_every_survivor_is_killed_even_when_the_run_blew_up(monkeypatch, tmp_path):
+    # A `fork(); setsid(); fork()` daemon escapes the process GROUP by definition, and the
+    # grading leg walks every submission serially in one process - so a survivor of student
+    # A's run is alive while student B's clone sits in a predictable temp path, free to
+    # read it, tamper with it, or forge the JUnit report B is scored on. Only `pkill -u`
+    # reaches it once it runs as another uid, and it has to run however the stage ended.
+    ran = _sandboxed(monkeypatch, tmp_path)
+
+    def explode(argv, **kw):
+        raise OSError("no such binary")
+
+    monkeypatch.setattr(collect.subprocess, "Popen", explode)
+
+    with pytest.raises(OSError):
+        collect._run_limited(["/nope"], cwd=str(tmp_path), env={}, timeout=1)
+
+    assert ["pkill", "-9", "-u", collect.SANDBOX_USER] in ran
+
+
+def test_a_runner_without_the_sandbox_runs_no_student_code_at_all(
+    monkeypatch, tmp_path
+):
+    # FAIL CLOSED. The alternative is running a cohort's code as the process holding the
+    # PAT, which is the whole finding.
+    _sandboxed(monkeypatch, tmp_path, sudo_works=False)
+    monkeypatch.setattr(
+        collect.subprocess,
+        "Popen",
+        lambda *a, **k: pytest.fail("student code ran as the token holder"),
+    )
+
+    assert collect.sandbox_unusable() == collect.SANDBOX_UNAVAILABLE
+    with pytest.raises(collect.SandboxUnavailable):
+        collect._run_limited(["/bin/true"], cwd=str(tmp_path), env={}, timeout=1)
+
+
+def test_a_runner_without_the_sandbox_records_the_skip_and_grades_nothing(
+    monkeypatch, capsys
+):
+    # ...and it is recorded, because a skip decided and not recorded is re-decided by the
+    # next quarter-hourly tick, for ever.
+    _stub_collect(monkeypatch, None)
+    _sandboxed(monkeypatch, sudo_works=False)
+    monkeypatch.setattr(
+        collect,
+        "_grade_target",
+        lambda *a, **k: pytest.fail("a submission was graded without a sandbox"),
+    )
+    marked: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        collect,
+        "mark_not_autograded",
+        lambda org, slug, why: marked.append((slug, why)) or True,
+    )
+
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
+
+    assert [slug for slug, _why in marked] == ["assignment-1"]
+    assert marked[0][1] == collect.SANDBOX_UNAVAILABLE
+    assert collect.SANDBOX_USER in capsys.readouterr().err
+
+
+def test_off_a_runner_the_degraded_sandbox_says_so_out_loud(monkeypatch, capsys):
+    # A maintainer's laptop has no account to drop to and no bot token in the environment
+    # either, so it runs as today - but never silently.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    collect.sandbox_user.cache_clear()
+    collect.sandbox_unusable.cache_clear()
+
+    assert collect.sandbox_unusable() == ""
+    assert collect.sandbox_user() == ""
+    assert "running graded code as THIS user" in capsys.readouterr().err
+
+
+class _Exits:
+    """A `Popen` that has already finished successfully."""
+
+    pid = 4242
+
+    def wait(self, timeout=None):
+        return 0
 
 
 def test_no_graded_subprocess_can_reach_back_into_the_actions_job(monkeypatch):
@@ -2074,7 +2264,7 @@ def _fake_execute(monkeypatch, writes: bytes | None, *, completes: bool = True):
     `completes=False` is the wall-clock kill. Returns the argv list it was called with."""
     spawned: list[list[str]] = []
 
-    def fake_run_limited(argv, *, cwd, env, timeout):
+    def fake_run_limited(argv, *, cwd, env, timeout, **_):
         spawned.append(argv)
         if writes is not None and completes:
             out = Path(argv[argv.index("--output-dir") + 1])
@@ -2360,7 +2550,7 @@ def test_the_notebook_is_executed_before_it_is_converted_to_a_script(
     # the check would execute nothing a student wrote.
     order: list[str] = []
 
-    def fake_run_limited(argv, *, cwd, env, timeout):
+    def fake_run_limited(argv, *, cwd, env, timeout, **_):
         if "--execute" in argv:
             order.append("execute")
             out = Path(argv[argv.index("--output-dir") + 1])
@@ -4732,7 +4922,7 @@ def test_the_grader_copy_renders_in_the_same_sandbox_as_everything_else(
     _capture_archive(monkeypatch)
     seen: dict = {}
 
-    def fake_run_limited(argv, *, cwd, env, timeout):
+    def fake_run_limited(argv, *, cwd, env, timeout, **_):
         seen.update(cwd=cwd, env=env)
         seen["siblings"] = sorted(p.name for p in Path(cwd).iterdir())
         return True
