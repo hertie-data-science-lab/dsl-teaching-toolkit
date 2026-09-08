@@ -135,6 +135,43 @@ Things whose *literal spelling* is depended on from outside Python:
   It is independent of `autograde`: `collect` now reaches its target loop for a hand-marked
   assignment, and only "no tests AND no completion check" is the exit that records a skip.
 
+### What the sandbox actually promises
+
+Every graded subprocess - the hidden tests, `run.sh`, the notebook execution, the grader's
+reading copy - goes through `collect._run_limited`, which is the only place any of them is
+spawned. What it guarantees, and what it does not:
+
+- **A separate uid.** Graded code runs as `dsl-sandbox` (`course.SANDBOX_USER`), created
+  once per job by the rendered preamble of every job that grades, via
+  `sudo -n -u dsl-sandbox env -i <sanitised env> <argv>`. This is the load-bearing one. A
+  UID is the boundary, not an environment: on Linux a process reads `/proc/<pid>/environ`
+  of anything running as its own user (Yama's `ptrace_scope` gates ATTACH, not that read),
+  and the grading process holds `GH_TOKEN` - the org-owner PAT - for the whole leg. Without
+  the separate uid, `grep -l GH_TOKEN= /proc/*/environ` from a notebook cell reads it
+  straight out, past the sanitised environment and past the "no secret-bearing step after
+  the graded one" rule alike.
+- **FAIL CLOSED under Actions.** No account, or no passwordless `sudo`, and `collect`
+  records a skip for the assignment before it clones anything. Student code is never run by
+  the process holding the token. Off a runner (`GITHUB_ACTIONS` unset - a maintainer's
+  laptop, where there is no such account and no bot token in the environment) it degrades
+  to the in-process sandbox and says so loudly, once per run.
+- **Nothing outlives a submission.** `sudo -n pkill -9 -u dsl-sandbox` runs after every
+  graded command, however it ended. A `fork(); setsid(); fork()` daemon escapes the process
+  GROUP by definition, and the leg walks submissions serially in one process - so a
+  survivor of one student's run would be alive while the next student's clone sits in a
+  predictable temp path. `killpg` cannot reach it at all once it runs as another uid.
+- **The graded trees are handed over and taken back.** The checkout and the runspace are
+  `chown`ed to the sandbox user before the run and back afterwards (widened to their
+  `mkdtemp` roots - a 0700 root would otherwise leave the checkout unreachable), and
+  `HOME`/`TMPDIR` are re-pointed into them.
+- **Best-effort, and only that: the network.** The proxy variables point at a dead port, so
+  every well-behaved client fails - but there is no network namespace here, and a
+  determined socket still opens. docs/10 tells faculty to commit the data rather than rely
+  on this.
+- Also still true and unchanged: `RUN_TIMEOUT` per subprocess, the `_apply_rlimits` caps,
+  output to `DEVNULL`, `.git` and the student's own rigging files removed before anything
+  starts, and no token of any kind in the child's environment.
+
 ## Secrets an org carries
 
 Two values are published onto an org by the toolkit itself, both through

@@ -192,6 +192,12 @@ Two things it is worth writing the assignment for:
   variables point at a dead port, which every well-behaved client honours, but it is not a
   jail. A notebook that downloads its data at run time reports `errors:N`. Commit the data,
   or cache it in the repo.
+- **It runs as a different user, with a time limit, and nothing it starts survives it.**
+  Your notebook is executed as an unprivileged sandbox account with no access to the
+  toolkit's credentials, under the same wall clock and memory caps as the hidden tests, and
+  everything it left running is killed before the next submission is looked at. If the
+  grading runner cannot provide that account, nothing is executed at all and the assignment
+  is recorded as not machine-marked - a runner fault to report, not a result.
 - **It checks one notebook: the first one you did not hand out.** Notebooks are taken
   shallowest first, and any still byte-identical to the starter are skipped - so a
   `00-setup.ipynb` you shipped alongside is passed over. Only when EVERY notebook in the
