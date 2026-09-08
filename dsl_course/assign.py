@@ -403,6 +403,7 @@ def provision_one(
     existed = (
         repo in existing if existing is not None else repo_exists(cohort_org, repo)
     )
+    feedback_failed = False
     if existed:
         log_person(f"  [skip] repo {cohort_org}/{repo}")
         # Converge the stamp off the listing row that already answered "does it exist?",
@@ -444,6 +445,13 @@ def provision_one(
         if feedback_body and not grades.ensure_feedback_issue(
             cohort_org, repo, feedback_body
         ):
+            # Reported in the RETURN value, not just the log. The issue is where every
+            # receipt and, eventually, the grade is posted, and it is opened on the CREATE
+            # path only - the cron re-fires every handed-out release on every tick, so
+            # re-probing an existing repo would cost one listing per student per tick for
+            # the rest of the term. A repo that misses its one chance therefore has to red
+            # the run, or a whole cohort's handout goes green with nowhere to post into.
+            feedback_failed = True
             log_err(
                 "  ! a submission repo has no Feedback issue yet - the refresh pass "
                 "opens it before the first receipt"
@@ -524,6 +532,8 @@ def provision_one(
             return "failed-no-access"
         if not team_ok:
             return "failed-team-members"
+        if feedback_failed:
+            return "failed-no-feedback-issue"
         return "skipped" if existed else "ok"
 
     # Ordering hazard (individual path): granting a repo collaborator BEFORE the student has
@@ -549,6 +559,8 @@ def provision_one(
         # A repo nobody can open is a failed handout - "failed" is what the exit code
         # keys on (see provision_all), so the run goes red rather than quietly ok.
         return "failed-no-collaborator"
+    if feedback_failed:
+        return "failed-no-feedback-issue"
     return "skipped" if existed else "ok"
 
 
@@ -645,9 +657,9 @@ def record_solution_released(cohort_org: str, slug: str, repos: int) -> bool:
 
 # provision_one statuses that mean the model solution did NOT reach that unit's repo, and
 # so must withhold the fire-once release marker. Every OTHER `failed-*` happens AFTER the
-# push (a dead handle, an unreachable team) and is persistent, so withholding the marker
-# for one would re-clone every submission repo every hour for the rest of the term - the
-# exact cost the marker exists to prevent.
+# push (a dead handle, an unreachable team, a Feedback issue that would not open) and is
+# persistent, so withholding the marker for one would re-clone every submission repo every
+# hour for the rest of the term - the exact cost the marker exists to prevent.
 _SOLUTION_NOT_PUSHED = ("failed-solution", "failed-create")
 
 

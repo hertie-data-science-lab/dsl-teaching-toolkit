@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import assign, collect
+from dsl_course import assign, collect, grades
 from dsl_course.schedule import Schedule
 from tests.conftest import ROSTER_HEADER
 
@@ -328,6 +328,79 @@ def test_the_marker_IS_written_when_a_handle_is_dead(tmp_path, monkeypatch):
     # Same reasoning: one unusable student handle is persistent and unrelated to the push.
     _rc, recorded = _marker_run(tmp_path, monkeypatch, status="failed-no-collaborator")
     assert recorded == [("COHORT", "assignment-1", 1)]
+
+
+def test_the_marker_IS_written_when_a_feedback_issue_would_not_open(
+    tmp_path, monkeypatch
+):
+    # Same reasoning again: the issue is opened AFTER the solution push and the fault is
+    # persistent, so withholding the fire-once marker for it would re-clone every
+    # submission repo every hour for the rest of the term.
+    _rc, recorded = _marker_run(
+        tmp_path, monkeypatch, status="failed-no-feedback-issue"
+    )
+    assert recorded == [("COHORT", "assignment-1", 1)]
+    assert "failed-no-feedback-issue" not in assign._SOLUTION_NOT_PUSHED
+
+
+def test_a_feedback_issue_that_would_not_open_reds_the_handout(tmp_path, monkeypatch):
+    # The issue is opened on the CREATE path only - the cron re-fires every release every
+    # tick, so an existing repo is never re-probed. A repo that misses its one chance used
+    # to log a line and report `ok`, so a whole cohort could be handed out green with
+    # nowhere for its receipts, feedback or grades to be posted.
+    rc, _recorded = _marker_run(
+        tmp_path, monkeypatch, status="failed-no-feedback-issue"
+    )
+    assert rc == 1
+
+
+def test_the_new_repo_status_says_its_feedback_issue_never_opened(
+    monkeypatch, feedback_issues
+):
+    _provision_one_env(monkeypatch)
+    monkeypatch.setattr(
+        assign.grades, "ensure_feedback_issue", lambda *a, **k: grades.LOOKUP_FAILED
+    )
+    assert (
+        assign.provision_one(
+            "COURSE",
+            "assignment-1",
+            "COHORT",
+            "assignment-1-ada-l",
+            ["ada-l"],
+            "assignment-1",
+            existing={},
+            feedback_body="BODY",
+        )
+        == "failed-no-feedback-issue"
+    )
+
+
+def test_a_failed_solution_push_still_wins_over_a_missing_feedback_issue(
+    monkeypatch, tmp_path
+):
+    # The fire-once solution marker is written off these statuses, so the one fault that
+    # must never be masked is the push that did not happen.
+    _provision_one_env(monkeypatch)
+    monkeypatch.setattr(
+        assign.grades, "ensure_feedback_issue", lambda *a, **k: grades.LOOKUP_FAILED
+    )
+    monkeypatch.setattr(assign, "_wait_for_content", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
+    assert (
+        assign.provision_one(
+            "COURSE",
+            "assignment-1",
+            "COHORT",
+            "assignment-1-ada-l",
+            ["ada-l"],
+            "assignment-1",
+            tmp_path,
+            existing={},
+            feedback_body="BODY",
+        )
+        == "failed-solution"
+    )
 
 
 def test_the_marker_is_not_written_when_there_is_nobody_to_push_to(
