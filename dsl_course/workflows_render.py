@@ -868,8 +868,9 @@ def render_archive_cohort(cohort_orgs: list[str]) -> str:
 
 # End of term, once, after the last grades have gone out. Revokes each student's direct
 # grant on the submission repos and gradebooks named after them, ARCHIVES those repos,
-# writes the teardown record into the cohort's private classroom-config and archives that
-# last - which is also what tells the nightly refresh this cohort is finished.
+# archives `welcome` so a finished term cannot still be joined, writes the teardown record
+# into the cohort's private classroom-config and archives that last - which is also what
+# tells the nightly refresh this cohort is finished.
 # NOTHING IS DELETED. Archiving is GitHub's reversible read-only freeze, and un-archiving a
 # repo from its own Settings page brings it back exactly as it was.
 # `dry_run` defaults to true and prints counts only. A real run refuses unless the cohort's

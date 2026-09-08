@@ -42,7 +42,7 @@ Full flow: [Grade and return assignments](../10-grade-and-return-assignments.md)
 
 | Action | Effect |
 | --- | --- |
-| **Archive cohort** | Close a finished cohort out: revoke each student's direct access to the submission repos and gradebooks named after them, archive those repos, record what was frozen in `classroom-config/archive/teardown.md`, and archive `classroom-config` last - which also tells the nightly refresh to leave the cohort alone. **Nothing is deleted** and archiving is reversible from each repo's Settings. **`dry_run` defaults to `true`**; a real run refuses unless `schedule.yml`'s `semester_end` has passed, and `force` overrides that. Safe to re-run - it resumes. See [10](../10-grade-and-return-assignments.md#closing-the-cohort-out). |
+| **Archive cohort** | Close a finished cohort out: revoke each student's direct access to the submission repos and gradebooks named after them, archive those repos, archive `welcome` so a finished term cannot still be joined, record what was frozen in `classroom-config/archive/teardown.md`, and archive `classroom-config` last - which also tells the nightly refresh to leave the cohort alone. **Nothing is deleted** and archiving is reversible from each repo's Settings. **`dry_run` defaults to `true`**; a real run refuses unless `schedule.yml`'s `semester_end` has passed, and `force` overrides that. Safe to re-run - it resumes. See [10](../10-grade-and-return-assignments.md#closing-the-cohort-out). |
 
 ## Optional: public course website
 

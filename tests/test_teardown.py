@@ -181,8 +181,9 @@ def test_every_repo_is_revoked_before_it_is_frozen(org):
     # An archived repo takes no collaborator change, so a repo frozen first keeps its
     # grant for as long as it stays frozen.
     assert teardown.close_out(COHORT, dry_run=False) == 0
+    # The infra repos are nobody's in particular and hold no direct grant to take back.
     for kind, repo in org:
-        if kind == "archive" and repo != "classroom-config":
+        if kind == "archive" and repo not in ("welcome", "classroom-config"):
             assert ("revoke", repo) in org[: org.index((kind, repo))], repo
 
 
@@ -198,6 +199,38 @@ def test_a_frozen_repo_is_not_touched_again(org):
     assert teardown.close_out(COHORT, dry_run=False) == 0
     assert ("archive", "grades-bob-b") not in org
     assert ("revoke", "grades-bob-b") not in org
+
+
+def test_the_way_in_is_frozen_after_the_work_and_before_the_seal(org):
+    # An open Join course issue on a finished cohort enrols a student into a term that is
+    # over - and the handler writes into a classroom-config that is by then sealed. So
+    # `welcome` is frozen too: after the student repos, before the marker.
+    assert teardown.close_out(COHORT, dry_run=False) == 0
+    archived = [r for k, r in org if k == "archive"]
+    assert archived[-2:] == ["welcome", "classroom-config"]
+    assert archived.index("welcome") > archived.index("grades-ada-l")
+
+
+def test_an_already_frozen_welcome_is_left_alone(org, monkeypatch):
+    listing = [dict(r) for r in LISTING]
+    next(r for r in listing if r["name"] == "welcome")["archived"] = True
+    monkeypatch.setattr(teardown, "list_org_repos", lambda o: listing)
+    assert teardown.close_out(COHORT, dry_run=False) == 0
+    assert ("archive", "welcome") not in org
+
+
+def test_a_welcome_that_will_not_freeze_reds_the_run_and_blocks_the_seal(
+    org, monkeypatch
+):
+    # A cohort still joinable is not closed, so this fails like any other repo would.
+    def archive(o, repo, person=False):
+        org.append(("archive", repo))
+        return repo != "welcome"
+
+    monkeypatch.setattr(teardown, "archive_repo", archive)
+    assert teardown.close_out(COHORT, dry_run=False) == 1
+    assert ("archive", "classroom-config") not in org
+    assert ("put", teardown.RECORD_PATH) not in org
 
 
 def test_the_classroom_config_is_never_treated_as_a_students_repo(org):
@@ -268,10 +301,12 @@ def test_the_record_names_what_was_frozen_and_why_it_is_being_kept():
         sealed_on=date(2027, 1, 5),
         semester_end=date(2026, 12, 18),
         registrar="cohort-gradebook.csv, 30 student row(s)",
+        welcome="frozen with them",
     )
     assert text.startswith("<!-- SYSTEM-OWNED")
     assert "`assignment-1-ada-l`" in text and "`grades-ada-l`" in text
     assert "| Direct grants and invitations withdrawn | 3 |" in text
+    assert "| Enrolment repo (`welcome`) | frozen with them |" in text
     assert "cohort-gradebook.csv, 30 student row(s)" in text
     assert "2026-12-18" in text and "2027-01-05" in text
     assert "Nothing was deleted." in text
@@ -285,6 +320,7 @@ def test_a_forced_record_says_the_term_end_was_never_declared():
         sealed_on=date(2027, 1, 5),
         semester_end=None,
         registrar="cohort-gradebook.csv, 0 student row(s)",
+        welcome="not in this org",
     )
     assert "`--force`" in text
 

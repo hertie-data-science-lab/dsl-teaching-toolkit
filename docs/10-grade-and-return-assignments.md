@@ -117,13 +117,14 @@ Once the last grades have gone out, run **Archive cohort** on that cohort. It is
 the year's work, and it is what stops a finished cohort quietly keeping every student's
 write access to their repos for ever.
 
-It does four things, in this order:
+It does five things, in this order:
 
 1. revokes each student's direct access to the submission repos and gradebooks named after
    them, and cancels any repo invitation they never accepted;
 2. archives those repos - GitHub's read-only freeze;
-3. writes `archive/teardown.md` into `classroom-config`, recording what was frozen;
-4. archives `classroom-config` itself, which is also what tells the nightly refresh this
+3. archives `welcome`, so nobody can still Join a term that is over;
+4. writes `archive/teardown.md` into `classroom-config`, recording what was frozen;
+5. archives `classroom-config` itself, which is also what tells the nightly refresh this
    cohort is finished and to leave it alone.
 
 **Nothing is deleted, ever.** Archiving is reversible: un-archive a repo from its own

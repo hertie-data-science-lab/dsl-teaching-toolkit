@@ -1,13 +1,14 @@
 """dsl-course teardown -- close a finished cohort out.
 
-Run once, at the end of term, after the last grades have gone out. Four steps, in this
+Run once, at the end of term, after the last grades have gone out. Five steps, in this
 order, and the order is the whole design:
 
 1. revoke each student's DIRECT collaborator grant - and any invitation they have not
    accepted yet - on the submission repos and gradebooks named after them;
 2. ARCHIVE those repos: GitHub's read-only freeze;
-3. write the teardown record into the cohort's private `classroom-config`;
-4. archive `classroom-config` itself, LAST.
+3. archive `welcome`, the way IN to the cohort, so a finished term cannot still be joined;
+4. write the teardown record into the cohort's private `classroom-config`;
+5. archive `classroom-config` itself, LAST.
 
 Revoke before freeze, because an archived repo takes no collaborator change: a repo frozen
 before it is revoked keeps that grant for as long as it stays frozen. Seal last, because an
@@ -57,6 +58,10 @@ from .sync_roster import revoke_repo_grants
 # file, so the sealed repo shows at a glance which files are the term's working state and
 # which one is the account of how it ended.
 RECORD_PATH = "archive/teardown.md"
+
+# The way IN to a cohort: the repo holding the Join course and Join team issues. Frozen
+# with the rest, so a finished cohort cannot still be joined.
+WELCOME_REPO = "welcome"
 
 _RECORD_BANNER = (
     "<!-- SYSTEM-OWNED - do not edit. Written by `python3 -m dsl_course.teardown` "
@@ -164,6 +169,7 @@ def render_record(
     sealed_on: date,
     semester_end: date | None,
     registrar: str,
+    welcome: str,
 ) -> str:
     """The teardown record, as it is written into the private `classroom-config`.
 
@@ -185,6 +191,7 @@ Closed out on **{sealed_on}** (UTC). {term}
 | --- | --- |
 | Submission repos and gradebooks archived | {len(closed.frozen)} |
 | Direct grants and invitations withdrawn | {closed.withdrawn} |
+| Enrolment repo (`{WELCOME_REPO}`) | {welcome} |
 | Registrar export | {registrar} |
 
 **Nothing was deleted.** Archiving is GitHub's reversible read-only freeze: un-archive a
@@ -229,6 +236,34 @@ def _freeze(cohort_org: str, live: list[Target], dry_run: bool) -> Closed:
         else:
             errors += 1
     return Closed(frozen, withdrawn, errors)
+
+
+def _freeze_welcome(
+    cohort_org: str, listing: list[dict], dry_run: bool
+) -> tuple[str, int]:
+    """Archive the cohort's `welcome` repo - the way IN to the cohort. Returns
+    `(what the record says about it, errors)`.
+
+    Its Join course and Join team issues are how a student enrols themselves, and an open
+    one on a finished cohort is an enrolment into a term that is over: the handler writes
+    into `classroom-config`, which by then is sealed and cannot take it, so the student gets
+    a red run instead of a place. Frozen AFTER the student repos and BEFORE the record is
+    sealed, for the same reason as everything else here - the marker moves last.
+
+    Not a per-person repo, so a failure names it in the public log like any other piece of
+    infrastructure, and reds the run: a cohort left joinable is not closed."""
+    row = next((r for r in listing if r["name"] == WELCOME_REPO), None)
+    if row is None:
+        return "not in this org", 0
+    if row.get("archived"):
+        return "already frozen", 0
+    if dry_run:
+        log(f"    DRY-RUN archive {cohort_org}/{WELCOME_REPO}")
+        return "frozen with them", 0
+    if archive_repo(cohort_org, WELCOME_REPO):
+        log_ok(f"archived {cohort_org}/{WELCOME_REPO}")
+        return "frozen with them", 0
+    return "NOT frozen", 1
 
 
 def close_out(cohort_org: str, dry_run: bool = True, force: bool = False) -> int:
@@ -276,16 +311,19 @@ def close_out(cohort_org: str, dry_run: bool = True, force: bool = False) -> int
 
     closed = _freeze(cohort_org, live, dry_run)
     frozen = sorted(closed.frozen + already)
-    if closed.errors:
+    welcome, welcome_errors = _freeze_welcome(cohort_org, listing, dry_run)
+    errors = closed.errors + welcome_errors
+    if errors:
         log_err(
-            f"{closed.errors} step(s) failed - {cohort_org} is NOT sealed. Fix the cause "
+            f"{errors} step(s) failed - {cohort_org} is NOT sealed. Fix the cause "
             f"and run this again; it resumes from wherever it stopped."
         )
         return 1
     if dry_run:
         log_ok(
             f"dry run: {len(closed.frozen)} repo(s) would be frozen, {closed.withdrawn} "
-            f"grant(s)/invite(s) withdrawn, then {CONFIG_REPO} sealed"
+            f"grant(s)/invite(s) withdrawn, {WELCOME_REPO} {welcome}, then "
+            f"{CONFIG_REPO} sealed"
         )
         return 0
 
@@ -295,6 +333,7 @@ def close_out(cohort_org: str, dry_run: bool = True, force: bool = False) -> int
         sealed_on=datetime.now(timezone.utc).date(),
         semester_end=sched.semester_end,
         registrar=registrar,
+        welcome=welcome,
     )
     if not put_file(
         cohort_org,
@@ -316,7 +355,7 @@ def close_out(cohort_org: str, dry_run: bool = True, force: bool = False) -> int
         return 1
     log_ok(
         f"{cohort_org} closed out: {len(frozen)} repo(s) frozen, {closed.withdrawn} "
-        f"grant(s)/invite(s) withdrawn, {CONFIG_REPO} sealed"
+        f"grant(s)/invite(s) withdrawn, {WELCOME_REPO} {welcome}, {CONFIG_REPO} sealed"
     )
     return 0
 
