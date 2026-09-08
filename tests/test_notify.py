@@ -944,6 +944,16 @@ def test_a_fault_about_the_whole_file_falls_back_to_whoever_pushed_it(wired, adm
     assert routing.logins == ["cpj97"]
 
 
+def test_a_line_the_bot_wrote_falls_through_to_whoever_pushed_it(wired, admins):
+    # The bot writes `central_ref:` into every dsl-course.yml, so blame is its login for
+    # lines nobody at the school has ever typed. @mentioning it on the issue reaches
+    # nobody and hides the person who actually pushed the file.
+    admins(ADMINS[0])
+    wired(blame={8: "dsl-bot"}, pushers=("dsl-bot", "cpj97"))
+    routing = notify.route_course(COURSE, [_course_fault()], NOW)
+    assert routing.logins == ["cpj97"]
+
+
 def test_the_maintainer_is_copied_on_the_very_first_course_mail(wired, admins):
     # Not at 48 hours as a cohort's file is: the course admins in the To line are the same
     # small group who may have written the line, so there is nobody else to notice.

@@ -183,7 +183,10 @@ def _wrote_it(cohort_org: str, fault: ConfigFault, bot: str) -> str | None:
     A CSV is asked who PUSHED it and a YAML who wrote the LINE, because a CSV's rows are
     written by a form and rewritten by the bot while a YAML's are typed by a person. The
     bot is skipped either way: it is the last committer of every file it maintains, and
-    mailing it is mailing nobody."""
+    mailing it is mailing nobody. On the BLAME side that matters as much - the bot writes
+    `central_ref:` into every dsl-course.yml and `handout_datetime:` into schedule.yml, so
+    it is the honest blame answer for lines nobody at the school has ever typed - and
+    None here is what lets `route_course` fall through to whoever pushed the file."""
     if not fault.file:
         return None
     if fault.file.endswith(".csv"):
@@ -197,9 +200,10 @@ def _wrote_it(cohort_org: str, fault: ConfigFault, bot: str) -> str | None:
         )
     if not fault.lineno:
         return None
-    return _blame(fault.in_org or cohort_org, fault.in_repo, fault.file, fault.ref).get(
-        fault.lineno
-    )
+    wrote = _blame(
+        fault.in_org or cohort_org, fault.in_repo, fault.file, fault.ref
+    ).get(fault.lineno)
+    return wrote if wrote and wrote.lower() != bot else None
 
 
 def _last_pusher(org: str, fault: ConfigFault, bot: str) -> str | None:
