@@ -1430,6 +1430,7 @@ def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypa
     written: list[tuple[str, str, bytes]] = []
     monkeypatch.setattr(grades, "_grading_text", lambda org, t: "type: group\n")
     monkeypatch.setattr(grades, "org_meta", lambda org: {})
+    monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo: False)
     monkeypatch.setattr(
         grades,
         "put_file",
@@ -1453,9 +1454,24 @@ def test_a_lock_file_that_could_not_be_written_says_what_that_costs(
 ):
     monkeypatch.setattr(grades, "_grading_text", lambda org, t: "type: group\n")
     monkeypatch.setattr(grades, "org_meta", lambda org: {})
+    monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo: False)
     monkeypatch.setattr(grades, "put_file", lambda *a, **k: False)
     assert not grades.write_team_lock("COURSE", "COHORT", _sched(p="t"))
     assert "the Join-team form reads it" in capsys.readouterr().err
+
+
+def test_a_closed_out_cohort_is_left_alone(monkeypatch, capsys):
+    # `teardown` archives classroom-config last, and an archived repo is read-only. The
+    # membership sync fans out over the cohort REGISTRY, which teardown does not touch, so
+    # without this every finished cohort would 403 the daily sync red for good.
+    def boom(*args, **kwargs):
+        raise AssertionError("a sealed classroom-config takes no write")
+
+    monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo: True)
+    monkeypatch.setattr(grades, "put_file", boom)
+    monkeypatch.setattr(grades, "_grading_text", boom)
+    assert grades.write_team_lock("COURSE", "COHORT", _sched(p="t"))
+    assert "cohort closed out" in capsys.readouterr().out
 
 
 def test_no_log_line_from_the_lock_file_names_a_person(monkeypatch, capsys):

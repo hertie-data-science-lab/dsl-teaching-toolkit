@@ -76,6 +76,7 @@ from .repos import (
     create_repo,
     ensure_label,
     repo_exists,
+    repo_is_archived,
     set_repo_topics,
 )
 
@@ -1213,7 +1214,16 @@ def write_team_lock(
     compare inside `put_file` makes every one of those a no-op when nothing changed, so the
     cost of writing it from four places is four reads a day.
 
-    Returns whether the file is now current; a failed write is the caller's to count."""
+    Returns whether the file is now current; a failed write is the caller's to count.
+
+    A CLOSED-OUT cohort is skipped: `teardown` archives `classroom-config` last, an
+    archived repo is read-only, and the membership sync reaches such a cohort every day -
+    the registry it fans out over is not what teardown seals. The check lives here rather
+    than at one call site because it is the same answer for all of them: a finished term
+    forms no teams, so there is nothing for the mirror to say."""
+    if repo_is_archived(cohort_org, CONFIG_REPO):
+        log(f"  [skip] {TEAM_LOCK_PATH} in {cohort_org} (cohort closed out)")
+        return True
     sched = sched if sched is not None else schedule.load(cohort_org)
     content = team_lock_text(team_lock_entries(course_org, sched)).encode()
     if dry_run:
