@@ -939,12 +939,14 @@ _READERS = {
     "tests": lambda v, w, d: str(v or "tests").strip() or "tests",
 }
 SPEC_KEYS = tuple(_READERS)
-# What a COURSE may set once for every assignment under it, in `dsl-course.yml`. The
+# What a COURSE may set once for every assignment under it, in `dsl-course.yml`: exactly
+# the settings `New assignment` does NOT ask for, and stamps from here instead. The
 # per-assignment keys - the title, the shape, the question maxima - are deliberately not
-# among them: they are what makes one assignment different from the next.
+# among them: they are what makes one assignment different from the next. Nor are
+# `submit_via` and `autograde`, which the button DOES ask for and always answers - a
+# course default the form can never lose to would be a setting that reads as policy and
+# changes nothing.
 COURSE_DEFAULT_KEYS = (
-    "submit_via",
-    "autograde",
     "max_team_size",
     "late_window_days",
     "late_penalty_per_day",

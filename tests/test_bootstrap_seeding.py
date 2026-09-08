@@ -587,9 +587,10 @@ def test_the_seeded_assignment_defaults_block_parses_with_the_real_reader(capsys
         welcome.example_course_file("dsl-course.yml"),
     ):
         block = yaml.safe_load(text)[grades.ASSIGNMENT_DEFAULTS_KEY]
+        # Only what `New assignment` does not ask for: a block carrying `submit_via` or
+        # `autograde` would read as policy and change nothing, since the button answers
+        # both on every run.
         assert grades.parse_assignment_defaults(block) == {
-            "submit_via": "github",
-            "autograde": False,
             "max_team_size": 5,
             "late_window_days": 7,
             "late_penalty_per_day": "10%",
