@@ -44,6 +44,8 @@ breaks a live link that faculty click:
 | `docs/08-release-materials-to-cohort.md` | `scaffold._RELEASEIGNORE_STUB` (seeded into every materials repo) |
 | `docs/05-manage-teaching-team.md` | `templates/classroom-config/people.yml` |
 | `docs/README.md` | `profile_readme.py` |
+| `docs/03-add-assignment-to-course.md` | `config_digest.GRADING_CONFIG` |
+| `docs/10-grade-and-return-assignments.md` | `config_digest.GRADING_SHEETS` |
 
 `grep -rn 'blob/.*/docs/' dsl_course/ templates/` before any rename.
 

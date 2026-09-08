@@ -126,6 +126,19 @@ Three things it refuses to do, because each one publishes the answer:
 content, because that log is public. Only `.ipynb`, `.Rmd`, `.qmd`, `.py` and `.R` are
 derived; anything else under `solution/` stays where it is.
 
+### A value `grading_config.yml` cannot be read for
+
+A value the toolkit cannot use costs that field and nothing else - grading falls back to
+the default, silently, which is how `submit_via: emial` turned a cohort's late arithmetic
+off for a term. From 24 hours before the assignment's `grading_datetime` (its due date
+where it declares none) each such value opens the cohort's *assignment grading_config.yml
+has values that will not grade as written* issue and emails whoever wrote the line, louder
+as the moment approaches. Earlier than that nothing is said: the fix is the same in August
+as on the day, and a warning nobody has to act on yet is a warning nobody reads.
+
+A template still carrying the pre-rename `grading.yml` is reported the same way - nothing
+reads that file, so the assignment grades as if it declared nothing at all.
+
 ### Group vs individual assignments
 
 - If not defined, an assignment is default `type` = `individual`; it is individually assessed and returned to students.
