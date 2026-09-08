@@ -873,6 +873,11 @@ def provision_all(
     # made it miss the real entry and append a bogus duplicate block (dropping its due date).
 
     schedule.record_handout(cohort_org, key)
+    # ...and refresh the Join-team form's mirror while this run holds the schedule and the
+    # spec. A handout is the moment the two can most recently have moved, and the form is
+    # read by students who cannot see either file. Not counted into `failed`: the repos
+    # are out, and Sync membership rewrites it every morning.
+    grades.write_team_lock(cohort_org=cohort_org, course_org=master_org, sched=sched)
 
     changed = any(k != "skipped" for k in results)
 

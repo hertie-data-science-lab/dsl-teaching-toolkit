@@ -62,6 +62,10 @@ ASSIGNMENT_TYPES = ("individual", "group")
 # outright, and it is not a value an instructor ever writes.
 TEAM_FORMATIONS = ("self_select", "assigned")
 NO_TEAMS = "none"
+# The cap the Join-team form enforces when neither the assignment nor its course says
+# otherwise. Here because three places have to agree on it: the `grading_config.yml` the
+# New assignment button writes, the lock file the form reads, and the form itself.
+DEFAULT_MAX_TEAM_SIZE = 5
 # Which starter stub `New assignment` seeds, and nothing else: grading reads whatever is
 # in the repo, and a student may commit anything. `none` is the raw-repo option.
 FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", "none")

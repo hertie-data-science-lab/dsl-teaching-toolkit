@@ -36,6 +36,7 @@ from .discovery import (
     discover_content_repos,
 )
 from .gh_teams import acting_login
+from .grades import write_team_lock
 from .log import log_err, log_ok
 
 
@@ -99,6 +100,11 @@ def sync(
             errors += sync_faculty.sync_cohort_instructors(
                 course_org, org, content_repos, assignments, dry_run=dry_run
             )
+            # The Join-team form's only source of truth, refreshed here because this is
+            # what a push to `schedule.yml` wakes (classroom-config/dispatch-sync.yml) -
+            # and a form answering off a stale mirror either refuses a real team or lets
+            # one form for an assignment the template says is individual.
+            errors += 0 if write_team_lock(course_org, org, dry_run=dry_run) else 1
         except Exception as exc:
             # Broad by design: this is the batch-isolation boundary, so one cohort's
             # failure (even an unexpected programming error) must not abandon the rest.

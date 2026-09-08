@@ -27,6 +27,7 @@ from .access import COURSE_TEAM_ACCESS, grant_faculty, grant_tagged_team_access
 from .central import CENTRAL
 from .course import (
     ASSIGNMENT_TYPES,
+    DEFAULT_MAX_TEAM_SIZE,
     FACULTY_ONLY_HEADING,
     FORMATS,
     MATERIALS_REPO_PREFIX,
@@ -235,7 +236,10 @@ def _grading_config(
             live=group,
         ),
         _setting(
-            "max_team_size", cap or 5, "group only", live=group and cap is not None
+            "max_team_size",
+            cap or DEFAULT_MAX_TEAM_SIZE,
+            "group only",
+            live=group and cap is not None,
         ),
         _setting(
             "submit_via", submit_via, "github | external (Moodle, Kaggle, in class...)"

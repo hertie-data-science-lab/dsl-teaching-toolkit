@@ -639,6 +639,22 @@ def test_sync_site_auto_resyncs_on_sourced_changes():
     assert jobs["sync"]["needs"] == "check-team"
 
 
+def test_classroom_config_membership_dispatcher_fires_on_a_schedule_change():
+    # Sync membership also rewrites `assignments.lock.yml`, the mirror the Join-team form
+    # reads. Without schedule.yml here a new assignment woke NOTHING - the form went on
+    # answering off the previous list until the 06:13 cron, and a group project handed out
+    # in between could not have a team formed for it.
+    tmpl = (ROOT / "templates" / "classroom-config" / "dispatch-sync.yml").read_text()
+    doc = yaml.safe_load(tmpl)
+    trigger = doc.get("on", doc.get(True))
+    assert sorted(trigger["push"]["paths"]) == [
+        "people.yml",
+        "schedule.yml",
+        "students.csv",
+        "teams.csv",
+    ]
+
+
 def test_classroom_config_site_dispatcher_fires_on_schedule_or_people_change():
     # Both files feed the site: schedule.yml its dates, people.yml its staff cards. A
     # people.yml edit must not have to wait for the daily cron. (people.yml also fires

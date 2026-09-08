@@ -40,6 +40,7 @@ from .course import (
     ASSIGNMENT_TYPES,
     CONFIG_REPO,
     COURSE_CONFIG,
+    DEFAULT_MAX_TEAM_SIZE,
     FEEDBACK_ISSUE_LABEL,
     FEEDBACK_ISSUE_MARKS,
     FEEDBACK_ISSUE_TITLE,
@@ -1083,24 +1084,154 @@ def course_assignment_defaults(course_org: str) -> dict:
     return parse_assignment_defaults(meta.get(ASSIGNMENT_DEFAULTS_KEY))
 
 
+def declared_grading_spec(course_org: str, template: str) -> GradingSpec | None:
+    """`load_grading_spec`, but None when there is no definition to read at all - the
+    template repo does not exist yet, or it carries no `grading_config.yml`.
+
+    Only the lock file asks the question this way. Every other reader wants the defaults
+    for an undeclared assignment and calls `load_grading_spec`; the lock file has to tell
+    "declared individual" from "nobody has said yet", because the second one must lock the
+    Join-team form rather than answer it."""
+    try:
+        text = _grading_text(course_org, template)
+    except RuntimeError as exc:
+        log_err(f"  ! could not read {template}/{GRADING_FILE}: {exc}")
+        return None
+    if text is None:
+        return None
+    try:
+        return parse_grading_spec(text)
+    except yaml.YAMLError as exc:
+        log_err(
+            f"  ! {template}/{GRADING_FILE} is not valid YAML - using defaults: {exc}"
+        )
+        return GradingSpec()
+
+
 def load_grading_spec(course_org: str, template: str) -> GradingSpec:
     """The assignment's definition from the course template's `solution` branch.
 
     NEVER raises: it sits under the hourly cron, and a template with no solution branch, no
     definition file, or one that does not parse must leave the rest of the tick running on
     the defaults rather than take the cohort down with it."""
-    try:
-        text = _grading_text(course_org, template)
-    except RuntimeError as exc:
-        log_err(f"  ! could not read {template}/{GRADING_FILE}: {exc}")
-        return GradingSpec()
-    try:
-        return parse_grading_spec(text or "")
-    except yaml.YAMLError as exc:
-        log_err(
-            f"  ! {template}/{GRADING_FILE} is not valid YAML - using defaults: {exc}"
+    spec = declared_grading_spec(course_org, template)
+    return spec if spec is not None else GradingSpec()
+
+
+# --------------------------------------------------- the team-formation lock file
+
+# `classroom-config/assignments.lock.yml` is a MIRROR, written by the toolkit and read by
+# the Join-team form in the cohort's public `welcome` repo. It exists because of who can
+# read what: the form runs on an `issues: opened` event any stranger can trigger, in a
+# public repo, under a token deliberately scoped away from the course org's assignment
+# templates - so it cannot open `grading_config.yml` and ask what the assignment is. It
+# used to scrape `type:` and `max_team_size:` out of the cohort's own `schedule.yml`
+# instead, which is why a slug with neither let any student mint a real GitHub team.
+#
+# Two flat scalars per schedule key, and no vocabulary the form has to interpret twice.
+TEAM_LOCK_PATH = "assignments.lock.yml"
+_TEAM_LOCK_HEADER = f"""\
+# SYSTEM-OWNED - do not edit, edits here are overwritten. Written by the DSL teaching
+# toolkit from each assignment's `{GRADING_FILE}`, one entry per assignment in
+# `schedule.yml`. Faculty change an assignment by editing its own `{GRADING_FILE}` on
+# the course template's `{SOLUTION_BRANCH}` branch; this file catches up next sync.
+#
+# The Join-team form in this cohort's `welcome` repo reads THIS FILE and nothing else.
+#
+#   team_formation: self_select   students form their own teams with the Join-team form
+#                   assigned      the teaching team writes teams.csv; the form refuses
+#                   none          an individual assignment; the form refuses
+#   max_team_size:  the cap the form enforces (group assignments only)
+#
+# An assignment whose course template does not exist yet is locked to `{NO_TEAMS}`:
+# until the template says what it is, nobody can mint a GitHub team for it.
+"""
+
+
+def team_lock_text(entries: dict[str, tuple[str, int]]) -> str:
+    """The lock file's whole text, from `{schedule key: (team_formation, cap)}`.
+
+    Hand-rolled rather than `yaml.safe_dump`, for the same reason the workflows are: the
+    form's line scanner is the only reader, and it reads a two-space key with two
+    four-space scalars under it. Keys sorted, so a re-sync of an unchanged cohort produces
+    an identical blob and `put_file` writes nothing."""
+    lines = [_TEAM_LOCK_HEADER, "assignments:"]
+    if not entries:
+        lines.append("  {}")
+    for key in sorted(entries):
+        formation, cap = entries[key]
+        lines += [
+            f"  {key}:",
+            f"    team_formation: {formation}",
+            f"    max_team_size: {cap}",
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def team_lock_entries(
+    course_org: str, sched: schedule.Schedule
+) -> dict[str, tuple[str, int]]:
+    """What each of this cohort's assignments allows, resolved off the ONE place that
+    declares it - the template's `grading_config.yml`.
+
+    A template with no definition to read is locked to `none` and says so: the alternative
+    is the toolkit guessing a shape for an assignment nobody has described, and the guess
+    that costs least is the one where a team cannot be formed yet."""
+    defaults = course_assignment_defaults(course_org)
+    fallback = defaults.get("max_team_size") or DEFAULT_MAX_TEAM_SIZE
+    entries: dict[str, tuple[str, int]] = {}
+    for key, entry in sched.assignments.items():
+        spec = declared_grading_spec(course_org, entry.course_source_repo)
+        if spec is None:
+            # Named by SLUG, never by anyone in it: this runs in a public workflow.
+            log_err(
+                f"  ! {key}: {entry.course_source_repo} has no {GRADING_FILE} yet - "
+                f"locking it to `{NO_TEAMS}`, so no team can be formed for it until the "
+                f"template declares what the assignment is"
+            )
+            entries[key] = (NO_TEAMS, fallback)
+            continue
+        entries[key] = (
+            spec.team_formation_resolved,
+            spec.max_team_size or fallback,
         )
-        return GradingSpec()
+    return entries
+
+
+def write_team_lock(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule | None = None,
+    *,
+    dry_run: bool = False,
+) -> bool:
+    """Mirror every assignment's team rules into `classroom-config/assignments.lock.yml`.
+
+    Written from everything that could have moved one of its two inputs: the membership
+    sync (whose dispatcher fires on a push to `schedule.yml`), the handout, and the nightly
+    refresh - which is also what seeds it, since a cohort's bootstrap ends in one. The blob
+    compare inside `put_file` makes every one of those a no-op when nothing changed, so the
+    cost of writing it from four places is four reads a day.
+
+    Returns whether the file is now current; a failed write is the caller's to count."""
+    sched = sched if sched is not None else schedule.load(cohort_org)
+    content = team_lock_text(team_lock_entries(course_org, sched)).encode()
+    if dry_run:
+        log(f"    DRY-RUN  {TEAM_LOCK_PATH} ({len(sched.assignments)} assignment(s))")
+        return True
+    if put_file(
+        cohort_org,
+        CONFIG_REPO,
+        TEAM_LOCK_PATH,
+        content,
+        "ci: refresh the team-formation lock from each assignment's definition",
+    ):
+        return True
+    log_err(
+        f"could not write {TEAM_LOCK_PATH} in {cohort_org} - the Join-team form reads it, "
+        f"so it answers from whatever the file last said"
+    )
+    return False
 
 
 def _display_moment(at: datetime | None) -> str:

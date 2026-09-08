@@ -834,6 +834,7 @@ def _stub_refresh(
     sample_failures=lambda org: 0,
     system_failures=lambda org, ref: 0,
     pointer_failures=lambda org, course: 0,
+    lock_failures=lambda course, cohort: True,
     seed_failures=0,
     heartbeat_failures=0,
     prior_misses=(),
@@ -863,6 +864,7 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "refresh_classroom_samples", sample_failures)
     monkeypatch.setattr(seed, "refresh_classroom_system_files", system_failures)
     monkeypatch.setattr(seed, "refresh_cohort_pointer", pointer_failures)
+    monkeypatch.setattr(seed, "write_team_lock", lock_failures)
     # The per-cohort loop probes the cohort ORG once: gone = unregister + skip. A live org
     # then reads the archived flag off its own listing (empty above = nothing archived),
     # so org_exists True + an unarchived classroom-config = present and live, proceed.
@@ -919,6 +921,31 @@ def test_refresh_repushes_every_cohorts_course_pointer(monkeypatch):
         ("Cohort-f2026", "Course-Org"),
         ("Cohort-s2027", "Course-Org"),
     ]
+
+
+def test_refresh_seeds_and_converges_every_cohorts_team_lock(monkeypatch):
+    # `assignments.lock.yml` is SYSTEM-owned, but DERIVED (from the cohort's schedule and
+    # each template's grading_config.yml) rather than templated, so it cannot join
+    # welcome.CLASSROOM_SYSTEM_FILES. This loop is what seeds it - Bootstrap cohort ends
+    # in a refresh - and what converges it every night, exactly like the pointer above.
+    locked: list[tuple[str, str]] = []
+    _stub_refresh(
+        monkeypatch,
+        lock_failures=lambda course, cohort: locked.append((course, cohort)) or True,
+    )
+
+    assert seed.refresh("Course-Org") == 0
+    assert locked == [
+        ("Course-Org", "Cohort-f2026"),
+        ("Course-Org", "Cohort-s2027"),
+    ]
+
+
+def test_a_team_lock_that_did_not_land_reds_the_refresh(monkeypatch):
+    # A stale lock either refuses a real team or lets one form for an assignment the
+    # template calls individual, and nothing else in the night rewrites it.
+    _stub_refresh(monkeypatch, lock_failures=lambda course, cohort: False)
+    assert seed.refresh("Course-Org") == 1
 
 
 def test_refresh_rebuilds_every_cohorts_own_landing_pages(monkeypatch):

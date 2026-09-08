@@ -60,6 +60,13 @@ def feedback_issues(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _team_lock_is_current(monkeypatch):
+    """The Join-team form's mirror, refreshed beside `record_handout`. Its content has its
+    own tests (tests/test_grades.py); a handout test only needs it not to reach the API."""
+    monkeypatch.setattr(assign.grades, "write_team_lock", lambda *a, **k: True)
+
+
+@pytest.fixture(autouse=True)
 def sheet_writes(monkeypatch):
     """provision_all creates the assignment's grading sheet once the handout has landed.
 
@@ -1695,3 +1702,31 @@ def test_the_handout_composes_one_feedback_body_per_team(
 
     assert ["@ada-l" in b for b in bodies] == [True, False]
     assert ["@ben-k" in b for b in bodies] == [False, True]
+
+
+def test_the_handout_refreshes_the_team_formation_lock(tmp_path, monkeypatch):
+    # A handout is the last moment the schedule and the template's definition can have
+    # moved before students are looking at the assignment, and the Join-team form cannot
+    # read either one. The lock is written with the schedule this run already loaded.
+    sched = Schedule()
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: sched)
+    locked: list[tuple] = []
+    monkeypatch.setattr(
+        assign.grades,
+        "write_team_lock",
+        lambda cohort_org, course_org, sched: (
+            locked.append((course_org, cohort_org, sched)) or True
+        ),
+    )
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: "ok")
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+
+    assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
+    )
+    assert locked == [("COURSE", "COHORT", sched)]
