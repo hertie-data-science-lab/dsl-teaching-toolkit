@@ -36,6 +36,7 @@ from .course import (
     TEAM_FORMATIONS,
     pages_repo,
 )
+from .derive import BEGIN_SOLUTION, END_SOLUTION
 from .discovery import central_ref_for, discover_assignments, discover_cohorts
 from .gh_contents import put_files
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
@@ -897,7 +898,15 @@ def scaffold_assignment(
             return 1
         sol = wd / "solution"
         sol.mkdir()
-        solution_code = "def solve():\n    return 42  # TODO"
+        # Fenced, so **Derive student version** works on a freshly scaffolded template
+        # rather than refusing it: a file with nothing fenced would derive the model
+        # answer itself as the starter, so `derive` names it and goes red.
+        solution_code = (
+            f"def solve():\n"
+            f"    {BEGIN_SOLUTION}\n"
+            f"    return 42  # TODO - the model answer\n"
+            f"    {END_SOLUTION}"
+        )
         # `starter`, not `solution`: `derive` writes `solution/X` onto `main` as `X`, so a
         # model answer called `solution.ipynb` derives a SECOND notebook beside the
         # untouched starter instead of becoming it. The stem is the same contract on both

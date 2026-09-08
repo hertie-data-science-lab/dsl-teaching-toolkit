@@ -448,6 +448,10 @@ def test_the_model_answer_is_seeded_where_derive_reads_it(fake, monkeypatch):
     assert derive.student_path("solution/starter.ipynb") == "starter.ipynb"
     assert scaffold.scaffold_assignment("Org", "2", "f2026", "py") == 0
     assert "solution/starter.py" in written
+    # ...and it is FENCED, so pressing the button on a fresh template derives a starter
+    # rather than refusing one: an unfenced seed would derive the model answer itself.
+    seeded = derive.strip_source("solution/starter.py", written["solution/starter.py"])
+    assert seeded.replaced == 1 and "return 42" not in seeded.text
 
 
 def test_the_cutoff_switches_are_written_out_with_their_defaults(fake, monkeypatch):

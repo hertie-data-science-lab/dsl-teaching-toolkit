@@ -62,6 +62,11 @@ from .log import log, log_err, log_ok, log_step
 # line that is nothing but comment hashes and the phrase. Case-insensitive, because a
 # marker that reads correctly to a human and not to this parser is the worst of both.
 _MARKER = re.compile(r"^\s*#*\s*(BEGIN|END)\s+SOLUTION\s*$", re.IGNORECASE)
+# The spelling to WRITE when something seeds a fenced file - `scaffold` seeds the model
+# answer this button reads, and a seed the button then refuses to derive is a red run on
+# the toolkit's own template. nbgrader's three-hash form, which `_MARKER` also matches.
+BEGIN_SOLUTION = "### BEGIN SOLUTION"
+END_SOLUTION = "### END SOLUTION"
 
 # The cell-level form: nbgrader's `solution` tag on a whole cell, which is how a written
 # (markdown) answer is marked - there is no comment syntax to hang a fence off.
