@@ -336,39 +336,60 @@ def test_team_formation_retakes_the_cap_decision_on_every_attempt():
     assert "e.status === 422" in code
 
 
-def test_team_cap_is_read_from_schedule_yml_per_assignment():
-    # The cap is instructor-set config (assignments.<slug>.max_team_size in the cohort's
-    # schedule.yml), not a constant buried in the workflow.
+def test_the_form_reads_the_lock_file_and_nothing_else():
+    # The two answers this workflow needs - may a team form, and how big - live in the
+    # template's grading_config.yml, in the course org, which this token cannot reach. It
+    # used to scrape them out of the cohort's schedule.yml, which no longer carries them
+    # at all: every request would be accepted, at a default cap, for any slug.
     script = script_of("team-formation.yml", "form-team")
-    assert "MAX_TEAM_SIZE" not in script
-    assert "max_team_size" in script and "schedule.yml" in script
-    assert "DEFAULT_TEAM_SIZE = 5" in script
+    assert "assignments.lock.yml" in script and "path: LOCK" in script
+    # Nothing reads the cohort's schedule any more, and nothing interprets a `type:`.
+    assert "path: 'schedule.yml'" not in script
+    assert "declaredType" not in script
+    # No cap of its own and no default cap of its own: both come from the file.
+    assert "MAX_TEAM_SIZE" not in script and "DEFAULT_TEAM_SIZE" not in script
 
 
 _JSC = shutil.which("osascript")
 
+_LOCK_FILE = """\
+# SYSTEM-OWNED - do not edit.
+assignments:
+  solo:
+    team_formation: none
+    max_team_size: 5
+  project:
+    team_formation: self_select
+    max_team_size: 3
+  allocated:
+    team_formation: assigned
+    max_team_size: 4
+"""
 
-def _team_cap_answers(schedule_yml: str, slugs: list[str]) -> list[int | None]:
-    """Run the SHIPPED `teamCap` scanner over `schedule_yml` in JavaScriptCore, with its
-    one await stubbed out, and return its answer for each slug. Skipped where there is no
-    JS engine (Linux CI); the text guard below runs everywhere."""
+
+def _lock_answers(lock_yml: str | None, slugs: list[str]) -> list[dict | None]:
+    """Run the SHIPPED `lockEntry` scanner over `lock_yml` in JavaScriptCore, with its one
+    await stubbed out, and return its answer for each slug. `None` for the file being
+    absent (the reader's `undefined`, which JSON.stringify drops to null either way).
+    Skipped where there is no JS engine (Linux CI); the text guards run everywhere."""
     script = script_of("team-formation.yml", "form-team")
-    start = script.index("const DEFAULT_TEAM_SIZE")
-    end = script.index("};", script.index("return cap === null")) + 2
+    start = script.index("const LOCK =")
+    end = script.index("\n  };", script.index("return formation === null")) + 5
     block = (
         script[start:end]
         .replace("async (slug)", "(slug)")
         .replace("await github", "github")
     )
-    calls = ", ".join(f"teamCap({json.dumps(s)})" for s in slugs)
+    missing = lock_yml is None
     harness = (
-        f"const SCHEDULE = {json.dumps(schedule_yml)};\n"
+        f"const LOCKFILE = {json.dumps(lock_yml or '')};\n"
         "const org = 'O', CONFIG = 'c';\n"
-        "const Buffer = { from: (s, e) => ({ toString: () => SCHEDULE }) };\n"
-        "const github = { rest: { repos: { getContent: () => "
-        "({ data: { content: '' } }) } } };\n"
+        "const Buffer = { from: (s, e) => ({ toString: () => LOCKFILE }) };\n"
+        "const github = { rest: { repos: { getContent: () => { "
+        f"if ({json.dumps(missing)}) {{ const e = new Error('nope'); e.status = 404; throw e; }} "
+        "return { data: { content: '' } }; } } } };\n"
         f"{block}\n"
-        f"JSON.stringify([{calls}]);\n"
+        f"JSON.stringify([{', '.join(f'lockEntry({json.dumps(s)})' for s in slugs)}]);\n"
     )
     run = subprocess.run(
         [_JSC, "-l", "JavaScript", "-e", harness],
@@ -381,33 +402,47 @@ def _team_cap_answers(schedule_yml: str, slugs: list[str]) -> list[int | None]:
 
 
 @pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
-def test_only_a_group_assignment_may_form_a_team():
-    # Any DECLARED assignment used to pass, so a student could open a Join-team issue
-    # against an individual assignment and mint a real GitHub team - with `maintain` on the
-    # repo it is granted - under a name of their choosing.
-    schedule_yml = (
-        "assignments:\n"
-        "  solo:\n"
-        "    type: individual\n"
-        "  project:\n"
-        "    type: group\n"
-        "    max_team_size: 3\n"
-        "  inline: {type: individual}\n"
-        "  untyped:\n"
-        "    due_datetime: 2026-10-01\n"
-    )
-    assert _team_cap_answers(
-        schedule_yml, ["solo", "project", "inline", "untyped", "invented"]
-    ) == [None, 3, None, 5, None]
-    # `untyped` is 5, not None: `type:` may live in the template's grading_config.yml
-    # instead, and this workflow cannot read it - refusing there would break real group
-    # assignments.
+def test_the_scanner_reads_both_scalars_for_every_shape():
+    assert _lock_answers(_LOCK_FILE, ["solo", "project", "allocated", "invented"]) == [
+        {"formation": "none", "cap": 5},
+        {"formation": "self_select", "cap": 3},
+        {"formation": "assigned", "cap": 4},
+        None,  # a slug the lock file does not carry
+    ]
 
 
-def test_the_group_only_guard_is_in_the_shipped_script():
-    # The behavioural test above needs a JS engine; this one holds the line in CI.
+@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+def test_an_absent_lock_file_is_told_apart_from_an_unknown_slug():
+    # Different messages: one is a maintainer's problem, the other a typo in the form.
+    (answer,) = _lock_answers(None, ["project"])
+    assert answer is None
+    assert _lock_answers("assignments:\n  {}\n", ["project"]) == [None]
+
+
+@pytest.mark.skipif(_JSC is None, reason="no JavaScript engine on this host")
+def test_the_scanner_is_not_confused_by_the_files_own_header():
+    # Every line of the header is a comment, and the file always carries one.
+    from dsl_course import grades
+
+    real = grades.team_lock_text({"project": ("self_select", 3)})
+    assert _lock_answers(real, ["project"]) == [{"formation": "self_select", "cap": 3}]
+
+
+def test_only_self_selection_may_form_a_team():
+    # The behavioural test above needs a JS engine; these hold the line in CI. `none` and
+    # `assigned` each get their own refusal, and anything else - a value written by a
+    # newer toolkit than this workflow - falls to the "assigned by the instructor" arm
+    # rather than through the guard.
     code = code_of(script_of("team-formation.yml", "form-team"))
-    assert "declaredType !== 'group'" in code
+    assert "lock.formation === 'none'" in code
+    assert "lock.formation !== 'self_select'" in code
+
+
+def test_each_refusal_says_which_kind_of_assignment_it_is():
+    script = script_of("team-formation.yml", "form-team")
+    assert "is an individual assignment - no teams." in script
+    assert "are assigned by the instructor." in script
+    assert "(the cap for \\`${assignment}\\` is ${cap})" in script
 
 
 def test_every_code_in_the_body_is_redacted_not_only_the_one_that_binds():

@@ -11,6 +11,12 @@ name: Form team
 # dsl_course.sync_teams), so the Team is a downstream projection that can't drift the way a
 # Classroom-managed team does. Group-assignment provisioning grants that team its shared repo.
 #
+# WHETHER a team may form at all, and how big, is answered by
+# classroom-config/assignments.lock.yml - written by the toolkit from each assignment's
+# grading_config.yml, because that file lives in the course org and this token cannot
+# reach it. An assignment the lock does not carry, or one it marks `assigned` or `none`,
+# is refused here.
+#
 # Runs under secrets.DSL_BOT_TOKEN, which needs, on the cohort org: Contents R/W on
 # classroom-config, Issues R/W on welcome.
 
@@ -68,62 +74,39 @@ jobs:
               const aMatch = (issue.body || '').match(/Assignment\s*[\r\n]+\s*([A-Za-z0-9][\w.-]*)/i);
               const tMatch = (issue.body || '').match(/Team\s*[\r\n]+\s*([A-Za-z0-9][\w-]*)/i);
 
-              // Per-assignment team-size cap, set by the teaching team in the PRIVATE
-              // classroom-config/schedule.yml:
-              //   assignments:
-              //     assignment-4-project:
-              //       max_team_size: 4        # (or inline: {due_datetime: ..., max_team_size: 4})
-              // Line-scanned (github-script has no YAML lib) tolerant of comments and both
-              // block and flow styles. Returns null when the slug is NOT under `assignments:`
-              // (or there is no schedule.yml), and when the entry declares a `type:` that is
-              // not `group`: a team may only form for a group assignment the teaching team has
-              // declared, or one student could mint any number of real GitHub teams under names
-              // of their choosing. `type:` may instead live in the template's grading_config.yml, which
-              // this workflow cannot read, so an entry with no `type:` still forms a team.
-              // A declared slug with no cap -> DEFAULT_TEAM_SIZE.
-              const DEFAULT_TEAM_SIZE = 5;
-              const teamCap = async (slug) => {
+              // What this assignment allows, read from the machine-written mirror the
+              // toolkit keeps at classroom-config/assignments.lock.yml - THIS FILE AND
+              // NOTHING ELSE. The answer lives in the template's grading_config.yml, in
+              // the course org, which this token deliberately cannot reach; the
+              // schedule.yml scrape that stood here before let a slug with no `type:`
+              // mint a real GitHub team for any assignment at all.
+              //
+              // The toolkit writes the file, so its shape is fixed (see
+              // dsl_course.grades.team_lock_text): two-space assignment keys, four-space
+              // scalars under them. `undefined` = no lock file; `null` = a slug it does
+              // not carry.
+              const LOCK = 'assignments.lock.yml';
+              const lockEntry = async (slug) => {
                 let text;
                 try {
-                  const got = await github.rest.repos.getContent({ owner: org, repo: CONFIG, path: 'schedule.yml' });
+                  const got = await github.rest.repos.getContent({ owner: org, repo: CONFIG, path: LOCK });
                   text = Buffer.from(got.data.content, 'base64').toString('utf8');
                 } catch (e) {
                   if (e.status !== 404) throw e;
-                  return null;
+                  return undefined;
                 }
-                // The slug indent is whatever the FIRST key under `assignments:` uses - a
-                // 4-space file must not read as "no assignments declared" and refuse every team.
-                let known = false, slugIndent = null;
-                let inAssignments = false, inSlug = false;
-                let cap = null, declaredType = null;
+                let inSlug = false, formation = null, cap = null;
                 for (const raw of text.split(/\r?\n/)) {
                   const line = raw.replace(/#.*$/, '').trimEnd();
-                  if (!line.trim()) continue;
-                  const indent = line.length - line.trimStart().length;
-                  if (indent === 0) { inAssignments = line.trim() === 'assignments:'; inSlug = false; slugIndent = null; continue; }
-                  if (!inAssignments) continue;
-                  if (slugIndent === null) slugIndent = indent;
-                  if (indent === slugIndent) {
-                    const m = line.trim().match(/^([\w.-]+):\s*(\{.*\})?$/);
-                    inSlug = !!m && m[1].toLowerCase() === slug;
-                    known = known || inSlug;
-                    if (inSlug && m && m[2]) {
-                      const f = m[2].match(/max_team_size:\s*(\d+)/);
-                      if (f) cap = parseInt(f[1], 10);
-                      const t = m[2].match(/type:\s*([\w-]+)/);
-                      if (t) declaredType = t[1].toLowerCase();
-                    }
-                    continue;
-                  }
-                  if (inSlug && indent > slugIndent) {
-                    const f = line.trim().match(/^max_team_size:\s*(\d+)$/);
-                    if (f) cap = parseInt(f[1], 10);
-                    const t = line.trim().match(/^type:\s*([\w-]+)$/);
-                    if (t) declaredType = t[1].toLowerCase();
-                  }
+                  const key = line.match(/^ {2}([\w.-]+):$/);
+                  if (key) { inSlug = key[1].toLowerCase() === slug; continue; }
+                  if (!inSlug) continue;
+                  const f = line.match(/^ {4}team_formation:\s*(\w+)$/);
+                  if (f) formation = f[1].toLowerCase();
+                  const c = line.match(/^ {4}max_team_size:\s*(\d+)$/);
+                  if (c) cap = parseInt(c[1], 10);
                 }
-                if (!known || (declaredType !== null && declaredType !== 'group')) return null;
-                return cap === null ? DEFAULT_TEAM_SIZE : cap;
+                return formation === null ? null : { formation, cap };
               };
 
               if (!aMatch || !tMatch) return fail(
@@ -203,12 +186,32 @@ jobs:
                 return { sha, header, rows };
               };
               const cell = (r, i) => (r[i] || '').trim();
-              // The cap is per-assignment config in schedule.yml, not a property of teams.csv,
-              // so it is read once rather than on every retry below.
-              const cap = await teamCap(assignment);
-              if (cap === null) return fail(
-                `Thanks @${handle} - \`${assignment}\` isn't an assignment in this cohort's schedule yet. ` +
+              // What this assignment allows is per-assignment config, not a property of
+              // teams.csv, so it is read once rather than on every retry below. Four ways
+              // to be refused, and only one of them is the student's to fix.
+              const lock = await lockEntry(assignment);
+              if (lock === undefined) return fail(
+                `Thanks @${handle} - I can't read this cohort's assignment list ` +
+                `(\`classroom-config/${LOCK}\` isn't there). A maintainer will action this.`,
+                'needs-review');
+              if (lock === null) return fail(
+                `Thanks @${handle} - \`${assignment}\` isn't an assignment in this cohort yet. ` +
                 `Check the slug with the teaching team, or ask them to add it to classroom-config/schedule.yml.`,
+                'needs-review');
+              if (lock.formation === 'none') return fail(
+                `Thanks @${handle} - \`${assignment}\` is an individual assignment - no teams.`,
+                'needs-review');
+              // Anything that is not self-selection is the teaching team's to allocate -
+              // `assigned`, and equally a value written by a newer toolkit than this
+              // workflow. Both mean the same thing to a student: wait to be added.
+              if (lock.formation !== 'self_select') return fail(
+                `Thanks @${handle} - teams for \`${assignment}\` are assigned by the instructor. ` +
+                `The teaching team will add you to one; there is nothing for you to do here.`,
+                'needs-review');
+              const cap = lock.cap;
+              if (!(cap > 0)) return fail(
+                `Thanks @${handle} - \`${assignment}\` has no team-size cap recorded. ` +
+                `A maintainer will action this.`,
                 'needs-review');
 
               // Read-modify-write, retried on a 409. Many Join-team issues are in flight at
@@ -253,9 +256,8 @@ jobs:
                 const size = rows.filter(r =>
                   cell(r, iAssign).toLowerCase() === assignment && cell(r, iTeam).toLowerCase() === team).length;
                 if (size >= cap) return fail(
-                  `Team **${team}** for \`${assignment}\` is full (${cap} member${cap === 1 ? '' : 's'} - ` +
-                  `the cap the teaching team set via \`max_team_size\` in classroom-config/schedule.yml). ` +
-                  `Pick another team name.`,
+                  `Thanks @${handle} - **${team}** already has ${size} member${size === 1 ? '' : 's'} ` +
+                  `(the cap for \`${assignment}\` is ${cap}). Pick another team name.`,
                   'needs-review');
 
                 // Append + write back (in the existing header's column order).
