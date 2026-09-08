@@ -2129,10 +2129,12 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
             return None
         try:
             return score_from_junit(report.read_text())
-        except ET.ParseError as exc:
+        except (ET.ParseError, UnicodeDecodeError) as exc:
             # A hand-written runner is the likely author of an XML nobody can parse, and an
             # unhandled traceback here would abort the whole cohort's job rather than this
-            # one submission.
+            # one submission. `UnicodeDecodeError` for the same reason: `run.sh` is written
+            # by faculty in whatever language their course uses, and a latin-1 report is a
+            # report we cannot read, not a run we may abandon a cohort over.
             log_err(f"  ! the test report is not valid XML ({exc}) - nothing scored")
             return None
 
@@ -2221,9 +2223,12 @@ def _grader_document_for(
             return GRADER_UNREADABLE
         if _pin_commit(wd, deadline, snapshot) is None:
             return GRADER_UNREADABLE
-        shutil.rmtree(
-            wd / ".git", ignore_errors=True
-        )  # the clone stored the bot's token
+        # The same hardening the hidden tests and the completion check get, for the same
+        # reason: `_export_document` runs a subprocess with this checkout as its cwd, so
+        # the clone's stored credential and the student's own rigging files have to go
+        # first. Rendering does not execute the notebook - but it does import a stack of
+        # Python from a directory the student wrote.
+        _harden_checkout(wd)
         picked = pick_grader_document(wd)
         if picked is None:
             return GRADER_NONE
@@ -2275,6 +2280,12 @@ def export_grader_documents(
     log_step(f"Grader copies for {slug}: {len(targets)} target(s)")
     snapshots = load_snapshots(cohort_org, slug)
     env = _sanitised_env()
+    # `_export_document` runs `python -m jupyter` FROM the notebook's own directory (an
+    # exporter resolves the document's relative assets from there), which puts that
+    # directory on `sys.path[0]`. Without this a committed `nbformat.py` beside the
+    # notebook is imported and run as the grader - the same hazard `_run_tests` and
+    # `_completion_env` close, closed the same way.
+    env["PYTHONSAFEPATH"] = "1"
     tally: dict[str, int] = {}
     for repo, target_key, _members in targets:
         verdict = _grader_document_for(

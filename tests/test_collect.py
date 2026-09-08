@@ -1929,6 +1929,24 @@ def test_a_report_that_is_not_xml_costs_one_submission_not_the_cohort(
     assert "not valid XML" in capsys.readouterr().err
 
 
+def test_a_report_in_another_encoding_costs_one_submission_not_the_cohort(
+    tmp_path, capsys
+):
+    # `run.sh` is written by faculty in whatever their course uses, and a runner that
+    # emits latin-1 XML used to raise UnicodeDecodeError straight out of the cohort's job:
+    # no sentinel, red run, and the next tick did the whole freeze again.
+    work = tmp_path / "sub"
+    work.mkdir()
+    tests = _hidden_tests_with_runner(tmp_path, "true\n")
+    (tmp_path / "hidden" / collect.RUN_SCRIPT).write_text(
+        "printf '<testsuite><testcase name=\"caf\\351\"/></testsuite>' "
+        '> "$DSL_JUNIT_OUT"\n'
+    )
+
+    assert collect._run_tests(work, tests) is None  # not a traceback out of the job
+    assert "not valid XML" in capsys.readouterr().err
+
+
 def test_a_run_script_is_never_looked_for_in_the_submission(monkeypatch, tmp_path):
     # The hatch is on the SOLUTION branch. A `tests/run.sh` a student committed is in the
     # checkout, which is never on this path - it would be a submission grading itself.
@@ -4530,6 +4548,39 @@ def test_a_dry_run_clones_nothing(monkeypatch):
     monkeypatch.setattr(collect, "clone", refuse)
     collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", True)
     assert written == {}
+
+
+def test_the_grader_copy_renders_in_the_same_sandbox_as_everything_else(
+    monkeypatch, tmp_path
+):
+    # `_export_document` runs `python -m jupyter` from the notebook's OWN directory, which
+    # is inside the student's checkout - so the same two guards every other subprocess in
+    # this module gets have to be on this one: cwd off sys.path, and the clone's stored
+    # credential plus the student's rigging files gone before anything starts.
+    _checkout(
+        monkeypatch,
+        {
+            "submission.ipynb": _QUESTION_NB,
+            ".git/config": "[remote]\n\turl = https://x-access-token:ghp_secret@x\n",
+            "sitecustomize.py": "import os; os.system('whoami')\n",
+        },
+    )
+    _capture_archive(monkeypatch)
+    seen: dict = {}
+
+    def fake_run_limited(argv, *, cwd, env, timeout):
+        seen.update(cwd=cwd, env=env)
+        seen["siblings"] = sorted(p.name for p in Path(cwd).iterdir())
+        return True
+
+    monkeypatch.setattr(collect, "_run_limited", fake_run_limited)
+    collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", False)
+
+    assert seen["env"]["PYTHONSAFEPATH"] == "1"
+    assert "GH_TOKEN" not in seen["env"]
+    # The credential the clone stored and the student's startup hook are both gone from
+    # the directory the exporter runs in.
+    assert ".git" not in seen["siblings"] and "sitecustomize.py" not in seen["siblings"]
 
 
 def test_grader_pdf_is_off_unless_the_assignment_asks_for_it():
