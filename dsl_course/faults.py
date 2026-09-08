@@ -245,9 +245,18 @@ class ConfigFault:
         on the entry alone the second inherited the first's recorded rung, so neither
         could appear, escalate or clear on its own. The FILE is not, because there is one
         digest issue per file and a key only ever means anything inside one of them."""
-        if not self.path:
-            return f"{self.where}.{self.field}"
-        return f"{self.where}[{self.path}].{self.field}"
+        where = f"{self.where}[{self.path}]" if self.path else self.where
+        return ".".join(part for part in (where, self.field) if part)
+
+    @property
+    def label(self) -> str:
+        """The fault's heading wherever one is shown: `releases.lecture_02 ->
+        course_source_path`, or just the entry for a fault about the whole of it.
+
+        A whole entry the parser had to DROP names no single key - "not a mapping" is not
+        a fault about `event_datetime` - and `x -> ` with nothing after the arrow reads as
+        a missing word rather than as an entry."""
+        return f"{self.where} -> {self.field}" if self.field else self.where
 
     @property
     def at(self) -> str:
@@ -378,7 +387,7 @@ class ConfigFault:
         is reading about the same fault."""
         at = f" - {cite or self.at}" if self.lineno else ""
         when = f"fires {self.due}" if self.fires else self.due
-        return f"{self.where} -> {self.field}{at} - {self.what} - {when}"
+        return f"{self.label}{at} - {self.what} - {when}"
 
 
 def header_fault(file: str, missing: list[str]) -> ConfigFault:

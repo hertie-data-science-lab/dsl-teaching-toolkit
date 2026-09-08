@@ -374,6 +374,11 @@ class Schedule:
     # quietly: `load` logs each line, `--validate` exits non-zero on them, and Check cohort
     # setup counts them.
     dropped: list[str] = field(default_factory=list)
+    # The same leftovers as `ConfigFault`s - what the digest issue lists and the mail
+    # names, one per line of `dropped`. Two shapes of one fact, built together: see
+    # `Drops`. A dropped entry is an IMMEDIATE fault (no `fires`), because the entry is
+    # already not in the plan - there is no moment it is about to bite at.
+    faults: list[ConfigFault] = field(default_factory=list)
     # Set by `load` when the file could not be read AS A SCHEDULE at all: the YAML did not
     # parse, or its top level is not a mapping. Distinct from `dropped` (a file that parsed,
     # minus some entries) and from a cohort that simply has no schedule.yml. `load` still
@@ -384,15 +389,76 @@ class Schedule:
     unparseable: bool = False
 
 
-def _drop(drops: list[str], where: str, why: str, cost: str) -> None:
+@dataclass
+class Drops:
+    """Everything one parse could not use, in the two shapes it has to take.
+
+    `report` is the human-readable line the run summary prints, `--validate` fails on and
+    Check cohort setup counts - unchanged, because faculty read it and three surfaces
+    quote it. `faults` is the same fact as a `ConfigFault`, which is what the digest issue
+    and the mail carry: a dropped entry used to reach people only through a red X and a
+    hand-rolled issue on the push, so an entry dropped by an hourly tick reached nobody.
+
+    Built together, from one call, because a fault the report does not mention (or the
+    other way round) is the two channels disagreeing about what the file says.
+
+    `top` is the top-level key lines, for a fault about a whole BLOCK (`releases:` written
+    as a list): the block's own entries carry their lines, and the block itself does
+    not."""
+
+    report: list[str] = field(default_factory=list)
+    faults: list[ConfigFault] = field(default_factory=list)
+    top: dict[str, int] = field(default_factory=dict)
+
+    def _add(
+        self,
+        report: str,
+        where: str,
+        field_name: str,
+        what: str,
+        lines: dict[str, int] | None,
+    ) -> None:
+        self.report.append(report)
+        self.faults.append(
+            ConfigFault(
+                where,
+                what,
+                file=SCHEDULE_PATH,
+                field=field_name,
+                lineno=line_of(lines if lines is not None else self.top, field_name),
+            )
+        )
+
+    def note(
+        self,
+        where: str,
+        field_name: str,
+        what: str,
+        lines: dict[str, int] | None = None,
+    ) -> None:
+        """A fault with its own wording - a key that MOVED to another file, a timezone
+        that is not a zone. The two below are the shapes every other fault takes."""
+        loc = f"{where}.{field_name}" if where else field_name
+        self._add(f"{loc}: {what}", where, field_name, what, lines)
+
+
+def _drop(
+    drops: Drops,
+    where: str,
+    why: str,
+    cost: str,
+    lines: dict[str, int] | None = None,
+    field_name: str = "",
+) -> None:
     """Record a thrown-away entry: where it is in the YAML, what is wrong, and what the
     cohort loses by it. The cost is the point - "entry dropped" alone tells faculty
     nothing about whether their term still runs."""
-    drops.append(f"{where}: {why} - entry dropped, so {cost}")
+    what = f"{why} - entry dropped, so {cost}"
+    drops._add(f"{where}: {what}", where, field_name, what, lines)
 
 
 def _require_mapping(
-    raw: object, drops: list[str], block: str, noun: str, cost: str
+    raw: object, drops: Drops, block: str, noun: str, cost: str
 ) -> dict | None:
     """A top-level `releases:`/`assignments:`/`events:` block must be a `label -> entry`
     mapping. Returns it, or None when it is absent (nothing to parse) or authored as a
@@ -407,6 +473,7 @@ def _require_mapping(
             block,
             f"not a mapping (it must be {noun} -> entry, not a list or value)",
             cost,
+            field_name=block,
         )
         return None
     # The block's own lines interest nobody; taking them keeps the stamp out of the label
@@ -488,7 +555,12 @@ KNOWN_EVENT = frozenset({"type", "title", "event_datetime", "tbc"})
 
 
 def _flag_unknown_keys(
-    drops: list[str], entry: dict, known: frozenset[str], where: str, cost: str
+    drops: Drops,
+    entry: dict,
+    known: frozenset[str],
+    where: str,
+    cost: str,
+    lines: dict[str, int] | None = None,
 ) -> None:
     """Record every key of `entry` not in `known`. Unlike `_drop`, the entry itself is
     KEPT (only the stray key is ignored) - a typo'd or legacy key otherwise passes
@@ -496,12 +568,16 @@ def _flag_unknown_keys(
     parse; a dropped entry already gets its own line."""
     for key in entry:
         if str(key) not in known:
-            loc = f"{where}.{key}" if where else str(key)
-            drops.append(f"{loc}: unrecognised key - ignored, so {cost}")
+            drops.note(where, str(key), f"unrecognised key - ignored, so {cost}", lines)
 
 
 def _flag_bad_value(
-    drops: list[str], where: str, key: str, value: object, cost: str
+    drops: Drops,
+    where: str,
+    key: str,
+    value: object,
+    cost: str,
+    lines: dict[str, int] | None = None,
 ) -> None:
     """Record a key whose value is PRESENT but unusable - a date that doesn't parse, a cap
     that isn't a number, a `type:` that isn't one of the known ones.
@@ -511,17 +587,17 @@ def _flag_bad_value(
     `handout_datetime: 2026-13-01` reads as a scheduled handout and provisions nothing;
     `grading_datetime: nxt week` silently grades at the due date. Both leave a green run
     and a plan that is not the one faculty wrote, so both belong in `dropped`."""
-    loc = f"{where}.{key}" if where else str(key)
-    drops.append(f"{loc}: unusable value {value!r} - ignored, so {cost}")
+    drops.note(where, str(key), f"unusable value {value!r} - ignored, so {cost}", lines)
 
 
 def _flagged_datetime(
     entry: dict,
     key: str,
     tz: ZoneInfo,
-    drops: list[str],
+    drops: Drops,
     where: str,
     cost: str,
+    lines: dict[str, int] | None = None,
     *,
     end_of_day: bool = False,
 ) -> datetime | None:
@@ -533,12 +609,12 @@ def _flagged_datetime(
     raw = entry.get(key)
     when = _coerce_datetime(raw, tz, end_of_day=end_of_day)
     if when is None and raw is not None:
-        _flag_bad_value(drops, where, key, raw, cost)
+        _flag_bad_value(drops, where, key, raw, cost, lines)
     return when
 
 
 def _flagged_date(
-    entry: dict, key: str, drops: list[str], where: str, cost: str
+    entry: dict, key: str, drops: Drops, where: str, cost: str
 ) -> date | None:
     """`entry[key]` as a whole-day date, flagging a value that is there but does not
     parse. The date-only twin of `_flagged_datetime`, with the same absent-vs-unreadable
@@ -550,9 +626,7 @@ def _flagged_date(
     return when
 
 
-def _parse_deploy(
-    raw: object, tz: ZoneInfo, drops: list[str], label: str
-) -> list[Deploy]:
+def _parse_deploy(raw: object, tz: ZoneInfo, drops: Drops, label: str) -> list[Deploy]:
     """Parse a release's `deploy:` - a list (or a single mapping) of source->dest copies.
     Entries missing course_source_repo/course_source_path are skipped (nothing to copy).
     A malformed `deploy_datetime` parses to None - the copy ships at the entry's
@@ -572,11 +646,18 @@ def _parse_deploy(
                 where,
                 "missing `course_source_repo` and/or `course_source_path`",
                 "this copy never ships",
+                lines,
+                "course_source_path",
             )
             continue
         dest_path = d.get("cohort_dest_path")
         _flag_unknown_keys(
-            drops, d, KNOWN_DEPLOY, where, "that setting is ignored for this copy"
+            drops,
+            d,
+            KNOWN_DEPLOY,
+            where,
+            "that setting is ignored for this copy",
+            lines,
         )
         out.append(
             Deploy(
@@ -592,6 +673,7 @@ def _parse_deploy(
                     where,
                     "this copy ships at the entry's `event_datetime` instead of the "
                     "time written here",
+                    lines,
                 ),
                 lines=lines,
             )
@@ -603,7 +685,7 @@ def _is_tbc(value: object) -> bool:
     return isinstance(value, str) and value.strip().lower() == "tbc"
 
 
-def _parse_releases(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Release]:
+def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
     """Parse `releases:` (label -> {event_datetime + deploys}) into Releases sorted by
     their event_datetime.
 
@@ -624,7 +706,7 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Release
                 drops, where, "not a mapping", "nothing deploys and no site row appears"
             )
             continue
-        take_lines(entry)
+        lines = take_lines(entry)
         raw_when = entry.get("event_datetime")
         when = _coerce_datetime(raw_when, tz)
         tbc = _is_tbc(raw_when) or entry.get("tbc") is True
@@ -634,10 +716,12 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Release
                 where,
                 "no valid `event_datetime` (use `tbc` if the date is not settled)",
                 "nothing deploys and no site row appears",
+                lines,
+                "event_datetime",
             )
             continue
         _flag_unknown_keys(
-            drops, entry, KNOWN_RELEASE, where, "that setting is ignored"
+            drops, entry, KNOWN_RELEASE, where, "that setting is ignored", lines
         )
         # `deploy:` written with nothing under it. YAML reads that as None, which is
         # indistinguishable from the key being ABSENT once it reaches _parse_deploy - and
@@ -656,6 +740,7 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Release
                 entry["deploy"],
                 "this entry ships NOTHING and is a display-only row - fill the deploy "
                 "in, or delete the key to say that is what you meant",
+                lines,
             )
         assignment = entry.get("assignment")
         out.append(
@@ -699,7 +784,7 @@ def _shared_sources(mapping: dict) -> set[str]:
 
 
 def _parse_assignments(
-    raw: object, tz: ZoneInfo, drops: list[str]
+    raw: object, tz: ZoneInfo, drops: Drops
 ) -> dict[str, AssignmentEntry]:
     # Only the nested {due_datetime, ...} form is accepted - matching the one schema
     # documented everywhere - rather than also silently accepting a bare due-date scalar.
@@ -729,11 +814,18 @@ def _parse_assignments(
         lines = take_lines(entry)
         due = _coerce_datetime(entry.get("due_datetime"), tz, end_of_day=True)
         if due is None:
-            _drop(drops, where, "no valid `due_datetime`", cost)
+            _drop(drops, where, "no valid `due_datetime`", cost, lines, "due_datetime")
             continue
         source_repo = str(entry.get("course_source_repo") or "").strip()
         if not source_repo:
-            _drop(drops, where, "no `course_source_repo`", cost)
+            _drop(
+                drops,
+                where,
+                "no `course_source_repo`",
+                cost,
+                lines,
+                "course_source_repo",
+            )
             continue
         if source_repo in sources and source_repo not in shared:
             # A copy-paste (Maths f2026 had assignments 3 and 4 both citing assignment-2's
@@ -748,6 +840,8 @@ def _parse_assignments(
                 f"the same repo when EVERY one of them sets its own `cohort_dest_repo` "
                 f"(a copy-paste?)",
                 cost,
+                lines,
+                "course_source_repo",
             )
             continue
         dest = str(entry.get("cohort_dest_repo") or "").strip()
@@ -768,15 +862,20 @@ def _parse_assignments(
                 f"snapshot and grading sheet all key on it; set a distinct "
                 f"`cohort_dest_repo`)",
                 cost,
+                lines,
+                "cohort_dest_repo",
             )
             continue
         sources[source_repo] = str(slug)
         names[name] = str(slug)
         for moved, moved_cost in MOVED_ASSIGNMENT_KEYS.items():
             if moved in entry:
-                drops.append(
-                    f"{where}.{moved}: moved to `{moved}:` {_GRADING_CONFIG_HOME} - "
-                    f"ignored here, so {moved_cost}"
+                drops.note(
+                    where,
+                    moved,
+                    f"moved to `{moved}:` {_GRADING_CONFIG_HOME} - ignored here, so "
+                    f"{moved_cost}",
+                    lines,
                 )
         _flag_unknown_keys(
             drops,
@@ -784,6 +883,7 @@ def _parse_assignments(
             KNOWN_ASSIGNMENT | frozenset(MOVED_ASSIGNMENT_KEYS),
             where,
             "that setting is ignored",
+            lines,
         )
         handout = _flagged_datetime(
             entry,
@@ -793,6 +893,7 @@ def _parse_assignments(
             where,
             "the handout NEVER fires - no student or team repos are provisioned "
             "from it, and nobody gets the assignment",
+            lines,
         )
         solution = _flagged_datetime(
             entry,
@@ -802,6 +903,7 @@ def _parse_assignments(
             where,
             "the model solution NEVER ships automatically - it stays on the "
             "template's solution branch until someone ticks include_solution by hand",
+            lines,
         )
         # The solution rides on the handout release, so these two dates are only meaningful
         # relative to each other - and both ways of getting that wrong are silent, which is
@@ -820,6 +922,7 @@ def _parse_assignments(
                 entry.get("solution_datetime"),
                 "the model solution NEVER ships automatically - the schedule can only push "
                 "it into repos it provisioned, which needs `handout_datetime` set too",
+                lines,
             )
             solution = None
         elif solution is not None and handout is not None and solution <= handout:
@@ -831,6 +934,7 @@ def _parse_assignments(
                 "it is not AFTER handout_datetime, which would ship the model solution "
                 "together with the assignment on the very first release - refused, so the "
                 "solution now waits for a human",
+                lines,
             )
             solution = None
         out[str(slug)] = AssignmentEntry(
@@ -848,6 +952,7 @@ def _parse_assignments(
                 "the template's `late_window_days`, and the due date itself when it "
                 "declares none. The submission snapshot freezes and the autograder fires "
                 "then, not when this says",
+                lines,
                 end_of_day=True,
             ),
             handout_datetime=handout,
@@ -857,7 +962,7 @@ def _parse_assignments(
     return out
 
 
-def _parse_events(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Event]:
+def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
     """Parse `events:` (label -> {type, title, event_datetime}) into display-only rows,
     in calendar order.
 
@@ -877,7 +982,7 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Event]:
         if not isinstance(entry, dict):
             _drop(drops, where, "not a mapping", "the row never appears on the site")
             continue
-        take_lines(entry)
+        lines = take_lines(entry)
         raw_when = entry.get("event_datetime")
         when = _coerce_date_or_datetime(raw_when, tz)
         tbc = _is_tbc(raw_when) or entry.get("tbc") is True
@@ -887,9 +992,13 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Event]:
                 where,
                 "no valid `event_datetime` (use `tbc` if the date is not settled)",
                 "the row never appears on the site",
+                lines,
+                "event_datetime",
             )
             continue
-        _flag_unknown_keys(drops, entry, KNOWN_EVENT, where, "that setting is ignored")
+        _flag_unknown_keys(
+            drops, entry, KNOWN_EVENT, where, "that setting is ignored", lines
+        )
         kind = str(entry.get("type") or "").strip().lower()
         if kind and kind not in ("exam", "special_event"):
             # A typo'd `type` (e.g. `exma`) still shows the row, but as a plain special
@@ -901,6 +1010,7 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Event]:
                 kind,
                 "the row is shown as a plain special event, not an exam "
                 "(expected 'exam' or 'special_event')",
+                lines,
             )
         out.append(
             Event(
@@ -934,8 +1044,7 @@ def parse(meta: dict) -> Schedule:
     than recorded as a drop, because a drop reds `--validate` and every live cohort still
     carries the block (see KNOWN_TOP_LEVEL)."""
     meta = meta if isinstance(meta, dict) else {}
-    take_lines(meta)
-    drops: list[str] = []
+    drops = Drops(top=take_lines(meta))
     # A whole plan under an unknown top-level key (`materials_releases:` instead of
     # `releases:`) otherwise validates as "OK: nothing dropped" with zero releases - the
     # worst kind of silent failure, since the file looks full. Flag it here.
@@ -945,9 +1054,11 @@ def parse(meta: dict) -> Schedule:
     tz_name = meta.get("timezone")
     tz = _tz(tz_name)
     if tz_name and str(tz_name).strip() != str(tz):
-        drops.append(
-            f"timezone: `{tz_name}` is not a known zone - falling back to {DEFAULT_TZ}, "
-            f"so every naive time below is read in {DEFAULT_TZ}"
+        drops.note(
+            "",
+            "timezone",
+            f"`{tz_name}` is not a known zone - falling back to {DEFAULT_TZ}, so every "
+            f"naive time below is read in {DEFAULT_TZ}",
         )
     if meta.get("enrolment") is not None:
         log_step(
@@ -966,7 +1077,8 @@ def parse(meta: dict) -> Schedule:
         semester_end=_flagged_date(meta, "semester_end", drops, "", term_cost),
         assignments=_parse_assignments(meta.get("assignments"), tz, drops),
         events=_parse_events(meta.get("events"), tz, drops),
-        dropped=drops,
+        dropped=drops.report,
+        faults=drops.faults,
     )
 
 
@@ -1769,7 +1881,11 @@ def main() -> int:
         source_name = f"{args.cohort_org}/{SCHEDULE_PATH}"
 
     if not args.validate:
-        print(json.dumps(asdict(sched), indent=2, default=str))
+        parsed = asdict(sched)
+        # `dropped` says the same thing in the shape this dump has always had; `faults` is
+        # the notifier's copy of it, and a dump of the plan is not where anybody reads it.
+        parsed.pop("faults", None)
+        print(json.dumps(parsed, indent=2, default=str))
         return 0
     # Report what was UNDERSTOOD as well as what was dropped: validation cannot catch a
     # well-formed entry with the wrong date, but a count that is one short is visible.

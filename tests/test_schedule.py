@@ -16,7 +16,8 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import source_fault
 
-from dsl_course import course, schedule
+from dsl_course import course, gh_contents, schedule
+from dsl_course import faults as faults_module
 from dsl_course.schedule import (
     AssignmentEntry,
     Deploy,
@@ -2204,3 +2205,73 @@ def test_two_cohort_dest_repos_that_match_each_other_are_refused():
     sched = parse(meta)
     assert set(sched.assignments) == {"week-3"}
     assert any("cohort-side name of assignments.week-3" in d for d in sched.dropped)
+
+
+# ------------------------------------------- what was dropped, as the notifier sees it
+#
+# `dropped` is the report faculty read; `faults` is the same leftovers as ConfigFaults,
+# which is what the digest issue lists and the mail names. They are built together, so the
+# thing asserted here is that they cannot disagree - and that a fault knows the line.
+
+
+def _from_text(text: str):
+    """Parse schedule.yml TEXT with line stamps, as `load` and the validator do."""
+    return schedule.parse(gh_contents.load_yaml_lines(text))
+
+
+UNREADABLE = """timezone: Nowhere/Nothing
+releases:
+  lecture_02:
+    event_datetime: not-a-date
+  lecture_03:
+    event_datetime: 2026-09-15T10:00
+    titel: typo
+assignments:
+  a1:
+    due_datetime: 2026-10-01
+    course_source_repo: a1-f2026
+    solution_datetime: 2026-09-01
+"""
+
+
+def test_every_dropped_line_has_a_fault_beside_it():
+    sched = _from_text(UNREADABLE)
+    assert len(sched.faults) == len(sched.dropped) == 4
+    # Every report line ENDS with what its fault says, so the run summary and the mail
+    # cannot describe the same entry differently.
+    assert all(
+        line.endswith(fault.what)
+        for line, fault in zip(sched.dropped, sched.faults, strict=True)
+    )
+
+
+def test_a_dropped_entry_cites_the_line_it_is_written_on():
+    faults = {f.key: f for f in _from_text(UNREADABLE).faults}
+    assert faults["releases.lecture_02.event_datetime"].lineno == 4
+    assert faults["releases.lecture_03.titel"].lineno == 7
+    assert faults["assignments.a1.solution_datetime"].lineno == 12
+    assert faults["timezone"].lineno == 1
+
+
+def test_a_dropped_entry_is_an_immediate_fault():
+    # No `fires`: the entry is already out of the plan, so there is no moment it is about
+    # to bite at - it is at the notify bar now.
+    (fault, *_) = _from_text(UNREADABLE).faults
+    assert fault.fires is None
+    assert fault.severity(datetime(2026, 9, 7, tzinfo=ZoneInfo("Europe/Berlin"))) is (
+        schedule.Severity.WARNING
+    )
+    assert fault.file == "schedule.yml"
+    assert fault.fix() == faults_module.FIX["schedule.yml"]
+
+
+def test_a_whole_block_written_as_a_list_names_the_block():
+    sched = _from_text("releases:\n  - lecture_02\n")
+    (fault,) = sched.faults
+    assert fault.where == "releases" and fault.field == "releases"
+    assert fault.lineno == 1
+
+
+def test_a_clean_plan_has_no_faults():
+    sched = _from_text("releases:\n  l1:\n    event_datetime: 2026-09-15T10:00\n")
+    assert sched.faults == [] and sched.dropped == []
