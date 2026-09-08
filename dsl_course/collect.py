@@ -25,21 +25,29 @@ assignment shortly after its grading deadline, writing one row per submission re
     classroom-config/snapshots/<slug>.csv
         repo,sha,recorded_at,submitted_at,submitted_source
 
-and never rewriting it. `submitted_at` is WHEN that pinned commit was made and
-`submitted_source` says where that time came from - `commit` for the committer date the
-API reports, which the student supplies and can backdate, and `suspect` when GitHub's own
-`pushed_at` for that repo is LATER than the due moment while the commit claims to predate
-it (the sheet then carries `info.submitted_note` for whoever marks it). Grading pins to the recorded sha; a blank sha means "nothing had
-been pushed by the deadline" and scores zero. Only with no snapshot at all does grading
-fall back to the date-based pin, loudly.
+and never rewriting it. `submitted_at` is WHEN that submission arrived and
+`submitted_source` says who timed it, on a three-rung ladder taken once, at the freeze:
 
-Only the MOMENT is server-timed, and it is easy to over-read what that buys. WHICH commit
-the freeze chooses is still the last one whose committer date is on or before the deadline,
-and that date is the student's to set - so a commit pushed after the deadline but before
-the next hourly tick, backdated, is still picked up by that first snapshot. What the
-snapshot closes is the UNBOUNDED window, not the hour before it. A chosen commit dated
-after `recorded_at` needs a skewed or doctored clock, so `_snapshot_sha` says so. To
-re-freeze deliberately, delete the snapshot CSV and let the next tick rebuild it.
+  `push`     GitHub's own record of the push that delivered the pinned commit, read from
+             the repository-activity API. Nobody can write this one, so it is what
+             `days_late` should rest on.
+  `commit`   no push record matched - the committer date the commits API reports, which
+             is `GIT_COMMITTER_DATE` and therefore the student's to set.
+  `suspect`  the same committer date, contradicted: GitHub's `pushed_at` for the repo is
+             LATER than the due moment while the commit claims to predate it.
+
+The last two carry `info.submitted_note` into the sheet, so whoever marks it can see that
+the time is a claim rather than an observation. Grading pins to the recorded sha; a blank
+sha means "nothing had been pushed by the deadline" and scores zero. Only with no snapshot
+at all does grading fall back to the date-based pin, loudly.
+
+WHICH commit the freeze chooses is still the last one whose committer date is on or before
+the deadline, and that date is the student's to set - so a commit pushed after the deadline
+but before the next tick, backdated, is still the one picked up. What the ladder fixes is
+the TIME the row carries: the pin may be a backdated commit, but the moment recorded
+against it is the moment GitHub saw it arrive. A chosen commit dated after `recorded_at`
+needs a skewed or doctored clock, so `_snapshot_sha` says so. To re-freeze deliberately,
+delete the snapshot CSV and let the next tick rebuild it.
 
 FIRE-ONCE.  The hourly scheduler autogrades each assignment exactly once, just after its
 grading deadline. The marker is an explicit SENTINEL file this module writes as the very last
@@ -127,18 +135,31 @@ GRADED_RECORD = "_graded.json"  # fire-once sentinel: a successful run's LAST wr
 SKIP_RECORD = "_skipped.json"  # the same marker, for an assignment nothing grades
 SNAPSHOT_DIR = "snapshots"  # classroom-config/snapshots/<slug>.csv
 SNAPSHOT_FIELDS = ("repo", "sha", "recorded_at", "submitted_at", "submitted_source")
-# Where a row's `submitted_at` came from. Only `commit` is written today: the committer
-# date the commits API reports, which is the STUDENT's to set (`GIT_COMMITTER_DATE`) and
-# can therefore be backdated. A server-timed rung (`push`, from the repository-activity
-# API) comes later; recording the provenance now is what lets a marker - and the code -
-# tell a client-supplied time from a server-observed one in a file that is never rewritten.
+# Where a row's `submitted_at` came from - recorded in a file that is never rewritten, so
+# a marker (and the code) can always tell a server-observed time from a claimed one.
+#
+# `push` is GitHub's own record of when the commit ARRIVED, read from the
+# repository-activity API at the freeze. It is the only rung nobody can write: a committer
+# date is `GIT_COMMITTER_DATE` and therefore the student's, so late work backdated past
+# the deadline used to be pinned with `days_late: 0` and nothing anywhere said otherwise.
+SUBMITTED_SOURCE_PUSH = "push"
+# The committer date the commits API reports - the fallback, when GitHub has no push
+# record that can be matched to this commit. Client-supplied, and the sheet says so.
 SUBMITTED_SOURCE_COMMIT = "commit"
-# The committer date says the work predates the deadline; GitHub's own `pushed_at` says
-# the repo did not receive it until after. One of the two is a claim the student wrote
-# (`GIT_COMMITTER_DATE`) and the other is the server's, so the row says so rather than
-# quietly pinning the earlier one.
+# The same committer date, plus a contradiction: GitHub's own `pushed_at` for the repo is
+# LATER than the due moment while the commit claims to predate it.
 SUBMITTED_SOURCE_SUSPECT = "suspect"
 SUSPECT_NOTE = "commit dated before the push that delivered it - check"
+COMMIT_ONLY_NOTE = (
+    "no push record matched this commit - the time shown is its committer date, "
+    "which the student sets"
+)
+# What `info.submitted_note` says for each source. A `push` row has nothing to note: the
+# time on it is the server's. Read at the freeze off the snapshot, which is the record.
+SUBMITTED_NOTES = {
+    SUBMITTED_SOURCE_SUSPECT: SUSPECT_NOTE,
+    SUBMITTED_SOURCE_COMMIT: COMMIT_ONLY_NOTE,
+}
 RUN_TIMEOUT = 300  # wall-clock seconds per graded subprocess
 # The note on the one zero that means "the RUNNER broke", not "the student didn't submit".
 # `collect` keys its systemic-failure guard on it, so it is a constant, not a loose string.
@@ -609,6 +630,108 @@ def delivery_is_suspect(
     return made <= moment < delivered
 
 
+# The two fields a push record answers with: the HEAD the push left behind, and when
+# GitHub observed it. Tab-joined, like `_COMMIT_FIELDS`, and filtered to the activity
+# types that actually deliver commits - a branch creation or a repo merge says nothing
+# about when a student's work arrived.
+_ACTIVITY_FIELDS = (
+    '.[] | select(.activity_type == "push" or .activity_type == "force_push") | '
+    '[(.after // ""), (.timestamp // "")] | join("\t")'
+)
+
+
+def _push_activity(cohort_org: str, repo: str) -> list[tuple[str, str]] | None:
+    """This repo's push records - `(the HEAD after the push, when GitHub saw it)` - or
+    None if the question could not be answered.
+
+    The repository-activity API, and not `pushed_at` (which moves with `push_solution` and
+    only ever describes the LAST push) and not the events API (90-day retention, and it
+    drops old events from a busy repo). Read ONCE per repo, at the write-once freeze, so
+    the cost is one call per submission and never a per-tick one."""
+    code, out = gh(
+        "api",
+        "-X",
+        "GET",
+        f"repos/{cohort_org}/{repo}/activity",
+        "-f",
+        "per_page=100",
+        "--jq",
+        _ACTIVITY_FIELDS,
+    )
+    if code != 0:
+        # A repo that is not there has no pushes; anything else is "could not tell", and
+        # the caller falls back to the committer date rather than abandoning the freeze -
+        # a snapshot never taken is worse, because the pin then moves with every push.
+        return [] if is_missing_resource(out) else None
+    rows = []
+    for line in out.splitlines():
+        after, _, stamp = line.partition("\t")
+        if stamp.strip():
+            rows.append((after.strip(), stamp.strip()))
+    return rows
+
+
+def push_time_for(activity: list[tuple[str, str]], sha: str, committed: str) -> str:
+    """When GitHub says the pinned commit ARRIVED, from this repo's push records, or "".
+
+    Two rungs. The push whose resulting HEAD *is* the pin is the push that delivered it,
+    exactly. Failing that - the pin is not the tip of any push, which is what pushing two
+    commits at once looks like - the EARLIEST push at or after the moment the commit
+    claims to have been made is the earliest one that could have carried it. That second
+    rung is deliberately generous to the student: it can only ever name a push at or after
+    their own claimed time, so it never invents lateness, and a backdated commit is still
+    timed by a real push rather than by the date typed into it.
+
+    "" means neither rung answered, and the caller falls back to the committer date."""
+    for after, stamp in activity:
+        if after and after == sha:
+            return stamp
+    made = _parse_iso(committed)
+    if made is None:
+        return ""
+    later = [
+        (when, stamp)
+        for _after, stamp in activity
+        if (when := _parse_iso(stamp)) is not None and when >= made
+    ]
+    return min(later)[1] if later else ""
+
+
+def _submitted(
+    cohort_org: str,
+    repo: str,
+    pin: Pin,
+    pushed_at: str,
+    moment: datetime | None,
+) -> tuple[str, str]:
+    """`(submitted_at, submitted_source)` for one pinned commit - the ladder in full.
+
+    Recorded now or never: the snapshot is write-once, and this is the only pass that
+    reads GitHub's push records. Everything downstream - `days_late`, the penalty, the
+    receipt a student reads - rests on which rung answered, which is why the row carries
+    the rung as well as the time."""
+    server = push_time_for(
+        _push_activity(cohort_org, repo) or [], pin.sha, pin.committed
+    )
+    if server:
+        return server, SUBMITTED_SOURCE_PUSH
+    # Nothing GitHub timed. The committer date is a CLAIM, so it is warned about here and
+    # noted in the sheet - a grader deciding a late penalty has to see which it is.
+    if delivery_is_suspect(pin.committed, pushed_at, moment):
+        # Tag, never the handle: this log is public.
+        log(
+            f"  [warn] {target_ref(repo)} is pinned to a commit dated before the push "
+            f"that delivered it - a committer date is client-supplied, so check it "
+            f"before marking"
+        )
+        return pin.committed, SUBMITTED_SOURCE_SUSPECT
+    log(
+        f"  [warn] {target_ref(repo)}: no push record matched the pinned commit - "
+        f"recording its committer date, which the student sets"
+    )
+    return pin.committed, SUBMITTED_SOURCE_COMMIT
+
+
 def _warn_if_late_commits_only(cohort_org: str, repo: str, deadline: str) -> None:
     """When a reachable repo yielded no commit on/before the deadline, tell an empty repo
     apart from one that HAS commits, all dated after the cutoff. The snapshot filters on the
@@ -793,26 +916,14 @@ def snapshot_assignment(
         if not pin.absent:
             any_present = True  # a sha, or a reachable-but-empty repo that EXISTS
         if pin.sha:
-            # The pinned commit's committer date, recorded with WHERE it came from - the
-            # student supplied it, so it is a claim, not an observation (see the module
-            # docstring). The snapshot is write-once, so it is recorded now or never.
-            suspect = delivery_is_suspect(pin.committed, pushed.get(repo, ""), moment)
-            if suspect:
-                # Tag, never the handle: this log is public.
-                log(
-                    f"  [warn] {target_ref(repo)} is pinned to a commit dated before the "
-                    f"push that delivered it - a committer date is client-supplied, so "
-                    f"check it before marking"
-                )
-            rows.append(
-                (
-                    repo,
-                    pin.sha,
-                    recorded_at,
-                    pin.committed,
-                    SUBMITTED_SOURCE_SUSPECT if suspect else SUBMITTED_SOURCE_COMMIT,
-                )
+            # WHEN the pinned commit was submitted, and WHERE that time came from: the
+            # server's push record if GitHub has one, else the committer date, which the
+            # student supplied and can backdate. The snapshot is write-once, so it is
+            # recorded now or never.
+            submitted_at, source = _submitted(
+                cohort_org, repo, pin, pushed.get(repo, ""), moment
             )
+            rows.append((repo, pin.sha, recorded_at, submitted_at, source))
         else:
             # Absent, or reachable with nothing pushed by the deadline. Either way there is
             # no submission, so there is no submission time: both cells stay blank.
@@ -930,7 +1041,7 @@ def _sheet_info(
     tz: str | None,
     *,
     is_group: bool,
-    suspect: set[str] | None = None,
+    notes: dict[str, str] | None = None,
 ) -> dict[str, dict]:
     """The toolkit's facts, per submission unit: when the pinned commit was made, how late
     that is, and (for a team) what CONTRIBUTIONS.md said at that commit.
@@ -955,12 +1066,13 @@ def _sheet_info(
         if when is not None:
             info["submitted"] = submitted_display(submitted_at, tz)
             info["days_late"] = days_late(when, due, tz) if due is not None else None
-            if repo in (suspect or ()):
-                # The one fact in `info:` that is not about the work: the committer date
-                # this row is built from is the student's to set, and the server says the
-                # push that carried it landed later. A grader marking late work has to see
-                # that before they act on `days_late: 0`.
-                info["submitted_note"] = SUSPECT_NOTE
+            note = (notes or {}).get(repo)
+            if note:
+                # The one fact in `info:` that is not about the work: whether the time this
+                # row is built from is the SERVER's or the student's. A row GitHub timed
+                # carries nothing here; one built from a committer date says so, because a
+                # grader acting on `days_late: 0` has to know which they are reading.
+                info["submitted_note"] = note
         if is_group:
             info["contributions"] = _contributions(cohort_org, repo, sha)
         out[unit] = info
@@ -1017,7 +1129,7 @@ def _provisional_pins(
     deadline: str,
     previous: dict,
     due: datetime | None = None,
-) -> tuple[dict[str, tuple[str, str]], set[str]] | None:
+) -> tuple[dict[str, tuple[str, str]], dict[str, str]] | None:
     """Each repo's last commit on or before the cutoff, read WITHOUT writing a snapshot.
 
     The snapshot file stays write-once and stays the cutoff's job: these pins move with
@@ -1030,11 +1142,16 @@ def _provisional_pins(
     four times an hour for the length of the late window, where it used to cost one commits
     call per submission repo on every one of those ticks.
 
-    Returns `(pins, the repos whose pin the server's own push time contradicts)`, or None
-    if a lookup we DID make failed - a half-read cohort must not rewrite the file."""
+    Returns `(pins, a note per repo whose pin the server's own push time contradicts)`, or
+    None if a lookup we DID make failed - a half-read cohort must not rewrite the file.
+
+    No push records are read here, and so no row is ever sourced `push`: that is one call
+    per submission repo and this runs four times an hour for the length of the late
+    window. The freeze pays for it once (`_submitted`), which is where the answer is
+    written down for good."""
     pushed = _pushed_at(cohort_org)
     pins: dict[str, tuple[str, str]] = {}
-    suspect: set[str] = set()
+    notes: dict[str, str] = {}
     for repo, unit, _members in targets:
         was = (previous.get(unit) or {}).get(grades.INFO_KEY) or {}
         if _quiet_since(pushed.get(repo, ""), was.get("submitted"), was.get("checked")):
@@ -1044,8 +1161,8 @@ def _provisional_pins(
             return None
         pins[repo] = (pin.sha, pin.committed)
         if delivery_is_suspect(pin.committed, pushed.get(repo, ""), due):
-            suspect.add(repo)
-    return pins, suspect
+            notes[repo] = SUSPECT_NOTE
+    return pins, notes
 
 
 def _receipt_event(
@@ -1268,7 +1385,7 @@ def sync_sheet(
     )
     info_updates: dict[str, dict] = {}
     pins: dict[str, tuple[str, str]] = {}
-    suspect: set[str] = set()
+    notes: dict[str, str] = {}
     if derive and phase is SheetPhase.FREEZING:
         rows = load_snapshot_rows(cohort_org, slug)
         if rows is None:
@@ -1281,11 +1398,12 @@ def sync_sheet(
             derive = False
         else:
             pins = {r: (row.sha, row.submitted_at) for r, row in rows.items()}
-            # Recorded once, at the freeze, and read back here: the snapshot is the record.
-            suspect = {
-                r
+            # Which rung timed each row was decided once, at the freeze, and is read back
+            # here: the snapshot is the record, and a row GitHub itself timed needs no note.
+            notes = {
+                r: SUBMITTED_NOTES[row.submitted_source]
                 for r, row in rows.items()
-                if row.submitted_source == SUBMITTED_SOURCE_SUSPECT
+                if row.sha and row.submitted_source in SUBMITTED_NOTES
             }
     elif derive:
         found = _provisional_pins(
@@ -1298,7 +1416,7 @@ def sync_sheet(
         if found is None:
             log_err(f"  ! could not read every submission for {path} - not rewriting")
             return False
-        pins, suspect = found
+        pins, notes = found
     if derive:
         info_updates = _sheet_info(
             cohort_org,
@@ -1307,7 +1425,7 @@ def sync_sheet(
             due,
             sched.timezone,
             is_group=is_group,
-            suspect=suspect,
+            notes=notes,
         )
     for unit, count in (autograde or {}).items():
         info_updates.setdefault(unit, {})["autograde"] = count

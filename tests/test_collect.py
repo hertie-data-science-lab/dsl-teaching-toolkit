@@ -838,15 +838,25 @@ def test_snapshot_sha_says_nothing_about_an_ordinary_commit(monkeypatch, capsys)
     assert "dated after" not in capsys.readouterr().out
 
 
-def _stub_snapshot_write(monkeypatch, pins: dict, existing=None, pushed=None):
+def _stub_snapshot_write(
+    monkeypatch, pins: dict, existing=None, pushed=None, activity=None
+):
     """Wire snapshot_assignment onto stubs; returns the (path, text) writes it makes.
 
     `pushed` is `{repo: pushed_at}` out of the org listing - the server's word on when each
     repo last received anything. Unset means the listing carries none, which is what every
-    test written before that check existed expects."""
+    test written before that check existed expects.
+
+    `activity` is `{repo: [(head after the push, when GitHub saw it)]}` from the
+    repository-activity API. Unset means GitHub answered with no push records at all, so
+    every row falls to the committer date - which is what the tests written before that
+    ladder existed expect. Stubbed, never called: nothing here reaches GitHub."""
     written: list[tuple[str, str]] = []
     monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: existing)
     monkeypatch.setattr(collect, "_pushed_at", lambda org: pushed or {})
+    monkeypatch.setattr(
+        collect, "_push_activity", lambda org, repo: (activity or {}).get(repo, [])
+    )
     monkeypatch.setattr(
         collect,
         "submission_targets",
@@ -927,6 +937,139 @@ def test_snapshot_assignment_records_when_the_pinned_commit_was_made(monkeypatch
             "",
             "",
         )
+
+
+def test_the_push_that_left_the_pin_at_head_times_the_submission(monkeypatch):
+    # Rung 1. `days_late` used to rest on a committer date, which is GIT_COMMITTER_DATE
+    # and therefore the student's: work pushed two days late and dated before the deadline
+    # was recorded as on time and nothing anywhere said otherwise.
+    written = _stub_snapshot_write(
+        monkeypatch,
+        {"assignment-1-anna": collect.Pin(SHA, "2026-10-13T21:40:00Z")},
+        activity={
+            "assignment-1-anna": [
+                (SHA, "2026-10-15T22:05:00Z"),
+                ("older" + SHA[5:], "2026-10-10T08:00:00Z"),
+            ]
+        },
+    )
+    collect.snapshot_assignment(
+        "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+    )
+    ((_path, text),) = written
+    row = collect.parse_snapshot_rows(text)["assignment-1-anna"]
+    assert (row.submitted_at, row.submitted_source) == (
+        "2026-10-15T22:05:00Z",
+        collect.SUBMITTED_SOURCE_PUSH,
+    )
+
+
+def test_a_pin_that_is_not_any_pushs_head_is_timed_by_the_earliest_push_after_it(
+    monkeypatch,
+):
+    # Rung 2: pushing two commits at once leaves the earlier one as nobody's HEAD. The
+    # first push at or after the moment the commit claims to have been made is the
+    # earliest one that could have carried it - generous to the student, and still the
+    # server's word rather than theirs.
+    written = _stub_snapshot_write(
+        monkeypatch,
+        {"assignment-1-anna": collect.Pin(SHA, "2026-10-13T21:40:00Z")},
+        activity={
+            "assignment-1-anna": [
+                ("tip", "2026-10-16T09:00:00Z"),
+                ("mid", "2026-10-14T07:30:00Z"),
+                ("before-the-commit", "2026-10-01T07:30:00Z"),
+            ]
+        },
+    )
+    collect.snapshot_assignment(
+        "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+    )
+    ((_path, text),) = written
+    row = collect.parse_snapshot_rows(text)["assignment-1-anna"]
+    assert (row.submitted_at, row.submitted_source) == (
+        "2026-10-14T07:30:00Z",
+        collect.SUBMITTED_SOURCE_PUSH,
+    )
+
+
+def test_a_commit_no_push_record_matches_falls_back_and_says_so(monkeypatch, capsys):
+    # Rung 3. The row still carries a time - the sheet needs one - but it names the rung,
+    # and the log says what a marker is looking at.
+    written = _stub_snapshot_write(
+        monkeypatch,
+        {"assignment-1-anna": collect.Pin(SHA, "2026-10-13T21:40:00Z")},
+        activity={"assignment-1-anna": [("other", "2026-10-01T07:30:00Z")]},
+    )
+    collect.snapshot_assignment(
+        "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+    )
+    ((_path, text),) = written
+    row = collect.parse_snapshot_rows(text)["assignment-1-anna"]
+    assert (row.submitted_at, row.submitted_source) == (
+        "2026-10-13T21:40:00Z",
+        collect.SUBMITTED_SOURCE_COMMIT,
+    )
+    out = capsys.readouterr().out
+    assert "no push record matched the pinned commit" in out
+    assert "anna" not in out  # the log is public: the repo is named by tag only
+
+
+def test_an_unreadable_activity_read_does_not_abandon_the_freeze(monkeypatch):
+    # A supplementary endpoint that 403s must not stop the write-once snapshot: without it
+    # the assignment is never frozen at all, and the pin then moves with every later push.
+    # The row falls to the committer date, which is exactly what shipped before this rung.
+    written = _stub_snapshot_write(
+        monkeypatch, {"assignment-1-anna": collect.Pin(SHA, "2026-10-13T21:40:00Z")}
+    )
+    monkeypatch.setattr(collect, "_push_activity", lambda org, repo: None)
+    assert (
+        collect.snapshot_assignment(
+            "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+        )
+        is collect.SnapshotResult.WRITTEN
+    )
+    ((_path, text),) = written
+    assert (
+        collect.parse_snapshot_rows(text)["assignment-1-anna"].submitted_source
+        == collect.SUBMITTED_SOURCE_COMMIT
+    )
+
+
+def test_a_server_timed_row_is_never_second_guessed_by_pushed_at(monkeypatch):
+    # `suspect` compares a CLAIM with the server. A row the server itself timed has no
+    # claim in it, so the contradiction cannot arise and the note must not appear.
+    written = _stub_snapshot_write(
+        monkeypatch,
+        {"assignment-1-anna": collect.Pin(SHA, "2026-10-13T21:40:00Z")},
+        pushed={"assignment-1-anna": "2026-10-20T09:00:00Z"},
+        activity={"assignment-1-anna": [(SHA, "2026-10-20T09:00:00Z")]},
+    )
+    collect.snapshot_assignment(
+        "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+    )
+    ((_path, text),) = written
+    assert (
+        collect.parse_snapshot_rows(text)["assignment-1-anna"].submitted_source
+        == collect.SUBMITTED_SOURCE_PUSH
+    )
+
+
+def test_a_repo_with_no_submission_is_asked_for_no_push_records(monkeypatch):
+    # One call per submission repo, at the freeze only - and none at all for a repo with
+    # nothing in it to time.
+    def boom(org, repo):
+        raise AssertionError("nothing was pushed; there is no push to look up")
+
+    written = _stub_snapshot_write(
+        monkeypatch,
+        {"assignment-1-anna": collect.Pin(), "assignment-1-ben": collect.Pin()},
+    )
+    monkeypatch.setattr(collect, "_push_activity", boom)
+    collect.snapshot_assignment(
+        "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+    )
+    assert written
 
 
 def test_snapshot_assignment_never_overwrites_an_existing_snapshot(monkeypatch):
@@ -2229,6 +2372,66 @@ def test_the_freeze_reads_the_note_back_off_the_snapshot(monkeypatch):
     ((_path, text),) = written
     info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
     assert info["submitted_note"] == collect.SUSPECT_NOTE
+
+
+def test_a_commit_dated_row_says_so_in_the_sheet_at_the_freeze(monkeypatch):
+    # `days_late` on a `commit` row rests on a time the student typed. The sheet says which
+    # rung timed it, so a grader can see what they are acting on.
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        rows={
+            "assignment-1-ada-l": collect.SnapshotRow(
+                repo="assignment-1-ada-l",
+                sha=SHA,
+                submitted_at="2026-10-04T20:00:00Z",
+                submitted_source=collect.SUBMITTED_SOURCE_COMMIT,
+            )
+        },
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 12, tzinfo=BERLIN),
+    )
+    ((_path, text),) = written
+    info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
+    assert info["submitted_note"] == collect.COMMIT_ONLY_NOTE
+
+
+def test_a_server_timed_row_carries_no_note_at_all(monkeypatch):
+    # The note exists to flag a claim. A row GitHub timed is not one, and a note on every
+    # row is a note nobody reads.
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        rows={
+            "assignment-1-ada-l": collect.SnapshotRow(
+                repo="assignment-1-ada-l",
+                sha=SHA,
+                submitted_at="2026-10-04T20:00:00Z",
+                submitted_source=collect.SUBMITTED_SOURCE_PUSH,
+            )
+        },
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 12, tzinfo=BERLIN),
+    )
+    ((_path, text),) = written
+    info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
+    assert "submitted_note" not in info
 
 
 def test_the_sheet_created_at_handout_has_every_row_and_derives_nothing(monkeypatch):
