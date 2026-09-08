@@ -358,17 +358,26 @@ a2-a4 were in, and the reason the button that creates a template writes its
 Five seeded crons: **Scheduled release** at :07/:22/:37/:52 every hour; **Refresh actions**
 05:27, **Publish course website** 05:58, **Sync membership** 06:13, **Sync site** 06:41 daily.
 Each reports its own failures, because GitHub emails a scheduled-run failure only to whoever
-last committed the file - the bot.
+last committed the file - the bot. **Send enrolment codes** carries the same three steps
+(`_CRON_NOTICE` + `_CRON_MAIL` + `_CRON_CLOSE`) without being a cron at all: a roster push
+fires it, so it has no actor either. Six workflows report their own failures; only five
+declare a `schedule:`, which is what `CRONS` in `tests/test_renderers.py` means.
 
 No cron may sit on minute 0/15/30/45 and no two daily ones may share a slot - GitHub drops the
 most contended minutes first (on `0 * * * *` the scheduler was delivered 6 ticks a day, not 24),
 and membership must write the teams that Sync site then reads. Both rules are enforced by
 `tests/test_renderers.py`; the reasoning sits above the cron literals in `workflows_render`.
 
-**A content fault never reds a cron.** A source the plan cites and the org has not got is
-faculty's to fix, so it is delivered by the cohort's digest issue and an email to the people git
-names for that line - never by the exit code. A red X on any of the five crons means the run
-itself broke, which is why the maintainer is emailed its log tail.
+**A content fault never reds an unattended run.** Anything faculty have to fix - a source the
+plan cites and the org has not got, a `;`-delimited students.csv, a teams.csv with no header, a
+people.yml that is not YAML - is delivered by the cohort's digest issue and an email to the
+people git names for that line, never by the exit code. Sync membership skips the cohort it
+cannot read (`sync_membership._CONTENT_FAULT`, which is `faults.Unusable` plus a YAML error)
+and Send enrolment codes returns `Outcome.UNUSABLE_ROSTER`, which `reds_the_run` treats as
+green. A red X on any of the six means the run itself broke - a `gh` write refused, a token
+that lost its scope, an absent roster, an unset mail transport - which is why the maintainer is
+emailed its log tail. `faults.Unusable` is the whole of the distinction: it IS a RuntimeError,
+so every consumer still stops for it, but a `gh` read that failed is not one and still reds.
 
 That holds one level up too. The COURSE org's own `dsl-course.yml` and `cohort-courses-pages.yml`
 are checked once per scheduler tick (`scheduler._preflight_course`) and again on a push to

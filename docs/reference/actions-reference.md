@@ -28,7 +28,7 @@ grants it: [`access-reference.md`](access-reference.md).
 | **Release materials** | Copy `course_source_path` (a folder, a file, or a comma-separated list) from a course-org `course_source_repo` into the cohort's `cohort_dest_repo` at `cohort_dest_path` - the same four fields as a `schedule.yml` `deploy`. Covers session folders, datasets, root files and code subpackages alike. _Fallback - see [07](../07-schedule-releases.md), [08](../08-release-materials-to-cohort.md)._ |
 | **Release assignment** | Freeze a cohort template from the chosen `assignment-*`, then generate one private `<slug>-<handle>` repo per onboarded student. `include_solution` and `dry_run` default off; `type` defaults to `auto` (follow `schedule.yml` / the template's `grading_config.yml`). _Fallback - see [07](../07-schedule-releases.md), [09](../09-release-assignment-to-cohort.md)._ |
 | **Patch released assignment** | Push a corrected file (or folder) from the template's default branch into every submission repo of an assignment already handed out - a new commit on each student's branch, never a force-push - and post a note on each Feedback issue. A file the student has already changed is kept unless `overwrite` says otherwise; the frozen cohort-side hand-out is patched too, so later onboarders get the fix. **`dry_run` defaults to `true`**. See [09](../09-release-assignment-to-cohort.md#fixing-a-file-after-the-assignment-has-gone-out). |
-| **Send enrolment codes** | **No button** - it runs only on a push to a cohort's `students.csv`, and it sends for real. Generates an `enrol_code` per roster row, writes it back to `students.csv`, emails each not-yet-onboarded student theirs. Safe on every push: a row's `code_sent_at` stops it being mailed twice (from the first run that sets it), so a re-send means clearing that cell and pushing. |
+| **Send enrolment codes** | **No button** - it runs only on a push to a cohort's `students.csv`, and it sends for real. Generates an `enrol_code` per roster row, writes it back to `students.csv`, emails each not-yet-onboarded student theirs. Safe on every push: a row's `code_sent_at` stops it being mailed twice (from the first run that sets it), so a re-send means clearing that cell and pushing. A roster the toolkit cannot read leaves the run green and is reported in the cohort's digest issue instead; a real failure files an issue and emails the maintainer, like the crons. See [06](../06-enrol-students-to-cohort.md). |
 | **Sync site** | Regenerate a cohort's website. Releases, a push to `schedule.yml` and a daily cron already do this for you. |
 
 ## Grades
@@ -55,12 +55,15 @@ Full flow: [Grade and return assignments](../10-grade-and-return-assignments.md)
 ## When a scheduled run fails
 
 The five scheduled actions (Scheduled release, Sync membership, Sync site, Refresh actions,
-Publish course website) run with nobody watching, so a failure **opens an issue in your
-`.github` repo** titled *"&lt;action&gt; is failing"*, with a link to the run and a cc to your
-org's `course-admin` team, so it reaches an inbox. It comments on
+Publish course website) run with nobody watching - and so does **Send enrolment codes**, which
+has no schedule and no button at all: a push to a cohort's roster fires it. A failure in any of
+the six **opens an issue in your `.github` repo** titled *"&lt;action&gt; is failing"*, with a
+link to the run and a cc to your org's `course-admin` team, so it reaches an inbox. It comments on
 that same issue while the failure persists, and closes it as soon as a run succeeds - so an
 open one always means "still broken". Don't close it by hand; fix the cause and re-run the
-action.
+action. A file **faculty** have to fix never opens one of these: Sync membership skips that
+cohort and Send enrolment codes sends nothing, both stay green, and the fault is reported in
+that cohort's own digest issue and emailed to whoever left it there.
 
 On the same throttle, the **toolkit maintainer is emailed** the run's URL and the last 30
 lines of the step that failed. A broken run is infrastructure rather than teaching, so the
