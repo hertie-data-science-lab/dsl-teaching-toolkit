@@ -2,7 +2,8 @@
 
 Sets up org-level infrastructure that persists across semesters:
 - DSL_BOT_TOKEN secret (required for all workflows), and DSL_MAINTAINER_EMAIL where the
-  run's env carries it (where the seeded workflows mail a fault)
+  run's env carries it (where the seeded workflows mail a fault); on a COURSE org,
+  DSL_COURSE_ADMIN_EMAILS too (who hears about a fault in the course's own config)
 - Faculty teams (instructors, course-admin); cohort bootstrap adds students + auditors
 - Org settings (base permissions, member repo creation, 2FA where every member has it)
 - Profile README (.github repo with description)
@@ -194,6 +195,39 @@ def propagate_maintainer_email(org: str) -> int:
         )
         return 0
     return 0 if set_org_secret(org, mailer.MAINTAINER_ENV, address) else 1
+
+
+def propagate_course_admin_emails(org: str) -> int:
+    """Copy `DSL_COURSE_ADMIN_EMAILS` from this run's env onto `org`. Failure count.
+
+    Who hears about a fault in the COURSE org's own config - `dsl-course.yml` and the
+    cohort registry, the two files that decide whether the course is synced at all (see
+    `notify.route_course`). A comma-separated address list, travelling exactly as
+    `DSL_MAINTAINER_EMAIL` does and for the same two reasons: an address is not a
+    credential, so centrally it is a repository VARIABLE on the toolkit; and a seeded
+    workflow can only read one out of `secrets.`, so on the org it is a secret.
+
+    An address list rather than an `email:` in `dsl-course.yml`, because that file is
+    PUBLIC and is itself one of the files these mails are about.
+
+    COURSE orgs only, which is why this is called under `not args.cohort`: every
+    course-level mail is sent from the course org's own `.github`, and no workflow seeded
+    into a cohort may wire the mail env at all (see maintainers.md).
+
+    Unset is a normal state and never fails a bootstrap - the digest issue's
+    `cc @<course>/course-admin` is then the only channel - so this logs one `[skip]` and
+    returns 0. A failed WRITE does count: the addresses were meant to be there and
+    silently are not.
+
+    Never logs the addresses, only the name: this runs in a public repo's Actions log."""
+    addresses = (os.environ.get(mailer.COURSE_ADMIN_ENV) or "").strip()
+    if not addresses:
+        log(
+            f"  [skip] {mailer.COURSE_ADMIN_ENV} not in this run's env - a fault in "
+            f"{org}'s own config reaches its admins through the digest issue only"
+        )
+        return 0
+    return 0 if set_org_secret(org, mailer.COURSE_ADMIN_ENV, addresses) else 1
 
 
 def create_default_teams(org: str) -> int:
@@ -715,7 +749,8 @@ def main() -> int:
         action="store_true",
         help="Set DSL_BOT_TOKEN on this org to the DSL_BOT_TOKEN env value "
         "(lets the central bootstrap auto-provision the token - no manual per-org step). "
-        "Also propagates DSL_MAINTAINER_EMAIL when this run's env carries it.",
+        "Also propagates DSL_MAINTAINER_EMAIL when this run's env carries it, and - on a "
+        "course org - DSL_COURSE_ADMIN_EMAILS.",
     )
     parser.add_argument(
         "--admins",
@@ -978,6 +1013,11 @@ def _run(args: argparse.Namespace) -> int:
     # only there: a run given no --propagate-secret has no central env to copy from.
     if args.propagate_secret:
         steps.append((propagate_maintainer_email(args.org), ""))
+        # ...and who hears about a fault in a COURSE org's own config. Course orgs only:
+        # the course-level digest and the mail beside it are written from the course org's
+        # `.github`, and nothing in a cohort reads this.
+        if not args.cohort:
+            steps.append((propagate_course_admin_emails(args.org), ""))
 
     # 5. Generate the org-overview README now that all repos exist (clickable index).
     steps.append(
