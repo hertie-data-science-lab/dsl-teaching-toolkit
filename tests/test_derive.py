@@ -108,6 +108,21 @@ def test_an_r_notebook_gets_a_comment_where_python_gets_pass():
     assert "pass" not in _source(out["cells"][1])
 
 
+def test_a_tagged_cell_with_no_body_still_derives_and_still_counts():
+    # A `solution` cell the faculty member tagged before writing the answer. It must still
+    # become a placeholder, and it must still COUNT: `replaced == 0` is the safety
+    # predicate that reds a run, so a template whose only fence is an empty cell would
+    # otherwise be refused as "nothing fenced".
+    nb = {
+        "cells": [
+            {"cell_type": "code", "metadata": {"tags": ["solution"]}, "source": ""}
+        ]
+    }
+    out, stripped = _derived(nb)
+    assert (stripped.cells, stripped.replaced) == (1, 1)
+    assert _source(out["cells"][0]) == derive.PY_PLACEHOLDER
+
+
 def test_a_notebook_with_nothing_fenced_reports_zero_rather_than_a_quiet_copy():
     nb = {"cells": [{"cell_type": "code", "metadata": {}, "source": "answer = 42\n"}]}
     stripped = derive.strip_notebook(json.dumps(nb), "solution/x.ipynb")
@@ -185,6 +200,27 @@ def test_a_solution_chunk_keeps_its_header_and_loses_its_body():
     assert derive.CODE_PLACEHOLDER in stripped.text
     # The flag itself must not travel to students - it labels which chunks held the answer.
     assert "solution=TRUE" not in stripped.text
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "```{r solution=TRUE}",
+        "```{r solution = TRUE}",  # knitr accepts the spaces, and people type them
+        "```{r solution=T}",  # R's own abbreviation for TRUE
+        "```{r fit, echo=TRUE, solution = true}",
+    ],
+)
+def test_every_spelling_of_the_chunk_flag_is_one_flag(header):
+    # The same rule the line fences follow: a flag that reads correctly to a human and not
+    # to this parser is the worst of both - the chunk keeps its body and the model answer
+    # ships as the starter.
+    stripped = derive.strip_rmd(f"{header}\nmodel <- lm(y ~ x)\n```\n", "s.Rmd")
+    assert stripped.cells == 1
+    assert "lm(y ~ x" not in stripped.text
+    assert derive.CODE_PLACEHOLDER in stripped.text
+    # ...and the flag never travels to students, whichever way it was written.
+    assert "solution" not in stripped.text
 
 
 def test_an_ordinary_chunk_is_untouched_options_and_all():

@@ -6,6 +6,7 @@ without touching gh/git.
 
 from __future__ import annotations
 
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -2041,6 +2042,93 @@ def test_a_dry_run_writes_nothing_and_says_nothing(monkeypatch):
     )
     assert _run(dry_run=True) == 0
     assert commits == [] and notes == []
+
+
+def test_a_patch_refuses_to_choose_between_two_entries_on_one_template(
+    monkeypatch, capsys
+):
+    # The same refusal the handout makes, and for a sharper reason: the two entries have
+    # different frozen hand-outs, so a patch that guessed would read every repo of the
+    # other assignment as "the student changed it" and quietly refuse to fix any of them.
+    commits = _cohort(monkeypatch, {"assignment-2": {"starter.py": AS_HANDED_OUT}})
+    _two_on_one_template(monkeypatch)
+
+    rc = assign.patch_released("COURSE", "assignment-2-f2026", "COHORT", "starter.py")
+
+    assert rc == 1 and commits == []
+    err = capsys.readouterr().err
+    assert "assignment-2-resit" in err and "say which" in err
+
+
+def test_a_patch_told_which_entry_acts_on_that_entrys_hand_out(monkeypatch):
+    # ...and told which, it patches the resit's frozen hand-out - not the other entry's,
+    # which is what every one of its submission repos is compared against.
+    commits = _cohort(
+        monkeypatch,
+        {
+            "assignment-2": {"starter.py": AS_HANDED_OUT},
+            "assignment-2-resit": {"starter.py": AS_HANDED_OUT},
+        },
+    )
+    _two_on_one_template(monkeypatch)
+
+    rc = assign.patch_released(
+        "COURSE",
+        "assignment-2-f2026",
+        "COHORT",
+        "starter.py",
+        slug="assignment-2-resit",
+        dry_run=False,
+    )
+
+    assert rc == 0
+    assert [repo for repo, _ in commits] == ["assignment-2-resit"]
+
+
+def _cli(monkeypatch, *argv: str) -> dict:
+    """Run `assign.main()` on `argv`, with both modes stubbed. Returns the keywords the
+    mode that ran was called with."""
+    seen: dict = {}
+    monkeypatch.setattr(
+        assign,
+        "provision_all",
+        lambda *a, **kw: (seen.update(kw, mode="provision"), (0, True))[1],
+    )
+    monkeypatch.setattr(
+        assign, "patch_released", lambda *a, **kw: seen.update(kw, mode="patch") or 0
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "assign",
+            "--master-org",
+            "COURSE",
+            "--course-source-repo",
+            "assignment-1-f2026",
+            "--cohort-org",
+            "COHORT",
+            *argv,
+        ],
+    )
+    assert assign.main() == 0
+    return seen
+
+
+def test_each_mode_keeps_its_own_default_when_the_flag_is_not_given(monkeypatch):
+    # `--dry-run` is tri-state (BooleanOptionalAction, default None) so the two modes can
+    # disagree about what "the caller said nothing" means. Provisioning has always run FOR
+    # REAL - an operator who pressed Release assignment meant it - and a `None` reaching
+    # `dry_run=` as a truthy "unset" would turn every handout into a no-op that reports
+    # success. Patching writes into repos students already hold, so it previews.
+    assert _cli(monkeypatch)["dry_run"] is False
+    assert _cli(monkeypatch, "--patch-path", "starter.py")["dry_run"] is True
+
+
+@pytest.mark.parametrize("flag, want", [("--dry-run", True), ("--no-dry-run", False)])
+def test_an_explicit_flag_reaches_both_modes(monkeypatch, flag, want):
+    assert _cli(monkeypatch, flag)["dry_run"] is want
+    assert _cli(monkeypatch, flag, "--patch-path", "starter.py")["dry_run"] is want
 
 
 def test_the_public_log_never_names_a_submission_repo(monkeypatch, capsys):
