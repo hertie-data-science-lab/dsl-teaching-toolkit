@@ -2595,15 +2595,12 @@ def _csv_fault():
 
 
 def test_the_config_preflight_checks_every_hand_edited_file(monkeypatch):
+    # schedule.yml is not here: everything wrong with it belongs in the one issue the
+    # source pre-flight keeps, and the plan this tick is running is already parsed.
     rc, synced, mailed = _config_preflight(monkeypatch)
     assert rc == 0
-    assert set(synced) == {"schedule.yml", "people.yml", "students.csv", "teams.csv"}
-    assert sorted(mailed) == [
-        "people.yml",
-        "schedule.yml",
-        "students.csv",
-        "teams.csv",
-    ]
+    assert set(synced) == {"people.yml", "students.csv", "teams.csv"}
+    assert sorted(mailed) == ["people.yml", "students.csv", "teams.csv"]
 
 
 def test_a_content_fault_reaches_that_files_digest_and_nobody_elses(monkeypatch):

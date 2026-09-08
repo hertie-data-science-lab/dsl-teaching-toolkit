@@ -483,15 +483,28 @@ def _preflight_sources(
     faculty can write. The signature keeps its int so the caller's `errors +=` reads the
     same as every other phase."""
     try:
-        faults = schedule.source_faults(sched, course_org)
+        sources = schedule.source_faults(sched, course_org)
     except Exception as exc:
         log_err(f"could not check {cohort_org}'s sources ({type(exc).__name__}): {exc}")
-        return 0
-    worst = schedule.worst_severity(faults, now)
-    if faults:
+        sources = []
+    # ONE issue for schedule.yml, carrying both of the ways it goes wrong: a source that
+    # is not staged yet (counting down to its release) and an entry the parser could not
+    # read at all (already out of the plan). A reader asked to fix this file finds
+    # everything wrong with it in one place, and each fault is still filed - and notified -
+    # on its own clock (`ConfigFault.fires`).
+    # NOT short-circuited when empty: an empty list is what CLOSES the issue, and the
+    # tick after the last fault is fixed is the one that has to say so.
+    faults = sources + list(sched.faults)
+    worst = schedule.worst_severity(sources, now)
+    if sources:
         log_step(
-            f"{len(faults)} source(s) in {cohort_org}'s plan not staged in "
+            f"{len(sources)} source(s) in {cohort_org}'s plan not staged in "
             f"{course_org} (worst: {worst})"
+        )
+    if sched.faults:
+        log_step(
+            f"{len(sched.faults)} entr(y/ies) in {cohort_org}'s "
+            f"{schedule.SCHEDULE_PATH} the scheduler cannot read"
         )
     # Local, because everything downstream speaks about time to a human: the deadline
     # faculty wrote, and the overnight window where a notification is held rather than
@@ -539,6 +552,20 @@ def _preflight_sources(
         unsent = notify.notify_source_transitions(
             cohort_org, course_org, digest, local, routing, dry_run=dry_run
         )
+        # The same issue's other half, in its own letter: an entry nobody can read names
+        # the file and what it costs, not a deadline it does not have.
+        unreadable = notify.notify_config_faults(
+            source_digest.SCHEDULE,
+            cohort_org,
+            course_org,
+            digest,
+            local,
+            routing,
+            dry_run=dry_run,
+        )
+        unsent = notify.Unsent(
+            unsent.addressees + unreadable.addressees, unsent.keys + unreadable.keys
+        )
         # A mail that did not go out is un-RECORDED rather than lost. The digest has
         # already written the new rung, so without this the notification was owed once,
         # failed once and was never owed again - and the log line saying so was the only
@@ -551,9 +578,14 @@ def _preflight_sources(
     return 0
 
 
-def _config_faults(cohort_org: str, sched: schedule.Schedule) -> dict:
-    """Every hand-edited file in this cohort's classroom-config, and what is wrong with
-    each. `{digest: faults}`, and a file left OUT of it is one this tick could not read.
+def _config_faults(cohort_org: str) -> dict:
+    """Every hand-edited file in this cohort's classroom-config EXCEPT schedule.yml, and
+    what is wrong with each. `{digest: faults}`, and a file left OUT of it is one this tick
+    could not read.
+
+    schedule.yml is not here because it is already parsed - the plan this tick is running
+    IS the parse - and because everything wrong with it belongs in the one issue the
+    source pre-flight keeps (see `_preflight_sources`).
 
     Absent from the map is not the same as no faults: syncing a digest with an empty list
     closes its issue and tells the cohort the file is fine, and "we could not look" is not
@@ -579,9 +611,6 @@ def _config_faults(cohort_org: str, sched: schedule.Schedule) -> dict:
                 return
         out[spec] = found
 
-    # schedule.yml is already parsed - the plan this tick is running IS the parse, and
-    # re-reading it here could disagree with what released.
-    out[source_digest.UNREADABLE] = list(sched.faults)
     collect(
         config_digest.PEOPLE,
         lambda found: sync_faculty.read_cohort_people(cohort_org, found),
@@ -670,7 +699,7 @@ def _preflight_configs(
     itself. The signature keeps its int so the caller's `errors +=` reads the same as
     every other phase."""
     local = schedule.in_cohort_zone(sched, now)
-    for spec, faults in _config_faults(cohort_org, sched).items():
+    for spec, faults in _config_faults(cohort_org).items():
         if faults:
             log_step(
                 f"{len(faults)} entr(y/ies) in {cohort_org}/{spec.file} the toolkit "

@@ -6,12 +6,19 @@ every fault; a term written up front has dozens of missing sources, all of them 
 and any scheme that files a ticket per fault (or comments on every hourly tick) buries the
 one that matters under the twenty that don't.
 
-ONE ENGINE, one issue per file: `Digest` says which file, which issue title and which
+ONE ENGINE, one issue per FILE: `Digest` says which file, which issue title and which
 team, and everything below works the same for a source the release plan cites and for a
 students.csv row nobody can be enrolled from. The two differ in their CLOCK, and that is
-all: a source climbs a ladder as its moment approaches (`Digest.scheduled`), while an
-immediate fault is at the notify bar from the moment it appears and is repeated at 48
-hours and 7 days (AGE_REMINDERS) until somebody fixes it.
+all - so schedule.yml, which goes wrong both ways, has ONE issue carrying both:
+
+- a fault with a fire time climbs the ladder as its moment approaches, is held overnight,
+  and is filed under its rung (MISSED / CRITICAL / URGENT / WARNING / advisory);
+- one without is at the notify bar from the moment it appears, is never held (the value of
+  saying it within the minute is that whoever pushed it is still there), and is filed under
+  how long it has stood, repeated at 48 hours and 7 days (AGE_REMINDERS) and then silent.
+
+Which clock a fault keeps is the FAULT's answer, never the issue's (`ConfigFault.fires`),
+because one issue holds both.
 
 So the issue is STATE and its comments are EVENTS:
 
@@ -75,14 +82,10 @@ class Digest:
     issue. The two schedule.yml digests keep the titles their issues already carry.
 
     `state_key` names the marker the body carries its state in. It is `source` for all of
-    them and must stay that way for the two that predate this engine: the marker name is
+    them and must stay that way for the one that predates this engine: the marker name is
     the key to what an OPEN issue has already reported, and renaming it would read as
     "nothing recorded" and re-announce - and re-mail - every standing fault in every live
-    cohort.
-
-    `scheduled` says the faults in it have fire times: they climb the ladder, their
-    notifications are held overnight, and they are never age-reminded (the deadline does
-    that). An immediate digest is the other way round on all three counts."""
+    cohort."""
 
     title: str
     file: str
@@ -90,7 +93,6 @@ class Digest:
     state_key: str = "source"
     repo: str = CONFIG_REPO
     cc_team: str = "instructors"
-    scheduled: bool = False
 
     def cite_file(self) -> str:
         return f"`{self.repo}/{self.file}`"
@@ -117,6 +119,12 @@ TEAMS = Digest(
     doc="docs/09-release-assignment-to-cohort.md",
 )
 
+# What closing one of these issues says. One string, because two issues are closed with
+# it - the one whose faults have all been fixed, and the one another has taken over.
+CLEARED_COMMENT = (
+    "Every entry in {file} is now usable. Reopens on its own if that changes."
+)
+
 # When an immediate fault is said again. It cannot escalate on its own - nothing about it
 # changes with time - so the only thing that can grow louder is how long it has stood, and
 # these are the two moments that is worth an inbox. After the second, the issue stays open
@@ -141,6 +149,7 @@ QUIET_UNTIL = 7
 _STATE = "state"  # {fault key: {rung: last reported, since: first seen}}
 _MENTION = "mention"  # the logins git named, reused by a tick with nothing to ask
 _CLOCK = "clock"  # {sent: how many age reminders have gone out for this issue}
+_ABSORBED = "absorbed"  # the title of an issue this one took over, once it is closed
 _MARKER_RE = "<!-- dsl-{key}-{name}: (.*?) -->"
 
 
@@ -240,8 +249,8 @@ class DigestResult:
     # Set when this tick crossed one of AGE_REMINDERS: how long the file has been
     # unusable, as the mail and the comment say it ("2 days"). The whole issue is owed one
     # message, not one per fault - there is one clock per issue - and the maintainer is
-    # copied on it. Never set for a scheduled digest, whose faults have a deadline to
-    # escalate towards instead.
+    # copied on it. Counted over the IMMEDIATE faults alone: one with a deadline
+    # escalates towards it instead, and is never age-reminded.
     reminder: str | None = None
 
 
@@ -385,7 +394,7 @@ def transitions(previous: dict[str, str], current: dict[str, str]) -> Transition
 
 
 def _announce(
-    digest: Digest,
+    by_key: dict[str, SourceFault],
     changed: Transitions,
     previous: dict[str, str],
     current: dict[str, str],
@@ -410,18 +419,31 @@ def _announce(
     CLEARED keys are announced immediately whatever the hour: the issue closes itself and
     nobody is emailed about it, so there is no notification to hold.
 
-    ONLY a scheduled digest holds. An immediate fault is what a push just left behind, and
-    the whole value of telling somebody within the minute is that they are still at the
-    keyboard that put it there - holding it until the morning trades the one moment it can
-    be fixed cheaply for a quieter night."""
-    if not digest.scheduled or not in_quiet_hours(now):
+    Only a fault with a DEADLINE is held. An immediate one is what a push just left
+    behind, and the whole value of telling somebody within the minute is that they are
+    still at the keyboard that put it there - holding it until the morning trades the one
+    moment it can be fixed cheaply for a quieter night. One issue carries both, so this is
+    decided per fault and not per issue."""
+    if not in_quiet_hours(now):
         return current, changed
+
+    def held(key: str) -> bool:
+        fault = by_key.get(key)
+        return fault is not None and fault.is_source
+
     stored = dict(current)
     for key in changed.appeared:
-        stored.pop(key, None)
+        if held(key):
+            stored.pop(key, None)
     for key in changed.escalated:
-        stored[key] = previous[key]
-    return stored, Transitions([], [], changed.cleared, changed.rung)
+        if held(key):
+            stored[key] = previous[key]
+    return stored, Transitions(
+        [k for k in changed.appeared if not held(k)],
+        [k for k in changed.escalated if not held(k)],
+        changed.cleared,
+        changed.rung,
+    )
 
 
 def render_body(
@@ -431,6 +453,7 @@ def render_body(
     ctx: Context,
     state: dict | None = None,
     since: dict[str, str] | None = None,
+    absorbed: str = "",
 ) -> str:
     """The whole issue body: the current list grouped by rung, plus the state markers.
 
@@ -447,13 +470,6 @@ def render_body(
     `ctx.central_ref` is the tier this org runs, so the field reference points at the docs
     for the engine that will read the file - not at whatever `main` says today."""
     seen = since or {}
-    by_rung: dict[Severity, list[SourceFault]] = {}
-    for f in faults:
-        by_rung.setdefault(f.severity(now), []).append(f)
-    oldest = min(
-        (_moment(seen.get(f.key)) for f in faults), default=None, key=_sortable
-    )
-
     out = [
         (
             f"{digest.cite_file()} has broken entries. **Do not close or edit "
@@ -462,11 +478,9 @@ def render_body(
         "",
         _mention(digest, ctx),
     ]
-    for rung in sorted(by_rung, reverse=True):  # loudest first
-        rows = by_rung[rung]
+    for heading, rows in _sections(faults, now, seen):
         # No count in the heading: the rows are right under it, and a number that has to
         # agree with them is a number that can disagree with them.
-        heading = _RUNG_HEADING[rung] if digest.scheduled else _age_heading(oldest, now)
         out += ["", f"### {heading}", ""]
         for f in sorted(rows, key=lambda f: (f.fires is None, f.fires or now)):
             # Past or future is the CLOCK's answer, not the rung's: a withheld source is
@@ -475,11 +489,11 @@ def render_body(
             when = (
                 f"_{'fired' if f.fires <= now else 'fires'} {f.due}_"
                 if f.fires
-                else _seen_line(seen.get(f.key), digest)
+                else _seen_line(seen.get(f.key), f)
             )
             out.append(
                 f"- **{f.label}** at {_cite(digest, ctx.cohort_org, f)}  \n  "
-                f"{f.what}  |  fix: {f.fix(ctx.course_org, rung)}  \n  {when}"
+                f"{f.what}  |  fix: {f.fix(ctx.course_org, f.severity(now))}  \n  {when}"
             )
     out += [
         "",
@@ -496,7 +510,48 @@ def render_body(
         ),
         _write_marker(_MENTION, list(ctx.mention), digest.state_key),
     ]
+    if absorbed:
+        out.append(_write_marker(_ABSORBED, absorbed, digest.state_key))
     return "\n".join(out)
+
+
+def _sections(
+    faults: list[SourceFault], now, seen: dict[str, str]
+) -> list[tuple[str, list[SourceFault]]]:
+    """The body's headings, in the order the appendix lists them: MISSED, CRITICAL,
+    URGENT, WARNING, then everything with no deadline at all under how long it has stood,
+    then the advisories.
+
+    Two clocks under one set of headings. The immediate faults sit at WARNING by severity
+    and would otherwise be filed under `WARNING (24h)` - a heading that promises a
+    deadline they do not have - so they get their own section, in the place the appendix
+    puts it: below the rungs that are counting down, above the term nobody has written
+    yet. One heading for all of them, because there is one clock per issue."""
+    by_rung: dict[Severity, list[SourceFault]] = {}
+    immediate: list[SourceFault] = []
+    for f in faults:
+        if f.is_source:
+            by_rung.setdefault(f.severity(now), []).append(f)
+        else:
+            immediate.append(f)
+    out = [
+        (_RUNG_HEADING[rung], by_rung[rung])
+        for rung in sorted(by_rung, reverse=True)
+        if rung is not Severity.ADVISORY
+    ]
+    if immediate:
+        out.append((_age_heading(oldest_seen(immediate, seen), now), immediate))
+    if Severity.ADVISORY in by_rung:
+        out.append((_RUNG_HEADING[Severity.ADVISORY], by_rung[Severity.ADVISORY]))
+    return out
+
+
+def oldest_seen(faults: list[SourceFault], seen: dict[str, str]) -> datetime | None:
+    """When the oldest of these faults first turned up, or None when none of them says.
+
+    THE issue's clock: the reminders count from it, and so does the age heading, so both
+    are asking one question of one list."""
+    return min((_moment(seen.get(f.key)) for f in faults), default=None, key=_sortable)
 
 
 def _moment(iso: str | None) -> datetime | None:
@@ -515,13 +570,14 @@ def _sortable(when: datetime | None) -> datetime:
     return when or datetime.max.replace(tzinfo=None)
 
 
-def _seen_line(iso: str | None, digest: Digest) -> str:
-    """The italic line under a fault with no deadline: when it turned up, or that it has
-    no date at all - which is a different thing, and only a scheduled digest has it."""
+def _seen_line(iso: str | None, fault: SourceFault) -> str:
+    """The italic line under a fault with no deadline. A SOURCE with no date is a `tbc`
+    entry - a session nobody has dated, which is a different thing from a line nobody can
+    read, and the two sit in one issue."""
+    if fault.is_source:
+        return "_no date (tbc)_"
     when = _moment(iso)
-    if when is None:
-        return "_no date (tbc)_" if digest.scheduled else "_first seen just now_"
-    return f"_first seen {when:%a %d %b %Y}_"
+    return f"_first seen {when:%a %d %b %Y}_" if when else "_first seen just now_"
 
 
 def cleared_body(digest: Digest) -> str:
@@ -587,13 +643,20 @@ def _comment(
             + "\n".join(f"- `{k}` - {cite(k)}" for k in sorted(faults))
         )
     quiet = [k for k in t.appeared if t.rung[k] == NOTIFY_FROM]
-    if quiet:
-        heading = (
-            f"**New** (fires within {hours(SOURCE_WARN_WINDOW)}h)"
-            if digest.scheduled
-            else "**New**"
-        )
-        parts.append(f"{heading}:\n" + "\n".join(f"- `{k}` - {cite(k)}" for k in quiet))
+    # Two headings, because one issue carries both clocks and only one of them is
+    # counting down: `New (fires within 24h)` over a line nobody can read would promise a
+    # deadline that does not exist.
+    for heading, keys in (
+        (
+            f"**New** (fires within {hours(SOURCE_WARN_WINDOW)}h)",
+            [k for k in quiet if k in faults and faults[k].is_source],
+        ),
+        ("**New**", [k for k in quiet if k in faults and not faults[k].is_source]),
+    ):
+        if keys:
+            parts.append(
+                f"{heading}:\n" + "\n".join(f"- `{k}` - {cite(k)}" for k in keys)
+            )
     if t.cleared:
         cleared_at = f"{now:%H:%M} {zone_name(now)}" if now.tzinfo else f"{now:%H:%M}"
         parts.append(
@@ -660,7 +723,7 @@ def hold(digest: Digest, cohort_org: str, held: dict[str, str | None]) -> int:
     return errors
 
 
-def _due_reminder(digest: Digest, oldest, now, sent: int) -> tuple[str | None, int]:
+def _due_reminder(oldest, now, sent: int) -> tuple[str | None, int]:
     """`(what to say, how many reminders have now gone out)` for this issue's own clock.
 
     ONE clock per issue, counted from the OLDEST fault still in it: an immediate fault
@@ -671,12 +734,43 @@ def _due_reminder(digest: Digest, oldest, now, sent: int) -> tuple[str | None, i
     Past the last rung it goes quiet with the issue still open. A fault nobody has fixed
     in a week is a decision, and the twentieth reminder about it is what teaches people to
     filter the channel that the URGENT ones arrive on."""
-    if digest.scheduled or oldest is None:
+    if oldest is None:
         return None, sent
     crossed = [label for window, label in AGE_REMINDERS if now - oldest >= window]
     if len(crossed) <= sent:
         return None, sent
     return crossed[-1], len(crossed)
+
+
+def _superseded(repo: str, digest: Digest, absorb: str | None, body: str):
+    """The open issue `digest` has taken over, or None - including when the search failed.
+
+    A listing that could not be read must not stop the surviving issue being written: the
+    worst case is that the old one is closed a tick later.
+
+    Asked at most twice in the life of a cohort: the fold happens on the first tick, and
+    the first tick that finds nothing left to fold records that in the body. Without that
+    every tick, for the rest of the term, would spend a second issue listing looking for
+    an issue that was closed in September."""
+    if not absorb or _read_marker(body, _ABSORBED, "", digest.state_key) == absorb:
+        return None
+    try:
+        return find_issues(repo, absorb).open
+    except RuntimeError as exc:
+        log_err(str(exc))
+        return None
+
+
+def _close_superseded(repo: str, digest: Digest, absorb: str | None) -> None:
+    """Close the issue this one took over, once. Never raises: the surviving issue is
+    already written and correct, and a second copy of the record is a tidiness problem
+    rather than a notification one."""
+    try:
+        if close_issues_titled(repo, absorb, CLEARED_COMMENT.format(file=digest.file)):
+            return
+        log_ok(f"folded `{absorb}` into `{digest.title}` in {repo}")
+    except Exception as exc:  # pragma: no cover - close_issues_titled counts its own
+        log_err(f"could not close `{absorb}` in {repo}: {exc}")
 
 
 def sync(
@@ -688,6 +782,7 @@ def sync(
     dry_run: bool = False,
     resolve_mention: Callable[[], list[str]] | None = None,
     migrate: Callable[[dict, list], dict] | None = None,
+    absorb: str | None = None,
 ) -> DigestResult:
     """Bring this cohort's digest issue for one FILE in line with `faults`. Reports what
     it did - the error count, and what a notifier owes an email for on top of the
@@ -702,6 +797,11 @@ def sync(
 
     `migrate` renames keys recorded under an older scheme (see `source_digest.migrated`).
     A digest whose keys have never changed shape passes nothing.
+
+    `absorb` is the title of an issue this one has TAKEN OVER: its recorded state is read
+    into this tick's (this issue's own wins) and it is closed once, on the first tick that
+    finds it. One-off, for schedule.yml - whose unreadable entries used to have an issue of
+    their own, opened by a block of shell in the cohort's validate-schedule workflow.
 
     Never raises past the caller's isolation and never fails a run: a notification that
     could not be delivered must not take a release cron down with it."""
@@ -732,10 +832,7 @@ def sync(
                 repo, digest.title, cleared_body(digest), existing=open_issue
             )
             if wrote.errors or close_issues_titled(
-                repo,
-                digest.title,
-                f"Every entry in {digest.file} is now usable. Reopens on its own if "
-                f"that changes.",
+                repo, digest.title, CLEARED_COMMENT.format(file=digest.file)
             ):
                 return DigestResult(errors=1, issue_url=url)
             log_ok(f"{digest.file} digest cleared and closed in {repo}")
@@ -748,6 +845,16 @@ def sync(
 
     body = open_issue.body if open_issue else (closed.body if closed else "")
     recorded = _read_marker(body, _STATE, {}, digest.state_key)
+    superseded = _superseded(repo, digest, absorb, body)
+    if superseded:
+        # The absorbed issue's rungs, UNDER this issue's own: a key both recorded is a key
+        # this one has already reported at whatever it says. Without adopting them, every
+        # fault the old issue was carrying appears afresh here - a comment and a mail
+        # apiece, about nothing that changed.
+        recorded = {
+            **_read_marker(superseded.body or "", _STATE, {}, digest.state_key),
+            **recorded,
+        }
     previous = _rungs(recorded)
     if migrate:
         previous = migrate(previous, faults)
@@ -758,7 +865,7 @@ def sync(
     since = {key: was_seen.get(key) or now.isoformat() for key in by_key}
     current = current_state(faults, now)
     state, changed = _announce(
-        digest, transitions(previous, current), previous, current, now
+        by_key, transitions(previous, current), previous, current, now
     )
     # A `.releaseignore`-withheld source is listed and commented on, and mailed to nobody.
     # Its ceiling is WARNING, which is NOTIFY_FROM itself, so without this it earns a mail
@@ -770,15 +877,19 @@ def sync(
         for k in changed.appeared + changed.escalated
         if by_key[k].kind is not FaultKind.WITHHELD
     }
-    oldest = min((_moment(iso) for iso in since.values()), default=None, key=_sortable)
+    # The clock is the IMMEDIATE faults' alone. A source in the same issue is counting
+    # down to its own deadline and is told about on that ladder; reminding anybody that it
+    # is "unfixed for 2 days" would be a second, contradictory schedule for one fault.
+    immediate = [f for f in faults if not f.is_source]
     sent = _read_marker(body, _CLOCK, {}, digest.state_key).get("sent")
     reminder, sent = _due_reminder(
-        digest, oldest, now, sent if isinstance(sent, int) else 0
+        oldest_seen(immediate, since), now, sent if isinstance(sent, int) else 0
     )
     if reminder:
-        # Everything still open is in the reminder, at the rung it stands at: the mail
-        # says what is unfixed, not what changed - nothing changed, that is the point.
-        mail = {k: changed.rung[k] for k in by_key}
+        # Every immediate fault still open is in the reminder, at the rung it stands at:
+        # the mail says what is unfixed, not what changed - nothing changed, that is the
+        # point.
+        mail |= {f.key: changed.rung[f.key] for f in immediate}
     # A ref that cannot be resolved is not worth failing a notification over - the
     # digest's own contract is that it never takes a release cron down.
     try:
@@ -817,14 +928,24 @@ def sync(
     wrote = upsert_issue(
         repo,
         digest.title,
-        render_body(digest, faults, now, ctx, _state_marker(state, since), since)
-        # The reminder count, and only where there are reminders: a scheduled digest
-        # counts none, and a third marker in the two issues that predate this engine is
-        # churn in a body faculty read.
+        render_body(
+            digest,
+            faults,
+            now,
+            ctx,
+            _state_marker(state, since),
+            since,
+            # Recorded only once there is nothing LEFT to fold: written on the tick that
+            # closes the old issue, a close that failed would be recorded as done.
+            absorbed="" if superseded else (absorb or ""),
+        )
+        # The reminder count, and only where there is a clock to keep: a plan whose only
+        # faults are sources counts none, and a marker that says nothing is churn in a
+        # body faculty read.
         + (
-            ""
-            if digest.scheduled
-            else "\n" + _write_marker(_CLOCK, {"sent": sent}, digest.state_key)
+            "\n" + _write_marker(_CLOCK, {"sent": sent}, digest.state_key)
+            if immediate
+            else ""
         ),
         comment=note or None,
         existing=open_issue,
@@ -844,8 +965,12 @@ def sync(
         + (f", unfixed for {reminder}" if reminder else "")
         + (
             f" (held until {QUIET_UNTIL}:00)"
-            if digest.scheduled and in_quiet_hours(now)
+            if in_quiet_hours(now) and any(f.is_source for f in faults)
             else ""
         )
     )
+    if superseded:
+        # Last, and only after the body it was folded into was written: an issue closed
+        # against a write that failed would take its state with it.
+        _close_superseded(repo, digest, absorb)
     return result

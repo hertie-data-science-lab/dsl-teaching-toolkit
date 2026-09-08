@@ -1,22 +1,22 @@
-"""dsl-course source digest -- the two digest issues schedule.yml earns, and the CLI that
-names one of them.
+"""dsl-course source digest -- schedule.yml's digest issue, and the CLI that names it.
 
-The machinery is `config_digest`: an issue whose BODY is the current list and whose
-COMMENTS are the events, with a mail beside it. What lives here is what is specific to
-schedule.yml, which is the only file with TWO of them, because it goes wrong in two ways
-that keep different time:
+The machinery is `config_digest`: one issue per file, whose BODY is the current list and
+whose COMMENTS are the events, with a mail beside it. What lives here is what is specific
+to schedule.yml - which goes wrong in two ways that keep different time, both of them in
+the ONE issue:
 
-- `SOURCES` - the plan cites materials the course org does not have. Time-bound: each
-  fault climbs the ladder as its release approaches, and its notifications are held
-  overnight (see `Digest.scheduled`).
-- `UNREADABLE` - the parser could not use an entry at all. Immediate: the entry is already
-  out of the plan, so there is nothing to count down to.
+- the plan cites materials the course org does not have. Time-bound: each fault climbs the
+  ladder as its release approaches, and its notifications are held overnight.
+- the parser could not use an entry at all. Immediate: the entry is already out of the
+  plan, so there is nothing to count down to, and it is filed under how long it has stood.
 
-Two issues rather than one because they are two clocks, and because both titles already
-exist in every live cohort: `UNREADABLE`'s was opened by a block of bash in
-validate-schedule.yml, which this replaces (the engine adopts the open issue by title).
+One issue because a reader asked to fix schedule.yml should find everything wrong with it
+in one place, and because the engine files a fault under its own clock (`ConfigFault`)
+rather than under its issue's. `ABSORBED` is the title the unreadable entries used to be
+reported under, by a block of bash in validate-schedule.yml: the first tick that finds
+that issue reads its state into this one and closes it.
 
-`--title` prints the sources issue's exact title, for the workflow that has to find it.
+`--title` prints the issue's exact title, for the workflow that has to find it.
 """
 
 from __future__ import annotations
@@ -46,11 +46,11 @@ from .schedule import SCHEDULE_PATH, SourceFault
 # Re-exported: `scheduler`, `notify` and their tests speak to the engine through this
 # module, which is where the schedule's own digests are declared.
 __all__ = [
+    "ABSORBED",
     "NOTIFY_FROM",
+    "SCHEDULE",
     "SOURCES",
     "TITLE",
-    "UNREADABLE",
-    "UNREADABLE_TITLE",
     "_STATE",
     "Context",
     "Digest",
@@ -64,7 +64,6 @@ __all__ = [
     "migrated",
     "render_body",
     "sync",
-    "sync_unreadable",
     "transitions",
 ]
 
@@ -72,14 +71,15 @@ __all__ = [
 # that varied with the faults would never match, and every run would open a new issue.
 TITLE = "schedule.yml: planned releases cite sources not staged in the course org"
 # The title the bash block in validate-schedule.yml has been opening since before any of
-# this existed. Kept to the letter so the engine ADOPTS that issue rather than opening a
-# second one beside it and leaving the first standing for the rest of the term.
-UNREADABLE_TITLE = "schedule.yml has entries the scheduler cannot read"
+# this existed. Kept to the letter so the first tick can find that issue, take its state
+# and close it, rather than leaving it standing for the rest of the term beside the one
+# that now carries the same faults.
+ABSORBED = "schedule.yml has entries the scheduler cannot read"
 
-_DOC = "docs/07-schedule-releases.md"
-
-SOURCES = Digest(title=TITLE, file=SCHEDULE_PATH, doc=_DOC, scheduled=True)
-UNREADABLE = Digest(title=UNREADABLE_TITLE, file=SCHEDULE_PATH, doc=_DOC)
+SCHEDULE = Digest(title=TITLE, file=SCHEDULE_PATH, doc="docs/07-schedule-releases.md")
+# What this digest was called while it carried sources alone. Kept because three modules
+# and their tests name it.
+SOURCES = SCHEDULE
 
 
 def migrated(previous: dict[str, str], faults: list[SourceFault]) -> dict[str, str]:
@@ -121,9 +121,10 @@ def sync(
     dry_run: bool = False,
     resolve_mention=None,
 ) -> DigestResult:
-    """The sources digest, for the faults `schedule.source_faults` found."""
+    """schedule.yml's digest, for everything wrong with it: the sources
+    `schedule.source_faults` found missing AND the entries `schedule.parse` had to drop."""
     return _sync(
-        SOURCES,
+        SCHEDULE,
         cohort_org,
         course_org,
         faults,
@@ -131,32 +132,13 @@ def sync(
         dry_run=dry_run,
         resolve_mention=resolve_mention,
         migrate=migrated,
-    )
-
-
-def sync_unreadable(
-    cohort_org: str,
-    course_org: str,
-    faults: list[SourceFault],
-    now,
-    dry_run: bool = False,
-    resolve_mention=None,
-) -> DigestResult:
-    """The unreadable-entries digest, for what `schedule.parse` had to drop."""
-    return _sync(
-        UNREADABLE,
-        cohort_org,
-        course_org,
-        faults,
-        now,
-        dry_run=dry_run,
-        resolve_mention=resolve_mention,
+        absorb=ABSORBED,
     )
 
 
 def hold(cohort_org: str, held: dict[str, str | None]) -> int:
-    """Un-record a sources crossing whose mail did not go out - see `config_digest.hold`."""
-    return _hold(SOURCES, cohort_org, held)
+    """Un-record a crossing whose mail did not go out - see `config_digest.hold`."""
+    return _hold(SCHEDULE, cohort_org, held)
 
 
 def main() -> int:

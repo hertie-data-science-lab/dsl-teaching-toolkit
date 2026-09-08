@@ -321,12 +321,47 @@ def test_a_body_carrying_both_shapes_keeps_the_rung_it_reported_at():
 # ------------------------------------------------------------------------- sync + IO
 
 
-def _open(*faults, state=None, mention=()):
-    """An OPEN digest whose body is what a previous tick would have written."""
+def _open(*faults, state=None, mention=(), absorbed=True):
+    """An OPEN digest whose body is what a previous tick would have written.
+
+    `absorbed` by default: the one-off fold of the issue the cohort's own workflow used to
+    open has already happened, so these tests are about the steady state."""
     body = sd.render_body(
-        sd.SOURCES, list(faults), NOW, COHORT._replace(mention=tuple(mention)), state
+        sd.SOURCES,
+        list(faults),
+        NOW,
+        COHORT._replace(mention=tuple(mention)),
+        state,
+        absorbed=sd.ABSORBED if absorbed else "",
     )
     return [issue_row(7, sd.TITLE, body)]
+
+
+def test_the_issue_the_workflow_used_to_open_is_folded_in_and_closed_once(gh):
+    # Its faults are in this issue now. Its recorded rungs come with them - read as
+    # nothing, every one of them would appear afresh here, with a comment and a mail.
+    fault = _f("releases.a", timedelta(hours=3))
+    old_body = sd.render_body(sd.SOURCES, [fault], NOW, COHORT)
+    fake = gh([issue_row(7, sd.TITLE, ""), issue_row(9, sd.ABSORBED, old_body)])
+    out = sd.sync("Cohort", "Course", [fault], NOW)
+    assert out.mail == {}  # already reported over there
+    (close,) = fake.did("issue", "close")
+    assert (
+        "Every entry in schedule.yml is now usable"
+        in close[close.index("--comment") + 1]
+    )
+    # NOT yet recorded as folded: the body is written before the close, so a close that
+    # failed would be filed as done. The next tick finds nothing left to fold and says so.
+    assert sd.ABSORBED not in fake.body_of("issue", "edit")
+    after = gh([issue_row(7, sd.TITLE, fake.body_of("issue", "edit"))])
+    sd.sync("Cohort", "Course", [fault], NOW)
+    assert sd.ABSORBED in after.body_of("issue", "edit")
+
+
+def test_a_folded_issue_is_looked_for_once_and_then_never_again(gh):
+    fake = gh(_open(_f("releases.a", timedelta(hours=3))))
+    sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
+    assert len(fake.did("issue", "list")) == 1
 
 
 def test_an_advisory_only_plan_opens_no_issue_at_all(gh):
@@ -810,3 +845,68 @@ def test_a_write_that_failed_owes_nobody_a_mail(gh):
     gh(_open(state={_KEY: "warning"}), write_code=1)
     out = sd.sync("Cohort", "Course", [_f("releases.a", timedelta(hours=3))], NOW)
     assert out.errors == 1 and out.mail == {}
+
+
+# --------------------------------------------------- both clocks, one issue
+
+
+def _dropped(where="releases.lecture_09", field="event_datetime", lineno=52):
+    """An entry the parser could not use: no fire time, so no ladder to climb."""
+    return schedule.ConfigFault(
+        where,
+        "no valid `event_datetime` (use `tbc` if the date is not settled) - entry "
+        "dropped, so nothing deploys and no site row appears",
+        file=schedule.SCHEDULE_PATH,
+        field=field,
+        lineno=lineno,
+    )
+
+
+def test_the_two_clocks_are_filed_under_their_own_headings():
+    # An immediate fault sits at WARNING by severity and would otherwise be filed under
+    # `WARNING (24h)` - a heading that promises a deadline it does not have.
+    faults = [_f("releases.a", timedelta(hours=3), lineno=31), _dropped()]
+    seen = {faults[1].key: (NOW - timedelta(days=2)).isoformat()}
+    body = sd.render_body(sd.SOURCES, faults, NOW, COHORT, since=seen)
+    assert body.index("### CRITICAL (6h)") < body.index("### unfixed for 2 days")
+    assert "_fires " in body and "_first seen " in body
+
+
+def test_the_advisories_stay_below_the_entries_nobody_can_read():
+    # The appendix's order: the rungs counting down, then what is unfixed, then the term
+    # nobody has written yet.
+    faults = [_f("releases.a", timedelta(days=40)), _dropped()]
+    body = sd.render_body(sd.SOURCES, faults, NOW, COHORT)
+    assert body.index("### needs fixing") < body.index("### advisory")
+
+
+def test_a_dropped_entry_is_never_held_overnight_but_a_source_is(gh):
+    night = NOW.replace(hour=2)
+    dropped, source = _dropped(), _f("releases.a", timedelta(hours=3))
+    gh([])
+    out = sd.sync("Cohort", "Course", [dropped, source], night)
+    assert set(out.mail) == {dropped.key}
+
+
+def test_a_reminder_counts_only_the_entries_that_have_no_deadline(gh):
+    # A source is counting down to its own moment and is told about on that ladder;
+    # "unfixed for 2 days" would be a second, contradictory schedule for one fault.
+    dropped, source = _dropped(), _f("releases.a", timedelta(hours=3))
+    seen = {
+        dropped.key: (NOW - timedelta(days=3)).isoformat(),
+        source.key: (NOW - timedelta(days=3)).isoformat(),
+    }
+    state = sd.render_body(
+        sd.SOURCES,
+        [dropped, source],
+        NOW,
+        COHORT,
+        engine._state_marker(sd.current_state([dropped, source], NOW), seen),
+        seen,
+        absorbed=sd.ABSORBED,
+    )
+    fake = gh([issue_row(7, sd.TITLE, state)])
+    out = sd.sync("Cohort", "Course", [dropped, source], NOW)
+    assert out.reminder == "2 days"
+    assert set(out.mail) == {dropped.key}
+    assert "**Escalated** (unfixed for 2 days)" in fake.body_of("issue", "comment")

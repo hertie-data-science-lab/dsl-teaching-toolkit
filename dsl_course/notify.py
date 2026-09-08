@@ -522,16 +522,25 @@ def _deliver(
     return Unsent()
 
 
-def _groups(digest: DigestResult, routing: Routing) -> dict[Routed, list[str]]:
-    """This tick's owed mails, gathered by recipient set: two entries the same person
-    wrote are one conversation, not two messages.
+def _groups(
+    digest: DigestResult, routing: Routing, source: bool
+) -> dict[Routed, list[str]]:
+    """This tick's owed mails of ONE kind, gathered by recipient set: two entries the same
+    person wrote are one conversation, not two messages.
+
+    `source` splits them, because schedule.yml's issue carries both and they are two
+    different letters: a source that is about to ship nothing names the entry and its
+    deadline, an entry nobody can read names the file and what it costs. One tick can owe
+    both, to the same person, and they are still two letters.
 
     A key the digest owes a mail for but could not hand over a fault (or an addressee)
     for has nothing to say. Not expected; not worth a KeyError inside a release run."""
     groups: dict[Routed, list[str]] = {}
     for key in digest.mail:
-        if key in digest.faults_by_key and key in routing.by_key:
-            groups.setdefault(routing.by_key[key], []).append(key)
+        fault = digest.faults_by_key.get(key)
+        if fault is None or fault.is_source is not source or key not in routing.by_key:
+            continue
+        groups.setdefault(routing.by_key[key], []).append(key)
     return groups
 
 
@@ -558,7 +567,7 @@ def notify_source_transitions(
     hold a rung below MISSED while the date has gone by all the same."""
     events: list[str] = []
     try:
-        groups = _groups(digest, routing)
+        groups = _groups(digest, routing, source=True)
         events = [k for keys in groups.values() for k in keys]
         if not events:
             return Unsent()
@@ -640,7 +649,7 @@ def notify_config_faults(
     what escalates is only how long it has stood."""
     events: list[str] = []
     try:
-        groups = _groups(digest, routing)
+        groups = _groups(digest, routing, source=False)
         events = [k for keys in groups.values() for k in keys]
         if not events:
             return Unsent()

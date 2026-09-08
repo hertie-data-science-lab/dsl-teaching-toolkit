@@ -173,7 +173,7 @@ def test_nothing_here_writes_an_issue_any_more():
     assert "gh issue comment" not in RAW
     # Nothing here SEARCHES for that issue either. (The only title this template looks up
     # is the sources digest's, and it asks the engine for it - see the test above.)
-    assert f'"{source_digest.UNREADABLE_TITLE} in:title"' not in RAW
+    assert f'"{source_digest.ABSORBED} in:title"' not in RAW
     # The red X and the annotation stay - they are the half only a push can give.
     assert "::error file=schedule.yml::" in RAW
     assert "--annotate" in RAW
