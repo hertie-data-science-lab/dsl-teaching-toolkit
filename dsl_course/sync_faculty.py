@@ -60,13 +60,7 @@ from .discovery import (
     discover_content_repos,
 )
 from .faults import ConfigFault, Unusable
-from .gh_contents import (
-    get_file_content,
-    line_of,
-    load_yaml_config,
-    load_yaml_lines,
-    take_lines,
-)
+from .gh_contents import line_of, load_yaml_config, take_lines
 from .gh_teams import create_team, is_valid_github_username, reconcile_team_members
 from .log import log, log_err, log_ok, log_step
 
@@ -482,34 +476,28 @@ def read_course_config(
     handle no team can be given, and a `central_ref:` no workflow can be pinned to. A read
     that FAILED still raises, because "we could not look" must never be reported to a
     course admin as "your file is broken"."""
-    # Read and parsed here rather than through `load_yaml_config`, which turns a malformed
-    # file and a read that failed into the same RuntimeError. That distinction is the whole
-    # contract of this function, and it is not one a message match can be trusted with.
-    content = get_file_content(course_org, ".github", COURSE_CONFIG)
-    if content is None:
-        faults.append(
-            _course_fault(
-                "this file is missing, so the course declares no admins and no tier"
-            )
-        )
-        return None
+    # `load_yaml_config` draws all three lines this function needs, and says which file
+    # and what it got as it does: None for an absent file, `yaml.YAMLError` for one that
+    # does not parse, `Unusable` for a top level that is not a mapping - and a read that
+    # FAILED still comes out as a bare RuntimeError, which is the distinction this whole
+    # function is about. `read_cohort_people` reads its file exactly this way.
     try:
-        meta = load_yaml_lines(content)
-    except yaml.YAMLError as exc:
-        log_err(f"malformed YAML in {course_org}/.github/{COURSE_CONFIG}: {exc}")
+        meta = load_yaml_config(course_org, ".github", COURSE_CONFIG, lines=True)
+    except yaml.YAMLError:
         faults.append(
             _course_fault("this file is not valid YAML, so none of it is read")
         )
         return None
-    if meta is None:
-        meta = {}
-    if not isinstance(meta, dict):
-        log_err(
-            f"{course_org}/.github/{COURSE_CONFIG} is not a YAML mapping "
-            f"(got {type(meta).__name__}) - refusing to use it"
-        )
+    except Unusable:
         faults.append(
             _course_fault("this file is not a YAML mapping, so none of it is read")
+        )
+        return None
+    if meta is None:
+        faults.append(
+            _course_fault(
+                "this file is missing, so the course declares no admins and no tier"
+            )
         )
         return None
     # Taken before the people block is parsed, so the top-level keys' lines are in hand

@@ -492,7 +492,9 @@ people:
 
 
 def _course(monkeypatch, text: str | None):
-    monkeypatch.setattr(sync_faculty, "get_file_content", lambda *a, **k: text)
+    # `gh_contents`, not `sync_faculty`: the read goes through `load_yaml_config`, so that
+    # is the module whose imported name has to be stubbed.
+    monkeypatch.setattr(gh_contents, "get_file_content", lambda *a, **k: text)
     found: list = []
     return sync_faculty.read_course_config("Course-Org", found), found
 
@@ -559,7 +561,7 @@ def test_a_course_config_that_could_not_be_READ_still_raises(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("rate limited")
 
-    monkeypatch.setattr(sync_faculty, "get_file_content", boom)
+    monkeypatch.setattr(gh_contents, "get_file_content", boom)
     try:
         sync_faculty.read_course_config("Course-Org", [])
     except RuntimeError as exc:
