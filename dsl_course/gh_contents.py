@@ -54,6 +54,65 @@ def _strip_bom(text: str) -> str:
     return text.lstrip("﻿")
 
 
+# `yaml.safe_load` drops positions, and a fault that cannot name the LINE to edit leaves
+# faculty scrolling a file they wrote in August. So the loader stamps every mapping with
+# the line it starts on and the parse hands that to the entry it builds: one pass, and the
+# answer comes from the parser that read the file rather than from a scan of the text
+# afterwards - which was a second opinion about what the file says, and gave two deploys
+# under one entry the same line.
+LINES = "__lines__"
+
+
+class LineLoader(yaml.SafeLoader):
+    """SafeLoader that records, under `__lines__`, the 1-based line every key of a mapping
+    is written on - plus `""` for the line the mapping itself opens on.
+
+    Per KEY, because that is the granularity a fault cites: `releases.lecture_02 ->
+    course_source_path` sends faculty to the `course_source_path:` line, and the copy's
+    `course_source_repo:` is a different line of the same block. A reserved key rather
+    than a parallel index of YAML paths, because the parse walks the mappings and not the
+    paths: every entry meets its own lines where it is built. `take_lines` removes the
+    stamp as the parse consumes it, so no key check and no label loop downstream ever
+    sees it."""
+
+    def construct_mapping(self, node, deep=False):
+        mapping = super().construct_mapping(node, deep=deep)
+        # `node.value` has been flattened by now, so a merged (`<<:`) key is here too,
+        # at the line it was written on in the block it came from.
+        lines = {
+            str(k.value): k.start_mark.line + 1
+            for k, _v in node.value
+            if isinstance(k, yaml.ScalarNode)
+        }
+        lines[""] = node.start_mark.line + 1
+        mapping[LINES] = lines
+        return mapping
+
+
+def load_yaml_lines(text: str) -> object:
+    """`yaml.safe_load` plus the line stamps a fault cites. Same failure modes exactly -
+    `yaml.YAMLError` on a file that does not parse, any object for one that does."""
+    return yaml.load(text, LineLoader)
+
+
+def take_lines(mapping: dict) -> dict[str, int]:
+    """This mapping's key lines, REMOVING the loader's stamp. `{}` for a mapping loaded
+    any other way - a dict built by hand in a test, or a plain `safe_load` - which every
+    consumer already treats as "the line is not known"."""
+    lines = mapping.pop(LINES, None)
+    return lines if isinstance(lines, dict) else {}
+
+
+def line_of(lines: dict[str, int], key: str) -> int | None:
+    """The line to cite for a fault about `key`: that key's own line, else the line the
+    entry opens on, else None.
+
+    The fallback is for a field the entry does not carry at all. Most faults name a key
+    the entry declared - but a citation pointing at the right BLOCK beats no citation, and
+    beats a link to line 1."""
+    return lines.get(key) or lines.get("")
+
+
 def read_csv(
     text: str,
     required: tuple[str, ...],
@@ -762,7 +821,9 @@ def last_committer(org: str, repo: str) -> str | None:
     return ((rows[0] or {}).get("author") or {}).get("login") or None
 
 
-def load_yaml_config(org: str, repo: str, path: str) -> dict | None:
+def load_yaml_config(
+    org: str, repo: str, path: str, lines: bool = False
+) -> dict | None:
     """Fetch + parse a YAML config file into a mapping, correctly distinguishing the three
     states callers that prune depend on:
 
@@ -774,12 +835,17 @@ def load_yaml_config(org: str, repo: str, path: str) -> dict | None:
     Any OTHER read failure propagates (get_file_content raises on non-404 - preserved
     here). Malformed YAML, or a non-mapping top level (a list/scalar), is logged (naming
     org/repo/path) and raised - never silently coerced to {}, which is exactly the
-    "or '' erases None-vs-content" class of bug this replaces."""
+    "or '' erases None-vs-content" class of bug this replaces.
+
+    `lines` stamps every mapping with the line each of its keys is written on (see
+    `LineLoader`), for a caller that has to tell somebody WHICH line to go and fix. Off by
+    default: the stamp is a reserved key, and a caller that does not consume it would
+    render it."""
     content = get_file_content(org, repo, path)
     if content is None:
         return None
     try:
-        data = yaml.safe_load(content)
+        data = load_yaml_lines(content) if lines else yaml.safe_load(content)
     except yaml.YAMLError as exc:
         log_err(f"malformed YAML in {org}/{repo}/{path}: {exc}")
         raise

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import yaml
 
-from dsl_course import sync_faculty
+from dsl_course import gh_contents, sync_faculty
 
 
 def _parse(raw: str) -> dict:
@@ -351,3 +351,100 @@ def test_without_email_names_the_active_handles_no_notification_reaches():
         "nomail",
         "anOther",
     ]
+
+
+# ------------------------------------------------------------- faults a human must fix
+#
+# people.yml decides who has access and who can be told anything, so an entry the sync
+# skips is invisible twice over: no team membership, and no notification about the entry
+# either. These are the faults the digest issue and the mail carry.
+
+
+def _faults(raw: str) -> list:
+    """Parse people.yml text WITH line stamps, as the pre-flight reads it."""
+    found = []
+    sync_faculty.parse_faculty_from_meta(gh_contents.load_yaml_lines(raw), found)
+    return found
+
+
+PEOPLE = """people:
+  instructors:
+    - github_handle: jan-g
+      name: Jan
+      email: jan@x.edu
+    - github_handle: not a handle
+      name: Typo
+      email: typo@x.edu
+    - name: No Handle At All
+      role: guest
+  teaching_assistants:
+    - github_handle: cpj97
+      name: Camilo
+"""
+
+
+def test_every_unusable_people_entry_is_reported_with_its_line():
+    # The third instructor is a NAMED card with no handle - display-only, which is a
+    # legitimate entry and not a fault. The TA has no `email:` at all, so the citation
+    # falls back to the line the entry opens on.
+    found = _faults(PEOPLE)
+    assert [(f.where, f.field, f.lineno) for f in found] == [
+        ("people.instructors[1]", "github_handle", 6),
+        ("people.teaching_assistants[0]", "email", 12),
+    ]
+    assert all(f.file == "people.yml" for f in found)
+
+
+def test_an_entry_that_is_neither_a_handle_nor_a_card_is_a_fault():
+    (fault,) = _faults("people:\n  instructors:\n    - role: guest\n")
+    assert fault.where == "people.instructors[0]" and fault.lineno == 3
+    assert "no `github_handle:`" in fault.what
+
+
+def test_a_teaching_entry_with_no_address_still_grants_access():
+    faculty = sync_faculty.parse_faculty_from_meta(
+        gh_contents.load_yaml_lines(PEOPLE), []
+    )
+    assert [p["github_handle"] for p in faculty["teaching_assistants"]] == ["cpj97"]
+
+
+def test_the_line_stamps_never_survive_the_parse():
+    """The loader's reserved key would otherwise reach the site's people cards."""
+    meta = gh_contents.load_yaml_lines(PEOPLE)
+    faculty = sync_faculty.parse_faculty_from_meta(meta, [])
+    entries = [p for role in faculty.values() for p in role]
+    assert entries and all(gh_contents.LINES not in p for p in entries)
+
+
+def test_a_clean_people_yml_has_no_faults():
+    clean = """people:
+  instructors:
+    - github_handle: jan-g
+      email: jan@x.edu
+"""
+    assert _faults(clean) == []
+
+
+def test_a_people_yml_that_is_absent_or_unreadable_is_itself_the_fault(monkeypatch):
+    for raise_or_return, expected in (
+        (lambda **_: None, "missing"),
+        (_raiser(yaml.YAMLError("bad")), "not valid YAML"),
+        (_raiser(RuntimeError("not a mapping")), "not a YAML mapping"),
+    ):
+        monkeypatch.setattr(
+            sync_faculty,
+            "load_yaml_config",
+            lambda *a, _f=raise_or_return, **k: _f(),
+        )
+        found = []
+        assert sync_faculty.read_cohort_people("Cohort-f2026", found) is None
+        (fault,) = found
+        assert expected in fault.what
+        assert fault.file == "people.yml" and fault.lineno is None
+
+
+def _raiser(exc):
+    def raise_it():
+        raise exc
+
+    return raise_it

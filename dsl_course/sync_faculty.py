@@ -42,6 +42,8 @@ from datetime import date
 from functools import cache
 from typing import NamedTuple
 
+import yaml
+
 from .access import grant_team_repo_access
 from .course import (
     CONFIG_REPO,
@@ -55,7 +57,8 @@ from .discovery import (
     discover_cohorts,
     discover_content_repos,
 )
-from .gh_contents import load_yaml_config
+from .faults import ConfigFault
+from .gh_contents import line_of, load_yaml_config, take_lines
 from .gh_teams import create_team, is_valid_github_username, reconcile_team_members
 from .log import log, log_err, log_ok, log_step
 
@@ -84,29 +87,96 @@ def valid_email(value: object) -> str | None:
     return text if local and domain else None
 
 
-def parse_faculty_from_meta(meta: dict) -> dict[str, list[dict]]:
+def _people_fault(
+    role: str,
+    index: int,
+    field: str,
+    what: str,
+    lines: dict[str, int],
+    file: str,
+) -> ConfigFault:
+    """One entry of a people block that the sync cannot use as written.
+
+    The entry is named by its ROLE and its position, not by its handle: `where` is this
+    fault's identity in the digest's state and its heading in the mail, and an entry
+    somebody renames is not a new fault. The line is what sends anybody to it."""
+    return ConfigFault(
+        f"people.{role}[{index}]",
+        what,
+        file=file,
+        field=field,
+        lineno=line_of(lines, field),
+    )
+
+
+def parse_faculty_from_meta(
+    meta: dict,
+    faults: list[ConfigFault] | None = None,
+    file: str = COHORT_PEOPLE_PATH,
+) -> dict[str, list[dict]]:
     """Parse an already-loaded config mapping's `people:` block (course org's
     dsl-course.yml, or a cohort's people.yml - same schema) for the roles in ROLE_TEAM.
     Only entries with a `github_handle` grant access; a named entry without one is a
     legitimate display-only card (noted, not an error), anything else is junk (flagged).
 
     An instructor/TA entry with no usable `email:` is an error line naming the role and
-    the handle - the entry still grants access, it just cannot be notified."""
+    the handle - the entry still grants access, it just cannot be notified.
+
+    `faults` collects the same three things for the notifier: an entry with no handle to
+    grant anything to, a handle that cannot be a GitHub username (adding it to a team
+    would INVITE it, so the sync skips it), and a teaching entry no notification can
+    reach. `file` names the file they are in - the same schema is a cohort's people.yml
+    and a course org's dsl-course.yml, and the fault has to cite the right one.
+
+    The line stamps (`take_lines`) are consumed here whether or not anybody asked for
+    faults, so no consumer downstream can ever render the loader's reserved key."""
     people = meta.get("people")
     if not isinstance(people, dict):
         return {}
+    take_lines(people)
     faculty: dict[str, list[dict]] = {}
     for role in ROLE_TEAM:
         entries = []
-        for p in people.get(role) or []:
+        for index, p in enumerate(people.get(role) or []):
+            lines = take_lines(p) if isinstance(p, dict) else {}
             if isinstance(p, dict) and p.get("github_handle"):
                 entries.append(p)
+                # Not logged here: `desired_team_members` says it, in the place that
+                # acts on it. This is the same fact on the channel that reaches somebody
+                # who is not reading a cron's log.
+                if faults is not None and not is_valid_github_username(
+                    str(p["github_handle"])
+                ):
+                    faults.append(
+                        _people_fault(
+                            role,
+                            index,
+                            "github_handle",
+                            "this is not a valid GitHub username - the entry is "
+                            "skipped, so it grants no access (adding it to a team "
+                            "would invite an arbitrary account to the org)",
+                            lines,
+                            file,
+                        )
+                    )
                 if role in TEACHING_ROLES and valid_email(p.get("email")) is None:
                     log_err(
                         f"  ! {role} entry {p['github_handle']} has no usable `email:` "
                         f"- it is required (access still granted, but this person is "
                         f"not notified): see {COHORT_PEOPLE_PATH}"
                     )
+                    if faults is not None:
+                        faults.append(
+                            _people_fault(
+                                role,
+                                index,
+                                "email",
+                                "no usable `email:` - access is still granted, but no "
+                                "notification reaches this person",
+                                lines,
+                                file,
+                            )
+                        )
             elif isinstance(p, dict) and p.get("name"):
                 log(
                     f"  ({role} entry '{p['name']}' has no github_handle - "
@@ -114,6 +184,18 @@ def parse_faculty_from_meta(meta: dict) -> dict[str, list[dict]]:
                 )
             else:
                 log_err(f"  ! skipping {role} entry with no github_handle: {p!r}")
+                if faults is not None:
+                    faults.append(
+                        _people_fault(
+                            role,
+                            index,
+                            "github_handle",
+                            "this entry has no `github_handle:` - it grants no access "
+                            "and appears nowhere",
+                            lines,
+                            file,
+                        )
+                    )
         faculty[role] = entries
     return faculty
 
@@ -274,6 +356,55 @@ def load_cohort_faculty(cohort_org: str) -> dict[str, list[dict]] | None:
     if meta is None:
         return None
     return _cohort_roles_only(parse_faculty_from_meta(meta))
+
+
+def read_cohort_people(
+    cohort_org: str, faults: list[ConfigFault]
+) -> dict[str, list[dict]] | None:
+    """This cohort's people.yml, parsed, with everything a human must fix collected.
+
+    The fault-collecting twin of `load_cohort_faculty`, and deliberately NOT memoised: it
+    reads the file with line stamps (which the cached loader must not hand to the site
+    renderer) and it is asked once per tick.
+
+    A file that is ABSENT or that does not parse is a fault of its own rather than an
+    exception, because both mean the same thing to a cohort - nobody is granted access and
+    nobody is notified - and neither is anything a release run should stop for. A read
+    that FAILED (a rate limit, a token that lost its scope) still raises: "we could not
+    look" must never be reported to faculty as "your file is broken"."""
+    try:
+        meta = load_yaml_config(cohort_org, CONFIG_REPO, COHORT_PEOPLE_PATH, lines=True)
+    except yaml.YAMLError:
+        faults.append(_file_fault("this file is not valid YAML, so none of it is read"))
+        return None
+    except RuntimeError:
+        # `load_yaml_config` has already said which file and what it got.
+        faults.append(
+            _file_fault("this file is not a YAML mapping, so none of it is read")
+        )
+        return None
+    if meta is None:
+        faults.append(
+            _file_fault(
+                "this file is missing, so the cohort has no declared teaching team"
+            )
+        )
+        return None
+    return _cohort_roles_only(parse_faculty_from_meta(meta, faults))
+
+
+def _file_fault(what: str) -> ConfigFault:
+    """people.yml as a whole, unusable - no entry to name and no line to point at."""
+    return ConfigFault(
+        COHORT_PEOPLE_PATH,
+        f"{what} - no instructor or TA is granted access or notified",
+        file=COHORT_PEOPLE_PATH,
+        field="people",
+        fix_text=(
+            f"restore {COHORT_PEOPLE_PATH} from the template and declare the cohort's "
+            f"instructors and teaching assistants in it"
+        ),
+    )
 
 
 def sync_course_admins(

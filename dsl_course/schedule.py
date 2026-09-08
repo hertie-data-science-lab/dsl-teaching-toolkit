@@ -91,7 +91,15 @@ from .faults import (
     Severity,
     hours,
 )
-from .gh_contents import get_file_content, get_file_with_sha, put_file, repo_tree
+from .gh_contents import (
+    get_file_content,
+    get_file_with_sha,
+    line_of,
+    load_yaml_lines,
+    put_file,
+    repo_tree,
+    take_lines,
+)
 from .log import log, log_err, log_step
 from .releaseignore import RELEASEIGNORE, excluded_in_tree
 from .repos import default_branch, repo_missing
@@ -376,65 +384,6 @@ class Schedule:
     unparseable: bool = False
 
 
-# `yaml.safe_load` drops positions, and a fault that cannot name the LINE to edit leaves
-# faculty scrolling a file they wrote in August. So the loader stamps every mapping with
-# the line it starts on and the parse hands that to the entry it builds: one pass, and the
-# answer comes from the parser that read the file rather than from a scan of the text
-# afterwards - which was a second opinion about what the file says, and gave two deploys
-# under one entry the same line.
-_LINES = "__lines__"
-
-
-class _LineLoader(yaml.SafeLoader):
-    """SafeLoader that records, under `__lines__`, the 1-based line every key of a mapping
-    is written on - plus `""` for the line the mapping itself opens on.
-
-    Per KEY, because that is the granularity a fault cites: `releases.lecture_02 ->
-    course_source_path` sends faculty to the `course_source_path:` line, and the copy's
-    `course_source_repo:` is a different line of the same block. A reserved key rather
-    than a parallel index of YAML paths, because the parse walks the mappings and not the
-    paths: every entry meets its own lines where it is built. `_take_lines` removes the
-    stamp as the parse consumes it, so no key check and no label loop downstream ever
-    sees it."""
-
-    def construct_mapping(self, node, deep=False):
-        mapping = super().construct_mapping(node, deep=deep)
-        # `node.value` has been flattened by now, so a merged (`<<:`) key is here too,
-        # at the line it was written on in the block it came from.
-        lines = {
-            str(k.value): k.start_mark.line + 1
-            for k, _v in node.value
-            if isinstance(k, yaml.ScalarNode)
-        }
-        lines[""] = node.start_mark.line + 1
-        mapping[_LINES] = lines
-        return mapping
-
-
-def _load_yaml(text: str) -> object:
-    """`yaml.safe_load` plus the line stamps `parse` reads. Same failure modes exactly -
-    `yaml.YAMLError` on a file that does not parse, any object for one that does."""
-    return yaml.load(text, _LineLoader)
-
-
-def _take_lines(mapping: dict) -> dict[str, int]:
-    """This mapping's key lines, REMOVING the loader's stamp. `{}` for a mapping this
-    module did not load - a dict built by hand in a test, or a caller that parsed the YAML
-    itself - which every consumer already treats as "the line is not known"."""
-    lines = mapping.pop(_LINES, None)
-    return lines if isinstance(lines, dict) else {}
-
-
-def _line_of(lines: dict[str, int], key: str) -> int | None:
-    """The line to cite for a fault about `key`: that key's own line, else the line the
-    entry opens on, else None.
-
-    The fallback is for a field the entry does not carry at all. Every fault this module
-    reports names a key the entry must have declared to have parsed - but a citation
-    pointing at the right BLOCK beats no citation, and beats a link to line 1."""
-    return lines.get(key) or lines.get("")
-
-
 def _drop(drops: list[str], where: str, why: str, cost: str) -> None:
     """Record a thrown-away entry: where it is in the YAML, what is wrong, and what the
     cohort loses by it. The cost is the point - "entry dropped" alone tells faculty
@@ -462,7 +411,7 @@ def _require_mapping(
         return None
     # The block's own lines interest nobody; taking them keeps the stamp out of the label
     # loop that follows, which would otherwise read `__lines__` as an entry.
-    _take_lines(raw)
+    take_lines(raw)
     return raw
 
 
@@ -615,7 +564,7 @@ def _parse_deploy(
         if not isinstance(d, dict):
             _drop(drops, where, "not a mapping", "this copy never ships")
             continue
-        lines = _take_lines(d)
+        lines = take_lines(d)
         src_repo, src_path = d.get("course_source_repo"), d.get("course_source_path")
         if not src_repo or not src_path:
             _drop(
@@ -675,7 +624,7 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Release
                 drops, where, "not a mapping", "nothing deploys and no site row appears"
             )
             continue
-        _take_lines(entry)
+        take_lines(entry)
         raw_when = entry.get("event_datetime")
         when = _coerce_datetime(raw_when, tz)
         tbc = _is_tbc(raw_when) or entry.get("tbc") is True
@@ -777,7 +726,7 @@ def _parse_assignments(
                 drops, where, "not a mapping (it needs a nested `due_datetime:`)", cost
             )
             continue
-        lines = _take_lines(entry)
+        lines = take_lines(entry)
         due = _coerce_datetime(entry.get("due_datetime"), tz, end_of_day=True)
         if due is None:
             _drop(drops, where, "no valid `due_datetime`", cost)
@@ -928,7 +877,7 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Event]:
         if not isinstance(entry, dict):
             _drop(drops, where, "not a mapping", "the row never appears on the site")
             continue
-        _take_lines(entry)
+        take_lines(entry)
         raw_when = entry.get("event_datetime")
         when = _coerce_date_or_datetime(raw_when, tz)
         tbc = _is_tbc(raw_when) or entry.get("tbc") is True
@@ -985,7 +934,7 @@ def parse(meta: dict) -> Schedule:
     than recorded as a drop, because a drop reds `--validate` and every live cohort still
     carries the block (see KNOWN_TOP_LEVEL)."""
     meta = meta if isinstance(meta, dict) else {}
-    _take_lines(meta)
+    take_lines(meta)
     drops: list[str] = []
     # A whole plan under an unknown top-level key (`materials_releases:` instead of
     # `releases:`) otherwise validates as "OK: nothing dropped" with zero releases - the
@@ -1154,7 +1103,7 @@ def load(cohort_org: str) -> Schedule:
     content = _schedule_text(cohort_org)
     unparseable = False
     try:
-        meta = _load_yaml(content) if content else {}
+        meta = load_yaml_lines(content) if content else {}
     except yaml.YAMLError as exc:
         log_err(
             f"{cohort_org}/{CONFIG_REPO}/{SCHEDULE_PATH} is NOT valid YAML - the whole "
@@ -1210,7 +1159,7 @@ def load_file(path: str) -> tuple[Schedule | None, str | None]:
     except OSError as exc:
         return None, f"cannot read {path}: {exc}"
     try:
-        meta = _load_yaml(text) or {}
+        meta = load_yaml_lines(text) or {}
     except yaml.YAMLError as exc:
         # the parser's own message carries the line/column and the offending snippet
         return None, f"{path} is not valid YAML:\n{exc}"
@@ -1292,7 +1241,7 @@ class _Wanted(NamedTuple):
     lines: dict[str, int]
 
     def lineno(self, field: str) -> int | None:
-        return _line_of(self.lines, field)
+        return line_of(self.lines, field)
 
 
 def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:

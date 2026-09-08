@@ -1714,8 +1714,8 @@ def test_every_deploy_field_knows_the_line_it_is_written_on(tmp_path):
     sched = _parsed(tmp_path)
     assert [
         (
-            schedule._line_of(d.lines, "course_source_repo"),
-            schedule._line_of(d.lines, "course_source_path"),
+            schedule.line_of(d.lines, "course_source_repo"),
+            schedule.line_of(d.lines, "course_source_path"),
         )
         for r in sched.releases
         for d in r.deploy
@@ -1724,7 +1724,7 @@ def test_every_deploy_field_knows_the_line_it_is_written_on(tmp_path):
 
 def test_an_assignment_field_knows_the_line_it_is_written_on(tmp_path):
     entry = _parsed(tmp_path).assignments["assignment-2"]
-    assert schedule._line_of(entry.lines, "course_source_repo") == 21
+    assert schedule.line_of(entry.lines, "course_source_repo") == 21
 
 
 def test_the_field_is_cited_wherever_it_sits_in_its_entry(tmp_path):
@@ -1742,11 +1742,11 @@ def test_the_field_is_cited_wherever_it_sits_in_its_entry(tmp_path):
         "        course_source_repo: cm\n",
     )
     (deploy,) = sched.releases[0].deploy
-    assert schedule._line_of(deploy.lines, "course_source_path") == 7
-    assert schedule._line_of(deploy.lines, "course_source_repo") == 8
+    assert schedule.line_of(deploy.lines, "course_source_path") == 7
+    assert schedule.line_of(deploy.lines, "course_source_repo") == 8
     # A field the entry does not carry falls back to the line the entry opens on: a
     # citation pointing at the right block beats no citation, and beats a link to line 1.
-    assert schedule._line_of(deploy.lines, "nonesuch") == 5
+    assert schedule.line_of(deploy.lines, "nonesuch") == 5
 
 
 def test_a_dict_built_by_hand_has_no_line_and_says_so(tmp_path):
@@ -1764,7 +1764,7 @@ def test_a_dict_built_by_hand_has_no_line_and_says_so(tmp_path):
     )
     deploy = sched.releases[0].deploy[0]
     assert deploy.lines == {}
-    assert schedule._line_of(deploy.lines, "course_source_path") is None
+    assert schedule.line_of(deploy.lines, "course_source_path") is None
 
 
 def test_the_line_stamp_never_reaches_the_parsed_plan(tmp_path):
