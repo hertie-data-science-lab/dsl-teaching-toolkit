@@ -706,7 +706,7 @@ def test_the_sheet_is_created_at_handout_with_the_students_row(pipeline):
     assert block["score_individual"] is None
     # `info:` carries exactly the facts THIS assignment's toolkit will fill, and
     # `autograde` exists only where hidden tests will run. New assignment scaffolds
-    # `autograde: true` with a stub `tests/` today and may not tomorrow, so the shape is
+    # `autograde: false` with a stub `tests/` today and may not tomorrow, so the shape is
     # read off the template's own grading config rather than written down here twice.
     expected = {"submitted": None, "days_late": None}
     if grades.load_grading_spec(COURSE_ORG, pipeline.slug)["autograde"]:

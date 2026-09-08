@@ -154,11 +154,11 @@ _READINGS_STUB = (
 )
 
 _GRADING_YML = """\
-# How the autograder marks this assignment (at the cutoff
-# set in schedule.yml). Delete this file (or set autograde: false) for a purely
-# manually-graded assignment.
+# How this assignment is defined and marked. Dates live in the cohort's schedule.yml.
+# Hand-marking is the default; set `autograde: true` to run the hidden tests below
+# at the cutoff.
 type: {kind}      # individual (one repo per student) or group (one repo per team)
-autograde: true       # false -> skip autograding (all-manual)
+autograde: false      # true -> run the hidden tests at the cutoff (needs `tests:` below)
 tests: tests          # path (on THIS solution branch) holding the hidden tests
                       # how many passed is shown to you as `info.autograde` in the grading
                       # sheet - never a mark by itself, and never something a student sees

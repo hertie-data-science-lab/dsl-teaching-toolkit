@@ -237,8 +237,8 @@ repos, never orgs. Every release is idempotent - re-runs are no-ops.
 | `deploy` | copy a source path → a cohort repo | `course_source_repo`, `course_source_path`, `cohort_dest_repo` (default `materials`), `cohort_dest_path` (default: mirror). A list, or a single mapping for one copy |
 | `assignment` | one private repo per onboarded student - or per team, when the template's `grading_config.yml` says `type: group` | the template repo name |
 
-(Grading takes no action here - each assignment is autograded automatically, once, at its
-`grading_datetime` under `assignments:`.)
+(Grading takes no action here - each assignment is frozen at its `grading_datetime`
+under `assignments:`, and autograded there only if its template says `autograde: true`.)
 
 Per entry: `event_datetime` (required - when the thing happens; the site schedule shows it,
 and it is the default fire time), `title` and `description` (optional - the session's name,
@@ -412,7 +412,8 @@ Verify with `python3 -m dsl_course.schedule --cohort-org <COHORT> --validate`. F
 
 **What happens at the grading deadline.** The scheduler freezes each submission repo's
 commit into `classroom-config/snapshots/<slug>.csv` (write-once - delete it to re-freeze),
-then autogrades **once** against the `<slug>-<tag>` template (the `_graded.json` / `_skipped.json`
+then, where that template's `grading_config.yml` says `autograde: true`, autogrades
+**once** against it (the `_graded.json` / `_skipped.json`
 record in `classroom-config/autograde/<slug>/` is the fired marker - delete it, or the whole
 folder, to re-grade). Machine grade columns are write-once too. All of
 this happens whether or not the cohort uses `releases`.
