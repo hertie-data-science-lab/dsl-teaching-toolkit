@@ -45,6 +45,7 @@ from .collect import (
     sync_sheet,
 )
 from .course import (
+    ASSIGNED,
     CONFIG_REPO,
     SOLUTION_BRANCH,
     assignment_slug,
@@ -751,18 +752,36 @@ def provision_all(
     if group:
         groups = teams.teams_for(teams.load(cohort_org), key)
         if not groups:
+            # WHO fills teams.csv is the assignment's own declaration, and the two answers
+            # need different words: telling a course whose teams the teaching team
+            # allocates to wait for students to self-select points them at a form that
+            # refuses every request (see templates/welcome/team-formation.yml).
+            # The RAW declaration, not `team_formation_resolved`: `--group` can force a
+            # per-team handout of a template that declares nothing, and a template that
+            # declares nothing self-selects.
+            self_select = gspec.team_formation != ASSIGNED
             if scheduled:
-                # Teams form when students click 'Join team', which can be days after the
-                # handout datetime - and the cron re-fires every hour until they do. Wait,
-                # exactly as an individual handout waits for its first onboarded student.
+                # Teams appear days after the handout datetime either way - and the cron
+                # re-fires every hour until they do. Wait, exactly as an individual
+                # handout waits for its first onboarded student.
+                arrives = (
+                    "the first team forms"
+                    if self_select
+                    else "the teaching team writes them into teams.csv"
+                )
                 log(
                     f"  [wait] no teams for `{key}` in {cohort_org} yet - the handout "
-                    f"fires on the tick after the first team forms"
+                    f"fires on the tick after {arrives}"
                 )
                 return 0, False
+            how = (
+                "students self-select via the welcome 'Join team' issue, or seed the CSV"
+                if self_select
+                else "this assignment allocates teams (`team_formation: assigned`), so "
+                "the teaching team fills the CSV - the Join-team form refuses it"
+            )
             log_err(
-                f"no teams for `{key}` in {cohort_org}/classroom-config/teams.csv - "
-                f"students self-select via the welcome 'Join team' issue, or seed the CSV."
+                f"no teams for `{key}` in {cohort_org}/classroom-config/teams.csv - {how}."
             )
             return 1, False
         # teams.csv is student-writable (the welcome "Join team" issue appends rows), so its

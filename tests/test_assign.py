@@ -1323,9 +1323,40 @@ def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_fails_on_the_bu
         )
 
     assert run(scheduled=True) == (0, False)
-    assert "[wait] no teams" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "[wait] no teams" in out and "the first team forms" in out
     assert run() == (1, False)
-    assert "no teams for" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "no teams for" in err and "students self-select" in err
+
+
+def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
+    tmp_path, monkeypatch, capsys
+):
+    # `team_formation: assigned` means the Join-team form refuses every request, so
+    # telling this course to wait for students to self-select points them at a door that
+    # is shut. Who fills teams.csv is the assignment's own declaration.
+    monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {})
+    monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.GradingSpec(
+            type="group", team_formation="assigned"
+        ),
+    )
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+
+    def run(**kw):
+        return assign.provision_all(
+            "COURSE", "project-f2026", "COHORT", roster_path=path, **kw
+        )
+
+    assert run(scheduled=True) == (0, False)
+    assert "the teaching team writes them into teams.csv" in capsys.readouterr().out
+    assert run() == (1, False)
+    err = capsys.readouterr().err
+    assert "team_formation: assigned" in err and "self-select" not in err
 
 
 # --------------- a failed solution push outranks every other fault (the marker depends on it)

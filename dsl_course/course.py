@@ -60,7 +60,9 @@ ASSIGNMENT_TYPES = ("individual", "group")
 # How a group assignment's teams come about. `none` is NOT one of them: it is the answer
 # an INDIVIDUAL assignment gives, which is why the Join-team form can refuse a slug
 # outright, and it is not a value an instructor ever writes.
-TEAM_FORMATIONS = ("self_select", "assigned")
+SELF_SELECT = "self_select"  # students use the Join-team form in `welcome`
+ASSIGNED = "assigned"  # the teaching team writes teams.csv; the form refuses
+TEAM_FORMATIONS = (SELF_SELECT, ASSIGNED)
 NO_TEAMS = "none"
 # The cap the Join-team form enforces when neither the assignment nor its course says
 # otherwise. Here because three places have to agree on it: the `grading_config.yml` the

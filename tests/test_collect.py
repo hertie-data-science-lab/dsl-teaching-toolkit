@@ -2988,6 +2988,49 @@ def test_a_teams_contributions_are_read_at_the_pin_and_a_stub_reads_blank(monkey
     assert list(team["members"]) == ["ada-l", "ben-k"]
 
 
+def test_the_freeze_reads_contributions_at_the_frozen_sha(monkeypatch):
+    # The freeze derives off the write-once snapshot, so the file is read at the sha that
+    # was pinned - not at the one the last refresh happened to see, and not at HEAD, which
+    # a team can still edit for the rest of the term.
+    frozen = "b" * 40
+    seen: list[str] = []
+
+    def contributions(org, repo, path, ref=""):
+        seen.append(ref)
+        return "Ada: Q1. Ben: Q2.\n"
+
+    written = _sheet_env(
+        monkeypatch,
+        targets=[("assignment-1-alpha", "alpha", ["ada-l", "ben-k"])],
+        rows={
+            "assignment-1-alpha": collect.SnapshotRow(
+                repo="assignment-1-alpha",
+                sha=frozen,
+                submitted_at="2026-10-03T20:14:00Z",
+                submitted_source=collect.SUBMITTED_SOURCE_PUSH,
+            )
+        },
+    )
+    monkeypatch.setattr(collect, "get_file_content", contributions)
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=True,
+        now=datetime(2026, 10, 12, tzinfo=BERLIN),
+    )
+    assert seen == [frozen]
+    ((_path, text),) = written
+    assert (
+        grades.parse_sheet(text)["teams"]["alpha"]["info"]["contributions"]
+        == "Ada: Q1. Ben: Q2.\n"
+    )
+    assert "# Status: FROZEN" in text
+
+
 def test_an_unwritten_contributions_stub_says_so_rather_than_reading_blank(monkeypatch):
     # A team that submitted and never wrote the file is a fact a grader acts on (it is
     # what an individual adjustment turns on). Blank would read as "the toolkit did not
