@@ -72,8 +72,7 @@ import os
 import re
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
-from enum import Enum, IntEnum
+from datetime import date, datetime, time, timezone
 from functools import cache
 from pathlib import Path
 from typing import NamedTuple
@@ -82,12 +81,29 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import yaml
 
 from .course import CONFIG_REPO, assignment_slug, coerce_date, is_repo_root
+from .faults import (
+    NOTIFY_FROM,
+    SOURCE_CRITICAL_WINDOW,
+    SOURCE_URGENT_WINDOW,
+    SOURCE_WARN_WINDOW,
+    ConfigFault,
+    FaultKind,
+    Severity,
+    hours,
+)
 from .gh_contents import get_file_content, get_file_with_sha, put_file, repo_tree
 from .log import log, log_err, log_step
 from .releaseignore import RELEASEIGNORE, excluded_in_tree
 from .repos import default_branch, repo_missing
 
 SCHEDULE_PATH = "schedule.yml"
+
+# What a fault in schedule.yml has always been called here, and still is: `ConfigFault`
+# with a `kind` set. One type rather than two, so the digest, the mail and the ladder are
+# the same code for a source the plan cites and for an entry the parser had to drop -
+# see `faults`. Every Part I call site (and its `isinstance`) reads unchanged.
+SourceFault = ConfigFault
+
 DEFAULT_TZ = "Europe/Berlin"
 
 # What a release SYNTHESISED from `assignments.<slug>.handout_datetime` is labelled:
@@ -1243,50 +1259,6 @@ def source_repo_paths(course_org: str, repo: str) -> set[str] | None:
     return _repo_paths(course_org, repo)
 
 
-# How close a missing source has to be to its fire time before it stops being "not
-# written yet" and starts being a fault. A term planned up front names paths nobody has
-# authored, which is why distance is what separates the normal state from the broken one.
-# Three windows rather than one, because how loudly it is said changes as the moment
-# approaches: the first rung opens the digest issue and mails the people git names, the
-# second says how little time is left, and the maintainer joins at the third. They
-# are deliberately tight - a day, half a day, a quarter of a day - because a source is
-# staged in minutes once somebody knows, and a week of warnings is a week of ignoring them.
-SOURCE_WARN_WINDOW = timedelta(hours=24)
-SOURCE_URGENT_WINDOW = timedelta(hours=12)
-SOURCE_CRITICAL_WINDOW = timedelta(hours=6)
-
-
-class Severity(IntEnum):
-    """How loud a source fault is. ORDERED, and that is the point: every consumer wants to
-    compare (worst of a run, has this escalated, is it past the notify bar), and as bare
-    strings each of those had to spell the ladder out again through a lookup table."""
-
-    ADVISORY = 0
-    WARNING = 1
-    URGENT = 2
-    CRITICAL = 3
-    MISSED = 4
-
-    def __str__(self) -> str:
-        return self.name.lower()
-
-
-# The rung at which anything is said at all - the digest issue opens, its comment goes out
-# and the mail beside it is addressed. Below it the fault is real and listed, but a session
-# nobody has written yet is the normal state of a term planned months ahead, so it earns no
-# notification. Here rather than in either notifier because both answer to it and they must
-# answer to the SAME one.
-NOTIFY_FROM = Severity.WARNING
-
-
-def hours(window: timedelta) -> int:
-    """A window in whole hours. Public because every surface that names one - a rung
-    heading, a subject suffix, a prose blurb, the commit comment - formats it from the
-    constant rather than typing the number, so moving a rung cannot leave a stale 24h in
-    somebody's inbox."""
-    return int(window.total_seconds() // 3600)
-
-
 def _window_blurb() -> str:
     """The ladder in one sentence, formatted from the windows themselves so changing one
     cannot leave three hand-written prose copies claiming the old numbers."""
@@ -1304,222 +1276,6 @@ def in_cohort_zone(sched: Schedule, when: datetime) -> datetime:
     definition: a deadline faculty wrote as 08:00 Berlin, and a quiet window where 02:00
     means somebody's actual night rather than 02:00 in a datacentre."""
     return when.astimezone(_tz(sched.timezone))
-
-
-def zone_name(when: datetime) -> str:
-    """The zone as faculty wrote it in schedule.yml (`Europe/Berlin`), not the abbreviation
-    in force that week.
-
-    A notification that says 08:00 without saying whose 08:00 is a notification about
-    nothing, and `%Z` answers `CEST` - which is not a string anybody can look up against
-    the `timezone:` line they typed."""
-    return getattr(when.tzinfo, "key", "") or when.strftime("%Z")
-
-
-class FaultKind(Enum):
-    """What is WRONG with a source, as against which key to go and edit.
-
-    The field cannot carry this: a path that is absent and a path a `.releaseignore`
-    withholds are both `course_source_path`, and they want opposite instructions - push
-    the files, or stop holding back the ones already there. Sniffed off the field name and
-    a bool flag, each surface grew its own copy of the guess."""
-
-    MISSING_REPO = "missing repo"
-    MISSING_PATH = "missing path"
-    WITHHELD = "withheld"
-
-
-_CREATE_REPO = (
-    "create the repo named on {at} in {course_org} and push its files, or correct the "
-    "line above."
-)
-_CREATE_TEMPLATE = (
-    "create the assignment template repo named on {at} in {course_org} and push the "
-    "starter files to it, or correct the line above."
-)
-# The one sentence that would put each fault right, keyed on the three things it actually
-# depends on: the KIND, whether the entry hands out an assignment template (a repo to
-# create, not a folder to fill), and whether the moment has already passed - once a
-# release has fired, "fix it by Wednesday" is no longer the instruction. A table rather
-# than a chain of `if`s, so a fourth kind cannot quietly inherit a sentence meant for
-# another. Combinations the check cannot produce are absent: only a deploy names a path,
-# and a withheld path caps at WARNING and so never fires.
-_FIX: dict[tuple[FaultKind, bool, bool], str] = {
-    (FaultKind.WITHHELD, False, False): "remove the pattern, or change {field}.",
-    (FaultKind.MISSING_REPO, False, False): _CREATE_REPO,
-    (FaultKind.MISSING_REPO, False, True): _CREATE_REPO,
-    (FaultKind.MISSING_REPO, True, False): _CREATE_TEMPLATE,
-    (FaultKind.MISSING_REPO, True, True): _CREATE_TEMPLATE,
-    (FaultKind.MISSING_PATH, False, False): (
-        "push the materials to that folder in {course_org}/{repo}, or correct the path "
-        "on the line above."
-    ),
-    (FaultKind.MISSING_PATH, False, True): (
-        "push the materials to that folder now - the next 15-minute tick releases them. "
-        "Nothing else is needed."
-    ),
-}
-
-
-@dataclass
-class SourceFault:
-    """One source in the plan that is not in the course org, and when it is needed.
-
-    `fires` is what makes it actionable: the same missing folder is a note in August and a
-    failure the day before the lecture. None = nothing pins it to a moment (an undated
-    `tbc` entry, or an assignment handed out by hand), so it can never escalate."""
-
-    where: str  # the YAML path, e.g. "releases.lecture-2"
-    what: str  # what is missing, e.g. "`cm/lectures/02_b` does not exist yet"
-    fires: datetime | None
-    # The key to go and edit - `course_source_path` or `course_source_repo`. Naming the
-    # field is what turns "something is wrong with lecture-2" into an instruction. No
-    # default: it is part of `key`, so a caller that forgot it would not fail, it would
-    # quietly give this fault someone else's identity in the digest's state.
-    field: str
-    # Which of the three things went wrong - see `FaultKind`. No default for the same
-    # reason: the remedy hangs off it, and a wrong guess reads as a real instruction.
-    kind: FaultKind
-    # The loudest this fault may ever get. A MISSING source climbs the whole ladder,
-    # because the copy will not ship and nobody meant that. A source a `.releaseignore`
-    # withholds is a decision faculty already made, so it caps at WARNING: it is listed,
-    # and it never earns anyone an email at 24h or a "this did not ship" once its moment
-    # has passed.
-    ceiling: Severity = Severity.MISSED
-    # The line of schedule.yml the entry is written on, as the parser saw it (see
-    # `_LineLoader`). Every surface turns it into `schedule.yml:36` and a deep link,
-    # because the entry name alone still leaves faculty scrolling a file they wrote in
-    # August.
-    lineno: int | None = None
-    # The source repo the entry names (`course-materials-f2026`). `what` spells it inside
-    # a `<org>/<repo>/<path>` phrase, which reads well and parses badly - the fault mail
-    # has to name `<course_org>/<repo>` as the place to go and stage the thing.
-    repo: str = ""
-    # The path inside that repo, where the entry names one (an assignment names only the
-    # repo). Carried rather than re-read out of `what`, so a link into the repo is built
-    # from the value the check used and not from parsing a sentence.
-    path: str = ""
-
-    @property
-    def is_assignment(self) -> bool:
-        """Whether the entry hands out an assignment template rather than deploying a
-        folder. Asked once here: two surfaces sniffed `where` for the prefix themselves,
-        which is a parse of a display string in the middle of deciding what to tell
-        somebody."""
-        return self.where.startswith("assignments.")
-
-    @property
-    def key(self) -> str:
-        """A stable identity for this fault across runs, so a digest can tell a fault that
-        ESCALATED from one that is merely still there. Deliberately excludes `fires`: an
-        entry whose date faculty push back is the same fault, at a new distance.
-
-        The PATH is part of it, because two deploys under one entry are two faults: keyed
-        on the entry alone the second inherited the first's recorded rung, so neither
-        could appear, escalate or clear on its own."""
-        if not self.path:
-            return f"{self.where}.{self.field}"
-        return f"{self.where}[{self.path}].{self.field}"
-
-    @property
-    def at(self) -> str:
-        """`schedule.yml:36`, or a bare `schedule.yml` when the line is not known.
-
-        The citation every surface shows - the mail, the digest body and comment, the CLI
-        report, the fix sentence - so all of them cite the file the same way."""
-        return f"{SCHEDULE_PATH}:{self.lineno}" if self.lineno else SCHEDULE_PATH
-
-    def cite(self, cohort_org: str = "") -> str:
-        """`at` for a MARKDOWN surface: a link to the exact line where the line and the
-        cohort are both known, plain code where either is not.
-
-        Every markdown surface - the digest body, its transition comment, the commit
-        comment on the push - cites the file through this, so the fix is one click from
-        wherever somebody first hears about it rather than a scroll through a file they
-        wrote in August."""
-        url = deep_link(cohort_org, self)
-        return f"[`{self.at}`]({url})" if url else f"`{self.at}`"
-
-    @property
-    def due(self) -> str:
-        """The moment this fault bites, zone and all - see `zone_name`."""
-        if self.fires is None:
-            return "no date (tbc)"
-        return f"{self.fires:%a %d %b %Y, %H:%M} {zone_name(self.fires)}"
-
-    @property
-    def due_short(self) -> str:
-        """`due` without the year - the subject-line form, where every character is paid
-        for by the sender's name beside it."""
-        if self.fires is None:
-            return "no date (tbc)"
-        return (
-            f"{self.fires:%a} {self.fires.day} {self.fires:%b} "
-            f"{self.fires:%H:%M} {zone_name(self.fires)}"
-        )
-
-    @property
-    def moment(self) -> str:
-        """What the date IS: a release ships, an assignment is handed out."""
-        return "handout" if self.is_assignment else "release"
-
-    def severity(self, now: datetime) -> Severity:
-        """How loud this should be at `now` - see the SOURCE_*_WINDOW constants.
-
-        A fault whose moment has already PASSED is MISSED and stays there: the copy did
-        not ship, and going quiet once the lecture is over is the one thing that must not
-        happen. The rungs decide who is TOLD (source_digest, and the mail beside it); none
-        of them touches an exit code, because a source nobody has written yet is a content
-        fault and the red X belongs to the run itself."""
-        if self.fires is None:
-            return Severity.ADVISORY
-        left = self.fires - now
-        if left <= timedelta(0):
-            rung = Severity.MISSED
-        elif left <= SOURCE_CRITICAL_WINDOW:
-            rung = Severity.CRITICAL
-        elif left <= SOURCE_URGENT_WINDOW:
-            rung = Severity.URGENT
-        elif left <= SOURCE_WARN_WINDOW:
-            rung = Severity.WARNING
-        else:
-            rung = Severity.ADVISORY
-        return min(rung, self.ceiling)
-
-    def fix(self, course_org: str, rung: Severity) -> str:
-        """What would put this right, in one sentence, lower-case and unpunctuated at the
-        front so a caller can prefix it with `fix:`.
-
-        Here rather than in the notifier because BOTH channels say it - the digest issue
-        body and the mail - and a fault whose issue and whose email disagree about the
-        remedy is worse than either on its own."""
-        fired = rung is Severity.MISSED
-        # Falls back to the not-yet-fired sentence for a (kind, entry, rung) triple the
-        # table does not list. Unreachable today; a KeyError inside a release cron is not
-        # the way to find out that stopped being true.
-        template = (
-            _FIX.get((self.kind, self.is_assignment, fired))
-            or _FIX[self.kind, False, False]
-        )
-        return template.format(
-            at=self.at, course_org=course_org, repo=self.repo, field=self.field
-        )
-
-    def line(self, cite: str | None = None) -> str:
-        """The one-line form, everywhere: the entry, the field, the line, what is wrong and
-        when it bites.
-
-        It names the FIELD as well as the entry, because "something is wrong with
-        lecture-2" is not an instruction. Dash-separated, in this order, because the
-        commit-time validator lists these lines verbatim (see `source_comment`).
-
-        `cite` replaces the plain `schedule.yml:36` with the caller's own rendering of it -
-        the markdown deep link, on the surfaces that are markdown. The rest of the line is
-        the same line, because a reader comparing the commit comment with the run summary
-        is reading about the same fault."""
-        at = f" - {cite or self.at}" if self.lineno else ""
-        when = f"fires {self.due}" if self.fires else self.due
-        return f"{self.where} -> {self.field}{at} - {self.what} - {when}"
 
 
 class _Wanted(NamedTuple):
@@ -1597,6 +1353,7 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                     w.fires,
                     field="course_source_repo",
                     kind=FaultKind.MISSING_REPO,
+                    file=SCHEDULE_PATH,
                     lineno=w.lineno("course_source_repo"),
                     repo=repo,
                     path=w.path,
@@ -1642,6 +1399,7 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                         w.fires,
                         field="course_source_path",
                         kind=FaultKind.WITHHELD,
+                        file=SCHEDULE_PATH,
                         ceiling=Severity.WARNING,
                         lineno=w.lineno("course_source_path"),
                         repo=repo,
@@ -1658,6 +1416,7 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                     w.fires,
                     field="course_source_path",
                     kind=FaultKind.MISSING_PATH,
+                    file=SCHEDULE_PATH,
                     lineno=w.lineno("course_source_path"),
                     repo=repo,
                     path=clean,
@@ -1670,14 +1429,10 @@ def deep_link(cohort_org: str, fault: SourceFault) -> str | None:
     """The GitHub URL of the exact line to edit, or None when the line - or the cohort it
     is in - is not known.
 
-    `main` is hard-coded because that is the only branch anything reads schedule.yml from,
-    the cohort's own workflows included."""
-    if not cohort_org or not fault.lineno:
-        return None
-    return (
-        f"https://github.com/{cohort_org}/{CONFIG_REPO}/blob/main/{SCHEDULE_PATH}"
-        f"#L{fault.lineno}"
-    )
+    The fault knows its own file and the repo it lives in, so it builds the URL
+    (`ConfigFault.link`) and every config file gets the same one. Kept as a function
+    because the whole source half calls it that way."""
+    return fault.link(cohort_org)
 
 
 def source_report(faults: list[SourceFault], now: datetime, course_org: str) -> str:

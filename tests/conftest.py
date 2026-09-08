@@ -281,6 +281,7 @@ def source_fault(
         where,
         what,
         fires,
+        file=schedule.SCHEDULE_PATH,
         field=field,
         kind=kind,
         ceiling=ceiling,

@@ -41,22 +41,19 @@ from typing import NamedTuple
 
 from .central import CENTRAL, CENTRAL_REF
 from .discovery import central_ref_for
-from .issues import close_issues_titled, find_issues, issue_url, upsert_issue
-from .log import log_err, log_ok, log_step
-from .schedule import (
-    CONFIG_REPO,
+from .faults import (
     NOTIFY_FROM,
-    SCHEDULE_PATH,
     SOURCE_CRITICAL_WINDOW,
     SOURCE_URGENT_WINDOW,
     SOURCE_WARN_WINDOW,
     FaultKind,
     Severity,
-    SourceFault,
     hours,
-    worst_severity,
     zone_name,
 )
+from .issues import close_issues_titled, find_issues, issue_url, upsert_issue
+from .log import log_err, log_ok, log_step
+from .schedule import CONFIG_REPO, SCHEDULE_PATH, SourceFault, worst_severity
 
 # Stable, because the workflow finds its own issue by searching this exact title - a title
 # that varied with the faults would never match, and every run would open a new issue.
