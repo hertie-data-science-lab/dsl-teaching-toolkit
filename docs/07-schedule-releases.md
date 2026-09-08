@@ -160,7 +160,7 @@ Keyed by a slug you choose. As with a `deploy:`, `course_source_repo` names wher
 
 Unlike a `releases:` label, **an assignment's slug is shown to students**: it names their repo (`assignment-1-<handle>`), and the site prints it as the row's heading - `assignment-3-project` reads "Assignment 3 Project". So keep it short, and put the assignment's name in `title:` beside it. 
 
-> `teams.csv` rows and the grades/snapshot files key on the cohort name too - `cohort_dest_repo` if set, else the slug.
+> `teams.csv` rows and the grading-sheet/snapshot files key on the cohort name too - `cohort_dest_repo` if set, else the slug.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|

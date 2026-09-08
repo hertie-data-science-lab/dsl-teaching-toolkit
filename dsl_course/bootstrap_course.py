@@ -74,9 +74,9 @@ def _profile_topics(is_cohort: bool, course_code: str = "") -> list[str]:
 # every re-run. The guard has to be per FILE, and it depends on who owns the file:
 #
 #   USER-owned - content faculty edit, or that the running system writes live state into.
-#   In a cohort: classroom-config/{students.csv, teams.csv, schedule.yml, people.yml}
-#   and welcome/README.md (the student landing page). On a
-#   course org: .github/dsl-course.yml (the faculty/course_admins SSOT). Seed these ONLY
+#   In a cohort: classroom-config/{students.csv, teams.csv, schedule.yml, people.yml} and
+#   welcome/README.md (the student landing page). On a course org: .github/dsl-course.yml
+#   (the faculty/course_admins SSOT). Seed these ONLY
 #   when absent (gh_contents.seed_if_absent) - rewriting them on a re-run destroys live enrolment
 #   state (roster rows, enrol codes, onboarded handles) and the faculty's schedule.
 #

@@ -6,9 +6,9 @@ bootstrap_course imports seed, so seed cannot import bootstrap_course back - thi
 is what both sides may import.
 
 Everything this module writes is SYSTEM-owned, and that is the whole rule for what may
-live here: a cohort's own config (students.csv, teams.csv, schedule.yml,
-people.yml) is seeded create-if-missing by bootstrap_course and must never be refreshed
-from a template, or a nightly run would clobber a live roster.
+live here: a cohort's own config (students.csv, teams.csv, schedule.yml, people.yml) is
+seeded create-if-missing by bootstrap_course and must never be refreshed from a template,
+or a nightly run would clobber a live roster.
 """
 
 from __future__ import annotations
@@ -228,7 +228,8 @@ def refresh_classroom_samples(org: str) -> int:
 #
 # HARD INVARIANT: nothing the cohort edits may join this table. students.csv, teams.csv,
 # schedule.yml and people.yml hold the cohort's LIVE state (enrol codes, onboarded
-# handles); they are seeded create-if-missing by bootstrap_course and stay that way. Adding one here would have the nightly refresh overwrite it every night.
+# handles); they are seeded create-if-missing by bootstrap_course and stay that way.
+# Adding one here would have the nightly refresh overwrite it every night.
 # tests/test_bootstrap_seeding.py pins this set exactly, so an addition fails loud.
 CLASSROOM_SYSTEM_FILES = (
     ("README.md", "classroom-config/README.md"),
