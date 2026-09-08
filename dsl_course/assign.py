@@ -902,13 +902,21 @@ def provision_all(
     # made it miss the real entry and append a bogus duplicate block (dropping its due date).
 
     schedule.record_handout(cohort_org, key)
-    # ...and refresh the Join-team form's mirror while this run holds the schedule and the
-    # spec. A handout is the moment the two can most recently have moved, and the form is
-    # read by students who cannot see either file. Not counted into `failed`: the repos
-    # are out, and Sync membership rewrites it every morning.
-    grades.write_team_lock(cohort_org=cohort_org, course_org=master_org, sched=sched)
 
     changed = any(k != "skipped" for k in results)
+
+    # ...and refresh the Join-team form's mirror while this run holds the schedule and the
+    # spec. A REAL handout is the moment the two can most recently have moved, and the form
+    # is read by students who cannot see either file. Gated on `changed` for the same reason
+    # the sheet and the site sync below are: `due_releases` is cumulative, so the scheduler
+    # re-fires every handed-out assignment on every tick, and a pass that skipped every repo
+    # handed nothing out - it would only pay one contents read per assignment per quarter of
+    # an hour to write a file `put_file` then finds unchanged. Not counted into `failed`:
+    # the repos are out, and Sync membership rewrites it on every schedule.yml push anyway.
+    if changed:
+        grades.write_team_lock(
+            cohort_org=cohort_org, course_org=master_org, sched=sched
+        )
 
     # The grading sheet arrives WITH the handout: every row present, every human field
     # blank, and a header saying which fields the toolkit fills and when. A sheet that only

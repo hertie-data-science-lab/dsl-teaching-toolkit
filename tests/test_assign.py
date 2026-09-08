@@ -1829,3 +1829,31 @@ def test_the_handout_refreshes_the_team_formation_lock(tmp_path, monkeypatch):
         "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
     )
     assert locked == [("COURSE", "COHORT", sched)]
+
+
+def test_a_tick_that_handed_nothing_out_does_not_rewrite_the_lock(
+    tmp_path, monkeypatch
+):
+    # `due_releases` is cumulative, so the quarter-hourly scheduler re-fires every
+    # handed-out assignment for the rest of the term. A pass whose every repo was skipped
+    # handed nothing out, and nothing it mirrors can have moved with it - writing anyway
+    # costs one contents read per assignment per tick to find the file unchanged.
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: Schedule())
+    locked: list[tuple] = []
+    monkeypatch.setattr(
+        assign.grades,
+        "write_team_lock",
+        lambda **kw: locked.append(kw) or True,
+    )
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: "skipped")
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+
+    assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
+    )
+    assert locked == []
