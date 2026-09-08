@@ -31,6 +31,7 @@ from .course import (
     ASSIGNMENT_TYPES,
     FORMATS,
     MATERIALS_REPO_PREFIX,
+    SANDBOX_USER,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     term_tag,
@@ -214,7 +215,25 @@ _TIMEOUT_GRADING = 120
 # gate via _run_preamble by every workflow. Ends after `pip install`, so a renderer appends
 # its own `      - name: ...` step directly. The timeout is the ONE thing that varies, so
 # it is a parameter rather than a second copy of the preamble.
-def _ungated_preamble(minutes: int = _TIMEOUT_DEFAULT) -> str:
+# The account graded code runs as, created once per job by the jobs that grade. Its reason
+# is in `course.SANDBOX_USER`: a uid is the boundary, and a graded subprocess sharing this
+# job's uid can read the org-owner PAT out of `/proc/<pid>/environ` however carefully its
+# own environment was stripped. `collect` execs every graded command through `sudo -n -u`
+# this account and fails closed without it, so a job that grades and does not run this step
+# grades nothing at all - which is why it belongs to the preamble rather than to a renderer.
+#
+# No `env:`: it holds no secret, and it must not. `--system` and a nologin shell because
+# nothing ever signs in as it; `id -u` first because a re-run on a warm self-hosted runner
+# finds the account already there and `useradd` would fail the job.
+_SANDBOX_STEP = f"""      - name: Create the account graded code runs as
+        run: |
+          id -u {SANDBOX_USER} >/dev/null 2>&1 \\
+            || sudo useradd --system --no-create-home --shell /usr/sbin/nologin {SANDBOX_USER}
+          sudo -n -u {SANDBOX_USER} true
+"""
+
+
+def _ungated_preamble(minutes: int = _TIMEOUT_DEFAULT, *, sandbox: bool = False) -> str:
     return f"""    runs-on: ubuntu-latest
     timeout-minutes: {minutes}
     steps:
@@ -232,11 +251,11 @@ def _ungated_preamble(minutes: int = _TIMEOUT_DEFAULT) -> str:
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-"""
+{_SANDBOX_STEP if sandbox else ""}"""
 
 
-def _run_preamble(minutes: int = _TIMEOUT_DEFAULT) -> str:
-    return f"    needs: check-team\n{_ungated_preamble(minutes)}"
+def _run_preamble(minutes: int = _TIMEOUT_DEFAULT, *, sandbox: bool = False) -> str:
+    return f"    needs: check-team\n{_ungated_preamble(minutes, sandbox=sandbox)}"
 
 
 # Mail secrets, wired into the env of the workflows that send email (enrolment codes and
@@ -824,7 +843,7 @@ on:
 {_concurrency("collect-submissions")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   collect-submissions:
-{_run_preamble(_TIMEOUT_GRADING)}      - name: Collect submissions
+{_run_preamble(_TIMEOUT_GRADING, sandbox=True)}      - name: Collect submissions
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           MASTER_ORG: ${{{{ github.repository_owner }}}}
@@ -1207,7 +1226,7 @@ on:
       fail-fast: false
       matrix:
         cohort: ${{{{ fromJSON(needs.release.outputs.cohorts) }}}}
-{_AUTOGRADE_CONCURRENCY}{_ungated_preamble(_TIMEOUT_GRADING)}      # THE LAST STEP OF THIS JOB, and it has to stay that way. It executes the students'
+{_AUTOGRADE_CONCURRENCY}{_ungated_preamble(_TIMEOUT_GRADING, sandbox=True)}      # THE LAST STEP OF THIS JOB, and it has to stay that way. It executes the students'
       # own notebooks, `run.sh` and hidden tests, and the runner sources whatever a step
       # leaves in $GITHUB_ENV / $GITHUB_PATH before it starts the next one - so a step
       # after this one holding secrets.DSL_BOT_TOKEN would run student code as the org

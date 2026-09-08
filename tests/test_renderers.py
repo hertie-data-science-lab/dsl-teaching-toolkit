@@ -1490,6 +1490,17 @@ def test_student_code_is_the_last_thing_its_runner_ever_does(name):
                 f"{name}.{job_name}: {steps[i + 1].get('name')!r} runs on the runner that "
                 f"just executed student code"
             )
+            # ...and the job creates the account that code runs AS. The step ordering above
+            # keeps the token off the runner AFTER the fact; the uid keeps it out of reach
+            # during, because /proc/<pid>/environ is readable by any process of the same
+            # user. `collect` fails closed without the account, so a grading job that skips
+            # this step grades nothing - silently, but for the skip record.
+            made = [j for j, s in enumerate(steps) if "useradd" in s.get("run", "")]
+            assert made and made[0] < i, f"{name}.{job_name}: no sandbox account"
+            assert workflows_render.SANDBOX_USER in steps[made[0]]["run"]
+            # It carries no secret of its own, and it must not: it runs before the step
+            # that hands the runner over to the students' code.
+            assert not steps[made[0]].get("env")
     # ...and the sweep is looking at something. `collect` is reached both directly (the
     # Collect submissions button) and through the scheduler's `--autograde-only`.
     if name in ("collect_submissions", "scheduler"):
