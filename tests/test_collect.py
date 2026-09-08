@@ -1139,6 +1139,70 @@ def test_an_unwritten_no_targets_marker_goes_red(monkeypatch):
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
 
 
+def _two_entries_on_one_template():
+    """Two assignments handing out from one template, each naming its own repos."""
+    from dsl_course.schedule import AssignmentEntry
+
+    def entry(dest):
+        return AssignmentEntry(
+            course_source_repo="assignment-2-f2026",
+            cohort_dest_repo=dest,
+            due_datetime=datetime(2026, 11, 15, tzinfo=ZoneInfo("Europe/Berlin")),
+        )
+
+    return Schedule(
+        assignments={
+            "assignment-2": entry("assignment-2"),
+            "assignment-2-resit": entry("assignment-2-resit"),
+        }
+    )
+
+
+def test_collect_refuses_to_choose_between_two_entries_on_one_template(
+    monkeypatch, capsys
+):
+    # The freeze is write-once. Grading the resit's repos under assignment-2's key would
+    # pin the wrong snapshot permanently, and no later run could take it back.
+    _stub_collect(monkeypatch, None)
+    monkeypatch.setattr(
+        collect.schedule, "load", lambda org: _two_entries_on_one_template()
+    )
+    assert collect.collect("Course", "assignment-2-f2026", "Cohort") == 1
+    err = capsys.readouterr().err
+    assert "assignment-2-resit" in err and "say which" in err
+
+
+def test_collect_told_which_entry_keys_everything_on_that_entry(monkeypatch):
+    _stub_collect(monkeypatch, None)
+    monkeypatch.setattr(
+        collect.schedule, "load", lambda org: _two_entries_on_one_template()
+    )
+    asked: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group=None, teams_key=None: (
+            asked.append((slug, teams_key)) or []
+        ),
+    )
+    monkeypatch.setattr(collect, "mark_not_autograded", lambda *a, **k: True)
+    collect.collect("Course", "assignment-2-f2026", "Cohort", slug="assignment-2-resit")
+    assert asked == [("assignment-2-resit", "assignment-2-resit")]
+
+
+def test_the_sheet_refresh_refuses_the_same_ambiguity(monkeypatch, capsys):
+    # The button starts from the template too, so it needs the same answer - and a sheet
+    # refreshed under the wrong key rewrites the other assignment's marks.
+    _stub_solution_clone(monkeypatch)
+    monkeypatch.setattr(
+        collect.schedule, "load", lambda org: _two_entries_on_one_template()
+    )
+    assert (
+        collect.refresh_assignment_sheet("Course", "assignment-2-f2026", "Cohort") == 1
+    )
+    assert "say which" in capsys.readouterr().err
+
+
 def test_collect_looks_teams_up_by_the_schedule_key_not_the_cohort_name(monkeypatch):
     # `cohort_dest_repo` makes the two differ. Repos are named after the cohort NAME;
     # teams.csv is keyed on the SCHEDULE KEY (the Join-team form writes what schedule.yml

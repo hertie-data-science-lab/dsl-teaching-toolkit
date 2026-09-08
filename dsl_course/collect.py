@@ -1764,6 +1764,7 @@ def refresh_assignment_sheet(
     *,
     group: bool = False,
     dry_run: bool = False,
+    slug: str = "",
 ) -> int:
     """Bring one assignment's grading sheet up to date, without freezing anything.
 
@@ -1777,7 +1778,12 @@ def refresh_assignment_sheet(
     recorded, and one pressed over a cutoff that passed while nothing ran does the sealing
     the tick missed."""
     sched = schedule.load(cohort_org)
-    found = schedule.entry_for_repo(sched, template)
+    # `slug` arrives as the SCHEDULE KEY (which of two entries handing out from this one
+    # template) and is consumed here; from the next line on it means the cohort-side name.
+    found = schedule.pick_entry(sched, template, slug)
+    if isinstance(found, str):
+        log_err(found)
+        return 1
     key = found[0] if found else assignment_slug(template)
     slug = schedule.cohort_name(*found) if found else key
     gspec = load_grading_spec(master_org, template)
@@ -1812,13 +1818,18 @@ def collect(
     group: bool = False,
     dry_run: bool = False,
     scheduled: bool = False,
+    slug: str = "",
 ) -> int:
     """Autograde every submission for `template` as of `deadline`, archiving result.json and
     recording the machine score into the cohort's grading sheet (`info.autograde`).
     Idempotent.
 
     `scheduled` marks the hourly cron: an assignment with no submission targets is then a
-    "not yet", never the permanent not-machine-graded record a button press writes."""
+    "not yet", never the permanent not-machine-graded record a button press writes.
+
+    `slug` names WHICH schedule entry this is, when two of them hand out from this one
+    template. Left empty with two in the plan, this refuses: they keep separate snapshots,
+    separate grading sheets and separate marks, and the freeze is write-once."""
     if master_org == cohort_org:
         log_err("master-org and cohort-org must differ.")
         return 1
@@ -1828,7 +1839,12 @@ def collect(
     # the scheduler's fire-once marker uses the schedule key, so the two must agree or a
     # passed deadline re-grades every tick.
     sched = schedule.load(cohort_org)
-    found = schedule.entry_for_repo(sched, template)
+    # As in `provision_all`: the parameter is the SCHEDULE KEY, consumed here, and `slug`
+    # then means the cohort-side name for the rest of the run.
+    found = schedule.pick_entry(sched, template, slug)
+    if isinstance(found, str):
+        log_err(found)
+        return 1
     key = found[0] if found else assignment_slug(template)
     slug = schedule.cohort_name(*found) if found else key
     # The assignment's definition, read from the API (memoised) rather than from the clone
@@ -2165,6 +2181,11 @@ def main() -> int:
         action="store_true",
         help="Refresh the grading sheet now and stop - no snapshot, no grading, no freeze",
     )
+    parser.add_argument(
+        "--slug",
+        default="",
+        help="Which assignment in the cohort's schedule.yml this is, when two of them hand out from the same template (each with its own cohort_dest_repo). Leave empty otherwise.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     if args.refresh_only:
@@ -2174,6 +2195,7 @@ def main() -> int:
             args.cohort_org,
             group=args.group,
             dry_run=args.dry_run,
+            slug=args.slug,
         )
     return collect(
         args.master_org,
@@ -2182,6 +2204,7 @@ def main() -> int:
         args.deadline,
         group=args.group,
         dry_run=args.dry_run,
+        slug=args.slug,
     )
 
 

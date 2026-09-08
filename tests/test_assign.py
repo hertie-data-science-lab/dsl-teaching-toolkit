@@ -1101,6 +1101,64 @@ def _scheduled(monkeypatch, key: str, dest: str, source: str):
     )
 
 
+def _two_on_one_template(monkeypatch):
+    """A plan where two entries hand out from one template, each naming its own repos."""
+    from datetime import datetime, timezone
+
+    from dsl_course.schedule import AssignmentEntry
+
+    def entry(dest):
+        return AssignmentEntry(
+            due_datetime=datetime(2026, 11, 1, tzinfo=timezone.utc),
+            course_source_repo="assignment-2-f2026",
+            cohort_dest_repo=dest,
+        )
+
+    monkeypatch.setattr(
+        "dsl_course.schedule.load",
+        lambda org: Schedule(
+            assignments={
+                "assignment-2": entry("assignment-2"),
+                "assignment-2-resit": entry("assignment-2-resit"),
+            }
+        ),
+    )
+
+
+def test_a_handout_refuses_to_choose_between_two_entries_on_one_template(
+    tmp_path, capsys, monkeypatch
+):
+    # Both entries are real assignments with their own repos and their own marks. Picking
+    # the first would hand the resit's brief to the whole cohort under the wrong name, and
+    # a handout is not a thing you can take back.
+    _two_on_one_template(monkeypatch)
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    rc, changed = assign.provision_all(
+        "COURSE", "assignment-2-f2026", "COHORT", roster_path=path, dry_run=True
+    )
+    assert (rc, changed) == (1, False)
+    err = capsys.readouterr().err
+    assert "assignment-2-resit" in err and "say which" in err
+
+
+def test_a_handout_told_which_entry_names_that_entrys_repos(
+    tmp_path, capsys, monkeypatch
+):
+    _two_on_one_template(monkeypatch)
+    monkeypatch.setenv("DSL_VERBOSE", "1")
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    rc, _changed = assign.provision_all(
+        "COURSE",
+        "assignment-2-f2026",
+        "COHORT",
+        roster_path=path,
+        dry_run=True,
+        slug="assignment-2-resit",
+    )
+    assert rc == 0
+    assert "assignment-2-resit-ada-l" in capsys.readouterr().out
+
+
 def test_group_handout_looks_teams_up_by_key_and_names_repos_by_dest(
     tmp_path, capsys, monkeypatch
 ):

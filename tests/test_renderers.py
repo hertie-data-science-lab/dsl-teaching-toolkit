@@ -284,10 +284,32 @@ def test_collect_submissions_refreshes_the_sheet_and_freezes_nothing():
         ["Cohort-f2026"], ["assignment-1-f2026"]
     )
     inp = workflow_inputs(rendered)
-    assert set(inp) == {"cohort_org", "course_source_repo", "dry_run"}
+    assert set(inp) == {"cohort_org", "course_source_repo", "slug", "dry_run"}
     assert inp["dry_run"]["default"] is False
     assert "dsl_course.collect" in rendered and "--refresh-only" in rendered
     assert "--deadline" not in rendered
+
+
+@pytest.mark.parametrize(
+    "rendered",
+    [
+        workflows_render.render_provision(["Cohort-f2026"], ["assignment-1-f2026"]),
+        workflows_render.render_collect_submissions(
+            ["Cohort-f2026"], ["assignment-1-f2026"]
+        ),
+    ],
+    ids=["release-assignment", "collect-submissions"],
+)
+def test_the_two_per_assignment_buttons_can_name_which_schedule_entry(rendered):
+    # Two schedule entries may hand out from one template when each names its own
+    # `cohort_dest_repo`. Both buttons start from the TEMPLATE, so both need a way to say
+    # which of the two - and neither may guess: they make different repos and keep
+    # different marks. Empty (the normal case) passes no flag at all.
+    inp = workflow_inputs(rendered)
+    assert inp["slug"]["required"] is False and inp["slug"]["default"] == ""
+    assert len(inp) <= GITHUB_MAX_DISPATCH_INPUTS
+    assert "SLUG: ${{ inputs.slug }}" in rendered
+    assert '[ -n "$SLUG" ] && args+=(--slug "$SLUG")' in rendered
 
 
 def test_sync_membership_is_a_consolidated_reconcile():

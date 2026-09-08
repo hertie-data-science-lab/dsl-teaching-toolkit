@@ -2072,6 +2072,84 @@ def test_two_assignments_cannot_hand_out_the_same_repo():
     assert "already used by assignments.assignment-2" in drop
 
 
+def test_two_assignments_may_share_a_template_when_both_name_their_own_repos():
+    # A resit off the same brief, or one template handed out to two halves of a cohort.
+    # Legitimate only because `cohort_dest_repo` is what every cohort-side artefact keys
+    # on, so the two never touch each other's repos, snapshots, sheets or marks.
+    meta = {
+        "assignments": {
+            "assignment-2": {
+                "course_source_repo": "a2-f2026",
+                "cohort_dest_repo": "assignment-2",
+                "due_datetime": "2026-10-13",
+            },
+            "assignment-2-resit": {
+                "course_source_repo": "a2-f2026",
+                "cohort_dest_repo": "assignment-2-resit",
+                "due_datetime": "2026-11-10",
+            },
+        }
+    }
+    sched = parse(meta)
+    assert set(sched.assignments) == {"assignment-2", "assignment-2-resit"}
+    assert sched.dropped == []
+    assert [slug for slug, _ in schedule.entries_for_repo(sched, "a2-f2026")] == [
+        "assignment-2",
+        "assignment-2-resit",
+    ]
+
+
+def test_one_entry_leaving_the_cohort_repo_to_default_re_breaks_the_pair():
+    # All-or-nothing: with one of them defaulting to its slug, the two are ambiguous
+    # again for every reader that starts from the template.
+    meta = {
+        "assignments": {
+            "assignment-2": {
+                "course_source_repo": "a2-f2026",
+                "due_datetime": "2026-10-13",
+            },
+            "assignment-2-resit": {
+                "course_source_repo": "a2-f2026",
+                "cohort_dest_repo": "assignment-2-resit",
+                "due_datetime": "2026-11-10",
+            },
+        }
+    }
+    sched = parse(meta)
+    assert set(sched.assignments) == {"assignment-2"}
+    (drop,) = [d for d in sched.dropped if "assignments.assignment-2-resit" in d]
+    assert "EVERY one of them sets its own `cohort_dest_repo`" in drop
+
+
+def test_pick_entry_refuses_to_choose_between_two_entries_on_one_template():
+    # The refusal that makes the relaxation safe: a caller acting on ONE of them has to
+    # say which, or nothing happens.
+    meta = {
+        "assignments": {
+            "assignment-2": {
+                "course_source_repo": "a2-f2026",
+                "cohort_dest_repo": "assignment-2",
+                "due_datetime": "2026-10-13",
+            },
+            "assignment-2-resit": {
+                "course_source_repo": "a2-f2026",
+                "cohort_dest_repo": "assignment-2-resit",
+                "due_datetime": "2026-11-10",
+            },
+        }
+    }
+    sched = parse(meta)
+    refusal = schedule.pick_entry(sched, "a2-f2026")
+    assert isinstance(refusal, str)
+    assert "assignment-2" in refusal and "assignment-2-resit" in refusal
+    chosen = schedule.pick_entry(sched, "a2-f2026", "assignment-2-resit")
+    assert chosen[0] == "assignment-2-resit"
+    # A slug that names no entry on this template is a refusal too, not a silent fallback
+    assert isinstance(schedule.pick_entry(sched, "a2-f2026", "nope"), str)
+    # ... and the unambiguous cases are unchanged
+    assert schedule.pick_entry(sched, "nothing-cites-this") is None
+
+
 def test_two_assignments_cannot_resolve_to_one_cohort_name():
     # `cohort_dest_repo`, else the slug, names every cohort-side artefact. Two entries
     # landing on one name is the same collision as a duplicate source, one hop later:

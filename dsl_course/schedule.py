@@ -225,6 +225,12 @@ class Release:
     when: datetime | None
     deploy: list[Deploy] = field(default_factory=list)
     assignment: str | None = None
+    # The SCHEDULE KEY this handout belongs to, on a synthesised assignment release.
+    # `assignment` names the course-org TEMPLATE, and two entries may hand out from one
+    # template (each with its own `cohort_dest_repo`) - so the template alone no longer
+    # says which assignment is firing, and the key travels with the release rather than
+    # being looked up again at the far end.
+    assignment_slug: str = ""
     # True on a release synthesised from `assignments.<slug>.solution_datetime`: the same
     # provisioning call, asked additionally to push the template's `solution/` into every
     # repo it already made. Never set from the YAML - the scheduler owns it.
@@ -706,6 +712,28 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Release
     return out
 
 
+def _shared_sources(mapping: dict) -> set[str]:
+    """The `course_source_repo`s more than one assignment may legitimately hand out from.
+
+    Two entries on one template is normally a copy-paste, and nothing downstream can tell
+    them apart. It IS legitimate when both say, explicitly, what their cohort-side repos
+    are called - a resit off the same brief, or one template handed out to two halves of a
+    cohort - because `cohort_dest_repo` is what every artefact keys on, and two explicit
+    ones cannot collide (`_parse_assignments` refuses that separately). One entry leaving
+    it to default is enough to make the pair ambiguous again, so the permission is
+    all-or-nothing across the citing entries."""
+    citing: dict[str, list[str]] = {}
+    for entry in mapping.values():
+        if not isinstance(entry, dict):
+            continue
+        source = str(entry.get("course_source_repo") or "").strip()
+        if source:
+            citing.setdefault(source, []).append(
+                str(entry.get("cohort_dest_repo") or "").strip()
+            )
+    return {src for src, dests in citing.items() if len(dests) > 1 and all(dests)}
+
+
 def _parse_assignments(
     raw: object, tz: ZoneInfo, drops: list[str]
 ) -> dict[str, AssignmentEntry]:
@@ -726,6 +754,7 @@ def _parse_assignments(
         return out
     sources: dict[str, str] = {}  # course_source_repo -> the slug that claimed it
     names: dict[str, str] = {}  # cohort-side name -> the slug that claimed it
+    shared = _shared_sources(mapping)  # sources every citing entry names a dest for
     for slug, entry in mapping.items():
         where = f"assignments.{slug}"
         if not isinstance(entry, dict):
@@ -742,7 +771,7 @@ def _parse_assignments(
         if not source_repo:
             _drop(drops, where, "no `course_source_repo`", cost)
             continue
-        if source_repo in sources:
+        if source_repo in sources and source_repo not in shared:
             # A copy-paste (Maths f2026 had assignments 3 and 4 both citing assignment-2's
             # repo). Nothing downstream can tell the two apart: the handout would "skip"
             # the other assignment's existing repos and hand out nothing, then the
@@ -751,8 +780,9 @@ def _parse_assignments(
                 drops,
                 where,
                 f"`course_source_repo: {source_repo}` is already used by "
-                f"assignments.{sources[source_repo]} - two assignments cannot hand out "
-                f"the same repo (a copy-paste?)",
+                f"assignments.{sources[source_repo]} - two assignments may only hand out "
+                f"the same repo when EVERY one of them sets its own `cohort_dest_repo` "
+                f"(a copy-paste?)",
                 cost,
             )
             continue
@@ -981,18 +1011,63 @@ def cohort_name(slug: str, entry: AssignmentEntry) -> str:
     return entry.cohort_dest_repo or slug
 
 
+def entries_for_repo(sched: Schedule, repo: str) -> list[tuple[str, AssignmentEntry]]:
+    """Every `(slug, entry)` that hands out from `repo`, in the plan's own order.
+
+    Usually one. Two is legitimate when each names its own `cohort_dest_repo` (see
+    `_shared_sources`) - a resit off the same brief, one template split across two halves
+    of a cohort - and a caller that acts on ONE of them has to say which, because the two
+    make different repos and keep different grades. The callers that do (`provision_all`,
+    `collect`) refuse rather than pick."""
+    return [
+        (slug, entry)
+        for slug, entry in sched.assignments.items()
+        if entry.course_source_repo == repo
+    ]
+
+
 def entry_for_repo(sched: Schedule, repo: str) -> tuple[str, AssignmentEntry] | None:
-    """(slug, entry) for the assignment that hands out from `repo`, or None.
+    """The FIRST `(slug, entry)` handing out from `repo`, or None.
 
     Callers that start from a REPO name - the autograder, the website - must find its
     schedule entry by matching `course_source_repo`, never by deriving a slug from the
     repo name. The slug is now a free label, so `wk3-regression-f2026` may legitimately be
     keyed `regression`; deriving would silently miss it, and the symptoms are quiet ones
-    (no due date on the site, a group assignment provisioned per student)."""
-    for slug, entry in sched.assignments.items():
-        if entry.course_source_repo == repo:
-            return slug, entry
-    return None
+    (no due date on the site, a group assignment provisioned per student).
+
+    For a repo two entries cite, this answers with the first and says nothing about the
+    second: only use it where ANY of them will do. Anything that writes cohort-side state
+    goes through `entries_for_repo` and refuses the ambiguity."""
+    found = entries_for_repo(sched, repo)
+    return found[0] if found else None
+
+
+def pick_entry(
+    sched: Schedule, repo: str, slug: str = ""
+) -> tuple[str, AssignmentEntry] | None | str:
+    """`(slug, entry)` for the assignment `repo` hands out from, `None` when the plan does
+    not name it, or an ERROR MESSAGE (a `str`) when it names more than one and `slug` does
+    not say which.
+
+    The one place the ambiguity is resolved, so the handout and the collection cannot
+    disagree about which of two entries they are acting on. `slug` is the SCHEDULE KEY, the
+    same one `teams.csv` and the grading sheet are keyed on."""
+    found = entries_for_repo(sched, repo)
+    if slug:
+        chosen = [pair for pair in found if pair[0] == slug]
+        if chosen:
+            return chosen[0]
+        return (
+            f"`{slug}` is not an assignment in this cohort's schedule.yml that hands out "
+            f"from {repo} (it names {', '.join(s for s, _ in found) or 'none'})"
+        )
+    if len(found) > 1:
+        return (
+            f"{repo} is handed out by {len(found)} assignments in this cohort's "
+            f"schedule.yml ({', '.join(s for s, _ in found)}) - say which with `slug`, "
+            f"since they make different repos and keep different grades"
+        )
+    return found[0] if found else None
 
 
 def grading_datetime_at(sched: Schedule, slug: str) -> datetime | None:

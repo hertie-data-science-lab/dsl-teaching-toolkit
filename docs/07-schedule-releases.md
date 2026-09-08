@@ -198,6 +198,8 @@ assignments:
 
 A `course_source_repo:` naming a repo that does not exist is reported loudly and the assignment is skipped - it can only be a typo, and its one other symptom is an assignment that never hands out and never grades. An entry missing the field altogether is dropped, like one missing `due_datetime:`.
 
+**Two assignments off one template** - a resit off the same brief, or one template handed out to two halves of a cohort - are allowed, but only when **every** entry citing that template sets its own `cohort_dest_repo:`. That name is what the student repos, the teams.csv rows, the snapshot and the grading sheet all key on, so two explicit ones can never touch each other's work; one left to default makes the pair ambiguous and the second entry is dropped. **Release assignment** and **Collect submissions** both start from the template, so both gain an optional `slug` box for saying which of the two you mean - and both refuse rather than guess if you leave it empty.
+
 ## `events:` 
 
 Could be an exam, a drop-in clinic, a guest lecture, a revision session: anything students should see on the calendar that releases no files.

@@ -583,6 +583,11 @@ def main() -> int:
         "classroom-config/teams.csv); auto = whatever the template's "
         "grading_config.yml declares (default: individual).",
     )
+    parser.add_argument(
+        "--slug",
+        default="",
+        help="Which assignment in the cohort's schedule.yml this is, when two of them hand out from the same template (each with its own cohort_dest_repo). Leave empty otherwise.",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     kind = args.kind
@@ -597,6 +602,7 @@ def main() -> int:
             solution=args.solution,
             group={"auto": None, "individual": False, "group": True}[kind],
             dry_run=args.dry_run,
+            slug=args.slug,
         )
         return rc
     except RuntimeError as exc:
@@ -655,6 +661,7 @@ def provision_all(
     dry_run: bool = False,
     touch_existing: bool = True,
     scheduled: bool = False,
+    slug: str = "",
 ) -> tuple[int, bool]:
     """Freeze the cohort template, then provision a repo per unit (student, or team).
 
@@ -672,7 +679,12 @@ def provision_all(
     a template that doesn't declare it.
 
     `scheduled` marks the hourly cron: a group assignment with no teams yet is then a
-    green wait, not the error a button press gets."""
+    green wait, not the error a button press gets.
+
+    `slug` names WHICH schedule entry to hand out when two of them hand out from this one
+    template (each with its own `cohort_dest_repo`). Left empty with two in the plan, this
+    refuses rather than picking: the two make different repos for different students and
+    keep separate grades, and guessing is a whole cohort's work in the wrong place."""
     if master_org == cohort_org:
         log_err("master-org and cohort-org must differ.")
         return 1, False
@@ -710,7 +722,12 @@ def provision_all(
     # on the name then meant no teams found at all, or a team granted on the repo under a
     # slug that Sync membership reconciles a DIFFERENT team for.
     sched = schedule.load(cohort_org)
-    found = schedule.entry_for_repo(sched, template)
+    # The parameter is consumed HERE and nowhere else: from the next line on, `slug` means
+    # the cohort-side name, exactly as it does everywhere else in this file.
+    found = schedule.pick_entry(sched, template, slug)
+    if isinstance(found, str):
+        log_err(found)
+        return 1, False
     key = found[0] if found else assignment_slug(template)
     slug = schedule.cohort_name(*found) if found else key
     # The sheet's header and the Feedback issue's body, off the definition read above.

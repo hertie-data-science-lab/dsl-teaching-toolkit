@@ -204,6 +204,10 @@ def _execute_nondeploy(
             # Hourly: leave existing repos alone (the manual button still repairs access).
             touch_existing=False,
             scheduled=True,
+            # WHICH entry this release was synthesised from. Two may hand out from one
+            # template, and the tick knows which it is firing - so it says, rather than
+            # letting the far end pick the first and hand out the other one's repos.
+            slug=release.assignment_slug,
         )
         if failed != 0:
             errors += 1
@@ -326,7 +330,14 @@ def _autograde_passed_deadlines(
             log(f"    DRY-RUN  autograde {slug} via {template} (deadline {deadline})")
             continue
         log_step(f"  autograde {slug} via {template} (deadline {deadline})")
-        if collect(course_org, template, cohort_org, deadline, scheduled=True) != 0:
+        # `slug` here is the schedule KEY (`due_snapshots` yields keys), which is exactly
+        # what `collect` needs to tell two entries on one template apart.
+        if (
+            collect(
+                course_org, template, cohort_org, deadline, scheduled=True, slug=slug
+            )
+            != 0
+        ):
             errors += 1
     return errors
 
@@ -435,6 +446,7 @@ def _handout_releases(
                 label=f"{slug}{schedule.HANDOUT_SUFFIX}",
                 when=entry.handout_datetime,
                 assignment=template,
+                assignment_slug=slug,
                 assignment_solution=_solution_due(cohort_org, slug, entry, now),
             )
         )

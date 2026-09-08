@@ -649,6 +649,10 @@ on:
           - auto
           - individual
           - group
+      slug:
+        description: "Only if TWO schedule.yml assignments hand out from this template: which one (the schedule key). Leave empty otherwise"
+        required: false
+        default: ""
       dry_run:
         description: "Preview only - list the repos that WOULD be created, don't create them"
         type: boolean
@@ -665,12 +669,14 @@ on:
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
           INC_SOL: ${{{{ inputs.include_solution }}}}
           TYPE: ${{{{ inputs.type }}}}
+          SLUG: ${{{{ inputs.slug }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
         run: |
           gh auth setup-git
           args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG")
           [ "$INC_SOL" = "true" ] && args+=(--solution)
           args+=(--type "$TYPE")
+          [ -n "$SLUG" ] && args+=(--slug "$SLUG")
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
           python3 -m dsl_course.assign "${{args[@]}}"
 """
@@ -695,6 +701,10 @@ on:
     inputs:
 {_choice_input("cohort_org", "Cohort org (submissions)", cohort_orgs)}
 {_assignment_input(assignments or [])}
+      slug:
+        description: "Only if TWO schedule.yml assignments hand out from this template: which one (the schedule key). Leave empty otherwise"
+        required: false
+        default: ""
       dry_run:
         description: "Preview only - show what WOULD be refreshed"
         type: boolean
@@ -709,9 +719,11 @@ on:
           MASTER_ORG: ${{{{ github.repository_owner }}}}
           COHORT_ORG: ${{{{ inputs.cohort_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
+          SLUG: ${{{{ inputs.slug }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
         run: |
           args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG" --refresh-only)
+          [ -n "$SLUG" ] && args+=(--slug "$SLUG")
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
           python3 -m dsl_course.collect "${{args[@]}}"
 """
