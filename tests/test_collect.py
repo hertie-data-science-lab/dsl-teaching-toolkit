@@ -145,17 +145,15 @@ def test_parse_grading_spec_drops_a_malformed_value_and_keeps_the_rest(capsys):
     assert len(spec.dropped) == 5
 
 
-def test_the_course_defaults_block_stands_behind_a_file_that_says_nothing(capsys):
+def test_the_course_defaults_block_is_validated_like_the_file_it_is_stamped_into(
+    capsys,
+):
     # `assignment_defaults:` in dsl-course.yml is what `New assignment` stamps into the
-    # file it generates; it is validated exactly as the file itself is.
-    defaults = grades.parse_assignment_defaults(
+    # file it generates - at WRITE time, so a reader never merges it - and it goes through
+    # the same readers, so a value the writer would emit cannot be one the reader refuses.
+    assert grades.parse_assignment_defaults(
         {"max_team_size": 5, "late_window_days": 7, "late_penalty_per_day": "10%"}
-    )
-    spec = collect.parse_grading_spec("type: group\n", defaults)
-    assert (spec.max_team_size, spec.late_window_days) == (5, 7)
-    # ... and what the file itself says wins over them.
-    beaten = collect.parse_grading_spec("type: group\nmax_team_size: 2\n", defaults)
-    assert beaten.max_team_size == 2
+    ) == {"max_team_size": 5, "late_window_days": 7, "late_penalty_per_day": "10%"}
     # A per-assignment key is not a course-wide one: nothing about ONE assignment belongs
     # in a block that stands behind all of them.
     assert grades.parse_assignment_defaults({"title": "no"}) == {}

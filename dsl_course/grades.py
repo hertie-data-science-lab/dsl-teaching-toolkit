@@ -1035,21 +1035,20 @@ def parse_assignment_defaults(raw: object) -> dict:
     return values
 
 
-def parse_grading_spec(text: str, defaults: dict | None = None) -> GradingSpec:
+def parse_grading_spec(text: str) -> GradingSpec:
     """Parse a `grading_config.yml` into a `GradingSpec`.
 
-    A missing key falls back to the course's `assignment_defaults`, then to the field's
-    own default. A malformed VALUE is logged and dropped, never raised and never passed
+    A missing key falls back to the field's own default, and to nothing else: the course's
+    `assignment_defaults` stand behind an assignment at WRITE time, stamped into the file
+    by `New assignment` (see `course_assignment_defaults`), so what a reader sees is what
+    the file says. A malformed VALUE is logged and dropped, never raised and never passed
     through: this file is hand-edited by faculty and read by an hourly cron, so one bad
     line costs the field it sits on and nothing else."""
     data = yaml.safe_load(text) if text.strip() else {}
     if not isinstance(data, dict):
         data = {}
     dropped: list[str] = []
-    values = {
-        **(defaults or {}),
-        **_read_settings(data, SPEC_KEYS, GRADING_FILE, dropped),
-    }
+    values = _read_settings(data, SPEC_KEYS, GRADING_FILE, dropped)
     for line in dropped:
         log_err(line)
     return GradingSpec(**values, dropped=tuple(dropped))
@@ -1227,10 +1226,12 @@ def write_team_lock(
         log(f"  [skip] {TEAM_LOCK_PATH} in {cohort_org} (cohort closed out)")
         return True
     sched = sched if sched is not None else schedule.load(cohort_org)
-    content = team_lock_text(team_lock_entries(course_org, sched)).encode()
     if dry_run:
+        # Above the render, not below it: resolving the entries reads every template's
+        # `grading_config.yml`, and a preview that never writes has nothing to do with them.
         log(f"    DRY-RUN  {TEAM_LOCK_PATH} ({len(sched.assignments)} assignment(s))")
         return True
+    content = team_lock_text(team_lock_entries(course_org, sched)).encode()
     if put_file(
         cohort_org,
         CONFIG_REPO,
