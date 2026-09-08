@@ -2176,6 +2176,46 @@ def test_the_notebook_checked_is_the_shallowest_one_and_never_a_checkpoint(
     assert spawned[0][-1] == str(work / "zzz.ipynb")
 
 
+def test_the_notebook_checked_is_the_first_one_that_is_not_a_starter(
+    monkeypatch, tmp_path
+):
+    # A template shipping `00-setup.ipynb` beside `assignment.ipynb` hands out two
+    # notebooks. On the shallowest one alone, a student who did all their work in the
+    # second read as `not-attempted` and was never executed at all.
+    spawned = _fake_execute(monkeypatch, _executed_bytes(False))
+    work = tmp_path / "sub"
+    work.mkdir()
+    setup = _notebook_bytes("import pandas\n")
+    (work / "00-setup.ipynb").write_bytes(setup)
+    (work / "01-assignment.ipynb").write_bytes(_notebook_bytes("answer = 42\n"))
+
+    state, _executed = collect._check_completion(
+        work,
+        frozenset({collect.blob_sha(setup), collect.blob_sha(_notebook_bytes("x\n"))}),
+        tmp_path / "r",
+    )
+
+    assert state == "ran-clean"
+    assert spawned[0][-1] == str(work / "01-assignment.ipynb")
+
+
+def test_not_attempted_needs_every_notebook_to_be_untouched(monkeypatch, tmp_path):
+    # ...and the rule the other way round: nothing was opened, so nothing costs a kernel.
+    spawned = _fake_execute(monkeypatch, _executed_bytes(False))
+    work = tmp_path / "sub"
+    work.mkdir()
+    starters = [_notebook_bytes("import pandas\n"), _notebook_bytes("pass\n")]
+    for name, body in zip(("00-setup.ipynb", "01-assignment.ipynb"), starters):
+        (work / name).write_bytes(body)
+
+    state, executed = collect._check_completion(
+        work, frozenset(collect.blob_sha(body) for body in starters), tmp_path / "r"
+    )
+
+    assert (state, executed) == (collect.COMPLETION_NOT_ATTEMPTED, None)
+    assert spawned == []
+
+
 _KERNEL_FLAG = f"--ExecutePreprocessor.kernel_name={collect.COMPLETION_KERNEL}"
 
 

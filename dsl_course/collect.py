@@ -1908,17 +1908,16 @@ def _starter_notebook_shas(course_org: str, template: str) -> frozenset[str]:
     )
 
 
-def _completion_notebook(workdir: Path) -> Path | None:
-    """THE notebook this submission is checked on: the shallowest `.ipynb` in the checkout,
-    ties broken by path.
+def _completion_notebooks(workdir: Path) -> list[Path]:
+    """Every `.ipynb` in the checkout, shallowest first and ties broken by path.
 
-    Deterministic on purpose. Most submissions hold exactly one notebook, but the state
-    recorded against a student must not depend on which file a directory walk happened to
-    see first - a re-run that picked the other one would move `info.completion` under a
-    grader who had already read it. Walked with `_walk_files` (no symlink following) and
+    ORDERED on purpose. Most submissions hold exactly one notebook, but the state recorded
+    against a student must not depend on which file a directory walk happened to see first
+    - a re-run that picked the other one would move `info.completion` under a grader who
+    had already read it. Walked with `_walk_files` (no symlink following) and
     `.ipynb_checkpoints` skipped: Jupyter's own autosave of the same notebook is not a
     second submission."""
-    found = sorted(
+    return sorted(
         (
             path
             for path in _walk_files(workdir)
@@ -1930,7 +1929,6 @@ def _completion_notebook(workdir: Path) -> Path | None:
             str(path.relative_to(workdir)),
         ),
     )
-    return found[0] if found else None
 
 
 def _completion_env() -> dict:
@@ -2018,15 +2016,27 @@ def _check_completion(
     """Execute this submission's notebook top to bottom and say what happened, plus the
     executed copy to archive (None where there is nothing to archive).
 
+    WHICH notebook: the first one, in `_completion_notebooks` order, that is not still
+    byte-identical to a starter the template handed out - so a template shipping
+    `00-setup.ipynb` beside `assignment.ipynb` is checked on the one the student worked in.
+    `not-attempted` needs EVERY notebook in the checkout to be an untouched starter; on the
+    shallowest one alone, a student who did all their work in the second notebook read as
+    having done none of it.
+
     Runs BEFORE `_run_tests`, on the notebook as submitted: `_run_tests` converts every
     `.ipynb` in the checkout to a script, and a script is not what the rule is about. The
     checkout is hardened first by the caller, so no credential is in reach of the code this
     starts, and the run is capped and group-killed exactly like the hidden tests are."""
-    notebook = _completion_notebook(workdir)
-    if notebook is None:
+    notebooks = _completion_notebooks(workdir)
+    if not notebooks:
         return COMPLETION_NO_NOTEBOOK, None
-    raw = notebook.read_bytes()
-    if blob_sha(raw) in starters:
+    notebook = raw = None
+    for candidate in notebooks:
+        content = candidate.read_bytes()
+        if blob_sha(content) not in starters:
+            notebook, raw = candidate, content
+            break
+    if notebook is None:
         return COMPLETION_NOT_ATTEMPTED, None
     out = run_root / "executed"
     out.mkdir(parents=True, exist_ok=True)
@@ -2257,7 +2267,7 @@ def pick_grader_document(
         if path.suffix.lower() not in GRADER_DOCUMENTS:
             continue
         if _CHECKPOINTS in path.relative_to(workdir).parts:
-            continue  # Jupyter's own autosave, as `_completion_notebook` also skips
+            continue  # Jupyter's own autosave, as `_completion_notebooks` also skips
         try:
             # Bounded before it is read: these are student-committed files, the read is
             # into the PARENT process (which no rlimit caps), and a document too big to
