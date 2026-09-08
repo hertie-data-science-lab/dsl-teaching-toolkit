@@ -277,6 +277,133 @@ def strip_source(path: str, text: str) -> Stripped:
     return Stripped(derived, regions, 0)
 
 
+# ------------------------------------------------- the grader's copy of one submission
+
+# Otter's manual-grading fences, written in a MARKDOWN cell (notebook) or on their own line
+# (Rmd/qmd). Everything from a BEGIN to the next END is one hand-marked question; everything
+# outside them is setup, imports and machine-marked work a grader does not read.
+#
+# The attribute form Otter also writes - `<!-- BEGIN QUESTION\nname: q1\nmanual: true\n-->`
+# - opens with the same two words, which is why this matches the OPENING rather than the
+# whole comment.
+_QUESTION = re.compile(r"<!--\s*(BEGIN|END)\s+QUESTION\b")
+
+
+class Filtered(NamedTuple):
+    """One submission filtered to its hand-marked questions, and how many were found.
+
+    `questions == 0` is the ordinary "this assignment does not use the fences" answer, not a
+    fault: the caller archives nothing rather than a whole notebook nobody asked for."""
+
+    text: str
+    questions: int
+
+
+def _question_marker(source: str) -> str:
+    """`"BEGIN"`, `"END"` or `""` for a cell/line, by its FIRST question fence.
+
+    First, not last: a cell holding both closes the question it opened, and treating it as
+    an END would run the next question's content into this one."""
+    found = _QUESTION.search(source)
+    return found.group(1).upper() if found else ""
+
+
+def _without_markers(source: str) -> str:
+    """The same text with the fence comments taken out - they are Otter's plumbing, and a
+    grader reading the exported page should see the question, not the tooling."""
+    return "\n".join(
+        line for line in source.split("\n") if not _QUESTION.search(line)
+    ).strip("\n")
+
+
+def filter_notebook_questions(text: str, where: str) -> Filtered:
+    """Keep only the cells inside `<!-- BEGIN QUESTION -->` ... `<!-- END QUESTION -->`.
+
+    The notebook's own metadata (kernel, language, nbformat) travels with them, because it
+    is what an exporter needs to render the result at all. A fence that never closes raises,
+    like every other unbalanced fence here: the alternative is a "filtered" grader copy that
+    is silently the whole submission."""
+    try:
+        nb = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise DeriveError(f"{where}: not a readable notebook - {exc}") from exc
+    if not isinstance(nb, dict) or not isinstance(nb.get("cells"), list):
+        raise DeriveError(f"{where}: not a readable notebook - no `cells` array")
+    kept: list[dict] = []
+    inside = False
+    questions = 0
+    for cell in nb["cells"]:
+        if not isinstance(cell, dict):
+            continue
+        marker = _question_marker(_cell_source(cell))
+        if marker == "BEGIN":
+            inside = True
+        if inside:
+            if marker:
+                stripped = _without_markers(_cell_source(cell))
+                if not stripped:
+                    # A fence on its own in a cell of its own: dropped rather than exported
+                    # as a blank page-break in the middle of the question.
+                    if marker == "END":
+                        inside, questions = False, questions + 1
+                    continue
+                cell = {**cell, "source": stripped}
+            kept.append(cell)
+        if marker == "END":
+            if not inside:
+                raise DeriveError(
+                    f"{where}: a question is closed that was never opened"
+                )
+            inside, questions = False, questions + 1
+    if inside:
+        raise DeriveError(f"{where}: a question is opened and never closed")
+    return Filtered(json.dumps({**nb, "cells": kept}, indent=1) + "\n", questions)
+
+
+def filter_rmd_questions(text: str, where: str) -> Filtered:
+    """The same filter for an Rmd/qmd, line by line, keeping the YAML front matter.
+
+    The front matter is not optional decoration: it carries the title, the output format
+    and the knitr options, and a document without it renders as plain text or not at all."""
+    lines = text.split("\n")
+    kept: list[str] = []
+    start = 0
+    if lines and lines[0].strip() == "---":
+        end = next(
+            (n for n, line in enumerate(lines[1:], 1) if line.strip() == "---"), 0
+        )
+        if end:
+            kept, start = lines[: end + 1], end + 1
+    inside = False
+    questions = 0
+    for line in lines[start:]:
+        marker = _question_marker(line)
+        if marker == "BEGIN":
+            if inside:
+                raise DeriveError(f"{where}: a question is opened inside another")
+            inside = True
+            continue
+        if marker == "END":
+            if not inside:
+                raise DeriveError(
+                    f"{where}: a question is closed that was never opened"
+                )
+            inside, questions = False, questions + 1
+            continue
+        if inside:
+            kept.append(line)
+    if inside:
+        raise DeriveError(f"{where}: a question is opened and never closed")
+    return Filtered("\n".join(kept) + "\n", questions)
+
+
+def filter_questions(path: str, text: str) -> Filtered:
+    """Filter one submission document to its hand-marked questions, by suffix."""
+    if PurePosixPath(path).suffix.lower() == ".ipynb":
+        return filter_notebook_questions(text, path)
+    return filter_rmd_questions(text, path)
+
+
 def student_path(path: str) -> str:
     """Where a `solution/`-relative source lands on `main`: the same tree, one level up.
 

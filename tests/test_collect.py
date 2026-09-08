@@ -4388,3 +4388,151 @@ def test_the_due_moment_the_sheet_counts_from_is_the_cohorts_own(monkeypatch):
         )
         == 1
     )
+
+
+# ------------------------------------- the grader's reading copy (`grader_pdf: true`)
+
+_QUESTION_NB = json.dumps(
+    {
+        "cells": [
+            {"cell_type": "code", "metadata": {}, "source": "import numpy as np\n"},
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": "<!-- BEGIN QUESTION -->",
+            },
+            {"cell_type": "markdown", "metadata": {}, "source": "## Q1 (5 points)\n"},
+            {"cell_type": "code", "metadata": {}, "source": "answer = 1\n"},
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": "<!-- END QUESTION -->",
+            },
+        ],
+        "metadata": {"language_info": {"name": "python"}},
+        "nbformat": 4,
+        "nbformat_minor": 5,
+    }
+)
+
+
+def _checkout(monkeypatch, files: dict[str, str]):
+    """A submission repo that clones to `files` and pins to its snapshot."""
+
+    def fake_clone(org, repo, dest, branch=""):
+        dest.mkdir(parents=True)
+        for name, text in files.items():
+            (dest / name).parent.mkdir(parents=True, exist_ok=True)
+            (dest / name).write_text(text)
+        return True
+
+    monkeypatch.setattr(collect, "clone", fake_clone)
+    monkeypatch.setattr(
+        collect, "_pin_commit", lambda wd, deadline, snapshot=None: "abc"
+    )
+    monkeypatch.setattr(
+        collect, "submission_targets", lambda *a: [("a1-alice", "alice", ["alice"])]
+    )
+    monkeypatch.setattr(
+        collect, "load_snapshots", lambda org, slug: {"a1-alice": "abc"}
+    )
+
+
+def _capture_archive(monkeypatch) -> dict[str, bytes]:
+    written: dict[str, bytes] = {}
+
+    def fake_put_file(org, repo, path, content, message, *a, **k):
+        written[path] = content
+        return True
+
+    monkeypatch.setattr(collect, "put_file", fake_put_file)
+    return written
+
+
+def test_the_grader_copy_is_the_marked_questions_and_nothing_else(
+    monkeypatch, tmp_path
+):
+    _checkout(monkeypatch, {"submission.ipynb": _QUESTION_NB})
+    written = _capture_archive(monkeypatch)
+    # No LaTeX and no browser on this runner: nbconvert writes nothing, so the fallback
+    # chain runs to the end and the FILTERED SOURCE is what a grader gets.
+    monkeypatch.setattr(collect, "_run_limited", lambda argv, **k: True)
+
+    collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", False)
+
+    assert list(written) == ["autograde/a1/alice.ipynb"]
+    body = written["autograde/a1/alice.ipynb"].decode()
+    assert "answer = 1" in body and "## Q1 (5 points)" in body
+    assert "import numpy" not in body  # setup, not a marked question
+    assert "BEGIN QUESTION" not in body
+
+
+def test_a_runner_with_latex_gets_a_pdf_and_one_without_falls_back(monkeypatch, capsys):
+    _checkout(monkeypatch, {"submission.ipynb": _QUESTION_NB})
+    written = _capture_archive(monkeypatch)
+
+    def only_html(argv, *, cwd, env, timeout):
+        # What a bare Actions runner does: `--to pdf` shells out to LaTeX and writes
+        # nothing, `--to html` succeeds. The verdict must come off the OUTPUT FILE.
+        fmt = argv[argv.index("--to") + 1]
+        if fmt == "html":
+            Path(argv[-1]).with_suffix(".html").write_text("<html>Q1</html>")
+        return True
+
+    monkeypatch.setattr(collect, "_run_limited", only_html)
+    collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", False)
+
+    assert list(written) == ["autograde/a1/alice.html"]
+    # Counts only, and the log says which path the runner took.
+    assert "1 html" in capsys.readouterr().out
+
+
+def test_a_submission_with_no_marked_questions_archives_nothing(monkeypatch, capsys):
+    _checkout(monkeypatch, {"submission.ipynb": '{"cells": []}'})
+    written = _capture_archive(monkeypatch)
+    monkeypatch.setattr(collect, "_run_limited", lambda argv, **k: True)
+
+    collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", False)
+
+    assert written == {}
+    assert "1 no marked questions" in capsys.readouterr().out
+
+
+def test_an_unclonable_repo_is_counted_not_raised(monkeypatch, capsys):
+    _checkout(monkeypatch, {})
+    monkeypatch.setattr(collect, "clone", lambda *a, **k: False)
+    written = _capture_archive(monkeypatch)
+
+    collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", False)
+
+    assert written == {}
+    assert "1 not readable" in capsys.readouterr().out
+
+
+def test_the_grader_copy_names_no_repo_in_the_public_log(monkeypatch, capsys):
+    _checkout(monkeypatch, {"submission.ipynb": _QUESTION_NB})
+    _capture_archive(monkeypatch)
+    monkeypatch.setattr(collect, "_run_limited", lambda argv, **k: True)
+
+    collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", False)
+
+    out = capsys.readouterr().out
+    assert "alice" not in out and "a1-alice" not in out
+
+
+def test_a_dry_run_clones_nothing(monkeypatch):
+    _checkout(monkeypatch, {"submission.ipynb": _QUESTION_NB})
+    written = _capture_archive(monkeypatch)
+
+    def refuse(*a, **k):
+        raise AssertionError("a dry run must not clone")
+
+    monkeypatch.setattr(collect, "clone", refuse)
+    collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", True)
+    assert written == {}
+
+
+def test_grader_pdf_is_off_unless_the_assignment_asks_for_it():
+    assert collect.load_grading_spec.__module__  # the spec is grades', read here
+    assert not collect.parse_grading_spec("title: x\n").grader_pdf
+    assert collect.parse_grading_spec("grader_pdf: true\n").grader_pdf

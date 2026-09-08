@@ -280,3 +280,99 @@ def test_a_template_with_no_derivable_source_says_so(monkeypatch, capsys):
     _Repo({"grading_config.yml": "type: individual\n"}).install(monkeypatch)
     assert derive.derive_student_version("Course", "assignment-1-f2026", True) == 1
     assert "nothing to derive" in capsys.readouterr().err
+
+
+# ---------------------------------------------- filtering to the hand-marked questions
+
+QUESTION_NB = {
+    "cells": [
+        {"cell_type": "code", "metadata": {}, "source": "import numpy as np\n"},
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": "<!-- BEGIN QUESTION -->\n",
+        },
+        {
+            "cell_type": "markdown",
+            "metadata": {},
+            "source": "### Question 1 (5 points)\n\nExplain.\n",
+        },
+        {"cell_type": "code", "metadata": {}, "source": "answer = 1\n"},
+        {"cell_type": "markdown", "metadata": {}, "source": "<!-- END QUESTION -->\n"},
+        {"cell_type": "code", "metadata": {}, "source": "grader.check('q2')\n"},
+    ],
+    "metadata": {"language_info": {"name": "python"}},
+    "nbformat": 4,
+    "nbformat_minor": 5,
+}
+
+
+def test_only_the_fenced_question_reaches_the_grader_copy():
+    filtered = derive.filter_notebook_questions(json.dumps(QUESTION_NB), "sub.ipynb")
+    assert filtered.questions == 1
+    out = json.loads(filtered.text)
+    assert [_source(c) for c in out["cells"]] == [
+        "### Question 1 (5 points)\n\nExplain.\n",
+        "answer = 1\n",
+    ]
+    # The notebook's own metadata travels with them, or nothing can render the result.
+    assert out["metadata"]["language_info"]["name"] == "python"
+    # The fences themselves are plumbing, not content.
+    assert "BEGIN QUESTION" not in filtered.text
+
+
+def test_a_notebook_with_no_question_fences_filters_to_nothing_to_export():
+    nb = {"cells": [{"cell_type": "code", "metadata": {}, "source": "x = 1\n"}]}
+    assert derive.filter_notebook_questions(json.dumps(nb), "sub.ipynb").questions == 0
+
+
+def test_an_unclosed_question_is_refused_rather_than_exported_whole():
+    nb = {
+        "cells": [
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": "<!-- BEGIN QUESTION -->",
+            },
+            {"cell_type": "code", "metadata": {}, "source": "x = 1\n"},
+        ]
+    }
+    with pytest.raises(derive.DeriveError):
+        derive.filter_notebook_questions(json.dumps(nb), "sub.ipynb")
+
+
+QUESTION_RMD = """---
+title: Assignment 1
+output: pdf_document
+---
+
+```{r setup}
+library(tidyverse)
+```
+
+<!-- BEGIN QUESTION -->
+
+## Question 1 (5 points)
+
+```{r}
+answer <- 1
+```
+
+<!-- END QUESTION -->
+
+```{r checks}
+stopifnot(TRUE)
+```
+"""
+
+
+def test_an_rmd_grader_copy_keeps_the_front_matter_and_the_question_only():
+    filtered = derive.filter_rmd_questions(QUESTION_RMD, "sub.Rmd")
+    assert filtered.questions == 1
+    assert filtered.text.startswith(
+        "---\ntitle: Assignment 1\noutput: pdf_document\n---"
+    )
+    assert "## Question 1 (5 points)" in filtered.text
+    assert "answer <- 1" in filtered.text
+    assert "library(tidyverse)" not in filtered.text
+    assert "stopifnot" not in filtered.text

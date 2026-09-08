@@ -942,6 +942,7 @@ _READERS = {
     "autograde": lambda v, w, d: _boolean(v, "autograde", w, d),
     "completion_check": lambda v, w, d: _boolean(v, "completion_check", w, d),
     "tests": lambda v, w, d: str(v or "tests").strip() or "tests",
+    "grader_pdf": lambda v, w, d: _boolean(v, "grader_pdf", w, d),
 }
 SPEC_KEYS = tuple(_READERS)
 # What a COURSE may set once for every assignment under it, in `dsl-course.yml`: exactly
@@ -988,6 +989,10 @@ class GradingSpec:
     # never mentions the key has to be told from one that turned the check off.
     completion_check: bool | None = None
     tests: str = "tests"
+    # The grader's reading copy, filtered to the HAND-marked questions and archived beside
+    # the autograde detail. Off unless the assignment asks for it: it clones the whole
+    # cohort a second time at the cutoff, and most assignments are read in the browser.
+    grader_pdf: bool = False
     dropped: tuple[str, ...] = ()
 
     @property

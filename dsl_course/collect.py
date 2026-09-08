@@ -119,6 +119,7 @@ from .course import (
     resolve_is_group,
     submission_repo,
 )
+from .derive import DeriveError, Filtered, filter_questions
 from .discovery import list_org_repos
 from .fs import copy_tree
 from .gh_contents import (
@@ -2136,6 +2137,163 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
             return None
 
 
+# ------------------------------------------------- the grader's reading copy (opt-in)
+
+# What a grader can be handed as a page rather than a repo. A notebook exports through
+# nbconvert, which every seeded workflow already installs; an Rmd/qmd would need pandoc and
+# an R toolchain that the runner has not got, so its FILTERED SOURCE is archived instead -
+# still the thing worth reading, and honest about being source.
+GRADER_DOCUMENTS = (".ipynb", ".rmd", ".qmd")
+# What one export came to, in the words the summary line counts. Not a student-visible
+# vocabulary - these appear only in the run log's totals and never beside a name.
+GRADER_PDF = "pdf"
+GRADER_HTML = "html"  # nbconvert's PDF path needs LaTeX; this is the fallback
+GRADER_SOURCE = "filtered source"  # nothing in the runner can render this format
+GRADER_NONE = "no marked questions"  # the assignment does not use the question fences
+GRADER_UNREADABLE = "not readable"  # unclonable, unpinnable, or a malformed document
+GRADER_UNWRITTEN = "not archived"  # produced, but the archive write failed
+
+
+def pick_grader_document(
+    workdir: Path,
+) -> tuple[Path, Filtered] | None:
+    """The one document in a checkout worth exporting for a grader, already filtered.
+
+    The submission with the MOST fenced questions wins, ties broken by path, because a
+    repo commonly holds several notebooks - a scratch copy, a provided demo, the answer -
+    and the one carrying the questions is by definition the one being marked. A checkout
+    where nothing carries a fence returns None, and the caller archives nothing.
+
+    A document that will not parse is skipped rather than raised on: one broken notebook in
+    a cohort must not cost the other hundred their grader copy."""
+    best: tuple[Path, Filtered] | None = None
+    for path in sorted(_walk_files(workdir)):
+        if path.suffix.lower() not in GRADER_DOCUMENTS or ".git" in path.parts:
+            continue
+        try:
+            filtered = filter_questions(path.name, path.read_text(errors="replace"))
+        except (DeriveError, OSError):
+            continue
+        if filtered.questions and (
+            best is None or filtered.questions > best[1].questions
+        ):
+            best = (path, filtered)
+    return best
+
+
+def _export_document(source: Path, env: dict) -> tuple[str, bytes]:
+    """Render `source` for a grader: `(what it came to, the bytes to archive)`.
+
+    PDF first, HTML second, the source itself last. nbconvert's PDF path shells out to
+    LaTeX, which a bare Actions runner has not got - so the verdict is taken from whether
+    the OUTPUT FILE appeared, never from the exit code, and a missing toolchain is a
+    quieter answer rather than a red run. Nothing here executes the notebook: these are
+    student submissions, and rendering one must not run it."""
+    if source.suffix.lower() != ".ipynb" or _grader_dep_missing("nbconvert"):
+        return GRADER_SOURCE, source.read_bytes()
+    for fmt, verdict in ((GRADER_PDF, GRADER_PDF), ("html", GRADER_HTML)):
+        out = source.with_suffix(f".{fmt}")
+        out.unlink(missing_ok=True)
+        _run_limited(
+            [sys.executable, "-m", "jupyter", "nbconvert", "--to", fmt, str(source)],
+            cwd=str(source.parent),
+            env=env,
+            timeout=RUN_TIMEOUT,
+        )
+        if out.is_file():
+            return verdict, out.read_bytes()
+    return GRADER_SOURCE, source.read_bytes()
+
+
+def _grader_document_for(
+    cohort_org: str,
+    repo: str,
+    target_key: str,
+    slug: str,
+    deadline: str,
+    snapshot: str | None,
+    env: dict,
+) -> str:
+    """Archive one submission's grader copy. Returns one of the GRADER_* verdicts."""
+    with tempfile.TemporaryDirectory() as work:
+        wd = Path(work) / "sub"
+        if not clone(cohort_org, repo, wd):
+            return GRADER_UNREADABLE
+        if _pin_commit(wd, deadline, snapshot) is None:
+            return GRADER_UNREADABLE
+        shutil.rmtree(
+            wd / ".git", ignore_errors=True
+        )  # the clone stored the bot's token
+        picked = pick_grader_document(wd)
+        if picked is None:
+            return GRADER_NONE
+        source, filtered = picked
+        source.write_text(filtered.text)
+        verdict, content = _export_document(source, env)
+        suffix = {GRADER_PDF: "pdf", GRADER_HTML: "html"}.get(
+            verdict, source.suffix.lstrip(".")
+        )
+        # `person=True`: the PATH is `autograde/<slug>/<handle>.pdf`, and this log is
+        # world-readable even where classroom-config is not.
+        if not put_file(
+            cohort_org,
+            CONFIG_REPO,
+            f"{autograde_path(slug)}/{target_key}.{suffix}",
+            content,
+            f"autograde: {slug}/{target_key} grader copy",
+            person=True,
+        ):
+            return GRADER_UNWRITTEN
+        return verdict
+
+
+def export_grader_documents(
+    cohort_org: str,
+    slug: str,
+    key: str,
+    is_group: bool,
+    deadline: str,
+    dry_run: bool,
+) -> None:
+    """Archive a reading copy of every submission, filtered to its hand-marked questions.
+
+    Opt-in per assignment (`grader_pdf: true` in the template's `grading_config.yml`) and
+    deliberately NOT behind `autograde:`: it is the questions a PERSON marks that the
+    Otter `<!-- BEGIN QUESTION -->` fences delimit, so the assignment that wants this most
+    is the all-manual one, which never reaches the autograder at all.
+
+    Returns nothing, and that is the contract: a runner with no LaTeX, a submission with no
+    fences, one unclonable repo - none of those is a reason to red the cutoff pass and
+    re-run the whole freeze on the next tick. Every outcome is counted into one summary
+    line and the run carries on. Counts only: the archive PATHS carry handles."""
+    targets = submission_targets(cohort_org, slug, is_group, key)
+    if not targets:
+        return
+    if dry_run:
+        log(f"    DRY-RUN would archive {len(targets)} grader copy/copies for {slug}")
+        return
+    log_step(f"Grader copies for {slug}: {len(targets)} target(s)")
+    snapshots = load_snapshots(cohort_org, slug)
+    env = _sanitised_env()
+    tally: dict[str, int] = {}
+    for repo, target_key, _members in targets:
+        verdict = _grader_document_for(
+            cohort_org,
+            repo,
+            target_key,
+            slug,
+            deadline,
+            None if snapshots is None else snapshots.get(repo),
+            env,
+        )
+        tally[verdict] = tally.get(verdict, 0) + 1
+    log_ok(
+        f"{slug}: grader copies - "
+        + ", ".join(f"{n} {what}" for what, n in sorted(tally.items()))
+        + f" (in {autograde_path(slug)}/)"
+    )
+
+
 def _grade_target(
     cohort_org: str,
     repo: str,
@@ -2324,6 +2482,15 @@ def collect(
     # template's grading_config.yml `type:` -> individual).
     is_group = resolve_is_group(force=group, template_type=gspec.type)
     cutoff = local_deadline(deadline, sched.timezone)
+
+    # The grader's reading copy, when the assignment asks for one - BEFORE every autograde
+    # exit below, and deliberately so. The fences it filters on delimit the questions a
+    # PERSON marks, so an all-manual assignment (no solution branch, `autograde: false`,
+    # no tests written) is exactly the one that wants it, and each of those returns from
+    # this function a few lines further down. It never changes the exit code: see
+    # `export_grader_documents`.
+    if gspec.grader_pdf:
+        export_grader_documents(cohort_org, slug, key, is_group, deadline, dry_run)
 
     def freeze_sheet(
         counts: dict[str, str] | None = None,
