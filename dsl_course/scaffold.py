@@ -38,7 +38,7 @@ from .course import (
     TEAM_FORMATIONS,
     pages_repo,
 )
-from .derive import BEGIN_SOLUTION, END_SOLUTION
+from .derive import BEGIN_SOLUTION, END_SOLUTION, SOLUTION_CHUNK_OPT
 from .discovery import central_ref_for, discover_assignments, discover_cohorts
 from .gh_contents import put_files
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
@@ -401,6 +401,12 @@ def _latex_starter(title: str) -> str:
     )
 
 
+# The front-matter key each markdown format names its output with - the ONE word `.Rmd` and
+# `.qmd` differ by here. Read by the starter on `main` and by the model answer on `solution`,
+# so the two cannot drift.
+_MARKDOWN_OUTPUT = {"rmd": "output: html_document", "qmd": "format: html"}
+
+
 def _markdown_starter(title: str, fmt: str, *, output: str) -> str:
     """An .Rmd / .qmd that knits or renders as it stands: front matter, a heading, one
     chunk, and the artefact rule.
@@ -480,11 +486,11 @@ _STARTERS = {
     "py": (".py", _py_starter),
     "rmd": (
         ".Rmd",
-        lambda title: _markdown_starter(title, "rmd", output="output: html_document"),
+        lambda title: _markdown_starter(title, "rmd", output=_MARKDOWN_OUTPUT["rmd"]),
     ),
     "qmd": (
         ".qmd",
-        lambda title: _markdown_starter(title, "qmd", output="format: html"),
+        lambda title: _markdown_starter(title, "qmd", output=_MARKDOWN_OUTPUT["qmd"]),
     ),
     "latex": (".tex", _latex_starter),
 }
@@ -571,6 +577,51 @@ def _notebook(title_lines: list[str], code: str) -> str:
         "nbformat_minor": 5,
     }
     return json.dumps(nb, indent=1) + "\n"
+
+
+# The stub model answer's one piece of work, fenced in each language's own vocabulary so
+# **Derive student version** works on a freshly scaffolded template rather than refusing it:
+# a file with nothing fenced would derive the model answer itself as the starter, so
+# `derive` names it and goes red.
+_MODEL_PY = (
+    f"def solve():\n"
+    f"    {BEGIN_SOLUTION}\n"
+    f"    return 42  # TODO - the model answer\n"
+    f"    {END_SOLUTION}"
+)
+_MODEL_R = "answer <- 42  # TODO - the model answer"
+
+
+def _model_answer(number: int, fmt: str) -> str | None:
+    """The model answer seeded on the `solution` branch for `fmt`, or None where there is
+    nothing to seed.
+
+    Same stem AND same suffix as the starter on `main`. `derive` writes `solution/X` onto
+    `main` as `X`, so a model answer in the wrong format - it was `starter.py` for every
+    non-notebook assignment - put a second file beside the real starter instead of becoming
+    it: `starter.py` landing next to an untouched `starter.Rmd`.
+
+    `latex` and `none` seed nothing at all: `.tex` is not derivable and `none` has no
+    starter to become, so a stub there could only ever be a file the button refuses."""
+    title = f"Assignment {number} - model solution (stub)"
+    if fmt == "ipynb":
+        return _notebook([f"# {title}"], _MODEL_PY)
+    if fmt == "py":
+        return (
+            f'"""Model solution for assignment {number} (stub)."""\n\n\n{_MODEL_PY}\n'
+        )
+    if fmt in _MARKDOWN_OUTPUT:
+        return (
+            "---\n"
+            f"title: {_yaml_scalar(title)}\n"
+            f"{_MARKDOWN_OUTPUT[fmt]}\n"
+            "---\n\n"
+            "## Task\n\n"
+            f"```{{r {SOLUTION_CHUNK_OPT}}}\n"
+            f"{_MODEL_R}\n"
+            "```\n"
+        )
+    return None
 
 
 # Seeded inert - every line a comment - so it withholds nothing until faculty write a
@@ -911,29 +962,13 @@ def scaffold_assignment(
             return 1
         sol = wd / SOLUTION_DIR
         sol.mkdir()
-        # Fenced, so **Derive student version** works on a freshly scaffolded template
-        # rather than refusing it: a file with nothing fenced would derive the model
-        # answer itself as the starter, so `derive` names it and goes red.
-        solution_code = (
-            f"def solve():\n"
-            f"    {BEGIN_SOLUTION}\n"
-            f"    return 42  # TODO - the model answer\n"
-            f"    {END_SOLUTION}"
-        )
         # `starter`, not `solution`: `derive` writes `solution/X` onto `main` as `X`, so a
         # model answer called `solution.ipynb` derives a SECOND notebook beside the
-        # untouched starter instead of becoming it. The stem is the same contract on both
-        # branches (see `_STARTERS`).
-        if fmt == "ipynb":
-            (sol / starter_name("ipynb")).write_text(
-                _notebook(
-                    [f"# Assignment {number} - model solution (stub)"], solution_code
-                )
-            )
-        else:
-            (sol / starter_name("py")).write_text(
-                f'"""Model solution for assignment {number} (stub)."""\n\n\n{solution_code}\n'
-            )
+        # untouched starter instead of becoming it. The stem AND the suffix are the same
+        # contract on both branches (see `_model_answer` and `_STARTERS`).
+        model = _model_answer(number, fmt)
+        if model is not None:
+            (sol / starter_name(fmt)).write_text(model)
         (sol / "README.md").write_text(
             f"# Assignment {number} - model solution\n\n"
             "Goes out to students after the deadline, two ways:\n\n"

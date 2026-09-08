@@ -77,6 +77,9 @@ SOLUTION_TAG = "solution"
 # not just honoured - a student starter must not carry a faculty-only flag that says which
 # chunks held the answer.
 _SOLUTION_OPT = re.compile(r"\s*,?\s*solution\s*=\s*(?:TRUE|T|true)\b", re.IGNORECASE)
+# The spelling to WRITE, for the same reason `BEGIN_SOLUTION` is spelt once above: `scaffold`
+# seeds an Rmd/qmd model answer this button then has to be able to derive.
+SOLUTION_CHUNK_OPT = "solution=TRUE"
 _CHUNK_OPEN = re.compile(r"^(\s*)(`{3,})\s*\{(.*)\}\s*$")
 _CHUNK_CLOSE = re.compile(r"^\s*`{3,}\s*$")
 

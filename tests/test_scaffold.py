@@ -455,6 +455,36 @@ def test_the_model_answer_is_seeded_where_derive_reads_it(fake, monkeypatch):
     assert seeded.replaced == 1 and "return 42" not in seeded.text
 
 
+@pytest.mark.parametrize("fmt, name", [("rmd", "starter.Rmd"), ("qmd", "starter.qmd")])
+def test_the_model_answer_is_seeded_in_the_format_the_template_uses(
+    fake, monkeypatch, fmt, name
+):
+    # It was always `starter.py`, whatever the assignment's format - so Derive on a fresh
+    # Rmd template wrote a `starter.py` onto `main` BESIDE the untouched `starter.Rmd`
+    # rather than becoming it. Same stem and same suffix on both branches.
+    written = _solution_files(monkeypatch)
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", fmt) == 0
+
+    assert f"solution/{name}" in written
+    assert "solution/starter.py" not in written
+    # ...and it is fenced in the vocabulary this format speaks, so the button derives a
+    # starter from it rather than refusing one.
+    seeded = derive.strip_source(f"solution/{name}", written[f"solution/{name}"])
+    assert seeded.replaced == 1 and "42" not in seeded.text
+
+
+@pytest.mark.parametrize("fmt", ["latex", "none"])
+def test_a_format_derive_cannot_read_is_seeded_no_model_answer(fake, monkeypatch, fmt):
+    # `.tex` is not derivable and `none` has no starter to become, so a stub either way
+    # could only ever be a file the button refuses.
+    written = _solution_files(monkeypatch)
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", fmt) == 0
+
+    assert [path for path in written if path.startswith("solution/")] == [
+        "solution/README.md"
+    ]
+
+
 def test_the_cutoff_switches_are_written_out_with_their_defaults(fake, monkeypatch):
     # The file teaches the whole vocabulary, so every switch the cutoff reads is on the
     # page with the value it would have had anyway - a faculty member flips a `false`
