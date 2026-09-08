@@ -70,6 +70,9 @@ ALL_RENDERED = {
     ),
     "new_materials": workflows_render.render_new_materials(),
     "new_assignment": workflows_render.render_new_assignment(),
+    "derive_student_version": workflows_render.render_derive_student_version(
+        ["assignment-1-f2026"]
+    ),
     "sync_site": workflows_render.render_sync_site(["Cohort-f2026"]),
     "publish_site": workflows_render.render_publish_site(["course-materials-f2026"]),
     "status": workflows_render.render_status(["Cohort-f2026"]),
@@ -131,6 +134,9 @@ DATED_RENDERED = {
     "provision": workflows_render.render_provision(COHORTS_2, ASSIGNMENTS_2),
     "collect_submissions": workflows_render.render_collect_submissions(
         COHORTS_2, ASSIGNMENTS_2
+    ),
+    "derive_student_version": workflows_render.render_derive_student_version(
+        ASSIGNMENTS_2
     ),
     "sync_membership": workflows_render.render_sync_membership(COHORTS_2),
     "distribute_grades": workflows_render.render_distribute_grades(COHORTS_2),
@@ -571,7 +577,7 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
     assert len(commits) == 1
     repo, files, deleted = commits[0]
     assert repo == ".github"
-    assert len(files) == 16  # three grading buttons became two, plus Archive cohort
+    assert len(files) == 17  # three grading buttons became two, plus Archive cohort
     assert all(path.startswith(".github/workflows/") for path in files)
     assert deleted == [
         ".github/workflows/sync-enrolment.yml",

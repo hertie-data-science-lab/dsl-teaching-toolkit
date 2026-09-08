@@ -45,6 +45,11 @@ SYLLABUS_SESSIONS_FILE = "SYLLABUS.sessions.md"
 FACULTY_ONLY_HEADING = "delete this section before releasing the README"
 # The branch an assignment template keeps its solution and grading_config.yml on.
 SOLUTION_BRANCH = "solution"
+# And the folder ON that branch holding the model answer. Two things read it and neither
+# owns it: `assign` pushes the folder into every student repo when the solution is
+# released, and `derive` reads the same folder to write `main`'s starter from it. One
+# spelling, here, or the two would disagree about where a faculty member puts the answer.
+SOLUTION_DIR = "solution"
 
 # ------------------------------------------- the vocabulary an assignment is defined in
 

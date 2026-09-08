@@ -48,6 +48,7 @@ from .course import (
     ASSIGNED,
     CONFIG_REPO,
     SOLUTION_BRANCH,
+    SOLUTION_DIR,
     submission_repo,
 )
 from .discovery import ASSIGNMENT_TEMPLATE_TOPIC, list_org_repos
@@ -83,7 +84,6 @@ from .repos import (
 # an outage, a queued runner, a rate limit - would silently mean the solution never ships
 # at all, and nothing would ever notice. Deleting the file re-releases it.
 SOLUTION_RECORD_DIR = "solutions"
-SOLUTION_DIR = "solution"
 
 
 def _wait_for_content(

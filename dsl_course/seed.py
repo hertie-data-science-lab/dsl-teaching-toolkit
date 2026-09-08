@@ -72,6 +72,7 @@ from .workflows_render import (
     render_bootstrap_cohort,
     render_central_release,
     render_collect_submissions,
+    render_derive_student_version,
     render_distribute_grades,
     render_generate_syllabus,
     render_new_assignment,
@@ -260,6 +261,9 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
             source_repos, cohorts
         ),
         ".github/workflows/new-assignment.yml": render_new_assignment(),
+        ".github/workflows/derive-student-version.yml": render_derive_student_version(
+            assignments
+        ),
         ".github/workflows/sync-site.yml": render_sync_site(cohorts),
         ".github/workflows/publish-site.yml": render_publish_site(source_repos),
         ".github/workflows/sync-membership.yml": render_sync_membership(cohorts),

@@ -250,10 +250,13 @@ _MAIL_ENV = "\n".join(
 )
 
 # Fail CLOSED: only an explicit `false` acts. Any other value - "True", "1", a blank from a
-# renamed input - previews. The two buttons that share it are the two whose real run cannot
-# be taken back by clicking again: Distribute grades emails a whole cohort, and Archive
-# cohort freezes one. The other dry-run gates in this module guard convergent work and keep
-# the simpler spelling.
+# renamed input - previews. Shared by the buttons whose `dry_run` DEFAULTS TO TRUE, which is
+# the set whose real run reaches further than a second click can take back: Distribute
+# grades emails a whole cohort, Archive cohort freezes one, and Derive student version
+# overwrites instructor-written files on a template's `main`. Their CLIs spell the flag
+# `--dry-run/--no-dry-run` and default it ON, so the gate has to pass one of the two
+# EXPLICITLY - "add nothing when the box is unticked" would preview for ever. The other
+# dry-run gates in this module guard convergent work and keep the simpler spelling.
 _DRY_RUN_GATE = (
     '          if [ "$DRY_RUN" = "false" ]; '
     "then args+=(--no-dry-run); else args+=(--dry-run); fi"
@@ -610,15 +613,22 @@ def render_central_release(source_repos: list[str], cohort_orgs: list[str]) -> s
     )
 
 
-def _assignment_input(assignments: list[str]) -> str:
-    """The course-org repo to hand out from - a dropdown of discovered assignment
-    templates, or free-text. Named as in schedule.yml: `course_source_repo`."""
+_ASSIGNMENT_DESC = "Course-org repo to hand out from"
+
+
+def _assignment_input(assignments: list[str], description: str = "") -> str:
+    """Which assignment TEMPLATE a button acts on - a dropdown of the discovered ones, or
+    free-text before any exists. Named as in schedule.yml: `course_source_repo`, on every
+    per-assignment button, so one word means one thing across the whole Actions tab.
+
+    `description` is for the buttons that do not hand anything out (deriving a starter,
+    patching a released one), where "hand out from" would be a lie about what the run does.
+    """
+    description = description or _ASSIGNMENT_DESC
     if assignments:
-        return _choice_input(
-            "course_source_repo", "Course-org repo to hand out from", assignments
-        )
+        return _choice_input("course_source_repo", description, assignments)
     return (
-        '      course_source_repo:\n        description: "Course-org repo to hand out from (e.g. assignment-1-f2026)"\n'
+        f'      course_source_repo:\n        description: "{description} (e.g. assignment-1-f2026)"\n'
         "        required: true"
     )
 
@@ -1295,6 +1305,49 @@ on:
             --team-formation "$TEAM_FORMATION" --submit-via "$SUBMIT_VIA" \\
             --autograde "$AUTOGRADE"
           python3 -m dsl_course.seed refresh --course-org "$ORG"
+"""
+
+
+def render_derive_student_version(assignments: list[str] | None = None) -> str:
+    """Write a template's student starter onto `main` from its `solution` branch.
+
+    A COURSE-org button: it touches one template repo and no cohort, so nothing it can
+    print names a person and its dry run may list the files it would write."""
+    return f"""name: Derive student version
+
+# ONE authored file, two branches. Keep the notebook you actually teach from on the
+# template's `solution` branch, under `solution/`, with the answers fenced off in the
+# nbgrader/Otter vocabulary: `### BEGIN SOLUTION` / `### END SOLUTION`, a `solution` cell
+# tag, or an Rmd/qmd chunk with `solution=TRUE`. This reads that branch and writes the
+# fenced-out version onto `main` - the only branch template-generate copies into a student
+# repo - so the starter is never maintained by hand beside the answer it is meant to be
+# missing. It never writes to `solution`, and a file with nothing fenced in it is never
+# written at all: the "starter" derived from that would be the model answer.
+# `dry_run` defaults to true and prints the file list and the counts, never the content.
+# See docs/03-add-assignment-to-course.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+{_assignment_input(assignments or [], "Assignment template to derive the student starter for")}
+      dry_run:
+        description: "Preview only - list the files and how much would be stripped out of each"
+        type: boolean
+        default: true
+
+{_concurrency("derive-student-version")}
+{_PERMISSIONS_JOBS}{_CHECK_TEAM}
+  derive:
+{_run_preamble()}      - name: Derive student version
+        env:
+          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
+          COURSE_ORG: ${{{{ github.repository_owner }}}}
+          COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
+          DRY_RUN: ${{{{ inputs.dry_run }}}}
+        run: |
+          args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO")
+{_DRY_RUN_GATE}
+          python3 -m dsl_course.derive "${{args[@]}}"
 """
 
 
