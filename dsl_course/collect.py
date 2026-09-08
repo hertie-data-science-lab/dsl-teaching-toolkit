@@ -2173,9 +2173,16 @@ def pick_grader_document(
     a cohort must not cost the other hundred their grader copy."""
     best: tuple[Path, Filtered] | None = None
     for path in sorted(_walk_files(workdir)):
-        if path.suffix.lower() not in GRADER_DOCUMENTS or ".git" in path.parts:
+        if path.suffix.lower() not in GRADER_DOCUMENTS:
             continue
+        if _CHECKPOINTS in path.relative_to(workdir).parts:
+            continue  # Jupyter's own autosave, as `_completion_notebook` also skips
         try:
+            # Bounded before it is read: these are student-committed files, the read is
+            # into the PARENT process (which no rlimit caps), and a document too big to
+            # archive cannot produce an archivable export anyway.
+            if path.stat().st_size > ARCHIVE_MAX_BYTES:
+                continue
             filtered = filter_questions(path.name, path.read_text(errors="replace"))
         except (DeriveError, OSError):
             continue

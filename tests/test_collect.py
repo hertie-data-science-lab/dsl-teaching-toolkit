@@ -4583,16 +4583,46 @@ def test_the_grader_copy_renders_in_the_same_sandbox_as_everything_else(
     assert ".git" not in seen["siblings"] and "sitecustomize.py" not in seen["siblings"]
 
 
+def test_a_jupyter_autosave_never_wins_the_grader_copy(monkeypatch):
+    # `.ipynb_checkpoints/` is Jupyter's own autosave of the same notebook, and an older
+    # save of it can hold MORE fenced questions than the file beside it - which is the
+    # tie-break, so the grader would read a copy the student did not hand in. The
+    # completion check has always skipped them; this now does too.
+    stale = json.loads(_QUESTION_NB)
+    stale["cells"] = stale["cells"] * 2  # two questions, so it would win on count
+    _checkout(
+        monkeypatch,
+        {
+            "submission.ipynb": _QUESTION_NB,
+            ".ipynb_checkpoints/submission-checkpoint.ipynb": json.dumps(stale),
+        },
+    )
+    written = _capture_archive(monkeypatch)
+    monkeypatch.setattr(collect, "_run_limited", lambda argv, **k: True)
+
+    collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", False)
+
+    assert list(written) == ["autograde/a1/alice.ipynb"]
+    assert written["autograde/a1/alice.ipynb"].decode().count("## Q1 (5 points)") == 1
+
+
 def test_a_grader_copy_past_the_archive_cap_is_counted_not_committed(
     monkeypatch, capsys
 ):
     # The same rule the executed notebook follows: an HTML export of a plot-heavy notebook
     # is base64 PNG all the way down, and one per student makes classroom-config a repo
-    # nobody can clone.
+    # nobody can clone. The SOURCE here is small - it is what nbconvert makes of it that
+    # blows the cap, so this is the post-render guard, not the pre-read one.
     _checkout(monkeypatch, {"submission.ipynb": _QUESTION_NB})
     written = _capture_archive(monkeypatch)
-    monkeypatch.setattr(collect, "ARCHIVE_MAX_BYTES", 16)
-    monkeypatch.setattr(collect, "_run_limited", lambda argv, **k: True)
+    monkeypatch.setattr(collect, "ARCHIVE_MAX_BYTES", 4096)
+
+    def fat_html(argv, *, cwd, env, timeout):
+        if argv[argv.index("--to") + 1] == "html":
+            Path(argv[-1]).with_suffix(".html").write_text("<html>" + "x" * 8192)
+        return True
+
+    monkeypatch.setattr(collect, "_run_limited", fat_html)
 
     collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", False)
 
