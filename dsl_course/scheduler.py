@@ -98,7 +98,13 @@ from .collect import (
     sync_sheet,
 )
 from .deploy import deploy_many
-from .grades import cohort_sheet_faults, cutoff_at, load_grading_spec, sheet_path
+from .grades import (
+    cohort_sheet_faults,
+    cutoff_at,
+    grading_config_faults,
+    load_grading_spec,
+    sheet_path,
+)
 from .log import log, log_err, log_ok, log_step
 from .schedule import Release
 from .schedule_plan import deploy_dest
@@ -630,6 +636,14 @@ def _config_faults(course_org: str, cohort_org: str, sched: schedule.Schedule) -
     collect(
         config_digest.GRADING_SHEETS,
         lambda found: cohort_sheet_faults(course_org, cohort_org, sched, found),
+    )
+    # The one file here that is not in this cohort's classroom-config at all: the
+    # assignment's own definition, in the course org. Its faults keep the SOURCE clock -
+    # they bite when the assignment is graded - so the engine files them under the rungs
+    # and holds them overnight without knowing anything about this file in particular.
+    collect(
+        config_digest.GRADING_CONFIG,
+        lambda found: grading_config_faults(course_org, cohort_org, sched, found),
     )
     return out
 

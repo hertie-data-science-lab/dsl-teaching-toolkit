@@ -803,6 +803,60 @@ def test_a_grading_sheet_mail_never_names_the_student_it_is_about(wired):
     assert "ada-l" not in sent.one["body"] and "ada-l" not in sent.one["subject"]
 
 
+def _grading_config_fault() -> notify.ConfigFault:
+    """A value in an assignment's definition that will not grade as written - the one
+    hand-edited file whose faults have a MOMENT, and the one that is not in the cohort org
+    at all."""
+    return notify.ConfigFault(
+        "assignments.a3",
+        "`submit_via: emial` is not one of github/external - using `github`",
+        fires=NOW + timedelta(hours=8),
+        field="submit_via",
+        lineno=3,
+        file="grading_config.yml",
+        in_repo="assignment-3-f2026",
+        in_org=COURSE,
+        ref="solution",
+        fix_text="correct the value on the line above (allowed: github/external)",
+    )
+
+
+def test_a_grading_config_fault_asks_the_template_who_wrote_the_line(
+    wired, monkeypatch
+):
+    # Blaming the cohort's classroom-config for a file in the course org would name
+    # nobody, and the cohort would be told by its instructors team instead of by the
+    # person who typed it.
+    wired()
+    asked: list = []
+    monkeypatch.setattr(
+        notify,
+        "blame_logins",
+        lambda org, repo, path, ref: (
+            asked.append((org, repo, path, ref)) or {3: "JanG"}
+        ),
+    )
+    routing = notify.route(COHORT, COURSE, [_grading_config_fault()], NOW)
+    assert asked == [
+        (COURSE, "assignment-3-f2026", "grading_config.yml", "refs/heads/solution")
+    ]
+    (routed,) = routing.by_key.values()
+    assert routed.to == ("jan@x.edu",)
+
+
+def test_a_grading_config_mail_says_when_the_value_is_used(wired):
+    sent = wired(blame={3: "JanG"})
+    fault = _grading_config_fault()
+    routing = notify.route(COHORT, COURSE, [fault], NOW)
+    _mail_config([fault], routing, spec=config_digest.GRADING_CONFIG)
+    body = sent.one["body"]
+    assert "grading uses the toolkit&#x27;s default for that value" in body
+    # A deadline row, because this fault HAS one, and it names the grading moment: the
+    # handout this entry describes went out weeks ago.
+    assert "fix by date" in body and "grading fires" in body
+    assert "assignment-3-f2026/blob/solution/grading_config.yml#L3" in body
+
+
 def test_no_mail_transport_says_so_once_and_never_raises(wired, capsys):
     wired(pushers=("JanG",), configured=False)
     routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)

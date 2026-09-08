@@ -32,6 +32,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import cache
 from pathlib import Path
+from typing import Self
 
 import yaml
 
@@ -875,6 +876,33 @@ def final_grade(
 # everything else in it exists to shape the grading sheet - which is this module's. The
 # names `collect` still spells are re-exported there, so no caller had to move.
 GRADING_FILE = "grading_config.yml"  # on the template's solution branch
+# The name it had before the rename. The engine stopped reading that one, so a template
+# still carrying it declares NOTHING - which looks exactly like an assignment nobody has
+# configured, and grades like one.
+LEGACY_GRADING_FILE = "grading.yml"
+
+
+class Dropped(str):
+    """One line the parse of an assignment's definition refused, and what it was about.
+
+    A `str`, because that is what `GradingSpec.dropped` has always been and what every
+    reader of it prints, logs and greps for. The key it names and the vocabulary it would
+    have accepted ride along, so the same line can also become the fault that cites the
+    line to edit and says what is allowed there; a second, parallel list of records would
+    be a second answer to "what did this parse refuse"."""
+
+    field: str
+    what: str
+    allowed: tuple[str, ...]
+
+    def __new__(
+        cls, where: str, field: str, what: str, allowed: tuple[str, ...] = ()
+    ) -> Self:
+        # `  ! <where>: ` is the run-log form, unchanged; `what` on its own is what a
+        # notification says, where the file is already named above it.
+        out = super().__new__(cls, f"  ! {where}: {what}")
+        out.field, out.what, out.allowed = field, what, allowed
+        return out
 
 
 def _one_of(
@@ -891,8 +919,12 @@ def _one_of(
     if text in allowed:
         return text
     dropped.append(
-        f"  ! {where}: `{field}: {value}` is not one of "
-        f"{'/'.join(allowed)} - using `{default}`"
+        Dropped(
+            where,
+            field,
+            f"`{field}: {value}` is not one of {'/'.join(allowed)} - using `{default}`",
+            allowed,
+        )
     )
     return default
 
@@ -909,7 +941,12 @@ def _boolean(value: object, field: str, where: str, dropped: list[str]) -> bool:
     if text in ("false", "no", "off", "0", ""):
         return False
     dropped.append(
-        f"  ! {where}: `{field}: {value}` is not true or false - using false"
+        Dropped(
+            where,
+            field,
+            f"`{field}: {value}` is not true or false - using false",
+            ("true", "false"),
+        )
     )
     return False
 
@@ -922,7 +959,11 @@ def _questions(value: object, where: str, dropped: list[str]) -> dict[str, str] 
     that is not a mapping is dropped with a warning rather than half-read."""
     if not isinstance(value, dict):
         dropped.append(
-            f"  ! {where}: `questions:` must be a mapping of name -> points - ignored"
+            Dropped(
+                where,
+                "questions",
+                "`questions:` must be a mapping of name -> points - ignored",
+            )
         )
         return None
     questions = {
@@ -939,8 +980,11 @@ def _whole_days(value: object, where: str, dropped: list[str]) -> int | None:
         return max(0, int(str(value).strip()))
     except (TypeError, ValueError):
         dropped.append(
-            f"  ! {where}: `late_window_days: {value}` is not a whole number of "
-            f"days - ignored"
+            Dropped(
+                where,
+                "late_window_days",
+                f"`late_window_days: {value}` is not a whole number of days - ignored",
+            )
         )
         return None
 
@@ -956,8 +1000,11 @@ def _team_cap(value: object, where: str, dropped: list[str]) -> int | None:
     if cap > 0:
         return cap
     dropped.append(
-        f"  ! {where}: `max_team_size: {value}` is not a whole number of "
-        f"members - ignored"
+        Dropped(
+            where,
+            "max_team_size",
+            f"`max_team_size: {value}` is not a whole number of members - ignored",
+        )
     )
     return None
 
@@ -976,8 +1023,12 @@ def _penalty(value: object, where: str, dropped: list[str]) -> str | None:
     fault = penalty_fault(raw)
     if fault:
         dropped.append(
-            f"  ! {where}: `late_penalty_per_day: {value}` "
-            f"{_PENALTY_FAULTS[fault]}; no late penalty is applied"
+            Dropped(
+                where,
+                "late_penalty_per_day",
+                f"`late_penalty_per_day: {value}` {_PENALTY_FAULTS[fault]}; no late "
+                f"penalty is applied",
+            )
         )
         return None
     return raw
@@ -1098,7 +1149,11 @@ def _read_settings(
         name = str(key)
         if name not in allowed:
             dropped.append(
-                f"  ! {where}: `{name}:` is not a setting the toolkit reads - ignored"
+                Dropped(
+                    where,
+                    name,
+                    f"`{name}:` is not a setting the toolkit reads - ignored",
+                )
             )
             continue
         out[name] = _READERS[name](value, where, dropped)
@@ -1205,6 +1260,167 @@ def load_grading_spec(course_org: str, template: str) -> GradingSpec:
     the defaults rather than take the cohort down with it."""
     spec = declared_grading_spec(course_org, template)
     return spec if spec is not None else GradingSpec()
+
+
+# ------------------------------------ what an assignment's definition will not grade as
+#
+# TIME-BOUND, unlike everything else that reaches a digest. `submit_via: emial` is a typo
+# in a file, and until the assignment is graded it is a typo that costs nothing: the fix
+# is the same in August and on the morning of the deadline. So it keeps the SOURCE clock -
+# it climbs the ladder as the grading moment approaches - rather than shouting from the
+# day somebody saved it.
+
+
+def _spec_fault(
+    slug: str,
+    template: str,
+    course_org: str,
+    fires: datetime | None,
+    what: str,
+    field: str = "",
+    lineno: int | None = None,
+    fix: str = "",
+    file: str = GRADING_FILE,
+) -> ConfigFault:
+    """One value in one assignment's definition that will not grade as written.
+
+    The fault is in the COURSE org, on the template's `solution` branch, and the digest
+    that carries it is the COHORT's - the cohort is what the grading happens to, and the
+    people who can fix it are the ones in its people.yml. So the file's own address rides
+    on the fault (`in_org`, `in_repo`, `ref`), which is what the deep link and the blame
+    query both go by."""
+    return ConfigFault(
+        f"assignments.{slug}",
+        what,
+        fires=fires,
+        field=field,
+        lineno=lineno,
+        file=file,
+        in_repo=template,
+        in_org=course_org,
+        ref=SOLUTION_BRANCH,
+        fix_text=fix,
+    )
+
+
+def grading_spec_faults(
+    slug: str,
+    template: str,
+    course_org: str,
+    text: str,
+    fires: datetime | None,
+) -> list[ConfigFault]:
+    """Everything in ONE `grading_config.yml` the parse had to refuse, as faults.
+
+    The parse's own sentences, in the words it already logs them in: it is the one place
+    that knows the vocabulary each key accepts, and a fault that paraphrased it would be a
+    second, slightly different answer about what is allowed."""
+    try:
+        spec = parse_grading_spec(text)
+    except yaml.YAMLError as exc:
+        return [
+            _spec_fault(
+                slug,
+                template,
+                course_org,
+                fires,
+                "this file is not valid YAML, so none of it is read and the whole "
+                "assignment grades on the toolkit's defaults",
+                lineno=_mark_line(exc),
+                fix="fix the YAML on the line above",
+            )
+        ]
+    lines = key_lines(text)
+    return [
+        _spec_fault(
+            slug,
+            template,
+            course_org,
+            fires,
+            dropped.what,
+            field=dropped.field,
+            lineno=lines.get((dropped.field,)),
+            fix=_spec_fix(dropped),
+        )
+        for dropped in spec.dropped
+        if isinstance(dropped, Dropped)
+    ]
+
+
+def _spec_fix(dropped: Dropped) -> str:
+    """What would put one refused line right: the vocabulary the key accepts, or - for a
+    key the toolkit has no reader for at all - the keys it does read.
+
+    "Correct the value" is not an instruction about a line whose KEY is the mistake: a
+    setting that moved here from schedule.yml, or a plain misspelling, has no value to
+    correct."""
+    if dropped.field not in SPEC_KEYS:
+        return f"remove the line above, or spell it as one of: {', '.join(SPEC_KEYS)}"
+    allowed = f" (allowed: {'/'.join(dropped.allowed)})" if dropped.allowed else ""
+    return f"correct the value on the line above{allowed}"
+
+
+def grading_config_faults(
+    course_org: str, cohort_org: str, sched, found: list[ConfigFault]
+) -> None:
+    """Every assignment this cohort's plan declares, and everything in its definition that
+    will not grade as written.
+
+    `fires` is the moment the value is USED: the assignment's `grading_datetime`, and its
+    due date where it declares none (which is what `cutoff_at` resolves the freeze to
+    anyway). An assignment with neither has no moment, and its faults simply sit in the
+    issue.
+
+    `cohort_org` is not read - the definition lives in the course org - and is taken all
+    the same, because every collector in `scheduler._config_faults` is asked the same
+    question and one that quietly dropped an argument would read as a different kind of
+    check. Nothing is appended until every template has been read: a read that failed is
+    "we could not look", and the digest closes what it is not handed."""
+    faults: list[ConfigFault] = []
+    for slug, entry in sorted(sched.assignments.items()):
+        template = entry.course_source_repo
+        if not template:
+            continue  # the plan itself is faulty; schedule.yml's own digest says so
+        fires = entry.grading_datetime or entry.due_datetime
+        text = _grading_text(course_org, template)
+        if text is None:
+            faults += _undeclared_faults(slug, template, course_org, fires)
+            continue
+        faults += grading_spec_faults(slug, template, course_org, text, fires)
+    found.extend(faults)
+
+
+def _undeclared_faults(
+    slug: str, template: str, course_org: str, fires: datetime | None
+) -> list[ConfigFault]:
+    """The one fault a template with NO `grading_config.yml` can still have: it is
+    carrying the file under the name the engine stopped reading.
+
+    An assignment that declares nothing is not a fault - it grades as an individual
+    hand-marked one, which is a real choice - so this asks the question only when there is
+    a file to find, and pays one API read for it only on a template that has no definition
+    at all."""
+    try:
+        legacy = get_file_content(
+            course_org, template, LEGACY_GRADING_FILE, ref=SOLUTION_BRANCH
+        )
+    except RuntimeError:
+        return []  # cannot say; `get_file_content` has already said why
+    if legacy is None:
+        return []
+    return [
+        _spec_fault(
+            slug,
+            template,
+            course_org,
+            fires,
+            f"this assignment is defined in `{LEGACY_GRADING_FILE}`, which nothing "
+            f"reads any more - it grades on the toolkit's defaults",
+            file=LEGACY_GRADING_FILE,
+            fix=f"rename `{LEGACY_GRADING_FILE}` to `{GRADING_FILE}` on the template's "
+            f"`{SOLUTION_BRANCH}` branch",
+        )
+    ]
 
 
 # --------------------------------------------------- the team-formation lock file

@@ -17,7 +17,7 @@ import sys
 import tempfile
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -25,6 +25,7 @@ import pytest
 import yaml
 
 from dsl_course import collect, gh_contents, ghcli, grades
+from dsl_course.faults import Severity
 from dsl_course.roster import Student
 from dsl_course.schedule import Schedule
 from tests.conftest import ROSTER_HEADER
@@ -5279,3 +5280,117 @@ def test_grader_pdf_is_off_unless_the_assignment_asks_for_it():
     assert collect.load_grading_spec.__module__  # the spec is grades', read here
     assert not collect.parse_grading_spec("title: x\n").grader_pdf
     assert collect.parse_grading_spec("grader_pdf: true\n").grader_pdf
+
+
+# --------------------- what an assignment's definition will not grade as, as a fault
+#
+# The one hand-edited file whose faults keep the SOURCE clock: `submit_via: emial` costs
+# nothing until the assignment is graded, and the fix is the same in August as on the
+# morning of the deadline. So it climbs the ladder towards the grading moment instead of
+# shouting from the day somebody saved it - and the file itself is in the COURSE org, on
+# the template's `solution` branch, while the issue about it is the cohort's.
+
+BERLIN_TZ = ZoneInfo("Europe/Berlin")
+GRADES_AT = datetime(2026, 10, 15, 23, 59, tzinfo=BERLIN_TZ)
+DUE_AT = datetime(2026, 10, 10, 23, 59, tzinfo=BERLIN_TZ)
+BROKEN_CONFIG = "title: Bayes\ntype: group\nsubmit_via: emial\nmystery: 4\n"
+
+
+def _spec_faults(text=BROKEN_CONFIG, fires=GRADES_AT):
+    return grades.grading_spec_faults(
+        "a3", "assignment-3-f2026", "Course-Org", text, fires
+    )
+
+
+def test_a_value_that_will_not_grade_as_written_cites_the_line_in_the_template():
+    fault = next(f for f in _spec_faults() if f.field == "submit_via")
+    assert fault.where == "assignments.a3" and fault.lineno == 3
+    assert fault.file == "grading_config.yml"
+    assert fault.in_repo == "assignment-3-f2026" and fault.in_org == "Course-Org"
+    assert fault.ref == "solution"
+    # The link goes to the TEMPLATE on its solution branch, not to the cohort's own repo,
+    # even though the cohort's digest is what carries the fault.
+    assert fault.link("Cohort-Org") == (
+        "https://github.com/Course-Org/assignment-3-f2026/blob/solution/"
+        "grading_config.yml#L3"
+    )
+
+
+def test_the_fix_names_the_vocabulary_the_key_accepts():
+    fault = next(f for f in _spec_faults() if f.field == "submit_via")
+    assert fault.fix() == (
+        "correct the value on the line above (allowed: github/external)"
+    )
+    # A key the toolkit has no reader for has no value to correct: the KEY is the mistake.
+    unknown = next(f for f in _spec_faults() if f.field == "mystery")
+    assert unknown.fix().startswith("remove the line above, or spell it as one of:")
+
+
+def test_these_faults_bite_when_the_assignment_is_graded():
+    assert all(f.fires == GRADES_AT for f in _spec_faults())
+    # Which is the whole difference from a line nobody can read: a month out it is not
+    # worth an email, and the day before grading it is.
+    fault = _spec_faults()[0]
+    assert fault.severity(GRADES_AT - timedelta(days=30)) is Severity.ADVISORY
+    assert fault.severity(GRADES_AT - timedelta(hours=8)) is Severity.URGENT
+
+
+def test_a_definition_that_is_not_valid_yaml_is_one_fault_for_the_whole_file():
+    (fault,) = _spec_faults("questions: [\n")
+    assert "none of it is read" in fault.what and fault.fires == GRADES_AT
+
+
+def _sched_one_assignment(grading=None):
+    from dsl_course.schedule import AssignmentEntry
+
+    return Schedule(
+        assignments={
+            "a3": AssignmentEntry(
+                course_source_repo="assignment-3-f2026",
+                due_datetime=DUE_AT,
+                grading_datetime=grading,
+            )
+        }
+    )
+
+
+def _collect_configs(monkeypatch, text=BROKEN_CONFIG, grading=None, legacy=None):
+    monkeypatch.setattr(grades, "_grading_text", lambda course, template: text)
+    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: legacy)
+    found: list = []
+    grades.grading_config_faults(
+        "Course-Org", "Cohort-Org", _sched_one_assignment(grading), found
+    )
+    return found
+
+
+def test_the_grading_moment_is_the_deadline_and_the_due_date_stands_in(monkeypatch):
+    assert _collect_configs(monkeypatch, grading=GRADES_AT)[0].fires == GRADES_AT
+    assert _collect_configs(monkeypatch)[0].fires == DUE_AT
+
+
+def test_a_template_still_using_the_pre_rename_filename_says_so(monkeypatch):
+    # `grading.yml` is read by nothing, so the assignment grades on the defaults while the
+    # file that was meant to define it sits right there.
+    (fault,) = _collect_configs(monkeypatch, text=None, legacy="type: group\n")
+    assert fault.file == "grading.yml"
+    assert "nothing reads any more" in fault.what
+    assert fault.fix().startswith("rename `grading.yml` to `grading_config.yml`")
+
+
+def test_an_assignment_that_declares_nothing_at_all_is_not_a_fault(monkeypatch):
+    # Undeclared is a real choice: an individual, hand-marked assignment.
+    assert _collect_configs(monkeypatch, text=None, legacy=None) == []
+
+
+def test_a_template_that_could_not_be_read_reports_none_of_them(monkeypatch):
+    def _boom(course, template):
+        raise RuntimeError("rate-limited")
+
+    monkeypatch.setattr(grades, "_grading_text", _boom)
+    found: list = []
+    with pytest.raises(RuntimeError):
+        grades.grading_config_faults(
+            "Course-Org", "Cohort-Org", _sched_one_assignment(), found
+        )
+    assert found == []

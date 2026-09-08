@@ -222,3 +222,67 @@ def test_every_grading_sheet_is_one_issue_and_each_line_links_its_own_sheet():
     assert "/grading_sheets/a1.yml#L5" in body
     assert "/grading_sheets/a2.yml#L9" in body
     assert "### needs fixing" in body  # no deadline: it is a line nobody can read
+
+
+# ------------------------------------------- a hand-edited file that keeps the OTHER clock
+
+
+def _spec_fault(fires) -> ConfigFault:
+    """A `grading_config.yml` value that will not grade as written: a hand-edited file's
+    fault with a MOMENT - the one it is used to grade at."""
+    return ConfigFault(
+        "assignments.a3",
+        "`submit_via: emial` is not one of github/external - using `github`",
+        fires=fires,
+        field="submit_via",
+        lineno=3,
+        file="grading_config.yml",
+        in_repo="assignment-3-f2026",
+        in_org="Course-Org",
+        ref="solution",
+        fix_text="correct the value on the line above (allowed: github/external)",
+    )
+
+
+def test_the_grading_config_issue_names_the_file_without_claiming_it_is_here():
+    # The issue is the COHORT's and the file is in the course org, on a template's
+    # solution branch: `classroom-config/grading_config.yml` is a path that does not exist.
+    body = cd.render_body(cd.GRADING_CONFIG, [_spec_fault(NOW)], NOW, COHORT)
+    assert "`<assignment template>/grading_config.yml` has broken entries" in body
+
+
+def test_a_fault_with_a_moment_is_filed_under_its_rung_whatever_file_it_is_in():
+    # The clock is the FAULT's answer, never the issue's. Filed by age it would sit under
+    # "unfixed for N days", which promises no deadline and hides the one it has.
+    body = cd.render_body(
+        cd.GRADING_CONFIG, [_spec_fault(NOW + timedelta(hours=8))], NOW, COHORT
+    )
+    assert "### URGENT (12h)" in body
+    assert "unfixed for" not in body and "needs fixing" not in body
+    assert "/assignment-3-f2026/blob/solution/grading_config.yml#L3" in body
+
+
+def test_a_fault_with_a_moment_is_held_overnight_like_every_other_deadline(gh):
+    # 02:00, and it can wait until 07:00 - unlike a line nobody can read, whose whole
+    # value is being said while the person who pushed it is still at the keyboard.
+    gh([])
+    out = cd.sync(
+        cd.GRADING_CONFIG,
+        "Cohort",
+        "Course",
+        [_spec_fault(NIGHT + timedelta(hours=8))],
+        NIGHT,
+    )
+    assert out.mail == {}
+
+
+def test_a_fault_with_a_moment_earns_no_age_reminder(gh):
+    # One clock per fault. Counting its days as well would be a second, contradictory
+    # schedule for one thing to fix.
+    fault = _spec_fault(NOW + timedelta(hours=8))
+    seen = {fault.key: (NOW - timedelta(days=9)).isoformat()}
+    state = cd._state_marker(cd.current_state([fault], NOW), seen)
+    body = cd.render_body(cd.GRADING_CONFIG, [fault], NOW, COHORT, state, seen)
+    gh([issue_row(7, cd.GRADING_CONFIG.title, body)])
+    out = cd.sync(cd.GRADING_CONFIG, "Cohort", "Course", [fault], NOW)
+    assert out.reminder is None

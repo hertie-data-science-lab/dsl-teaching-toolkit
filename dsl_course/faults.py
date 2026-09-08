@@ -149,6 +149,7 @@ CONSEQUENCE = {
     # Keyed on the DIGEST's label for the folder, not on one sheet's path: every grading
     # sheet in the cohort is carried by one issue and one letter.
     "grading_sheets/": "that sheet is not refreshed, and nothing on it is sent",
+    "grading_config.yml": "grading uses the toolkit's default for that value",
 }
 
 # What to do about a CSV whose header the toolkit cannot read. The same sentence for every
@@ -218,6 +219,13 @@ class ConfigFault:
     # blame query that decides who is told.
     file: str = ""
     in_repo: str = CONFIG_REPO
+    # Where that repo IS, and on which branch, when it is not the cohort org's `main`. An
+    # assignment's `grading_config.yml` lives in the course org, on the template's
+    # `solution` branch, while the digest that carries the fault is the cohort's - so the
+    # deep link and the blame query would otherwise both go looking in the wrong place.
+    # "" = wherever the caller is asking from, which is every other file.
+    in_org: str = ""
+    ref: str = "main"
     # This fault's own fix sentence, where the parser knows one better than the file's
     # (see FIX). Lower-case and unpunctuated at the front, so a caller can prefix `fix:`.
     fix_text: str = ""
@@ -273,12 +281,15 @@ class ConfigFault:
         """The GitHub URL of the exact line to edit, or None when the line - or the org it
         is in - is not known.
 
-        `main` is hard-coded because that is the only branch anything reads these files
-        from, the cohort's own workflows included."""
+        `org` is where the CALLER is asking from - the cohort, for every file in its
+        classroom-config. A fault that knows better says so (`in_org`, `ref`): an
+        assignment's definition is a file in the course org on a `solution` branch, and
+        the cohort's digest is still the issue that carries it."""
+        org = self.in_org or org
         if not org or not self.lineno or not self.file:
             return None
         return (
-            f"https://github.com/{org}/{self.in_repo}/blob/main/{self.file}"
+            f"https://github.com/{org}/{self.in_repo}/blob/{self.ref}/{self.file}"
             f"#L{self.lineno}"
         )
 
@@ -313,7 +324,15 @@ class ConfigFault:
 
     @property
     def moment(self) -> str:
-        """What the date IS: a release ships, an assignment is handed out."""
+        """What the date IS: a release ships, an assignment is handed out, a mark is
+        computed.
+
+        Only a SOURCE is about a copy that has to be there in time. Everything else that
+        carries a moment is a VALUE the grading pass will read at it - an assignment's
+        `grading_config.yml` - and "handout fires" would name the wrong deadline entirely
+        for an entry whose handout went out weeks ago."""
+        if not self.is_source:
+            return "grading"
         return "handout" if self.is_assignment else "release"
 
     @property

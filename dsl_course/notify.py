@@ -134,16 +134,20 @@ def _addresses(emails: Iterable[str]) -> tuple[str, ...]:
     return tuple(out.values())
 
 
-def _blame(cohort_org: str, repo: str, path: str) -> dict[int, str]:
+def _blame(org: str, repo: str, path: str, ref: str = "main") -> dict[int, str]:
     """Who wrote each line of one config file. `{}` when it cannot be read.
 
     A blame that failed must not read as "nobody wrote this": absence here degrades to
-    mailing the whole teaching team, which is noisier but never wrong."""
+    mailing the whole teaching team, which is noisier but never wrong.
+
+    `org` and `ref` because not every file a cohort's digest carries is in the cohort org
+    on `main`: an assignment's `grading_config.yml` is in the course org, on the
+    template's `solution` branch, and blaming the cohort for it would name nobody."""
     try:
-        return blame_logins(cohort_org, repo, path)
+        return blame_logins(org, repo, path, f"refs/heads/{ref}")
     except Exception as exc:
         log(
-            f"  [skip] could not read who wrote {path} in {cohort_org} "
+            f"  [skip] could not read who wrote {path} in {org} "
             f"({type(exc).__name__}) - notifying the whole teaching team"
         )
         return {}
@@ -185,7 +189,9 @@ def _wrote_it(cohort_org: str, fault: ConfigFault, bot: str) -> str | None:
         )
     if not fault.lineno:
         return None
-    return _blame(cohort_org, fault.in_repo, fault.file).get(fault.lineno)
+    return _blame(fault.in_org or cohort_org, fault.in_repo, fault.file, fault.ref).get(
+        fault.lineno
+    )
 
 
 def _last_committer(course_org: str, repo: str) -> str | None:

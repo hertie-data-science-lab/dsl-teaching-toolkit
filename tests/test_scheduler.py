@@ -2551,7 +2551,12 @@ def test_a_routing_that_raised_still_lets_the_digest_speak(monkeypatch, capsys):
 
 
 def _config_preflight(
-    monkeypatch, *, roster_faults=None, roster_raises=None, sheet_faults=None
+    monkeypatch,
+    *,
+    roster_faults=None,
+    roster_raises=None,
+    sheet_faults=None,
+    spec_faults=None,
 ):
     """Drive `_preflight_configs` with every reader stubbed, capturing what each digest
     was handed."""
@@ -2576,6 +2581,11 @@ def _config_preflight(
         scheduler,
         "cohort_sheet_faults",
         lambda course, cohort, sched, found: found.extend(sheet_faults or []),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "grading_config_faults",
+        lambda course, cohort, sched, found: found.extend(spec_faults or []),
     )
     monkeypatch.setattr(
         scheduler.config_digest,
@@ -2606,7 +2616,13 @@ def test_the_config_preflight_checks_every_hand_edited_file(monkeypatch):
     # source pre-flight keeps, and the plan this tick is running is already parsed.
     rc, synced, mailed = _config_preflight(monkeypatch)
     assert rc == 0
-    everything = {"people.yml", "students.csv", "teams.csv", "grading_sheets/"}
+    everything = {
+        "people.yml",
+        "students.csv",
+        "teams.csv",
+        "grading_sheets/",
+        "grading_config.yml",
+    }
     assert set(synced) == everything
     assert sorted(mailed) == sorted(everything)
 

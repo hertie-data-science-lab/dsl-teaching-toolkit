@@ -64,7 +64,7 @@ from .faults import (
     hours,
     zone_name,
 )
-from .grades import SHEETS_DIR
+from .grades import GRADING_FILE, SHEETS_DIR
 from .issues import close_issues_titled, find_issues, issue_url, upsert_issue
 from .log import log_err, log_ok, log_step
 from .roster import ROSTER_PATH
@@ -94,9 +94,14 @@ class Digest:
     state_key: str = "source"
     repo: str = CONFIG_REPO
     cc_team: str = "instructors"
+    # How the file is NAMED where a reader is sent to it, when `<repo>/<file>` is not
+    # where it lives. An assignment's `grading_config.yml` is a file in the course org, on
+    # a template's `solution` branch, and the issue about it is the cohort's - so the
+    # heading has to say which file without claiming it is in the repo the issue is in.
+    cite: str = ""
 
     def cite_file(self) -> str:
-        return f"`{self.repo}/{self.file}`"
+        return f"`{self.cite or f'{self.repo}/{self.file}'}`"
 
 
 # The digests that are not schedule.yml's (those two are declared in `source_digest`,
@@ -126,6 +131,16 @@ GRADING_SHEETS = Digest(
     title="grading sheets have entries the grader cannot read",
     file=f"{SHEETS_DIR}/",
     doc="docs/10-grade-and-return-assignments.md",
+)
+# The COHORT's issue about a file in the COURSE org: the assignment is defined once and
+# graded per cohort, and the people who can act on it are the ones in this cohort's
+# people.yml. Every fault in it carries its own template's address, so the line links the
+# template it is in - see `ConfigFault.in_org`.
+GRADING_CONFIG = Digest(
+    title="assignment grading_config.yml has values that will not grade as written",
+    file=GRADING_FILE,
+    doc="docs/03-add-assignment-to-course.md",
+    cite=f"<assignment template>/{GRADING_FILE}",
 )
 
 # What closing one of these issues says. One string, because two issues are closed with
@@ -438,7 +453,7 @@ def _announce(
 
     def held(key: str) -> bool:
         fault = by_key.get(key)
-        return fault is not None and fault.is_source
+        return fault is not None and fault.fires is not None
 
     stored = dict(current)
     for key in changed.appeared:
@@ -524,6 +539,18 @@ def render_body(
     return "\n".join(out)
 
 
+def keeps_the_age_clock(fault: SourceFault) -> bool:
+    """Whether this fault is filed - and reminded about - by HOW LONG IT HAS STOOD, as
+    against by a moment it is counting down to.
+
+    The question is the fault's clock and nothing else, so it is asked in one place. It is
+    not `is_source`: an undated `tbc` entry is a source with no moment, and it earns no
+    age reminder either (nobody has written the session yet, which is the normal state of
+    a term planned in August), while an assignment's `grading_config.yml` is a hand-edited
+    file with a deadline all the same - the moment its value is used to grade."""
+    return fault.fires is None and not fault.is_source
+
+
 def _sections(
     faults: list[SourceFault], now, seen: dict[str, str]
 ) -> list[tuple[str, list[SourceFault]]]:
@@ -539,10 +566,10 @@ def _sections(
     by_rung: dict[Severity, list[SourceFault]] = {}
     immediate: list[SourceFault] = []
     for f in faults:
-        if f.is_source:
-            by_rung.setdefault(f.severity(now), []).append(f)
-        else:
+        if keeps_the_age_clock(f):
             immediate.append(f)
+        else:
+            by_rung.setdefault(f.severity(now), []).append(f)
     out = [
         (_RUNG_HEADING[rung], by_rung[rung])
         for rung in sorted(by_rung, reverse=True)
@@ -889,7 +916,7 @@ def sync(
     # The clock is the IMMEDIATE faults' alone. A source in the same issue is counting
     # down to its own deadline and is told about on that ladder; reminding anybody that it
     # is "unfixed for 2 days" would be a second, contradictory schedule for one fault.
-    immediate = [f for f in faults if not f.is_source]
+    immediate = [f for f in faults if keeps_the_age_clock(f)]
     sent = _read_marker(body, _CLOCK, {}, digest.state_key).get("sent")
     reminder, sent = _due_reminder(
         oldest_seen(immediate, since), now, sent if isinstance(sent, int) else 0
