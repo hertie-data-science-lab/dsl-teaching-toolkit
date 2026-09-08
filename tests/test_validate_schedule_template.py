@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 import yaml
 from conftest import source_fault
 
-from dsl_course import mailer, schedule, source_digest
+from dsl_course import discovery, mailer, schedule, source_digest
 from dsl_course.schedule import SOURCE_WARN_WINDOW, hours
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -54,6 +54,20 @@ def test_an_unreadable_course_org_is_a_failure_not_a_skipped_check():
     # otherwise go looking through a file that is perfectly fine.
     assert "not a fault in your file" in fail["run"]
     assert "::notice::" not in RAW
+
+
+def test_the_course_org_is_read_by_the_real_loader_not_a_grep():
+    # `grep '^course:' | cut -d: -f2- | xargs` - what the dispatchers must use, having
+    # neither Python nor the central checkout - keeps the quotes on a quoted value and
+    # keeps a trailing `# comment`. Either resolves to an org that does not exist, and the
+    # source check then reads as infrastructure-broken on a file that is fine. This job
+    # has both by the time it asks, so it asks the same YAML parse every CLI makes.
+    resolve = _step("Resolve the course org")
+    assert "grep" not in resolve["run"]
+    assert "course_org_for_cohort" in resolve["run"]
+    # ...and the name it invokes is a real one, in the checkout it runs from.
+    assert callable(discovery.course_org_for_cohort)
+    assert resolve["working-directory"] == "central"
 
 
 def test_the_parse_is_reported_even_when_the_course_org_cannot_be_read():
