@@ -301,6 +301,62 @@ def test_read_cohorts_raises_on_a_malformed_registry_shape(monkeypatch):
         discovery._read_cohorts("Course")
 
 
+def test_a_caller_collecting_faults_is_told_rather_than_raised_at(monkeypatch):
+    # The notifier is asking what is WRONG with the file so it can mail somebody about it.
+    # Raising at it would take the whole pre-flight down over the one thing it exists to
+    # report - and the cohort listing above still raises, because nothing may be pruned
+    # against a registry nobody can read.
+    for text, expected in (
+        ("cohorts: [unclosed\n", "not valid YAML"),
+        ("cohorts: Course-f2026\n", "not a list of cohort org names"),
+    ):
+        monkeypatch.setattr(discovery, "get_file_content", _registry(text))
+        found: list = []
+        assert discovery.read_cohort_registry("Course", found) == []
+        (fault,) = found
+        assert expected in fault.what
+        assert (fault.file, fault.in_repo, fault.field) == (
+            discovery.COHORTS_PATH,
+            ".github",
+            "cohorts",
+        )
+        # The COURSE org's registry, so the fix sentence is the course-level one and the
+        # citation points at the course org's own .github - not at a cohort's config repo.
+        assert fault.fix() == "correct the line above"
+        # No line: the registry's shape is what is wrong, not one entry of it, so every
+        # surface cites the file bare rather than deep-linking a guess.
+        assert fault.at == discovery.COHORTS_PATH and fault.lineno is None
+
+
+def test_a_registry_the_toolkit_can_read_leaves_no_fault(monkeypatch):
+    monkeypatch.setattr(
+        discovery, "get_file_content", _registry("cohorts:\n  - Course-f2026\n")
+    )
+    found: list = []
+    assert discovery.read_cohort_registry("Course", found) == ["Course-f2026"]
+    assert found == []
+
+
+def test_a_registry_that_is_not_there_yet_is_not_a_fault(monkeypatch):
+    # A brand-new course org has no cohorts and no registry file. That is the normal
+    # state for weeks, and an issue about it would be an issue about nothing.
+    monkeypatch.setattr(discovery, "get_file_content", _registry(None))
+    found: list = []
+    assert discovery.read_cohort_registry("Course", found) == []
+    assert found == []
+
+
+def test_a_registry_that_could_not_be_READ_still_raises(monkeypatch):
+    # "We could not look" must never be reported to a course admin as "your file is
+    # broken": the digest would list a fault nobody can fix, and the mail would name it.
+    def boom(*a, **k):
+        raise RuntimeError("rate limited")
+
+    monkeypatch.setattr(discovery, "get_file_content", boom)
+    with pytest.raises(RuntimeError, match="rate limited"):
+        discovery.read_cohort_registry("Course", [])
+
+
 def test_register_cohort_reports_failure_when_the_write_fails(monkeypatch):
     # The put_file return was discarded and log_ok("registered ...") fired unconditionally,
     # so bootstrap claimed a cohort was registered even when the write failed.

@@ -150,6 +150,13 @@ CONSEQUENCE = {
     # sheet in the cohort is carried by one issue and one letter.
     "grading_sheets/": "that sheet is not refreshed, and nothing on it is sent",
     "grading_config.yml": "grading uses the toolkit's default for that value",
+    # The COURSE org's own two files share one digest and therefore one sentence, keyed on
+    # the file that names the issue. Both cost the same thing, which is why they can: a
+    # course whose identity file or whose registry cannot be read is a course the sync
+    # walks past entirely.
+    "dsl-course.yml": (
+        "the sync skips this course: admins and cohorts are not reconciled"
+    ),
 }
 
 # What to do about a CSV whose header the toolkit cannot read. The same sentence for every
@@ -171,6 +178,8 @@ FIX = {
     "people.yml": "fix the handle/email on the line above",
     "students.csv": CSV_HEADER_FIX,
     "teams.csv": CSV_HEADER_FIX,
+    "dsl-course.yml": "correct the line above",
+    "cohort-courses-pages.yml": "correct the line above",
 }
 
 
