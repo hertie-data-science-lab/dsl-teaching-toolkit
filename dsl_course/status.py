@@ -1,7 +1,7 @@
 """dsl-course status -- a per-cohort checklist of every faculty & instructors input location.
 
 Faculty & instructors currently touch several distinct files across 2 orgs to run a cohort: course
-identity, course admins, and classroom-config's roster/teams/grades/schedule.yml (which
+identity, course admins, and classroom-config's roster/teams/grading sheets/schedule.yml (which
 now carries the release plan too)/people.yml. This module answers one glance-able question -
 what's configured, what's still missing, and where do I go to fix it - by reusing
 each source's existing loader rather than re-deriving anything. Read-only; it
@@ -261,7 +261,7 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         "Grades",
         cohort_org,
         grades.CONFIG_REPO,
-        grades.GRADES_DIR,
+        grades.SHEETS_DIR,
         cohort_branch,
         bool(grade_sources),
         f"{len(grade_sources)} assignment(s)" if grade_sources else "",

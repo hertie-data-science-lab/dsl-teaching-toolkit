@@ -28,7 +28,6 @@ import yaml
 
 from dsl_course import bootstrap_course, welcome
 from dsl_course.grades import (
-    GradeRow,
     SheetSpec,
     build_gradebooks,
     dump_sheet,
@@ -109,13 +108,14 @@ PY_FILES = sorted((ROOT / "dsl_course").glob("*.py"))
 
 def _gradebook() -> str:
     """One student's `grades.yml` - the `yaml.safe_dump` path (grades.render_yaml)."""
-    rows = {
-        "assignment-1": [
-            GradeRow(github_handle="janedoe", team="t1", final_grade="15")
-        ],
-        "assignment-2": [GradeRow(github_handle="janedoe", final_grade="10")],
+    sources = {
+        slug: (
+            SheetSpec(slug=slug, title=slug, is_group=False),
+            {"submissions": {"janedoe": {"score_individual": score}}},
+        )
+        for slug, score in (("assignment-1", 15), ("assignment-2", 10))
     }
-    books = build_gradebooks(rows)
+    books = build_gradebooks(sources)
     return render_yaml({"student": "janedoe", "assignments": books["janedoe"]})
 
 

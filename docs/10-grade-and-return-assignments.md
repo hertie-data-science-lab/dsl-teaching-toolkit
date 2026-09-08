@@ -111,12 +111,5 @@ count lands in `info.autograde` (`7/9`) for your information only - it is never 
 itself and a student never sees it. Per-test detail goes to `classroom-config/autograde/`.
 To regrade, delete `autograde/<slug>/`.
 
-## Still on the grade CSVs?
-
-A cohort that began marking in `grades/<slug>.csv` keeps distributing from it: those marks
-reach gradebooks, the registrar export and the email, but not the Feedback issues, and the
-gradebook's Submitted column stays blank because a CSV records no timing. New assignments
-get a sheet.
-
 See also: [Release an assignment](09-release-assignment-to-cohort.md) ·
 [Schedule releases](07-schedule-releases.md)

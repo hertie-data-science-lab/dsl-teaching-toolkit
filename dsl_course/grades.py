@@ -26,7 +26,6 @@ import sys
 import tempfile
 import textwrap
 from collections import Counter
-from collections.abc import Container
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -72,7 +71,6 @@ from .repos import (
     set_repo_topics,
 )
 
-GRADES_DIR = "grades"  # RETIRED: the pre-sheet grade tables, still READ in transition
 GRADEBOOK_DIR = (
     "gradebook"  # what has been sent (distributed.csv), beside the retired files
 )
@@ -81,30 +79,6 @@ GRADEBOOK_DIR = (
 # writes `distributed.csv`, which records every channel rather than just the email.
 NOTIFIED_PATH = f"{GRADEBOOK_DIR}/notified.csv"
 COHORT_CSV_NAME = "cohort-gradebook.csv"  # generated wide faculty-only glance view
-
-# One assignment CSV row. `autograde_score` is the machine's passing-test count on both
-# individual and group assignments; `manual_score` is the faculty & instructors' hand-marked
-# part of an individual one. Group rows additionally carry the shared `team_score`, that
-# member's private `individual_adjustment`, and the shared `team_comments`. `final_grade` is
-# authoritative (stored explicitly so faculty & instructors own any rounding/combination).
-# `autograde_score`/`manual_score` are faculty-internal working columns - they never appear in
-# the student's gradebook. Values stay strings - a grade may be a letter, a percentage, or
-# "+4" - we never coerce.
-#
-# Every name says its scope and its role outright: a marker opening the CSV in Excel reads the
-# header, not this file, and the old `auto`/`manual`/`final` said neither which part of the
-# mark they held nor who owned them.
-GRADE_FIELDS = (
-    "github_handle",
-    "team",
-    "autograde_score",
-    "manual_score",
-    "team_score",
-    "individual_adjustment",
-    "final_grade",
-    "individual_comments",
-    "team_comments",
-)
 
 # What a gradebook says before its student has been marked in anything. The legend names
 # the keys `STUDENT_VIEW_KEYS` allows and no others: this is the first file a student opens,
@@ -128,59 +102,7 @@ _STARTER_README = (
 )
 
 
-@dataclass
-class GradeRow:
-    github_handle: str = ""
-    team: str = ""
-    autograde_score: str = ""
-    manual_score: str = ""
-    team_score: str = ""
-    individual_adjustment: str = ""
-    final_grade: str = ""
-    individual_comments: str = ""
-    team_comments: str = ""
-
-
 # --------------------------------------------------------------------------- pure core
-
-
-# The pre-rename column names. A CSV still carrying them must never be parsed, because the
-# rename left `github_handle`, `team` and `team_comments` untouched: an old row would parse
-# PARTIALLY, keeping its handle while every renamed cell read blank. Nothing downstream can
-# tell that apart from a legitimately sparse row, so a distribute would publish a gradebook
-# with the marks missing - a green run that destroys a marker's work. Refusing to read the
-# file is the only safe answer.
-_RETIRED_GRADE_FIELDS = {
-    "auto": "autograde_score",
-    "manual": "manual_score",
-    "team_grade": "team_score",
-    "adjustment": "individual_adjustment",
-    "final": "final_grade",
-    "comments": "individual_comments",
-}
-
-
-class RetiredGradeHeader(Exception):
-    """A grades CSV written against the pre-rename column names."""
-
-
-def parse_grades(text: str) -> list[GradeRow]:
-    """Parse one `grades/<assignment>.csv` into rows (blank/extra columns tolerated).
-
-    Raises RetiredGradeHeader if the header uses the pre-rename names - see
-    `_RETIRED_GRADE_FIELDS` for why that cannot be tolerated the way an unknown column is."""
-    reader = read_csv(text, ("github_handle",), "grades CSV")
-    stale = [f for f in (reader.fieldnames or []) if f.strip() in _RETIRED_GRADE_FIELDS]
-    if stale:
-        renames = ", ".join(f"{f} -> {_RETIRED_GRADE_FIELDS[f.strip()]}" for f in stale)
-        raise RetiredGradeHeader(
-            f"grades CSV uses retired column name(s): {renames}. Rename the header row and "
-            f"re-run; reading it as-is would drop every mark in those columns."
-        )
-    return [
-        GradeRow(**{f: (row.get(f) or "").strip() for f in GRADE_FIELDS})
-        for row in reader
-    ]
 
 
 def render_yaml(book: dict) -> str:
@@ -1680,47 +1602,19 @@ def _views_from_sheet(spec: SheetSpec, sheet: dict) -> dict[str, dict]:
     return views
 
 
-def _views_from_grade_rows(rows: list[GradeRow]) -> dict[str, dict]:
-    """The same views off a legacy `grades/<slug>.csv`, so a cohort that began marking
-    before the grading sheet existed still distributes from the table it is using.
-
-    That CSV's `final_grade` is authoritative - it was typed, not derived - so nothing is
-    recomputed from it. Its `team_score` and `individual_adjustment` columns have no
-    student-visible home any more (see STUDENT_VIEW_KEYS) and are not carried over."""
-    return {
-        row.github_handle: _allowlisted(
-            {
-                "final_grade": row.final_grade,
-                "feedback": row.individual_comments,
-                "team": row.team,
-                "team_feedback": row.team_comments,
-            }
-        )
-        for row in rows
-        if row.github_handle
-    }
-
-
 def build_gradebooks(
-    sources: dict[str, tuple[SheetSpec, dict] | list[GradeRow]],
+    sources: dict[str, tuple[SheetSpec, dict]],
 ) -> dict[str, dict[str, dict]]:
-    """Pivot every assignment's source into `{handle: {slug: view}}` - one book per
+    """Pivot every assignment's grading sheet into `{handle: {slug: view}}` - one book per
     student, one entry per assignment they have a mark or a word of feedback on.
 
-    A source is either a grading sheet with the spec that reads it, or a legacy grade
-    CSV's rows. Assignments are folded in sorted order, so a re-run renders byte-identical
-    files and only a gradebook that really changed is committed and emailed. An empty view
-    is not an entry: a student with nothing in the sheet yet has nothing to be told."""
+    Assignments are folded in sorted order, so a re-run renders byte-identical files and
+    only a gradebook that really changed is committed and emailed. An empty view is not an
+    entry: a student with nothing in the sheet yet has nothing to be told."""
     books: dict[str, dict[str, dict]] = {}
     canonical: dict[str, str] = {}  # fold key -> the first spelling seen for it
     for slug in sorted(sources):
-        source = sources[slug]
-        views = (
-            _views_from_grade_rows(source)
-            if isinstance(source, list)
-            else _views_from_sheet(*source)
-        )
-        for handle, view in views.items():
+        for handle, view in _views_from_sheet(*sources[slug]).items():
             if not view:
                 continue
             key = canonical.setdefault(handle.casefold(), handle)
@@ -1734,10 +1628,9 @@ def _on_the_roster(
     """The books belonging to somebody this cohort's roster knows, and how many marks the
     rest accounted for.
 
-    Every source of marks is hand-typed - a grading sheet, and the legacy `grades/*.csv` a
-    transition cohort is still marking in - so both carry rows for handles the cohort does
-    not have: a student who withdrew before onboarding, a handle typed from memory, a
-    cohort's CSVs carried over wholesale from the term before. `ensure_gradebooks`
+    A grading sheet is hand-typed, so it carries blocks for handles the cohort does not
+    have: a student who withdrew before onboarding, a handle typed from memory, a sheet
+    carried over wholesale from the term before. `ensure_gradebooks`
     provisions one repo per ONBOARDED enrolled student and nothing else, so a book for any
     other handle was a write to a repo that does not exist - a 404 per row, in a PUBLIC
     log, naming `grades-<handle>` as it went. Dropping them here is what makes the two
@@ -1806,15 +1699,14 @@ def _questions_clause(score: object) -> str:
     return " (" + ", ".join(f"{name} {value}" for name, value in marked.items()) + ")"
 
 
-def _readme_row(title: str, view: dict, timed: bool = True) -> str:
+def _readme_row(title: str, view: dict) -> str:
     """One assignment's row in the summary table."""
     values = (
         title,
         _over_max(view.get("final_grade", ""), view.get("max_points")),
         # An external assignment says so; anything else with no time on it is a repo
-        # nothing was ever pushed to - unless nothing timed this assignment at all, in
-        # which case the cell is blank rather than an accusation.
-        view.get("submitted") or (_NOT_SUBMITTED if timed else ""),
+        # nothing was ever pushed to.
+        view.get("submitted") or _NOT_SUBMITTED,
         _late_display(view.get("days_late")),
         view.get("team", ""),
     )
@@ -1837,12 +1729,7 @@ def _readme_section(title: str, view: dict) -> str:
     return "\n\n".join(parts)
 
 
-def render_readme(
-    handle: str,
-    book: dict[str, dict],
-    titles: dict[str, str],
-    timed: Container[str] | None = None,
-) -> str:
+def render_readme(handle: str, book: dict[str, dict], titles: dict[str, str]) -> str:
     """One student's gradebook README - the file they actually open.
 
     The privacy line, one row per assignment, then a section per assignment with their
@@ -1854,24 +1741,13 @@ def render_readme(
     `handle` is the student the book belongs to; the text names nobody - the repo is
     already private to them - and takes it so that every per-student write reads the
     same at the call site. `titles` maps a slug to the assignment's name, falling back to
-    the slug rather than rendering an empty heading.
-
-    `timed` is the set of slugs whose source records WHEN the work came in - the grading
-    sheets. An assignment distributed from a legacy CSV is not in it, and its Submitted
-    cell is left blank: "not submitted" there would be this module asserting something no
-    source told it. None (the default) means every assignment is timed, which is what a
-    caller holding only sheets has."""
+    the slug rather than rendering an empty heading."""
     del handle
     slugs = sorted(book)
     table = [
         "| " + " | ".join(_README_COLUMNS) + " |",
         "|" + "---|" * len(_README_COLUMNS),
-        *(
-            _readme_row(
-                titles.get(slug, slug), book[slug], timed is None or slug in timed
-            )
-            for slug in slugs
-        ),
+        *(_readme_row(titles.get(slug, slug), book[slug]) for slug in slugs),
     ]
     sections = [_readme_section(titles.get(slug, slug), book[slug]) for slug in slugs]
     return "\n\n".join([_PRIVACY_HEADER, "\n".join(table), *sections]) + "\n"
@@ -2042,7 +1918,7 @@ def load_sheets(wd: Path) -> dict[str, dict]:
 
 def _config_dir_names(cohort_org: str, folder: str) -> list[str]:
     """The file names in one folder of the cohort's classroom-config ([] when it has no
-    such folder - which is the normal state of both of these, not a fault)."""
+    such folder - the normal state before the first handout, not a fault)."""
     code, out = gh(
         "api",
         f"repos/{cohort_org}/{CONFIG_REPO}/contents/{folder}",
@@ -2052,52 +1928,21 @@ def _config_dir_names(cohort_org: str, folder: str) -> list[str]:
     return sorted(out.splitlines()) if code == 0 else []
 
 
-def load_grade_sources(cohort_org: str) -> dict[str, list[GradeRow] | dict]:
-    """Every source of marks in the cohort's classroom-config, keyed by assignment slug.
-
-    TWO kinds, because a cohort part-way through a term keeps marking where it started:
-    `grading_sheets/<slug>.yml` (the sheet, and where every new assignment goes) parsed to
-    a dict, and the legacy `grades/<slug>.csv` parsed to rows. A slug with both is the
-    sheet's - that is the file a grader was told to type in."""
-    sheets: dict[str, list[GradeRow] | dict] = {}
+def load_grade_sources(cohort_org: str) -> dict[str, dict]:
+    """Every grading sheet in the cohort's classroom-config, keyed by assignment slug."""
+    sheets: dict[str, dict] = {}
     for name in _config_dir_names(cohort_org, SHEETS_DIR):
         if not name.endswith(".yml"):
             continue
         content = get_file_content(cohort_org, CONFIG_REPO, f"{SHEETS_DIR}/{name}")
         if content is not None:
             sheets[name[:-4]] = parse_sheet(content)
-    names = _config_dir_names(cohort_org, GRADES_DIR)
-    if not names and not sheets:
+    if not sheets:
         log_err(
-            f"no {SHEETS_DIR}/ or {GRADES_DIR}/ in {cohort_org}/{CONFIG_REPO} - hand out "
-            f"an assignment (which creates its grading sheet) first"
+            f"no {SHEETS_DIR}/ in {cohort_org}/{CONFIG_REPO} - hand out an assignment "
+            f"(which creates its grading sheet) first"
         )
-        return {}
-    per: dict[str, list[GradeRow] | dict] = {}
-    stale = []
-    for name in names:
-        if not name.endswith(".csv"):
-            continue
-        content = get_file_content(cohort_org, CONFIG_REPO, f"{GRADES_DIR}/{name}")
-        if content is None:
-            continue
-        try:
-            per[name[:-4]] = parse_grades(content)
-        except RetiredGradeHeader as exc:
-            # Name the file and carry on reading the others, so one un-migrated CSV
-            # reports itself by name rather than aborting on the first one it meets.
-            log_err(f"{GRADES_DIR}/{name}: {exc}")
-            stale.append(name)
-    if stale:
-        # Returning a partial set would render gradebooks for the cohort MINUS these
-        # assignments, which reads as "those students have no marks" rather than as an
-        # error. Nothing is rendered until every CSV can be read.
-        log_err(
-            f"{len(stale)} grade CSV(s) still use retired column names - rename their "
-            f"header rows before rendering: {', '.join(stale)}"
-        )
-        return {}
-    return per | sheets
+    return sheets
 
 
 def _existing_repos(cohort_org: str) -> dict[str, dict] | None:
@@ -2358,25 +2203,6 @@ def _retired_gradebook_files(wd: Path) -> list[str]:
     return sorted(f"{GRADEBOOK_DIR}/{p.name}" for p in folder.glob("*.yml"))
 
 
-def load_legacy_grades(wd: Path) -> dict[str, list[GradeRow]]:
-    """Every `grades/<slug>.csv` in a classroom-config checkout, keyed by slug.
-
-    The transition reader: a cohort that began marking before the grading sheet existed
-    keeps distributing from the table it is using. Raises nothing - a CSV on the retired
-    column names names itself and is skipped, because a partial read would publish a
-    gradebook with that assignment silently missing."""
-    folder = wd / GRADES_DIR
-    if not folder.is_dir():
-        return {}
-    out: dict[str, list[GradeRow]] = {}
-    for path in sorted(folder.glob("*.csv")):
-        try:
-            out[path.stem] = parse_grades(path.read_text(encoding="utf-8"))
-        except RetiredGradeHeader as exc:
-            log_err(f"{GRADES_DIR}/{path.name}: {exc}")
-    return out
-
-
 def _spec_from_sheet(slug: str, sheet: dict) -> SheetSpec:
     """A minimal spec for a sheet whose assignment the schedule no longer declares - a
     term whose entry has been deleted, or a hand-written sheet. Its shape is read off the
@@ -2512,13 +2338,11 @@ def _hold_undecided(
     return held
 
 
-def _gradebook_files(
-    handle: str, book: dict[str, dict], titles, timed
-) -> dict[str, bytes]:
+def _gradebook_files(handle: str, book: dict[str, dict], titles) -> dict[str, bytes]:
     """The two files a student's private gradebook holds: the data and the page."""
     return {
         "grades.yml": render_yaml({"student": handle, "assignments": book}).encode(),
-        "README.md": render_readme(handle, book, titles, timed).encode(),
+        "README.md": render_readme(handle, book, titles).encode(),
     }
 
 
@@ -2590,42 +2414,29 @@ def distribute(
             # reconciled student by student.
             log_err(f"{exc} - nothing distributed; fix the file and run this again")
             return 1
-        legacy = load_legacy_grades(wd)
-        if not sheets and not legacy:
+        if not sheets:
             log_err(
-                f"no {SHEETS_DIR}/ or {GRADES_DIR}/ in {cohort_org}/{CONFIG_REPO} - hand "
-                f"out an assignment (which creates its grading sheet) first"
+                f"no {SHEETS_DIR}/ in {cohort_org}/{CONFIG_REPO} - hand out an "
+                f"assignment (which creates its grading sheet) first"
             )
             return 1
         if assignment:
             # Narrowed AFTER the read, not during it: `load_sheets` is what refuses to
             # distribute anything while one sheet is mid-edit, and that guard is about the
             # repo, not about the slug somebody typed.
-            wanted = {assignment}
-            if not (wanted & (set(sheets) | set(legacy))):
+            if assignment not in sheets:
                 log_err(
-                    f"no grading sheet or grade CSV for `{assignment}` in {cohort_org} - "
+                    f"no grading sheet for `{assignment}` in {cohort_org} - "
                     f"nothing distributed"
                 )
                 return 1
-            sheets = {s: v for s, v in sheets.items() if s in wanted}
-            legacy = {s: v for s, v in legacy.items() if s in wanted}
+            sheets = {assignment: sheets[assignment]}
         specs = sheet_specs(course_org, sched)
-        sources: dict[str, tuple[SheetSpec, dict] | list[GradeRow]] = {}
+        sources: dict[str, tuple[SheetSpec, dict]] = {}
         for slug, sheet in sheets.items():
             specs.setdefault(slug, _spec_from_sheet(slug, sheet))
             sources[slug] = (specs[slug], sheet)
-        for slug, rows in legacy.items():
-            # A slug with both is the SHEET's - that is the file a grader was told to type
-            # in, and the CSV beside it is what they were typing in before.
-            sources.setdefault(slug, rows)
-        titles = {
-            slug: specs[slug].title if slug in specs else slug for slug in sources
-        }
-        # Which assignments know when the work came in. A legacy CSV knows nothing about
-        # timing, so its README cell is BLANK - "not submitted" there would be this
-        # module asserting something it has no source for.
-        timed = frozenset(sheets)
+        titles = {slug: specs[slug].title for slug in sources}
         books, unknown = _on_the_roster(build_gradebooks(sources), students)
         distributed, migrating = _read_distributed(wd)
         retired = _retired_gradebook_files(wd)
@@ -2659,9 +2470,7 @@ def distribute(
                 f"until it is settled in the sheet"
             )
 
-    # 1. The feedback comment on each submission repo's Feedback issue. Sheet-backed
-    #    assignments only: a legacy CSV has no submission-unit structure to post against,
-    #    and its marks reach the student through the gradebook instead.
+    # 1. The feedback comment on each submission repo's Feedback issue.
     for slug in sorted(sheets):
         spec = specs[slug]
         withheld = {unit for unit, _reason in held.get(slug, {}).values()}
@@ -2726,7 +2535,7 @@ def distribute(
     #    telling recorded, which would stop them being told when it lands.
     live: dict[str, str] = {}
     for handle in sorted(books):
-        files = _gradebook_files(handle, books[handle], titles, timed)
+        files = _gradebook_files(handle, books[handle], titles)
         digest = content_hash("".join(f.decode() for f in files.values()))
         if record.get((handle, "", CHANNEL_GRADEBOOK), ("",))[0] == digest:
             live[handle] = digest
