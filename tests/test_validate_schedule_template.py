@@ -70,6 +70,15 @@ def test_the_course_org_is_read_by_the_real_loader_not_a_grep():
     assert resolve["working-directory"] == "central"
 
 
+def test_only_the_course_org_reaches_the_step_output():
+    # The answer is captured off STDOUT, and `ghcli.gh` prints its retry notices there
+    # before a successful retry. A second line writes a step-output line with no `=`,
+    # GitHub rejects the whole file, and the step fails - which skips every step after it,
+    # the parse verdict included. One rate-limited read would cost the dropped-entry
+    # channel entirely. `scheduler.main`'s --list-cohorts carries the same guard.
+    assert "redirect_stdout" in _step("Resolve the course org")["run"]
+
+
 def test_the_parse_is_reported_even_when_the_course_org_cannot_be_read():
     # Two verdicts, two channels. Failing the validate step for a missing org skipped
     # every step after it - and those steps have no status function in their `if:`, so a
