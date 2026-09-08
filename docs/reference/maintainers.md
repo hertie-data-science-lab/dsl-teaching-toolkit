@@ -54,8 +54,8 @@ Things whose *literal spelling* is depended on from outside Python:
 - **CLI module names.** Seeded workflows and templates invoke `python3 -m dsl_course.<x>`:
   `assign`, `bootstrap_course`, `collect`, `deploy`, `enrol_codes`, `grades`, `list_orgs`,
   `notify`, `scaffold`, `schedule`, `scheduler`, `seed`, `site`, `source_digest`, `status`,
-  `syllabus`, `sync_faculty`, `sync_membership`, `sync_roster`, `sync_teams`. A rename
-  strands every org until it refreshes.
+  `syllabus`, `sync_faculty`, `sync_membership`, `sync_roster`, `sync_teams`, `teardown`.
+  A rename strands every org until it refreshes.
 - **`roster.FIELDS` / `roster.normalise_role` / `teams.FIELDS`** are re-implemented in the
   shipped JavaScript (`templates/welcome/onboard.yml`, `team-formation.yml`), which cites them by
   name. Change a column and change both sides.
@@ -73,6 +73,11 @@ Things whose *literal spelling* is depended on from outside Python:
   makes the quarter-hourly refresh post once rather than four times an hour.
 - **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-cohort`, `submission`, `gradebook`,
   `assignment-template`. Discovery reads them; renaming one is a discovery outage.
+- **An ARCHIVED `classroom-config`** is a cohort's "finished" marker. `teardown` archives it
+  last, after everything else it freezes, and `seed._live_cohorts` reads it to leave that
+  cohort's refresh alone. So archiving one closes a cohort whether the person doing it meant
+  that or not, and anything that freezes a cohort must do it in that order - the archived
+  repo is read-only, and a marker set early strands whatever had not happened yet.
 - **`.github/cohort-courses-pages.yml`** is the cohort registry every dropdown reads, and
   **`.github/.last-refresh`** is the heartbeat that keeps an org's crons from GitHub's 60-day
   inactivity disable.

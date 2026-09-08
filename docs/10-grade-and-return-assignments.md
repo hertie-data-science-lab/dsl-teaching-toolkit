@@ -111,5 +111,38 @@ count lands in `info.autograde` (`7/9`) for your information only - it is never 
 itself and a student never sees it. Per-test detail goes to `classroom-config/autograde/`.
 To regrade, delete `autograde/<slug>/`.
 
+## Closing the cohort out
+
+Once the last grades have gone out, run **Archive cohort** on that cohort. It is the end of
+the year's work, and it is what stops a finished cohort quietly keeping every student's
+write access to their repos for ever.
+
+It does four things, in this order:
+
+1. revokes each student's direct access to the submission repos and gradebooks named after
+   them, and cancels any repo invitation they never accepted;
+2. archives those repos - GitHub's read-only freeze;
+3. writes `archive/teardown.md` into `classroom-config`, recording what was frozen;
+4. archives `classroom-config` itself, which is also what tells the nightly refresh this
+   cohort is finished and to leave it alone.
+
+**Nothing is deleted, ever.** Archiving is reversible: un-archive a repo from its own
+Settings page and it is back exactly as it was, and `students.csv` is what re-grants a
+student their access if you have to reopen one - a grade appeal, a late submission.
+
+`dry_run` is on by default and prints the counts. The real run **refuses** unless your
+`schedule.yml` declares a `semester_end` that has passed; tick `force` to close out a cohort
+whose term dates were never filled in. Run it again if it fails part-way - it picks up where
+it stopped, and only the last step seals the record.
+
+What it does **not** touch: org membership, and the project teams that grant access to
+group repos. Those follow `students.csv` and `teams.csv` through Sync membership, so empty
+those files if you want the students out of the org as well.
+
+`classroom-config` is now the cohort's whole record of assessment - roster, teams, schedule,
+grading sheets, autograde detail, what was sent to whom, and `cohort-gradebook.csv`. Delete
+the repository, and the archived student repos with it, when your institution's retention
+period for that record expires.
+
 See also: [Release an assignment](09-release-assignment-to-cohort.md) ·
 [Schedule releases](07-schedule-releases.md)
