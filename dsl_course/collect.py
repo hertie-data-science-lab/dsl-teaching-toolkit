@@ -207,7 +207,7 @@ def template_is_group(master_org: str, template: str) -> bool:
     scheduler's group resolution shares the memoised read with the sheet refresh and the
     collection that follow it in the same tick."""
     return resolve_is_group(
-        force=False, template_type=load_grading_spec(master_org, template)["type"]
+        force=False, template_type=load_grading_spec(master_org, template).type
     )
 
 
@@ -1796,7 +1796,7 @@ def refresh_assignment_sheet(
     key = found[0] if found else assignment_slug(template)
     slug = schedule.cohort_name(*found) if found else key
     gspec = load_grading_spec(master_org, template)
-    is_group = resolve_is_group(force=group, template_type=gspec["type"])
+    is_group = resolve_is_group(force=group, template_type=gspec.type)
     ok = sync_sheet(
         master_org,
         cohort_org,
@@ -1879,7 +1879,7 @@ def collect(
 
     # group-vs-individual via the single `resolve_is_group` precedence (force -> the
     # template's grading_config.yml `type:` -> individual).
-    is_group = resolve_is_group(force=group, template_type=gspec["type"])
+    is_group = resolve_is_group(force=group, template_type=gspec.type)
     cutoff = local_deadline(deadline, sched.timezone)
 
     def freeze_sheet(counts: dict[str, str] | None = None) -> bool:
@@ -1934,7 +1934,7 @@ def collect(
                 f"no `{SOLUTION_BRANCH}` branch on {master_org}/{template}",
                 dry_run,
             )
-        if not gspec["autograde"]:
+        if not gspec.autograde:
             log_ok(
                 f"{slug}: autograde disabled in {GRADING_FILE} - all-manual, nothing to collect."
             )
@@ -1943,7 +1943,7 @@ def collect(
             return _record_skip(
                 cohort_org, slug, f"`autograde: false` in {GRADING_FILE}", dry_run
             )
-        tests_src = soldir / str(gspec["tests"])
+        tests_src = soldir / gspec.tests
         if not tests_src.is_dir():
             # The third hand-marked exit: an assignment that asked to be autograded and
             # whose hidden tests were never written. Recorded and frozen like the other
@@ -1951,7 +1951,7 @@ def collect(
             # a fault the cron re-decides every quarter of an hour is a fault nobody reads,
             # and the sheet has to be sealed whether or not a machine ever marked anything.
             log_err(
-                f"{slug}: no `{gspec['tests']}/` on the solution branch - hand-marked, "
+                f"{slug}: no `{gspec.tests}/` on the solution branch - hand-marked, "
                 f"nothing to collect."
             )
             if not sealed():
@@ -1959,7 +1959,7 @@ def collect(
             return _record_skip(
                 cohort_org,
                 slug,
-                f"no `{gspec['tests']}/` on the solution branch - hand-marked",
+                f"no `{gspec.tests}/` on the solution branch - hand-marked",
                 dry_run,
             )
 

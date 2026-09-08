@@ -17,6 +17,18 @@ course_code: {course_code}
 #   # everything you release still ships, and the folder itself is always one click away.
 #   # (The public open-courseware site always lists root files - it hosts what it lists.)
 
+# What every assignment under this course starts from. **New assignment** stamps these
+# values into the `grading_config.yml` it generates, so each assignment's own file says
+# what it does and can be edited there afterwards; changing them here changes the NEXT
+# assignment, never one that already exists.
+assignment_defaults:
+  submit_via: github          # github | external (Moodle, Kaggle, in class...)
+  autograde: false            # true -> run the template's tests/ at the cutoff
+  team_formation: self_select # self_select (students use Join team) | assigned (you write teams.csv)
+  max_team_size: 5            # group assignments only
+  late_window_days: 7         # 0 = nothing after the due date is accepted
+  late_penalty_per_day: 10%   # of the EARNED grade, per day started
+
 # `course_name`, `course_code` and `course_description` are what reach the cohort
 # websites. Editing them here re-syncs every cohort site already bootstrapped from this
 # course org.

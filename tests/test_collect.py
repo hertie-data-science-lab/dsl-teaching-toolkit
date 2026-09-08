@@ -50,31 +50,24 @@ def _clear_dep_caches() -> None:
     collect._grader_dep_missing.cache_clear()
 
 
-DEFAULT_SPEC = {
-    "type": "individual",
-    "autograde": False,
-    "tests": "tests",
-    "title": "",
-    "submit_via": "github",
-    "questions": None,
-    "late_window_days": None,
-    "late_penalty_per_day": None,
-}
+DEFAULT_SPEC = grades.GradingSpec()
 
 
 def test_parse_grading_spec_defaults_and_overrides():
     assert collect.parse_grading_spec("") == DEFAULT_SPEC
-    # A retired key (`format`, `max_auto`) in a template written before they went is
-    # ignored like any other extra, never carried into the spec.
+    # A retired key (`max_auto`) in a template written before it went is flagged like any
+    # other unknown key, never carried into the spec.
     spec = collect.parse_grading_spec(
-        "type: group\nformat: notebook\nautograde: false\nmax_auto: 20\ntests: solution/tests\n"
+        "type: group\nformat: ipynb\nautograde: false\nmax_auto: 20\ntests: solution/tests\n"
     )
-    assert spec == {
-        **DEFAULT_SPEC,
-        "type": "group",
-        "autograde": False,
-        "tests": "solution/tests",
-    }
+    assert spec == grades.GradingSpec(
+        type="group",
+        format="ipynb",
+        autograde=False,
+        tests="solution/tests",
+        dropped=spec.dropped,
+    )
+    assert [d for d in spec.dropped if "max_auto" in d]
 
 
 def test_parse_grading_spec_reads_what_the_grading_sheet_needs():
@@ -85,13 +78,46 @@ def test_parse_grading_spec_reads_what_the_grading_sheet_needs():
         "late_window_days: 7\n"
         "late_penalty_per_day: 10%\n"
     )
-    assert spec["title"] == "Neural networks"
-    assert spec["submit_via"] == "external"
+    assert spec.title == "Neural networks"
+    assert spec.submit_via == "external" and spec.submit_external
     # TEXT, not numbers: the maxima are only ever displayed, and `1.5` must read back as
     # the course wrote it rather than as this module's idea of how to print a float.
-    assert spec["questions"] == {"Q1": "15", "Q2": "1.5"}
-    assert spec["late_window_days"] == 7
-    assert spec["late_penalty_per_day"] == "10%"
+    assert spec.questions == {"Q1": "15", "Q2": "1.5"}
+    assert spec.late_window_days == 7
+    assert spec.late_penalty_per_day == "10%"
+
+
+def test_the_group_shape_reads_off_type_and_team_formation():
+    # `none` is the answer an INDIVIDUAL assignment gives, and not a value anyone writes:
+    # the Join-team form refuses a slug on it, so a group assignment that forgot the key
+    # must not fall into it.
+    individual = collect.parse_grading_spec("team_formation: assigned\n")
+    assert not individual.is_group
+    assert individual.team_formation_resolved == "none"
+    group = collect.parse_grading_spec("type: group\n")
+    assert group.is_group and group.team_formation_resolved == "self_select"
+    assigned = collect.parse_grading_spec("type: group\nteam_formation: assigned\n")
+    assert assigned.team_formation_resolved == "assigned"
+    assert (
+        collect.parse_grading_spec("type: group\nmax_team_size: 3\n").max_team_size == 3
+    )
+
+
+def test_a_setting_the_toolkit_does_not_read_is_flagged_by_name(capsys):
+    # `type` and `max_team_size` moved here out of schedule.yml, and the reverse mistake -
+    # a grading_config.yml carrying a schedule key - has to say so rather than be ignored.
+    spec = collect.parse_grading_spec("due_datetime: 2026-10-13\n")
+    assert [d for d in spec.dropped if "due_datetime" in d]
+    assert "due_datetime" in capsys.readouterr().err
+
+
+def test_autograde_written_as_text_is_still_a_boolean(capsys):
+    # A quoted "false" is a non-empty string; read as truthy it turned hidden tests on for
+    # an assignment that had just asked for the opposite.
+    assert collect.parse_grading_spec('autograde: "false"\n').autograde is False
+    assert collect.parse_grading_spec('autograde: "yes"\n').autograde is True
+    assert collect.parse_grading_spec("autograde: perhaps\n").autograde is False
+    assert "is not true or false" in capsys.readouterr().err
 
 
 def test_parse_grading_spec_drops_a_malformed_value_and_keeps_the_rest(capsys):
@@ -99,13 +125,41 @@ def test_parse_grading_spec_drops_a_malformed_value_and_keeps_the_rest(capsys):
     # field it sits on, never the parse.
     spec = collect.parse_grading_spec(
         "title: Bayes\nsubmit_via: moodle\nquestions: 50\nlate_window_days: a week\n"
+        "max_team_size: lots\ntype: gruop\n"
     )
-    assert spec["title"] == "Bayes"
-    assert spec["submit_via"] == "github"  # the safe default, not the typo
-    assert spec["questions"] is None
-    assert spec["late_window_days"] is None
+    assert spec.title == "Bayes"
+    assert spec.submit_via == "github"  # the safe default, not the typo
+    assert spec.type == "individual"
+    assert spec.questions is None
+    assert spec.late_window_days is None
+    assert spec.max_team_size is None
     err = capsys.readouterr().err
-    assert "submit_via" in err and "questions" in err and "late_window_days" in err
+    for field in (
+        "submit_via",
+        "questions",
+        "late_window_days",
+        "max_team_size",
+        "type",
+    ):
+        assert field in err
+    assert len(spec.dropped) == 5
+
+
+def test_the_course_defaults_block_stands_behind_a_file_that_says_nothing(capsys):
+    # `assignment_defaults:` in dsl-course.yml is what `New assignment` stamps into the
+    # file it generates; it is validated exactly as the file itself is.
+    defaults = grades.parse_assignment_defaults(
+        {"max_team_size": 5, "late_window_days": 7, "late_penalty_per_day": "10%"}
+    )
+    spec = collect.parse_grading_spec("type: group\n", defaults)
+    assert (spec.max_team_size, spec.late_window_days) == (5, 7)
+    # ... and what the file itself says wins over them.
+    beaten = collect.parse_grading_spec("type: group\nmax_team_size: 2\n", defaults)
+    assert beaten.max_team_size == 2
+    # A per-assignment key is not a course-wide one: nothing about ONE assignment belongs
+    # in a block that stands behind all of them.
+    assert grades.parse_assignment_defaults({"title": "no"}) == {}
+    assert "title" in capsys.readouterr().err
 
 
 def test_a_bare_late_penalty_number_is_refused_out_loud(capsys):
@@ -113,7 +167,7 @@ def test_a_bare_late_penalty_number_is_refused_out_loud(capsys):
     # without a word meant every late mark in that cohort lost its deduction and every
     # receipt showed no percentage, on a green run.
     spec = collect.parse_grading_spec("late_penalty_per_day: 10\n")
-    assert spec["late_penalty_per_day"] is None
+    assert spec.late_penalty_per_day is None
     err = capsys.readouterr().err
     assert "late_penalty_per_day: 10" in err
     assert "`10%` or `0.1`" in err
@@ -134,7 +188,7 @@ def test_every_way_the_late_policy_can_be_wrong_says_so(typed, says, capsys):
     # One number multiplies every late mark in the cohort. `-10%` ADDED marks for being
     # late and `150%` took more than the work was worth, both on a green run.
     spec = collect.parse_grading_spec(f"late_penalty_per_day: {typed}\n")
-    assert spec["late_penalty_per_day"] is None
+    assert spec.late_penalty_per_day is None
     err = capsys.readouterr().err
     assert says in err
     assert "no late penalty is applied" in err
@@ -142,12 +196,8 @@ def test_every_way_the_late_policy_can_be_wrong_says_so(typed, says, capsys):
 
 def test_a_penalty_rate_that_parses_is_kept_exactly_as_typed(capsys):
     for typed in ("10%", "0.1", "5.5%", "0%", "100%"):
-        assert (
-            collect.parse_grading_spec(f"late_penalty_per_day: {typed}\n")[
-                "late_penalty_per_day"
-            ]
-            == typed
-        )
+        spec = collect.parse_grading_spec(f"late_penalty_per_day: {typed}\n")
+        assert spec.late_penalty_per_day == typed
     assert capsys.readouterr().err == ""
 
 
@@ -1241,8 +1291,8 @@ def test_the_next_run_after_a_failed_freeze_seals_and_then_records(monkeypatch):
 def test_autograde_is_off_unless_the_assignment_asks_for_it():
     # Most assignments are hand-marked. A default of true made every template without the
     # key try to run hidden tests that were never written - red every quarter of an hour.
-    assert collect.parse_grading_spec("")["autograde"] is False
-    assert collect.parse_grading_spec("autograde: true\n")["autograde"] is True
+    assert collect.parse_grading_spec("").autograde is False
+    assert collect.parse_grading_spec("autograde: true\n").autograde is True
 
 
 def test_collect_records_a_skip_when_autograde_is_disabled(monkeypatch):
@@ -2879,7 +2929,7 @@ def test_the_definition_is_read_from_grading_config_yml(monkeypatch):
         return "type: group"
 
     monkeypatch.setattr(collect.grades, "get_file_content", fake_get)
-    assert collect.load_grading_spec("Course", "assignment-4-f2026")["type"] == "group"
+    assert collect.load_grading_spec("Course", "assignment-4-f2026").type == "group"
     assert paths == ["grading_config.yml"]
 
 

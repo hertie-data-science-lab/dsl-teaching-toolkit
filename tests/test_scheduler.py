@@ -19,7 +19,7 @@ from conftest import source_fault
 
 from dsl_course import collect as collect_mod
 from dsl_course import course, deploy, ghcli, notify, scheduler, seed, source_digest
-from dsl_course.grades import _DEFAULT_SPEC as DEFAULT_SPEC
+from dsl_course.grades import GradingSpec
 from dsl_course.schedule import (
     AssignmentEntry,
     Deploy,
@@ -81,7 +81,7 @@ def _grading_spec_defaults(monkeypatch):
     measuring the behaviour it was written for; the tests that are ABOUT the window declare
     their own spec."""
     monkeypatch.setattr(
-        scheduler, "load_grading_spec", lambda org, template: dict(DEFAULT_SPEC)
+        scheduler, "load_grading_spec", lambda org, template: GradingSpec()
     )
 
 
@@ -850,7 +850,7 @@ def _window(monkeypatch, days: int | None) -> None:
     monkeypatch.setattr(
         scheduler,
         "load_grading_spec",
-        lambda org, template: dict(DEFAULT_SPEC, late_window_days=days),
+        lambda org, template: GradingSpec(late_window_days=days),
     )
 
 

@@ -49,7 +49,7 @@ def feedback_issues(monkeypatch):
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, template: dict(collect.grades._DEFAULT_SPEC),
+        lambda org, template: collect.grades.GradingSpec(),
     )
     monkeypatch.setattr(
         assign.grades,

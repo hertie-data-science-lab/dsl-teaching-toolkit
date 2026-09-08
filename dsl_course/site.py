@@ -807,7 +807,7 @@ def _assignment_entry(
     # cohort's schedule.yml, which the site used to read it from for free, no longer has
     # a say.
     group = resolve_is_group(
-        force=False, template_type=load_grading_spec(course_org, repo)["type"]
+        force=False, template_type=load_grading_spec(course_org, repo).type
     )
     repo_name = submission_repo(slug, "<your-team>" if group else "<your-handle>")
     # The slug's own name: the row's IDENTIFIER, bold beside its name, and the one half

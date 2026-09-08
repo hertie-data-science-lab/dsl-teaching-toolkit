@@ -573,6 +573,31 @@ def test_the_example_course_declares_every_key_the_generator_writes():
     )
 
 
+def test_the_seeded_assignment_defaults_block_parses_with_the_real_reader(capsys):
+    # Every value in the block a bootstrap seeds is stamped into the next assignment's
+    # grading_config.yml, so a key or a spelling the reader does not know would be
+    # silently dropped there rather than here. Both files that carry it are checked.
+    for text in (
+        welcome.template("course/dsl-course.yml").format(
+            org="Course-E1",
+            org_name="Course",
+            course_name="Deep Learning",
+            course_code="E1",
+        ),
+        welcome.example_course_file("dsl-course.yml"),
+    ):
+        block = yaml.safe_load(text)[grades.ASSIGNMENT_DEFAULTS_KEY]
+        assert grades.parse_assignment_defaults(block) == {
+            "submit_via": "github",
+            "autograde": False,
+            "team_formation": "self_select",
+            "max_team_size": 5,
+            "late_window_days": 7,
+            "late_penalty_per_day": "10%",
+        }
+    assert capsys.readouterr().err == ""
+
+
 def test_the_example_courses_people_block_feeds_both_of_its_readers():
     # One block, two consumers: sync_faculty grants GitHub access from it, site_repo.py renders
     # website cards from it. A card key the theme cannot read is invisible until a real
@@ -606,14 +631,15 @@ def test_every_example_assignment_parses_with_the_real_grading_reader():
         spec_file = a / "solution" / collect.GRADING_FILE
         assert spec_file.is_file(), f"{a.name}: no solution/{collect.GRADING_FILE}"
         spec = collect.parse_grading_spec(spec_file.read_text())
-        kinds[a.name] = spec["type"]
-        autograded.add(spec["autograde"])
+        assert spec.dropped == (), f"{a.name}: {spec.dropped}"
+        kinds[a.name] = spec.type
+        autograded.add(spec.autograde)
         # the hidden tests the autograder runs live where the file says - seeded even where
         # this assignment is hand-marked, so turning `autograde` on needs no other edit
-        assert (a / "solution" / spec["tests"]).is_dir(), (
-            f"{a.name}: `tests: {spec['tests']}` names no directory"
+        assert (a / "solution" / spec.tests).is_dir(), (
+            f"{a.name}: `tests: {spec.tests}` names no directory"
         )
-        assert spec["title"], (
+        assert spec.title, (
             f"{a.name}: no `title:` - the grading sheet's header needs it"
         )
     # both kinds are demonstrated - `type: group` is what drives team provisioning, and an
