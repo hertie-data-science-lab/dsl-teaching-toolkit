@@ -62,6 +62,7 @@ ALL_RENDERED = {
     "sync_membership": workflows_render.render_sync_membership(["Cohort-f2026"]),
     "send_codes": workflows_render.render_send_codes(),
     "distribute_grades": workflows_render.render_distribute_grades(["Cohort-f2026"]),
+    "archive_cohort": workflows_render.render_archive_cohort(["Cohort-f2026"]),
     "bootstrap_cohort": workflows_render.render_bootstrap_cohort(),
     "refresh": workflows_render.render_refresh(),
     "generate_syllabus": workflows_render.render_generate_syllabus(
@@ -101,6 +102,9 @@ JOB_TIMEOUTS = {
     "collect_submissions": 120,
     "distribute_grades": 120,
     "bootstrap_cohort": 60,
+    # Archive cohort revokes and freezes every submission repo and gradebook in a cohort,
+    # in series - the same "many repos, one at a time" shape as a handout.
+    "archive_cohort": 60,
 }
 # The scheduler is the one workflow whose jobs carry DIFFERENT budgets: it releases and
 # grades in two jobs precisely so the two-hour one is never in the release's way, and giving
@@ -130,6 +134,7 @@ DATED_RENDERED = {
     ),
     "sync_membership": workflows_render.render_sync_membership(COHORTS_2),
     "distribute_grades": workflows_render.render_distribute_grades(COHORTS_2),
+    "archive_cohort": workflows_render.render_archive_cohort(COHORTS_2),
     "sync_site": workflows_render.render_sync_site(COHORTS_2),
     "publish_site": workflows_render.render_publish_site(REPOS_2),
     "status": workflows_render.render_status(COHORTS_2),
@@ -310,6 +315,23 @@ def test_the_two_per_assignment_buttons_can_name_which_schedule_entry(rendered):
     assert len(inp) <= GITHUB_MAX_DISPATCH_INPUTS
     assert "SLUG: ${{ inputs.slug }}" in rendered
     assert '[ -n "$SLUG" ] && args+=(--slug "$SLUG")' in rendered
+
+
+def test_archive_cohort_previews_by_default_and_never_deletes():
+    # The end-of-term button. It is the one WRITE in the set that a second click cannot
+    # take back, so it fails closed like Distribute grades: only an explicit `false`
+    # reaches the CLI as --no-dry-run, and `force` is the separate, deliberate override of
+    # the term-not-over refusal.
+    rendered = workflows_render.render_archive_cohort(["Cohort-f2026"])
+    inp = workflow_inputs(rendered)
+    assert set(inp) == {"cohort_org", "dry_run", "force"}
+    assert inp["dry_run"]["default"] is True
+    assert inp["force"]["default"] is False
+    assert workflows_render._DRY_RUN_GATE in rendered
+    assert "python3 -m dsl_course.teardown" in rendered
+    # Faculty read the header before they click a button whose name sounds final: it has
+    # to say there, in the file, that this freezes and never destroys.
+    assert "NOTHING IS DELETED" in rendered
 
 
 def test_sync_membership_is_a_consolidated_reconcile():
@@ -526,11 +548,11 @@ def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
 
 
 def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
-    # Sixteen workflows rendered from one set of inputs by shared helpers: an edit to the
-    # run preamble or a dropdown helper re-renders every one of them, so file-by-file
-    # writes turned each such edit into a wall of sixteen near-identical commits in the
-    # repo whose history faculty actually browse. The retired buttons ride along in the
-    # same commit rather than earning three more.
+    # The whole org-level set rendered from one set of inputs by shared helpers: an edit
+    # to the run preamble or a dropdown helper re-renders every one of them, so file-by-file
+    # writes turned each such edit into a wall of near-identical commits in the repo whose
+    # history faculty actually browse. The retired buttons ride along in the same commit
+    # rather than earning three more.
     monkeypatch.setattr(seed, "discover_cohorts", lambda org: ["Cohort-f2026"])
     monkeypatch.setattr(
         seed, "discover_content_repos", lambda org: ["course-materials"]
@@ -549,7 +571,7 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
     assert len(commits) == 1
     repo, files, deleted = commits[0]
     assert repo == ".github"
-    assert len(files) == 15  # three grading buttons became two
+    assert len(files) == 16  # three grading buttons became two, plus Archive cohort
     assert all(path.startswith(".github/workflows/") for path in files)
     assert deleted == [
         ".github/workflows/sync-enrolment.yml",
@@ -1387,6 +1409,7 @@ SERIALISED_WRITERS = {
     # third arrival cancels the second).
     "send_codes": "send-codes-${{ github.event.client_payload.cohort_org }}",
     "sync_membership": "sync-membership",
+    "archive_cohort": "archive-cohort",
     "sync_site": "sync-site",
     "publish_site": "publish-course-website",
 }

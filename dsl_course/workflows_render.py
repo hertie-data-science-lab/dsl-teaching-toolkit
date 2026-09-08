@@ -249,10 +249,11 @@ _MAIL_ENV = "\n".join(
     for name in (*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV)
 )
 
-# Fail CLOSED: only an explicit `false` sends. Any other value - "True", "1", a blank from
-# a renamed input - previews. Distribute grades is the one button left that emails a whole
-# cohort; the other dry-run gates in this module are not send paths and keep the simpler
-# spelling.
+# Fail CLOSED: only an explicit `false` acts. Any other value - "True", "1", a blank from a
+# renamed input - previews. The two buttons that share it are the two whose real run cannot
+# be taken back by clicking again: Distribute grades emails a whole cohort, and Archive
+# cohort freezes one. The other dry-run gates in this module guard convergent work and keep
+# the simpler spelling.
 _DRY_RUN_GATE = (
     '          if [ "$DRY_RUN" = "false" ]; '
     "then args+=(--no-dry-run); else args+=(--dry-run); fi"
@@ -858,6 +859,50 @@ on:
 {_DRY_RUN_GATE}
           [ "$SILENT" = "true" ] && args+=(--no-notify)
           python3 -m dsl_course.grades distribute "${{args[@]}}"
+"""
+
+
+def render_archive_cohort(cohort_orgs: list[str]) -> str:
+    """Close a finished cohort out: freeze the work, revoke the students, seal the record."""
+    return f"""name: Archive cohort
+
+# End of term, once, after the last grades have gone out. Revokes each student's direct
+# grant on the submission repos and gradebooks named after them, ARCHIVES those repos,
+# writes the teardown record into the cohort's private classroom-config and archives that
+# last - which is also what tells the nightly refresh this cohort is finished.
+# NOTHING IS DELETED. Archiving is GitHub's reversible read-only freeze, and un-archiving a
+# repo from its own Settings page brings it back exactly as it was.
+# `dry_run` defaults to true and prints counts only. A real run refuses unless the cohort's
+# schedule.yml declares a `semester_end` that has passed; `force` says so by hand.
+# A run that dies half way is resumed by running it again - see docs/10.
+
+on:
+  workflow_dispatch:
+    inputs:
+{_cohort_dropdown(cohort_orgs)}
+      dry_run:
+        description: "Preview the teardown - freeze nothing, revoke nothing"
+        type: boolean
+        default: true
+      force:
+        description: "Close out even though the term is not over"
+        type: boolean
+        default: false
+
+{_concurrency("archive-cohort")}
+{_PERMISSIONS_JOBS}{_CHECK_TEAM}
+  archive-cohort:
+{_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Archive cohort
+        env:
+          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
+          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          FORCE: ${{{{ inputs.force }}}}
+        run: |
+          args=(--cohort-org "$COHORT_ORG")
+{_DRY_RUN_GATE}
+          [ "$FORCE" = "true" ] && args+=(--force)
+          python3 -m dsl_course.teardown "${{args[@]}}"
 """
 
 
