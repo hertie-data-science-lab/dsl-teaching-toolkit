@@ -89,14 +89,35 @@ jobs:
       # empty answer here is an API error or a token that lost its scope - infrastructure,
       # not anything in the file that was just pushed. It used to be swallowed, which meant
       # the source check silently stopped running and every push looked clean.
+      #
+      # Through the real loader, not a grep. The dispatchers shell out to
+      # `grep '^course:' | cut -d: -f2- | xargs` because they have neither Python nor the
+      # central checkout; that pipeline reads a quoted value with its quotes on and keeps
+      # a trailing `# comment`, and either spelling resolves to an org that does not
+      # exist. This job has both by now, so it asks `discovery.course_org_for_cohort` -
+      # the same YAML parse every CLI makes.
       - name: Resolve the course org
         id: course
+        working-directory: central
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           COHORT_ORG: ${{ github.repository_owner }}
         run: |
-          course_org=$(gh api "repos/$COHORT_ORG/.github/contents/dsl-course.yml" \
-            --jq '.content | @base64d' | grep '^course:' | cut -d: -f2- | xargs) || true
+          # Only the ANSWER may reach stdout, because stdout is what is captured into the
+          # step output below: `ghcli.gh` prints its retry notices ("[wait] rate-limited
+          # ...") there before a successful retry, and a second line writes a step-output
+          # line with no `=`. GitHub then rejects the whole file and this step fails -
+          # which skips every step after it, the parse verdict included, and a push that
+          # dropped an entry goes unreported. That is the failure the comment above says
+          # was already fixed once. Same guard, same reason, as `scheduler.main`'s
+          # --list-cohorts: every log line the read makes goes to stderr for the duration.
+          course_org=$(python3 -c '
+          import contextlib, os, sys
+          from dsl_course.discovery import course_org_for_cohort
+          with contextlib.redirect_stdout(sys.stderr):
+              org = course_org_for_cohort(os.environ["COHORT_ORG"])
+          sys.stdout.write(org)
+          ') || true
           echo "org=$course_org" >> "$GITHUB_OUTPUT"
 
       - name: Validate schedule.yml

@@ -286,6 +286,18 @@ def active_today(start: str | date | None, end: str | date | None, today: str) -
     return True
 
 
+def is_repo_root(path: str) -> bool:
+    """Whether a plan's `course_source_path` / `cohort_dest_path` names the whole repo.
+
+    `""`, `/` and `.` are all the "release everything" spelling, and faculty write all
+    three. Stated once because two readers act on it: `deploy._resolve_within` resolves
+    each to the clone root, and `schedule.source_faults` has to skip exactly the same
+    spellings - a whole-repo line the validator instead read as "a path that does not
+    exist" is a source fault mailed about a release that ships perfectly well.
+    """
+    return path.strip("/").strip() in ("", ".")
+
+
 # Session directories are named "<ordinal>_<free text>" (e.g. "00_intro",
 # "07_finals-review") - only the leading, zero-padding-tolerant ordinal is meaningful;
 # the rest is whatever the course calls it. No "week"/"session" literal is required.

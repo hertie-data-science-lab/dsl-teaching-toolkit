@@ -38,6 +38,7 @@ from .course import (
     FACULTY_ONLY_HEADING,
     SYLLABUS_SAMPLE_FILE,
     SYLLABUS_SESSIONS_FILE,
+    is_repo_root,
 )
 from .fs import copy_tree, union_deny
 from .gh_contents import is_untouched_stub
@@ -134,12 +135,14 @@ def _is_withheld_stub(path: str, text: str) -> bool:
 def _resolve_within(base: Path, rel: str) -> Path | None:
     """Resolve `rel` under the clone `base`, or None if it escapes it.
 
-    `""`, `/` and `.` all name the root of `base` - for a source path that is the "release
-    everything" spelling. A `..` path resolving outside the clone is refused: no reading of
-    it is a release, and it is caught before any file is touched."""
-    cleaned = rel.strip("/")
+    The "release everything" spellings all name the root of `base` - `course.is_repo_root`
+    owns which they are, because the schedule validator has to skip the same ones. A `..`
+    path resolving outside the clone is refused: no reading of it is a release, and it is
+    caught before any file is touched."""
     base_r = base.resolve()
-    target = (base / cleaned).resolve() if cleaned else base_r
+    if is_repo_root(rel):
+        return base_r
+    target = (base / rel.strip("/")).resolve()
     return target if target.is_relative_to(base_r) else None
 
 

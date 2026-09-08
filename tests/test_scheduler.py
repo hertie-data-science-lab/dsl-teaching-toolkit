@@ -1073,11 +1073,17 @@ def test_run_reports_a_failed_snapshot(monkeypatch):
 # recompute over a marker's hand-edits).
 
 
-def test_assignment_template_is_the_named_course_source_repo(monkeypatch):
+def _stub_source_repos(monkeypatch, answers: dict[str, set[str] | None]):
+    """`schedule.source_repo_paths`, the shared "is this source there?" test, answering
+    off a dict: a set of paths, `set()` for absent-or-empty, `None` for unreadable."""
     monkeypatch.setattr(
-        "dsl_course.scheduler.repo_exists",
-        lambda org, repo: repo == "wk3-regression-f2026",
+        "dsl_course.schedule.source_repo_paths",
+        lambda org, repo: answers.get(repo, set()),
     )
+
+
+def test_assignment_template_is_the_named_course_source_repo(monkeypatch):
+    _stub_source_repos(monkeypatch, {"wk3-regression-f2026": {"README.md"}})
     entry = AssignmentEntry(
         course_source_repo="wk3-regression-f2026",
         due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
@@ -1093,7 +1099,7 @@ def test_assignment_template_is_the_named_course_source_repo(monkeypatch):
 def test_a_course_source_repo_that_does_not_exist_says_so(monkeypatch, capsys):
     # The name is required and hand-written, so one that resolves to nothing can only be a
     # typo - and its only other symptom is an assignment that never hands out or grades.
-    monkeypatch.setattr("dsl_course.scheduler.repo_exists", lambda org, repo: False)
+    _stub_source_repos(monkeypatch, {})
     entry = AssignmentEntry(
         course_source_repo="typo-repo",
         due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
@@ -1102,6 +1108,30 @@ def test_a_course_source_repo_that_does_not_exist_says_so(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert "assignments.assignment-1.course_source_repo" in err
     assert "typo-repo" in err and "Course-Org" in err
+
+
+def test_an_empty_source_repo_gets_the_same_answer_as_source_faults_gives(monkeypatch):
+    # `repo_exists` is optimistic and said yes to a repo created but never pushed to, so
+    # `source_faults` mailed faculty about a missing source in the same run that this
+    # handed out from it. One predicate, one answer.
+    _stub_source_repos(monkeypatch, {"empty-f2026": set()})
+    entry = AssignmentEntry(
+        course_source_repo="empty-f2026",
+        due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+    )
+    assert scheduler._assignment_template("Course-Org", "assignment-1", entry) is None
+
+
+def test_an_unreadable_source_repo_still_hands_out(monkeypatch):
+    # `None` is "could not tell" - a 403, a 5xx, a rate limit. `source_faults` passes it
+    # over in silence; here it stays optimistic, because refusing to hand out on a
+    # transient read failure is worse than trying and failing.
+    _stub_source_repos(monkeypatch, {"wk3-f2026": None})
+    entry = AssignmentEntry(
+        course_source_repo="wk3-f2026",
+        due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+    )
+    assert scheduler._assignment_template("Course-Org", "wk3", entry) == "wk3-f2026"
 
 
 def _stub_collect(monkeypatch, marked: set[str], templates: set[str], rc: int = 0):

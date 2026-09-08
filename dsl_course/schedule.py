@@ -81,7 +81,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
-from .course import CONFIG_REPO, coerce_date
+from .course import CONFIG_REPO, coerce_date, is_repo_root
 from .gh_contents import get_file_content, get_file_with_sha, put_file, repo_tree
 from .log import log, log_err, log_step
 from .releaseignore import RELEASEIGNORE, excluded_in_tree
@@ -1116,6 +1116,25 @@ def _repo_paths(course_org: str, repo: str) -> set[str] | None:
         return None
 
 
+def source_repo_paths(course_org: str, repo: str) -> set[str] | None:
+    """Every path in a source repo the plan names - `set()` when the repo is absent OR
+    empty, `None` when it could not be read.
+
+    THE "is this source there?" test, and shared on purpose: `source_faults` and the
+    scheduler's `_assignment_template` ask the same question in the same run and used to
+    answer it differently. `repo_exists` is optimistic - it says yes to a repo that exists
+    with no commits - so a template nobody had pushed to was reported as a missing source
+    by one and handed out from by the other, on the same tick.
+
+    `repo_missing` and not `repo_exists`, because the two failures want opposite handling:
+    only a 404 says absent, and a 403, a 5xx or a rate limit must come back as `None` for
+    the caller to pass over in silence rather than tell faculty their materials are gone.
+    """
+    if repo_missing(course_org, repo):
+        return set()
+    return _repo_paths(course_org, repo)
+
+
 # How close a missing source has to be to its fire time before it stops being "not
 # written yet" and starts being a fault. A term planned up front names paths nobody has
 # authored, which is why distance is what separates the normal state from the broken one.
@@ -1450,24 +1469,18 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
     for repo in sorted(wanted):
         # Absent-or-empty is asked separately from unreadable, because they want opposite
         # answers: a repo that is not there is the typo this check exists to catch, while
-        # a repo that cannot be READ must be passed over in silence.
-        #
-        # `repo_missing` and not the optimistic `repo_exists`, which reads a 403, a 5xx or
-        # a rate limit as absence: absence here becomes an email telling faculty their
-        # materials are not in the course org, hours before a lecture. Only a 404 says
-        # that. A read that failed some other way falls through to the tree fetch, which
-        # fails the same way and is passed over below.
-        paths: set[str] | None = set()
-        if not repo_missing(course_org, repo):
-            paths = _repo_paths(course_org, repo)
-            if paths is None:
-                # Could not tell. Say nothing rather than cry wolf about every source in
-                # the plan - and say out loud that this tick did not check them.
-                log(
-                    f"  [skip] could not read {course_org}/{repo} - its sources are not "
-                    f"checked this tick"
-                )
-                continue
+        # a repo that cannot be READ must be passed over in silence. Both, and the reason
+        # the optimistic `repo_exists` is not what asks, live in `source_repo_paths` - the
+        # scheduler puts the same question to it.
+        paths = source_repo_paths(course_org, repo)
+        if paths is None:
+            # Could not tell. Say nothing rather than cry wolf about every source in
+            # the plan - and say out loud that this tick did not check them.
+            log(
+                f"  [skip] could not read {course_org}/{repo} - its sources are not "
+                f"checked this tick"
+            )
+            continue
         if not paths:
             out.extend(
                 SourceFault(
@@ -1504,10 +1517,12 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
             withheld = set()
         for w in wanted[repo]:
             # "" is the assignment case: the repo IS the source, so its existence is all
-            # there is to check. `/` and `.` mean the whole repo, likewise.
-            clean = w.path.strip("/").strip()
-            if clean in ("", "."):
+            # there is to check. `/` and `.` mean the whole repo, likewise - and which
+            # spellings those are is `course.is_repo_root`, the same rule the release
+            # itself resolves by (deploy._resolve_within).
+            if is_repo_root(w.path):
                 continue
+            clean = w.path.strip("/").strip()
             if clean in withheld:
                 # The file EXISTS, so nothing looks wrong - which is why this is worth
                 # saying here rather than leaving to the `::warning::` a green release run

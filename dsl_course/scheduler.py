@@ -91,7 +91,6 @@ from .collect import (
 from .deploy import deploy_many
 from .grades import cutoff_at, load_grading_spec, sheet_path
 from .log import log, log_err, log_ok, log_step
-from .repos import repo_exists
 from .schedule import Release
 from .schedule_plan import deploy_dest
 from .seed import discover_cohorts
@@ -277,14 +276,23 @@ def _assignment_template(
     course_org: str, slug: str, entry: schedule.AssignmentEntry
 ) -> str | None:
     """The course-org repo `slug` hands out from: its `course_source_repo`, if that repo
-    exists. None otherwise, and loudly - the name is required and written by hand, so a
-    name that resolves to nothing can only be a typo, and its one other symptom is an
-    assignment that never hands out and never grades."""
-    if repo_exists(course_org, entry.course_source_repo):
+    is there with something in it. None otherwise, and loudly - the name is required and
+    written by hand, so a name that resolves to nothing can only be a typo, and its one
+    other symptom is an assignment that never hands out and never grades.
+
+    `schedule.source_repo_paths`, and not the optimistic `repo_exists` this used to ask:
+    `source_faults` puts the same question to the same repo in the same run and calls a
+    repo with no commits missing, so the two used to disagree about a template nobody had
+    pushed to - one mailing faculty about a missing source while the other handed out from
+    it. `None` there is "could not tell", and stays optimistic: refusing to hand out on a
+    403 or a rate limit is worse than trying and failing."""
+    paths = schedule.source_repo_paths(course_org, entry.course_source_repo)
+    if paths is None or paths:
         return entry.course_source_repo
     log_err(
         f"assignments.{slug}.course_source_repo names `{entry.course_source_repo}`, which "
-        f"does not exist in {course_org} - nothing can be handed out or autograded for it"
+        f"does not exist in {course_org} (or it is empty) - nothing can be handed out or "
+        f"autograded for it"
     )
     return None
 
