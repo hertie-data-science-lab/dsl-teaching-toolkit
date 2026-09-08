@@ -17,9 +17,7 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
       - `assignment_number` = `1`, `2`, etc
       - `semester_tag` = `f/sYYYY`
       - `format` (`ipynb` / `py` / `rmd` / `qmd` / `latex` / `none`) - picks which starter
-        stub you get, and nothing else. Grading reads whatever is in the repo, so a student
-        who works in a notebook on a `py` assignment still grades; `none` seeds no starter
-        at all.
+        stub you get, and nothing else (see [Formats](#formats-and-what-students-hand-in)).
       - `type` (`individual` or `group` - one repo per student vs per team)
       - `team_formation` (group only: `self_select` = students use the welcome repo's
         **Join team** form; `assigned` = you write `classroom-config/teams.csv`)
@@ -55,6 +53,32 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
 3. **Run Refresh actions** so the assignment dropdowns update.
 
 Repeat for each assignment (`number` = 2, 3, …). 
+
+### Formats and what students hand in
+
+Each `format` seeds one starter on `main`, and each one already builds: an `.Rmd` that
+knits, a `.qmd` that renders, a `.tex` that compiles, a notebook that runs.
+
+| `format` | Starter on `main` | What the student commits |
+|---|---|---|
+| `ipynb` | `starter.ipynb` | the notebook, outputs saved, after **Restart kernel and run all** |
+| `py` | `starter.py` | the `.py` files, runnable from the repository root |
+| `rmd` | `starter.Rmd` | `starter.Rmd` **and** the knitted `starter.html` |
+| `qmd` | `starter.qmd` | `starter.qmd` **and** the rendered `starter.html` |
+| `latex` | `starter.tex` | `starter.tex` **and** the compiled `starter.pdf` |
+| `none` | nothing at all | whatever your brief says |
+
+> **The graded artefact is the built one.** For every source format the rendered document -
+> the HTML, the PDF - is committed beside its source, and that is what a grader reads; the
+> source is what we check it against. The starter says so, and so does the brief the button
+> seeds, so it is on the page whatever else you write.
+
+The `.Rmd` and `.qmd` stubs seed an `{r}` chunk; swap it for `{python}` if your course
+works in Python and nothing else changes.
+
+`format` picks the starter and nothing else. Grading reads whatever is actually in the
+repo, so a student who works in a notebook on a `py` assignment still grades, and `none`
+is the raw-repo option.
 
 ### Group vs individual assignments
 
