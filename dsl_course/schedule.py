@@ -707,6 +707,7 @@ def _parse_assignments(
     if mapping is None:
         return out
     sources: dict[str, str] = {}  # course_source_repo -> the slug that claimed it
+    names: dict[str, str] = {}  # cohort-side name -> the slug that claimed it
     for slug, entry in mapping.items():
         where = f"assignments.{slug}"
         if not isinstance(entry, dict):
@@ -737,7 +738,28 @@ def _parse_assignments(
                 cost,
             )
             continue
+        dest = str(entry.get("cohort_dest_repo") or "").strip()
+        # `cohort_name` - `cohort_dest_repo`, else the slug - is what EVERY cohort-side
+        # artefact keys on: the generated repos, the teams.csv rows, the snapshot, the
+        # autograde marker, the grading sheet. Two entries resolving to one name share all
+        # of them silently: the second handout finds the first's repos and "skips" them,
+        # then both assignments read and freeze the same snapshot under one another's
+        # marks. Refused like a duplicate source, and for the same reason - nothing
+        # downstream can tell the two apart.
+        name = dest or str(slug)
+        if name in names:
+            _drop(
+                drops,
+                where,
+                f"`{name}` is the cohort-side name of assignments.{names[name]} too - "
+                f"two assignments cannot share one (the student repos, teams.csv rows, "
+                f"snapshot and grading sheet all key on it; set a distinct "
+                f"`cohort_dest_repo`)",
+                cost,
+            )
+            continue
         sources[source_repo] = str(slug)
+        names[name] = str(slug)
         _flag_unknown_keys(
             drops, entry, KNOWN_ASSIGNMENT, where, "that setting is ignored"
         )
@@ -768,7 +790,6 @@ def _parse_assignments(
                 "the assignment is treated as individual - one repo per student, not one "
                 "per team (expected 'group' or 'individual')",
             )
-        dest = str(entry.get("cohort_dest_repo") or "").strip()
         handout = _flagged_datetime(
             entry,
             "handout_datetime",

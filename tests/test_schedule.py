@@ -2122,3 +2122,49 @@ def test_two_assignments_cannot_hand_out_the_same_repo():
     assert set(sched.assignments) == {"assignment-2"}
     (drop,) = [d for d in sched.dropped if "assignments.assignment-3" in d]
     assert "already used by assignments.assignment-2" in drop
+
+
+def test_two_assignments_cannot_resolve_to_one_cohort_name():
+    # `cohort_dest_repo`, else the slug, names every cohort-side artefact. Two entries
+    # landing on one name is the same collision as a duplicate source, one hop later:
+    # the second handout finds the first's repos and skips them, and both assignments
+    # then read and freeze the same snapshot. The second claimant is dropped, naming the
+    # first.
+    meta = {
+        "assignments": {
+            "assignment-1": {
+                "course_source_repo": "a1-f2026",
+                "due_datetime": "2026-10-13",
+            },
+            "assignment-1-resit": {
+                "course_source_repo": "a1-resit-f2026",
+                "cohort_dest_repo": "assignment-1",
+                "due_datetime": "2026-11-10",
+            },
+        }
+    }
+    sched = parse(meta)
+    assert set(sched.assignments) == {"assignment-1"}
+    (drop,) = [d for d in sched.dropped if "assignments.assignment-1-resit" in d]
+    assert "cohort-side name of assignments.assignment-1" in drop
+
+
+def test_two_cohort_dest_repos_that_match_each_other_are_refused():
+    # The same collision written the other way round - neither entry uses its slug.
+    meta = {
+        "assignments": {
+            "week-3": {
+                "course_source_repo": "a3-f2026",
+                "cohort_dest_repo": "homework",
+                "due_datetime": "2026-10-13",
+            },
+            "week-4": {
+                "course_source_repo": "a4-f2026",
+                "cohort_dest_repo": "homework",
+                "due_datetime": "2026-11-10",
+            },
+        }
+    }
+    sched = parse(meta)
+    assert set(sched.assignments) == {"week-3"}
+    assert any("cohort-side name of assignments.week-3" in d for d in sched.dropped)
