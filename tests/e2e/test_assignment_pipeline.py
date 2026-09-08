@@ -715,6 +715,31 @@ def test_the_snapshot_pins_the_pushed_commit(pipeline):
     assert rows[pipeline.submission_repo] == pipeline.stages["submission"].detail["sha"]
 
 
+def test_the_freeze_timed_the_submission_by_githubs_own_push_record(pipeline):
+    # The live proof that the bot token may read `GET /repos/{o}/{r}/activity` on a
+    # PRIVATE submission repo. That endpoint is the one rung of `collect._submitted`
+    # nobody can write - a committer date is client-supplied, so a student can set it to
+    # whatever they like - and it is the rung every late penalty rests on. It is also the
+    # one thing no unit test can show: a 403 or a 404 there falls straight through to the
+    # committer date, and the run would still pass every other assertion in this file.
+    row = collect.parse_snapshot_rows(pipeline.stages["artefacts"].detail["snapshot"])[
+        pipeline.submission_repo
+    ]
+    assert row.submitted_at
+    assert row.submitted_source == collect.SUBMITTED_SOURCE_PUSH, (
+        f"the freeze recorded {row.submitted_source!r}, not "
+        f"{collect.SUBMITTED_SOURCE_PUSH!r} - the bot could not read the repository "
+        f"activity of a private submission repo, so the student timed their own hand-in"
+    )
+    # The sheet's half of the same fact. `info.submitted_note` exists only for the two
+    # rungs built from the student's clock - `COMMIT_ONLY_NOTE` and `SUSPECT_NOTE` - so a
+    # row GitHub timed carries none at all.
+    info = grades.parse_sheet(pipeline.stages["artefacts"].detail["sheet"])[
+        "submissions"
+    ][pipeline.student]["info"]
+    assert "submitted_note" not in info, info.get("submitted_note")
+
+
 def test_the_autograde_marker_was_written(pipeline):
     # `_graded.json`, not the bare `autograde/<slug>/` directory: that is the fire-once
     # sentinel the next tick reads to decide it has nothing to do.
@@ -763,6 +788,12 @@ def test_the_due_date_fills_info_from_the_students_own_push(pipeline):
     # `parse_sheet` hands back what the file says, as text (`grades._SheetLoader`): a mark
     # a grader typed must come back the way they typed it, so `0` here is "0".
     assert int(info["days_late"]) == 0
+    # The refresh reads no push records (`_provisional_pins` says why), so the only note
+    # it can write is `SUSPECT_NOTE` - the pinned commit dated before the push that
+    # delivered it. A genuine push seconds ago earns none, and `days_late: 0` above is
+    # therefore a time the grader can act on. The push rung itself is proved at the
+    # freeze, where it is decided once and written down.
+    assert "submitted_note" not in info, info.get("submitted_note")
     assert "# Status: OPEN - 1 of " in pipeline.stages["after_due"].detail["sheet"]
 
 
