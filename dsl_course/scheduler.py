@@ -505,11 +505,10 @@ def _preflight_sources(
     # NOT short-circuited when empty: an empty list is what CLOSES the issue, and the
     # tick after the last fault is fixed is the one that has to say so.
     faults = sources + list(sched.faults)
-    worst = schedule.worst_severity(sources, now)
     if sources:
         log_step(
             f"{len(sources)} source(s) in {cohort_org}'s plan not staged in "
-            f"{course_org} (worst: {worst})"
+            f"{course_org} (worst: {schedule.worst_severity(sources, now)})"
         )
     if sched.faults:
         log_step(

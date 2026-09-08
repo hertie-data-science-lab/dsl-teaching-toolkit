@@ -472,11 +472,12 @@ def parse_sheet(
         data = yaml.load(text, Loader=_SheetLoader) or {}
     except yaml.YAMLError as exc:
         if faults is not None:
+            problem = _problem(exc)
             faults.append(
                 _sheet_fault(
                     slug,
                     "this sheet is not valid YAML, so nothing on it is refreshed or "
-                    "sent" + (f": {_problem(exc)}" if _problem(exc) else ""),
+                    "sent" + (f": {problem}" if problem else ""),
                     lineno=_mark_line(exc),
                     fix="fix the YAML on the line above; nothing on this sheet is "
                     "refreshed or sent until it parses",

@@ -64,7 +64,7 @@ from .faults import (
 )
 from .gh_contents import blame_logins, last_committer, path_committers
 from .log import log, log_err, log_ok, log_person
-from .schedule import SourceFault, deep_link
+from .schedule import SourceFault
 
 # How much of the deadline is left, in the subject. Formatted from the windows themselves,
 # so moving a rung cannot leave a hand-typed number of hours in somebody's inbox.
@@ -432,7 +432,7 @@ def _block(
     and the date has still gone by, so "fix by: release fires <yesterday>" is not an
     instruction anybody can follow."""
     fired = fault.fires is not None and fault.fires <= now
-    line_url = deep_link(cohort_org, fault)
+    line_url = fault.link(cohort_org)
     where = html.escape(f" - {fault.label}")
     at = _anchor(line_url, fault.at) if line_url else html.escape(fault.at)
     fix = fault.fix(course_org, rung)
@@ -660,9 +660,6 @@ def notify_source_transitions(
         if not events:
             return Unsent()
 
-        def loudest(keys: list[str]) -> Severity:
-            return max(digest.mail[k] for k in keys)
-
         def message(_routed: Routed, keys: list[str]) -> tuple[str, str]:
             keys.sort(key=lambda k: (-digest.mail[k], k))
             return _mail(
@@ -676,7 +673,7 @@ def notify_source_transitions(
             # The maintainer is copied at the two rungs where a release is about to ship
             # nothing, or already has. Not at the quieter two: those are still faculty's
             # own day, and a maintainer copied on every one of them stops reading them.
-            lambda keys: loudest(keys) >= Severity.CRITICAL,
+            lambda keys: max(digest.mail[k] for k in keys) >= Severity.CRITICAL,
             "source fault(s)",
             dry_run,
         )
@@ -911,6 +908,18 @@ def notify_overwritten_edits(
     if not groups:
         return Unsent()
 
+    try:
+        # Inside the guard with the delivery: both of these read the course org's identity
+        # file, and a rate limit on it must cost the mail rather than the sync's report.
+        label = _course_label(course_org, site_org)
+        sender = html.escape(_course_name(course_org))
+    except Exception as exc:
+        log_err(
+            f"could not mail {site_org}'s overwritten edits "
+            f"({type(exc).__name__}): {exc}"
+        )
+        return Unsent(1, tuple(faults_by_key))
+
     def message(_routed: Routed, keys: list[str]) -> tuple[str, str]:
         keys.sort()
         found = [faults_by_key[k] for k in keys]
@@ -936,10 +945,6 @@ def notify_overwritten_edits(
         return subject, "\n".join(parts) + "\n"
 
     try:
-        # Inside the guard with the delivery: both of these read the course org's identity
-        # file, and a rate limit on it must cost the mail rather than the sync's report.
-        label = _course_label(course_org, site_org)
-        sender = html.escape(course_name_of(course_org) or course_org)
         return _deliver(
             site_org,
             groups,

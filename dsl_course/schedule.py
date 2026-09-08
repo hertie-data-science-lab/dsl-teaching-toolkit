@@ -1486,16 +1486,6 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
     return out
 
 
-def deep_link(cohort_org: str, fault: SourceFault) -> str | None:
-    """The GitHub URL of the exact line to edit, or None when the line - or the cohort it
-    is in - is not known.
-
-    The fault knows its own file and the repo it lives in, so it builds the URL
-    (`ConfigFault.link`) and every config file gets the same one. Kept as a function
-    because the whole source half calls it that way."""
-    return fault.link(cohort_org)
-
-
 def source_report(faults: list[SourceFault], now: datetime, course_org: str) -> str:
     """The `--check-sources` half of the CLI report: every fault, loudest first, with the
     rung it sits at and the sentence that explains why distance is what decides.
