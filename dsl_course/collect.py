@@ -197,32 +197,17 @@ _STUDENT_TEST_RIGGING = (
 
 
 def template_is_group(master_org: str, template: str) -> bool:
-    """Whether an assignment template declares itself group-provisioned: `type: group` in
-    the grading_config.yml on its solution branch (written by the New assignment scaffold). No
-    solution branch / no grading_config.yml means individual (the parse's default).
+    """Whether an assignment declares itself group-provisioned: `type: group` in the
+    grading_config.yml on its template's solution branch (written by the New assignment
+    scaffold). No solution branch / no grading_config.yml means individual (the parse's
+    default).
 
-    Through `load_grading_spec`, so the scheduler's group resolution shares the memoised
-    read with the sheet refresh and the collection that follow it in the same tick."""
-    return load_grading_spec(master_org, template)["type"] == "group"
-
-
-def assignment_is_group(master_org: str, cohort_org: str, template: str) -> bool:
-    """The one resolution of group-vs-individual every consumer (handout, grading) uses.
-
-    Precedence (via `resolve_is_group`): the COHORT's own declaration -
-    `assignments.<slug>.type` in classroom-config/schedule.yml - wins; else the template's
-    design-time grading_config.yml `type:` (solution branch, written by the New assignment scaffold);
-    else individual. Read-side only: the cohort setting never writes back into the course org's
-    grading_config.yml - sources are read course-ward, state written cohort-ward. The template's
-    grading_config.yml is read only when the cohort leaves `type` unset."""
-    found = schedule.entry_for_repo(schedule.load(cohort_org), template)
-    entry = found[1] if found else None
-    schedule_type = entry.type if entry else None
-    template_group = (
-        None if schedule_type is not None else template_is_group(master_org, template)
-    )
+    THE resolution every consumer (handout, snapshot, sheet, grading) shares, now that
+    the cohort's schedule.yml no longer gets a say. Through `load_grading_spec`, so the
+    scheduler's group resolution shares the memoised read with the sheet refresh and the
+    collection that follow it in the same tick."""
     return resolve_is_group(
-        force=False, schedule_type=schedule_type, template_group=template_group
+        force=False, template_type=load_grading_spec(master_org, template)["type"]
     )
 
 
@@ -408,7 +393,7 @@ def submission_targets(
     up by the name then found none, so a group assignment silently had no targets at all.
     Defaults to `slug` for the (usual) case where they are the same.
 
-    `is_group` is decided upstream by `resolve_is_group` (force -> schedule -> grading_config.yml)
+    `is_group` is decided upstream by `resolve_is_group` (force -> grading_config.yml)
     and passed in; it is NEVER inferred from teams.csv here. teams.csv is student-writable (a
     "Join team" issue can add a row against an individual assignment), so trusting its rows to
     decide the assignment's KIND would let a student turn an individual assignment into a group
@@ -1810,13 +1795,8 @@ def refresh_assignment_sheet(
     found = schedule.entry_for_repo(sched, template)
     key = found[0] if found else assignment_slug(template)
     slug = schedule.cohort_name(*found) if found else key
-    entry = found[1] if found else None
     gspec = load_grading_spec(master_org, template)
-    is_group = resolve_is_group(
-        force=group,
-        schedule_type=entry.type if entry else None,
-        template_group=gspec["type"] == "group",
-    )
+    is_group = resolve_is_group(force=group, template_type=gspec["type"])
     ok = sync_sheet(
         master_org,
         cohort_org,
@@ -1897,16 +1877,9 @@ def collect(
         )
         return 1
 
-    entry = found[1] if found else None
-    # group-vs-individual via the single `resolve_is_group` precedence (force -> cohort
-    # schedule `type:` -> template grading_config.yml -> individual). The entry is the
-    # one found above by course_source_repo - `slug` is the cohort-side NAME, which is
-    # `cohort_dest_repo` when that is set and so is not a key into `sched.assignments`.
-    is_group = resolve_is_group(
-        force=group,
-        schedule_type=entry.type if entry else None,
-        template_group=gspec["type"] == "group",
-    )
+    # group-vs-individual via the single `resolve_is_group` precedence (force -> the
+    # template's grading_config.yml `type:` -> individual).
+    is_group = resolve_is_group(force=group, template_type=gspec["type"])
     cutoff = local_deadline(deadline, sched.timezone)
 
     def freeze_sheet(counts: dict[str, str] | None = None) -> bool:

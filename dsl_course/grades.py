@@ -2221,11 +2221,7 @@ def sheet_specs(course_org: str, sched) -> dict[str, SheetSpec]:
             key,
             name,
             gspec,
-            resolve_is_group(
-                force=False,
-                schedule_type=entry.type,
-                template_group=gspec["type"] == "group",
-            ),
+            resolve_is_group(force=False, template_type=gspec["type"]),
         )
     return specs
 

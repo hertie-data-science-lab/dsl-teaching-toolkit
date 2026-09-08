@@ -84,27 +84,11 @@ def test_assignment_slug_drops_only_a_trailing_cohort_suffix():
 
 
 def test_resolve_is_group_precedence():
-    # force wins over everything
-    assert (
-        course.resolve_is_group(
-            force=True, schedule_type="individual", template_group=False
-        )
-        is True
-    )
-    # else the cohort's declaration
-    assert (
-        course.resolve_is_group(
-            force=False, schedule_type="group", template_group=False
-        )
-        is True
-    )
-    # else the template's design-time type
-    assert (
-        course.resolve_is_group(force=False, schedule_type=None, template_group=True)
-        is True
-    )
+    # force wins over the assignment's own declaration
+    assert course.resolve_is_group(force=True, template_type="individual") is True
+    # else grading_config.yml's `type:` - the only other rung there is
+    assert course.resolve_is_group(force=False, template_type="group") is True
+    assert course.resolve_is_group(force=False, template_type="individual") is False
     # else individual
-    assert (
-        course.resolve_is_group(force=False, schedule_type=None, template_group=None)
-        is False
-    )
+    assert course.resolve_is_group(force=False, template_type=None) is False
+    assert course.resolve_is_group(force=False, template_type="") is False

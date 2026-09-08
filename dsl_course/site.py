@@ -52,6 +52,7 @@ from .discovery import (
     list_org_repos,
 )
 from .gh_contents import get_file_content, repo_tree
+from .grades import load_grading_spec
 from .log import log_err, log_step
 from .public_site import resync_public_site, sync_public_site
 from .readings import demote_headings, is_reading_overlay
@@ -801,13 +802,12 @@ def _assignment_entry(
     # differs. Through `resolve_is_group` rather than testing `type == "group"` here:
     # that is the single precedence every other consumer resolves through, and a second
     # copy of it in the one place students READ the answer is how the site comes to name
-    # a shape the handout does not create. `template_group=None` leaves the design-time
-    # grading_config.yml unconsulted - the site will not spend an API call per
-    # assignment on a repo name.
+    # a shape the handout does not create. It costs the template's grading_config.yml,
+    # which is where the answer now lives and is memoised per template per process - the
+    # cohort's schedule.yml, which the site used to read it from for free, no longer has
+    # a say.
     group = resolve_is_group(
-        force=False,
-        schedule_type=found[1].type if found else None,
-        template_group=None,
+        force=False, template_type=load_grading_spec(course_org, repo)["type"]
     )
     repo_name = submission_repo(slug, "<your-team>" if group else "<your-handle>")
     # The slug's own name: the row's IDENTIFIER, bold beside its name, and the one half

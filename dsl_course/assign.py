@@ -40,10 +40,10 @@ import yaml
 from . import grades, roster, schedule, site, sync_teams, teams
 from .access import FACULTY_READ_ACCESS, grant_faculty, grant_team_repo_access
 from .collect import (
-    assignment_is_group,
     load_grading_spec,
     sheet_spec,
     sync_sheet,
+    template_is_group,
 )
 from .course import (
     CONFIG_REPO,
@@ -581,8 +581,8 @@ def main() -> int:
         choices=["auto", "individual", "group"],
         default="auto",
         help="individual = one repo per student; group = one per team (from "
-        "classroom-config/teams.csv); auto = whatever schedule.yml / the template's "
-        "grading_config.yml declare (default: individual).",
+        "classroom-config/teams.csv); auto = whatever the template's "
+        "grading_config.yml declares (default: individual).",
     )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -668,9 +668,9 @@ def provision_all(
     was not `skipped`.
 
     Callable directly (e.g. by the scheduler) as well as from the CLI. `group=None`
-    (the default) reads the template's own declaration - `type: group` in the
-    grading_config.yml on its solution branch; pass True to force per-team for a template
-    that doesn't declare it.
+    (the default) reads the assignment's own declaration - `type: group` in the
+    grading_config.yml on the template's solution branch; pass True to force per-team for
+    a template that doesn't declare it.
 
     `scheduled` marks the hourly cron: a group assignment with no teams yet is then a
     green wait, not the error a button press gets."""
@@ -678,8 +678,8 @@ def provision_all(
         log_err("master-org and cohort-org must differ.")
         return 1, False
     if group is None:
-        # schedule.yml's assignments.<slug>.type wins; grading_config.yml is the fallback.
-        group = assignment_is_group(master_org, cohort_org, template)
+        # The assignment's own grading_config.yml is the only declaration there is.
+        group = template_is_group(master_org, template)
         if group:
             log("  (declared `type: group` - provisioning per team)")
 

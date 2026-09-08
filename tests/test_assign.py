@@ -645,7 +645,7 @@ def test_group_none_infers_per_team_from_the_templates_grading_yml(
     # force-ticking.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
-        "dsl_course.assign.assignment_is_group", lambda org, cohort, template: True
+        "dsl_course.assign.template_is_group", lambda org, template: True
     )
     monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {"unused": {}})
     monkeypatch.setattr(
@@ -676,10 +676,8 @@ def test_group_false_forces_individual_even_for_a_group_template(
     # An explicit False never consults grading_config.yml - the caller decided.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
-        "dsl_course.assign.assignment_is_group",
-        lambda org, cohort, template: (_ for _ in ()).throw(
-            AssertionError("must not be read")
-        ),
+        "dsl_course.assign.template_is_group",
+        lambda org, template: (_ for _ in ()).throw(AssertionError("must not be read")),
     )
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     rc, _changed = assign.provision_all(
@@ -815,7 +813,7 @@ def test_group_provisioning_filters_teams_csv_through_the_roster_allowlist(
     # into the private org with maintain on a repo. An auditor's handle is excluded too.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
-        "dsl_course.assign.assignment_is_group", lambda org, cohort, template: True
+        "dsl_course.assign.template_is_group", lambda org, template: True
     )
     monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {"unused": {}})
     monkeypatch.setattr(
@@ -851,7 +849,7 @@ def test_a_rejected_teams_csv_handle_is_not_published_in_the_workflow_log(
     # log actually shows: a count a faculty member can act on, and no student's typing.
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     monkeypatch.setattr(
-        "dsl_course.assign.assignment_is_group", lambda org, cohort, template: True
+        "dsl_course.assign.template_is_group", lambda org, template: True
     )
     monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {"unused": {}})
     monkeypatch.setattr(
@@ -1089,10 +1087,13 @@ def _scheduled(monkeypatch, key: str, dest: str, source: str):
         due_datetime=datetime(2026, 11, 1, tzinfo=timezone.utc),
         course_source_repo=source,
         cohort_dest_repo=dest,
-        type="group",
     )
     monkeypatch.setattr(
         "dsl_course.schedule.load", lambda org: Schedule(assignments={key: entry})
+    )
+    # ... and a group assignment, which only the template's grading_config.yml can say.
+    monkeypatch.setattr(
+        "dsl_course.assign.template_is_group", lambda org, template: True
     )
 
 

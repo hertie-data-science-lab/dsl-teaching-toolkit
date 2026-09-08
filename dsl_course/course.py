@@ -234,24 +234,23 @@ def assignment_slug(template: str) -> str:
     return re.sub(r"-[fs]\d{4}$", "", template)
 
 
-def resolve_is_group(
-    *, force: bool, schedule_type: str | None, template_group: bool | None
-) -> bool:
+def resolve_is_group(*, force: bool, template_type: str | None) -> bool:
     """The SINGLE precedence for group-vs-individual, shared by every resolver.
 
-    An explicit force (the release workflow's `type: group` / `--group`) wins; else the
-    COHORT's declaration - `assignments.<slug>.type` in classroom-config/schedule.yml, passed
-    as `schedule_type`; else the template's design-time grading_config.yml `type:`, passed as
-    `template_group` (True/False, or None when not consulted); else individual. Pure: each
-    caller passes the inputs it already holds, so no consumer re-derives its own precedence
-    (and none re-trusts student-writable teams.csv to decide the kind)."""
+    An explicit force (the Release assignment button's `type: group` / `--group`) wins;
+    else the assignment's OWN declaration - `type:` in the template's `grading_config.yml`,
+    passed as `template_type` ("group"/"individual", or None when the file says nothing);
+    else individual. Pure: each caller passes what it already holds, so no consumer
+    re-derives its own precedence (and none re-trusts student-writable teams.csv to decide
+    the kind).
+
+    The cohort's `schedule.yml` used to sit between the two and no longer does. The two
+    files are orthogonal now - schedule.yml is WHEN, grading_config.yml is WHAT - and a
+    cohort that could override the shape got one assignment provisioned per student while
+    its own grading config, its team cap and its Join-team form all said per team."""
     if force:
         return True
-    if schedule_type is not None:
-        return schedule_type == "group"
-    if template_group is not None:
-        return template_group
-    return False
+    return str(template_type or "").strip().lower() == "group"
 
 
 def coerce_date(value: object) -> date | None:

@@ -1006,8 +1006,10 @@ def _captured_writes(monkeypatch) -> list[tuple[str, str]]:
     return written
 
 
-def _stub_collect(monkeypatch, snapshots):
-    _stub_solution_clone(monkeypatch)
+def _stub_collect(monkeypatch, snapshots, grading: str | None = None):
+    _stub_solution_clone(
+        monkeypatch, **({"grading": grading} if grading is not None else {})
+    )
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(
         collect,
@@ -1153,18 +1155,16 @@ def test_collect_resolves_the_cohort_type_from_the_entry_not_the_cohort_name(
     monkeypatch,
 ):
     # schedule.yml is keyed on the SLUG; a `cohort_dest_repo` makes the cohort-side name
-    # differ from that key, so looking the entry up by name finds nothing and a declared
-    # group assignment quietly grades one repo per student. Resolve it by
-    # course_source_repo, exactly as assignment_is_group does.
+    # differ from that key, so looking the entry up by name finds nothing and the
+    # collection runs under the wrong cohort-side name. Resolve it by course_source_repo.
     from dsl_course.schedule import AssignmentEntry
 
     entry = AssignmentEntry(
         course_source_repo="assignment-4-project-f2026",
         cohort_dest_repo="group-project",
         due_datetime=datetime(2026, 11, 15, tzinfo=ZoneInfo("Europe/Berlin")),
-        type="group",
     )
-    _stub_collect(monkeypatch, None)
+    _stub_collect(monkeypatch, None, grading="type: group\nautograde: true\n")
     monkeypatch.setattr(
         collect.schedule, "load", lambda org: Schedule(assignments={"project": entry})
     )
@@ -1383,40 +1383,15 @@ def test_template_is_group_defaults_to_individual_without_grading_yml(monkeypatc
     assert not collect.template_is_group("Course-Org", "assignment-1-f2026")
 
 
-def test_assignment_is_group_prefers_the_cohort_schedule(monkeypatch):
-    # schedule.yml's assignments.<slug>.type wins; grading_config.yml is only the fallback.
-    from dsl_course.schedule import AssignmentEntry, Schedule
-
-    entry = AssignmentEntry(
-        course_source_repo="assignment-4-project-f2026",
-        due_datetime=datetime(2026, 11, 15, tzinfo=ZoneInfo("Europe/Berlin")),
-    )
-    sched = Schedule(assignments={"assignment-4-project": entry})
-    monkeypatch.setattr(collect.schedule, "load", lambda org: sched)
-    calls = []
+def test_the_cohort_schedule_no_longer_gets_a_say_in_the_shape(monkeypatch):
+    # The clean break: schedule.yml is timing, grading_config.yml is the assignment. A
+    # cohort that still carries the retired `type:` cannot flip an individual template to
+    # group, or a group one to individual - the template's own answer is the only one.
     monkeypatch.setattr(
-        collect,
-        "template_is_group",
-        lambda org, template: calls.append(template) or True,
+        collect.grades, "get_file_content", lambda *a, **k: "type: group\n"
     )
-    # no cohort declaration -> falls through to grading_config.yml
-    entry.type = None
-    assert collect.assignment_is_group(
-        "Course", "Cohort-f2026", "assignment-4-project-f2026"
-    )
-    assert calls == ["assignment-4-project-f2026"]
-    # cohort says individual -> grading_config.yml is NOT consulted
-    entry.type = "individual"
-    calls.clear()
-    assert not collect.assignment_is_group(
-        "Course", "Cohort-f2026", "assignment-4-project-f2026"
-    )
-    assert calls == []
-    # cohort says group -> group, regardless of the template
-    entry.type = "group"
-    assert collect.assignment_is_group(
-        "Course", "Cohort-f2026", "assignment-4-project-f2026"
-    )
+    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
+    assert collect.template_is_group("Course", "assignment-4-project-f2026")
 
 
 # ---------------------------------------------------------- autograde sandbox (fix 1)
@@ -1767,23 +1742,19 @@ def test_strip_student_test_rigging_survives_a_symlink_cycle(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "force,schedule_type,template_group,expected",
+    "force,template_type,expected",
     [
-        (True, None, None, True),  # force (button / --group) wins
-        (True, "individual", False, True),  # ... over everything below it
-        (False, "group", False, True),  # cohort schedule beats the template
-        (False, "individual", True, False),
-        (False, None, True, True),  # template grading_config.yml is the fallback
-        (False, None, False, False),
-        (False, None, None, False),  # nothing declared -> individual
+        (True, None, True),  # force (button / --group) wins
+        (True, "individual", True),  # ... over the assignment's own declaration
+        (False, "group", True),  # grading_config.yml decides
+        (False, "individual", False),
+        (False, None, False),  # nothing declared -> individual
+        (False, "GROUP", True),  # the vocabulary is case- and space-insensitive
     ],
 )
-def test_resolve_is_group_precedence(force, schedule_type, template_group, expected):
+def test_resolve_is_group_precedence(force, template_type, expected):
     assert (
-        collect.resolve_is_group(
-            force=force, schedule_type=schedule_type, template_group=template_group
-        )
-        is expected
+        collect.resolve_is_group(force=force, template_type=template_type) is expected
     )
 
 
