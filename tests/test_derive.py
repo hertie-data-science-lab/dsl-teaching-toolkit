@@ -127,6 +127,23 @@ def test_an_unbalanced_fence_is_refused_rather_than_guessed_at(source):
         derive.strip_regions(source, derive.PY_PLACEHOLDER, "solution/x.py")
 
 
+def test_a_grader_copy_keeps_its_non_ascii_readable():
+    # Both notebook writers go through one dump now. The filtered copy used to escape to
+    # `\uXXXX`, which is what a grader would have read for a German answer.
+    nb = {
+        "cells": [
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": "<!-- BEGIN QUESTION -->\n## Frage 1: Schätzer\n<!-- END QUESTION -->\n",
+            }
+        ]
+    }
+    assert (
+        "Schätzer" in derive.filter_notebook_questions(json.dumps(nb), "s.ipynb").text
+    )
+
+
 def test_a_notebook_that_is_not_json_is_refused():
     with pytest.raises(derive.DeriveError):
         derive.strip_notebook("not a notebook", "solution/x.ipynb")

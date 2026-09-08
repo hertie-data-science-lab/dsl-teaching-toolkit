@@ -186,6 +186,14 @@ def _notebook_language(nb: dict) -> str:
     return str(info.get("name") or kernel.get("language") or "").lower()
 
 
+def _dump_notebook(nb: dict) -> str:
+    """A notebook as a file. `indent=1` with a trailing newline is what nbformat itself
+    writes, so anything derived here diffs against a hand-saved notebook rather than
+    against its own formatting - and `ensure_ascii=False` keeps a German answer readable
+    instead of escaping it to `\\uXXXX`."""
+    return json.dumps(nb, indent=1, ensure_ascii=False) + "\n"
+
+
 def _cell_source(cell: dict) -> str:
     """A cell's source as one string, whichever of the two shapes nbformat wrote it in."""
     source = cell.get("source")
@@ -206,7 +214,8 @@ def strip_notebook(text: str, where: str) -> Stripped:
     if not isinstance(nb, dict) or not isinstance(nb.get("cells"), list):
         raise DeriveError(f"{where}: not a readable notebook - no `cells` array")
 
-    python = _notebook_language(nb).startswith("python") or not _notebook_language(nb)
+    language = _notebook_language(nb)
+    python = not language or language.startswith("python")
     regions = cells = 0
     for cell in nb["cells"]:
         if not isinstance(cell, dict):
@@ -220,7 +229,7 @@ def strip_notebook(text: str, where: str) -> Stripped:
         source = _cell_source(cell)
         tags = (cell.get("metadata") or {}).get("tags") or []
         if SOLUTION_TAG in tags:
-            derived, replaced = _headers_only(source, placeholder), 0
+            derived = _headers_only(source, placeholder)
             cells += 1
         else:
             derived, replaced = strip_regions(source, placeholder, where)
@@ -235,9 +244,7 @@ def strip_notebook(text: str, where: str) -> Stripped:
         if cell.get("cell_type") == "code":
             cell["outputs"] = []
             cell["execution_count"] = None
-    # indent=1 with a trailing newline is what nbformat itself writes, so a derived
-    # notebook diffs against a hand-saved one instead of against its own formatting.
-    return Stripped(json.dumps(nb, indent=1, ensure_ascii=False) + "\n", regions, cells)
+    return Stripped(_dump_notebook(nb), regions, cells)
 
 
 def strip_rmd(text: str, where: str) -> Stripped:
@@ -369,7 +376,7 @@ def filter_notebook_questions(text: str, where: str) -> Filtered:
             inside, questions = False, questions + 1
     if inside:
         raise DeriveError(f"{where}: a question is opened and never closed")
-    return Filtered(json.dumps({**nb, "cells": kept}, indent=1) + "\n", questions)
+    return Filtered(_dump_notebook({**nb, "cells": kept}), questions)
 
 
 def filter_rmd_questions(text: str, where: str) -> Filtered:
