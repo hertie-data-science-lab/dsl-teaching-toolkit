@@ -19,7 +19,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import course, roster, sync_teams, teams, welcome
+from dsl_course import course, roster, teams, welcome
 
 WELCOME = Path(__file__).resolve().parents[1] / "templates" / "welcome"
 TEMPLATES = [
@@ -552,7 +552,7 @@ def test_onboard_throttles_a_student_before_it_touches_the_roster():
 def test_the_form_refuses_exactly_the_slugs_the_reconcile_reserves():
     # teams.csv is STUDENT-written, and `team_slug("course", "admin")` is `course-admin` -
     # the faculty team with admin on every repo in the cohort. The form is the gate; the
-    # reconcile (sync_teams.is_reserved_slug) is the backstop for a row that reached the
+    # reconcile (teams.is_reserved_slug) is the backstop for a row that reached the
     # CSV another way. Two lists in two languages, so they are pinned to each other here:
     # a role team added to course.ROLE_TEAMS and not to the form is a slug a student can
     # claim, and the reconcile would then add them to it and prune the real members.
@@ -560,7 +560,7 @@ def test_the_form_refuses_exactly_the_slugs_the_reconcile_reserves():
     declared = re.search(r"const RESERVED = new Set\(\[([^\]]*)\]\)", code)
     assert declared, "the form no longer declares a RESERVED set"
     assert set(re.findall(r"'([^']+)'", declared.group(1))) == set(
-        sync_teams.RESERVED_TEAM_SLUGS
+        teams.RESERVED_TEAM_SLUGS
     )
     # ...and the `instructors-<tag>` prefix rule, which is a startswith on both sides.
     assert f"startsWith('{course.INSTRUCTORS_TEAM}-')" in code

@@ -26,30 +26,13 @@ import argparse
 import sys
 
 from . import roster, teams
-from .course import INSTRUCTORS_TEAM, ROLE_TEAMS
 from .gh_teams import create_team, reconcile_team_members
 from .log import log_err, log_ok, log_person, log_step
 
-
-def team_slug(assignment: str, team: str) -> str:
-    """The GitHub Team name/slug materialised for one (assignment, team) pair.
-
-    Assignment-prefixed so a team name reused across assignments (e.g. `wizards` in two
-    projects) maps to distinct org-unique teams. Lower-cased to match the slug GitHub
-    derives from the team name."""
-    return f"{assignment}-{team}".lower()
-
-
-# Team slugs students may never materialise. teams.csv is STUDENT-written (the public
-# Join-team issue form), and `team_slug("course", "admin")` is `course-admin` - the faculty
-# team that holds admin on every repo in the cohort. Reconciling that slug from teams.csv
-# would add the student to it and prune the real admins. The workflow refuses these at the
-# form; this is the backstop for a row that reached the CSV any other way.
-RESERVED_TEAM_SLUGS = ROLE_TEAMS
-
-
-def is_reserved_slug(slug: str) -> bool:
-    return slug in RESERVED_TEAM_SLUGS or slug.startswith(f"{INSTRUCTORS_TEAM}-")
+# The naming rules live with the file's parser, which is the only thing that can
+# refuse a row for breaking them. Re-exported because three modules and their tests
+# have always asked `sync_teams` for them.
+from .teams import is_reserved_slug, team_slug
 
 
 def desired_teams(per: dict[str, dict[str, list[str]]]) -> dict[str, set[str]]:
