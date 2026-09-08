@@ -13,6 +13,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 import pytest
+import yaml
 
 from dsl_course import grades
 from dsl_course.grades import (
@@ -29,6 +30,7 @@ from dsl_course.grades import (
     penalty_rate,
     score_total,
     sheet_faults,
+    sheet_hold_reasons,
     sheet_path,
 )
 
@@ -692,6 +694,27 @@ def test_a_word_processors_minus_sign_is_a_fault_on_the_adjustment_line():
     ]
     assert fault.lineno == 11
     assert "adjustment" in fault.what and "not a number" in fault.what
+
+
+def test_a_teams_bad_mark_is_one_fault_however_many_people_it_holds():
+    # The HOLD is per person - that is what stops each return - but the mark is one line
+    # and one thing to correct. Four faults with one key printed the same bullet four
+    # times in the digest issue and made the run summary count four.
+    text = """teams:
+  team-alpha:
+    score_group:
+      Q1: pass
+    members:
+      ada-l:
+        adjustment_individual: null
+      ben-k:
+        adjustment_individual: null
+"""
+    spec = group(questions=QUESTIONS)
+    held = sheet_hold_reasons(spec, yaml.safe_load(text))
+    assert held == {"ada-l": "score", "ben-k": "score"}
+    (fault,) = sheet_faults("a3", text, spec)
+    assert fault.lineno == 3 and fault.field == "score_group"
 
 
 def test_a_question_the_assignment_never_declared_is_a_fault():

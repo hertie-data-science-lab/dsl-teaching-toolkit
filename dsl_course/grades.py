@@ -2168,6 +2168,11 @@ def sheet_hold_reasons(
     held: dict[str, str] = {}
     seen: set[str] = set()
     lines = key_lines(text) if faults is not None else {}
+    # A group's mark is ONE line, so the four members it holds are one thing to fix. The
+    # hold above is still per handle - it is what stops each person's return - but four
+    # faults with one key printed the same bullet four times in the digest issue and made
+    # the run summary count four entries where a grader has one to correct.
+    recorded: set[str] = set()
 
     def record(unit_key: str, handle: str, reason: str) -> None:
         held[handle] = reason
@@ -2175,16 +2180,17 @@ def sheet_hold_reasons(
             return
         lineno = _hold_line(lines, spec, unit_key, handle, reason)
         what, fix = _HOLD_FAULT[reason]
-        faults.append(
-            _sheet_fault(
-                slug,
-                what,
-                lineno=lineno,
-                # No field for a duplicate: the key that repeats IS the handle.
-                field="" if reason == "duplicate" else _hold_field(spec, reason),
-                fix=fix.format(at=f"line {lineno}" if lineno else "that line"),
-            )
+        fault = _sheet_fault(
+            slug,
+            what,
+            lineno=lineno,
+            # No field for a duplicate: the key that repeats IS the handle.
+            field="" if reason == "duplicate" else _hold_field(spec, reason),
+            fix=fix.format(at=f"line {lineno}" if lineno else "that line"),
         )
+        if fault.key not in recorded:
+            recorded.add(fault.key)
+            faults.append(fault)
 
     for unit_key, block in ((sheet or {}).get(spec.container_key) or {}).items():
         if not isinstance(block, dict):
