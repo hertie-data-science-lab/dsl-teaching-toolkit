@@ -402,7 +402,7 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
     # here: "we could not list" is not "nothing is open".
     standing = open_titles(f"{cohort_org}/{schedule.CONFIG_REPO}")
 
-    sources_open = [t for t in (source_digest.TITLE,) if t in standing]
+    sources_open = [source_digest.TITLE] if source_digest.TITLE in standing else []
     data["C8"] = _fault_row(
         "Source faults (release plan)",
         cohort_org,

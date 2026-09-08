@@ -411,37 +411,6 @@ def _rung(name: str) -> Severity | None:
         return None
 
 
-def migrated(previous: dict[str, str], faults: list[SourceFault]) -> dict[str, str]:
-    """`previous`, with any key written before `SourceFault.key` carried the deploy's path
-    renamed to the key that same fault has today.
-
-    The key gained `[path]` because two deploys under one entry are two faults, and every
-    digest issue open at the moment that shipped carries keys in the old `<where>.<field>`
-    shape. Read as they stand, each of them is a fault that CLEARED and a fault that
-    APPEARED in the same tick - a close comment and a fresh mail about nothing, on the one
-    channel this design exists to keep quiet.
-
-    An old key matching exactly one of today's faults becomes that fault's key. One
-    matching SEVERAL is dropped: those are the two deploys the path was added to tell
-    apart, and there is no honest way to say which of them the recorded rung belonged to,
-    so the loudest reappears rather than inheriting it. A key matching nothing is left
-    alone - that is a fault that genuinely cleared, and it is owed its Cleared comment.
-
-    Removable one release cycle after it ships: by then no open digest carries an
-    old-shape key."""
-    today: dict[str, list[str]] = {}
-    for f in faults:
-        today.setdefault(f"{f.where}.{f.field}", []).append(f.key)
-    # Already-current keys first, so a body written mid-migration - carrying both shapes
-    # for one fault - keeps the rung it actually reported at.
-    out = {k: v for k, v in previous.items() if k in today.get(k, [k])}
-    for key, rung in previous.items():
-        current = today.get(key, [key])
-        if key not in current and len(current) == 1:
-            out.setdefault(current[0], rung)
-    return out
-
-
 def transitions(previous: dict[str, str], current: dict[str, str]) -> Transitions:
     """What changed between two states, filtered to what deserves telling somebody, plus
     the rung every current fault sits at.

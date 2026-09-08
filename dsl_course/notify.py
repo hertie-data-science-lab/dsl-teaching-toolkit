@@ -190,14 +190,7 @@ def _wrote_it(cohort_org: str, fault: ConfigFault, bot: str) -> str | None:
     if not fault.file:
         return None
     if fault.file.endswith(".csv"):
-        return next(
-            (
-                login
-                for login in _pushed(cohort_org, fault.in_repo, fault.file)
-                if login.lower() != bot
-            ),
-            None,
-        )
+        return _last_pusher(cohort_org, fault, bot)
     if not fault.lineno:
         return None
     wrote = _blame(
