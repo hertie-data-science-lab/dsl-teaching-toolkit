@@ -312,9 +312,7 @@ def test_assignment_bare_date_is_rejected_only_the_nested_form_is_accepted():
 
 
 def test_assignment_without_due_is_skipped():
-    assert (
-        parse({"assignments": {"assignment-1": {"max_team_size": 2}}}).assignments == {}
-    )
+    assert parse({"assignments": {"assignment-1": {"title": "x"}}}).assignments == {}
 
 
 def test_event_datetime_is_the_only_accepted_key():
@@ -392,29 +390,33 @@ def test_malformed_deploy_datetime_falls_back_to_the_event_datetime():
     assert r.deploy[0].deploy_datetime is None  # ships at the event_datetime
 
 
-def test_max_team_size_parses_and_defaults_to_none():
+def test_the_settings_that_moved_to_grading_config_are_flagged_by_name():
+    # The clean break. A cohort still carrying `type: group` is not making a typo, it is
+    # declaring the shape in a file that no longer reads it - so the entry is KEPT (its
+    # dates are still good) and the message says which file the declaration moved to.
     meta = {
         "assignments": {
             "assignment-4-project": {
                 "course_source_repo": "a-f2026-1",
                 "due_datetime": "2026-11-15",
+                "type": "group",
                 "max_team_size": 3,
-            },
-            "assignment-1": {
-                "course_source_repo": "a-f2026-2",
-                "due_datetime": "2026-10-13",
-            },
-            "bad": {
-                "course_source_repo": "a-f2026-3",
-                "due_datetime": "2026-10-20",
-                "max_team_size": "lots",
             },
         }
     }
-    entries = parse(meta).assignments
-    assert entries["assignment-4-project"].max_team_size == 3
-    assert entries["assignment-1"].max_team_size is None
-    assert entries["bad"].max_team_size is None  # malformed -> unset, and flagged
+    sched = parse(meta)
+    entry = sched.assignments["assignment-4-project"]
+    assert not hasattr(entry, "type") and not hasattr(entry, "max_team_size")
+    assert entry.due_datetime is not None  # the timing it DID declare still stands
+    kinds = {line.split(":")[0] for line in sched.dropped}
+    assert kinds == {
+        "assignments.assignment-4-project.type",
+        "assignments.assignment-4-project.max_team_size",
+    }
+    for line in sched.dropped:
+        assert "grading_config.yml" in line and "solution" in line
+        # named as MOVED, not as the generic typo they are not
+        assert "unrecognised key" not in line
 
 
 def test_assignment_handout_parses():
@@ -603,41 +605,6 @@ def test_show_on_site_is_a_known_release_key():
         },
     }
     assert parse(meta).dropped == []
-
-
-def test_assignment_type_parses_and_rejects_unknown_values():
-    meta = {
-        "assignments": {
-            "assignment-4-project": {
-                "course_source_repo": "a-f2026-1",
-                "due_datetime": "2026-11-15",
-                "type": "group",
-            },
-            "assignment-1": {
-                "course_source_repo": "a-f2026-2",
-                "due_datetime": "2026-10-13",
-                "type": "Individual",
-            },
-            "assignment-2": {
-                "course_source_repo": "a-f2026-3",
-                "due_datetime": "2026-10-27",
-            },
-            "typo": {
-                "course_source_repo": "a-f2026-4",
-                "due_datetime": "2026-11-01",
-                "type": "grp",
-            },
-        }
-    }
-    sched = parse(meta)
-    entries = sched.assignments
-    assert entries["assignment-4-project"].type == "group"
-    assert entries["assignment-1"].type == "individual"  # case-normalised
-    assert entries["assignment-2"].type is None
-    # unknown value still falls back to individual, but is now surfaced (a group
-    # assignment typo'd here would otherwise silently get one repo per student)
-    assert entries["typo"].type is None
-    assert any("assignments.typo.type" in d and "grp" in d for d in sched.dropped)
 
 
 def test_insert_handout_records_write_once():
@@ -1248,25 +1215,6 @@ def test_an_unparseable_grading_datetime_is_flagged_not_silently_the_due_date():
     assert "falls back to the due date" in line
 
 
-def test_a_non_integer_max_team_size_is_flagged():
-    sched = parse(
-        {
-            "assignments": {
-                "project": {
-                    "course_source_repo": "a-f2026",
-                    "due_datetime": "2026-11-15",
-                    "type": "group",
-                    "max_team_size": "lots",
-                }
-            }
-        }
-    )
-    assert sched.assignments["project"].max_team_size is None
-    (line,) = sched.dropped
-    assert line.startswith("assignments.project.max_team_size:")
-    assert "'lots'" in line and "Join team" in line
-
-
 def test_an_unparseable_deploy_datetime_is_flagged():
     sched = parse(
         {
@@ -1301,8 +1249,8 @@ def test_an_unknown_event_type_is_flagged_like_an_unknown_assignment_type():
 
 
 def test_an_absent_optional_value_is_never_flagged():
-    # Omitting handout/grading/deploy/type/max_team_size is the documented way to take
-    # their defaults - only a value that IS there and cannot be read is a fault.
+    # Omitting handout/grading/deploy/solution is the documented way to take their
+    # defaults - only a value that IS there and cannot be read is a fault.
     assert (
         parse(
             {

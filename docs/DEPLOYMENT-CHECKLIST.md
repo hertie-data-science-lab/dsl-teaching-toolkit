@@ -147,8 +147,7 @@ cron (~24h)** - run **Sync membership** by hand if you need it sooner. Runbook:
 Live example: [`example-course/cohort-org/teams.csv`](../example-course/cohort-org/teams.csv).
 
 `classroom-config/teams.csv` - group membership, per assignment. This can be popualted in 2 ways:
-1. Students self-select via the `welcome` **Join team** issue (which enforces the per-assignment `max_team_size` set under
-[`schedule.yml`](#scheduleyml)'s `assignments:`, default 5),
+1. Students self-select via the `welcome` **Join team** issue (which enforces the per-assignment `max_team_size`, default 5),
 2. you edit it directly;
 either way a push materialises a GitHub team per group, and releasing a group assignment grants each team one shared repo.
 
@@ -319,10 +318,11 @@ assignments:
 | `title` | no | the template README's `# ` heading | the assignment's name, beside the slug on the site. Declared here it shows from day one; the README fallback only appears at hand-out |
 | `handout_datetime` | no* | - | when repos are provisioned, automatic. *Required for the schedule to release it. If you hand out via the **Release assignment** workflow instead, the workflow records the release moment here for you |
 | `grading_datetime` | no | `due_datetime` + `late_window_days` | snapshot freezes + autograder fires (once) |
-| `type` | no | individual | `group` / `individual` - how handout + grading fan out. Can also be set in the template's `grading_config.yml` |
-| `max_team_size` | no | 5 | group assignments: Join-team cap |
 | `course_source_repo` | **yes** | - (entry dropped without it) | the course-org repo this hands out from. A name that does not exist is reported loudly |
+| `solution_datetime` | no | never | pushes the template's `solution/` into every provisioned repo. Must be after `handout_datetime` |
 | `cohort_dest_repo` | no | the slug | the cohort-side name: student/team repos (`<name>-<handle>`), the frozen cohort template, the teams.csv key, snapshots and grades |
+
+Timing only. `type:` and `max_team_size:` are no longer accepted here - they live in the assignment's own `grading_config.yml` on the course template's `solution` branch, and **Validate schedule** flags them here by name.
 
 ```yaml
 semester_start: 2026-09-07
@@ -334,12 +334,10 @@ assignments:                          # each assignment's WHOLE lifecycle, keyed
                                         # team - the template's grading_config.yml decides), automatic
     due_datetime: 2026-10-13            # what students see
     grading_datetime: 2026-10-15        # optional: the grading pin - snapshot freezes and the
-                                        # autograder fires (once). Default = due_datetime.
-  assignment-4-project:
-    due_datetime: 2026-11-27
-    type: group                       # optional: group | individual
-    max_team_size: 4                  # optional, group assignments: the welcome Join team
-                                      # flow refuses members beyond this (default 5)
+                                        # autograder fires (once). Default = due_datetime
+                                        # plus the template's late_window_days.
+  assignment-4-project:                 # group or not is the template's grading_config.yml's
+    due_datetime: 2026-11-27            # business, along with its team cap - not this file's
 ```
 
 **`events`** - display-only calendar rows, keyed by a label you choose. Nothing deploys;
@@ -404,8 +402,8 @@ fully read goes red and opens an issue naming the bad entry.
 | `handout_datetime:` unparseable | kept, but nothing is ever handed out |
 | `grading_datetime:` unparseable | kept - the grading deadline falls back to `due_datetime` |
 | `deploy_datetime:` unparseable | kept - that copy ships at the `event_datetime` |
-| `max_team_size:` unparseable | kept - no cap |
-| unknown `type:`, unknown key, unknown `timezone:` | kept, on the documented fallback |
+| `type:` / `max_team_size:` on an assignment | kept, and reported as moved to its `grading_config.yml` |
+| unknown `type:` on an event, unknown key, unknown `timezone:` | kept, on the documented fallback |
 
 Verify with `python3 -m dsl_course.schedule --cohort-org <COHORT> --validate`. Full account:
 [Schedule releases -> Dropped entries](07-schedule-releases.md#dropped-entries).

@@ -57,7 +57,8 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
    2. instructors edit `classroom-config/teams.csv`(`assignment, team, github_handle`)
 - The issue flow only accepts an assignment already **declared under `assignments:` in
   `classroom-config/schedule.yml`** (declare it before students form teams) and enforces its
-  `max_team_size` (default 5).
+  `max_team_size`, which lives in that assignment's own `grading_config.yml` (default:
+  the course's `assignment_defaults`, else 5).
 - Team names are lower-cased; a GitHub handle or a faculty team name (`course-admin`) is refused.
 - The **Sync membership** workflow then creates a GitHub team per group.
 - A **Release assignment** run with `group` ticked then grants each team its shared repo.

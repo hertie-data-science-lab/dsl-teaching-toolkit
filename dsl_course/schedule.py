@@ -265,11 +265,16 @@ class Release:
 
 @dataclass
 class AssignmentEntry:
-    """One assignment's whole lifecycle, in one place: `handout_datetime` (when
-    student/team repos are provisioned), `due_datetime` (what students see),
-    `grading_datetime` (when the snapshot freezes and the autograder fires),
-    `solution_datetime` (when the model solution goes out), `type` and `max_team_size`
-    (group assignments)."""
+    """One assignment's TIMING, and nothing else: `handout_datetime` (when student/team
+    repos are provisioned), `due_datetime` (what students see), `grading_datetime` (when
+    the snapshot freezes and the autograder fires), `solution_datetime` (when the model
+    solution goes out).
+
+    What the assignment IS - its shape, its team cap, how it is handed in, how it is
+    marked - lives in the assignment's own `grading_config.yml`, on the course template's
+    solution branch. The two files were both allowed to declare the shape, and a cohort
+    that said one thing while the template said another got repos of one kind graded as
+    the other."""
 
     due_datetime: datetime
     # The COURSE-org repo this assignment hands out from - the template one repo per
@@ -282,7 +287,11 @@ class AssignmentEntry:
     # None = the entry's slug, which is almost always right. Mirrors a deploy's
     # `cohort_dest_repo`: source names the course side, dest names the cohort side.
     cohort_dest_repo: str | None = None
-    grading_datetime: datetime | None = None  # explicit pin; defaults to due_datetime
+    # An explicit freeze. Left unset the cutoff is the due date plus the template's
+    # `late_window_days` - resolved by `grades.cutoff_at`, which holds the spec this file
+    # cannot read, and NOT here: answering it in the parser would shut the door on the due
+    # date and refuse every late push the receipts had just promised to accept.
+    grading_datetime: datetime | None = None
     # When to provision one repo per student (or per team - see `type`) from the
     # `<slug>-<tag>` template. The scheduler synthesises a release from this, so it fires
     # exactly like a `releases` entry. None = hand out manually (the workflow
@@ -294,14 +303,6 @@ class AssignmentEntry:
     # embargoed until hand-out, so a name that lives only there cannot appear on the
     # schedule that publishes the assignment's dates. "" = fall back to the heading.
     title: str = ""
-    # 'group' | 'individual' | None. The COHORT-level declaration of how this assignment
-    # fans out; when set it wins over the template's own grading_config.yml `type:` (the
-    # design-time fallback). None = defer to grading_config.yml (then individual).
-    type: str | None = None
-    # Group assignments: the team-size cap the welcome repo's "Join team" flow enforces
-    # (templates/welcome/team-formation.yml reads it straight from schedule.yml; its
-    # default when unset lives there). None = not set here.
-    max_team_size: int | None = None
     # When to push the template's `solution/` folder into every provisioned repo - the
     # scheduled twin of Release assignment's `include_solution` tick. Deliberately NOT
     # defaulted to the due date: a solution released the moment submissions close is a
@@ -492,10 +493,27 @@ KNOWN_ASSIGNMENT = frozenset(
         "handout_datetime",
         "solution_datetime",
         "title",
-        "type",
-        "max_team_size",
     }
 )
+# Settings that USED to live in an `assignments:` entry and now live in the assignment's
+# own `grading_config.yml`, on the course template's solution branch. Flagged BY NAME
+# rather than as generic unknown keys: a cohort still carrying `type: group` is not making
+# a typo, it is declaring something in a file that no longer reads it, and the message has
+# to say where the declaration went.
+_GRADING_CONFIG_HOME = "in the assignment's own grading_config.yml, on the course template's `solution` branch"
+MOVED_ASSIGNMENT_KEYS = {
+    "type": (
+        f"`type:` {_GRADING_CONFIG_HOME}",
+        (
+            "the assignment is handed out and graded in whatever shape grading_config.yml "
+            "declares - individual when it declares none"
+        ),
+    ),
+    "max_team_size": (
+        f"`max_team_size:` {_GRADING_CONFIG_HOME}",
+        "the 'Join team' flow uses the cap declared there, or the course default",
+    ),
+}
 KNOWN_EVENT = frozenset({"type", "title", "event_datetime", "tbc"})
 
 
@@ -693,7 +711,7 @@ def _parse_assignments(
 ) -> dict[str, AssignmentEntry]:
     # Only the nested {due_datetime, ...} form is accepted - matching the one schema
     # documented everywhere - rather than also silently accepting a bare due-date scalar.
-    # A malformed `grading_datetime`/`handout_datetime`/`max_team_size`/`type` keeps the
+    # A malformed `grading_datetime`/`handout_datetime`/`solution_datetime` keeps the
     # entry on its documented fallback, and is flagged (see `_flag_bad_value`).
     out: dict[str, AssignmentEntry] = {}
     cost = "no deadline for students, no submission snapshot and no autograding"
@@ -760,36 +778,18 @@ def _parse_assignments(
             continue
         sources[source_repo] = str(slug)
         names[name] = str(slug)
-        _flag_unknown_keys(
-            drops, entry, KNOWN_ASSIGNMENT, where, "that setting is ignored"
-        )
-        raw_cap = entry.get("max_team_size")
-        cap = None
-        if raw_cap is not None:
-            try:
-                cap = int(raw_cap)
-            except (TypeError, ValueError):
-                _flag_bad_value(
-                    drops,
-                    where,
-                    "max_team_size",
-                    raw_cap,
-                    "no cap is set, so the welcome repo's 'Join team' flow falls back "
-                    "to its own default team size",
+        for moved, (home, moved_cost) in MOVED_ASSIGNMENT_KEYS.items():
+            if moved in entry:
+                drops.append(
+                    f"{where}.{moved}: moved to {home} - ignored here, so {moved_cost}"
                 )
-        kind = str(entry.get("type") or "").strip().lower()
-        if kind and kind not in ("group", "individual"):
-            # A typo'd `type` (e.g. `gruop`) silently falls back to individual, so a group
-            # assignment would be provisioned one-repo-per-student. Keep the fallback but
-            # surface it, since the functional consequence is otherwise invisible.
-            _flag_bad_value(
-                drops,
-                where,
-                "type",
-                kind,
-                "the assignment is treated as individual - one repo per student, not one "
-                "per team (expected 'group' or 'individual')",
-            )
+        _flag_unknown_keys(
+            drops,
+            entry,
+            KNOWN_ASSIGNMENT | frozenset(MOVED_ASSIGNMENT_KEYS),
+            where,
+            "that setting is ignored",
+        )
         handout = _flagged_datetime(
             entry,
             "handout_datetime",
@@ -855,10 +855,6 @@ def _parse_assignments(
             ),
             handout_datetime=handout,
             solution_datetime=solution,
-            # anything other than the two known values -> None, i.e. the grading_config.yml
-            # fallback (flagged above, not silent)
-            type=kind if kind in ("group", "individual") else None,
-            max_team_size=cap,
             lines=lines,
         )
     return out

@@ -53,10 +53,9 @@ Two places to say it, depending on how you release:
   assignments:
     assignment-4-project:
       handout_datetime: 2026-10-20T14:00
-      type: group          # or individual - the default if field empty
   ```
 
-- **Manual dispatch**: the **Release assignment** workflow asks for `type` - pick `individual` or `group`, or leave the default `auto` (= whatever `schedule.yml` or the template's `grading_config.yml` declare; unwritten everywhere means individual).
+- **Manual dispatch**: the **Release assignment** workflow asks for `type` - pick `individual` or `group`, or leave the default `auto` (= whatever the template's `grading_config.yml` declares; unwritten means individual).
 
 - `group` = one shared repo per team from `teams.csv` (repo `<slug>-<team>`, every member a collaborator), marked per team in the grading sheet's `teams:` block, with one `adjustment_individual` per member.
 - `individual` = one private repo per onboarded, enrolled student (`<slug>-<handle>`), marked in the sheet's `submissions:` block.
@@ -71,7 +70,7 @@ Teams must exist **before** you release a group assignment. Two ways to form the
 
 - **Instructor-allocated**: you edit `teams.csv` directly - add one row per member.
 - **Student self-service**: students open a **Join team** issue in the cohort's `welcome` repo.
-  - Team size is capped per assignment by `max_team_size` under `assignments:` in `schedule.yml`, (default 5)  
+  - Team size is capped per assignment by `max_team_size` in that assignment's own `grading_config.yml` (default: the course's `assignment_defaults`, else 5)
 
 
 The release then grants each team its one shared repo. Full flow:

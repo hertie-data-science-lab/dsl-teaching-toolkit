@@ -342,7 +342,7 @@ exam · special_event`"]
 | Block | Key fields | Fires |
 | --- | --- | --- |
 | `releases.<label>` | `event_datetime`, `deploy[]` of `course_source_repo` + `course_source_path` (required), `cohort_dest_repo` (default `materials`), `cohort_dest_path` (default: mirror), `deploy_datetime` | a deploy per entry |
-| `assignments.<slug>` | `course_source_repo` (**required**), `due_datetime` (**required**; a bare date closes at 23:59:59), `grading_datetime` (default: due), `handout_datetime`, `cohort_dest_repo` (default: the slug), `type`, `max_team_size` | handout, then snapshot + autograde |
+| `assignments.<slug>` | `course_source_repo` (**required**), `due_datetime` (**required**; a bare date closes at 23:59:59), `grading_datetime` (default: due + the template's `late_window_days`), `handout_datetime`, `solution_datetime` (default: never), `cohort_dest_repo` (default: the slug), `title` | handout, then snapshot + autograde. TIMING ONLY - the shape and the team cap live in the template's `grading_config.yml` |
 | `events.<label>` | `type` (`exam` \| `special_event`), `title`, `event_datetime` | nothing - display-only site rows |
 
   `enrolment:` was a fourth block, mailing the codes on a window. A push to `students.csv`

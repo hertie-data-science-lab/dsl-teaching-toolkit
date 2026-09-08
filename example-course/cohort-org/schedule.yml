@@ -136,9 +136,10 @@ assignments:
     title: Group project                  # NB if empty, the template README's heading is used
     course_source_repo: assignment-4-project-f2026
     handout_datetime: 2026-10-13T14:00
-    type: group
     due_datetime: 2026-11-15T23:59
-    max_team_size: 4
+    # NB no `type: group` and no `max_team_size: 4` here - this file is timing only. Both
+    # live in this assignment's own grading_config.yml, on the course template's solution
+    # branch (../course-org/assignment-4-project-f2026/solution/grading_config.yml)
 
 events:
   mid-term:

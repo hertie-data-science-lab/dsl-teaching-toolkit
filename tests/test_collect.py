@@ -1148,9 +1148,8 @@ def test_collect_looks_teams_up_by_the_schedule_key_not_the_cohort_name(monkeypa
         course_source_repo="assignment-4-project-f2026",
         cohort_dest_repo="group-project",
         due_datetime=datetime(2026, 11, 15, tzinfo=ZoneInfo("Europe/Berlin")),
-        type="group",
     )
-    _stub_collect(monkeypatch, None)
+    _stub_collect(monkeypatch, None, grading="type: group\nautograde: true\n")
     monkeypatch.setattr(
         collect.schedule, "load", lambda org: Schedule(assignments={"project": entry})
     )
