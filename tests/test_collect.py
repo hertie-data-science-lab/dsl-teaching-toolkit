@@ -8,6 +8,7 @@ answer, so the pin's every branch is pinned down here with git/gh stubbed.
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import signal
 import subprocess
@@ -1235,9 +1236,9 @@ def _stub_collect(monkeypatch, snapshots, grading: str | None = None):
     monkeypatch.setattr(collect, "get_file_with_sha", lambda *a, **k: None)
     seen: dict[str, str | None] = {}
 
-    def fake_grade(cohort_org, repo, tests_src, deadline, snapshot=None):
+    def fake_grade(cohort_org, repo, tests_src, deadline, snapshot=None, **kw):
         seen[repo] = snapshot
-        return {"score": 1, "max": 2, "tests": []}
+        return {"score": 1, "max": 2, "tests": []}, None
 
     monkeypatch.setattr(collect, "_grade_target", fake_grade)
     return seen
@@ -1592,7 +1593,7 @@ def test_collect_with_every_repo_unreadable_fails_and_records_nothing(
     _stub_collect(
         monkeypatch, None
     )  # no snapshot: every repo goes through the clone path
-    monkeypatch.setattr(collect, "_grade_target", lambda *a, **k: None)
+    monkeypatch.setattr(collect, "_grade_target", lambda *a, **k: (None, None))
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
     assert written == []  # above all: no _skipped.json
@@ -1610,7 +1611,7 @@ def test_collect_with_every_target_failing_to_grade_records_nothing(
     monkeypatch.setattr(
         collect,
         "_grade_target",
-        lambda *a, **k: collect._zero_result(collect.GRADE_FAILED_NOTE),
+        lambda *a, **k: (collect._zero_result(collect.GRADE_FAILED_NOTE), None),
     )
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
@@ -1626,7 +1627,10 @@ def test_collect_records_a_cohort_of_genuine_non_submissions(monkeypatch):
     monkeypatch.setattr(
         collect,
         "_grade_target",
-        lambda *a, **k: collect._zero_result("no submission on/before 2026-11-15"),
+        lambda *a, **k: (
+            collect._zero_result("no submission on/before 2026-11-15"),
+            None,
+        ),
     )
     written = _captured_writes(monkeypatch)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
@@ -1781,7 +1785,7 @@ def test_collect_leaves_no_marker_when_the_run_dies_mid_loop(monkeypatch):
         n["calls"] += 1
         if n["calls"] == 2:
             raise RuntimeError("the clone host fell over mid-run")
-        return {"score": 1, "max": 2, "tests": []}
+        return {"score": 1, "max": 2, "tests": []}, None
 
     monkeypatch.setattr(collect, "_grade_target", dying_grade)
     written = _captured_writes(monkeypatch)
@@ -1798,7 +1802,9 @@ def test_collect_holds_the_marker_when_some_repos_are_unreachable(monkeypatch):
     _stub_collect(monkeypatch, None)
 
     def grade(cohort_org, repo, *a, **k):
-        return None if repo.endswith("cara") else {"score": 1, "max": 2, "tests": []}
+        if repo.endswith("cara"):
+            return None, None
+        return {"score": 1, "max": 2, "tests": []}, None
 
     monkeypatch.setattr(collect, "_grade_target", grade)
     sheets = _recorded_sheet_writes(monkeypatch)
@@ -1809,6 +1815,435 @@ def test_collect_holds_the_marker_when_some_repos_are_unreachable(monkeypatch):
     # tick re-grades and picks up the repo that could not be read.
     assert sheets == []
     assert not any(p.startswith("autograde/") for p in paths)
+
+
+# ------------------------------------------------------------------- the completion check
+
+
+def _notebook_bytes(*cells: str) -> bytes:
+    """A minimal valid notebook whose code cells hold `cells`, and nothing else."""
+    return json.dumps(
+        {
+            "cells": [
+                {
+                    "cell_type": "code",
+                    "execution_count": None,
+                    "metadata": {},
+                    "outputs": [],
+                    "source": [source],
+                }
+                for source in cells
+            ],
+            "metadata": {},
+            "nbformat": 4,
+            "nbformat_minor": 5,
+        }
+    ).encode()
+
+
+def _executed_bytes(*errored: bool) -> bytes:
+    """What nbconvert --execute writes back: one code cell per flag, the True ones
+    carrying an `error` output."""
+    return json.dumps(
+        {
+            "cells": [
+                {
+                    "cell_type": "code",
+                    "execution_count": n + 1,
+                    "metadata": {},
+                    "outputs": (
+                        [{"output_type": "error", "ename": "ValueError"}]
+                        if raised
+                        else [{"output_type": "stream", "text": "ok"}]
+                    ),
+                    "source": ["1\n"],
+                }
+                for n, raised in enumerate(errored)
+            ],
+            "metadata": {},
+            "nbformat": 4,
+            "nbformat_minor": 5,
+        }
+    ).encode()
+
+
+def _fake_execute(monkeypatch, writes: bytes | None, *, completes: bool = True):
+    """Stub the one subprocess `_check_completion` crosses. `writes` is what nbconvert is
+    pretended to have left at --output-dir/--output (None = it wrote nothing);
+    `completes=False` is the wall-clock kill. Returns the argv list it was called with."""
+    spawned: list[list[str]] = []
+
+    def fake_run_limited(argv, *, cwd, env, timeout):
+        spawned.append(argv)
+        if writes is not None and completes:
+            out = Path(argv[argv.index("--output-dir") + 1])
+            (out / argv[argv.index("--output") + 1]).write_bytes(writes)
+        return completes
+
+    monkeypatch.setattr(collect, "_run_limited", fake_run_limited)
+    return spawned
+
+
+@pytest.mark.parametrize(
+    "config, on",
+    [
+        ("format: ipynb\n", True),
+        ("format: py\n", False),
+        ("", False),
+        ("format: ipynb\ncompletion_check: false\n", False),
+        ("format: py\ncompletion_check: true\n", True),
+        ("completion_check: true\n", True),
+    ],
+)
+def test_the_completion_check_defaults_off_the_format_and_an_explicit_key_wins(
+    config, on
+):
+    # The rule it verifies - restart the kernel and run all - is a notebook rule, so
+    # `format: ipynb` is the only default that turns it on. But UNDECLARED is a third
+    # state, not a false: a course that keeps its notebooks somewhere `format:` does not
+    # name must be able to ask for the check, and a notebook course must be able to
+    # decline it.
+    assert collect.parse_grading_spec(config).runs_completion_check is on
+
+
+def test_completion_state_counts_the_cells_that_raised():
+    assert collect._completion_state(_executed_bytes(False, False)) == "ran-clean"
+    assert collect._completion_state(_executed_bytes(True, False, True)) == "errors:2"
+    # Bytes that are not a notebook at all - nbconvert wrote something we cannot read.
+    assert (
+        collect._completion_state(b"not a notebook") == collect.COMPLETION_DID_NOT_RUN
+    )
+
+
+def test_an_untouched_starter_is_not_attempted_and_is_never_executed(
+    monkeypatch, tmp_path
+):
+    # THE distinction the check exists for: a notebook that runs and does nothing is not
+    # the same as a notebook nobody opened. Byte identity against the starter GitHub still
+    # holds on the template's default branch, so it costs no kernel at all.
+    spawned = _fake_execute(monkeypatch, _executed_bytes(False))
+    work = tmp_path / "sub"
+    work.mkdir()
+    starter = _notebook_bytes("pass\n")
+    (work / "starter.ipynb").write_bytes(starter)
+
+    state, executed = collect._check_completion(
+        work, frozenset({collect._blob_sha(starter)}), tmp_path / "run"
+    )
+
+    assert state == collect.COMPLETION_NOT_ATTEMPTED
+    assert executed is None
+    assert spawned == [], "an untouched starter must not cost a kernel"
+
+
+def test_one_byte_of_work_is_no_longer_the_starter(monkeypatch, tmp_path):
+    spawned = _fake_execute(monkeypatch, _executed_bytes(False, True))
+    work = tmp_path / "sub"
+    work.mkdir()
+    (work / "starter.ipynb").write_bytes(_notebook_bytes("x = 1\n"))
+
+    state, executed = collect._check_completion(
+        work, frozenset({collect._blob_sha(_notebook_bytes("pass\n"))}), tmp_path / "r"
+    )
+
+    assert state == "errors:1"
+    assert executed == _executed_bytes(False, True)  # archived for the grader to read
+    assert len(spawned) == 1 and "--execute" in spawned[0]
+    # The WHOLE notebook runs: without this nbclient stops at the first traceback and
+    # `errors:1` would mean "at least one" for every submission that has any.
+    assert "--allow-errors" in spawned[0]
+
+
+def test_the_notebook_checked_is_the_shallowest_one_and_never_a_checkpoint(
+    monkeypatch, tmp_path
+):
+    # Deterministic on purpose: a re-run that picked the other notebook would move
+    # `info.completion` under a grader who had already read it. Jupyter's own autosave of
+    # the same notebook is not a second submission.
+    spawned = _fake_execute(monkeypatch, _executed_bytes(False))
+    work = tmp_path / "sub"
+    (work / "notebooks").mkdir(parents=True)
+    (work / ".ipynb_checkpoints").mkdir()
+    (work / ".ipynb_checkpoints" / "aaa-checkpoint.ipynb").write_bytes(
+        _notebook_bytes("stale\n")
+    )
+    (work / "notebooks" / "deep.ipynb").write_bytes(_notebook_bytes("deep\n"))
+    (work / "zzz.ipynb").write_bytes(_notebook_bytes("shallow\n"))
+
+    collect._check_completion(work, frozenset(), tmp_path / "r")
+
+    assert spawned[0][-1] == str(work / "zzz.ipynb")
+
+
+def test_the_completion_check_runs_offline_and_without_the_bot_token(monkeypatch):
+    # Student code, run under the faculty token's job: the token goes (as everywhere else
+    # here), and so does the network - a notebook that only reproduces because it
+    # downloads its data has not reproduced.
+    monkeypatch.setenv("GH_TOKEN", "ghs_secret")
+    monkeypatch.setenv("NO_PROXY", "*")
+    env = collect._completion_env()
+    assert "GH_TOKEN" not in env
+    assert env["https_proxy"] == collect.COMPLETION_DEAD_PROXY
+    assert env["HTTPS_PROXY"] == collect.COMPLETION_DEAD_PROXY
+    assert "NO_PROXY" not in env and "no_proxy" not in env
+    assert env["PYTHONSAFEPATH"] == "1"
+
+
+def test_a_notebook_that_never_finishes_is_recorded_not_red(
+    monkeypatch, tmp_path, capsys
+):
+    # The student's own fact, and one a grader has to see. Same wall clock as everything
+    # else here, and the process GROUP is killed.
+    _fake_execute(monkeypatch, None, completes=False)
+    work = tmp_path / "sub"
+    work.mkdir()
+    (work / "a.ipynb").write_bytes(_notebook_bytes("while True: pass\n"))
+
+    state, executed = collect._check_completion(work, frozenset(), tmp_path / "r")
+
+    assert state == collect.COMPLETION_TIMED_OUT and executed is None
+    assert "completion check timed out" in capsys.readouterr().err
+
+
+def test_nbconvert_that_writes_nothing_is_did_not_run(monkeypatch, tmp_path):
+    # OUR fault or a corrupt submission - a file it would not open, a kernel that would not
+    # start - not a verdict on the work, so it is spelt differently from a timeout.
+    _fake_execute(monkeypatch, None)
+    work = tmp_path / "sub"
+    work.mkdir()
+    (work / "a.ipynb").write_bytes(_notebook_bytes("pass\n"))
+
+    assert collect._check_completion(work, frozenset(), tmp_path / "r") == (
+        collect.COMPLETION_DID_NOT_RUN,
+        None,
+    )
+
+
+def test_a_submission_with_no_notebook_says_so(monkeypatch, tmp_path):
+    _fake_execute(monkeypatch, _executed_bytes(False))
+    work = tmp_path / "sub"
+    work.mkdir()
+    (work / "starter.py").write_text("x = 1\n")
+
+    assert collect._check_completion(work, frozenset(), tmp_path / "r") == (
+        collect.COMPLETION_NO_NOTEBOOK,
+        None,
+    )
+
+
+def _clone_writing_notebook():
+    """A clone that lands one notebook in the destination - enough for `_grade_target` to
+    have something to examine."""
+
+    def fake_clone(org, repo, dest, branch=None):
+        Path(dest).mkdir(parents=True, exist_ok=True)
+        (Path(dest) / "starter.ipynb").write_bytes(_notebook_bytes("x = 1\n"))
+        return True
+
+    return fake_clone
+
+
+def test_the_notebook_is_executed_before_it_is_converted_to_a_script(
+    monkeypatch, tmp_path
+):
+    # Ordering IS the behaviour: `_run_tests` converts every .ipynb in the checkout to a
+    # script, and a script is not what the restart-and-run-all rule is about. Run second,
+    # the check would execute nothing a student wrote.
+    order: list[str] = []
+
+    def fake_run_limited(argv, *, cwd, env, timeout):
+        if "--execute" in argv:
+            order.append("execute")
+            out = Path(argv[argv.index("--output-dir") + 1])
+            (out / "executed.ipynb").write_bytes(_executed_bytes(False))
+        elif "pytest" in argv:
+            order.append("pytest")
+            report = next(a for a in argv if a.startswith("--junitxml="))
+            Path(report.split("=", 1)[1]).write_text(_JUNIT)
+        else:
+            order.append("convert")
+            Path(argv[-1]).with_suffix(".py").write_text("def solve():\n    return 1\n")
+        return True
+
+    monkeypatch.setattr(collect, "_run_limited", fake_run_limited)
+    monkeypatch.setattr(collect, "clone", _clone_writing_notebook())
+    monkeypatch.setattr(collect, "_pin_commit", lambda *a, **k: SHA)
+    tests = tmp_path / "hidden"
+    tests.mkdir()
+    (tests / "test_x.py").write_text("def test_solve(): pass\n")
+
+    result, executed = collect._grade_target(
+        "Cohort", "assignment-1-anna", tests, "2026-11-15", starters=frozenset()
+    )
+
+    assert order[0] == "execute"
+    assert "convert" in order and order.index("execute") < order.index("convert")
+    assert result["completion"] == "ran-clean" and result["commit"] == SHA
+    assert result["score"] == 1  # and the hidden tests still ran, on the script
+    assert executed == _executed_bytes(False)
+
+
+def test_a_repo_with_nothing_pushed_reads_as_not_attempted(monkeypatch, tmp_path):
+    # The row a grader most wants to see, and the one a blank would say nothing about:
+    # what is in the repo is the handout, which is exactly what `not-attempted` means.
+    monkeypatch.setattr(collect, "clone", _clone_writing_notebook())
+    monkeypatch.setattr(collect, "_pin_commit", lambda *a, **k: None)
+
+    result, executed = collect._grade_target(
+        "Cohort", "assignment-1-anna", None, "2026-11-15", starters=frozenset()
+    )
+
+    assert result["completion"] == collect.COMPLETION_NOT_ATTEMPTED
+    assert result["score"] == 0 and executed is None
+
+
+def test_a_hand_marked_notebook_assignment_is_still_completion_checked(monkeypatch):
+    # The common case, and the whole point: "restart the kernel and run all" is stated by
+    # courses that mark BY HAND. Before this, `autograde: false` exited before any
+    # submission was cloned and the rule stayed uncheckable.
+    _stub_collect(monkeypatch, None, grading="format: ipynb\nautograde: false\n")
+    monkeypatch.setattr(collect, "_starter_notebook_shas", lambda *a: frozenset())
+    monkeypatch.setattr(
+        collect,
+        "_grade_target",
+        lambda *a, **k: ({"commit": SHA, "completion": "ran-clean"}, b"{}"),
+    )
+    sheets = _recorded_sheet_writes(monkeypatch)
+    written = _captured_writes(monkeypatch)
+
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
+
+    paths = [p for p, _t in written]
+    assert (
+        "autograde/assignment-1/_skipped.json" not in paths
+    )  # NOT hand-marked-and-done
+    assert "autograde/assignment-1/_graded.json" in paths  # fire-once, as usual
+    # No hidden tests ran, so there is no count - only the state.
+    assert sheets[-1]["autograde"] == {}
+    assert sheets[-1]["completion"] == {h: "ran-clean" for h in ("anna", "ben", "cara")}
+
+
+def test_the_executed_notebook_is_archived_beside_the_result(monkeypatch):
+    # `errors:3` is a number; the grader has to be able to see WHICH three.
+    _stub_collect(monkeypatch, None, grading="format: ipynb\nautograde: false\n")
+    monkeypatch.setattr(collect, "_starter_notebook_shas", lambda *a: frozenset())
+    monkeypatch.setattr(
+        collect,
+        "_grade_target",
+        lambda *a, **k: ({"commit": SHA, "completion": "errors:3"}, b"{executed}"),
+    )
+    _recorded_sheet_writes(monkeypatch)
+    written = _captured_writes(monkeypatch)
+
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
+
+    paths = [p for p, _t in written]
+    assert "autograde/assignment-1/anna.json" in paths
+    assert "autograde/assignment-1/anna.ipynb" in paths
+
+
+def test_an_oversized_executed_notebook_is_recorded_but_not_archived(
+    monkeypatch, capsys
+):
+    # A notebook of plots is base64 all the way down, and classroom-config is a repo
+    # somebody has to clone. The STATE is the record; the copy is a convenience.
+    _stub_collect(monkeypatch, None, grading="format: ipynb\nautograde: false\n")
+    monkeypatch.setattr(collect, "_starter_notebook_shas", lambda *a: frozenset())
+    monkeypatch.setattr(collect, "COMPLETION_ARCHIVE_MAX_BYTES", 16)
+    monkeypatch.setattr(
+        collect,
+        "_grade_target",
+        lambda *a, **k: ({"commit": SHA, "completion": "ran-clean"}, b"x" * 4096),
+    )
+    sheets = _recorded_sheet_writes(monkeypatch)
+    written = _captured_writes(monkeypatch)
+
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
+
+    assert not [p for p, _t in written if p.endswith(".ipynb")]
+    assert sheets[-1]["completion"]["anna"] == "ran-clean"
+    # Said out loud, and with no path in it: the path would name the handle.
+    out = capsys.readouterr().out
+    assert "over the" in out and "archive cap" in out and "anna" not in out
+
+
+def test_a_runner_without_the_kernel_records_a_skip_rather_than_a_red_cron(
+    monkeypatch, capsys
+):
+    # nbconvert can CONVERT without ipykernel and cannot EXECUTE without it, so a runner
+    # that installed only nbconvert would report a whole cohort of `did-not-run`. It is a
+    # runner fault with one fix: say so in words, record the decision once, stay green.
+    _stub_collect(monkeypatch, None, grading="format: ipynb\nautograde: false\n")
+    monkeypatch.setattr(collect.importlib.util, "find_spec", lambda name: None)
+    _clear_dep_caches()
+    written = _captured_writes(monkeypatch)
+
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
+
+    ((path, text),) = written
+    assert path == "autograde/assignment-1/_skipped.json"
+    assert "ipykernel" in text
+    err = capsys.readouterr().err
+    # BOTH are named, not just the first one probed: a runner missing both should have to
+    # read the log once.
+    assert (
+        "`nbconvert` is not installed" in err and "`ipykernel` is not installed" in err
+    )
+
+
+def test_the_hidden_tests_still_run_when_the_kernel_is_missing(monkeypatch):
+    # The two are independent in BOTH directions: a runner that cannot execute notebooks
+    # can still run pytest, and holding the whole assignment back would be a cohort of
+    # ungraded work over a check that is information only.
+    _stub_collect(monkeypatch, None, grading="format: ipynb\nautograde: true\n")
+
+    def only_ipykernel_missing(name):
+        return None if name == "ipykernel" else object()
+
+    monkeypatch.setattr(collect.importlib.util, "find_spec", only_ipykernel_missing)
+    _clear_dep_caches()
+    sheets = _recorded_sheet_writes(monkeypatch)
+    written = _captured_writes(monkeypatch)
+
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
+
+    assert "autograde/assignment-1/_graded.json" in [p for p, _t in written]
+    assert sheets[-1]["autograde"] == {h: "1/2" for h in ("anna", "ben", "cara")}
+    assert sheets[-1]["completion"] == {}
+
+
+def test_a_starter_tree_that_cannot_be_read_still_checks_every_notebook(
+    monkeypatch, capsys
+):
+    # An unreadable tree means nothing can be RECOGNISED as untouched. Every notebook is
+    # then executed, which is the safe way round: a wrong `not-attempted` is an accusation.
+    monkeypatch.setattr(collect, "default_branch", lambda *a, **k: "main")
+
+    def boom(org, repo, branch):
+        raise RuntimeError("HTTP 502")
+
+    monkeypatch.setattr(collect, "repo_blob_shas", boom)
+    assert collect._starter_notebook_shas("Course", "assignment-1-f2026") == frozenset()
+    assert "an untouched starter cannot be told" in capsys.readouterr().err
+
+
+def test_the_starter_shas_are_the_notebooks_on_the_default_branch(monkeypatch):
+    monkeypatch.setattr(collect, "default_branch", lambda *a, **k: "trunk")
+    seen: list[str] = []
+
+    def tree(org, repo, branch):
+        seen.append(branch)
+        return {
+            "starter.ipynb": "aaa",
+            "README.md": "bbb",
+            ".ipynb_checkpoints/starter-checkpoint.ipynb": "ccc",
+        }
+
+    monkeypatch.setattr(collect, "repo_blob_shas", tree)
+    assert collect._starter_notebook_shas("Course", "assignment-1-f2026") == frozenset(
+        {"aaa"}
+    )
+    assert seen == ["trunk"]
 
 
 # ------------------------------------------------------ snapshot integrity (fix 3B, 4b)
@@ -2080,10 +2515,11 @@ def test_a_zero_is_recorded_only_when_github_says_the_repo_is_gone(monkeypatch):
     # probe used to write a permanent, write-once zero for a student who had submitted.
     monkeypatch.setattr(ghcli, "gh", lambda *a, **k: (1, "clone failed"))
     monkeypatch.setattr(collect, "repo_missing", lambda *a: False)  # a 5xx: cannot tell
-    assert collect._grade_target("K", "a1-ada", None, "2026-09-08") is None
+    assert collect._grade_target("K", "a1-ada", None, "2026-09-08") == (None, None)
     monkeypatch.setattr(collect, "repo_missing", lambda *a: True)  # GitHub says 404
-    result = collect._grade_target("K", "a1-ada", None, "2026-09-08")
+    result, executed = collect._grade_target("K", "a1-ada", None, "2026-09-08")
     assert result["score"] == 0 and "does not exist" in result["note"]
+    assert executed is None
 
 
 # ---------- teams.csv is keyed on the SCHEDULE KEY, submission repos on the cohort name

@@ -13,7 +13,10 @@ sheet, as information for whoever marks it. Faculty & instructors write the mark
   cohort/<slug>-<team>    (group)              |
                 v
   classroom-config/autograde/<slug>/<key>.json   (per-test detail, private archive)
-  classroom-config/grading_sheets/<slug>.yml     (`info.autograde`, never a mark)
+  classroom-config/autograde/<slug>/<key>.ipynb  (the executed notebook, where the
+                                                 completion check ran)
+  classroom-config/grading_sheets/<slug>.yml     (`info.autograde`, `info.completion` -
+                                                 never a mark)
 
 Student code is run in a subprocess with the GitHub token stripped from the environment.
 
@@ -67,6 +70,12 @@ grading_config.yml (on the template's solution branch):
     type: individual        # or group
     autograde: false        # the default; true -> run the hidden tests at the cutoff
     tests: tests            # path on the solution branch holding the hidden tests
+    completion_check: true  # default for `format: ipynb` -> execute the pinned notebook
+                            # at the cutoff and record whether it runs top to bottom
+
+The two are INDEPENDENT. A hand-marked notebook assignment (`autograde: false`) still gets
+its completion check, which is the common case: the "restart the kernel and run all" rule
+is stated by courses that mark by hand, and it is the one rule nobody could verify.
 
 Usage:
     python3 -m dsl_course.collect \\
@@ -114,6 +123,7 @@ from .gh_contents import (
     get_file_with_sha,
     is_untouched_stub,
     put_file,
+    repo_blob_shas,
 )
 from .ghcli import BOT_EMAIL, GIT_ENV, bot_login, clone, gh, git, is_missing_resource
 
@@ -127,7 +137,7 @@ from .grades import (
     sheet_spec,
 )
 from .log import log, log_err, log_ok, log_person, log_skip, log_step
-from .repos import repo_missing
+from .repos import default_branch, repo_missing
 
 AUTOGRADE_DIR = "autograde"  # classroom-config/autograde/<slug>/<key>.json
 GRADED_RECORD = "_graded.json"  # fire-once sentinel: a successful run's LAST write
@@ -1324,6 +1334,7 @@ def sync_sheet(
     now: datetime,
     units: list[tuple[str, list[str]]] | None = None,
     autograde: dict[str, str] | None = None,
+    completion: dict[str, str] | None = None,
     dry_run: bool = False,
 ) -> bool:
     """Write `grading_sheets/<slug>.yml` for this assignment, creating it if it is not
@@ -1443,6 +1454,10 @@ def sync_sheet(
         )
     for unit, count in (autograde or {}).items():
         info_updates.setdefault(unit, {})["autograde"] = count
+    # Beside the count, and on the same terms: information for whoever marks it, derived at
+    # the cutoff and never typed. `setdefault`, because a unit can carry both.
+    for unit, state in (completion or {}).items():
+        info_updates.setdefault(unit, {})["completion"] = state
 
     sheet = grades.merge_sheet(
         on_disk or None,
@@ -1623,6 +1638,18 @@ def _strip_student_test_rigging(workdir: Path) -> None:
             dirnames.remove(name)  # pruned - don't descend into what we just deleted
 
 
+def _harden_checkout(workdir: Path) -> None:
+    """Make a freshly cloned submission safe to run code out of. Idempotent, and called by
+    every path that starts a subprocess in it - the completion check and the hidden tests
+    both do, and the one that happens to go first must not be the only one that hardens.
+
+    The clone persists the bot credential in `.git/config`; env-stripping does not reach it
+    and student code runs next in the same workspace, so `.git` goes first. The student's
+    own grading-rigging files go with it (`_strip_student_test_rigging`)."""
+    shutil.rmtree(workdir / ".git", ignore_errors=True)
+    _strip_student_test_rigging(workdir)
+
+
 def _apply_rlimits() -> None:
     """`preexec_fn` for a graded subprocess: runs in the CHILD after fork, before exec, and
     lowers the POSIX resource caps a hostile submission can burn (see the RLIMIT_* constants).
@@ -1725,6 +1752,216 @@ def _run_limited(argv: list[str], *, cwd: str, env: dict, timeout: int) -> bool:
         return False
 
 
+# ------------------------------------------------------------------ the completion check
+#
+# "Restart the kernel and run all cells before you hand in" is a rule several syllabuses
+# state and nobody could check: a notebook arrives with whatever outputs the student's
+# laptop happened to hold, and a grader opening it cannot tell a result that reproduces
+# from one that never will. At the cutoff, therefore, the same sandbox that runs the hidden
+# tests re-EXECUTES the pinned notebook and records what happened - one word into the
+# grading sheet's `info:` block, and the executed copy into the private archive beside the
+# result JSON, so the grader can read the notebook as the toolkit saw it run.
+#
+# It is information, exactly like `info.autograde`: never a mark, never shown to a student,
+# and never a reason to fail a run. Opt-in per assignment (`completion_check:` in
+# grading_config.yml, defaulted from `format:` - see GradingSpec.runs_completion_check).
+COMPLETION_CLEAN = "ran-clean"  # every cell executed, none raised
+COMPLETION_ERRORS = "errors:"  # + the number of cells that raised (`errors:3`)
+# Byte-identical to the starter the template handed out: the notebook was never opened.
+# Distinct from a zero, and distinct from a notebook that runs and does nothing.
+COMPLETION_NOT_ATTEMPTED = "not-attempted"
+COMPLETION_NO_NOTEBOOK = "no-notebook"  # the submission holds no .ipynb to run
+# The student's own notebook never finished - a cell that blocks, an infinite loop. Their
+# fact, and one a grader has to see: the wall clock is the same RUN_TIMEOUT everything else
+# here gets, and the process GROUP is killed (`_run_limited`).
+COMPLETION_TIMED_OUT = "timed-out"
+# nbconvert exited but produced no notebook - a file it would not open, a kernel that would
+# not start. OUR fault or a corrupt submission, not a verdict on the work, so it is spelt
+# differently from a timeout.
+COMPLETION_DID_NOT_RUN = "did-not-run"
+# What the executed notebook is executed WITH. `nbconvert --execute` drives a kernel
+# through `nbclient`, and the kernel itself is `ipykernel` - a separate distribution that
+# nbconvert does not pull in, so a runner with only nbconvert fails every notebook with
+# "no such kernel" and would report a cohort of `did-not-run`. Both are pinned in
+# requirements.txt, which every seeded workflow's preamble installs.
+COMPLETION_DEPS = ("nbconvert", "ipykernel")
+COMPLETION_DEP_SKIP = (
+    "the completion check needs " + " and ".join(COMPLETION_DEPS) + " in the grading "
+    "environment, and they are not installed"
+)
+# The executed notebook is archived, and a notebook full of plots is base64 PNG all the way
+# down. Past this the STATE is still recorded and the copy is not: classroom-config is a
+# git repo somebody has to clone, and a term of 40 MB notebooks makes it one nobody can.
+COMPLETION_ARCHIVE_MAX_BYTES = 5 * 1024**2
+# The completion check runs OFFLINE. Not a jail - a real one needs a network namespace this
+# job does not have - but every well-behaved HTTP client (requests, urllib, pandas.read_csv
+# on a URL) honours these, so a notebook that only reproduces because it downloads its data
+# reports `errors:N` rather than passing on a resource that may not be there in March. Port
+# 9 is discard; nothing listens. Documented in docs/10, because it is a rule the assignment
+# has to be written for: commit the data.
+COMPLETION_DEAD_PROXY = "http://127.0.0.1:9"
+_PROXY_VARS = (
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+)
+# Jupyter's own scratch directory inside a notebook's folder; never the submission.
+_CHECKPOINTS = ".ipynb_checkpoints"
+
+
+def _blob_sha(data: bytes) -> str:
+    """The git blob sha of `data` - `git hash-object` without the subprocess.
+
+    sha1 because that is the hash git's object names ARE, not because anything here rests
+    on it being hard to forge: it is compared against shas GitHub reported for the same
+    template, and the question it answers is "are these bytes the ones we handed out"."""
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+@cache
+def _starter_notebook_shas(course_org: str, template: str) -> frozenset[str]:
+    """The git blob shas of every notebook on the template's DEFAULT branch - the starters
+    exactly as students received them.
+
+    A submission whose notebook hashes to one of these was never opened, which is
+    `not-attempted` and not a run that produced nothing. Shas rather than content: one
+    recursive tree call answers for the whole template, and a sha comparison IS byte
+    identity - the plan's rule, not an approximation of it.
+
+    An empty set (no notebook on `main`, or a tree we could not read) simply means nothing
+    can be recognised as untouched this run; every notebook is then executed, which is the
+    safe way round. Memoised per template per process, like the grading spec."""
+    branch = default_branch(course_org, template, fallback="main")
+    try:
+        shas = repo_blob_shas(course_org, template, branch)
+    except RuntimeError as exc:
+        log_err(
+            f"  ! could not read {course_org}/{template}@{branch} ({exc}) - an untouched "
+            f"starter cannot be told from a submission this run"
+        )
+        return frozenset()
+    return frozenset(
+        sha
+        for path, sha in shas.items()
+        if path.endswith(".ipynb") and _CHECKPOINTS not in path.split("/")
+    )
+
+
+def _completion_notebook(workdir: Path) -> Path | None:
+    """THE notebook this submission is checked on: the shallowest `.ipynb` in the checkout,
+    ties broken by path.
+
+    Deterministic on purpose. Most submissions hold exactly one notebook, but the state
+    recorded against a student must not depend on which file a directory walk happened to
+    see first - a re-run that picked the other one would move `info.completion` under a
+    grader who had already read it. Walked with `_walk_files` (no symlink following) and
+    `.ipynb_checkpoints` skipped: Jupyter's own autosave of the same notebook is not a
+    second submission."""
+    found = sorted(
+        (
+            path
+            for path in _walk_files(workdir)
+            if path.suffix == ".ipynb"
+            and _CHECKPOINTS not in path.relative_to(workdir).parts
+        ),
+        key=lambda path: (
+            len(path.relative_to(workdir).parts),
+            str(path.relative_to(workdir)),
+        ),
+    )
+    return found[0] if found else None
+
+
+def _completion_env() -> dict:
+    """The environment the completion check executes a student's notebook in: no GitHub
+    token (`_sanitised_env`), no cwd on `sys.path` (PYTHONSAFEPATH), and no network."""
+    env = _sanitised_env()
+    env["PYTHONSAFEPATH"] = "1"
+    for var in _PROXY_VARS:
+        env[var] = COMPLETION_DEAD_PROXY
+    for var in ("no_proxy", "NO_PROXY"):
+        env.pop(var, None)
+    return env
+
+
+def _completion_state(executed: bytes) -> str:
+    """`ran-clean`, or `errors:N` for the N cells that raised - read off the notebook
+    nbconvert wrote.
+
+    Counted per CELL, not per traceback: a cell can emit an error output and nothing else,
+    and what a grader wants is how many places the notebook stops working."""
+    try:
+        nb = json.loads(executed)
+    except (ValueError, UnicodeDecodeError):
+        return COMPLETION_DID_NOT_RUN
+    errors = sum(
+        1
+        for cell in nb.get("cells", [])
+        if any(
+            isinstance(out, dict) and out.get("output_type") == "error"
+            for out in (cell.get("outputs") or [])
+        )
+    )
+    return COMPLETION_CLEAN if not errors else f"{COMPLETION_ERRORS}{errors}"
+
+
+def _check_completion(
+    workdir: Path, starters: frozenset[str], run_root: Path
+) -> tuple[str, bytes | None]:
+    """Execute this submission's notebook top to bottom and say what happened, plus the
+    executed copy to archive (None where there is nothing to archive).
+
+    Runs BEFORE `_run_tests`, on the notebook as submitted: `_run_tests` converts every
+    `.ipynb` in the checkout to a script, and a script is not what the rule is about. The
+    checkout is hardened first by the caller, so no credential is in reach of the code this
+    starts, and the run is capped and group-killed exactly like the hidden tests are."""
+    notebook = _completion_notebook(workdir)
+    if notebook is None:
+        return COMPLETION_NO_NOTEBOOK, None
+    if _blob_sha(notebook.read_bytes()) in starters:
+        return COMPLETION_NOT_ATTEMPTED, None
+    out = run_root / "executed"
+    out.mkdir(parents=True, exist_ok=True)
+    if not _run_limited(
+        [
+            sys.executable,
+            "-m",
+            "jupyter",
+            "nbconvert",
+            "--to",
+            "notebook",
+            "--execute",
+            # Run the WHOLE notebook. Without this nbclient stops at the first traceback,
+            # and `errors:1` would mean "at least one" for every submission that has any.
+            "--allow-errors",
+            "--output-dir",
+            str(out),
+            "--output",
+            "executed.ipynb",
+            str(notebook),
+        ],
+        # The notebook's own directory, which is where the student ran it: a notebook that
+        # opens `data/train.csv` beside itself has to find it, or the check reports an
+        # error the submission does not have.
+        cwd=str(notebook.parent),
+        env=_completion_env(),
+        timeout=RUN_TIMEOUT,
+    ):
+        log_err(
+            f"  ! the completion check timed out after {RUN_TIMEOUT}s (process group "
+            f"killed) - recording `{COMPLETION_TIMED_OUT}`"
+        )
+        return COMPLETION_TIMED_OUT, None
+    executed = out / "executed.ipynb"
+    if not executed.is_file():
+        return COMPLETION_DID_NOT_RUN, None
+    data = executed.read_bytes()
+    return _completion_state(data), data
+
+
 def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
     """Run the hidden tests against the checked-out submission, token-free and sandboxed.
     Returns the result.json dict, or None if grading could not run (a wall-clock timeout, a
@@ -1752,10 +1989,7 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
     # the submission to sys.path AFTER the stdlib (see the injection below), so a real module
     # always wins the import while the submission's own uniquely-named module still resolves.
     env["PYTHONSAFEPATH"] = "1"
-    # The clone persists the bot credential in `.git/config`; env-stripping doesn't reach it,
-    # and student code runs next and can read the workspace - so drop `.git` first (fix 10).
-    shutil.rmtree(workdir / ".git", ignore_errors=True)
-    _strip_student_test_rigging(workdir)
+    _harden_checkout(workdir)
     # Convert every notebook the submission holds to an importable script first (Otter can
     # slot in here). Unconditional, and driven by what is actually in the checkout rather
     # than by a `format:` the template declared: the two disagreed silently whenever a
@@ -1855,13 +2089,24 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
 def _grade_target(
     cohort_org: str,
     repo: str,
-    tests_src: Path,
+    tests_src: Path | None,
     deadline: str,
     snapshot: str | None = None,
-) -> dict | None:
-    """Clone one submission, pin it to its snapshot (else the deadline), run the hidden
-    tests. Always returns a result dict (a zero with a note for non-submissions /
-    failures), or None if unclonable."""
+    *,
+    starters: frozenset[str] | None = None,
+) -> tuple[dict | None, bytes | None]:
+    """Clone one submission, pin it to its snapshot (else the deadline), and examine it:
+    the completion check where the assignment asked for one, then the hidden tests where
+    there are any.
+
+    Returns `(result, executed notebook)`. `result` is None for the ONE reason the caller
+    treats as "never examined" - the repo could not be cloned; everything else comes back
+    as a dict (a zero with a note for a non-submission or a failed run). The executed
+    notebook is bytes to archive, or None where there is nothing to archive.
+
+    `tests_src` None = this assignment is hand-marked and only the completion check runs;
+    `starters` None = no completion check (else the blob shas of the handed-out starters,
+    which is how an untouched notebook is recognised)."""
     with tempfile.TemporaryDirectory() as work:
         wd = Path(work) / "sub"
         if not clone(cohort_org, repo, wd):
@@ -1876,17 +2121,33 @@ def _grade_target(
                 log_err(
                     f"  ! {target_ref(repo)} does not exist - scoring 0 (no submission)"
                 )
-                return _zero_result("submission repo does not exist")
+                return _zero_result("submission repo does not exist"), None
             log_err(f"  ! could not clone {target_ref(repo)} (transient - will retry)")
-            return None
+            return None, None
         sha = _pin_commit(wd, deadline, snapshot)
         if sha is None:
-            return _zero_result(f"no submission on/before {deadline}")
-        result = _run_tests(wd, tests_src)
-        if result is None:
-            return _zero_result(GRADE_FAILED_NOTE)
+            zero = _zero_result(f"no submission on/before {deadline}")
+            if starters is not None:
+                # Nothing was pushed, so what is in the repo is the handout - which is
+                # exactly what `not-attempted` says, and saying nothing here would leave
+                # the one row a grader most wants to see blank.
+                zero["completion"] = COMPLETION_NOT_ATTEMPTED
+            return zero, None
+        _harden_checkout(wd)
+        executed = None
+        completion = ""
+        if starters is not None:
+            # BEFORE the tests: `_run_tests` converts every notebook in the checkout to a
+            # script, and the rule this verifies is about the notebook.
+            completion, executed = _check_completion(wd, starters, Path(work))
+        if tests_src is None:
+            result = {}
+        else:
+            result = _run_tests(wd, tests_src) or _zero_result(GRADE_FAILED_NOTE)
         result["commit"] = sha
-        return result
+        if completion:
+            result["completion"] = completion
+        return result, executed
 
 
 def refresh_assignment_sheet(
@@ -1951,9 +2212,10 @@ def collect(
     scheduled: bool = False,
     slug: str = "",
 ) -> int:
-    """Autograde every submission for `template` as of `deadline`, archiving result.json and
-    recording the machine score into the cohort's grading sheet (`info.autograde`).
-    Idempotent.
+    """Examine every submission for `template` as of `deadline` - the hidden tests where
+    the assignment asked to be autograded, the completion check where it asked for one -
+    archiving what each run produced and recording the machine facts into the cohort's
+    grading sheet (`info.autograde`, `info.completion`). Idempotent.
 
     `scheduled` marks the hourly cron: an assignment with no submission targets is then a
     "not yet", never the permanent not-machine-graded record a button press writes.
@@ -2013,7 +2275,10 @@ def collect(
     is_group = resolve_is_group(force=group, template_type=gspec.type)
     cutoff = local_deadline(deadline, sched.timezone)
 
-    def freeze_sheet(counts: dict[str, str] | None = None) -> bool:
+    def freeze_sheet(
+        counts: dict[str, str] | None = None,
+        states: dict[str, str] | None = None,
+    ) -> bool:
         """Seal the grading sheet: one last derivation, off the write-once snapshot, and
         `info:` is never touched again. Every path out of a passed cutoff runs it, because
         a sheet left OPEN after the deadline tells a grader marks can still move."""
@@ -2027,10 +2292,14 @@ def collect(
             is_group=is_group,
             now=cutoff,
             autograde=counts,
+            completion=states,
             dry_run=dry_run,
         )
 
-    def sealed(counts: dict[str, str] | None = None) -> bool:
+    def sealed(
+        counts: dict[str, str] | None = None,
+        states: dict[str, str] | None = None,
+    ) -> bool:
         """Freeze the sheet, and say whether this run may record anything permanent.
 
         A skip or graded record is FIRE-ONCE. Written over a sheet the freeze could not
@@ -2039,7 +2308,7 @@ def collect(
         assignment with its header still OPEN and its `info:` still provisional, and
         nothing ever re-derives them. So the marker waits for the seal, and the next tick
         does both."""
-        if freeze_sheet(counts):
+        if freeze_sheet(counts, states):
             return True
         log_err(
             f"{slug}: the grading sheet could not be sealed - recording nothing, so the "
@@ -2065,32 +2334,45 @@ def collect(
                 f"no `{SOLUTION_BRANCH}` branch on {master_org}/{template}",
                 dry_run,
             )
+        # WHAT this run does, decided once: hidden tests, a completion check, either,
+        # both, or nothing at all. The two are independent - a hand-marked notebook
+        # assignment still gets its completion check - so neither can exit early on the
+        # other's behalf, and only "neither" is the hand-marked exit that records a skip.
+        tests_src: Path | None = soldir / gspec.tests
+        no_tests = ""
         if not gspec.autograde:
-            log_ok(
-                f"{slug}: autograde disabled in {GRADING_FILE} - all-manual, nothing to collect."
-            )
-            if not sealed():
-                return 1
-            return _record_skip(
-                cohort_org, slug, f"`autograde: false` in {GRADING_FILE}", dry_run
-            )
-        tests_src = soldir / gspec.tests
-        if not tests_src.is_dir():
-            # The third hand-marked exit: an assignment that asked to be autograded and
-            # whose hidden tests were never written. Recorded and frozen like the other
-            # two rather than red -
-            # a fault the cron re-decides every quarter of an hour is a fault nobody reads,
-            # and the sheet has to be sealed whether or not a machine ever marked anything.
-            log_err(
-                f"{slug}: no `{gspec.tests}/` on the solution branch - hand-marked, "
-                f"nothing to collect."
-            )
+            no_tests = f"`autograde: false` in {GRADING_FILE}"
+        elif not tests_src.is_dir():
+            # An assignment that asked to be autograded and whose hidden tests were never
+            # written. Reported rather than red: a fault the cron re-decides every quarter
+            # of an hour is a fault nobody reads.
+            log_err(f"  ! no `{gspec.tests}/` on the solution branch")
+            no_tests = f"no `{gspec.tests}/` on the solution branch - hand-marked"
+        if no_tests:
+            tests_src = None
+
+        starters: frozenset[str] | None = None
+        no_completion = ""
+        if gspec.runs_completion_check:
+            # Every missing one named, not just the first probed: a runner missing both
+            # should have to read the log once.
+            if [dep for dep in COMPLETION_DEPS if _grader_dep_missing(dep)]:
+                # A runner fault with one fix, said in words by `_grader_dep_missing`
+                # rather than through a cohort of `did-not-run`. Recorded like any other
+                # decision not to machine-mark, so the cron does not re-decide it hourly;
+                # deleting `autograde/<slug>/` re-runs it once the runner is fixed.
+                no_completion = COMPLETION_DEP_SKIP
+            else:
+                starters = _starter_notebook_shas(master_org, template)
+
+        if tests_src is None and starters is None:
+            log_ok(f"{slug}: hand-marked, nothing to collect.")
             if not sealed():
                 return 1
             return _record_skip(
                 cohort_org,
                 slug,
-                f"no `{gspec.tests}/` on the solution branch - hand-marked",
+                "; ".join(reason for reason in (no_tests, no_completion) if reason),
                 dry_run,
             )
 
@@ -2128,6 +2410,14 @@ def collect(
         # `{unit key: "passed/total"}` - what `info.autograde` shows a grader at the
         # cutoff. Per UNIT, not per member: a team is graded once, on one commit.
         scores: dict[str, str] = {}
+        # `{unit key: "ran-clean" | "errors:N" | ...}` - `info.completion`, on exactly the
+        # same terms, and kept apart from `scores` because an assignment can have one
+        # without the other.
+        completions: dict[str, str] = {}
+        # The unit keys this run actually EXAMINED - one entry per target that came back
+        # with a result, whether or not it produced a count. Not `len(archives)`: a target
+        # can archive two files (its result JSON and its executed notebook).
+        examined: list[str] = []
         # The per-target result archives are held here and written only AFTER the grading
         # sheet is durable (see below), with the `_graded.json` sentinel written last. Writing
         # archives mid-loop is what let an aborted run un-grade everyone back when bare
@@ -2163,18 +2453,23 @@ def collect(
                     f"the deadline freeze; scoring 0 rather than pinning on student-"
                     f"controlled commit dates"
                 )
-                result = _zero_result(f"absent from {snapshot_path(slug)}")
+                result, executed = (
+                    _zero_result(f"absent from {snapshot_path(slug)}"),
+                    None,
+                )
             else:
-                result = _grade_target(
+                result, executed = _grade_target(
                     cohort_org,
                     repo,
                     tests_src,
                     deadline,
                     snapshot=None if snapshots is None else snapshots[repo],
+                    starters=starters,
                 )
             if result is None:
                 unreachable.append(repo)
                 continue
+            examined.append(target_key)
             if result.get("note") == GRADE_FAILED_NOTE:
                 failed_to_run.append(repo)
             # The score and per-test detail go ONLY to the private archive: this log is
@@ -2187,6 +2482,26 @@ def collect(
                     f"autograde: {slug}/{target_key}",
                 )
             )
+            if executed is not None:
+                # The notebook as the toolkit ran it, beside the result JSON: `errors:3` is
+                # a number, and the grader has to be able to see WHICH three. Capped,
+                # because a notebook of plots is base64 all the way down and
+                # classroom-config is a repo somebody has to clone. No path in this log -
+                # it would name the handle.
+                if len(executed) <= COMPLETION_ARCHIVE_MAX_BYTES:
+                    archives.append(
+                        (
+                            f"{autograde_path(slug)}/{target_key}.ipynb",
+                            executed,
+                            f"autograde: {slug}/{target_key} (executed notebook)",
+                        )
+                    )
+                else:
+                    log(
+                        f"    (an executed notebook came to {len(executed) // 1024} KiB, "
+                        f"over the {COMPLETION_ARCHIVE_MAX_BYTES // 1024} KiB archive cap "
+                        f"- the state is recorded, the copy is not)"
+                    )
             # A count, shown to the grader for information - never a mark by itself, and
             # never a field a student sees. It reaches them, if at all, through whatever
             # the grader then types into `score_*`.
@@ -2196,11 +2511,15 @@ def collect(
             # its count would make the assignment look graded when no student can receive
             # it. The per-target archive above is still written - the run DID examine it.
             if members:
-                scores[target_key] = f"{result['score']}/{result['max']}"
+                if tests_src is not None:
+                    scores[target_key] = f"{result['score']}/{result['max']}"
+                if result.get("completion"):
+                    completions[target_key] = result["completion"]
 
         if dry_run:
             return 0
-        if not scores and unreachable:
+        recorded = scores or completions
+        if not recorded and unreachable:
             # Nothing graded because nothing could be READ - a repo that is not there yet,
             # or an API having a bad afternoon. The run is genuinely unfinished, so it goes
             # red and no record is written: the next tick must be free to try again, and
@@ -2210,7 +2529,7 @@ def collect(
                 f"(tagged above) - nothing graded, and nothing recorded; the next run retries"
             )
             return 1
-        if not scores:
+        if not recorded:
             # Every target WAS examined and none of them yielded a grade. Not a failure: the
             # snapshot is frozen, so an hourly retry would see exactly what this run saw and
             # go red for ever. Record the skip and stay green - a deliberate re-grade is
@@ -2227,7 +2546,7 @@ def collect(
                 f"nothing gradable across {len(targets)} target(s) as of {deadline}",
                 dry_run,
             )
-        if failed_to_run and len(failed_to_run) == len(archives):
+        if failed_to_run and len(failed_to_run) == len(examined):
             # EVERY target that was examined failed to grade for the same class of reason -
             # a broken image, a missing dependency, an rlimit the runner can't satisfy. That
             # is a runner fault, not a cohort of non-submitters, so it is treated like the
@@ -2247,7 +2566,7 @@ def collect(
         # and picks up the repo(s) that could not be read.
         if unreachable:
             log_err(
-                f"{slug}: graded {len(scores)} target(s), but {len(unreachable)} "
+                f"{slug}: examined {len(examined)} target(s), but {len(unreachable)} "
                 f"submission repo(s) could not be read (tagged above) - NOT marking {slug} "
                 f"machine-graded; the next run retries the missing one(s)"
             )
@@ -2271,15 +2590,18 @@ def collect(
         # unfrozen sheet would leave the cutoff's facts unrecorded for ever (nothing
         # re-derives them), and a frozen sheet with no sentinel is simply re-frozen next
         # tick to identical bytes, which writes nothing.
-        if not (archive_ok and sealed(scores) and mark_graded(cohort_org, slug)):
+        if not (
+            archive_ok and sealed(scores, completions) and mark_graded(cohort_org, slug)
+        ):
             log_err(
-                f"{slug}: graded {len(scores)} target(s) but a result archive, the grading "
+                f"{slug}: examined {len(examined)} target(s) but a result archive, the grading "
                 f"sheet or the fire-once sentinel failed to write - NOT marking "
                 f"machine-graded; retrying"
             )
             return 1
     log_ok(
-        f"graded {len(scores)} target(s) into {grades.sheet_path(slug)}; "
+        f"examined {len(examined)} target(s) into {grades.sheet_path(slug)}: "
+        f"{len(scores)} scored, {len(completions)} completion-checked; "
         f"{len(failed_to_run)} failed to run, {len(unreachable)} unreachable "
         f"(per-target detail in {autograde_path(slug)}/) - faculty mark in the sheet"
     )

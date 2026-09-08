@@ -177,6 +177,7 @@ class SheetSpec:
     late_window_days: int | None = None
     late_penalty_per_day: str | None = None
     autograde: bool = False
+    completion_check: bool = False
     due_display: str = ""
     cutoff_display: str = ""
     # The same two moments spelt out in full - `Sunday 4 October 2026, 23:59
@@ -201,8 +202,9 @@ class SheetSpec:
 
 def _fresh_info(spec: SheetSpec) -> dict:
     """A blank `info:` block: every fact this assignment's toolkit will fill, and no other.
-    `contributions` exists only where CONTRIBUTIONS.md does and `autograde` only where
-    tests will run - an always-blank key is a question a grader keeps re-asking.
+    `contributions` exists only where CONTRIBUTIONS.md does, `autograde` only where tests
+    will run and `completion` only where a notebook is executed at the cutoff - an
+    always-blank key is a question a grader keeps re-asking.
 
     Two toolkit facts are deliberately NOT here, because they have nothing to say until
     there is something to say: `checked` (the minute this unit was last read) appears from
@@ -214,6 +216,8 @@ def _fresh_info(spec: SheetSpec) -> dict:
         info["contributions"] = None
     if spec.autograde:
         info["autograde"] = None
+    if spec.completion_check:
+        info["completion"] = None
     return info
 
 
@@ -936,6 +940,7 @@ _READERS = {
     "late_window_days": _whole_days,
     "late_penalty_per_day": _penalty,
     "autograde": lambda v, w, d: _boolean(v, "autograde", w, d),
+    "completion_check": lambda v, w, d: _boolean(v, "completion_check", w, d),
     "tests": lambda v, w, d: str(v or "tests").strip() or "tests",
 }
 SPEC_KEYS = tuple(_READERS)
@@ -978,6 +983,10 @@ class GradingSpec:
     # default of true made every template without the key try to run hidden tests that
     # were never written - a red tick every quarter of an hour for the rest of the term.
     autograde: bool = False
+    # UNDECLARED, and that is a third state rather than a missing false: the default
+    # depends on the `format:` beside it (see `runs_completion_check`), so a file that
+    # never mentions the key has to be told from one that turned the check off.
+    completion_check: bool | None = None
     tests: str = "tests"
     dropped: tuple[str, ...] = ()
 
@@ -998,6 +1007,21 @@ class GradingSpec:
         """Handed in off GitHub (Moodle, Kaggle, in class), so the repo holds the brief
         and the Feedback issue and nothing is ever collected from it."""
         return self.submit_via == "external"
+
+    @property
+    def runs_completion_check(self) -> bool:
+        """Whether the cutoff executes this assignment's notebook and records whether it
+        runs top to bottom (`collect`).
+
+        ON by default for `format: ipynb` and off for everything else, because the rule it
+        verifies - restart the kernel and run all before you hand in - is a rule only a
+        notebook course states, and it is the one rule nobody could check by hand. An
+        explicit `completion_check:` wins either way: a notebook assignment can turn it
+        off, and an assignment that keeps its notebooks somewhere the `format:` does not
+        name can turn it on."""
+        if self.completion_check is None:
+            return self.format == "ipynb"
+        return self.completion_check
 
 
 def _read_settings(
@@ -1303,6 +1327,7 @@ def sheet_spec(
         late_window_days=gspec.late_window_days,
         late_penalty_per_day=gspec.late_penalty_per_day,
         autograde=gspec.autograde,
+        completion_check=gspec.runs_completion_check,
         due_display=_display_moment(entry.due_datetime if entry else None),
         cutoff_display=_display_moment(cutoff_at(sched, key, gspec)),
         due_long=_display_long(entry.due_datetime if entry else None, sched.timezone),

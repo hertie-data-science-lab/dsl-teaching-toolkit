@@ -271,6 +271,11 @@ def _grading_config(
             "true" if autograde else "false",
             "true: run tests/ at the cutoff and show the count to graders",
         ),
+        _setting(
+            "completion_check",
+            "true" if fmt == "ipynb" else "false",
+            "true: execute the notebook at the cutoff, record whether it runs clean",
+        ),
     ]
     return "\n".join(lines) + "\n"
 

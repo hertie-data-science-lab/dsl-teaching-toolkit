@@ -123,6 +123,20 @@ def test_autograde_adds_its_info_field_only_when_the_assignment_autogrades():
     )
 
 
+def test_completion_adds_its_info_field_only_where_a_notebook_is_executed():
+    # Same rule as the count beside it: an always-blank key is a question a grader keeps
+    # re-asking. The two are independent - a hand-marked notebook assignment has the
+    # completion row and no autograde row.
+    info = new_sheet(individual(completion_check=True), SOLO)["submissions"]["ada-l"][
+        "info"
+    ]
+    assert "completion" in info and "autograde" not in info
+    assert (
+        "completion"
+        not in new_sheet(individual(), SOLO)["submissions"]["ada-l"]["info"]
+    )
+
+
 # ------------------------------------------------------------------------- the merge
 
 
