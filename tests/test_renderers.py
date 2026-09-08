@@ -1842,6 +1842,61 @@ def test_the_release_pass_itself_carries_the_transport():
     assert step["env"][mailer.MAINTAINER_ENV] == _secret_ref(mailer.MAINTAINER_ENV)
 
 
+# Where a fault in a COURSE org's OWN config is emailed: the two steps that check
+# dsl-course.yml and the cohort registry, and nowhere else. An address list has no business
+# in the env of a workflow that never reads it.
+COURSE_ADMIN_CARRIERS = ("scheduler", "sync_membership")
+
+
+@pytest.mark.parametrize(
+    ("name", "command"),
+    [
+        ("scheduler", "--all-cohorts --skip-autograde"),
+        ("sync_membership", "--check-course-config"),
+    ],
+)
+def test_the_course_config_check_carries_the_admin_addresses(name, command):
+    steps = [
+        s for job in workflow_jobs(ALL_RENDERED[name]).values() for s in job["steps"]
+    ]
+    step = next(s for s in steps if command in str(s.get("run", "")))
+    # The transport AND the list: a step carrying one and not the other can mail, and has
+    # nobody to tell.
+    assert set(mailer.GRAPH_ENV) <= set(step["env"])
+    assert step["env"][mailer.COURSE_ADMIN_ENV] == _secret_ref(mailer.COURSE_ADMIN_ENV)
+
+
+def test_no_other_workflow_is_handed_the_admin_addresses():
+    for name, rendered in ALL_RENDERED.items():
+        if name in COURSE_ADMIN_CARRIERS:
+            continue
+        assert mailer.COURSE_ADMIN_ENV not in rendered, name
+
+
+def test_a_push_to_either_course_config_file_checks_it_within_the_minute():
+    # The registry is the other half of the course's own config and shares its digest
+    # issue, so an edit to either has to reach the same check.
+    rendered = ALL_RENDERED["sync_membership"]
+    doc = yaml.safe_load(rendered)
+    paths = doc.get("on", doc.get(True))["push"]["paths"]
+    assert paths == ["dsl-course.yml", "cohort-courses-pages.yml"]
+    auto = workflow_jobs(rendered)["sync-auto"]["steps"]
+    step = next(
+        s for s in auto if "dsl_course.sync_membership" in str(s.get("run", ""))
+    )
+    # Before the reconcile, which is the pass that SKIPS a course it cannot read - so the
+    # digest and the mail are written whatever that then does.
+    run = step["run"]
+    assert run.index("--check-course-config") < run.index("dsl_course.sync_membership")
+
+
+def test_the_manual_sync_button_is_not_given_the_addresses():
+    # Somebody is standing at that run and reads its log; the automatic job is the one
+    # with nobody watching.
+    steps = workflow_jobs(ALL_RENDERED["sync_membership"])["sync-dispatch"]["steps"]
+    assert all(mailer.COURSE_ADMIN_ENV not in (s.get("env") or {}) for s in steps)
+
+
 def test_a_cohort_bootstrap_forwards_the_maintainer_address_to_the_new_org():
     # It runs in the COURSE org, which has the address as an org secret already, and
     # --propagate-secret is what copies it down. A cohort org left without it is one whose
