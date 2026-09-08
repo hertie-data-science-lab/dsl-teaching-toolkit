@@ -183,10 +183,17 @@ COHORT_DIGESTS: tuple[Digest, ...] = (
     GRADING_CONFIG,
 )
 
-# What closing one of these issues says. One string, because two issues are closed with
-# it - the one whose faults have all been fixed, and the one another has taken over.
+# What closing one of these issues says, when its last fault has actually been fixed.
 CLEARED_COMMENT = (
     "Every entry in {file} is now usable. Reopens on its own if that changes."
+)
+# And what closing the OTHER one says - the issue this digest has taken over. Not
+# CLEARED_COMMENT, which is what that read for a while: the fold only happens on a tick
+# that HAS faults, so telling a thread full of broken entries that every entry is now
+# usable is the one thing about them that is not true.
+FOLDED_COMMENT = (
+    "Superseded by *{title}*, which now carries these entries and closes itself once "
+    "they are fixed."
 )
 
 # When an immediate fault is said again. It cannot escalate on its own - nothing about it
@@ -879,7 +886,7 @@ def _close_superseded(repo: str, digest: Digest, absorb: str | None) -> None:
     already written and correct, and a second copy of the record is a tidiness problem
     rather than a notification one."""
     try:
-        if close_issues_titled(repo, absorb, CLEARED_COMMENT.format(file=digest.file)):
+        if close_issues_titled(repo, absorb, FOLDED_COMMENT.format(title=digest.title)):
             return
         log_ok(f"folded `{absorb}` into `{digest.title}` in {repo}")
     except Exception as exc:  # pragma: no cover - close_issues_titled counts its own

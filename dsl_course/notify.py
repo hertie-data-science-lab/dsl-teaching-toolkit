@@ -707,19 +707,28 @@ def _plural(n: int) -> str:
     return "entry" if n == 1 else "entries"
 
 
-def _immediate_intro(spec: Digest, count: int, reminder: str | None) -> str:
+def _immediate_intro(
+    spec: Digest, count: int, reminder: str | None, dated: bool = False
+) -> str:
     """The first line, which is the only part a reminder changes.
 
     It leads with the CONSEQUENCE, because "students.csv has 1 entry the toolkit cannot
     use" says nothing about whether anybody's term is affected - and the answer differs
-    sharply per file (see `faults.CONSEQUENCE`)."""
+    sharply per file (see `faults.CONSEQUENCE`).
+
+    `dated` is whether these faults carry a MOMENT. An assignment's `grading_config.yml`
+    is the one file here that does: its faults are held back until the grading pass that
+    reads them is close, so the letter typically goes out months after the line was
+    written and "a recent edit" names the wrong week - under a table whose own row says
+    when it bites."""
     what = f"{count} {_plural(count)} the toolkit cannot use"
-    opening = (
-        f"Still unfixed after {reminder}: <code>{html.escape(spec.file)}</code> has "
-        f"{what}."
-        if reminder
-        else (f"A recent edit to <code>{html.escape(spec.file)}</code> left {what}.")
-    )
+    file = f"<code>{html.escape(spec.file)}</code>"
+    if reminder:
+        opening = f"Still unfixed after {reminder}: {file} has {what}."
+    elif dated:
+        opening = f"{file} has {what} by the time it is read."
+    else:
+        opening = f"A recent edit to {file} left {what}."
     consequence = faults.CONSEQUENCE.get(spec.file, "")
     tail = f" Until they are fixed: {html.escape(consequence)}." if consequence else ""
     return f"<p>{opening}{tail}</p>"
@@ -756,7 +765,12 @@ def notify_config_faults(
             sender = html.escape(_course_name(course_org))
             parts = [
                 f"<p>This is an automated email sent on behalf of {sender}.</p>",
-                _immediate_intro(spec, len(faults_in), digest.reminder),
+                _immediate_intro(
+                    spec,
+                    len(faults_in),
+                    digest.reminder,
+                    any(f.fires for f in faults_in),
+                ),
             ]
             parts += [
                 _block(cohort_org, course_org, f, digest.mail[k], digest.issue_url, now)

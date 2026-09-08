@@ -346,10 +346,10 @@ def test_the_issue_the_workflow_used_to_open_is_folded_in_and_closed_once(gh):
     out = sd.sync("Cohort", "Course", [fault], NOW)
     assert out.mail == {}  # already reported over there
     (close,) = fake.did("issue", "close")
-    assert (
-        "Every entry in schedule.yml is now usable"
-        in close[close.index("--comment") + 1]
-    )
+    # Superseded, NOT fixed: the fold only ever happens on a tick that has faults, so a
+    # thread full of broken entries must not be closed saying every entry is now usable.
+    closing = close[close.index("--comment") + 1]
+    assert sd.TITLE in closing and "now usable" not in closing
     # NOT yet recorded as folded: the body is written before the close, so a close that
     # failed would be filed as done. The next tick finds nothing left to fold and says so.
     assert sd.ABSORBED not in fake.body_of("issue", "edit")

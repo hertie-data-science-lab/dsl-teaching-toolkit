@@ -726,6 +726,31 @@ def test_the_mail_says_what_the_file_is_costing_the_cohort(wired):
     assert sent.one["html"] is True
 
 
+def test_a_dated_fault_is_not_introduced_as_a_recent_edit(wired):
+    # An assignment's grading_config.yml is the one file here whose faults carry a moment:
+    # they are held until the grading pass that reads them is close, so the letter goes out
+    # months after the line was written and "a recent edit" names the wrong week - under a
+    # table whose own row already says when it bites.
+    dated = notify.ConfigFault(
+        "assignments.a3",
+        "`submit_via: emial` is not one of github/email - using github",
+        fires=NOW + timedelta(hours=6),
+        file="grading_config.yml",
+        field="submit_via",
+        lineno=4,
+        in_repo="assignment-3",
+        in_org=COURSE,
+        ref="solution",
+    )
+    sent = wired(blame={4: "JanG"})
+    routing = notify.route(COHORT, COURSE, [dated], NOW)
+    _mail_config([dated], routing, spec=config_digest.GRADING_CONFIG)
+    body = sent.one["body"]
+    assert "A recent edit" not in body
+    assert "<code>grading_config.yml</code> has 1 entry the toolkit cannot use" in body
+    assert "grading fires" in body  # the row that does say when
+
+
 def test_two_faults_are_one_message_and_the_subject_counts_them(wired):
     sent = wired(pushers=("JanG",))
     faults = [_row_fault(4), _row_fault(9, field="github_handle")]
