@@ -883,11 +883,6 @@ def final_grade(
 # names `collect` still spells are re-exported there, so no caller had to move.
 GRADING_FILE = "grading_config.yml"  # on the template's solution branch
 
-# What the file was called while it held three autograder fields. It defines the whole
-# assignment now - dates aside - and the name says so. Templates scaffolded before the
-# rename still carry the old one, so it is still READ; nothing writes it any more.
-LEGACY_GRADING_FILE = "grading.yml"
-
 # The assignment's own definition. `type`/`autograde`/`tests` drive the autograder;
 # everything below them drives the grading sheet - its shape, its maxima, its header - so a
 # course states each fact once, in the file that already holds the others.
@@ -1009,23 +1004,8 @@ def _grading_text(course_org: str, template: str) -> str | None:
     An hourly tick asks the same template the same question from the scheduler, the sheet
     refresh and the collection that follows them. Memoising the TEXT (like
     `schedule._schedule_text`) means every caller still parses its own dict - nothing
-    shared to mutate - and still sees its own warnings. tests/conftest.py clears it.
-
-    The old name is a FALLBACK, not a second spelling: a template scaffolded before the
-    rename is read and its owner told to rename it, once per template per process - this
-    cache is what makes it once rather than once per tick per pass."""
-    text = get_file_content(course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH)
-    if text is not None:
-        return text
-    legacy = get_file_content(
-        course_org, template, LEGACY_GRADING_FILE, ref=SOLUTION_BRANCH
-    )
-    if legacy is not None:
-        log_err(
-            f"  ! {template} still defines the assignment in {LEGACY_GRADING_FILE} - "
-            f"rename to {GRADING_FILE}; the old name stops working next term"
-        )
-    return legacy
+    shared to mutate - and still sees its own warnings. tests/conftest.py clears it."""
+    return get_file_content(course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH)
 
 
 def load_grading_spec(course_org: str, template: str) -> dict:
