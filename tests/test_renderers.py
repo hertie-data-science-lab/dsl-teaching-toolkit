@@ -91,6 +91,12 @@ UNGATED = {"scheduler", "refresh", "send_codes"}
 # whoever last committed the cron file - the bot - so each has to report itself.
 CRONS = {"sync_membership", "sync_site", "refresh", "publish_site", "scheduler"}
 
+# Everything that runs with nobody watching: the crons, plus the codes send, which has no
+# button and no actor at all - a push to a cohort's students.csv fires it. The failure
+# contract is the same for all of them and the reason is the same, so it is asserted over
+# the whole set rather than over the ones that happen to declare a `schedule:`.
+UNATTENDED = CRONS | {"send_codes"}
+
 # Every renderer whose run ends in `seed refresh` - and the subset that may join a shared
 # concurrency group. See test_only_the_nightly_refresh_joins_the_seed_refresh_group.
 SEED_REFRESH = {"refresh", "new_materials", "new_assignment", "bootstrap_cohort"}
@@ -723,7 +729,12 @@ def test_send_codes_only_ever_runs_off_a_roster_push():
     jobs = doc["jobs"]
     assert set(jobs) == {"send-codes"}
     assert "check-team" not in str(jobs["send-codes"].get("needs", ""))
-    step = jobs["send-codes"]["steps"][-1]
+    # The failure-notice steps trail this job too now, so address the work step by name.
+    step = next(
+        s
+        for s in jobs["send-codes"]["steps"]
+        if s.get("name", "").startswith("Send enrolment codes")
+    )
     assert step["env"]["DISPATCH_COHORT"] == (
         "${{ github.event.client_payload.cohort_org }}"
     )
@@ -1407,8 +1418,8 @@ def test_a_failure_files_its_own_issue_rather_than_commenting_on_a_sibling(tmp_p
     assert _run_issue_step(opener, tmp_path / "y", _OPEN_ISSUES) == ["comment 11"]
 
 
-@pytest.mark.parametrize("name", sorted(CRONS))
-def test_every_cron_files_and_closes_its_own_failure_issue(name):
+@pytest.mark.parametrize("name", sorted(UNATTENDED))
+def test_every_unattended_run_files_and_closes_its_own_failure_issue(name):
     doc = yaml.safe_load(ALL_RENDERED[name])
     reporting = [
         (n, j)
@@ -1772,7 +1783,7 @@ MAIL_SENDERS = ("send_codes", "distribute_grades")
 # fiction an unattended codes send leans on when it says a person will read the row.
 # ...plus the scheduler, which mails a cohort about a source it has not staged, and
 # every cron, whose failure step mails the maintainer the log (asserted per cron in
-# test_every_cron_files_and_closes_its_own_failure_issue).
+# test_every_unattended_run_files_and_closes_its_own_failure_issue).
 MAIL_ENV_CARRIERS = MAIL_SENDERS + ("status", "scheduler")
 
 

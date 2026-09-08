@@ -1079,6 +1079,14 @@ def render_send_codes() -> str:
     It carries `--dispatched-by`, which refuses a cohort this course org does not own: a
     `client_payload` is written by whoever holds a cohort's bot token, a lower trust tier
     than the course org (see enrol_codes.refuse_unregistered).
+
+    And it reports itself like the crons do. Nobody watches a send either - there is no
+    button and no actor - so a run that broke reached nobody at all: GitHub's own failure
+    email goes to whoever last committed this file, which is the bot. The same three steps
+    every cron carries file the issue, mail the maintainer the failed step's log and close
+    the issue on the next good send. A ROSTER fault does not come through here: that run
+    is green by design (see `enrol_codes.reds_the_run`) and the students.csv digest tells
+    faculty about it.
     """
     return f"""name: Send enrolment codes
 
@@ -1115,8 +1123,8 @@ on:
           # the payload comes from a cohort's bot token, so the cohort it names is
           # untrusted input.
           python3 -m dsl_course.enrol_codes --cohort-org "$DISPATCH_COHORT" \\
-            --dispatched-by "$COURSE"
-"""
+            --dispatched-by "$COURSE"{_TEE_RUN_LOG}
+{_CRON_NOTICE}"""
 
 
 def render_bootstrap_cohort() -> str:
