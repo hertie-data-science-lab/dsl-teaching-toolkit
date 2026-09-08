@@ -19,7 +19,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import source_fault
 
-from dsl_course import mailer, notify, source_digest
+from dsl_course import config_digest, mailer, notify, source_digest
 from dsl_course.schedule import Severity, SourceFault
 
 BERLIN = ZoneInfo("Europe/Berlin")
@@ -119,12 +119,16 @@ def wired(monkeypatch):
     def _make(
         blame: dict[int, str] | None = None,
         committer: str | None = None,
+        pushers: tuple[str, ...] | None = None,
         people: dict | None = PEOPLE,
         maintainer: str | None = "maint@x.edu",
         configured: bool = True,
     ) -> _Sent:
         monkeypatch.setattr(notify, "blame_logins", lambda *a, **k: blame or {})
         monkeypatch.setattr(notify, "last_committer", lambda *a, **k: committer)
+        monkeypatch.setattr(
+            notify, "path_committers", lambda *a, **k: tuple(pushers or ())
+        )
         monkeypatch.setattr(
             notify.sync_faculty,
             "load_cohort_faculty",
@@ -628,3 +632,145 @@ def test_with_no_maintainer_address_the_failure_issue_is_the_only_channel(
     assert notify.notify_run_failed(COURSE, "Refresh actions", "https://run/1", "") == 0
     assert sent.batches == []
     assert "[skip] mail not configured" in capsys.readouterr().out
+
+
+# --------------------------------------------------- a file the toolkit cannot read
+#
+# The other half of the notifier: an immediate fault, which has no deadline to escalate
+# towards. Everything the source mail gets from the rung this one has to get from the
+# clock the digest keeps - and the file it is about is full of personal data, so what the
+# mail may say about a row is the row number and the column.
+
+CSV_ISSUE = "https://github.com/Cohort-f2026/classroom-config/issues/12"
+
+
+def _row_fault(lineno: int = 4, field: str = "role") -> notify.ConfigFault:
+    return notify.ConfigFault(
+        f"row {lineno}",
+        "unrecognised role - the row is treated as enrolled",
+        file="students.csv",
+        field=field,
+        lineno=lineno,
+        fix_text=f"fix row {lineno} of students.csv",
+    )
+
+
+def _people_fault() -> notify.ConfigFault:
+    return notify.ConfigFault(
+        "people.instructors[1]",
+        "no usable `email:` - access is still granted, but no notification reaches "
+        "this person",
+        file="people.yml",
+        field="email",
+        lineno=6,
+    )
+
+
+def _config_digest_result(faults, reminder=None) -> source_digest.DigestResult:
+    by_key = {f.key: f for f in faults}
+    return source_digest.DigestResult(
+        issue_url=CSV_ISSUE,
+        faults_by_key=by_key,
+        mail=dict.fromkeys(by_key, Severity.WARNING),
+        reminder=reminder,
+    )
+
+
+def _mail_config(faults, routing, reminder=None, spec=None, dry_run=False):
+    return notify.notify_config_faults(
+        spec or config_digest.ROSTER,
+        COHORT,
+        COURSE,
+        _config_digest_result(faults, reminder),
+        NOW,
+        routing,
+        dry_run=dry_run,
+    )
+
+
+def test_a_csv_fault_is_addressed_to_whoever_pushed_the_file(wired):
+    # NOT blame: the bot writes `enrol_code` and `code_sent_at` back into rows faculty
+    # typed, so half the roster blames to an account that cannot fix anything.
+    wired(blame={4: "dsl-bot"}, pushers=("dsl-bot", "JanG"))
+    routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
+    (routed,) = routing.by_key.values()
+    assert routed.to == ("jan@x.edu",)
+    assert routing.logins == ["JanG"]
+
+
+def test_a_yaml_fault_is_addressed_by_blame_of_its_own_file(wired):
+    wired(blame={6: "cpj97"})
+    routing = notify.route(COHORT, COURSE, [_people_fault()], NOW)
+    (routed,) = routing.by_key.values()
+    assert routed.to == ("cam@x.edu",)
+    assert routed.cc == ("jan@x.edu",)  # a TA's mail copies the instructors
+
+
+def test_git_naming_nobody_falls_back_to_the_whole_teaching_team(wired):
+    wired(pushers=("dsl-bot",))
+    routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
+    (routed,) = routing.by_key.values()
+    assert routed.to == ("jan@x.edu", "cam@x.edu")
+
+
+def test_the_mail_says_what_the_file_is_costing_the_cohort(wired):
+    sent = wired(pushers=("JanG",))
+    routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
+    _mail_config([_row_fault()], routing)
+    assert sent.one["subject"] == (
+        "[Course Name f2026] students.csv has 1 entry the toolkit cannot use"
+    )
+    assert "A recent edit to <code>students.csv</code> left 1 entry" in sent.one["body"]
+    assert "the whole roster is skipped" in sent.one["body"]
+    assert sent.one["html"] is True
+
+
+def test_two_faults_are_one_message_and_the_subject_counts_them(wired):
+    sent = wired(pushers=("JanG",))
+    faults = [_row_fault(4), _row_fault(9, field="github_handle")]
+    routing = notify.route(COHORT, COURSE, faults, NOW)
+    _mail_config(faults, routing)
+    assert "2 entries the toolkit cannot use" in sent.one["subject"]
+
+
+def test_the_mail_carries_the_row_the_column_and_the_fix_and_nothing_else(wired):
+    sent = wired(pushers=("JanG",))
+    routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
+    _mail_config([_row_fault()], routing)
+    body = sent.one["body"]
+    assert "students.csv:4" in body and "row 4 -&gt; role" in body
+    assert "fix row 4 of students.csv" in body
+    assert CSV_ISSUE in body
+    # No deadline row: an unreadable line does not happen at a time.
+    assert "fix by date" not in body and "no date (tbc)" not in body
+
+
+def test_the_first_mail_does_not_copy_the_maintainer(wired):
+    sent = wired(pushers=("JanG",))
+    routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
+    _mail_config([_row_fault()], routing)
+    assert sent.one["cc"] == []
+
+
+def test_a_reminder_changes_the_first_line_and_copies_the_maintainer(wired):
+    sent = wired(pushers=("JanG",))
+    routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
+    _mail_config([_row_fault()], routing, reminder="2 days")
+    assert "Still unfixed after 2 days:" in sent.one["body"]
+    assert sent.one["cc"] == ["maint@x.edu"]
+
+
+def test_a_people_fault_names_its_own_file(wired):
+    sent = wired(blame={6: "JanG"})
+    routing = notify.route(COHORT, COURSE, [_people_fault()], NOW)
+    _mail_config([_people_fault()], routing, spec=config_digest.PEOPLE)
+    assert "people.yml has 1 entry the toolkit cannot use" in sent.one["subject"]
+    assert "this person has no access and is not notified" in sent.one["body"]
+    assert "people.yml#L6" in sent.one["body"]
+
+
+def test_no_mail_transport_says_so_once_and_never_raises(wired, capsys):
+    wired(pushers=("JanG",), configured=False)
+    routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
+    assert _mail_config([_row_fault()], routing).addressees == 0
+    assert "mail not configured" in capsys.readouterr().out
