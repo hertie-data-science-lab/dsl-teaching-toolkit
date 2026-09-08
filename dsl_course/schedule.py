@@ -879,8 +879,10 @@ def _parse_assignments(
                 tz,
                 drops,
                 where,
-                "grading falls back to the due date - the submission snapshot freezes "
-                "and the autograder fires then, not when this says",
+                "grading falls back to the end of the late window - the due date plus "
+                "the template's `late_window_days`, and the due date itself when it "
+                "declares none. The submission snapshot freezes and the autograder fires "
+                "then, not when this says",
                 end_of_day=True,
             ),
             handout_datetime=handout,

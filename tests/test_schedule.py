@@ -1205,14 +1205,16 @@ def test_an_unparseable_grading_datetime_is_flagged_not_silently_the_due_date():
             }
         }
     )
-    # the documented fallback still applies - grading pins to the due date
+    # the documented fallback still applies - the schedule's own, spec-free answer is the
+    # due date, and `grades.cutoff_at` then adds the template's late window to it, which
+    # is what the flag has to name: that is the moment the snapshot actually freezes.
     assert (
         schedule.grading_datetime_at(sched, "a1")
         == sched.assignments["a1"].due_datetime
     )
     (line,) = sched.dropped
     assert line.startswith("assignments.a1.grading_datetime:")
-    assert "falls back to the due date" in line
+    assert "falls back to the end of the late window" in line
 
 
 def test_an_unparseable_deploy_datetime_is_flagged():
