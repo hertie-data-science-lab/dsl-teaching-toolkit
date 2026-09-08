@@ -400,7 +400,7 @@ fully read goes red and opens an issue naming the bad entry.
 | `deploy` missing `course_source_repo`/`course_source_path` | that copy is dropped |
 | `solution_datetime:` malformed, or not after `handout_datetime` | dropped - the solution waits for a human |
 | `handout_datetime:` unparseable | kept, but nothing is ever handed out |
-| `grading_datetime:` unparseable | kept - the grading deadline falls back to `due_datetime` |
+| `grading_datetime:` unparseable | kept - grading falls back to the end of the late window (`due_datetime` plus the template's `late_window_days`; the due date itself with no window) |
 | `deploy_datetime:` unparseable | kept - that copy ships at the `event_datetime` |
 | `type:` / `max_team_size:` on an assignment | kept, and reported as moved to its `grading_config.yml` |
 | unknown `type:` on an event, unknown key, unknown `timezone:` | kept, on the documented fallback |

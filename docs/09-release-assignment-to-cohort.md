@@ -13,7 +13,7 @@ Hand out one **private repo per student** from a course org assignment template,
 ## The schedule automatically handles releases in advance (recommended)
 
 
-A `handout_datetime:` datetime under `assignments.<slug>` in the cohort's `schedule.yml` hands out the same repos automatically - the assignment's whole lifecycle (handout, due date, grading deadline, team-size cap) sits in one block: [Schedule releases](07-schedule-releases.md).
+A `handout_datetime:` datetime under `assignments.<slug>` in the cohort's `schedule.yml` hands out the same repos automatically - the assignment's whole lifecycle (handout, due date, grading deadline) sits in one block: [Schedule releases](07-schedule-releases.md).
 
 This is the recommended method for releasing assignments, as it involves a one-time setup cost and also creates an entry in the deployed `<course>.github.io` site, so students can clearly understand the course plan in advance.
 

@@ -411,9 +411,9 @@ def _handout_releases(
     course_org: str, cohort_org: str, sched: schedule.Schedule, now: datetime
 ) -> list[Release]:
     """Synthetic releases for `assignments.<slug>.handout_datetime` - the whole assignment
-    lifecycle (handout_datetime/due_datetime/grading_datetime/max_team_size) is declared in
-    ONE block, and the handout still fires through the exact machinery a
-    `releases` entry would: due at its datetime, re-checked every tick
+    lifecycle (handout_datetime/due_datetime/grading_datetime) is declared in ONE block,
+    and the handout still fires through the exact machinery a `releases` entry would:
+    due at its datetime, re-checked every tick
     (idempotent - a late onboarder gets their repo on the next one), per-team when the
     template's grading_config.yml says so. An assignment with no `<slug>-<tag>` template repo is
     skipped - it may be pinned for its website date alone.
