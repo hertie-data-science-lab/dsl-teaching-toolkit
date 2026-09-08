@@ -158,24 +158,45 @@ def test_sync_never_adds_a_handle_that_is_not_on_the_roster(stub_team, monkeypat
         roster, "load", lambda org: _students("ben@uni.edu,Ben,,ben-baker,42,")
     )
     errors = sync_teams.sync("org", prune=False)
-    assert errors == 1  # the skipped stranger is surfaced, not silently dropped
+    # Skipped and logged, but not counted: a handle faculty mistyped is a CONTENT fault
+    # of teams.csv, listed by row on that file's digest issue and mailed to whoever
+    # pushed the line. Reddening the nightly cron for it as well tells a maintainer only
+    # that something is wrong in an org they cannot correct a CSV in.
+    assert errors == 0
     assert stub_team["added"] == ["ben-baker"]
 
 
-def test_sync_refuses_to_reconcile_when_the_roster_is_unreadable(
-    stub_team, monkeypatch
-):
-    # teams.csv present but students.csv unreadable (None): the allowlist would be empty and
-    # a pruning reconcile would evict every project team. Refuse and red, don't mass-evict.
+def test_sync_refuses_to_reconcile_when_there_is_no_roster(stub_team, monkeypatch):
+    # teams.csv present but students.csv absent (None): the allowlist would be empty and
+    # a pruning reconcile would evict every project team. Refuse - and stay green, like
+    # every other file faculty have to write. A read that FAILED raises out of
+    # `roster.load` instead, and still reds the run.
     monkeypatch.setattr(
         sync_teams.teams,
         "load",
         lambda org: {"assignment-4-project": {"wizards": ["ben-baker"]}},
     )
-    monkeypatch.setattr(roster, "load", lambda org: None)  # roster unreadable
+    monkeypatch.setattr(roster, "load", lambda org: None)  # no roster
     errors = sync_teams.sync("org", prune=True)
-    assert errors == 1
+    assert errors == 0
     assert stub_team["added"] == [] and stub_team["removed"] == []  # nothing touched
+
+
+def test_a_read_that_failed_still_reds_the_teams_sync(stub_team, monkeypatch):
+    # The other half of the rule above: "we could not look" is not a file faculty can
+    # fix, and it must not be reported to them as one - nor quietly pass as green.
+    monkeypatch.setattr(
+        sync_teams.teams,
+        "load",
+        lambda org: {"assignment-4-project": {"wizards": ["ben-baker"]}},
+    )
+
+    def rate_limited(org, faults=None):
+        raise RuntimeError("API rate limit exceeded")
+
+    monkeypatch.setattr(roster, "load", rate_limited)
+    with pytest.raises(RuntimeError):
+        sync_teams.sync("org", prune=True)
 
 
 def test_sync_matches_roster_handles_case_insensitively(stub_team, monkeypatch):
@@ -214,8 +235,8 @@ def test_a_rejected_teams_csv_handle_is_counted_publicly_and_named_only_when_ver
     stub_team, monkeypatch, capsys
 ):
     # The handle came from a STUDENT (the public "Join team" issue), and this sync runs in
-    # a world-readable log - so the name is verbose-only, while the count that makes the
-    # run red stays where faculty can see it.
+    # a world-readable log - so the name is verbose-only, while the count faculty act on
+    # stays where they can see it. Neither reds the run.
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     monkeypatch.setattr(
         sync_teams.teams,
@@ -225,11 +246,11 @@ def test_a_rejected_teams_csv_handle_is_counted_publicly_and_named_only_when_ver
     monkeypatch.setattr(
         roster, "load", lambda org: _students("ben@uni.edu,Ben,,ben-baker,42,")
     )
-    assert sync_teams.sync("org", prune=False) == 1
+    assert sync_teams.sync("org", prune=False) == 0
     captured = capsys.readouterr()
     assert "m-stranger" not in captured.out + captured.err
     assert "1 handle(s) in teams.csv are not onboarded roster handles" in captured.err
 
     monkeypatch.setenv("DSL_VERBOSE", "1")
-    assert sync_teams.sync("org", prune=False) == 1
+    assert sync_teams.sync("org", prune=False) == 0
     assert "m-stranger" in capsys.readouterr().out

@@ -127,16 +127,18 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
         return 0
     students = roster.load(cohort_org)
     if students is None:
-        # The roster is UNREADABLE (absent, or a transient read failure) - distinct from a
-        # present-but-empty one. Building the allowlist from None gives an empty set, so a
-        # pruning reconcile would then EVICT every member from every project team. Refuse to
-        # touch anything, mirroring sync_roster's abort on the same signal, rather than
-        # mass-evicting and reporting red. (roster.load has already logged the cause.)
+        # The roster is ABSENT - distinct from a present-but-empty one. Building the
+        # allowlist from None gives an empty set, so a pruning reconcile would then EVICT
+        # every member from every project team. Refuse to touch anything, mirroring
+        # sync_roster's skip on the same signal. GREEN, for the same reason it is: a file
+        # faculty have to write is reported on the roster's own digest issue and mailed to
+        # them, and a red X here reaches only a maintainer who cannot fix it. A read that
+        # FAILED still raises out of `roster.load` and still reds the run.
         log_err(
-            f"roster unreadable in {cohort_org} - refusing to reconcile project teams "
-            f"(an empty allowlist would evict every team member)"
+            f"no roster to vet teams.csv against in {cohort_org} - skipping (reported on "
+            f"the students.csv digest issue in {teams.CONFIG_REPO})"
         )
-        return 1
+        return 0
     log_step(f"Materialising {len(wanted)} project team(s) in {cohort_org}")
     errors = 0
     for slug, accepted, rejected in vet_groups(
@@ -151,7 +153,12 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
                 f"not adding to {slug} (would invite an arbitrary GitHub account)"
             )
         if rejected:
-            errors += len(rejected)
+            # NOT an error. A handle faculty typed that is not on the roster is a CONTENT
+            # fault of teams.csv: `teams.parse` records it, the teams.csv digest issue
+            # lists the row, and the mail beside it goes to whoever pushed the line. The
+            # row is skipped either way - adding it would invite an arbitrary GitHub
+            # account into a private org - and counting it here as well only reddened the
+            # nightly cron for a typo nobody reading that red X can correct.
             log_err(
                 f"{len(rejected)} handle(s) in teams.csv are not onboarded roster handles "
                 f"- not added to {slug} (they would invite arbitrary GitHub accounts). "

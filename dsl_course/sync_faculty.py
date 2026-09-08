@@ -561,13 +561,19 @@ def sync_cohort_instructors(
     faculty = load_cohort_faculty(cohort_org)
     if faculty is None:
         # ABSENT people.yml: reconciling an empty desired set with prune=True would strip
-        # this cohort's instructors team (and its course-org tag team). Refuse to prune.
+        # this cohort's instructors team (and its course-org tag team). Refuse to prune -
+        # and stay GREEN, because a file faculty have to write is a CONTENT fault. It is
+        # already on the people.yml digest issue in this cohort's classroom-config
+        # (`read_cohort_people`), with a mail beside it to the people who can act on it; a
+        # red X here opens "Sync membership is failing" in the COURSE org and mails a
+        # maintainer who cannot write another org's teaching team. A read that FAILED
+        # still raises out of the loader and still reds the run.
         log_err(
             f"cohort people config {cohort_org}/{CONFIG_REPO}/"
             f"{COHORT_PEOPLE_PATH} is absent - refusing to reconcile instructors (an "
             f"absent config would prune every instructor); skipping"
         )
-        return 1
+        return 0
     desired = _desired_for(faculty, INSTRUCTORS_TEAM, date.today().isoformat())
     errors = reconcile_team_members(
         cohort_org, INSTRUCTORS_TEAM, desired, prune=True, dry_run=dry_run

@@ -71,6 +71,10 @@ def test_sync_course_admins_still_prunes_a_present_but_empty_people_block(monkey
 def test_sync_cohort_instructors_refuses_to_prune_when_people_yml_is_absent(
     monkeypatch,
 ):
+    # Nothing is reconciled - an absent people.yml with prune=True would strip the
+    # cohort's whole instructors team - and the run stays GREEN: a file faculty have to
+    # write reaches them on the people.yml digest issue, while this run's red X reaches
+    # only a maintainer who cannot write another org's teaching team.
     monkeypatch.setattr(sync_faculty, "load_cohort_faculty", lambda org: None)
     calls = []
     monkeypatch.setattr(
@@ -79,7 +83,7 @@ def test_sync_cohort_instructors_refuses_to_prune_when_people_yml_is_absent(
         lambda *a, **k: calls.append(a) or 0,
     )
     errors = sync_faculty.sync_cohort_instructors("Course", "Course-f2026", [], [])
-    assert errors == 1
+    assert errors == 0
     assert calls == []
 
 
