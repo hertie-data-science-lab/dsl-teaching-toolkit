@@ -239,17 +239,18 @@ def test_the_markup_starters_are_valid_documents_of_their_own_format(fake, monke
     assert "\\section{Task}" in tex
     assert tex.rstrip().endswith("\\end{document}")
 
-    for number, path, output_key, verb in (
-        ("2", "starter.Rmd", "output", "Knit"),
-        ("3", "starter.qmd", "format", "Render"),
+    for number, fmt, path, output_key, verb in (
+        ("2", "rmd", "starter.Rmd", "output", "Knit"),
+        ("3", "qmd", "starter.qmd", "format", "Render"),
     ):
         doc = fake.files[(f"assignment-{number}-f2026", path)]
         front = yaml.safe_load(doc.split("---\n")[1])
         assert front["title"] == "Backprop" and output_key in front
         assert "## Task" in doc and "```{r}" in doc
-        # The graded artefact, named in the file the student opens.
-        assert f"{verb} this file and commit **both** `{path}`" in doc
-        assert "starter.html" in doc
+        # The graded artefact, named in the file the student opens - and in the SAME
+        # sentence the brief carries, because both read `_hand_in`.
+        assert f"{verb} `{path}` and commit **both** it and the `starter.html`" in doc
+        assert scaffold._hand_in(fmt) in doc
 
 
 def test_a_title_that_is_tex_syntax_still_compiles(fake, monkeypatch):

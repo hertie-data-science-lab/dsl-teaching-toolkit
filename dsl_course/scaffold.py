@@ -31,6 +31,8 @@ from .course import (
     FACULTY_ONLY_HEADING,
     FORMATS,
     MATERIALS_REPO_PREFIX,
+    SOLUTION_BRANCH,
+    SOLUTION_DIR,
     SUBMIT_VIA,
     SYLLABUS_SAMPLE_FILE,
     TEAM_FORMATIONS,
@@ -380,8 +382,8 @@ def _latex_starter(title: str) -> str:
         f"% {_one_line(title)}\n"
         "%\n"
         "% Compile this file (`pdflatex starter.tex`, or your editor's Build button) and\n"
-        "% commit the starter.pdf it produces beside it. The PDF is what we read and\n"
-        "% mark; this source is what we check it against.\n"
+        "% commit the starter.pdf it produces beside it.\n"
+        f"% {_RENDER_RULE}\n"
         "\\documentclass[11pt,a4paper]{article}\n"
         "\\usepackage[utf8]{inputenc}\n"
         "\\usepackage[T1]{fontenc}\n"
@@ -399,15 +401,15 @@ def _latex_starter(title: str) -> str:
     )
 
 
-def _markdown_starter(title: str, *, output: str, source: str, verb: str) -> str:
+def _markdown_starter(title: str, fmt: str, *, output: str) -> str:
     """An .Rmd / .qmd that knits or renders as it stands: front matter, a heading, one
     chunk, and the artefact rule.
 
-    The two formats differ in exactly two words - the front-matter key naming the output
-    (`output:` vs `format:`) and what each calls the build - so they are one function
-    rather than two that drift. Both seed an `{r}` chunk, which is what a Quarto document
-    at a school teaching R renders with; swap it for `{python}` and nothing else moves."""
-    built = f"{Path(source).stem}.html"
+    The two formats differ in exactly one word here - the front-matter key naming the
+    output (`output:` vs `format:`) - so they are one function rather than two that drift;
+    the verb and the built filename come from `_BUILDS` like everywhere else. Both seed an
+    `{r}` chunk, which is what a Quarto document at a school teaching R renders with; swap
+    it for `{python}` and nothing else moves."""
     return (
         "---\n"
         f"title: {_yaml_scalar(_one_line(title))}\n"
@@ -419,8 +421,7 @@ def _markdown_starter(title: str, *, output: str, source: str, verb: str) -> str
         "# Your code here.\n"
         "```\n\n"
         "## What you hand in\n\n"
-        f"{verb} this file and commit **both** `{source}` and the `{built}` it produces.\n"
-        f"{_RENDER_RULE}\n"
+        f"{_hand_in(fmt)}\n"
     )
 
 
@@ -442,48 +443,58 @@ def _notebook_starter(title: str) -> str:
     return _notebook([f"# {_one_line(title)}", "", _NOTEBOOK_RULE], _STARTER_CODE)
 
 
-# `format` -> (the extension its starter takes, how to build it). `starter` is the stem
-# all of them share: the hidden tests `from starter import ...`, `collect` converts
-# `starter.ipynb` to `starter.py` before they do, and the artefact rule names
-# `starter.html` / `starter.pdf` - so the stem is a contract, not a preference.
+# THE stem every starter shares - the hidden tests `from starter import ...`, `collect`
+# converts `starter.ipynb` to `starter.py` before they do, and the artefact rule names
+# `starter.html` / `starter.pdf`. A contract, not a preference, so it is spelt once.
+STARTER_STEM = "starter"
+# The `format`s whose graded artefact is BUILT from the source: `format` -> (what to call
+# the build, what it produces). One row is what the starter, the brief and the seeded
+# `%` preamble all read, so the three cannot drift into three wordings of one rule.
+_BUILDS = {
+    "rmd": ("Knit", "html"),
+    "qmd": ("Render", "html"),
+    "latex": ("Compile", "pdf"),
+}
+
+
+def starter_name(fmt: str) -> str:
+    """The starter's filename for `fmt` - `starter` plus its extension."""
+    return f"{STARTER_STEM}{_STARTERS[fmt][0]}"
+
+
+def _hand_in(fmt: str) -> str:
+    """What "hand it in" means for `fmt`, in the one sentence the starter and the brief
+    both carry."""
+    if fmt not in _BUILDS:
+        return _ARTEFACT_NOTE.get(fmt, "")
+    verb, built = _BUILDS[fmt]
+    return (
+        f"{verb} `{starter_name(fmt)}` and commit **both** it and the "
+        f"`{STARTER_STEM}.{built}` it produces. {_RENDER_RULE}"
+    )
+
+
+# `format` -> (the extension its starter takes, how to build it).
 _STARTERS = {
     "ipynb": (".ipynb", _notebook_starter),
     "py": (".py", _py_starter),
     "rmd": (
         ".Rmd",
-        lambda title: _markdown_starter(
-            title, output="output: html_document", source="starter.Rmd", verb="Knit"
-        ),
+        lambda title: _markdown_starter(title, "rmd", output="output: html_document"),
     ),
     "qmd": (
         ".qmd",
-        lambda title: _markdown_starter(
-            title, output="format: html", source="starter.qmd", verb="Render"
-        ),
+        lambda title: _markdown_starter(title, "qmd", output="format: html"),
     ),
     "latex": (".tex", _latex_starter),
 }
-# What "hand it in" means for each `format`, in the brief - the page a student opens first
-# and the one faculty edit. The starter says it too; a student who deleted the stub and
-# began again still reads it here.
+# The formats whose artefact rule is NOT "build it": the two that hand in what they are.
 _ARTEFACT_NOTE = {
     "ipynb": (
         "Commit the notebook with its outputs saved, after **Restart kernel and run "
         "all**. We read it as it stands, and we run it the same way."
     ),
     "py": "Commit your `.py` files; we run them from the repository root.",
-    "rmd": (
-        f"Knit `starter.Rmd` and commit **both** it and the `starter.html` it produces. "
-        f"{_RENDER_RULE}"
-    ),
-    "qmd": (
-        f"Render `starter.qmd` and commit **both** it and the `starter.html` it produces. "
-        f"{_RENDER_RULE}"
-    ),
-    "latex": (
-        f"Compile `starter.tex` and commit **both** it and the `starter.pdf` it produces. "
-        f"{_RENDER_RULE}"
-    ),
 }
 # CONTRIBUTIONS.md goes into a GROUP assignment's `main` only. It carries the stub mark,
 # because `collect._contributions` reads it at the pin and has to tell an untouched
@@ -501,7 +512,7 @@ _CONTRIBUTIONS_STUB = """\
 """
 
 
-def _brief_stub(title: str, defaults: dict, fmt: str = "none") -> str:
+def _brief_stub(title: str, defaults: dict, fmt: str) -> str:
     """`README.md` on `main` - the page students read, and the only one only faculty can
     write. A STUB, unmistakably: seeding a plausible-looking brief invites shipping it
     unedited. The late-work line repeats what the course already declared, so the two
@@ -518,7 +529,7 @@ def _brief_stub(title: str, defaults: dict, fmt: str = "none") -> str:
         late = f"{penalty} per day, up to {window} days"
     else:
         late = f"accepted up to {window} days late"
-    artefact = _ARTEFACT_NOTE.get(fmt, "")
+    artefact = _hand_in(fmt)
     return (
         f"# {title}\n\n"
         f"**Points:** __ · **Due:** see the course schedule · **Late work:** {late}\n\n"
@@ -845,8 +856,7 @@ def scaffold_assignment(
     # by hand opens on one `init:` line rather than three identical ones.
     seeds = {"README.md": _brief_stub(title, defaults, fmt)}
     if fmt in _STARTERS:
-        ext, build = _STARTERS[fmt]
-        seeds[f"starter{ext}"] = build(title)
+        seeds[starter_name(fmt)] = _STARTERS[fmt][1](title)
     if kind == "group":
         seeds["CONTRIBUTIONS.md"] = _CONTRIBUTIONS_STUB
     # A failed create-only write (not a skip of a live file) reds the scaffold rather than
@@ -882,7 +892,7 @@ def scaffold_assignment(
                 "--exit-code",
                 "--heads",
                 "origin",
-                "refs/heads/solution",
+                f"refs/heads/{SOLUTION_BRANCH}",
             )[0]
             == 0
         ):
@@ -891,12 +901,15 @@ def scaffold_assignment(
                 f"(delete {org}/{repo}'s solution branch first if you really want it rebuilt)"
             )
             return 1
-        if git("-C", str(wd), *GIT_ENV, "checkout", "-q", "-b", "solution")[0] != 0:
+        if (
+            git("-C", str(wd), *GIT_ENV, "checkout", "-q", "-b", SOLUTION_BRANCH)[0]
+            != 0
+        ):
             # Any other local failure here must not be swallowed and then misreported as
             # a push failure below.
             log_err("  ! could not create the solution branch")
             return 1
-        sol = wd / "solution"
+        sol = wd / SOLUTION_DIR
         sol.mkdir()
         # Fenced, so **Derive student version** works on a freshly scaffolded template
         # rather than refusing it: a file with nothing fenced would derive the model
@@ -912,13 +925,13 @@ def scaffold_assignment(
         # untouched starter instead of becoming it. The stem is the same contract on both
         # branches (see `_STARTERS`).
         if fmt == "ipynb":
-            (sol / "starter.ipynb").write_text(
+            (sol / starter_name("ipynb")).write_text(
                 _notebook(
                     [f"# Assignment {number} - model solution (stub)"], solution_code
                 )
             )
         else:
-            (sol / "starter.py").write_text(
+            (sol / starter_name("py")).write_text(
                 f'"""Model solution for assignment {number} (stub)."""\n\n\n{solution_code}\n'
             )
         (sol / "README.md").write_text(
@@ -970,7 +983,9 @@ def scaffold_assignment(
             f"solution: assignment {number} (model answer + grading_config.yml)",
         )
         if (
-            git("-C", str(wd), *GIT_ENV, "push", "-q", "-u", "origin", "solution")[0]
+            git("-C", str(wd), *GIT_ENV, "push", "-q", "-u", "origin", SOLUTION_BRANCH)[
+                0
+            ]
             != 0
         ):
             log_err("  ! could not push the solution branch")
