@@ -81,7 +81,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
-from .course import CONFIG_REPO, coerce_date, is_repo_root
+from .course import CONFIG_REPO, assignment_slug, coerce_date, is_repo_root
 from .gh_contents import get_file_content, get_file_with_sha, put_file, repo_tree
 from .log import log, log_err, log_step
 from .releaseignore import RELEASEIGNORE, excluded_in_tree
@@ -225,6 +225,12 @@ class Release:
     when: datetime | None
     deploy: list[Deploy] = field(default_factory=list)
     assignment: str | None = None
+    # The SCHEDULE KEY this handout belongs to, on a synthesised assignment release.
+    # `assignment` names the course-org TEMPLATE, and two entries may hand out from one
+    # template (each with its own `cohort_dest_repo`) - so the template alone no longer
+    # says which assignment is firing, and the key travels with the release rather than
+    # being looked up again at the far end.
+    assignment_slug: str = ""
     # True on a release synthesised from `assignments.<slug>.solution_datetime`: the same
     # provisioning call, asked additionally to push the template's `solution/` into every
     # repo it already made. Never set from the YAML - the scheduler owns it.
@@ -265,11 +271,16 @@ class Release:
 
 @dataclass
 class AssignmentEntry:
-    """One assignment's whole lifecycle, in one place: `handout_datetime` (when
-    student/team repos are provisioned), `due_datetime` (what students see),
-    `grading_datetime` (when the snapshot freezes and the autograder fires),
-    `solution_datetime` (when the model solution goes out), `type` and `max_team_size`
-    (group assignments)."""
+    """One assignment's TIMING, and nothing else: `handout_datetime` (when student/team
+    repos are provisioned), `due_datetime` (what students see), `grading_datetime` (when
+    the snapshot freezes and the autograder fires), `solution_datetime` (when the model
+    solution goes out).
+
+    What the assignment IS - its shape, its team cap, how it is handed in, how it is
+    marked - lives in the assignment's own `grading_config.yml`, on the course template's
+    solution branch. The two files were both allowed to declare the shape, and a cohort
+    that said one thing while the template said another got repos of one kind graded as
+    the other."""
 
     due_datetime: datetime
     # The COURSE-org repo this assignment hands out from - the template one repo per
@@ -282,7 +293,11 @@ class AssignmentEntry:
     # None = the entry's slug, which is almost always right. Mirrors a deploy's
     # `cohort_dest_repo`: source names the course side, dest names the cohort side.
     cohort_dest_repo: str | None = None
-    grading_datetime: datetime | None = None  # explicit pin; defaults to due_datetime
+    # An explicit freeze. Left unset the cutoff is the due date plus the template's
+    # `late_window_days` - resolved by `grades.cutoff_at`, which holds the spec this file
+    # cannot read, and NOT here: answering it in the parser would shut the door on the due
+    # date and refuse every late push the receipts had just promised to accept.
+    grading_datetime: datetime | None = None
     # When to provision one repo per student (or per team - see `type`) from the
     # `<slug>-<tag>` template. The scheduler synthesises a release from this, so it fires
     # exactly like a `releases` entry. None = hand out manually (the workflow
@@ -294,14 +309,6 @@ class AssignmentEntry:
     # embargoed until hand-out, so a name that lives only there cannot appear on the
     # schedule that publishes the assignment's dates. "" = fall back to the heading.
     title: str = ""
-    # 'group' | 'individual' | None. The COHORT-level declaration of how this assignment
-    # fans out; when set it wins over the template's own grading_config.yml `type:` (the
-    # design-time fallback). None = defer to grading_config.yml (then individual).
-    type: str | None = None
-    # Group assignments: the team-size cap the welcome repo's "Join team" flow enforces
-    # (templates/welcome/team-formation.yml reads it straight from schedule.yml; its
-    # default when unset lives there). None = not set here.
-    max_team_size: int | None = None
     # When to push the template's `solution/` folder into every provisioned repo - the
     # scheduled twin of Release assignment's `include_solution` tick. Deliberately NOT
     # defaulted to the due date: a solution released the moment submissions close is a
@@ -492,10 +499,26 @@ KNOWN_ASSIGNMENT = frozenset(
         "handout_datetime",
         "solution_datetime",
         "title",
-        "type",
-        "max_team_size",
     }
 )
+# Settings that USED to live in an `assignments:` entry and now live in the assignment's
+# own `grading_config.yml`, on the course template's solution branch. Flagged BY NAME
+# rather than as generic unknown keys: a cohort still carrying `type: group` is not making
+# a typo, it is declaring something in a file that no longer reads it, and the message has
+# to say where the declaration went.
+_GRADING_CONFIG_HOME = "in the assignment's own grading_config.yml, on the course template's `solution` branch"
+# key -> what ignoring it here costs. Where it MOVED TO is the same sentence for both and
+# is built from the key at the flag site, so a third retired key cannot be filed under a
+# home that names a different setting.
+MOVED_ASSIGNMENT_KEYS = {
+    "type": (
+        "the assignment is handed out and graded in whatever shape grading_config.yml "
+        "declares - individual when it declares none"
+    ),
+    "max_team_size": (
+        "the 'Join team' flow uses the cap declared there, or the course default"
+    ),
+}
 KNOWN_EVENT = frozenset({"type", "title", "event_datetime", "tbc"})
 
 
@@ -688,12 +711,34 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Release
     return out
 
 
+def _shared_sources(mapping: dict) -> set[str]:
+    """The `course_source_repo`s more than one assignment may legitimately hand out from.
+
+    Two entries on one template is normally a copy-paste, and nothing downstream can tell
+    them apart. It IS legitimate when both say, explicitly, what their cohort-side repos
+    are called - a resit off the same brief, or one template handed out to two halves of a
+    cohort - because `cohort_dest_repo` is what every artefact keys on, and two explicit
+    ones cannot collide (`_parse_assignments` refuses that separately). One entry leaving
+    it to default is enough to make the pair ambiguous again, so the permission is
+    all-or-nothing across the citing entries."""
+    citing: dict[str, list[str]] = {}
+    for entry in mapping.values():
+        if not isinstance(entry, dict):
+            continue
+        source = str(entry.get("course_source_repo") or "").strip()
+        if source:
+            citing.setdefault(source, []).append(
+                str(entry.get("cohort_dest_repo") or "").strip()
+            )
+    return {src for src, dests in citing.items() if len(dests) > 1 and all(dests)}
+
+
 def _parse_assignments(
     raw: object, tz: ZoneInfo, drops: list[str]
 ) -> dict[str, AssignmentEntry]:
     # Only the nested {due_datetime, ...} form is accepted - matching the one schema
     # documented everywhere - rather than also silently accepting a bare due-date scalar.
-    # A malformed `grading_datetime`/`handout_datetime`/`max_team_size`/`type` keeps the
+    # A malformed `grading_datetime`/`handout_datetime`/`solution_datetime` keeps the
     # entry on its documented fallback, and is flagged (see `_flag_bad_value`).
     out: dict[str, AssignmentEntry] = {}
     cost = "no deadline for students, no submission snapshot and no autograding"
@@ -707,6 +752,8 @@ def _parse_assignments(
     if mapping is None:
         return out
     sources: dict[str, str] = {}  # course_source_repo -> the slug that claimed it
+    names: dict[str, str] = {}  # cohort-side name -> the slug that claimed it
+    shared = _shared_sources(mapping)  # sources every citing entry names a dest for
     for slug, entry in mapping.items():
         where = f"assignments.{slug}"
         if not isinstance(entry, dict):
@@ -723,7 +770,7 @@ def _parse_assignments(
         if not source_repo:
             _drop(drops, where, "no `course_source_repo`", cost)
             continue
-        if source_repo in sources:
+        if source_repo in sources and source_repo not in shared:
             # A copy-paste (Maths f2026 had assignments 3 and 4 both citing assignment-2's
             # repo). Nothing downstream can tell the two apart: the handout would "skip"
             # the other assignment's existing repos and hand out nothing, then the
@@ -732,43 +779,47 @@ def _parse_assignments(
                 drops,
                 where,
                 f"`course_source_repo: {source_repo}` is already used by "
-                f"assignments.{sources[source_repo]} - two assignments cannot hand out "
-                f"the same repo (a copy-paste?)",
+                f"assignments.{sources[source_repo]} - two assignments may only hand out "
+                f"the same repo when EVERY one of them sets its own `cohort_dest_repo` "
+                f"(a copy-paste?)",
+                cost,
+            )
+            continue
+        dest = str(entry.get("cohort_dest_repo") or "").strip()
+        # `cohort_name` - `cohort_dest_repo`, else the slug - is what EVERY cohort-side
+        # artefact keys on: the generated repos, the teams.csv rows, the snapshot, the
+        # autograde marker, the grading sheet. Two entries resolving to one name share all
+        # of them silently: the second handout finds the first's repos and "skips" them,
+        # then both assignments read and freeze the same snapshot under one another's
+        # marks. Refused like a duplicate source, and for the same reason - nothing
+        # downstream can tell the two apart.
+        name = dest or str(slug)
+        if name in names:
+            _drop(
+                drops,
+                where,
+                f"`{name}` is the cohort-side name of assignments.{names[name]} too - "
+                f"two assignments cannot share one (the student repos, teams.csv rows, "
+                f"snapshot and grading sheet all key on it; set a distinct "
+                f"`cohort_dest_repo`)",
                 cost,
             )
             continue
         sources[source_repo] = str(slug)
-        _flag_unknown_keys(
-            drops, entry, KNOWN_ASSIGNMENT, where, "that setting is ignored"
-        )
-        raw_cap = entry.get("max_team_size")
-        cap = None
-        if raw_cap is not None:
-            try:
-                cap = int(raw_cap)
-            except (TypeError, ValueError):
-                _flag_bad_value(
-                    drops,
-                    where,
-                    "max_team_size",
-                    raw_cap,
-                    "no cap is set, so the welcome repo's 'Join team' flow falls back "
-                    "to its own default team size",
+        names[name] = str(slug)
+        for moved, moved_cost in MOVED_ASSIGNMENT_KEYS.items():
+            if moved in entry:
+                drops.append(
+                    f"{where}.{moved}: moved to `{moved}:` {_GRADING_CONFIG_HOME} - "
+                    f"ignored here, so {moved_cost}"
                 )
-        kind = str(entry.get("type") or "").strip().lower()
-        if kind and kind not in ("group", "individual"):
-            # A typo'd `type` (e.g. `gruop`) silently falls back to individual, so a group
-            # assignment would be provisioned one-repo-per-student. Keep the fallback but
-            # surface it, since the functional consequence is otherwise invisible.
-            _flag_bad_value(
-                drops,
-                where,
-                "type",
-                kind,
-                "the assignment is treated as individual - one repo per student, not one "
-                "per team (expected 'group' or 'individual')",
-            )
-        dest = str(entry.get("cohort_dest_repo") or "").strip()
+        _flag_unknown_keys(
+            drops,
+            entry,
+            KNOWN_ASSIGNMENT | frozenset(MOVED_ASSIGNMENT_KEYS),
+            where,
+            "that setting is ignored",
+        )
         handout = _flagged_datetime(
             entry,
             "handout_datetime",
@@ -828,16 +879,14 @@ def _parse_assignments(
                 tz,
                 drops,
                 where,
-                "grading falls back to the due date - the submission snapshot freezes "
-                "and the autograder fires then, not when this says",
+                "grading falls back to the end of the late window - the due date plus "
+                "the template's `late_window_days`, and the due date itself when it "
+                "declares none. The submission snapshot freezes and the autograder fires "
+                "then, not when this says",
                 end_of_day=True,
             ),
             handout_datetime=handout,
             solution_datetime=solution,
-            # anything other than the two known values -> None, i.e. the grading_config.yml
-            # fallback (flagged above, not silent)
-            type=kind if kind in ("group", "individual") else None,
-            max_team_size=cap,
             lines=lines,
         )
     return out
@@ -964,18 +1013,77 @@ def cohort_name(slug: str, entry: AssignmentEntry) -> str:
     return entry.cohort_dest_repo or slug
 
 
+def entries_for_repo(sched: Schedule, repo: str) -> list[tuple[str, AssignmentEntry]]:
+    """Every `(slug, entry)` that hands out from `repo`, in the plan's own order.
+
+    Usually one. Two is legitimate when each names its own `cohort_dest_repo` (see
+    `_shared_sources`) - a resit off the same brief, one template split across two halves
+    of a cohort - and a caller that acts on ONE of them has to say which, because the two
+    make different repos and keep different grades. The callers that do (`provision_all`,
+    `collect`) refuse rather than pick."""
+    return [
+        (slug, entry)
+        for slug, entry in sched.assignments.items()
+        if entry.course_source_repo == repo
+    ]
+
+
 def entry_for_repo(sched: Schedule, repo: str) -> tuple[str, AssignmentEntry] | None:
-    """(slug, entry) for the assignment that hands out from `repo`, or None.
+    """The FIRST `(slug, entry)` handing out from `repo`, or None.
 
     Callers that start from a REPO name - the autograder, the website - must find its
     schedule entry by matching `course_source_repo`, never by deriving a slug from the
     repo name. The slug is now a free label, so `wk3-regression-f2026` may legitimately be
     keyed `regression`; deriving would silently miss it, and the symptoms are quiet ones
-    (no due date on the site, a group assignment provisioned per student)."""
-    for slug, entry in sched.assignments.items():
-        if entry.course_source_repo == repo:
-            return slug, entry
-    return None
+    (no due date on the site, a group assignment provisioned per student).
+
+    For a repo two entries cite, this answers with the first and says nothing about the
+    second: only use it where ANY of them will do. Anything that writes cohort-side state
+    goes through `entries_for_repo` and refuses the ambiguity."""
+    found = entries_for_repo(sched, repo)
+    return found[0] if found else None
+
+
+def resolve_target(sched: Schedule, repo: str, slug: str = "") -> tuple[str, str] | str:
+    """`(schedule key, cohort-side name)` for the assignment `repo` hands out, or an ERROR
+    MESSAGE (a `str`) when the plan names more than one of them and `slug` does not say
+    which.
+
+    The two names, and the only two, that every consumer starting from a TEMPLATE needs:
+    the KEY is what `teams.csv`, the fire-once marker and the grading sheet are keyed on;
+    the NAME is what the cohort-side repos are called (`cohort_dest_repo`, else the key).
+    A template the plan does not name AT ALL answers with `assignment_slug(repo)` for
+    both - the manual buttons must still work on a template nobody has scheduled - and
+    that fallback lives here rather than at each call site, because a caller that copied
+    only half of it would write cohort-side artefacts under the schedule key.
+
+    `slug` is the SCHEDULE KEY. Two entries handing out from one template are REFUSED
+    rather than guessed between: they make different repos for different students and
+    keep separate grades, so the handout and the collection must not be free to disagree
+    about which of them they are acting on.
+
+    A `str` rather than a raise, deliberately: the hourly scheduler calls straight into
+    these consumers and has to count one assignment's refusal without abandoning the tick.
+    """
+    found = entries_for_repo(sched, repo)
+    if slug:
+        found = [pair for pair in found if pair[0] == slug]
+        if not found:
+            return (
+                f"`{slug}` is not an assignment in this cohort's schedule.yml that hands "
+                f"out from {repo} (it names "
+                f"{', '.join(s for s, _ in entries_for_repo(sched, repo)) or 'none'})"
+            )
+    elif len(found) > 1:
+        return (
+            f"{repo} is handed out by {len(found)} assignments in this cohort's "
+            f"schedule.yml ({', '.join(s for s, _ in found)}) - say which with `slug`, "
+            f"since they make different repos and keep different grades"
+        )
+    if not found:
+        unscheduled = assignment_slug(repo)
+        return unscheduled, unscheduled
+    return found[0][0], cohort_name(*found[0])
 
 
 def grading_datetime_at(sched: Schedule, slug: str) -> datetime | None:

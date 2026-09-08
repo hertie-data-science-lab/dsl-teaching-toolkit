@@ -44,7 +44,7 @@ teams:
 
 | Field | Owner | Student sees |
 | --- | --- | --- |
-| `info.submitted`, `info.days_late`, `info.contributions`, `info.autograde` | toolkit, refreshed until frozen | `submitted`, `days_late` |
+| `info.submitted`, `info.days_late`, `info.contributions`, `info.autograde`, `info.submitted_note` | toolkit, refreshed until frozen | `submitted`, `days_late` |
 | `score_individual` (per question, or one value) | you | the total, and the breakdown behind it |
 | `feedback_group`, `feedback_individual` | you | yes (own + team) |
 | `score_group` | you | the team's, in the TEAM repo's comment - never in a member's gradebook |
@@ -62,11 +62,26 @@ edit them **there**, never in the sheet. The toolkit writes the file only when t
 that header really moved, so your quoting and spacing survive the quarter-hourly tick; YAML
 comments you add do not survive a rewrite when one happens.
 
-`info.submitted` is the pinned commit's **committer** date, which is a value the student's
-own git client writes. Where GitHub's record of when the repo last received a push is later
-than the due moment while that commit claims to predate it, `info.submitted_note` says
-`commit dated before the push that delivered it - check` and the snapshot row records
-`suspect`. The late arithmetic still says what the dates say; the note is for you.
+### Where `info.submitted` comes from
+
+A git committer date is written by the student's own client, so a submission dated before
+the deadline is a claim, not an observation. At the **cutoff** the freeze therefore asks
+GitHub when it saw the push that delivered the pinned commit, and records which rung
+answered in `snapshots/<slug>.csv`:
+
+| `submitted_source` | what `info.submitted` is | `info.submitted_note` |
+|---|---|---|
+| `push` | when **GitHub** recorded the push that delivered the pinned commit | none - there is nothing to flag |
+| `commit` | its committer date - no push record matched | `no push record matched this commit - the time shown is its committer date, which the student sets` |
+| `suspect` | its committer date, contradicted: GitHub's record of the repo's last push is later than the due moment while the commit claims to predate it | `commit dated before the push that delivered it - check` |
+
+`days_late` and the penalty are derived from whatever `info.submitted` holds, so a `push`
+row is timed by the server and the other two are the student's word plus a note. The
+arithmetic says what the dates say either way; the note is for you.
+
+Between the due date and the cutoff the sheet refreshes off committer dates alone (asking
+GitHub per repo four times an hour would be one call per student per tick), so `submitted`
+can move at the freeze - which is the last derivation there will ever be.
 
 An assignment whose `grading_config.yml` says `submit_via: external` has no `info:` block at all:
 there is no commit to time.
@@ -110,6 +125,40 @@ hidden tests from its `solution` branch at the cutoff, against the frozen pin, i
 count lands in `info.autograde` (`7/9`) for your information only - it is never a mark by
 itself and a student never sees it. Per-test detail goes to `classroom-config/autograde/`.
 To regrade, delete `autograde/<slug>/`.
+
+## Closing the cohort out
+
+Once the last grades have gone out, run **Archive cohort** on that cohort. It is the end of
+the year's work, and it is what stops a finished cohort quietly keeping every student's
+write access to their repos for ever.
+
+It does five things, in this order:
+
+1. revokes each student's direct access to the submission repos and gradebooks named after
+   them, and cancels any repo invitation they never accepted;
+2. archives those repos - GitHub's read-only freeze;
+3. archives `welcome`, so nobody can still Join a term that is over;
+4. writes `archive/teardown.md` into `classroom-config`, recording what was frozen;
+5. archives `classroom-config` itself, which is also what tells the nightly refresh this
+   cohort is finished and to leave it alone.
+
+**Nothing is deleted, ever.** Archiving is reversible: un-archive a repo from its own
+Settings page and it is back exactly as it was, and `students.csv` is what re-grants a
+student their access if you have to reopen one - a grade appeal, a late submission.
+
+`dry_run` is on by default and prints the counts. The real run **refuses** unless your
+`schedule.yml` declares a `semester_end` that has passed; tick `force` to close out a cohort
+whose term dates were never filled in. Run it again if it fails part-way - it picks up where
+it stopped, and only the last step seals the record.
+
+What it does **not** touch: org membership, and the project teams that grant access to
+group repos. Those follow `students.csv` and `teams.csv` through Sync membership, so empty
+those files if you want the students out of the org as well.
+
+`classroom-config` is now the cohort's whole record of assessment - roster, teams, schedule,
+grading sheets, autograde detail, what was sent to whom, and `cohort-gradebook.csv`. Delete
+the repository, and the archived student repos with it, when your institution's retention
+period for that record expires.
 
 See also: [Release an assignment](09-release-assignment-to-cohort.md) ·
 [Schedule releases](07-schedule-releases.md)

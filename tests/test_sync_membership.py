@@ -6,12 +6,25 @@ cohort's failure is isolated from the rest of the batch.
 
 from __future__ import annotations
 
+import pytest
+
 from dsl_course import sync_membership
 
 
 def _stub_course_admins(monkeypatch, rv: int = 0):
     monkeypatch.setattr(
         sync_membership.sync_faculty, "sync_course_admins", lambda *a, **k: rv
+    )
+
+
+@pytest.fixture(autouse=True)
+def _team_lock_is_current(monkeypatch):
+    """The Join-team form's mirror, written at the end of every cohort's sync. It reads
+    the cohort's schedule and each template's definition, so it is stubbed here for the
+    tests that are about the sync's own orchestration; the ones that are about the lock
+    file itself set their own."""
+    monkeypatch.setattr(
+        sync_membership, "write_team_lock", lambda course, cohort, dry_run=False: True
     )
 
 
@@ -140,3 +153,44 @@ def test_a_clean_multi_cohort_run_reports_no_errors(monkeypatch):
         sync_membership.sync_faculty, "sync_cohort_instructors", lambda *a, **k: 0
     )
     assert sync_membership.sync("Course", all_cohorts=True) == 0
+
+
+def test_every_cohorts_sync_refreshes_the_team_formation_lock(monkeypatch):
+    # The Join-team form reads `assignments.lock.yml` and nothing else, and this sync is
+    # what a push to schedule.yml wakes (classroom-config/dispatch-sync.yml). Without the
+    # write here, adding an assignment left the form answering off the previous list.
+    locked: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        sync_membership,
+        "write_team_lock",
+        lambda course, cohort, dry_run=False: locked.append((course, cohort)) or True,
+    )
+    monkeypatch.setattr(sync_membership, "discover_cohorts", lambda org: ["A", "B"])
+    monkeypatch.setattr(sync_membership, "discover_content_repos", lambda org: [])
+    monkeypatch.setattr(sync_membership, "discover_assignments", lambda org: [])
+    _stub_course_admins(monkeypatch)
+    monkeypatch.setattr(sync_membership.sync_roster, "sync", lambda org, **k: 0)
+    monkeypatch.setattr(sync_membership.sync_teams, "sync", lambda org, **k: 0)
+    monkeypatch.setattr(
+        sync_membership.sync_faculty, "sync_cohort_instructors", lambda *a, **k: 0
+    )
+
+    assert sync_membership.sync("Course", all_cohorts=True) == 0
+    assert locked == [("Course", "A"), ("Course", "B")]
+
+
+def test_a_lock_file_that_did_not_land_is_counted(monkeypatch):
+    monkeypatch.setattr(
+        sync_membership, "write_team_lock", lambda course, cohort, dry_run=False: False
+    )
+    monkeypatch.setattr(sync_membership, "discover_cohorts", lambda org: ["A"])
+    monkeypatch.setattr(sync_membership, "discover_content_repos", lambda org: [])
+    monkeypatch.setattr(sync_membership, "discover_assignments", lambda org: [])
+    _stub_course_admins(monkeypatch)
+    monkeypatch.setattr(sync_membership.sync_roster, "sync", lambda org, **k: 0)
+    monkeypatch.setattr(sync_membership.sync_teams, "sync", lambda org, **k: 0)
+    monkeypatch.setattr(
+        sync_membership.sync_faculty, "sync_cohort_instructors", lambda *a, **k: 0
+    )
+
+    assert sync_membership.sync("Course", all_cohorts=True) == 1

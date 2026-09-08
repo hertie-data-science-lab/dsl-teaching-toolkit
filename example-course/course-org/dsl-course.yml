@@ -4,6 +4,15 @@ course_name: Deep Learning (Demo)
 course_code: E1234
 course_description: A demo course - the blurb every cohort site shows under the title.
 
+# What every assignment under this course starts from. **New assignment** stamps these
+# values into the `grading_config.yml` it generates, so each assignment's own file says
+# what it does and can be edited there afterwards; changing them here changes the NEXT
+# assignment, never one that already exists.
+assignment_defaults:
+  max_team_size: 5            # group assignments only
+  late_window_days: 7         # 0 = nothing after the due date is accepted
+  late_penalty_per_day: 10%   # of the EARNED grade, per day started
+
 # course_admins is the SSOT for course-wide GitHub admin access (applied here AND
 # mirrored into every cohort org's own course-admin team by sync_faculty).
 # instructors/teaching_assistants below are DISPLAY ONLY at this level - website

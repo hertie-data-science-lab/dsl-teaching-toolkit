@@ -13,7 +13,7 @@ Hand out one **private repo per student** from a course org assignment template,
 ## The schedule automatically handles releases in advance (recommended)
 
 
-A `handout_datetime:` datetime under `assignments.<slug>` in the cohort's `schedule.yml` hands out the same repos automatically - the assignment's whole lifecycle (handout, due date, grading deadline, team-size cap) sits in one block: [Schedule releases](07-schedule-releases.md).
+A `handout_datetime:` datetime under `assignments.<slug>` in the cohort's `schedule.yml` hands out the same repos automatically - the assignment's whole lifecycle (handout, due date, grading deadline) sits in one block: [Schedule releases](07-schedule-releases.md).
 
 This is the recommended method for releasing assignments, as it involves a one-time setup cost and also creates an entry in the deployed `<course>.github.io` site, so students can clearly understand the course plan in advance.
 
@@ -53,10 +53,9 @@ Two places to say it, depending on how you release:
   assignments:
     assignment-4-project:
       handout_datetime: 2026-10-20T14:00
-      type: group          # or individual - the default if field empty
   ```
 
-- **Manual dispatch**: the **Release assignment** workflow asks for `type` - pick `individual` or `group`, or leave the default `auto` (= whatever `schedule.yml` or the template's `grading_config.yml` declare; unwritten everywhere means individual).
+- **Manual dispatch**: the **Release assignment** workflow asks for `type` - pick `individual` or `group`, or leave the default `auto` (= whatever the template's `grading_config.yml` declares; unwritten means individual).
 
 - `group` = one shared repo per team from `teams.csv` (repo `<slug>-<team>`, every member a collaborator), marked per team in the grading sheet's `teams:` block, with one `adjustment_individual` per member.
 - `individual` = one private repo per onboarded, enrolled student (`<slug>-<handle>`), marked in the sheet's `submissions:` block.
@@ -69,9 +68,12 @@ Live example: [`example-course/cohort-org/teams.csv`](../example-course/cohort-o
 
 Teams must exist **before** you release a group assignment. Two ways to form them - both end up in `classroom-config/teams.csv` (`assignment, team, github_handle`), and **Sync membership** turns each into a GitHub team on push:
 
-- **Instructor-allocated**: you edit `teams.csv` directly - add one row per member.
-- **Student self-service**: students open a **Join team** issue in the cohort's `welcome` repo.
-  - Team size is capped per assignment by `max_team_size` under `assignments:` in `schedule.yml`, (default 5)  
+Which of the two an assignment uses is its own declaration - `team_formation` in the `grading_config.yml` on the template's `solution` branch:
+
+- **`assigned`** - you edit `teams.csv` directly, one row per member. The **Join team** form refuses every request for this assignment and says so.
+- **`self_select`** - students open a **Join team** issue in the cohort's `welcome` repo. Team size is capped by that assignment's `max_team_size` (default: the course's `assignment_defaults`, else 5).
+
+The form reads both answers out of `classroom-config/assignments.lock.yml`, which the toolkit generates from each assignment's definition and nobody edits. Change the assignment's `grading_config.yml` and the mirror catches up on the next **Sync membership**, **Release assignment** or nightly **Refresh actions**.
 
 
 The release then grants each team its one shared repo. Full flow:

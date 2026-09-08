@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
-from dsl_course import gh_contents, schedule_plan, site, site_repo
+from dsl_course import gh_contents, grades, schedule_plan, site, site_repo
 from dsl_course import schedule as schedule_mod
 from dsl_course.schedule import (
     AssignmentEntry,
@@ -27,6 +27,17 @@ UTC = ZoneInfo("UTC")
 
 BERLIN = ZoneInfo("Europe/Berlin")
 END_OF_TERM = date(2026, 12, 18)
+
+
+@pytest.fixture(autouse=True)
+def _individual_by_default(monkeypatch):
+    """An assignment row names the repo shape a student looks for, and that now comes
+    from the template's `grading_config.yml` - a course-org read the guard in conftest
+    refuses. Individual is what an unanswered read gives anyway; the one test about the
+    group shape sets its own."""
+    monkeypatch.setattr(
+        site, "load_grading_spec", lambda *a: grades.parse_grading_spec("")
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -349,12 +360,14 @@ def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
     monkeypatch.setattr(
         site, "get_file_content", lambda *a, **k: "# Group project\nThe brief."
     )
+    monkeypatch.setattr(
+        site, "load_grading_spec", lambda *a: grades.parse_grading_spec("type: group\n")
+    )
     sched = Schedule(
         assignments={
             "assignment-3": AssignmentEntry(
                 course_source_repo="assignment-3-f2026",
                 due_datetime=datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
-                type="group",
             )
         }
     )

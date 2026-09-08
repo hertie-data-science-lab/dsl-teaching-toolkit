@@ -435,10 +435,14 @@ def _walk(run_id: str, stages: dict[str, Stage]) -> dict[str, Stage]:
         CONTROL_REPO,
         NEW_ASSIGNMENT,
         {
-            "number": cleanup.ASSIGNMENT_NUMBER,
-            "tag": run_id,
+            "assignment_name": f"E2E assignment {run_id}",
+            "assignment_number": cleanup.ASSIGNMENT_NUMBER,
+            "semester_tag": run_id,
             "format": "py",
             "type": "individual",
+            "team_formation": "self_select",
+            "submit_via": "github",
+            "autograde": "true",
         },
     )
     stages["new_assignment"] = Stage(
@@ -705,11 +709,11 @@ def test_the_sheet_is_created_at_handout_with_the_students_row(pipeline):
     assert set(block) >= {"info", "score_individual", grades.NOTES_KEY}
     assert block["score_individual"] is None
     # `info:` carries exactly the facts THIS assignment's toolkit will fill, and
-    # `autograde` exists only where hidden tests will run. New assignment scaffolds
-    # `autograde: false` with a stub `tests/` today and may not tomorrow, so the shape is
-    # read off the template's own grading config rather than written down here twice.
+    # `autograde` exists only where hidden tests will run. The run asks New assignment for
+    # autograding, but the shape is read off the template's own grading config rather than
+    # written down here twice.
     expected = {"submitted": None, "days_late": None}
-    if grades.load_grading_spec(COURSE_ORG, pipeline.slug)["autograde"]:
+    if grades.load_grading_spec(COURSE_ORG, pipeline.slug).autograde:
         expected["autograde"] = None
     assert block["info"] == expected
 

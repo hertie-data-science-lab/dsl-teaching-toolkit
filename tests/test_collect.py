@@ -50,31 +50,24 @@ def _clear_dep_caches() -> None:
     collect._grader_dep_missing.cache_clear()
 
 
-DEFAULT_SPEC = {
-    "type": "individual",
-    "autograde": False,
-    "tests": "tests",
-    "title": "",
-    "submit_via": "github",
-    "questions": None,
-    "late_window_days": None,
-    "late_penalty_per_day": None,
-}
+DEFAULT_SPEC = grades.GradingSpec()
 
 
 def test_parse_grading_spec_defaults_and_overrides():
     assert collect.parse_grading_spec("") == DEFAULT_SPEC
-    # A retired key (`format`, `max_auto`) in a template written before they went is
-    # ignored like any other extra, never carried into the spec.
+    # A retired key (`max_auto`) in a template written before it went is flagged like any
+    # other unknown key, never carried into the spec.
     spec = collect.parse_grading_spec(
-        "type: group\nformat: notebook\nautograde: false\nmax_auto: 20\ntests: solution/tests\n"
+        "type: group\nformat: ipynb\nautograde: false\nmax_auto: 20\ntests: solution/tests\n"
     )
-    assert spec == {
-        **DEFAULT_SPEC,
-        "type": "group",
-        "autograde": False,
-        "tests": "solution/tests",
-    }
+    assert spec == grades.GradingSpec(
+        type="group",
+        format="ipynb",
+        autograde=False,
+        tests="solution/tests",
+        dropped=spec.dropped,
+    )
+    assert [d for d in spec.dropped if "max_auto" in d]
 
 
 def test_parse_grading_spec_reads_what_the_grading_sheet_needs():
@@ -85,13 +78,46 @@ def test_parse_grading_spec_reads_what_the_grading_sheet_needs():
         "late_window_days: 7\n"
         "late_penalty_per_day: 10%\n"
     )
-    assert spec["title"] == "Neural networks"
-    assert spec["submit_via"] == "external"
+    assert spec.title == "Neural networks"
+    assert spec.submit_via == "external" and spec.submit_external
     # TEXT, not numbers: the maxima are only ever displayed, and `1.5` must read back as
     # the course wrote it rather than as this module's idea of how to print a float.
-    assert spec["questions"] == {"Q1": "15", "Q2": "1.5"}
-    assert spec["late_window_days"] == 7
-    assert spec["late_penalty_per_day"] == "10%"
+    assert spec.questions == {"Q1": "15", "Q2": "1.5"}
+    assert spec.late_window_days == 7
+    assert spec.late_penalty_per_day == "10%"
+
+
+def test_the_group_shape_reads_off_type_and_team_formation():
+    # `none` is the answer an INDIVIDUAL assignment gives, and not a value anyone writes:
+    # the Join-team form refuses a slug on it, so a group assignment that forgot the key
+    # must not fall into it.
+    individual = collect.parse_grading_spec("team_formation: assigned\n")
+    assert not individual.is_group
+    assert individual.team_formation_resolved == "none"
+    group = collect.parse_grading_spec("type: group\n")
+    assert group.is_group and group.team_formation_resolved == "self_select"
+    assigned = collect.parse_grading_spec("type: group\nteam_formation: assigned\n")
+    assert assigned.team_formation_resolved == "assigned"
+    assert (
+        collect.parse_grading_spec("type: group\nmax_team_size: 3\n").max_team_size == 3
+    )
+
+
+def test_a_setting_the_toolkit_does_not_read_is_flagged_by_name(capsys):
+    # `type` and `max_team_size` moved here out of schedule.yml, and the reverse mistake -
+    # a grading_config.yml carrying a schedule key - has to say so rather than be ignored.
+    spec = collect.parse_grading_spec("due_datetime: 2026-10-13\n")
+    assert [d for d in spec.dropped if "due_datetime" in d]
+    assert "due_datetime" in capsys.readouterr().err
+
+
+def test_autograde_written_as_text_is_still_a_boolean(capsys):
+    # A quoted "false" is a non-empty string; read as truthy it turned hidden tests on for
+    # an assignment that had just asked for the opposite.
+    assert collect.parse_grading_spec('autograde: "false"\n').autograde is False
+    assert collect.parse_grading_spec('autograde: "yes"\n').autograde is True
+    assert collect.parse_grading_spec("autograde: perhaps\n").autograde is False
+    assert "is not true or false" in capsys.readouterr().err
 
 
 def test_parse_grading_spec_drops_a_malformed_value_and_keeps_the_rest(capsys):
@@ -99,13 +125,39 @@ def test_parse_grading_spec_drops_a_malformed_value_and_keeps_the_rest(capsys):
     # field it sits on, never the parse.
     spec = collect.parse_grading_spec(
         "title: Bayes\nsubmit_via: moodle\nquestions: 50\nlate_window_days: a week\n"
+        "max_team_size: lots\ntype: gruop\n"
     )
-    assert spec["title"] == "Bayes"
-    assert spec["submit_via"] == "github"  # the safe default, not the typo
-    assert spec["questions"] is None
-    assert spec["late_window_days"] is None
+    assert spec.title == "Bayes"
+    assert spec.submit_via == "github"  # the safe default, not the typo
+    assert spec.type == "individual"
+    assert spec.questions is None
+    assert spec.late_window_days is None
+    assert spec.max_team_size is None
     err = capsys.readouterr().err
-    assert "submit_via" in err and "questions" in err and "late_window_days" in err
+    for field in (
+        "submit_via",
+        "questions",
+        "late_window_days",
+        "max_team_size",
+        "type",
+    ):
+        assert field in err
+    assert len(spec.dropped) == 5
+
+
+def test_the_course_defaults_block_is_validated_like_the_file_it_is_stamped_into(
+    capsys,
+):
+    # `assignment_defaults:` in dsl-course.yml is what `New assignment` stamps into the
+    # file it generates - at WRITE time, so a reader never merges it - and it goes through
+    # the same readers, so a value the writer would emit cannot be one the reader refuses.
+    assert grades.parse_assignment_defaults(
+        {"max_team_size": 5, "late_window_days": 7, "late_penalty_per_day": "10%"}
+    ) == {"max_team_size": 5, "late_window_days": 7, "late_penalty_per_day": "10%"}
+    # A per-assignment key is not a course-wide one: nothing about ONE assignment belongs
+    # in a block that stands behind all of them.
+    assert grades.parse_assignment_defaults({"title": "no"}) == {}
+    assert "title" in capsys.readouterr().err
 
 
 def test_a_bare_late_penalty_number_is_refused_out_loud(capsys):
@@ -113,7 +165,7 @@ def test_a_bare_late_penalty_number_is_refused_out_loud(capsys):
     # without a word meant every late mark in that cohort lost its deduction and every
     # receipt showed no percentage, on a green run.
     spec = collect.parse_grading_spec("late_penalty_per_day: 10\n")
-    assert spec["late_penalty_per_day"] is None
+    assert spec.late_penalty_per_day is None
     err = capsys.readouterr().err
     assert "late_penalty_per_day: 10" in err
     assert "`10%` or `0.1`" in err
@@ -134,7 +186,7 @@ def test_every_way_the_late_policy_can_be_wrong_says_so(typed, says, capsys):
     # One number multiplies every late mark in the cohort. `-10%` ADDED marks for being
     # late and `150%` took more than the work was worth, both on a green run.
     spec = collect.parse_grading_spec(f"late_penalty_per_day: {typed}\n")
-    assert spec["late_penalty_per_day"] is None
+    assert spec.late_penalty_per_day is None
     err = capsys.readouterr().err
     assert says in err
     assert "no late penalty is applied" in err
@@ -142,12 +194,8 @@ def test_every_way_the_late_policy_can_be_wrong_says_so(typed, says, capsys):
 
 def test_a_penalty_rate_that_parses_is_kept_exactly_as_typed(capsys):
     for typed in ("10%", "0.1", "5.5%", "0%", "100%"):
-        assert (
-            collect.parse_grading_spec(f"late_penalty_per_day: {typed}\n")[
-                "late_penalty_per_day"
-            ]
-            == typed
-        )
+        spec = collect.parse_grading_spec(f"late_penalty_per_day: {typed}\n")
+        assert spec.late_penalty_per_day == typed
     assert capsys.readouterr().err == ""
 
 
@@ -788,15 +836,25 @@ def test_snapshot_sha_says_nothing_about_an_ordinary_commit(monkeypatch, capsys)
     assert "dated after" not in capsys.readouterr().out
 
 
-def _stub_snapshot_write(monkeypatch, pins: dict, existing=None, pushed=None):
+def _stub_snapshot_write(
+    monkeypatch, pins: dict, existing=None, pushed=None, activity=None
+):
     """Wire snapshot_assignment onto stubs; returns the (path, text) writes it makes.
 
     `pushed` is `{repo: pushed_at}` out of the org listing - the server's word on when each
     repo last received anything. Unset means the listing carries none, which is what every
-    test written before that check existed expects."""
+    test written before that check existed expects.
+
+    `activity` is `{repo: [(head after the push, when GitHub saw it)]}` from the
+    repository-activity API. Unset means GitHub answered with no push records at all, so
+    every row falls to the committer date - which is what the tests written before that
+    ladder existed expect. Stubbed, never called: nothing here reaches GitHub."""
     written: list[tuple[str, str]] = []
     monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: existing)
     monkeypatch.setattr(collect, "_pushed_at", lambda org: pushed or {})
+    monkeypatch.setattr(
+        collect, "_push_activity", lambda org, repo: (activity or {}).get(repo, [])
+    )
     monkeypatch.setattr(
         collect,
         "submission_targets",
@@ -877,6 +935,158 @@ def test_snapshot_assignment_records_when_the_pinned_commit_was_made(monkeypatch
             "",
             "",
         )
+
+
+def test_the_push_that_left_the_pin_at_head_times_the_submission(monkeypatch):
+    # Rung 1. `days_late` used to rest on a committer date, which is GIT_COMMITTER_DATE
+    # and therefore the student's: work pushed two days late and dated before the deadline
+    # was recorded as on time and nothing anywhere said otherwise.
+    written = _stub_snapshot_write(
+        monkeypatch,
+        {"assignment-1-anna": collect.Pin(SHA, "2026-10-13T21:40:00Z")},
+        activity={
+            "assignment-1-anna": [
+                (SHA, "2026-10-15T22:05:00Z"),
+                ("older" + SHA[5:], "2026-10-10T08:00:00Z"),
+            ]
+        },
+    )
+    collect.snapshot_assignment(
+        "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+    )
+    ((_path, text),) = written
+    row = collect.parse_snapshot_rows(text)["assignment-1-anna"]
+    assert (row.submitted_at, row.submitted_source) == (
+        "2026-10-15T22:05:00Z",
+        collect.SUBMITTED_SOURCE_PUSH,
+    )
+
+
+def test_a_pin_that_is_not_any_pushs_head_is_timed_by_the_earliest_push_after_it(
+    monkeypatch,
+):
+    # Rung 2: pushing two commits at once leaves the earlier one as nobody's HEAD. The
+    # first push at or after the moment the commit claims to have been made is the
+    # earliest one that could have carried it - generous to the student, and still the
+    # server's word rather than theirs.
+    written = _stub_snapshot_write(
+        monkeypatch,
+        {"assignment-1-anna": collect.Pin(SHA, "2026-10-13T21:40:00Z")},
+        activity={
+            "assignment-1-anna": [
+                ("tip", "2026-10-16T09:00:00Z"),
+                ("mid", "2026-10-14T07:30:00Z"),
+                ("before-the-commit", "2026-10-01T07:30:00Z"),
+            ]
+        },
+    )
+    collect.snapshot_assignment(
+        "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+    )
+    ((_path, text),) = written
+    row = collect.parse_snapshot_rows(text)["assignment-1-anna"]
+    assert (row.submitted_at, row.submitted_source) == (
+        "2026-10-14T07:30:00Z",
+        collect.SUBMITTED_SOURCE_PUSH,
+    )
+
+
+def test_a_commit_no_push_record_matches_falls_back_and_says_so(monkeypatch, capsys):
+    # Rung 3. The row still carries a time - the sheet needs one - but it names the rung,
+    # and the log says what a marker is looking at.
+    written = _stub_snapshot_write(
+        monkeypatch,
+        {"assignment-1-anna": collect.Pin(SHA, "2026-10-13T21:40:00Z")},
+        activity={"assignment-1-anna": [("other", "2026-10-01T07:30:00Z")]},
+    )
+    collect.snapshot_assignment(
+        "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+    )
+    ((_path, text),) = written
+    row = collect.parse_snapshot_rows(text)["assignment-1-anna"]
+    assert (row.submitted_at, row.submitted_source) == (
+        "2026-10-13T21:40:00Z",
+        collect.SUBMITTED_SOURCE_COMMIT,
+    )
+    out = capsys.readouterr().out
+    assert "no push record matched the pinned commit" in out
+    assert "anna" not in out  # the log is public: the repo is named by tag only
+
+
+def test_an_unreadable_activity_read_abandons_the_freeze(monkeypatch, capsys):
+    # "Could not tell" is not "no push record". The snapshot is never rewritten, so
+    # falling to the student's own committer date on a rate-limited read would fix a
+    # backdated submission as on time for good; a retry costs a tick instead.
+    written = _stub_snapshot_write(
+        monkeypatch, {"assignment-1-anna": collect.Pin(SHA, "2026-10-13T21:40:00Z")}
+    )
+    monkeypatch.setattr(collect, "_push_activity", lambda org, repo: None)
+    assert (
+        collect.snapshot_assignment(
+            "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+        )
+        is collect.SnapshotResult.FAILED
+    )
+    assert not written  # nothing half-timed is left behind
+    err = capsys.readouterr().err
+    assert "will retry on the next run" in err
+    assert "anna" not in err  # the log is public: the repo is named by tag only
+
+
+def test_a_repo_whose_activity_github_will_not_serve_is_not_a_failure(monkeypatch):
+    # A 404 IS an answer - the repo has no push records the toolkit can see - so the row
+    # falls to the committer date and says so, exactly as it did before this rung existed.
+    written = _stub_snapshot_write(
+        monkeypatch, {"assignment-1-anna": collect.Pin(SHA, "2026-10-13T21:40:00Z")}
+    )
+    monkeypatch.setattr(collect, "_push_activity", lambda org, repo: [])
+    assert (
+        collect.snapshot_assignment(
+            "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+        )
+        is collect.SnapshotResult.WRITTEN
+    )
+    ((_path, text),) = written
+    assert (
+        collect.parse_snapshot_rows(text)["assignment-1-anna"].submitted_source
+        == collect.SUBMITTED_SOURCE_COMMIT
+    )
+
+
+def test_a_server_timed_row_is_never_second_guessed_by_pushed_at(monkeypatch):
+    # `suspect` compares a CLAIM with the server. A row the server itself timed has no
+    # claim in it, so the contradiction cannot arise and the note must not appear.
+    written = _stub_snapshot_write(
+        monkeypatch,
+        {"assignment-1-anna": collect.Pin(SHA, "2026-10-13T21:40:00Z")},
+        pushed={"assignment-1-anna": "2026-10-20T09:00:00Z"},
+        activity={"assignment-1-anna": [(SHA, "2026-10-20T09:00:00Z")]},
+    )
+    collect.snapshot_assignment(
+        "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+    )
+    ((_path, text),) = written
+    assert (
+        collect.parse_snapshot_rows(text)["assignment-1-anna"].submitted_source
+        == collect.SUBMITTED_SOURCE_PUSH
+    )
+
+
+def test_a_repo_with_no_submission_is_asked_for_no_push_records(monkeypatch):
+    # One call per submission repo, at the freeze only - and none at all for a repo with
+    # nothing in it to time.
+    def boom(org, repo):
+        raise AssertionError("nothing was pushed; there is no push to look up")
+
+    written = _stub_snapshot_write(
+        monkeypatch,
+        {"assignment-1-anna": collect.Pin(), "assignment-1-ben": collect.Pin()},
+    )
+    monkeypatch.setattr(collect, "_push_activity", boom)
+    collect.snapshot_assignment(
+        "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+    )
+    assert written
 
 
 def test_snapshot_assignment_never_overwrites_an_existing_snapshot(monkeypatch):
@@ -1006,8 +1216,10 @@ def _captured_writes(monkeypatch) -> list[tuple[str, str]]:
     return written
 
 
-def _stub_collect(monkeypatch, snapshots):
-    _stub_solution_clone(monkeypatch)
+def _stub_collect(monkeypatch, snapshots, grading: str | None = None):
+    _stub_solution_clone(
+        monkeypatch, **({"grading": grading} if grading is not None else {})
+    )
     monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
     monkeypatch.setattr(
         collect,
@@ -1087,6 +1299,70 @@ def test_an_unwritten_no_targets_marker_goes_red(monkeypatch):
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
 
 
+def _two_entries_on_one_template():
+    """Two assignments handing out from one template, each naming its own repos."""
+    from dsl_course.schedule import AssignmentEntry
+
+    def entry(dest):
+        return AssignmentEntry(
+            course_source_repo="assignment-2-f2026",
+            cohort_dest_repo=dest,
+            due_datetime=datetime(2026, 11, 15, tzinfo=ZoneInfo("Europe/Berlin")),
+        )
+
+    return Schedule(
+        assignments={
+            "assignment-2": entry("assignment-2"),
+            "assignment-2-resit": entry("assignment-2-resit"),
+        }
+    )
+
+
+def test_collect_refuses_to_choose_between_two_entries_on_one_template(
+    monkeypatch, capsys
+):
+    # The freeze is write-once. Grading the resit's repos under assignment-2's key would
+    # pin the wrong snapshot permanently, and no later run could take it back.
+    _stub_collect(monkeypatch, None)
+    monkeypatch.setattr(
+        collect.schedule, "load", lambda org: _two_entries_on_one_template()
+    )
+    assert collect.collect("Course", "assignment-2-f2026", "Cohort") == 1
+    err = capsys.readouterr().err
+    assert "assignment-2-resit" in err and "say which" in err
+
+
+def test_collect_told_which_entry_keys_everything_on_that_entry(monkeypatch):
+    _stub_collect(monkeypatch, None)
+    monkeypatch.setattr(
+        collect.schedule, "load", lambda org: _two_entries_on_one_template()
+    )
+    asked: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group=None, teams_key=None: (
+            asked.append((slug, teams_key)) or []
+        ),
+    )
+    monkeypatch.setattr(collect, "mark_not_autograded", lambda *a, **k: True)
+    collect.collect("Course", "assignment-2-f2026", "Cohort", slug="assignment-2-resit")
+    assert asked == [("assignment-2-resit", "assignment-2-resit")]
+
+
+def test_the_sheet_refresh_refuses_the_same_ambiguity(monkeypatch, capsys):
+    # The button starts from the template too, so it needs the same answer - and a sheet
+    # refreshed under the wrong key rewrites the other assignment's marks.
+    _stub_solution_clone(monkeypatch)
+    monkeypatch.setattr(
+        collect.schedule, "load", lambda org: _two_entries_on_one_template()
+    )
+    assert (
+        collect.refresh_assignment_sheet("Course", "assignment-2-f2026", "Cohort") == 1
+    )
+    assert "say which" in capsys.readouterr().err
+
+
 def test_collect_looks_teams_up_by_the_schedule_key_not_the_cohort_name(monkeypatch):
     # `cohort_dest_repo` makes the two differ. Repos are named after the cohort NAME;
     # teams.csv is keyed on the SCHEDULE KEY (the Join-team form writes what schedule.yml
@@ -1096,9 +1372,8 @@ def test_collect_looks_teams_up_by_the_schedule_key_not_the_cohort_name(monkeypa
         course_source_repo="assignment-4-project-f2026",
         cohort_dest_repo="group-project",
         due_datetime=datetime(2026, 11, 15, tzinfo=ZoneInfo("Europe/Berlin")),
-        type="group",
     )
-    _stub_collect(monkeypatch, None)
+    _stub_collect(monkeypatch, None, grading="type: group\nautograde: true\n")
     monkeypatch.setattr(
         collect.schedule, "load", lambda org: Schedule(assignments={"project": entry})
     )
@@ -1153,18 +1428,16 @@ def test_collect_resolves_the_cohort_type_from_the_entry_not_the_cohort_name(
     monkeypatch,
 ):
     # schedule.yml is keyed on the SLUG; a `cohort_dest_repo` makes the cohort-side name
-    # differ from that key, so looking the entry up by name finds nothing and a declared
-    # group assignment quietly grades one repo per student. Resolve it by
-    # course_source_repo, exactly as assignment_is_group does.
+    # differ from that key, so looking the entry up by name finds nothing and the
+    # collection runs under the wrong cohort-side name. Resolve it by course_source_repo.
     from dsl_course.schedule import AssignmentEntry
 
     entry = AssignmentEntry(
         course_source_repo="assignment-4-project-f2026",
         cohort_dest_repo="group-project",
         due_datetime=datetime(2026, 11, 15, tzinfo=ZoneInfo("Europe/Berlin")),
-        type="group",
     )
-    _stub_collect(monkeypatch, None)
+    _stub_collect(monkeypatch, None, grading="type: group\nautograde: true\n")
     monkeypatch.setattr(
         collect.schedule, "load", lambda org: Schedule(assignments={"project": entry})
     )
@@ -1241,8 +1514,8 @@ def test_the_next_run_after_a_failed_freeze_seals_and_then_records(monkeypatch):
 def test_autograde_is_off_unless_the_assignment_asks_for_it():
     # Most assignments are hand-marked. A default of true made every template without the
     # key try to run hidden tests that were never written - red every quarter of an hour.
-    assert collect.parse_grading_spec("")["autograde"] is False
-    assert collect.parse_grading_spec("autograde: true\n")["autograde"] is True
+    assert collect.parse_grading_spec("").autograde is False
+    assert collect.parse_grading_spec("autograde: true\n").autograde is True
 
 
 def test_collect_records_a_skip_when_autograde_is_disabled(monkeypatch):
@@ -1360,7 +1633,9 @@ def test_collect_records_a_cohort_of_genuine_non_submissions(monkeypatch):
     assert "autograde/assignment-1/_graded.json" in [p for p, _t in written]
 
 
-def test_template_is_group_reads_the_solution_branch_grading_yml(monkeypatch):
+def test_the_shape_is_read_off_the_solution_branch_grading_config(monkeypatch):
+    # The clean break: schedule.yml is timing, grading_config.yml is the assignment, and
+    # the file on the TEMPLATE's solution branch is the only answer there is.
     seen = {}
 
     def fake_get(org, repo, path, ref=""):
@@ -1368,7 +1643,9 @@ def test_template_is_group_reads_the_solution_branch_grading_yml(monkeypatch):
         return "type: group\nformat: py\n"
 
     monkeypatch.setattr(collect.grades, "get_file_content", fake_get)
-    assert collect.template_is_group("Course-Org", "assignment-4-project-f2026")
+    assert collect.load_grading_spec(
+        "Course-Org", "assignment-4-project-f2026"
+    ).is_group
     assert seen == {
         "org": "Course-Org",
         "repo": "assignment-4-project-f2026",
@@ -1377,46 +1654,10 @@ def test_template_is_group_reads_the_solution_branch_grading_yml(monkeypatch):
     }
 
 
-def test_template_is_group_defaults_to_individual_without_grading_yml(monkeypatch):
+def test_the_shape_defaults_to_individual_without_grading_config(monkeypatch):
     # No solution branch / no grading_config.yml -> the contents fetch misses -> individual.
     monkeypatch.setattr(collect.grades, "get_file_content", lambda *a, **k: None)
-    assert not collect.template_is_group("Course-Org", "assignment-1-f2026")
-
-
-def test_assignment_is_group_prefers_the_cohort_schedule(monkeypatch):
-    # schedule.yml's assignments.<slug>.type wins; grading_config.yml is only the fallback.
-    from dsl_course.schedule import AssignmentEntry, Schedule
-
-    entry = AssignmentEntry(
-        course_source_repo="assignment-4-project-f2026",
-        due_datetime=datetime(2026, 11, 15, tzinfo=ZoneInfo("Europe/Berlin")),
-    )
-    sched = Schedule(assignments={"assignment-4-project": entry})
-    monkeypatch.setattr(collect.schedule, "load", lambda org: sched)
-    calls = []
-    monkeypatch.setattr(
-        collect,
-        "template_is_group",
-        lambda org, template: calls.append(template) or True,
-    )
-    # no cohort declaration -> falls through to grading_config.yml
-    entry.type = None
-    assert collect.assignment_is_group(
-        "Course", "Cohort-f2026", "assignment-4-project-f2026"
-    )
-    assert calls == ["assignment-4-project-f2026"]
-    # cohort says individual -> grading_config.yml is NOT consulted
-    entry.type = "individual"
-    calls.clear()
-    assert not collect.assignment_is_group(
-        "Course", "Cohort-f2026", "assignment-4-project-f2026"
-    )
-    assert calls == []
-    # cohort says group -> group, regardless of the template
-    entry.type = "group"
-    assert collect.assignment_is_group(
-        "Course", "Cohort-f2026", "assignment-4-project-f2026"
-    )
+    assert not collect.load_grading_spec("Course-Org", "assignment-1-f2026").is_group
 
 
 # ---------------------------------------------------------- autograde sandbox (fix 1)
@@ -1767,23 +2008,19 @@ def test_strip_student_test_rigging_survives_a_symlink_cycle(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "force,schedule_type,template_group,expected",
+    "force,template_type,expected",
     [
-        (True, None, None, True),  # force (button / --group) wins
-        (True, "individual", False, True),  # ... over everything below it
-        (False, "group", False, True),  # cohort schedule beats the template
-        (False, "individual", True, False),
-        (False, None, True, True),  # template grading_config.yml is the fallback
-        (False, None, False, False),
-        (False, None, None, False),  # nothing declared -> individual
+        (True, None, True),  # force (button / --group) wins
+        (True, "individual", True),  # ... over the assignment's own declaration
+        (False, "group", True),  # grading_config.yml decides
+        (False, "individual", False),
+        (False, None, False),  # nothing declared -> individual
+        (False, "GROUP", True),  # the vocabulary is case- and space-insensitive
     ],
 )
-def test_resolve_is_group_precedence(force, schedule_type, template_group, expected):
+def test_resolve_is_group_precedence(force, template_type, expected):
     assert (
-        collect.resolve_is_group(
-            force=force, schedule_type=schedule_type, template_group=template_group
-        )
-        is expected
+        collect.resolve_is_group(force=force, template_type=template_type) is expected
     )
 
 
@@ -2152,6 +2389,66 @@ def test_the_freeze_reads_the_note_back_off_the_snapshot(monkeypatch):
     ((_path, text),) = written
     info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
     assert info["submitted_note"] == collect.SUSPECT_NOTE
+
+
+def test_a_commit_dated_row_says_so_in_the_sheet_at_the_freeze(monkeypatch):
+    # `days_late` on a `commit` row rests on a time the student typed. The sheet says which
+    # rung timed it, so a grader can see what they are acting on.
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        rows={
+            "assignment-1-ada-l": collect.SnapshotRow(
+                repo="assignment-1-ada-l",
+                sha=SHA,
+                submitted_at="2026-10-04T20:00:00Z",
+                submitted_source=collect.SUBMITTED_SOURCE_COMMIT,
+            )
+        },
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 12, tzinfo=BERLIN),
+    )
+    ((_path, text),) = written
+    info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
+    assert info["submitted_note"] == collect.COMMIT_ONLY_NOTE
+
+
+def test_a_server_timed_row_carries_no_note_at_all(monkeypatch):
+    # The note exists to flag a claim. A row GitHub timed is not one, and a note on every
+    # row is a note nobody reads.
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        rows={
+            "assignment-1-ada-l": collect.SnapshotRow(
+                repo="assignment-1-ada-l",
+                sha=SHA,
+                submitted_at="2026-10-04T20:00:00Z",
+                submitted_source=collect.SUBMITTED_SOURCE_PUSH,
+            )
+        },
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 12, tzinfo=BERLIN),
+    )
+    ((_path, text),) = written
+    info = grades.parse_sheet(text)["submissions"]["ada-l"]["info"]
+    assert "submitted_note" not in info
 
 
 def test_the_sheet_created_at_handout_has_every_row_and_derives_nothing(monkeypatch):
@@ -2708,6 +3005,49 @@ def test_a_teams_contributions_are_read_at_the_pin_and_a_stub_reads_blank(monkey
     assert list(team["members"]) == ["ada-l", "ben-k"]
 
 
+def test_the_freeze_reads_contributions_at_the_frozen_sha(monkeypatch):
+    # The freeze derives off the write-once snapshot, so the file is read at the sha that
+    # was pinned - not at the one the last refresh happened to see, and not at HEAD, which
+    # a team can still edit for the rest of the term.
+    frozen = "b" * 40
+    seen: list[str] = []
+
+    def contributions(org, repo, path, ref=""):
+        seen.append(ref)
+        return "Ada: Q1. Ben: Q2.\n"
+
+    written = _sheet_env(
+        monkeypatch,
+        targets=[("assignment-1-alpha", "alpha", ["ada-l", "ben-k"])],
+        rows={
+            "assignment-1-alpha": collect.SnapshotRow(
+                repo="assignment-1-alpha",
+                sha=frozen,
+                submitted_at="2026-10-03T20:14:00Z",
+                submitted_source=collect.SUBMITTED_SOURCE_PUSH,
+            )
+        },
+    )
+    monkeypatch.setattr(collect, "get_file_content", contributions)
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=True,
+        now=datetime(2026, 10, 12, tzinfo=BERLIN),
+    )
+    assert seen == [frozen]
+    ((_path, text),) = written
+    assert (
+        grades.parse_sheet(text)["teams"]["alpha"]["info"]["contributions"]
+        == "Ada: Q1. Ben: Q2.\n"
+    )
+    assert "# Status: FROZEN" in text
+
+
 def test_an_unwritten_contributions_stub_says_so_rather_than_reading_blank(monkeypatch):
     # A team that submitted and never wrote the file is a fact a grader acts on (it is
     # what an individual adjustment turns on). Blank would read as "the toolkit did not
@@ -2908,7 +3248,7 @@ def test_the_definition_is_read_from_grading_config_yml(monkeypatch):
         return "type: group"
 
     monkeypatch.setattr(collect.grades, "get_file_content", fake_get)
-    assert collect.load_grading_spec("Course", "assignment-4-f2026")["type"] == "group"
+    assert collect.load_grading_spec("Course", "assignment-4-f2026").type == "group"
     assert paths == ["grading_config.yml"]
 
 
@@ -3341,3 +3681,122 @@ def test_the_public_log_counts_receipts_and_names_no_submission_repo(
     out = capsys.readouterr().out
     assert "2 submission receipt(s) up to date" in out
     assert "ada-l" not in out and "ben-k" not in out
+
+
+# ------------------------------------- from the push GitHub timed to the final grade
+
+
+def test_a_late_push_the_server_timed_reaches_the_final_grade(monkeypatch):
+    # The whole chain, end to end, because every link of it used to rest on a date the
+    # student typed: the push GitHub recorded -> `info.submitted` -> `days_late`, counted
+    # in the cohort's own calendar -> the penalty -> the grade the student is sent.
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        rows={
+            "assignment-1-ada-l": collect.SnapshotRow(
+                repo="assignment-1-ada-l",
+                sha=SHA,
+                # Committed before the deadline; GitHub saw it two days after.
+                submitted_at="2026-10-06T07:30:00Z",
+                submitted_source=collect.SUBMITTED_SOURCE_PUSH,
+            )
+        },
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 11, 23, 59, tzinfo=BERLIN),
+    )
+    ((_path, text),) = written
+    sheet = grades.parse_sheet(text)
+    info = sheet["submissions"]["ada-l"]["info"]
+    assert info["submitted"] == "2026-10-06T09:30+02:00"  # the cohort's own clock
+    assert info["days_late"] == "2"
+    assert "submitted_note" not in info  # the server timed it; nothing to flag
+
+    # And the arithmetic the student is sent, off that same block: 10% per day started,
+    # of the earned grade, floored at 0 and applied before the one human override.
+    spec = grades.sheet_spec(
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        grades.parse_grading_spec(GRADING_YML),
+        False,
+    )
+    sheet["submissions"]["ada-l"]["score_individual"] = {"Q1": "15", "Q2": "10"}
+    view = grades.student_view(spec, "ada-l", sheet["submissions"]["ada-l"], "ada-l")
+    assert view["days_late"] == "2"
+    assert view["penalty"] == "-20%"
+    assert view["final_grade"] == "20"  # 25 x (1 - 0.10 x 2)
+
+
+def test_a_submission_on_the_deadline_is_not_late_and_loses_nothing(monkeypatch):
+    # The other end of the same chain: the penalty must not apply to a push GitHub saw
+    # inside the deadline, and `days_late` is floored at 0 rather than going negative.
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        rows={
+            "assignment-1-ada-l": collect.SnapshotRow(
+                repo="assignment-1-ada-l",
+                sha=SHA,
+                submitted_at="2026-10-04T21:58:00Z",  # 23:58 Berlin, a minute to spare
+                submitted_source=collect.SUBMITTED_SOURCE_PUSH,
+            )
+        },
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 11, 23, 59, tzinfo=BERLIN),
+    )
+    ((_path, text),) = written
+    sheet = grades.parse_sheet(text)
+    assert sheet["submissions"]["ada-l"]["info"]["days_late"] == "0"
+    spec = grades.sheet_spec(
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        grades.parse_grading_spec(GRADING_YML),
+        False,
+    )
+    sheet["submissions"]["ada-l"]["score_individual"] = {"Q1": "15", "Q2": "10"}
+    view = grades.student_view(spec, "ada-l", sheet["submissions"]["ada-l"], "ada-l")
+    assert view["final_grade"] == "25" and "penalty" not in view
+
+
+def test_the_due_moment_the_sheet_counts_from_is_the_cohorts_own(monkeypatch):
+    # `due_datetime` is coerced into the cohort's timezone when the schedule is parsed (a
+    # bare date meaning the END of that day), so the sheet counts from the moment students
+    # were actually given. Read as UTC, "the 4th" ran until 01:59 on the 5th in Berlin.
+    sched = collect.schedule.parse(
+        {
+            "timezone": "Europe/Berlin",
+            "assignments": {
+                "assignment-1": {
+                    "course_source_repo": "assignment-1-f2026",
+                    "due_datetime": "2026-10-04",
+                }
+            },
+        }
+    )
+    due = sched.assignments["assignment-1"].due_datetime
+    assert due == collect.local_deadline("2026-10-04", sched.timezone)
+    # 00:30 Berlin on the 5th is one day started, not zero.
+    assert (
+        collect.days_late(
+            datetime(2026, 10, 5, 0, 30, tzinfo=BERLIN), due, sched.timezone
+        )
+        == 1
+    )

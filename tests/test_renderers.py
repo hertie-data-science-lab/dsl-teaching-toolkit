@@ -18,6 +18,7 @@ import yaml
 from conftest import workflow_inputs, workflow_jobs
 
 from dsl_course import (
+    course,
     mailer,
     profile_readme,
     seed,
@@ -61,6 +62,7 @@ ALL_RENDERED = {
     "sync_membership": workflows_render.render_sync_membership(["Cohort-f2026"]),
     "send_codes": workflows_render.render_send_codes(),
     "distribute_grades": workflows_render.render_distribute_grades(["Cohort-f2026"]),
+    "archive_cohort": workflows_render.render_archive_cohort(["Cohort-f2026"]),
     "bootstrap_cohort": workflows_render.render_bootstrap_cohort(),
     "refresh": workflows_render.render_refresh(),
     "generate_syllabus": workflows_render.render_generate_syllabus(
@@ -100,6 +102,9 @@ JOB_TIMEOUTS = {
     "collect_submissions": 120,
     "distribute_grades": 120,
     "bootstrap_cohort": 60,
+    # Archive cohort revokes and freezes every submission repo and gradebook in a cohort,
+    # in series - the same "many repos, one at a time" shape as a handout.
+    "archive_cohort": 60,
 }
 # The scheduler is the one workflow whose jobs carry DIFFERENT budgets: it releases and
 # grades in two jobs precisely so the two-hour one is never in the release's way, and giving
@@ -129,6 +134,7 @@ DATED_RENDERED = {
     ),
     "sync_membership": workflows_render.render_sync_membership(COHORTS_2),
     "distribute_grades": workflows_render.render_distribute_grades(COHORTS_2),
+    "archive_cohort": workflows_render.render_archive_cohort(COHORTS_2),
     "sync_site": workflows_render.render_sync_site(COHORTS_2),
     "publish_site": workflows_render.render_publish_site(REPOS_2),
     "status": workflows_render.render_status(COHORTS_2),
@@ -283,10 +289,49 @@ def test_collect_submissions_refreshes_the_sheet_and_freezes_nothing():
         ["Cohort-f2026"], ["assignment-1-f2026"]
     )
     inp = workflow_inputs(rendered)
-    assert set(inp) == {"cohort_org", "course_source_repo", "dry_run"}
+    assert set(inp) == {"cohort_org", "course_source_repo", "slug", "dry_run"}
     assert inp["dry_run"]["default"] is False
     assert "dsl_course.collect" in rendered and "--refresh-only" in rendered
     assert "--deadline" not in rendered
+
+
+@pytest.mark.parametrize(
+    "rendered",
+    [
+        workflows_render.render_provision(["Cohort-f2026"], ["assignment-1-f2026"]),
+        workflows_render.render_collect_submissions(
+            ["Cohort-f2026"], ["assignment-1-f2026"]
+        ),
+    ],
+    ids=["release-assignment", "collect-submissions"],
+)
+def test_the_two_per_assignment_buttons_can_name_which_schedule_entry(rendered):
+    # Two schedule entries may hand out from one template when each names its own
+    # `cohort_dest_repo`. Both buttons start from the TEMPLATE, so both need a way to say
+    # which of the two - and neither may guess: they make different repos and keep
+    # different marks. Empty (the normal case) passes no flag at all.
+    inp = workflow_inputs(rendered)
+    assert inp["slug"]["required"] is False and inp["slug"]["default"] == ""
+    assert len(inp) <= GITHUB_MAX_DISPATCH_INPUTS
+    assert "SLUG: ${{ inputs.slug }}" in rendered
+    assert '[ -n "$SLUG" ] && args+=(--slug "$SLUG")' in rendered
+
+
+def test_archive_cohort_previews_by_default_and_never_deletes():
+    # The end-of-term button. It is the one WRITE in the set that a second click cannot
+    # take back, so it fails closed like Distribute grades: only an explicit `false`
+    # reaches the CLI as --no-dry-run, and `force` is the separate, deliberate override of
+    # the term-not-over refusal.
+    rendered = workflows_render.render_archive_cohort(["Cohort-f2026"])
+    inp = workflow_inputs(rendered)
+    assert set(inp) == {"cohort_org", "dry_run", "force"}
+    assert inp["dry_run"]["default"] is True
+    assert inp["force"]["default"] is False
+    assert workflows_render._DRY_RUN_GATE in rendered
+    assert "python3 -m dsl_course.teardown" in rendered
+    # Faculty read the header before they click a button whose name sounds final: it has
+    # to say there, in the file, that this freezes and never destroys.
+    assert "NOTHING IS DELETED" in rendered
 
 
 def test_sync_membership_is_a_consolidated_reconcile():
@@ -503,11 +548,11 @@ def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
 
 
 def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
-    # Sixteen workflows rendered from one set of inputs by shared helpers: an edit to the
-    # run preamble or a dropdown helper re-renders every one of them, so file-by-file
-    # writes turned each such edit into a wall of sixteen near-identical commits in the
-    # repo whose history faculty actually browse. The retired buttons ride along in the
-    # same commit rather than earning three more.
+    # The whole org-level set rendered from one set of inputs by shared helpers: an edit
+    # to the run preamble or a dropdown helper re-renders every one of them, so file-by-file
+    # writes turned each such edit into a wall of near-identical commits in the repo whose
+    # history faculty actually browse. The retired buttons ride along in the same commit
+    # rather than earning three more.
     monkeypatch.setattr(seed, "discover_cohorts", lambda org: ["Cohort-f2026"])
     monkeypatch.setattr(
         seed, "discover_content_repos", lambda org: ["course-materials"]
@@ -526,7 +571,7 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
     assert len(commits) == 1
     repo, files, deleted = commits[0]
     assert repo == ".github"
-    assert len(files) == 15  # three grading buttons became two
+    assert len(files) == 16  # three grading buttons became two, plus Archive cohort
     assert all(path.startswith(".github/workflows/") for path in files)
     assert deleted == [
         ".github/workflows/sync-enrolment.yml",
@@ -549,9 +594,16 @@ def test_scaffold_buttons_route_inputs_through_env_not_the_shell():
     for rendered in (materials, assignment):
         step = workflow_jobs(rendered)["scaffold"]["steps"][-1]
         assert "${{" not in step["run"]
-        assert step["env"]["TAG"] == "${{ inputs.tag }}"
-    assert '--tag "$TAG"' in materials
+        assert '--tag "$TAG"' in rendered
+    assert workflow_jobs(materials)["scaffold"]["steps"][-1]["env"]["TAG"] == (
+        "${{ inputs.tag }}"
+    )
+    assert workflow_jobs(assignment)["scaffold"]["steps"][-1]["env"]["TAG"] == (
+        "${{ inputs.semester_tag }}"
+    )
     assert '--number "$NUMBER"' in assignment
+    # The free-text ones are the ones that matter here: a name is prose a person types.
+    assert '--name "$NAME"' in assignment
 
 
 def test_bootstrap_org_workflow_routes_inputs_through_env_not_the_shell():
@@ -585,6 +637,22 @@ def test_sync_site_auto_resyncs_on_sourced_changes():
     assert jobs["sync-auto"]["if"] == "github.event_name != 'workflow_dispatch'"
     assert "check-team" not in jobs["sync-auto"].get("needs", "")
     assert jobs["sync"]["needs"] == "check-team"
+
+
+def test_classroom_config_membership_dispatcher_fires_on_a_schedule_change():
+    # Sync membership also rewrites `assignments.lock.yml`, the mirror the Join-team form
+    # reads. Without schedule.yml here a new assignment woke NOTHING - the form went on
+    # answering off the previous list until the 06:13 cron, and a group project handed out
+    # in between could not have a team formed for it.
+    tmpl = (ROOT / "templates" / "classroom-config" / "dispatch-sync.yml").read_text()
+    doc = yaml.safe_load(tmpl)
+    trigger = doc.get("on", doc.get(True))
+    assert sorted(trigger["push"]["paths"]) == [
+        "people.yml",
+        "schedule.yml",
+        "students.csv",
+        "teams.csv",
+    ]
 
 
 def test_classroom_config_site_dispatcher_fires_on_schedule_or_people_change():
@@ -667,20 +735,51 @@ def test_classroom_config_roster_dispatcher_fires_send_codes_on_students_csv():
     assert "contents/dsl-course.yml" in tmpl
 
 
-def test_new_assignment_button_exposes_format_and_type():
-    # The grading_config.yml vocabulary (type: individual/group) is chosen
-    # on the button and recorded by the scaffold - not hand-edited in afterwards.
+# The whole assignment, in the order the eight boxes are numbered. Pinned as a LIST: the
+# order is what a person reads down, and GitHub caps a workflow_dispatch at ten - a ninth
+# box means one of these earned its place over an edit to a file, so it is a decision, not
+# a diff nobody noticed.
+NEW_ASSIGNMENT_INPUTS = [
+    "assignment_name",
+    "assignment_number",
+    "semester_tag",
+    "format",
+    "type",
+    "team_formation",
+    "submit_via",
+    "autograde",
+]
+
+
+def test_new_assignment_button_asks_for_the_whole_assignment():
+    # Every one of these but `format` lands verbatim in grading_config.yml, so the answers
+    # given here are the ones the handout, the sheet and the Join-team form later obey -
+    # none of them is hand-edited in afterwards.
     rendered = workflows_render.render_new_assignment()
     inputs = workflow_inputs(rendered)
-    assert inputs["format"]["options"] == ["py", "notebook"]
-    assert inputs["format"]["default"] == "py"
-    assert inputs["type"]["options"] == ["individual", "group"]
-    assert inputs["type"]["default"] == "individual"
+    assert list(inputs) == NEW_ASSIGNMENT_INPUTS
+    assert len(inputs) <= GITHUB_MAX_DISPATCH_INPUTS
+    assert inputs["format"]["options"] == list(course.FORMATS)
+    assert inputs["type"]["options"] == list(course.ASSIGNMENT_TYPES)
+    assert inputs["team_formation"]["options"] == list(course.TEAM_FORMATIONS)
+    assert inputs["submit_via"]["options"] == list(course.SUBMIT_VIA)
+    # Hand-marking is the default, so `tests/` is seeded only when someone asks for it.
+    assert inputs["autograde"]["type"] == "boolean"
+    assert inputs["autograde"]["default"] is False
     step = workflow_jobs(rendered)["scaffold"]["steps"][-1]
     assert "${{" not in step["run"]
-    assert step["env"]["FORMAT"] == "${{ inputs.format }}"
-    assert step["env"]["TYPE"] == "${{ inputs.type }}"
-    assert '--format "$FORMAT"' in rendered and '--type "$TYPE"' in rendered
+    for env_name, field in (
+        ("NAME", "assignment_name"),
+        ("NUMBER", "assignment_number"),
+        ("TAG", "semester_tag"),
+        ("FORMAT", "format"),
+        ("TYPE", "type"),
+        ("TEAM_FORMATION", "team_formation"),
+        ("SUBMIT_VIA", "submit_via"),
+        ("AUTOGRADE", "autograde"),
+    ):
+        assert step["env"][env_name] == f"${{{{ inputs.{field} }}}}"
+        assert f'"${env_name}"' in rendered
 
 
 @pytest.mark.parametrize("name", sorted(ALL_RENDERED))
@@ -1326,6 +1425,7 @@ SERIALISED_WRITERS = {
     # third arrival cancels the second).
     "send_codes": "send-codes-${{ github.event.client_payload.cohort_org }}",
     "sync_membership": "sync-membership",
+    "archive_cohort": "archive-cohort",
     "sync_site": "sync-site",
     "publish_site": "publish-course-website",
 }

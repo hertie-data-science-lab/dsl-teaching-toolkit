@@ -37,12 +37,19 @@ import yaml
 from . import mailer, roster, schedule
 from .access import FACULTY_READ_ACCESS, grant_faculty
 from .course import (
+    ASSIGNMENT_TYPES,
     CONFIG_REPO,
+    COURSE_CONFIG,
+    DEFAULT_MAX_TEAM_SIZE,
     FEEDBACK_ISSUE_LABEL,
     FEEDBACK_ISSUE_MARKS,
     FEEDBACK_ISSUE_TITLE,
+    FORMATS,
     GRADEBOOK_PREFIX,
+    NO_TEAMS,
     SOLUTION_BRANCH,
+    SUBMIT_VIA,
+    TEAM_FORMATIONS,
     feedback_issue_body,
     receipt_body,
     resolve_is_group,
@@ -52,6 +59,7 @@ from .discovery import (
     course_name_for_cohort,
     course_org_for_cohort,
     list_org_repos,
+    org_meta,
 )
 from .gh_contents import (
     blob_sha,
@@ -68,6 +76,7 @@ from .repos import (
     create_repo,
     ensure_label,
     repo_exists,
+    repo_is_archived,
     set_repo_topics,
 )
 
@@ -805,51 +814,53 @@ def final_grade(
 # names `collect` still spells are re-exported there, so no caller had to move.
 GRADING_FILE = "grading_config.yml"  # on the template's solution branch
 
-# The assignment's own definition. `type`/`autograde`/`tests` drive the autograder;
-# everything below them drives the grading sheet - its shape, its maxima, its header - so a
-# course states each fact once, in the file that already holds the others.
-_DEFAULT_SPEC = {
-    "type": "individual",
-    # OFF unless the assignment asks for it. Most assignments are hand-marked, and a
-    # default of true made every template without the key try to run hidden tests that were
-    # never written - a red tick every quarter of an hour for the rest of the term.
-    "autograde": False,
-    "tests": "tests",
-    "title": "",
-    "submit_via": "github",
-    "questions": None,
-    "late_window_days": None,
-    "late_penalty_per_day": None,
-}
 
-SUBMIT_VIA = (
-    "github",
-    "external",
-)  # `external` = handed in off GitHub (Moodle, Kaggle)
-
-
-def _one_of(value: object, allowed: tuple[str, ...], field: str, default: str) -> str:
+def _one_of(
+    value: object,
+    allowed: tuple[str, ...],
+    field: str,
+    default: str,
+    where: str,
+    dropped: list[str],
+) -> str:
     """A closed vocabulary, or the default with a warning. Never the raw value: an
     unrecognised `submit_via` would silently turn late arithmetic off for a cohort."""
     text = str(value or "").strip().lower()
     if text in allowed:
         return text
-    log_err(
-        f"  ! {GRADING_FILE}: `{field}: {value}` is not one of "
+    dropped.append(
+        f"  ! {where}: `{field}: {value}` is not one of "
         f"{'/'.join(allowed)} - using `{default}`"
     )
     return default
 
 
-def _questions(value: object) -> dict[str, str] | None:
+def _boolean(value: object, field: str, where: str, dropped: list[str]) -> bool:
+    """A YAML boolean, or one spelt as text. Anything else is false with a warning:
+    `autograde: "false"` is a non-empty string, and reading it as truthy turned hidden
+    tests on for an assignment that had asked for the opposite."""
+    if isinstance(value, bool):
+        return value
+    text = str(value if value is not None else "").strip().lower()
+    if text in ("true", "yes", "on", "1"):
+        return True
+    if text in ("false", "no", "off", "0", ""):
+        return False
+    dropped.append(
+        f"  ! {where}: `{field}: {value}` is not true or false - using false"
+    )
+    return False
+
+
+def _questions(value: object, where: str, dropped: list[str]) -> dict[str, str] | None:
     """`questions:` as {name: maximum AS TEXT}.
 
     Text, because the maxima are only ever DISPLAYED - beside each blank in the sheet, and
     in its header - and a course that writes `1.5` must read back what it wrote. Anything
     that is not a mapping is dropped with a warning rather than half-read."""
     if not isinstance(value, dict):
-        log_err(
-            f"  ! {GRADING_FILE}: `questions:` must be a mapping of name -> points - ignored"
+        dropped.append(
+            f"  ! {where}: `questions:` must be a mapping of name -> points - ignored"
         )
         return None
     questions = {
@@ -860,19 +871,36 @@ def _questions(value: object) -> dict[str, str] | None:
     return questions or None
 
 
-def _whole_days(value: object) -> int | None:
+def _whole_days(value: object, where: str, dropped: list[str]) -> int | None:
     """`late_window_days` as a whole number of days, or None with a warning."""
     try:
         return max(0, int(str(value).strip()))
     except (TypeError, ValueError):
-        log_err(
-            f"  ! {GRADING_FILE}: `late_window_days: {value}` is not a whole number of "
+        dropped.append(
+            f"  ! {where}: `late_window_days: {value}` is not a whole number of "
             f"days - ignored"
         )
         return None
 
 
-def _penalty(value: object) -> str | None:
+def _team_cap(value: object, where: str, dropped: list[str]) -> int | None:
+    """`max_team_size` as a positive whole number, or None with a warning. None means
+    the Join-team form falls back to the course default, so a typo costs the cap and
+    nothing else."""
+    try:
+        cap = int(str(value).strip())
+    except (TypeError, ValueError):
+        cap = 0
+    if cap > 0:
+        return cap
+    dropped.append(
+        f"  ! {where}: `max_team_size: {value}` is not a whole number of "
+        f"members - ignored"
+    )
+    return None
+
+
+def _penalty(value: object, where: str, dropped: list[str]) -> str | None:
     """`late_penalty_per_day` as it was typed, or None with a warning saying which way it
     is wrong.
 
@@ -885,38 +913,145 @@ def _penalty(value: object) -> str | None:
         return None
     fault = penalty_fault(raw)
     if fault:
-        log_err(
-            f"  ! {GRADING_FILE}: `late_penalty_per_day: {value}` "
+        dropped.append(
+            f"  ! {where}: `late_penalty_per_day: {value}` "
             f"{_PENALTY_FAULTS[fault]}; no late penalty is applied"
         )
         return None
     return raw
 
 
-def parse_grading_spec(text: str) -> dict:
-    """Parse a `grading_config.yml` (missing keys fall back to defaults; extras ignored).
+# One reader per key, so the per-assignment file and the course-wide defaults block below
+# validate the same value the same way and cannot drift into two vocabularies.
+_READERS = {
+    "title": lambda v, w, d: str(v or "").strip(),
+    "type": lambda v, w, d: _one_of(v, ASSIGNMENT_TYPES, "type", "individual", w, d),
+    "team_formation": lambda v, w, d: _one_of(
+        v, TEAM_FORMATIONS, "team_formation", "self_select", w, d
+    ),
+    "max_team_size": _team_cap,
+    "submit_via": lambda v, w, d: _one_of(v, SUBMIT_VIA, "submit_via", "github", w, d),
+    "format": lambda v, w, d: _one_of(v, FORMATS, "format", "none", w, d),
+    "questions": _questions,
+    "late_window_days": _whole_days,
+    "late_penalty_per_day": _penalty,
+    "autograde": lambda v, w, d: _boolean(v, "autograde", w, d),
+    "tests": lambda v, w, d: str(v or "tests").strip() or "tests",
+}
+SPEC_KEYS = tuple(_READERS)
+# What a COURSE may set once for every assignment under it, in `dsl-course.yml`: exactly
+# the settings `New assignment` does NOT ask for, and stamps from here instead. The
+# per-assignment keys - the title, the shape, the question maxima - are deliberately not
+# among them: they are what makes one assignment different from the next. Nor are
+# `submit_via` and `autograde`, which the button DOES ask for and always answers - a
+# course default the form can never lose to would be a setting that reads as policy and
+# changes nothing.
+COURSE_DEFAULT_KEYS = (
+    "max_team_size",
+    "late_window_days",
+    "late_penalty_per_day",
+)
+# Where the course-wide block lives, for the warnings it produces.
+ASSIGNMENT_DEFAULTS_KEY = "assignment_defaults"
+_DEFAULTS_WHERE = f"{COURSE_CONFIG} {ASSIGNMENT_DEFAULTS_KEY}"
 
-    A malformed VALUE is logged and dropped, never raised and never passed through: this
-    file is hand-edited by faculty and read by an hourly cron, so one bad line costs the
-    field it sits on and nothing else."""
+
+@dataclass(frozen=True)
+class GradingSpec:
+    """One assignment's whole definition: what it is, how it is handed in, and how it is
+    marked. `schedule.yml` says WHEN; this says WHAT, and the two never overlap.
+
+    Frozen, because the read is memoised per template per process and several passes of
+    one tick share it. `dropped` carries every line the parse refused - an unknown key, a
+    value it could not use - in the words it printed them."""
+
+    title: str = ""
+    type: str = "individual"
+    team_formation: str = "self_select"
+    max_team_size: int | None = None
+    submit_via: str = "github"
+    format: str = "none"
+    questions: dict[str, str] | None = None
+    late_window_days: int | None = None
+    late_penalty_per_day: str | None = None
+    # OFF unless the assignment asks for it. Most assignments are hand-marked, and a
+    # default of true made every template without the key try to run hidden tests that
+    # were never written - a red tick every quarter of an hour for the rest of the term.
+    autograde: bool = False
+    tests: str = "tests"
+    dropped: tuple[str, ...] = ()
+
+    @property
+    def is_group(self) -> bool:
+        """One repo per team rather than one per student."""
+        return self.type == "group"
+
+    @property
+    def team_formation_resolved(self) -> str:
+        """`self_select` | `assigned` | `none` - the answer the Join-team form needs, and
+        the one the lock file carries. An individual assignment has no teams to form, so
+        it answers `none`: a shape nobody writes and every reader can refuse on."""
+        return self.team_formation if self.is_group else NO_TEAMS
+
+    @property
+    def submit_external(self) -> bool:
+        """Handed in off GitHub (Moodle, Kaggle, in class), so the repo holds the brief
+        and the Feedback issue and nothing is ever collected from it."""
+        return self.submit_via == "external"
+
+
+def _read_settings(
+    data: dict, allowed: tuple[str, ...], where: str, dropped: list[str]
+) -> dict:
+    """The keys of `data` this schema understands, each through its own reader; everything
+    else recorded as an unknown key. Unknown rather than ignored, because the settings
+    that used to live in schedule.yml now live here and a misfiled one has to say so."""
+    out: dict = {}
+    for key, value in data.items():
+        name = str(key)
+        if name not in allowed:
+            dropped.append(
+                f"  ! {where}: `{name}:` is not a setting the toolkit reads - ignored"
+            )
+            continue
+        out[name] = _READERS[name](value, where, dropped)
+    return out
+
+
+def parse_assignment_defaults(raw: object) -> dict:
+    """The course-wide `assignment_defaults:` block, validated exactly as an assignment's
+    own file is. Returns the settings it declares; anything else it says is warned about
+    and dropped. A course that declares none gets `{}` and every assignment keeps the
+    toolkit's own defaults."""
+    if raw is None:
+        return {}
+    dropped: list[str] = []
+    if not isinstance(raw, dict):
+        log_err(f"  ! {_DEFAULTS_WHERE}: must be a block of settings - ignored")
+        return {}
+    values = _read_settings(raw, COURSE_DEFAULT_KEYS, _DEFAULTS_WHERE, dropped)
+    for line in dropped:
+        log_err(line)
+    return values
+
+
+def parse_grading_spec(text: str) -> GradingSpec:
+    """Parse a `grading_config.yml` into a `GradingSpec`.
+
+    A missing key falls back to the field's own default, and to nothing else: the course's
+    `assignment_defaults` stand behind an assignment at WRITE time, stamped into the file
+    by `New assignment` (see `course_assignment_defaults`), so what a reader sees is what
+    the file says. A malformed VALUE is logged and dropped, never raised and never passed
+    through: this file is hand-edited by faculty and read by an hourly cron, so one bad
+    line costs the field it sits on and nothing else."""
     data = yaml.safe_load(text) if text.strip() else {}
     if not isinstance(data, dict):
         data = {}
-    spec = dict(_DEFAULT_SPEC)
-    spec.update({k: data[k] for k in ("type", "autograde", "tests") if k in data})
-    if "title" in data:
-        spec["title"] = str(data["title"] or "").strip()
-    if "submit_via" in data:
-        spec["submit_via"] = _one_of(
-            data["submit_via"], SUBMIT_VIA, "submit_via", "github"
-        )
-    if "questions" in data:
-        spec["questions"] = _questions(data["questions"])
-    if "late_window_days" in data:
-        spec["late_window_days"] = _whole_days(data["late_window_days"])
-    if "late_penalty_per_day" in data:
-        spec["late_penalty_per_day"] = _penalty(data["late_penalty_per_day"])
-    return spec
+    dropped: list[str] = []
+    values = _read_settings(data, SPEC_KEYS, GRADING_FILE, dropped)
+    for line in dropped:
+        log_err(line)
+    return GradingSpec(**values, dropped=tuple(dropped))
 
 
 @cache
@@ -925,29 +1060,191 @@ def _grading_text(course_org: str, template: str) -> str | None:
 
     An hourly tick asks the same template the same question from the scheduler, the sheet
     refresh and the collection that follows them. Memoising the TEXT (like
-    `schedule._schedule_text`) means every caller still parses its own dict - nothing
+    `schedule._schedule_text`) means every caller still parses its own spec - nothing
     shared to mutate - and still sees its own warnings. tests/conftest.py clears it."""
     return get_file_content(course_org, template, GRADING_FILE, ref=SOLUTION_BRANCH)
 
 
-def load_grading_spec(course_org: str, template: str) -> dict:
+@cache
+def course_assignment_defaults(course_org: str) -> dict:
+    """A course's `assignment_defaults:` block, read ONCE per course per process.
+
+    The one place a course states the team cap, the late window and the penalty it uses
+    everywhere. Read WHEN AN ASSIGNMENT IS WRITTEN, not every time one is read: `New
+    assignment` stamps these values into the `grading_config.yml` it generates, so the file
+    a grader opens says what the assignment does rather than pointing at another file in
+    another repo - and the hourly tick pays for no extra read at all. NEVER raises: a
+    malformed identity file must cost the defaults, not the run. tests/conftest.py clears
+    it."""
+    if not course_org:
+        return {}
+    try:
+        meta = org_meta(course_org)
+    except RuntimeError as exc:
+        log_err(f"  ! could not read {course_org}/.github/{COURSE_CONFIG}: {exc}")
+        return {}
+    return parse_assignment_defaults(meta.get(ASSIGNMENT_DEFAULTS_KEY))
+
+
+def declared_grading_spec(course_org: str, template: str) -> GradingSpec | None:
+    """`load_grading_spec`, but None when there is no definition to read at all - the
+    template repo does not exist yet, or it carries no `grading_config.yml`.
+
+    Only the lock file asks the question this way. Every other reader wants the defaults
+    for an undeclared assignment and calls `load_grading_spec`; the lock file has to tell
+    "declared individual" from "nobody has said yet", because the second one must lock the
+    Join-team form rather than answer it."""
+    try:
+        text = _grading_text(course_org, template)
+    except RuntimeError as exc:
+        log_err(f"  ! could not read {template}/{GRADING_FILE}: {exc}")
+        return None
+    if text is None:
+        return None
+    try:
+        return parse_grading_spec(text)
+    except yaml.YAMLError as exc:
+        log_err(
+            f"  ! {template}/{GRADING_FILE} is not valid YAML - using defaults: {exc}"
+        )
+        return GradingSpec()
+
+
+def load_grading_spec(course_org: str, template: str) -> GradingSpec:
     """The assignment's definition from the course template's `solution` branch.
 
     NEVER raises: it sits under the hourly cron, and a template with no solution branch, no
     definition file, or one that does not parse must leave the rest of the tick running on
     the defaults rather than take the cohort down with it."""
-    try:
-        text = _grading_text(course_org, template)
-    except RuntimeError as exc:
-        log_err(f"  ! could not read {template}/{GRADING_FILE}: {exc}")
-        return dict(_DEFAULT_SPEC)
-    try:
-        return parse_grading_spec(text or "")
-    except yaml.YAMLError as exc:
-        log_err(
-            f"  ! {template}/{GRADING_FILE} is not valid YAML - using defaults: {exc}"
+    spec = declared_grading_spec(course_org, template)
+    return spec if spec is not None else GradingSpec()
+
+
+# --------------------------------------------------- the team-formation lock file
+
+# `classroom-config/assignments.lock.yml` is a MIRROR, written by the toolkit and read by
+# the Join-team form in the cohort's public `welcome` repo. It exists because of who can
+# read what: the form runs on an `issues: opened` event any stranger can trigger, in a
+# public repo, under a token deliberately scoped away from the course org's assignment
+# templates - so it cannot open `grading_config.yml` and ask what the assignment is. It
+# used to scrape `type:` and `max_team_size:` out of the cohort's own `schedule.yml`
+# instead, which is why a slug with neither let any student mint a real GitHub team.
+#
+# Two flat scalars per schedule key, and no vocabulary the form has to interpret twice.
+TEAM_LOCK_PATH = "assignments.lock.yml"
+_TEAM_LOCK_HEADER = f"""\
+# SYSTEM-OWNED - do not edit, edits here are overwritten. Written by the DSL teaching
+# toolkit from each assignment's `{GRADING_FILE}`, one entry per assignment in
+# `schedule.yml`. Faculty change an assignment by editing its own `{GRADING_FILE}` on
+# the course template's `{SOLUTION_BRANCH}` branch; this file catches up next sync.
+#
+# The Join-team form in this cohort's `welcome` repo reads THIS FILE and nothing else.
+#
+#   team_formation: self_select   students form their own teams with the Join-team form
+#                   assigned      the teaching team writes teams.csv; the form refuses
+#                   none          an individual assignment; the form refuses
+#   max_team_size:  the cap the form enforces (group assignments only)
+#
+# An assignment whose course template does not exist yet is locked to `{NO_TEAMS}`:
+# until the template says what it is, nobody can mint a GitHub team for it.
+"""
+
+
+def team_lock_text(entries: dict[str, tuple[str, int]]) -> str:
+    """The lock file's whole text, from `{schedule key: (team_formation, cap)}`.
+
+    Hand-rolled rather than `yaml.safe_dump`, for the same reason the workflows are: the
+    form's line scanner is the only reader, and it reads a two-space key with two
+    four-space scalars under it. Keys sorted, so a re-sync of an unchanged cohort produces
+    an identical blob and `put_file` writes nothing."""
+    lines = [_TEAM_LOCK_HEADER, "assignments:"]
+    if not entries:
+        lines.append("  {}")
+    for key in sorted(entries):
+        formation, cap = entries[key]
+        lines += [
+            f"  {key}:",
+            f"    team_formation: {formation}",
+            f"    max_team_size: {cap}",
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def team_lock_entries(
+    course_org: str, sched: schedule.Schedule
+) -> dict[str, tuple[str, int]]:
+    """What each of this cohort's assignments allows, resolved off the ONE place that
+    declares it - the template's `grading_config.yml`.
+
+    A template with no definition to read is locked to `none` and says so: the alternative
+    is the toolkit guessing a shape for an assignment nobody has described, and the guess
+    that costs least is the one where a team cannot be formed yet."""
+    defaults = course_assignment_defaults(course_org)
+    fallback = defaults.get("max_team_size") or DEFAULT_MAX_TEAM_SIZE
+    entries: dict[str, tuple[str, int]] = {}
+    for key, entry in sched.assignments.items():
+        spec = declared_grading_spec(course_org, entry.course_source_repo)
+        if spec is None:
+            # Named by SLUG, never by anyone in it: this runs in a public workflow.
+            log_err(
+                f"  ! {key}: {entry.course_source_repo} has no {GRADING_FILE} yet - "
+                f"locking it to `{NO_TEAMS}`, so no team can be formed for it until the "
+                f"template declares what the assignment is"
+            )
+            entries[key] = (NO_TEAMS, fallback)
+            continue
+        entries[key] = (
+            spec.team_formation_resolved,
+            spec.max_team_size or fallback,
         )
-        return dict(_DEFAULT_SPEC)
+    return entries
+
+
+def write_team_lock(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule | None = None,
+    *,
+    dry_run: bool = False,
+) -> bool:
+    """Mirror every assignment's team rules into `classroom-config/assignments.lock.yml`.
+
+    Written from everything that could have moved one of its two inputs: the membership
+    sync (whose dispatcher fires on a push to `schedule.yml`), the handout, and the nightly
+    refresh - which is also what seeds it, since a cohort's bootstrap ends in one. The blob
+    compare inside `put_file` makes every one of those a no-op when nothing changed, so the
+    cost of writing it from four places is four reads a day.
+
+    Returns whether the file is now current; a failed write is the caller's to count.
+
+    A CLOSED-OUT cohort is skipped: `teardown` archives `classroom-config` last, an
+    archived repo is read-only, and the membership sync reaches such a cohort every day -
+    the registry it fans out over is not what teardown seals. The check lives here rather
+    than at one call site because it is the same answer for all of them: a finished term
+    forms no teams, so there is nothing for the mirror to say."""
+    if repo_is_archived(cohort_org, CONFIG_REPO):
+        log(f"  [skip] {TEAM_LOCK_PATH} in {cohort_org} (cohort closed out)")
+        return True
+    sched = sched if sched is not None else schedule.load(cohort_org)
+    if dry_run:
+        # Above the render, not below it: resolving the entries reads every template's
+        # `grading_config.yml`, and a preview that never writes has nothing to do with them.
+        log(f"    DRY-RUN  {TEAM_LOCK_PATH} ({len(sched.assignments)} assignment(s))")
+        return True
+    content = team_lock_text(team_lock_entries(course_org, sched)).encode()
+    if put_file(
+        cohort_org,
+        CONFIG_REPO,
+        TEAM_LOCK_PATH,
+        content,
+        "ci: refresh the team-formation lock from each assignment's definition",
+    ):
+        return True
+    log_err(
+        f"could not write {TEAM_LOCK_PATH} in {cohort_org} - the Join-team form reads it, "
+        f"so it answers from whatever the file last said"
+    )
+    return False
 
 
 def _display_moment(at: datetime | None) -> str:
@@ -968,7 +1265,9 @@ def _display_long(at: datetime | None, tz_name: str = "") -> str:
     return f"{at:%A} {at.day} {at:%B %Y}, {at:%H:%M}{zone}"
 
 
-def cutoff_at(sched: schedule.Schedule, key: str, gspec: dict) -> datetime | None:
+def cutoff_at(
+    sched: schedule.Schedule, key: str, gspec: GradingSpec
+) -> datetime | None:
     """When this assignment stops accepting work: an explicit `grading_datetime`, else the
     due date plus the template's late window, else the due date.
 
@@ -983,12 +1282,12 @@ def cutoff_at(sched: schedule.Schedule, key: str, gspec: dict) -> datetime | Non
         return None
     if entry.grading_datetime is not None:
         return entry.grading_datetime
-    days = gspec.get("late_window_days")
+    days = gspec.late_window_days
     return entry.due_datetime + timedelta(days=days) if days else entry.due_datetime
 
 
 def sheet_spec(
-    sched: schedule.Schedule, key: str, slug: str, gspec: dict, is_group: bool
+    sched: schedule.Schedule, key: str, slug: str, gspec: GradingSpec, is_group: bool
 ) -> SheetSpec:
     """What the sheet needs to know about this assignment, gathered from the two files
     that own it: `grading_config.yml` on the template's solution branch, and the cohort's
@@ -997,13 +1296,13 @@ def sheet_spec(
     entry = sched.assignments.get(key)
     return SheetSpec(
         slug=slug,
-        title=gspec["title"] or (entry.title if entry else "") or slug,
+        title=gspec.title or (entry.title if entry else "") or slug,
         is_group=is_group,
-        submit_external=gspec["submit_via"] == "external",
-        questions=gspec["questions"],
-        late_window_days=gspec["late_window_days"],
-        late_penalty_per_day=gspec["late_penalty_per_day"],
-        autograde=bool(gspec["autograde"]),
+        submit_external=gspec.submit_external,
+        questions=gspec.questions,
+        late_window_days=gspec.late_window_days,
+        late_penalty_per_day=gspec.late_penalty_per_day,
+        autograde=gspec.autograde,
         due_display=_display_moment(entry.due_datetime if entry else None),
         cutoff_display=_display_moment(cutoff_at(sched, key, gspec)),
         due_long=_display_long(entry.due_datetime if entry else None, sched.timezone),
@@ -2214,18 +2513,14 @@ def sheet_specs(course_org: str, sched) -> dict[str, SheetSpec]:
         gspec = (
             load_grading_spec(course_org, entry.course_source_repo)
             if course_org
-            else dict(_DEFAULT_SPEC)
+            else GradingSpec()
         )
         specs[name] = sheet_spec(
             sched,
             key,
             name,
             gspec,
-            resolve_is_group(
-                force=False,
-                schedule_type=entry.type,
-                template_group=gspec["type"] == "group",
-            ),
+            resolve_is_group(force=False, template_type=gspec.type),
         )
     return specs
 

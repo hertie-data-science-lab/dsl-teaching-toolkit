@@ -40,15 +40,14 @@ import yaml
 from . import grades, roster, schedule, site, sync_teams, teams
 from .access import FACULTY_READ_ACCESS, grant_faculty, grant_team_repo_access
 from .collect import (
-    assignment_is_group,
     load_grading_spec,
     sheet_spec,
     sync_sheet,
 )
 from .course import (
+    ASSIGNED,
     CONFIG_REPO,
     SOLUTION_BRANCH,
-    assignment_slug,
     submission_repo,
 )
 from .discovery import ASSIGNMENT_TEMPLATE_TOPIC, list_org_repos
@@ -404,6 +403,7 @@ def provision_one(
     existed = (
         repo in existing if existing is not None else repo_exists(cohort_org, repo)
     )
+    feedback_failed = False
     if existed:
         log_person(f"  [skip] repo {cohort_org}/{repo}")
         # Converge the stamp off the listing row that already answered "does it exist?",
@@ -445,6 +445,13 @@ def provision_one(
         if feedback_body and not grades.ensure_feedback_issue(
             cohort_org, repo, feedback_body
         ):
+            # Reported in the RETURN value, not just the log. The issue is where every
+            # receipt and, eventually, the grade is posted, and it is opened on the CREATE
+            # path only - the cron re-fires every handed-out release on every tick, so
+            # re-probing an existing repo would cost one listing per student per tick for
+            # the rest of the term. A repo that misses its one chance therefore has to red
+            # the run, or a whole cohort's handout goes green with nowhere to post into.
+            feedback_failed = True
             log_err(
                 "  ! a submission repo has no Feedback issue yet - the refresh pass "
                 "opens it before the first receipt"
@@ -525,6 +532,8 @@ def provision_one(
             return "failed-no-access"
         if not team_ok:
             return "failed-team-members"
+        if feedback_failed:
+            return "failed-no-feedback-issue"
         return "skipped" if existed else "ok"
 
     # Ordering hazard (individual path): granting a repo collaborator BEFORE the student has
@@ -550,6 +559,8 @@ def provision_one(
         # A repo nobody can open is a failed handout - "failed" is what the exit code
         # keys on (see provision_all), so the run goes red rather than quietly ok.
         return "failed-no-collaborator"
+    if feedback_failed:
+        return "failed-no-feedback-issue"
     return "skipped" if existed else "ok"
 
 
@@ -581,8 +592,13 @@ def main() -> int:
         choices=["auto", "individual", "group"],
         default="auto",
         help="individual = one repo per student; group = one per team (from "
-        "classroom-config/teams.csv); auto = whatever schedule.yml / the template's "
-        "grading_config.yml declare (default: individual).",
+        "classroom-config/teams.csv); auto = whatever the template's "
+        "grading_config.yml declares (default: individual).",
+    )
+    parser.add_argument(
+        "--slug",
+        default="",
+        help="Which assignment in the cohort's schedule.yml this is, when two of them hand out from the same template (each with its own cohort_dest_repo). Leave empty otherwise.",
     )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -598,6 +614,7 @@ def main() -> int:
             solution=args.solution,
             group={"auto": None, "individual": False, "group": True}[kind],
             dry_run=args.dry_run,
+            slug=args.slug,
         )
         return rc
     except RuntimeError as exc:
@@ -640,9 +657,9 @@ def record_solution_released(cohort_org: str, slug: str, repos: int) -> bool:
 
 # provision_one statuses that mean the model solution did NOT reach that unit's repo, and
 # so must withhold the fire-once release marker. Every OTHER `failed-*` happens AFTER the
-# push (a dead handle, an unreachable team) and is persistent, so withholding the marker
-# for one would re-clone every submission repo every hour for the rest of the term - the
-# exact cost the marker exists to prevent.
+# push (a dead handle, an unreachable team, a Feedback issue that would not open) and is
+# persistent, so withholding the marker for one would re-clone every submission repo every
+# hour for the rest of the term - the exact cost the marker exists to prevent.
 _SOLUTION_NOT_PUSHED = ("failed-solution", "failed-create")
 
 
@@ -656,6 +673,7 @@ def provision_all(
     dry_run: bool = False,
     touch_existing: bool = True,
     scheduled: bool = False,
+    slug: str = "",
 ) -> tuple[int, bool]:
     """Freeze the cohort template, then provision a repo per unit (student, or team).
 
@@ -668,18 +686,29 @@ def provision_all(
     was not `skipped`.
 
     Callable directly (e.g. by the scheduler) as well as from the CLI. `group=None`
-    (the default) reads the template's own declaration - `type: group` in the
-    grading_config.yml on its solution branch; pass True to force per-team for a template
-    that doesn't declare it.
+    (the default) reads the assignment's own declaration - `type: group` in the
+    grading_config.yml on the template's solution branch; pass True to force per-team for
+    a template that doesn't declare it.
 
     `scheduled` marks the hourly cron: a group assignment with no teams yet is then a
-    green wait, not the error a button press gets."""
+    green wait, not the error a button press gets.
+
+    `slug` names WHICH schedule entry to hand out when two of them hand out from this one
+    template (each with its own `cohort_dest_repo`). Left empty with two in the plan, this
+    refuses rather than picking: the two make different repos for different students and
+    keep separate grades, and guessing is a whole cohort's work in the wrong place."""
     if master_org == cohort_org:
         log_err("master-org and cohort-org must differ.")
         return 1, False
+    # The assignment's own definition, read ONCE here: it answers the shape (below), and
+    # it composes both the grading sheet's header and the Feedback issue's body further
+    # down. Two reads of one memoised file is not expensive, but it is two places for the
+    # answer to be spelt, which is how a handout came to provision a shape the sheet did
+    # not expect.
+    gspec = load_grading_spec(master_org, template)
     if group is None:
-        # schedule.yml's assignments.<slug>.type wins; grading_config.yml is the fallback.
-        group = assignment_is_group(master_org, cohort_org, template)
+        # The assignment's own grading_config.yml is the only declaration there is.
+        group = gspec.is_group
         if group:
             log("  (declared `type: group` - provisioning per team)")
 
@@ -705,14 +734,15 @@ def provision_all(
     # on the name then meant no teams found at all, or a team granted on the repo under a
     # slug that Sync membership reconciles a DIFFERENT team for.
     sched = schedule.load(cohort_org)
-    found = schedule.entry_for_repo(sched, template)
-    key = found[0] if found else assignment_slug(template)
-    slug = schedule.cohort_name(*found) if found else key
-    # The assignment's own facts, read once: they compose both the grading sheet's header
-    # (below) and the Feedback issue's body (per unit, since a team's names it).
-    spec = sheet_spec(
-        sched, key, slug, load_grading_spec(master_org, template), bool(group)
-    )
+    # The parameter is consumed HERE and nowhere else: from the next line on, `slug` means
+    # the cohort-side name, exactly as it does everywhere else in this file.
+    target = schedule.resolve_target(sched, template, slug)
+    if isinstance(target, str):
+        log_err(target)
+        return 1, False
+    key, slug = target
+    # The sheet's header and the Feedback issue's body, off the definition read above.
+    spec = sheet_spec(sched, key, slug, gspec, bool(group))
     feedback_bodies: dict[str, str] = {}
 
     # A provisioning unit is (repo_name, [member handles], team slug). Individual = one per
@@ -720,18 +750,36 @@ def provision_all(
     if group:
         groups = teams.teams_for(teams.load(cohort_org), key)
         if not groups:
+            # WHO fills teams.csv is the assignment's own declaration, and the two answers
+            # need different words: telling a course whose teams the teaching team
+            # allocates to wait for students to self-select points them at a form that
+            # refuses every request (see templates/welcome/team-formation.yml).
+            # The RAW declaration, not `team_formation_resolved`: `--group` can force a
+            # per-team handout of a template that declares nothing, and a template that
+            # declares nothing self-selects.
+            self_select = gspec.team_formation != ASSIGNED
             if scheduled:
-                # Teams form when students click 'Join team', which can be days after the
-                # handout datetime - and the cron re-fires every hour until they do. Wait,
-                # exactly as an individual handout waits for its first onboarded student.
+                # Teams appear days after the handout datetime either way - and the cron
+                # re-fires every hour until they do. Wait, exactly as an individual
+                # handout waits for its first onboarded student.
+                arrives = (
+                    "the first team forms"
+                    if self_select
+                    else "the teaching team writes them into teams.csv"
+                )
                 log(
                     f"  [wait] no teams for `{key}` in {cohort_org} yet - the handout "
-                    f"fires on the tick after the first team forms"
+                    f"fires on the tick after {arrives}"
                 )
                 return 0, False
+            how = (
+                "students self-select via the welcome 'Join team' issue, or seed the CSV"
+                if self_select
+                else "this assignment allocates teams (`team_formation: assigned`), so "
+                "the teaching team fills the CSV - the Join-team form refuses it"
+            )
             log_err(
-                f"no teams for `{key}` in {cohort_org}/classroom-config/teams.csv - "
-                f"students self-select via the welcome 'Join team' issue, or seed the CSV."
+                f"no teams for `{key}` in {cohort_org}/classroom-config/teams.csv - {how}."
             )
             return 1, False
         # teams.csv is student-writable (the welcome "Join team" issue appends rows), so its
@@ -856,6 +904,19 @@ def provision_all(
     schedule.record_handout(cohort_org, key)
 
     changed = any(k != "skipped" for k in results)
+
+    # ...and refresh the Join-team form's mirror while this run holds the schedule and the
+    # spec. A REAL handout is the moment the two can most recently have moved, and the form
+    # is read by students who cannot see either file. Gated on `changed` for the same reason
+    # the sheet and the site sync below are: `due_releases` is cumulative, so the scheduler
+    # re-fires every handed-out assignment on every tick, and a pass that skipped every repo
+    # handed nothing out - it would only pay one contents read per assignment per quarter of
+    # an hour to write a file `put_file` then finds unchanged. Not counted into `failed`:
+    # the repos are out, and Sync membership rewrites it on every schedule.yml push anyway.
+    if changed:
+        grades.write_team_lock(
+            cohort_org=cohort_org, course_org=master_org, sched=sched
+        )
 
     # The grading sheet arrives WITH the handout: every row present, every human field
     # blank, and a header saying which fields the toolkit fills and when. A sheet that only

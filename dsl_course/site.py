@@ -37,7 +37,6 @@ from . import schedule
 from .course import (
     assignment_slug,
     pages_repo,
-    resolve_is_group,
     session_number,
     submission_repo,
     term_tag,
@@ -52,6 +51,7 @@ from .discovery import (
     list_org_repos,
 )
 from .gh_contents import get_file_content, repo_tree
+from .grades import load_grading_spec
 from .log import log_err, log_step
 from .public_site import resync_public_site, sync_public_site
 from .readings import demote_headings, is_reading_overlay
@@ -798,17 +798,12 @@ def _assignment_entry(
     )
     out = slug in handed_out or pinned_out
     # A group assignment fans out one repo per TEAM, so the shape a student looks for
-    # differs. Through `resolve_is_group` rather than testing `type == "group"` here:
-    # that is the single precedence every other consumer resolves through, and a second
-    # copy of it in the one place students READ the answer is how the site comes to name
-    # a shape the handout does not create. `template_group=None` leaves the design-time
-    # grading_config.yml unconsulted - the site will not spend an API call per
-    # assignment on a repo name.
-    group = resolve_is_group(
-        force=False,
-        schedule_type=found[1].type if found else None,
-        template_group=None,
-    )
+    # differs. Off the assignment's own spec, like every other consumer, rather than a
+    # second copy of the rule here - which is how the site comes to name a shape the
+    # handout does not create. It costs the template's grading_config.yml, memoised per
+    # template per process; the cohort's schedule.yml, which the site used to read it
+    # from for free, no longer has a say.
+    group = load_grading_spec(course_org, repo).is_group
     repo_name = submission_repo(slug, "<your-team>" if group else "<your-handle>")
     # The slug's own name: the row's IDENTIFIER, bold beside its name, and the one half
     # that must not change at hand-out. It used to be overwritten by the README heading, so

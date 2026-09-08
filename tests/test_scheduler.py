@@ -19,7 +19,7 @@ from conftest import source_fault
 
 from dsl_course import collect as collect_mod
 from dsl_course import course, deploy, ghcli, notify, scheduler, seed, source_digest
-from dsl_course.grades import _DEFAULT_SPEC as DEFAULT_SPEC
+from dsl_course.grades import GradingSpec
 from dsl_course.schedule import (
     AssignmentEntry,
     Deploy,
@@ -81,7 +81,7 @@ def _grading_spec_defaults(monkeypatch):
     measuring the behaviour it was written for; the tests that are ABOUT the window declare
     their own spec."""
     monkeypatch.setattr(
-        scheduler, "load_grading_spec", lambda org, template: dict(DEFAULT_SPEC)
+        scheduler, "load_grading_spec", lambda org, template: GradingSpec()
     )
 
 
@@ -302,7 +302,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.scheduler.provision_all",
-        lambda master_org, template, cohort_org, solution=False, touch_existing=True, scheduled=False: (
+        lambda master_org, template, cohort_org, solution=False, touch_existing=True, scheduled=False, slug="": (
             (
                 calls.append(
                     (
@@ -312,16 +312,18 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
                         solution,
                         touch_existing,
                         scheduled,
+                        slug,
                     )
                 ),
                 (0, True),
             )[1]
         ),
     )
-    r = _r("s", WHEN, assignment="assignment-2-f2026")
+    r = _r("s", WHEN, assignment="assignment-2-f2026", assignment_slug="assignment-2")
     assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == (0, True)
-    # The hourly path never re-touches an existing repo (the manual button does), and says
-    # it is the cron - a group handout with no teams yet then waits instead of going red.
+    # The hourly path never re-touches an existing repo (the manual button does), says it
+    # is the cron - a group handout with no teams yet then waits instead of going red -
+    # and names WHICH entry it is firing, since two may hand out from one template.
     assert calls[0] == (
         "Course-Org",
         "assignment-2-f2026",
@@ -329,11 +331,12 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
         False,
         False,
         True,
+        "assignment-2",
     )
 
     # The solution release is the SAME call, asked to push the solution too - so a
     # scheduled solution can never diverge from what include_solution does by hand.
-    r = _r("s", WHEN, assignment="assignment-2-f2026")
+    r = _r("s", WHEN, assignment="assignment-2-f2026", assignment_slug="assignment-2")
     r.assignment_solution = True
     assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == (0, True)
     assert calls[1] == (
@@ -343,6 +346,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
         True,
         False,
         True,
+        "assignment-2",
     )
 
 
@@ -850,7 +854,7 @@ def _window(monkeypatch, days: int | None) -> None:
     monkeypatch.setattr(
         scheduler,
         "load_grading_spec",
-        lambda org, template: dict(DEFAULT_SPEC, late_window_days=days),
+        lambda org, template: GradingSpec(late_window_days=days),
     )
 
 
@@ -1137,7 +1141,7 @@ def test_an_unreadable_source_repo_still_hands_out(monkeypatch):
 def _stub_collect(monkeypatch, marked: set[str], templates: set[str], rc: int = 0):
     """Record collect() calls. `marked` = slugs whose autograde/<slug>/ already exists;
     `templates` = the template repos that exist in the course org."""
-    graded: list[tuple[str, str, str, str, bool, bool]] = []
+    graded: list[tuple[str, str, str, str, bool, bool, str]] = []
     monkeypatch.setattr(
         scheduler, "has_autograde_results", lambda org, slug: slug in marked
     )
@@ -1150,8 +1154,8 @@ def _stub_collect(monkeypatch, marked: set[str], templates: set[str], rc: int = 
         "dsl_course.scheduler.collect",
         # `scheduled=True` is the cron's contract with collect (an empty target list is a
         # "not yet", not a permanent skip) - a scheduler that stopped passing it fails here.
-        lambda m, t, c, deadline=None, group=False, *, scheduled: (
-            graded.append((m, t, c, deadline, group, scheduled)) or rc
+        lambda m, t, c, deadline=None, group=False, *, scheduled, slug: (
+            graded.append((m, t, c, deadline, group, scheduled, slug)) or rc
         ),
     )
     return graded
@@ -1163,7 +1167,6 @@ def _no_sheet_refresh(monkeypatch) -> list[tuple[str, str]]:
     It sits between the freeze and the autograde and reads the template's grading_config.yml, so
     every `run()` test would otherwise reach the API for a file it does not care about."""
     refreshed: list[tuple[str, str]] = []
-    monkeypatch.setattr(scheduler, "template_is_group", lambda org, template: False)
     monkeypatch.setattr(
         scheduler,
         "sync_sheet",
@@ -1244,7 +1247,7 @@ def test_run_autogrades_a_passed_deadline_with_no_marker(monkeypatch):
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
     assert scheduler.run("Course-Org", "Cohort-f2026", now) == 0
-    ((course, template, cohort, deadline, group, scheduled),) = graded
+    ((course, template, cohort, deadline, group, scheduled, slug),) = graded
     assert (course, template, cohort) == (
         "Course-Org",
         "assignment-1-f2026",
@@ -1252,6 +1255,8 @@ def test_run_autogrades_a_passed_deadline_with_no_marker(monkeypatch):
     )
     # graded at exactly the instant the snapshot froze, and never guessed as a group run
     assert deadline.startswith("2026-10-13T23:59:59") and group is False
+    # ... and told WHICH entry it is, so two on one template cannot be confused
+    assert slug == "assignment-1"
     assert (
         scheduled is True
     )  # a cron run, so no-targets waits rather than being recorded
@@ -2354,7 +2359,6 @@ def test_the_snapshot_pass_reads_each_passed_deadline_once(monkeypatch):
     monkeypatch.setattr(
         scheduler, "load_snapshots", lambda org, name: reads.append(name) or None
     )
-    monkeypatch.setattr(scheduler, "template_is_group", lambda org, repo: None)
     monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
     monkeypatch.setattr(
         scheduler,
@@ -2398,7 +2402,6 @@ def _real_snapshot_then_autograde(monkeypatch, targets):
         raise AssertionError("nothing may be written when there is nothing to freeze")
 
     monkeypatch.setattr(collect_mod, "put_file", no_write)
-    monkeypatch.setattr(scheduler, "template_is_group", lambda org, repo: None)
     monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
     monkeypatch.setattr(scheduler, "has_autograde_results", lambda org, slug: False)
     monkeypatch.setattr(scheduler, "collect", lambda *a, **k: graded.append(a) or 0)

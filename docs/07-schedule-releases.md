@@ -169,10 +169,18 @@ Unlike a `releases:` label, **an assignment's slug is shown to students**: it na
 | `due_datetime` | **yes** | - | the deadline students see; a bare date closes at **23:59:59** |
 | `grading_datetime` | no | `due_datetime` + the template's `late_window_days` | when the snapshot freezes and it is [autograded](#deadline-snapshots-and-autograding) - i.e. the END of the late window, not the deadline it is measured from |
 | `solution_datetime` | no | - | when the template's `solution/` is pushed into every provisioned repo. **No default** - omit it and the solution only ever goes out by hand. Must be **after** `handout_datetime`, and needs it set |
-| `type` | no | `individual` | `individual` or `group`  |
-| `max_team_size` | no | `5` | group assignments only: the welcome repo's Join-team cap |
 | `course_source_repo` | **yes** | - | the course-org repo this hands out from - one repo per student (or team) is generated from it |
 | `cohort_dest_repo` | no | the slug | what the cohort-side repos are called: `<name>-<handle>` per student (or `<name>-<team>`), and the frozen cohort template `<name>` |
+
+**Three defaults worth knowing, because none of them is written in the file:**
+
+- **grading** - `due_datetime` plus the template's `late_window_days`, i.e. the END of the late window. With no window declared, the due date itself.
+- **solution** - *never*. Omit `solution_datetime:` and the model answer only goes out when someone ticks `include_solution` on **Release assignment**.
+- **cohort repo name** - the slug, which is the course repo name minus its term tag unless you set `cohort_dest_repo:` (`assignment-1-f2026` -> `assignment-1`).
+
+**This file is timing only.** `type:` and `max_team_size:` used to be accepted here and are not any more: what an assignment IS - its shape, its team cap, how it is handed in, its question maxima, its late policy, whether it is autograded - lives in that assignment's own `grading_config.yml`, on the course template's `solution` branch (see [Add an assignment](03-add-assignment-to-course.md)). Written here they are flagged by **Validate schedule**, which names the file they moved to, and ignored.
+
+Adding or renaming an assignment here also wakes **Sync membership**, which rewrites `classroom-config/assignments.lock.yml` - the generated mirror the **Join team** form reads to decide whether a team may form for a slug and how big it may be. So a new group assignment is joinable within a minute or so of the push, provided its template already declares `team_formation: self_select`.
 
 ```yaml
 assignments:
@@ -184,8 +192,6 @@ assignments:
     due_datetime: 2026-10-13            # what students see
     grading_datetime: 2026-10-15        # snapshot freezes + autograded (default when undefined: due_datetime plus the template's late_window_days)
     solution_datetime: 2026-10-16T09:00 # optional: pushes the model solution to every repo. No default - omitted = never
-    type: group                         # default: individual 
-    max_team_size: 3
 
   regression: # the slug is a label; the repo is named outright
     course_source_repo: wk3-regression-f2026
@@ -193,6 +199,8 @@ assignments:
 ```
 
 A `course_source_repo:` naming a repo that does not exist is reported loudly and the assignment is skipped - it can only be a typo, and its one other symptom is an assignment that never hands out and never grades. An entry missing the field altogether is dropped, like one missing `due_datetime:`.
+
+**Two assignments off one template** - a resit off the same brief, or one template handed out to two halves of a cohort - are allowed, but only when **every** entry citing that template sets its own `cohort_dest_repo:`. That name is what the student repos, the teams.csv rows, the snapshot and the grading sheet all key on, so two explicit ones can never touch each other's work; one left to default makes the pair ambiguous and the second entry is dropped. **Release assignment** and **Collect submissions** both start from the template, so both gain an optional `slug` box for saying which of the two you mean - and both refuse rather than guess if you leave it empty.
 
 ## `events:` 
 
@@ -332,7 +340,7 @@ An entry that is valid YAML but not a valid *schedule* entry is **dropped**: it 
 | no valid `due_datetime` on an `assignments:` entry | no deadline, no submission snapshot, no autograding |
 | a `deploy` item missing `course_source_repo` or `course_source_path` | that one copy never ships |
 
-Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `handout_datetime` (**nothing is ever handed out**), `grading_datetime` (falls back to `due_datetime`), `deploy_datetime` (the copy ships at the `event_datetime`) or `max_team_size` (no cap); an unknown `type:` on an assignment (treated as individual) or an event (shown as a plain special event); a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`).
+Kept rather than dropped - the entry still runs on its documented fallback, and the fallback is reported alongside the drops (so `--validate` catches it): a malformed `handout_datetime` (**nothing is ever handed out**), `grading_datetime` (falls back to the end of the late window) or `deploy_datetime` (the copy ships at the `event_datetime`); an unknown `type:` on an event (shown as a plain special event); `type:` or `max_team_size:` on an assignment, which moved to its `grading_config.yml` and are reported as such; a typo'd or unknown key at any level; and an unknown `timezone:` (falls back to `Europe/Berlin`).
 
 An empty `deploy:` - the key written with nothing under it - is flagged too. It parses as "no copies", so the entry becomes a display-only row that ships nothing; if that is what you meant, delete the key (or write `deploy: []`) and the flag goes away.
 
@@ -352,9 +360,17 @@ Full details of this are in [10-grade-and-return-assignments.md](10-grade-and-re
 
 Each assignment's **cutoff** is `grading_datetime` if you set it, else `due_datetime` plus the template's `late_window_days`. From the **due date** the cron refreshes the grading sheet (and posts submission receipts) every quarter of an hour; at the cutoff it does three things, once each:
 
-1. **Freezes** each submission repo's HEAD into `classroom-config/snapshots/<slug>.csv`, using the **server's** clock.
+1. **Freezes** each submission repo's HEAD into `classroom-config/snapshots/<slug>.csv`, using the **server's** clock, and records against it when GitHub saw the push that delivered that commit.
 2. **Freezes** the grading sheet - its `info:` never moves again.
 3. **Autogrades** it (optional).
+
+> **If your course has a late policy, set `grading_datetime` past `due_datetime`.**
+> How late a submission is comes off the frozen snapshot, and the snapshot is taken at
+> the **cutoff**. With the two on the same moment there is no window to be late in: every
+> repo freezes at the deadline, `days_late` is 0 for everyone, and the penalty your
+> `grading_config.yml` advertises never applies to anybody. Leaving `grading_datetime`
+> unset does the right thing on its own - the cutoff is then the due date plus the
+> template's `late_window_days`.
 
 ### Releasing the model solution
 

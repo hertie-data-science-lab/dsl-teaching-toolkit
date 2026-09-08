@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import assign, collect
+from dsl_course import assign, collect, grades
 from dsl_course.schedule import Schedule
 from tests.conftest import ROSTER_HEADER
 
@@ -49,7 +49,7 @@ def feedback_issues(monkeypatch):
     monkeypatch.setattr(
         assign,
         "load_grading_spec",
-        lambda org, template: dict(collect.grades._DEFAULT_SPEC),
+        lambda org, template: collect.grades.GradingSpec(),
     )
     monkeypatch.setattr(
         assign.grades,
@@ -57,6 +57,13 @@ def feedback_issues(monkeypatch):
         lambda org, repo, body, dry_run=False: opened.append((repo, body)) or 1,
     )
     return opened
+
+
+@pytest.fixture(autouse=True)
+def _team_lock_is_current(monkeypatch):
+    """The Join-team form's mirror, refreshed beside `record_handout`. Its content has its
+    own tests (tests/test_grades.py); a handout test only needs it not to reach the API."""
+    monkeypatch.setattr(assign.grades, "write_team_lock", lambda *a, **k: True)
 
 
 @pytest.fixture(autouse=True)
@@ -165,11 +172,6 @@ def test_the_handout_sheet_for_a_group_assignment_is_keyed_on_the_team_name(
     ((sheet,),) = (sheet_writes,)
     assert sheet["is_group"] is True
     assert sheet["units"] == [("alpha", ["ada-l"])]
-
-
-def test_assignment_slug_drops_the_cohort_suffix():
-    assert assign.assignment_slug("assignment-1-f2026") == "assignment-1"
-    assert assign.assignment_slug("assignment-4-project") == "assignment-4-project"
 
 
 def test_an_unusable_solution_branch_does_not_block_provisioning(
@@ -321,6 +323,79 @@ def test_the_marker_IS_written_when_a_handle_is_dead(tmp_path, monkeypatch):
     # Same reasoning: one unusable student handle is persistent and unrelated to the push.
     _rc, recorded = _marker_run(tmp_path, monkeypatch, status="failed-no-collaborator")
     assert recorded == [("COHORT", "assignment-1", 1)]
+
+
+def test_the_marker_IS_written_when_a_feedback_issue_would_not_open(
+    tmp_path, monkeypatch
+):
+    # Same reasoning again: the issue is opened AFTER the solution push and the fault is
+    # persistent, so withholding the fire-once marker for it would re-clone every
+    # submission repo every hour for the rest of the term.
+    _rc, recorded = _marker_run(
+        tmp_path, monkeypatch, status="failed-no-feedback-issue"
+    )
+    assert recorded == [("COHORT", "assignment-1", 1)]
+    assert "failed-no-feedback-issue" not in assign._SOLUTION_NOT_PUSHED
+
+
+def test_a_feedback_issue_that_would_not_open_reds_the_handout(tmp_path, monkeypatch):
+    # The issue is opened on the CREATE path only - the cron re-fires every release every
+    # tick, so an existing repo is never re-probed. A repo that misses its one chance used
+    # to log a line and report `ok`, so a whole cohort could be handed out green with
+    # nowhere for its receipts, feedback or grades to be posted.
+    rc, _recorded = _marker_run(
+        tmp_path, monkeypatch, status="failed-no-feedback-issue"
+    )
+    assert rc == 1
+
+
+def test_the_new_repo_status_says_its_feedback_issue_never_opened(
+    monkeypatch, feedback_issues
+):
+    _provision_one_env(monkeypatch)
+    monkeypatch.setattr(
+        assign.grades, "ensure_feedback_issue", lambda *a, **k: grades.LOOKUP_FAILED
+    )
+    assert (
+        assign.provision_one(
+            "COURSE",
+            "assignment-1",
+            "COHORT",
+            "assignment-1-ada-l",
+            ["ada-l"],
+            "assignment-1",
+            existing={},
+            feedback_body="BODY",
+        )
+        == "failed-no-feedback-issue"
+    )
+
+
+def test_a_failed_solution_push_still_wins_over_a_missing_feedback_issue(
+    monkeypatch, tmp_path
+):
+    # The fire-once solution marker is written off these statuses, so the one fault that
+    # must never be masked is the push that did not happen.
+    _provision_one_env(monkeypatch)
+    monkeypatch.setattr(
+        assign.grades, "ensure_feedback_issue", lambda *a, **k: grades.LOOKUP_FAILED
+    )
+    monkeypatch.setattr(assign, "_wait_for_content", lambda *a, **k: True)
+    monkeypatch.setattr(assign, "push_solution", lambda *a, **k: False)
+    assert (
+        assign.provision_one(
+            "COURSE",
+            "assignment-1",
+            "COHORT",
+            "assignment-1-ada-l",
+            ["ada-l"],
+            "assignment-1",
+            tmp_path,
+            existing={},
+            feedback_body="BODY",
+        )
+        == "failed-solution"
+    )
 
 
 def test_the_marker_is_not_written_when_there_is_nobody_to_push_to(
@@ -645,7 +720,8 @@ def test_group_none_infers_per_team_from_the_templates_grading_yml(
     # force-ticking.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
-        "dsl_course.assign.assignment_is_group", lambda org, cohort, template: True
+        "dsl_course.assign.load_grading_spec",
+        lambda org, template: collect.grades.GradingSpec(type="group"),
     )
     monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {"unused": {}})
     monkeypatch.setattr(
@@ -673,13 +749,11 @@ def test_group_none_infers_per_team_from_the_templates_grading_yml(
 def test_group_false_forces_individual_even_for_a_group_template(
     tmp_path, capsys, monkeypatch
 ):
-    # An explicit False never consults grading_config.yml - the caller decided.
+    # An explicit False beats the assignment's own `type: group` - the caller decided.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
-        "dsl_course.assign.assignment_is_group",
-        lambda org, cohort, template: (_ for _ in ()).throw(
-            AssertionError("must not be read")
-        ),
+        "dsl_course.assign.load_grading_spec",
+        lambda org, template: collect.grades.GradingSpec(type="group"),
     )
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     rc, _changed = assign.provision_all(
@@ -815,7 +889,8 @@ def test_group_provisioning_filters_teams_csv_through_the_roster_allowlist(
     # into the private org with maintain on a repo. An auditor's handle is excluded too.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
-        "dsl_course.assign.assignment_is_group", lambda org, cohort, template: True
+        "dsl_course.assign.load_grading_spec",
+        lambda org, template: collect.grades.GradingSpec(type="group"),
     )
     monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {"unused": {}})
     monkeypatch.setattr(
@@ -851,7 +926,8 @@ def test_a_rejected_teams_csv_handle_is_not_published_in_the_workflow_log(
     # log actually shows: a count a faculty member can act on, and no student's typing.
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     monkeypatch.setattr(
-        "dsl_course.assign.assignment_is_group", lambda org, cohort, template: True
+        "dsl_course.assign.load_grading_spec",
+        lambda org, template: collect.grades.GradingSpec(type="group"),
     )
     monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {"unused": {}})
     monkeypatch.setattr(
@@ -1089,11 +1165,73 @@ def _scheduled(monkeypatch, key: str, dest: str, source: str):
         due_datetime=datetime(2026, 11, 1, tzinfo=timezone.utc),
         course_source_repo=source,
         cohort_dest_repo=dest,
-        type="group",
     )
     monkeypatch.setattr(
         "dsl_course.schedule.load", lambda org: Schedule(assignments={key: entry})
     )
+    # ... and a group assignment, which only the template's grading_config.yml can say.
+    monkeypatch.setattr(
+        "dsl_course.assign.load_grading_spec",
+        lambda org, template: collect.grades.GradingSpec(type="group"),
+    )
+
+
+def _two_on_one_template(monkeypatch):
+    """A plan where two entries hand out from one template, each naming its own repos."""
+    from datetime import datetime, timezone
+
+    from dsl_course.schedule import AssignmentEntry
+
+    def entry(dest):
+        return AssignmentEntry(
+            due_datetime=datetime(2026, 11, 1, tzinfo=timezone.utc),
+            course_source_repo="assignment-2-f2026",
+            cohort_dest_repo=dest,
+        )
+
+    monkeypatch.setattr(
+        "dsl_course.schedule.load",
+        lambda org: Schedule(
+            assignments={
+                "assignment-2": entry("assignment-2"),
+                "assignment-2-resit": entry("assignment-2-resit"),
+            }
+        ),
+    )
+
+
+def test_a_handout_refuses_to_choose_between_two_entries_on_one_template(
+    tmp_path, capsys, monkeypatch
+):
+    # Both entries are real assignments with their own repos and their own marks. Picking
+    # the first would hand the resit's brief to the whole cohort under the wrong name, and
+    # a handout is not a thing you can take back.
+    _two_on_one_template(monkeypatch)
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    rc, changed = assign.provision_all(
+        "COURSE", "assignment-2-f2026", "COHORT", roster_path=path, dry_run=True
+    )
+    assert (rc, changed) == (1, False)
+    err = capsys.readouterr().err
+    assert "assignment-2-resit" in err and "say which" in err
+
+
+def test_a_handout_told_which_entry_names_that_entrys_repos(
+    tmp_path, capsys, monkeypatch
+):
+    _two_on_one_template(monkeypatch)
+    monkeypatch.setenv("DSL_VERBOSE", "1")
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    rc, _changed = assign.provision_all(
+        "COURSE",
+        "assignment-2-f2026",
+        "COHORT",
+        roster_path=path,
+        dry_run=True,
+        slug="assignment-2-resit",
+    )
+    assert rc == 0
+    assert "assignment-2-resit-ada-l" in capsys.readouterr().out
 
 
 def test_group_handout_looks_teams_up_by_key_and_names_repos_by_dest(
@@ -1180,9 +1318,40 @@ def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_fails_on_the_bu
         )
 
     assert run(scheduled=True) == (0, False)
-    assert "[wait] no teams" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "[wait] no teams" in out and "the first team forms" in out
     assert run() == (1, False)
-    assert "no teams for" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "no teams for" in err and "students self-select" in err
+
+
+def test_an_allocated_assignment_with_no_teams_names_the_teaching_team(
+    tmp_path, monkeypatch, capsys
+):
+    # `team_formation: assigned` means the Join-team form refuses every request, so
+    # telling this course to wait for students to self-select points them at a door that
+    # is shut. Who fills teams.csv is the assignment's own declaration.
+    monkeypatch.setattr(assign.teams, "load", lambda cohort_org: {})
+    monkeypatch.setattr(assign.teams, "teams_for", lambda rows, slug: {})
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.GradingSpec(
+            type="group", team_formation="assigned"
+        ),
+    )
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+
+    def run(**kw):
+        return assign.provision_all(
+            "COURSE", "project-f2026", "COHORT", roster_path=path, **kw
+        )
+
+    assert run(scheduled=True) == (0, False)
+    assert "the teaching team writes them into teams.csv" in capsys.readouterr().out
+    assert run() == (1, False)
+    err = capsys.readouterr().err
+    assert "team_formation: assigned" in err and "self-select" not in err
 
 
 # --------------- a failed solution push outranks every other fault (the marker depends on it)
@@ -1632,3 +1801,59 @@ def test_the_handout_composes_one_feedback_body_per_team(
 
     assert ["@ada-l" in b for b in bodies] == [True, False]
     assert ["@ben-k" in b for b in bodies] == [False, True]
+
+
+def test_the_handout_refreshes_the_team_formation_lock(tmp_path, monkeypatch):
+    # A handout is the last moment the schedule and the template's definition can have
+    # moved before students are looking at the assignment, and the Join-team form cannot
+    # read either one. The lock is written with the schedule this run already loaded.
+    sched = Schedule()
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: sched)
+    locked: list[tuple] = []
+    monkeypatch.setattr(
+        assign.grades,
+        "write_team_lock",
+        lambda cohort_org, course_org, sched: (
+            locked.append((course_org, cohort_org, sched)) or True
+        ),
+    )
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: "ok")
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+
+    assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
+    )
+    assert locked == [("COURSE", "COHORT", sched)]
+
+
+def test_a_tick_that_handed_nothing_out_does_not_rewrite_the_lock(
+    tmp_path, monkeypatch
+):
+    # `due_releases` is cumulative, so the quarter-hourly scheduler re-fires every
+    # handed-out assignment for the rest of the term. A pass whose every repo was skipped
+    # handed nothing out, and nothing it mirrors can have moved with it - writing anyway
+    # costs one contents read per assignment per tick to find the file unchanged.
+    monkeypatch.setattr("dsl_course.schedule.load", lambda org: Schedule())
+    locked: list[tuple] = []
+    monkeypatch.setattr(
+        assign.grades,
+        "write_team_lock",
+        lambda **kw: locked.append(kw) or True,
+    )
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: "skipped")
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+
+    assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
+    )
+    assert locked == []

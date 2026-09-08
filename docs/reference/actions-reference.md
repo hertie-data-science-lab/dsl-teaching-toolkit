@@ -13,11 +13,11 @@ grants it: [`access-reference.md`](access-reference.md).
 | --- | --- |
 | **Bootstrap cohort** | Configure a pre-created cohort org: `welcome` + `classroom-config`, permissions, site, `course_admins`, register + refresh. Safe to re-run on a live cohort - your `classroom-config` files are never overwritten. |
 | **New materials repo** | Scaffold a `course-materials-<tag>` repo (lectures/readings/labs session folders, `SYLLABUS.md`, the run-from-repo Release workflows). |
-| **New assignment** | Scaffold an `assignment-N-<tag>` template: brief + starter on `main`; stub solution, `grading_config.yml` and a hidden test on the `solution` branch. `format` picks py/notebook stubs; `type: group` makes handout + grading run per team. |
+| **New assignment** | Scaffold an `assignment-N-<tag>` template from eight answers (name, number, tag, format, type, team_formation, submit_via, autograde): brief + starter (+ `CONTRIBUTIONS.md` for a group) on `main`; stub solution and `grading_config.yml` on the `solution` branch, with a hidden-test stub only when autograding was asked for. `format` picks the starter stub and nothing else; `type: group` makes handout + grading run per team. |
 | **Generate syllabus** | Write the syllabus's "Course sessions and readings" section - one block per session, with its title, learning objectives and reading list - from a cohort's `schedule.yml` and this repo's `readings/`. Lands in `SYLLABUS.sessions.md` beside your syllabus, never released to students; it never touches `SYLLABUS.md` itself. |
 | **Refresh actions** | Re-seed the run-from-repo workflows, propagate the repo secret, repopulate every dropdown, rebuild the profile READMEs. No inputs. Also runs itself daily, so every org converges on the toolkit tier its course org runs within 24h without anyone clicking. _(All DSL orgs at once: [Refresh Course Orgs Inventory](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml).)_ |
 | **Check cohort setup** | Read-only per-cohort checklist of what's configured and what's missing, with an edit link for each gap. |
-| **Sync membership** | Reconcile `students`/`auditors` teams (`students.csv`), project teams (`teams.csv`) and instructor/course-admin access (`people.yml`, `dsl-course.yml`). Automatic on push to those files, plus a daily cron - run it by hand only to apply a `start`/`end` date that rolled over without an edit. See [05](../05-manage-teaching-team.md), [`access-reference.md`](access-reference.md). |
+| **Sync membership** | Reconcile `students`/`auditors` teams (`students.csv`), project teams (`teams.csv`) and instructor/course-admin access (`people.yml`, `dsl-course.yml`), and rewrite `assignments.lock.yml` - the generated mirror the **Join team** form reads (hence the `schedule.yml` trigger). Automatic on push to any of those files, plus a daily cron - run it by hand only to apply a `start`/`end` date that rolled over without an edit. See [05](../05-manage-teaching-team.md), [`access-reference.md`](access-reference.md). |
 
 ## Release
 
@@ -37,6 +37,12 @@ Full flow: [Grade and return assignments](../10-grade-and-return-assignments.md)
 | --- | --- |
 | **Collect submissions** | Refresh one assignment's grading sheet now instead of waiting for the cron: re-read each submission, refill `info:`, post any receipt still owed. It never freezes anything - the cutoff does that. |
 | **Distribute grades** | Send what the grading sheet holds: a feedback comment on each submission repo's Feedback issue, each student's private `grades-<handle>` repo (`grades.yml` + `README.md`), `cohort-gradebook.csv`, and an email. Nothing is said twice, so a re-run after one correction reaches one student. **`dry_run` defaults to `true`**; `silent` sends without emailing; `assignment` narrows the run to one slug (blank = every sheet). |
+
+## End of term
+
+| Action | Effect |
+| --- | --- |
+| **Archive cohort** | Close a finished cohort out: revoke each student's direct access to the submission repos and gradebooks named after them, archive those repos, archive `welcome` so a finished term cannot still be joined, record what was frozen in `classroom-config/archive/teardown.md`, and archive `classroom-config` last - which also tells the nightly refresh to leave the cohort alone. **Nothing is deleted** and archiving is reversible from each repo's Settings. **`dry_run` defaults to `true`**; a real run refuses unless `schedule.yml`'s `semester_end` has passed, and `force` overrides that. Safe to re-run - it resumes. See [10](../10-grade-and-return-assignments.md#closing-the-cohort-out). |
 
 ## Optional: public course website
 

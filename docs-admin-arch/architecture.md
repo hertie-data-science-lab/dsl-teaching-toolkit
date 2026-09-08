@@ -293,11 +293,26 @@ full team.
 ### Project teams (group assignments)
 
 `teams.csv` (in `classroom-config`, columns `assignment,team,github_handle`) is the **only
-writer surface**: students self-select by opening a "Join team" issue (capped per assignment
-by `max_team_size` in the cohort's schedule.yml, default 5; `team-formation.yml`
-appends a row - authenticated author, one team per assignment, size-capped, auditors refused),
-and faculty can edit it directly. The default cap is set by `MAX_TEAM_SIZE` in
-`templates/welcome/team-formation.yml`.
+writer surface**: students self-select by opening a "Join team" issue (`team-formation.yml`
+appends a row - authenticated author, one team per assignment, size-capped, auditors
+refused), and faculty can edit it directly.
+
+WHETHER a team may form at all, and how big, is the assignment's own declaration, in the
+`grading_config.yml` on the course template's `solution` branch. The form cannot read it:
+it runs on an `issues: opened` event any stranger can trigger, in a PUBLIC repo, under a
+token deliberately scoped away from the course org's content repos. So the toolkit mirrors
+the two answers it needs into `classroom-config/assignments.lock.yml` - SYSTEM-OWNED,
+`team_formation` (`self_select` | `assigned` | `none`) and `max_team_size`, one entry per
+assignment in `schedule.yml` - and the form reads that and nothing else. It is rewritten by
+**Sync membership** (whose dispatcher fires on a `schedule.yml` push), by every **Release
+assignment**, and by the nightly **Refresh actions**; `put_file` blob-compares, so an
+unchanged cohort is written nothing. An assignment whose template does not exist yet locks
+to `none`, because the alternative is guessing a shape for an assignment nobody has
+described - and a wrong guess of `group` lets any student mint a real GitHub team, granted
+`maintain` on the repo, under a name of their choosing.
+
+Before the lock file the form scraped `type:` and `max_team_size:` out of the cohort's own
+`schedule.yml`, which no longer carries either.
 
 ```mermaid
 flowchart LR
@@ -342,7 +357,7 @@ exam · special_event`"]
 | Block | Key fields | Fires |
 | --- | --- | --- |
 | `releases.<label>` | `event_datetime`, `deploy[]` of `course_source_repo` + `course_source_path` (required), `cohort_dest_repo` (default `materials`), `cohort_dest_path` (default: mirror), `deploy_datetime` | a deploy per entry |
-| `assignments.<slug>` | `course_source_repo` (**required**), `due_datetime` (**required**; a bare date closes at 23:59:59), `grading_datetime` (default: due), `handout_datetime`, `cohort_dest_repo` (default: the slug), `type`, `max_team_size` | handout, then snapshot + autograde |
+| `assignments.<slug>` | `course_source_repo` (**required**), `due_datetime` (**required**; a bare date closes at 23:59:59), `grading_datetime` (default: due + the template's `late_window_days`), `handout_datetime`, `solution_datetime` (default: never), `cohort_dest_repo` (default: the slug), `title` | handout, then snapshot + autograde. TIMING ONLY - the shape and the team cap live in the template's `grading_config.yml` |
 | `events.<label>` | `type` (`exam` \| `special_event`), `title`, `event_datetime` | nothing - display-only site rows |
 
   `enrolment:` was a fourth block, mailing the codes on a window. A push to `students.csv`

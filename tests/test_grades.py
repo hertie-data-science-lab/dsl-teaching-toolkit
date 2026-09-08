@@ -12,6 +12,7 @@ from pathlib import Path
 from shutil import copytree
 
 import pytest
+import yaml
 
 from dsl_course import gh_contents, ghcli, grades, repos, roster
 from dsl_course.schedule import AssignmentEntry, Schedule
@@ -1327,3 +1328,155 @@ def test_distribute_reds_when_the_roster_cannot_be_read(tmp_path, monkeypatch, c
     ((_repo, files, _delete),) = out["config"]
     assert grades.COHORT_CSV_NAME not in files
     assert grades.DISTRIBUTED_PATH in files
+
+
+# ------------------------------------------------- the team-formation lock file
+
+
+def _sched(**assignments) -> Schedule:
+    """A schedule of assignments whose only interesting field is which template they hand
+    out from - the lock file reads nothing else off it."""
+    return Schedule(
+        assignments={
+            key: AssignmentEntry(
+                due_datetime=datetime(2026, 10, 4, 23, 59, tzinfo=timezone.utc),
+                course_source_repo=template,
+            )
+            for key, template in assignments.items()
+        }
+    )
+
+
+def _lock(
+    monkeypatch, sched, configs: dict[str, str | None], defaults: str = ""
+) -> str:
+    """Render the lock file for `sched`, with each template's `grading_config.yml` given
+    as text (None = the template has none) and the course's own defaults block as YAML."""
+    monkeypatch.setattr(
+        grades, "_grading_text", lambda org, template: configs.get(template)
+    )
+    monkeypatch.setattr(
+        grades, "org_meta", lambda org: yaml.safe_load(defaults or "{}") or {}
+    )
+    return grades.team_lock_text(grades.team_lock_entries("COURSE", sched))
+
+
+def test_the_lock_file_carries_two_scalars_per_schedule_assignment(monkeypatch):
+    # The Join-team form runs in a PUBLIC repo under a token deliberately scoped away from
+    # the course org's templates, so it cannot read grading_config.yml. This file is the
+    # mirror it reads instead, and it must answer for every assignment in the schedule.
+    text = _lock(
+        monkeypatch,
+        _sched(a1="assignment-1-f2026", project="assignment-4-project-f2026"),
+        {
+            "assignment-1-f2026": "type: individual\n",
+            "assignment-4-project-f2026": (
+                "type: group\nteam_formation: self_select\nmax_team_size: 3\n"
+            ),
+        },
+    )
+    assert yaml.safe_load(text) == {
+        "assignments": {
+            "a1": {"team_formation": "none", "max_team_size": 5},
+            "project": {"team_formation": "self_select", "max_team_size": 3},
+        }
+    }
+    # SYSTEM-OWNED, stamped at the write site - it is rewritten on every sync.
+    assert text.startswith("# SYSTEM-OWNED")
+
+
+def test_an_assigned_group_assignment_is_locked_as_assigned(monkeypatch):
+    text = _lock(
+        monkeypatch,
+        _sched(project="assignment-4-project-f2026"),
+        {"assignment-4-project-f2026": "type: group\nteam_formation: assigned\n"},
+    )
+    assert (
+        yaml.safe_load(text)["assignments"]["project"]["team_formation"] == "assigned"
+    )
+
+
+def test_a_template_that_does_not_exist_yet_is_locked_to_none(monkeypatch, capsys):
+    # Maths a2-a4 today: the schedule names a template nobody has created. Guessing
+    # `group` would let any student mint a real GitHub team, granted `maintain` on the
+    # repo, under a name of their choosing - so the lock refuses and says what that costs.
+    text = _lock(
+        monkeypatch, _sched(a2="assignment-2-f2026"), {"assignment-2-f2026": None}
+    )
+    assert yaml.safe_load(text)["assignments"]["a2"]["team_formation"] == "none"
+    err = capsys.readouterr().err
+    assert "no grading_config.yml yet" in err and "no team can be formed" in err
+
+
+def test_the_course_default_cap_fills_in_for_an_assignment_that_names_none(monkeypatch):
+    text = _lock(
+        monkeypatch,
+        _sched(project="assignment-4-project-f2026"),
+        {"assignment-4-project-f2026": "type: group\n"},
+        defaults="assignment_defaults:\n  max_team_size: 4\n",
+    )
+    assert yaml.safe_load(text)["assignments"]["project"]["max_team_size"] == 4
+
+
+def test_a_cohort_with_no_assignments_still_gets_a_readable_lock_file(monkeypatch):
+    # The form refuses every slug rather than 404ing on the read and reporting a fault.
+    text = _lock(monkeypatch, _sched(), {})
+    assert yaml.safe_load(text) == {"assignments": {}}
+
+
+def test_the_lock_file_is_written_once_and_is_free_when_nothing_changed(monkeypatch):
+    # put_file blob-compares, so writing it from the membership sync, the handout and the
+    # nightly refresh costs a read apiece and no commit at all on an unchanged cohort.
+    written: list[tuple[str, str, bytes]] = []
+    monkeypatch.setattr(grades, "_grading_text", lambda org, t: "type: group\n")
+    monkeypatch.setattr(grades, "org_meta", lambda org: {})
+    monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo: False)
+    monkeypatch.setattr(
+        grades,
+        "put_file",
+        lambda org, repo, path, content, msg: (
+            written.append((org, path, content)) or True
+        ),
+    )
+    assert grades.write_team_lock(
+        "COURSE", "COHORT", _sched(project="assignment-4-project-f2026")
+    )
+    ((org, path, content),) = written
+    assert (org, path) == ("COHORT", "assignments.lock.yml")
+    assert yaml.safe_load(content)["assignments"]["project"] == {
+        "team_formation": "self_select",
+        "max_team_size": 5,
+    }
+
+
+def test_a_lock_file_that_could_not_be_written_says_what_that_costs(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(grades, "_grading_text", lambda org, t: "type: group\n")
+    monkeypatch.setattr(grades, "org_meta", lambda org: {})
+    monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo: False)
+    monkeypatch.setattr(grades, "put_file", lambda *a, **k: False)
+    assert not grades.write_team_lock("COURSE", "COHORT", _sched(p="t"))
+    assert "the Join-team form reads it" in capsys.readouterr().err
+
+
+def test_a_closed_out_cohort_is_left_alone(monkeypatch, capsys):
+    # `teardown` archives classroom-config last, and an archived repo is read-only. The
+    # membership sync fans out over the cohort REGISTRY, which teardown does not touch, so
+    # without this every finished cohort would 403 the daily sync red for good.
+    def boom(*args, **kwargs):
+        raise AssertionError("a sealed classroom-config takes no write")
+
+    monkeypatch.setattr(grades, "repo_is_archived", lambda org, repo: True)
+    monkeypatch.setattr(grades, "put_file", boom)
+    monkeypatch.setattr(grades, "_grading_text", boom)
+    assert grades.write_team_lock("COURSE", "COHORT", _sched(p="t"))
+    assert "cohort closed out" in capsys.readouterr().out
+
+
+def test_no_log_line_from_the_lock_file_names_a_person(monkeypatch, capsys):
+    # It runs in the course org's PUBLIC .github. Only slugs and template names may appear.
+    monkeypatch.setattr(grades, "put_file", lambda *a, **k: True)
+    _lock(monkeypatch, _sched(a2="assignment-2-f2026"), {"assignment-2-f2026": None})
+    printed = capsys.readouterr()
+    assert "@" not in printed.out + printed.err

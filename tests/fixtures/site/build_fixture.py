@@ -32,7 +32,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(ROOT))
 
-from dsl_course import schedule_plan, site, site_repo
+from dsl_course import grades, schedule_plan, site, site_repo
 
 BERLIN = ZoneInfo("Europe/Berlin")
 COURSE_ORG = "hertie-dsl-fixture-course"
@@ -100,6 +100,13 @@ PEOPLE = {
 
 def _repo_tree(_org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     return "main", TREE if repo == MATERIALS else ()
+
+
+def _grading_spec(_org: str, _repo: str):
+    """The assignment's own definition, which names the repo shape a student looks for.
+    The fixture's assignment is individual, so the empty file's defaults are exactly
+    right - it is stubbed only because the read would otherwise go to GitHub."""
+    return grades.parse_grading_spec("")
 
 
 def _get_file_content(_org: str, _repo: str, path: str) -> str | None:
@@ -234,7 +241,9 @@ def generated() -> dict[str, dict[str, str] | dict[str, dict[str, str]]]:
     memoised and `get_file_content` is imported into `site`'s namespace, so this is the
     seam every caller below actually goes through."""
     real_tree, real_content = site._repo_tree, site.get_file_content
+    real_spec = site.load_grading_spec
     site._repo_tree, site.get_file_content = _repo_tree, _get_file_content
+    site.load_grading_spec = _grading_spec
     try:
         return {
             "collections": collections(),
@@ -242,6 +251,7 @@ def generated() -> dict[str, dict[str, str] | dict[str, dict[str, str]]]:
         }
     finally:
         site._repo_tree, site.get_file_content = real_tree, real_content
+        site.load_grading_spec = real_spec
 
 
 # The overlay the offline build layers on top of the generated `_config.yml`. The primary

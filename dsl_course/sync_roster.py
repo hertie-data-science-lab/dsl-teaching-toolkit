@@ -76,6 +76,59 @@ def submission_repo_suffixes(repos: list[dict]) -> list[tuple[str, str]]:
     ]
 
 
+def revoke_repo_grants(
+    cohort_org: str, repo: str, login: str, dry_run: bool = False
+) -> tuple[int, int]:
+    """Take back `login`'s DIRECT grant on `cohort_org/repo`, and any invitation to it they
+    have not accepted. Returns `(withdrawn, errors)`.
+
+    The one revoke path, shared by the two callers that need it: off-boarding, below, for a
+    handle that left the roster, and the end-of-term teardown (`dsl_course.teardown`) for
+    every repo in a finished cohort. Both need the same two halves - a grant is not the same
+    object as an un-accepted invitation, and cancelling only the first hands the access
+    straight back the day the second is accepted.
+
+    Both reads return None when the listing could not be READ, and that is kept distinct
+    from "nothing to revoke": the caller is about to take access away, and a rate limit must
+    never be acted on in either direction. An unreadable collaborator listing therefore
+    abandons the whole repo rather than going on to its invitations - what is there is
+    unknown, and the next run reads it again.
+
+    Only a DIRECT grant is ever touched. Access held through a TEAM - every faculty member,
+    the bot, a project team on its own group repo - is not a collaborator row here and is
+    left exactly as it is."""
+    withdrawn = 0
+    errors = 0
+    present = is_collaborator(cohort_org, repo, login, person=True)
+    if present is None:  # unreadable - never guess, in either direction
+        return 0, 1
+    if present:
+        if dry_run:
+            log_person(f"    DRY-RUN revoke {login} <- {cohort_org}/{repo}")
+            withdrawn += 1
+        elif remove_collaborator(cohort_org, repo, login, person=True):
+            log_person(f"  [ok] revoked {login} from {cohort_org}/{repo}")
+            withdrawn += 1
+        else:
+            errors += 1
+    # A grant made before the org invite was accepted is a pending INVITATION, which
+    # `is_collaborator` cannot see and `remove_collaborator` does not touch. Left live,
+    # accepting it later hands `maintain` back to a student who should no longer have it.
+    invitations = pending_invitations(cohort_org, repo, login, person=True)
+    if invitations is None:
+        return withdrawn, errors + 1
+    for invitation_id in invitations:
+        if dry_run:
+            log_person(f"    DRY-RUN cancel invite {login} <- {cohort_org}/{repo}")
+            withdrawn += 1
+        elif cancel_invitation(cohort_org, repo, invitation_id, person=True):
+            log_person(f"  [ok] cancelled {login}'s invite to {cohort_org}/{repo}")
+            withdrawn += 1
+        else:
+            errors += 1
+    return withdrawn, errors
+
+
 def revoke_offboarded_access(
     cohort_org: str, on_roster: set[str], dry_run: bool = False
 ) -> int:
@@ -89,9 +142,8 @@ def revoke_offboarded_access(
     on every assignment repo they had ever been handed, indefinitely, while every report
     said they had been removed.
 
-    A grant made before the org invite was accepted is a pending INVITATION rather than a
-    collaborator row, so it is cancelled too - otherwise accepting it later hands the
-    access straight back. Org membership itself is not touched here.
+    What one repo's revoke consists of is `revoke_repo_grants` above; org membership itself
+    is not touched here.
 
     Deliberately narrow. Only the login the repo is NAMED after is ever revoked, and only
     once GitHub confirms it is a direct collaborator or holds an invitation - a group
@@ -118,35 +170,11 @@ def revoke_offboarded_access(
     errors = 0
     revoked = 0
     for repo, suffix in stale:
-        present = is_collaborator(cohort_org, repo, suffix, person=True)
-        if present is None:  # unreadable - never guess, in either direction
-            errors += 1
-            continue
-        if present:
-            if dry_run:
-                log_person(f"    DRY-RUN revoke {suffix} <- {cohort_org}/{repo}")
-                revoked += 1
-            elif remove_collaborator(cohort_org, repo, suffix, person=True):
-                log_person(f"  [ok] revoked {suffix} from {cohort_org}/{repo}")
-                revoked += 1
-            else:
-                errors += 1
-        # A grant made before the org invite was accepted is a pending INVITATION, which
-        # `is_collaborator` cannot see and `remove_collaborator` does not touch. Left live,
-        # accepting it later hands `maintain` back to an off-boarded student.
-        invitations = pending_invitations(cohort_org, repo, suffix, person=True)
-        if invitations is None:
-            errors += 1
-            continue
-        for invitation_id in invitations:
-            if dry_run:
-                log_person(f"    DRY-RUN cancel invite {suffix} <- {cohort_org}/{repo}")
-                revoked += 1
-            elif cancel_invitation(cohort_org, repo, invitation_id, person=True):
-                log_person(f"  [ok] cancelled {suffix}'s invite to {cohort_org}/{repo}")
-                revoked += 1
-            else:
-                errors += 1
+        withdrawn, failed = revoke_repo_grants(
+            cohort_org, repo, suffix, dry_run=dry_run
+        )
+        revoked += withdrawn
+        errors += failed
     if revoked:
         # Only DIRECT grants and pending invitations are counted, because only those were
         # removed: `is_collaborator` reads the affiliation=direct listing, so a repo whose

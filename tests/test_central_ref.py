@@ -283,6 +283,7 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
     )
     monkeypatch.setattr(seed, "refresh_classroom_samples", lambda org: 0)
     monkeypatch.setattr(seed, "refresh_cohort_pointer", lambda org, course: 0)
+    monkeypatch.setattr(seed, "write_team_lock", lambda course, cohort: True)
     return seed.refresh("Course-Org"), rendered
 
 

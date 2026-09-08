@@ -46,6 +46,33 @@ FACULTY_ONLY_HEADING = "delete this section before releasing the README"
 # The branch an assignment template keeps its solution and grading_config.yml on.
 SOLUTION_BRANCH = "solution"
 
+# ------------------------------------------- the vocabulary an assignment is defined in
+
+# The closed vocabularies of `grading_config.yml`. Here rather than beside the parser
+# because three layers spell them: `workflows_render` builds the New assignment dropdowns
+# from them, `scaffold` writes the chosen values into the file, and `grades` reads them
+# back - and a dropdown offering a word the reader would refuse is a form that lies.
+SUBMIT_VIA = (
+    "github",
+    "external",
+)  # `external` = handed in off GitHub (Moodle, Kaggle)
+ASSIGNMENT_TYPES = ("individual", "group")
+# How a group assignment's teams come about. `none` is NOT one of them: it is the answer
+# an INDIVIDUAL assignment gives, which is why the Join-team form can refuse a slug
+# outright, and it is not a value an instructor ever writes.
+SELF_SELECT = "self_select"  # students use the Join-team form in `welcome`
+ASSIGNED = "assigned"  # the teaching team writes teams.csv; the form refuses
+TEAM_FORMATIONS = (SELF_SELECT, ASSIGNED)
+NO_TEAMS = "none"
+# The cap the Join-team form enforces when neither the assignment nor its course says
+# otherwise. Here because three places have to agree on it: the `grading_config.yml` the
+# New assignment button writes, the lock file the form reads, and the form itself.
+DEFAULT_MAX_TEAM_SIZE = 5
+# Which starter stub `New assignment` seeds, and nothing else: grading reads whatever is
+# in the repo, and a student may commit anything. `none` is the raw-repo option.
+FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", "none")
+
+
 # The four ROLE teams every org's access is expressed in: the two faculty teams, created
 # in course and cohort orgs alike, and the two cohort-only student teams. Named here
 # because the grants (access), the reconciles (sync_faculty, sync_roster), the bootstrap
@@ -234,24 +261,23 @@ def assignment_slug(template: str) -> str:
     return re.sub(r"-[fs]\d{4}$", "", template)
 
 
-def resolve_is_group(
-    *, force: bool, schedule_type: str | None, template_group: bool | None
-) -> bool:
+def resolve_is_group(*, force: bool, template_type: str | None) -> bool:
     """The SINGLE precedence for group-vs-individual, shared by every resolver.
 
-    An explicit force (the release workflow's `type: group` / `--group`) wins; else the
-    COHORT's declaration - `assignments.<slug>.type` in classroom-config/schedule.yml, passed
-    as `schedule_type`; else the template's design-time grading_config.yml `type:`, passed as
-    `template_group` (True/False, or None when not consulted); else individual. Pure: each
-    caller passes the inputs it already holds, so no consumer re-derives its own precedence
-    (and none re-trusts student-writable teams.csv to decide the kind)."""
+    An explicit force (the Release assignment button's `type: group` / `--group`) wins;
+    else the assignment's OWN declaration - `type:` in the template's `grading_config.yml`,
+    passed as `template_type` ("group"/"individual", or None when the file says nothing);
+    else individual. Pure: each caller passes what it already holds, so no consumer
+    re-derives its own precedence (and none re-trusts student-writable teams.csv to decide
+    the kind).
+
+    The cohort's `schedule.yml` used to sit between the two and no longer does. The two
+    files are orthogonal now - schedule.yml is WHEN, grading_config.yml is WHAT - and a
+    cohort that could override the shape got one assignment provisioned per student while
+    its own grading config, its team cap and its Join-team form all said per team."""
     if force:
         return True
-    if schedule_type is not None:
-        return schedule_type == "group"
-    if template_group is not None:
-        return template_group
-    return False
+    return str(template_type or "").strip().lower() == "group"
 
 
 def coerce_date(value: object) -> date | None:

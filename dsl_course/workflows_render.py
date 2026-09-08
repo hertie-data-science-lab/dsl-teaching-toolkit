@@ -27,7 +27,14 @@ import re
 
 from . import mailer
 from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER, pin_central_ref
-from .course import MATERIALS_REPO_PREFIX, term_tag
+from .course import (
+    ASSIGNMENT_TYPES,
+    FORMATS,
+    MATERIALS_REPO_PREFIX,
+    SUBMIT_VIA,
+    TEAM_FORMATIONS,
+    term_tag,
+)
 
 # Third-party actions pinned to full commit SHAs. Every job below runs with an org-owner
 # PAT in its env, so a mutable tag (`@v4`) is a standing invitation: whoever can move the
@@ -242,10 +249,11 @@ _MAIL_ENV = "\n".join(
     for name in (*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV)
 )
 
-# Fail CLOSED: only an explicit `false` sends. Any other value - "True", "1", a blank from
-# a renamed input - previews. Distribute grades is the one button left that emails a whole
-# cohort; the other dry-run gates in this module are not send paths and keep the simpler
-# spelling.
+# Fail CLOSED: only an explicit `false` acts. Any other value - "True", "1", a blank from a
+# renamed input - previews. The two buttons that share it are the two whose real run cannot
+# be taken back by clicking again: Distribute grades emails a whole cohort, and Archive
+# cohort freezes one. The other dry-run gates in this module guard convergent work and keep
+# the simpler spelling.
 _DRY_RUN_GATE = (
     '          if [ "$DRY_RUN" = "false" ]; '
     "then args+=(--no-dry-run); else args+=(--dry-run); fi"
@@ -634,7 +642,7 @@ on:
         type: boolean
         default: false
       type:
-        description: "individual (one repo per student) or group (one per team from teams.csv). auto = whatever schedule.yml / the template's grading_config.yml declare (default: individual)"
+        description: "individual (one repo per student) or group (one per team from teams.csv). auto = whatever the template's grading_config.yml declares (default: individual)"
         required: true
         type: choice
         default: auto
@@ -642,6 +650,10 @@ on:
           - auto
           - individual
           - group
+      slug:
+        description: "Only if TWO schedule.yml assignments hand out from this template: which one (the schedule key). Leave empty otherwise"
+        required: false
+        default: ""
       dry_run:
         description: "Preview only - list the repos that WOULD be created, don't create them"
         type: boolean
@@ -658,12 +670,14 @@ on:
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
           INC_SOL: ${{{{ inputs.include_solution }}}}
           TYPE: ${{{{ inputs.type }}}}
+          SLUG: ${{{{ inputs.slug }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
         run: |
           gh auth setup-git
           args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG")
           [ "$INC_SOL" = "true" ] && args+=(--solution)
           args+=(--type "$TYPE")
+          [ -n "$SLUG" ] && args+=(--slug "$SLUG")
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
           python3 -m dsl_course.assign "${{args[@]}}"
 """
@@ -688,6 +702,10 @@ on:
     inputs:
 {_choice_input("cohort_org", "Cohort org (submissions)", cohort_orgs)}
 {_assignment_input(assignments or [])}
+      slug:
+        description: "Only if TWO schedule.yml assignments hand out from this template: which one (the schedule key). Leave empty otherwise"
+        required: false
+        default: ""
       dry_run:
         description: "Preview only - show what WOULD be refreshed"
         type: boolean
@@ -702,9 +720,11 @@ on:
           MASTER_ORG: ${{{{ github.repository_owner }}}}
           COHORT_ORG: ${{{{ inputs.cohort_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
+          SLUG: ${{{{ inputs.slug }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
         run: |
           args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG" --refresh-only)
+          [ -n "$SLUG" ] && args+=(--slug "$SLUG")
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
           python3 -m dsl_course.collect "${{args[@]}}"
 """
@@ -839,6 +859,51 @@ on:
 {_DRY_RUN_GATE}
           [ "$SILENT" = "true" ] && args+=(--no-notify)
           python3 -m dsl_course.grades distribute "${{args[@]}}"
+"""
+
+
+def render_archive_cohort(cohort_orgs: list[str]) -> str:
+    """Close a finished cohort out: freeze the work, revoke the students, seal the record."""
+    return f"""name: Archive cohort
+
+# End of term, once, after the last grades have gone out. Revokes each student's direct
+# grant on the submission repos and gradebooks named after them, ARCHIVES those repos,
+# archives `welcome` so a finished term cannot still be joined, writes the teardown record
+# into the cohort's private classroom-config and archives that last - which is also what
+# tells the nightly refresh this cohort is finished.
+# NOTHING IS DELETED. Archiving is GitHub's reversible read-only freeze, and un-archiving a
+# repo from its own Settings page brings it back exactly as it was.
+# `dry_run` defaults to true and prints counts only. A real run refuses unless the cohort's
+# schedule.yml declares a `semester_end` that has passed; `force` says so by hand.
+# A run that dies half way is resumed by running it again - see docs/10.
+
+on:
+  workflow_dispatch:
+    inputs:
+{_cohort_dropdown(cohort_orgs)}
+      dry_run:
+        description: "Preview the teardown - freeze nothing, revoke nothing"
+        type: boolean
+        default: true
+      force:
+        description: "Close out even though the term is not over"
+        type: boolean
+        default: false
+
+{_concurrency("archive-cohort")}
+{_PERMISSIONS_JOBS}{_CHECK_TEAM}
+  archive-cohort:
+{_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Archive cohort
+        env:
+          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
+          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          DRY_RUN: ${{{{ inputs.dry_run }}}}
+          FORCE: ${{{{ inputs.force }}}}
+        run: |
+          args=(--cohort-org "$COHORT_ORG")
+{_DRY_RUN_GATE}
+          [ "$FORCE" = "true" ] && args+=(--force)
+          python3 -m dsl_course.teardown "${{args[@]}}"
 """
 
 
@@ -1175,36 +1240,38 @@ on:
 def render_new_assignment() -> str:
     """Scaffold an assignment-N-<tag> template repo (main + solution branch), then refresh.
 
-    format/type land in the solution branch's grading_config.yml (and shape the starter/hidden
-    tests), so the choice made on this workflow is the one the grader later obeys - the
-    grading_config.yml vocabulary is picked here, not hand-edited in afterwards."""
+    EIGHT boxes, and between them they are the whole assignment: everything but `format`
+    lands verbatim in the solution branch's `grading_config.yml`, which the handout, the
+    grading sheet, the receipts and the Join-team form all read. What the form does NOT ask
+    - the team cap, the late window, the penalty, the question maxima - comes from the
+    course's own `assignment_defaults:` in dsl-course.yml, and is written into that same
+    file so it can be revised there per assignment afterwards.
+
+    GitHub caps a workflow_dispatch at 10 inputs, and there is deliberately no ninth here:
+    an assignment's remaining settings belong in a file the instructor can revise, not in a
+    form filled in once, before the brief has even been written."""
     return f"""name: New assignment
 
 on:
   workflow_dispatch:
     inputs:
-      number:
-        description: "Assignment number (e.g. 1)"
+      assignment_name:
+        description: "1. The assignment's name, e.g. Neural networks from scratch"
         required: true
-      tag:
-        description: "Year tag, e.g. f2026 or s2026 - creates assignment-<number>-<tag>"
+      assignment_number:
+        description: "2. Assignment number, e.g. 1"
         required: true
-      format:
-        description: "Starter format - a .py script or a Jupyter notebook"
+      semester_tag:
+        description: "3. Year tag, e.g. f2026 or s2026 - creates assignment-<number>-<tag>"
         required: true
-        type: choice
-        default: py
-        options:
-          - py
-          - notebook
-      type:
-        description: "individual = one repo per student; group = one repo per team (teams.csv)"
-        required: true
-        type: choice
-        default: individual
-        options:
-          - individual
-          - group
+{_choice_input("format", "4. Which starter file to seed - none = the brief only. Grading reads whatever students commit either way", list(FORMATS), "ipynb")}
+{_choice_input("type", "5. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual")}
+{_choice_input("team_formation", "6. Group only: self_select = students use the Join team form; assigned = you write teams.csv", list(TEAM_FORMATIONS), "self_select")}
+{_choice_input("submit_via", "7. external = handed in off GitHub (Moodle, Kaggle, in class) - no receipts, no late arithmetic", list(SUBMIT_VIA), "github")}
+      autograde:
+        description: "8. Run the template's tests/ at the cutoff. The count is shown to graders, never to a student"
+        type: boolean
+        default: false
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
@@ -1213,14 +1280,20 @@ on:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           ORG: ${{{{ github.repository_owner }}}}
-          NUMBER: ${{{{ inputs.number }}}}
-          TAG: ${{{{ inputs.tag }}}}
+          NAME: ${{{{ inputs.assignment_name }}}}
+          NUMBER: ${{{{ inputs.assignment_number }}}}
+          TAG: ${{{{ inputs.semester_tag }}}}
           FORMAT: ${{{{ inputs.format }}}}
           TYPE: ${{{{ inputs.type }}}}
+          TEAM_FORMATION: ${{{{ inputs.team_formation }}}}
+          SUBMIT_VIA: ${{{{ inputs.submit_via }}}}
+          AUTOGRADE: ${{{{ inputs.autograde }}}}
         run: |
           gh auth setup-git
           python3 -m dsl_course.scaffold assignment --org "$ORG" --number "$NUMBER" \\
-            --tag "$TAG" --format "$FORMAT" --type "$TYPE"
+            --tag "$TAG" --name "$NAME" --format "$FORMAT" --type "$TYPE" \\
+            --team-formation "$TEAM_FORMATION" --submit-via "$SUBMIT_VIA" \\
+            --autograde "$AUTOGRADE"
           python3 -m dsl_course.seed refresh --course-org "$ORG"
 """
 

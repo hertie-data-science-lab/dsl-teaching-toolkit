@@ -82,11 +82,9 @@ from .collect import (
     collect,
     has_autograde_results,
     load_snapshots,
-    resolve_is_group,
     snapshot_assignment,
     snapshot_path,
     sync_sheet,
-    template_is_group,
 )
 from .deploy import deploy_many
 from .grades import cutoff_at, load_grading_spec, sheet_path
@@ -206,6 +204,10 @@ def _execute_nondeploy(
             # Hourly: leave existing repos alone (the manual button still repairs access).
             touch_existing=False,
             scheduled=True,
+            # WHICH entry this release was synthesised from. Two may hand out from one
+            # template, and the tick knows which it is firing - so it says, rather than
+            # letting the far end pick the first and hand out the other one's repos.
+            slug=release.assignment_slug,
         )
         if failed != 0:
             errors += 1
@@ -237,24 +239,12 @@ def _snapshot_passed_deadlines(
             log(f"    DRY-RUN  snapshot {snapshot_path(name)} (deadline {deadline})")
             continue
         log_step(f"  snapshot {name} (deadline {deadline})")
-        # Resolve group-ness the SAME way grading does, through the one
-        # `resolve_is_group` precedence - cohort schedule `type:` wins, else the
-        # template's grading_config.yml - so the snapshot freezes the exact repos
-        # grading scores. Deriving it from the schedule alone would miss a group
-        # assignment declared ONLY in grading_config.yml, freezing individual repos
-        # while grading targets group repos (every team then reads as "absent from the
-        # snapshot" and scores zero). grading_config.yml is read only when the schedule
-        # leaves type unset.
-        if entry.type is not None:
-            template_group = None
-        else:
-            template = _assignment_template(course_org, slug, entry)
-            template_group = (
-                template_is_group(course_org, template) if template else None
-            )
-        is_group = resolve_is_group(
-            force=False, schedule_type=entry.type, template_group=template_group
-        )
+        # Resolve group-ness the SAME way grading does, off the template's own
+        # grading_config.yml - so the snapshot freezes the exact repos grading scores.
+        # A template that cannot be found leaves it individual, which is the parse's
+        # default anyway.
+        template = _assignment_template(course_org, slug, entry)
+        is_group = bool(template) and load_grading_spec(course_org, template).is_group
         # `name` names the repos, `slug` (the schedule key) is what teams.csv is keyed on.
         # A FAILED freeze counts; NOTHING_TO_FREEZE (nobody handed out yet) does not, and
         # neither writes a snapshot file - which is what keeps the autograde phase off an
@@ -340,7 +330,14 @@ def _autograde_passed_deadlines(
             log(f"    DRY-RUN  autograde {slug} via {template} (deadline {deadline})")
             continue
         log_step(f"  autograde {slug} via {template} (deadline {deadline})")
-        if collect(course_org, template, cohort_org, deadline, scheduled=True) != 0:
+        # `slug` here is the schedule KEY (`due_snapshots` yields keys), which is exactly
+        # what `collect` needs to tell two entries on one template apart.
+        if (
+            collect(
+                course_org, template, cohort_org, deadline, scheduled=True, slug=slug
+            )
+            != 0
+        ):
             errors += 1
     return errors
 
@@ -414,9 +411,9 @@ def _handout_releases(
     course_org: str, cohort_org: str, sched: schedule.Schedule, now: datetime
 ) -> list[Release]:
     """Synthetic releases for `assignments.<slug>.handout_datetime` - the whole assignment
-    lifecycle (handout_datetime/due_datetime/grading_datetime/max_team_size) is declared in
-    ONE block, and the handout still fires through the exact machinery a
-    `releases` entry would: due at its datetime, re-checked every tick
+    lifecycle (handout_datetime/due_datetime/grading_datetime) is declared in ONE block,
+    and the handout still fires through the exact machinery a `releases` entry would:
+    due at its datetime, re-checked every tick
     (idempotent - a late onboarder gets their repo on the next one), per-team when the
     template's grading_config.yml says so. An assignment with no `<slug>-<tag>` template repo is
     skipped - it may be pinned for its website date alone.
@@ -449,6 +446,7 @@ def _handout_releases(
                 label=f"{slug}{schedule.HANDOUT_SUFFIX}",
                 when=entry.handout_datetime,
                 assignment=template,
+                assignment_slug=slug,
                 assignment_solution=_solution_due(cohort_org, slug, entry, now),
             )
         )
@@ -577,17 +575,9 @@ def _refresh_sheets(
             log(f"    DRY-RUN  refresh {sheet_path(name)}")
             continue
         log_step(f"  grading sheet {name}")
-        # Spelt exactly as the snapshot pass above spells it, including the short-circuit:
-        # a cohort that has declared `type:` never pays for the template read.
-        is_group = resolve_is_group(
-            force=False,
-            schedule_type=entry.type,
-            template_group=(
-                None
-                if entry.type is not None
-                else template_is_group(course_org, template)
-            ),
-        )
+        # Spelt exactly as the snapshot pass above spells it, off the one memoised read
+        # of the template's grading_config.yml.
+        is_group = load_grading_spec(course_org, template).is_group
         if not sync_sheet(
             course_org,
             cohort_org,
