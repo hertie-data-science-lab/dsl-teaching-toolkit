@@ -16,3 +16,4 @@ late_penalty_per_day: 10%     # of the EARNED grade, per day started
 autograde: true               # runs the hidden tests below at the cutoff
 tests: tests                  # where they live on THIS solution branch
 completion_check: true        # also runs the notebook itself; info.completion says how it went
+grader_pdf: false             # the hidden tests do the reading; no question fences in this one

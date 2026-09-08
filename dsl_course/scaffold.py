@@ -276,6 +276,12 @@ def _grading_config(
             "true" if fmt == "ipynb" else "false",
             "true: execute the notebook at the cutoff, record whether it runs clean",
         ),
+        _setting(
+            "grader_pdf",
+            "false",
+            "true: at the cutoff, archive each submission filtered to its marked "
+            "questions as a PDF for graders",
+        ),
     ]
     return "\n".join(lines) + "\n"
 

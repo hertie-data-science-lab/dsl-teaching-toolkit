@@ -14,3 +14,4 @@ format: py                    # ipynb | py | rmd | qmd | latex | none - the star
 # late_penalty_per_day: 10%   # of the EARNED grade, per day started
 
 autograde: false              # true: run tests/ at the cutoff and show the count to graders
+grader_pdf: false             # nothing is collected from GitHub here, so there is nothing to filter

@@ -17,3 +17,4 @@ late_penalty_per_day: 10%     # of the EARNED grade, per day started
 
 autograde: false              # hand-marked, so no tests/ is seeded on the solution branch
 completion_check: false       # not a notebook assignment; the default for `format: py`
+grader_pdf: true              # hand-marked: archive each team's fenced questions for the graders

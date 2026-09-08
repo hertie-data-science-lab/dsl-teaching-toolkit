@@ -437,6 +437,22 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
     assert written["grading_config.yml"].startswith("# INSTRUCTOR-OWNED")
 
 
+def test_the_cutoff_switches_are_written_out_with_their_defaults(fake, monkeypatch):
+    # The file teaches the whole vocabulary, so every switch the cutoff reads is on the
+    # page with the value it would have had anyway - a faculty member flips a `false`
+    # rather than having to learn a key name from the docs. `completion_check` follows
+    # `format:`; `grader_pdf` is off for everything until someone fences the questions.
+    written = _solution_files(monkeypatch)
+    for fmt, notebook in (("ipynb", True), ("py", False)):
+        assert scaffold.scaffold_assignment("Org", "1", "f2026", fmt) == 0
+        text = written["grading_config.yml"]
+        spec = grades.parse_grading_spec(text)
+        assert spec.dropped == ()
+        assert (spec.completion_check, spec.grader_pdf) == (notebook, False)
+        assert f"completion_check: {str(notebook).lower()}" in text
+        assert "grader_pdf: false" in text
+
+
 def test_a_course_with_no_defaults_gets_the_settings_commented_out(fake, monkeypatch):
     # Nothing is asserted on the course's behalf: the file teaches the whole vocabulary,
     # and a late window nobody declared stays a comment rather than becoming a policy.
