@@ -45,9 +45,11 @@ from typing import NamedTuple
 import yaml
 
 from .access import grant_team_repo_access
+from .central import MissingCentralRef, resolve_central_ref
 from .course import (
     CONFIG_REPO,
     COURSE_ADMIN_TEAM,
+    COURSE_CONFIG,
     INSTRUCTORS_TEAM,
     active_today,
     term_tag,
@@ -58,7 +60,13 @@ from .discovery import (
     discover_content_repos,
 )
 from .faults import ConfigFault
-from .gh_contents import line_of, load_yaml_config, take_lines
+from .gh_contents import (
+    get_file_content,
+    line_of,
+    load_yaml_config,
+    load_yaml_lines,
+    take_lines,
+)
 from .gh_teams import create_team, is_valid_github_username, reconcile_team_members
 from .log import log, log_err, log_ok, log_step
 
@@ -94,17 +102,21 @@ def _people_fault(
     what: str,
     lines: dict[str, int],
     file: str,
+    repo: str,
 ) -> ConfigFault:
     """One entry of a people block that the sync cannot use as written.
 
     The entry is named by its ROLE and its position, not by its handle: `where` is this
     fault's identity in the digest's state and its heading in the mail, and an entry
-    somebody renames is not a new fault. The line is what sends anybody to it."""
+    somebody renames is not a new fault. The line is what sends anybody to it - and
+    `repo`, with `file`, is what makes that line a place: the same block is a cohort's
+    `classroom-config/people.yml` and a course org's `.github/dsl-course.yml`."""
     return ConfigFault(
         f"people.{role}[{index}]",
         what,
         file=file,
         field=field,
+        in_repo=repo,
         lineno=line_of(lines, field),
     )
 
@@ -113,6 +125,7 @@ def parse_faculty_from_meta(
     meta: dict,
     faults: list[ConfigFault] | None = None,
     file: str = COHORT_PEOPLE_PATH,
+    repo: str = CONFIG_REPO,
 ) -> dict[str, list[dict]]:
     """Parse an already-loaded config mapping's `people:` block (course org's
     dsl-course.yml, or a cohort's people.yml - same schema) for the roles in ROLE_TEAM.
@@ -125,8 +138,9 @@ def parse_faculty_from_meta(
     `faults` collects the same three things for the notifier: an entry with no handle to
     grant anything to, a handle that cannot be a GitHub username (adding it to a team
     would INVITE it, so the sync skips it), and a teaching entry no notification can
-    reach. `file` names the file they are in - the same schema is a cohort's people.yml
-    and a course org's dsl-course.yml, and the fault has to cite the right one.
+    reach. `file` and `repo` name where they are - the same schema is a cohort's
+    `classroom-config/people.yml` and a course org's `.github/dsl-course.yml`, and a fault
+    that cited the wrong one would link a reader at a file that does not exist.
 
     The line stamps (`take_lines`) are consumed here whether or not anybody asked for
     faults, so no consumer downstream can ever render the loader's reserved key."""
@@ -157,9 +171,19 @@ def parse_faculty_from_meta(
                             "would invite an arbitrary account to the org)",
                             lines,
                             file,
+                            repo,
                         )
                     )
-                if role in TEACHING_ROLES and valid_email(p.get("email")) is None:
+                # A COHORT's file only. `email:` is what a notification is addressed to,
+                # and only a cohort declares people who are notified through their entry:
+                # a course org's dsl-course.yml holds course_admins (mailed through the
+                # `DSL_COURSE_ADMIN_EMAILS` org secret, never from a public file) and
+                # display-only website cards, neither of which carries one.
+                if (
+                    role in TEACHING_ROLES
+                    and file == COHORT_PEOPLE_PATH
+                    and valid_email(p.get("email")) is None
+                ):
                     log_err(
                         f"  ! {role} entry {p['github_handle']} has no usable `email:` "
                         f"- it is required (access still granted, but this person is "
@@ -175,6 +199,7 @@ def parse_faculty_from_meta(
                                 "notification reaches this person",
                                 lines,
                                 file,
+                                repo,
                             )
                         )
             elif isinstance(p, dict) and p.get("name"):
@@ -194,6 +219,7 @@ def parse_faculty_from_meta(
                             "and appears nowhere",
                             lines,
                             file,
+                            repo,
                         )
                     )
         faculty[role] = entries
@@ -405,6 +431,94 @@ def _file_fault(what: str) -> ConfigFault:
             f"instructors and teaching assistants in it"
         ),
     )
+
+
+def _course_fault(what: str, field: str = "", lineno: int | None = None) -> ConfigFault:
+    """One thing in the COURSE org's identity file the sync cannot use.
+
+    `in_repo` is the course org's public `.github`, which is what puts the citation, the
+    deep link and the blame query on the file somebody has to edit. `where` is the file
+    for a fault about the whole of it and the file plus the key for a fault about one
+    line, so the two can never collide in the digest's state."""
+    return ConfigFault(
+        COURSE_CONFIG,
+        what,
+        file=COURSE_CONFIG,
+        field=field,
+        in_repo=".github",
+        lineno=lineno,
+    )
+
+
+def read_course_config(
+    course_org: str, faults: list[ConfigFault]
+) -> dict[str, list[dict]] | None:
+    """The COURSE org's `.github/dsl-course.yml`, parsed, with everything a human must fix
+    collected. None when the file could not be used at all.
+
+    The fault-collecting twin of `load_faculty`, and deliberately not memoised for the
+    same reason `read_cohort_people` is not: it reads the file with line stamps and it is
+    asked once per tick.
+
+    Three things in this file stop the whole course being reconciled, and all three come
+    back as faults rather than as exceptions - an absent or unparseable file, an admin
+    handle no team can be given, and a `central_ref:` no workflow can be pinned to. A read
+    that FAILED still raises, because "we could not look" must never be reported to a
+    course admin as "your file is broken"."""
+    # Read and parsed here rather than through `load_yaml_config`, which turns a malformed
+    # file and a read that failed into the same RuntimeError. That distinction is the whole
+    # contract of this function, and it is not one a message match can be trusted with.
+    content = get_file_content(course_org, ".github", COURSE_CONFIG)
+    if content is None:
+        faults.append(
+            _course_fault(
+                "this file is missing, so the course declares no admins and no tier"
+            )
+        )
+        return None
+    try:
+        meta = load_yaml_lines(content)
+    except yaml.YAMLError as exc:
+        log_err(f"malformed YAML in {course_org}/.github/{COURSE_CONFIG}: {exc}")
+        faults.append(
+            _course_fault("this file is not valid YAML, so none of it is read")
+        )
+        return None
+    if meta is None:
+        meta = {}
+    if not isinstance(meta, dict):
+        log_err(
+            f"{course_org}/.github/{COURSE_CONFIG} is not a YAML mapping "
+            f"(got {type(meta).__name__}) - refusing to use it"
+        )
+        faults.append(
+            _course_fault("this file is not a YAML mapping, so none of it is read")
+        )
+        return None
+    # Taken before the people block is parsed, so the top-level keys' lines are in hand
+    # for `central_ref:` - and so the loader's reserved key cannot survive into anything
+    # that renders this mapping.
+    lines = take_lines(meta)
+    faculty = parse_faculty_from_meta(meta, faults, file=COURSE_CONFIG, repo=".github")
+    try:
+        resolve_central_ref(
+            meta.get("central_ref"), source=f"{course_org}/.github/{COURSE_CONFIG}"
+        )
+    except MissingCentralRef:
+        # Not the exception's own message: it is written for a run log and names the file
+        # again, which every surface here has already done. What a reader needs is what it
+        # COSTS - `pin_central_ref` refuses the render, so the org keeps whatever workflows
+        # it last had and takes no fix or improvement until this line is corrected.
+        faults.append(
+            _course_fault(
+                "`central_ref:` is not `main`, `release` or a full 40-character commit "
+                "SHA - every workflow this course seeds stays at its previous rendering "
+                "until it is corrected",
+                field="central_ref",
+                lineno=line_of(lines, "central_ref"),
+            )
+        )
+    return faculty
 
 
 def sync_course_admins(

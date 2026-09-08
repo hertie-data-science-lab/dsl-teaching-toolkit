@@ -448,3 +448,101 @@ def _raiser(exc):
         raise exc
 
     return raise_it
+
+
+# ---------------------------------------------- the COURSE org's own identity file
+#
+# dsl-course.yml declares the course admins and the toolkit tier every workflow under
+# this course is rendered at. A fault in it is not one cohort's problem: the sync walks
+# past the whole course, so it earns a digest of its own in the course org.
+
+
+COURSE_CONFIG = """org: Course-Org
+central_ref: release
+people:
+  course_admins:
+    - github_handle: jan-g
+    - github_handle: not a handle
+  instructors:
+    - github_handle: janedoe
+      name: Prof. Jane Doe
+"""
+
+
+def _course(monkeypatch, text: str | None):
+    monkeypatch.setattr(sync_faculty, "get_file_content", lambda *a, **k: text)
+    found: list = []
+    return sync_faculty.read_course_config("Course-Org", found), found
+
+
+def test_a_course_admin_handle_no_team_can_be_given_is_a_fault(monkeypatch):
+    faculty, found = _course(monkeypatch, COURSE_CONFIG)
+    assert [p["github_handle"] for p in faculty["course_admins"]] == [
+        "jan-g",
+        "not a handle",
+    ]
+    (fault,) = found
+    assert (fault.where, fault.field, fault.lineno) == (
+        "people.course_admins[1]",
+        "github_handle",
+        6,
+    )
+    # The COURSE org's own .github, so the citation and the deep link land on the file a
+    # course admin actually edits - not on some cohort's classroom-config.
+    assert (fault.file, fault.in_repo) == ("dsl-course.yml", ".github")
+    assert fault.link("Course-Org") == (
+        "https://github.com/Course-Org/.github/blob/main/dsl-course.yml#L6"
+    )
+
+
+def test_a_display_only_instructor_card_is_not_asked_for_an_address(monkeypatch):
+    # The course file's `instructors:` are website cards, and course-admin addresses live
+    # in an org secret - so nothing here is notified through its own entry. Requiring
+    # `email:` produced a fault, and now a mail, about a card doing exactly its job.
+    _faculty, found = _course(monkeypatch, COURSE_CONFIG)
+    assert [f.field for f in found] == ["github_handle"]
+
+
+def test_a_central_ref_nothing_can_be_pinned_to_is_a_fault(monkeypatch):
+    _faculty, found = _course(monkeypatch, "org: Course-Org\ncentral_ref: stagign\n")
+    (fault,) = found
+    assert fault.field == "central_ref" and fault.lineno == 2
+    assert "stays at its previous rendering" in fault.what
+
+
+def test_a_course_config_that_is_absent_or_unreadable_is_itself_the_fault(monkeypatch):
+    for text, expected in (
+        (None, "missing"),
+        ("people: [unclosed\n", "not valid YAML"),
+        ("- a list\n", "not a YAML mapping"),
+    ):
+        faculty, found = _course(monkeypatch, text)
+        assert faculty is None
+        (fault,) = found
+        assert expected in fault.what
+        assert fault.file == "dsl-course.yml" and fault.lineno is None
+        # One sentence for both of the course org's files, because both cost the course
+        # the same thing (`faults.CONSEQUENCE`).
+        assert "the sync skips this course" in fault.consequence
+
+
+def test_a_course_config_that_could_not_be_READ_still_raises(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("rate limited")
+
+    monkeypatch.setattr(sync_faculty, "get_file_content", boom)
+    try:
+        sync_faculty.read_course_config("Course-Org", [])
+    except RuntimeError as exc:
+        assert "rate limited" in str(exc)
+    else:
+        raise AssertionError("a read failure must not read as a broken file")
+
+
+def test_a_clean_course_config_has_no_faults(monkeypatch):
+    faculty, found = _course(
+        monkeypatch,
+        "org: Course-Org\npeople:\n  course_admins:\n    - github_handle: jan-g\n",
+    )
+    assert [p["github_handle"] for p in faculty["course_admins"]] == ["jan-g"]
+    assert found == []
