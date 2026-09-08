@@ -773,6 +773,7 @@ query($owner: String!, $name: String!, $ref: String!, $path: String!) {
 """
 
 
+@cache
 def blame_logins(
     org: str, repo: str, path: str, ref: str = "refs/heads/main"
 ) -> dict[int, str]:
@@ -783,7 +784,12 @@ def blame_logins(
     every caller already has a fallback for. Anything that could not be READ raises, on the
     same rule as `get_file_content`: absence has to be a real answer, and a rate limit
     reported as "nobody wrote this" would silently address a notification to the wrong
-    people."""
+    people.
+
+    Memoised per process, like `last_committer` and `path_committers` beside it: this used
+    to be asked once per FILE and hoisted out of the loop, and `notify.route` now asks it
+    once per FAULT - so a grading sheet with twenty unreadable marks was twenty identical
+    GraphQL blame queries of one file in one tick. `tests/conftest.py` clears it."""
     doc = gh_json(
         "api",
         "graphql",

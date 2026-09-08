@@ -747,12 +747,14 @@ def notify_config_faults(
         events = [k for keys in groups.values() for k in keys]
         if not events:
             return Unsent()
+        # Both read the course org's identity file, so they are taken ONCE and not once
+        # per recipient group - `message` is called per group by `_deliver`.
         label = _course_label(course_org, cohort_org)
+        sender = html.escape(_course_name(course_org))
 
         def message(_routed: Routed, keys: list[str]) -> tuple[str, str]:
             keys.sort()
             faults_in = [digest.faults_by_key[k] for k in keys]
-            sender = html.escape(_course_name(course_org))
             parts = [
                 f"<p>This is an automated email sent on behalf of {sender}.</p>",
                 _immediate_intro(
