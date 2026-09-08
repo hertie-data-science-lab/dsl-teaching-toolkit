@@ -795,6 +795,15 @@ def test_distribute_can_be_narrowed_to_one_assignment(tmp_path, monkeypatch):
     assert "assignment-2" not in files["grades.yml"]
 
 
+def test_a_cohort_with_no_sheet_yet_distributes_nothing(tmp_path, monkeypatch, capsys):
+    # The sheet is the only source of marks, so an empty folder is "nothing has been
+    # handed out yet" - reported, and nothing written, rather than an empty run.
+    out = _distribute(monkeypatch, tmp_path, sheets={})
+    assert out["rc"] == 1
+    assert (out["comments"], out["gradebooks"], out["config"]) == ([], [], [])
+    assert f"no {grades.SHEETS_DIR}/ in COHORT" in capsys.readouterr().err
+
+
 def test_a_slug_no_sheet_matches_distributes_nothing(tmp_path, monkeypatch, capsys):
     out = _distribute(monkeypatch, tmp_path, assignment="assignment-9")
     assert out["rc"] == 1
