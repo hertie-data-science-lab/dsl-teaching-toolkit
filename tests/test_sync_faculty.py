@@ -6,8 +6,10 @@ cohort-scoping/tag-matching helpers, which decide what gets reconciled.
 
 from __future__ import annotations
 
+import pytest
 import yaml
 
+from dsl_course import faults as faults_mod
 from dsl_course import gh_contents, sync_faculty
 
 
@@ -433,7 +435,7 @@ def test_a_people_yml_that_is_absent_or_unreadable_is_itself_the_fault(monkeypat
     for raise_or_return, expected in (
         (lambda **_: None, "missing"),
         (_raiser(yaml.YAMLError("bad")), "not valid YAML"),
-        (_raiser(RuntimeError("not a mapping")), "not a YAML mapping"),
+        (_raiser(faults_mod.Unusable("not a mapping")), "not a YAML mapping"),
     ):
         monkeypatch.setattr(
             sync_faculty,
@@ -445,6 +447,22 @@ def test_a_people_yml_that_is_absent_or_unreadable_is_itself_the_fault(monkeypat
         (fault,) = found
         assert expected in fault.what
         assert fault.file == "people.yml" and fault.lineno is None
+
+
+def test_a_read_that_failed_is_not_reported_as_a_broken_people_yml(monkeypatch):
+    # A rate limit or a token that lost its scope raises a BARE RuntimeError out of
+    # `get_file_content`. Recorded as a fault it would rewrite the digest with one entry
+    # saying people.yml is broken - closing every real fault in it as cleared and mailing
+    # the teaching team about a file nobody touched. It has to come back out.
+    monkeypatch.setattr(
+        sync_faculty,
+        "load_yaml_config",
+        lambda *a, **k: _raiser(RuntimeError("HTTP 403 rate limit"))(),
+    )
+    found = []
+    with pytest.raises(RuntimeError):
+        sync_faculty.read_cohort_people("Cohort-f2026", found)
+    assert found == []
 
 
 def _raiser(exc):

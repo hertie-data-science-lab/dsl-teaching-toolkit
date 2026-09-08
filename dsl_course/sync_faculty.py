@@ -59,7 +59,7 @@ from .discovery import (
     discover_cohorts,
     discover_content_repos,
 )
-from .faults import ConfigFault
+from .faults import ConfigFault, Unusable
 from .gh_contents import (
     get_file_content,
     line_of,
@@ -403,8 +403,13 @@ def read_cohort_people(
     except yaml.YAMLError:
         faults.append(_file_fault("this file is not valid YAML, so none of it is read"))
         return None
-    except RuntimeError:
-        # `load_yaml_config` has already said which file and what it got.
+    except Unusable:
+        # `Unusable` and NOT `RuntimeError`: `load_yaml_config` raises the first for a top
+        # level that is not a mapping, and `get_file_content` under it raises the second
+        # for any read that was not a 404 - a rate limit, a token that lost its scope. Read
+        # as the same thing, a rate limit came back as ONE fault saying people.yml is
+        # broken, which closes every real fault in that issue as cleared and mails the
+        # teaching team about it. That is the line this whole function exists to draw.
         faults.append(
             _file_fault("this file is not a YAML mapping, so none of it is read")
         )
