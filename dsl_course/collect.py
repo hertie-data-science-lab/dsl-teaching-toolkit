@@ -1965,6 +1965,39 @@ def _completion_state(executed: bytes) -> str:
     return COMPLETION_CLEAN if not errors else f"{COMPLETION_ERRORS}{errors}"
 
 
+# The kernel a Python notebook is executed with, whatever kernel it was SAVED with.
+#
+# `metadata.kernelspec.name` is whatever the student's own machine called its environment -
+# `conda-env-ml-py`, `myenv`, a VS Code interpreter hash - and nbclient resolves that name
+# literally against the kernels installed on the grading runner, where the only one is
+# `python3`. Without this a submission written anywhere but a bare Jupyter install raised
+# NoSuchKernel, wrote no output file, and was recorded `did-not-run`, i.e. "tell the
+# maintainer" - for a large share of a real cohort.
+COMPLETION_KERNEL = "python3"
+
+
+def _kernel_argv(raw: bytes) -> list[str]:
+    """The kernel override for this notebook, or nothing at all.
+
+    Only for a notebook that says it is PYTHON, or says nothing: forcing `python3` onto an R
+    or Julia submission would trade a truthful `did-not-run` for a page of syntax errors
+    recorded as the student's. Read off `language_info` (what the notebook last ran as)
+    falling back to the kernelspec's own `language`, because a kernelspec NAME is exactly
+    the thing that cannot be trusted here."""
+    try:
+        meta = json.loads(raw).get("metadata") or {}
+    except (ValueError, UnicodeDecodeError, AttributeError):
+        return []  # not a notebook we can read; nbconvert will say so its own way
+    language = str(
+        (meta.get("language_info") or {}).get("name")
+        or (meta.get("kernelspec") or {}).get("language")
+        or ""
+    ).lower()
+    if language and not language.startswith("python"):
+        return []
+    return [f"--ExecutePreprocessor.kernel_name={COMPLETION_KERNEL}"]
+
+
 def _check_completion(
     workdir: Path, starters: frozenset[str], run_root: Path
 ) -> tuple[str, bytes | None]:
@@ -1978,7 +2011,8 @@ def _check_completion(
     notebook = _completion_notebook(workdir)
     if notebook is None:
         return COMPLETION_NO_NOTEBOOK, None
-    if blob_sha(notebook.read_bytes()) in starters:
+    raw = notebook.read_bytes()
+    if blob_sha(raw) in starters:
         return COMPLETION_NOT_ATTEMPTED, None
     out = run_root / "executed"
     out.mkdir(parents=True, exist_ok=True)
@@ -1991,6 +2025,7 @@ def _check_completion(
             "--to",
             "notebook",
             "--execute",
+            *_kernel_argv(raw),
             # Run the WHOLE notebook. Without this nbclient stops at the first traceback,
             # and `errors:1` would mean "at least one" for every submission that has any.
             "--allow-errors",

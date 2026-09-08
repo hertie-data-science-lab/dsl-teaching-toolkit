@@ -2021,7 +2021,7 @@ def test_no_graded_subprocess_can_reach_back_into_the_actions_job(monkeypatch):
 # ------------------------------------------------------------------- the completion check
 
 
-def _notebook_bytes(*cells: str) -> bytes:
+def _notebook_bytes(*cells: str, metadata: dict | None = None) -> bytes:
     """A minimal valid notebook whose code cells hold `cells`, and nothing else."""
     return json.dumps(
         {
@@ -2035,7 +2035,7 @@ def _notebook_bytes(*cells: str) -> bytes:
                 }
                 for source in cells
             ],
-            "metadata": {},
+            "metadata": metadata or {},
             "nbformat": 4,
             "nbformat_minor": 5,
         }
@@ -2174,6 +2174,49 @@ def test_the_notebook_checked_is_the_shallowest_one_and_never_a_checkpoint(
     collect._check_completion(work, frozenset(), tmp_path / "r")
 
     assert spawned[0][-1] == str(work / "zzz.ipynb")
+
+
+_KERNEL_FLAG = f"--ExecutePreprocessor.kernel_name={collect.COMPLETION_KERNEL}"
+
+
+def test_a_notebook_saved_with_someone_elses_kernel_is_still_run(monkeypatch, tmp_path):
+    # conda, VS Code and every venv-backed Jupyter write their OWN environment's name into
+    # metadata.kernelspec, and nbclient resolves that name literally against the kernels on
+    # the grading runner - where the only one is python3. Left alone, the check exited
+    # NoSuchKernel, wrote no output file, and recorded `did-not-run` ("tell the maintainer")
+    # for most of a real cohort.
+    spawned = _fake_execute(monkeypatch, _executed_bytes(False))
+    work = tmp_path / "sub"
+    work.mkdir()
+    (work / "a.ipynb").write_bytes(
+        _notebook_bytes(
+            "x = 1\n",
+            metadata={
+                "kernelspec": {"name": "conda-env-ml-py", "language": "python"},
+                "language_info": {"name": "python"},
+            },
+        )
+    )
+
+    state, _executed = collect._check_completion(work, frozenset(), tmp_path / "r")
+
+    assert state == "ran-clean"
+    assert _KERNEL_FLAG in spawned[0]
+
+
+def test_a_notebook_that_is_not_python_keeps_its_own_kernel(monkeypatch, tmp_path):
+    # Forcing python3 onto an R submission would trade a truthful `did-not-run` for a page
+    # of syntax errors recorded against the student's work.
+    spawned = _fake_execute(monkeypatch, _executed_bytes(False))
+    work = tmp_path / "sub"
+    work.mkdir()
+    (work / "a.ipynb").write_bytes(
+        _notebook_bytes("x <- 1\n", metadata={"language_info": {"name": "R"}})
+    )
+
+    collect._check_completion(work, frozenset(), tmp_path / "r")
+
+    assert not [arg for arg in spawned[0] if "kernel_name" in arg]
 
 
 def test_the_completion_check_runs_offline_and_without_the_bot_token(monkeypatch):
