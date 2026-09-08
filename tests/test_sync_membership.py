@@ -1,14 +1,16 @@
 """sync_membership orchestrates course-admin (always) plus per-cohort roster/teams/
 instructors. The gh wiring is left live per the testing strategy; these pin the
-orchestration decisions: an empty registry is visible (not a silent green), and one
-cohort's failure is isolated from the rest of the batch.
+orchestration decisions: an empty registry is visible (not a silent green), one
+cohort's failure is isolated from the rest of the batch, and a file faculty have to fix
+skips its cohort without reddening the cron.
 """
 
 from __future__ import annotations
 
 import pytest
+import yaml
 
-from dsl_course import sync_membership
+from dsl_course import faults, roster, sync_membership
 
 
 def _stub_course_admins(monkeypatch, rv: int = 0):
@@ -194,3 +196,110 @@ def test_a_lock_file_that_did_not_land_is_counted(monkeypatch):
     )
 
     assert sync_membership.sync("Course", all_cohorts=True) == 1
+
+
+# ------------------------------------------- a file faculty must fix is not a failed run
+
+
+def _semicolon_roster_fault() -> Exception:
+    """The exception a `;`-delimited students.csv really raises, taken from the reader the
+    sync actually calls - not a hand-built stand-in whose type could drift from it."""
+    with pytest.raises(faults.Unusable) as caught:
+        roster.parse("hertie_email;name;github_handle\na;b;c\n")
+    return caught.value
+
+
+def _one_cohort(monkeypatch, **steps):
+    """Cohorts A, B and C, with every per-cohort step green unless `steps` says otherwise."""
+    monkeypatch.setattr(
+        sync_membership, "discover_cohorts", lambda org: ["A", "B", "C"]
+    )
+    monkeypatch.setattr(sync_membership, "discover_content_repos", lambda org: [])
+    monkeypatch.setattr(sync_membership, "discover_assignments", lambda org: [])
+    _stub_course_admins(monkeypatch)
+    monkeypatch.setattr(
+        sync_membership.sync_roster, "sync", steps.get("roster", lambda org, **k: 0)
+    )
+    monkeypatch.setattr(
+        sync_membership.sync_teams, "sync", steps.get("teams", lambda org, **k: 0)
+    )
+    monkeypatch.setattr(
+        sync_membership.sync_faculty,
+        "sync_cohort_instructors",
+        steps.get("instructors", lambda *a, **k: 0),
+    )
+
+
+def test_a_roster_nobody_can_read_skips_its_cohort_and_leaves_the_run_green(
+    monkeypatch, capsys
+):
+    # The whole point of the change: a students.csv saved as a German-locale Excel export
+    # is faculty's to fix, and it used to red this cron every night - filing "Sync
+    # membership is failing" in the course org and emailing the maintainer about a CSV in
+    # a cohort org that neither of them can fix. The fault reaches the person who saved it
+    # through the cohort's digest issue instead; the run says so and carries on.
+    fault = _semicolon_roster_fault()
+    reached = []
+
+    def roster_sync(org, **k):
+        reached.append(org)
+        if org == "B":
+            raise fault
+        return 0
+
+    _one_cohort(monkeypatch, roster=roster_sync)
+    assert sync_membership.sync("Course", all_cohorts=True) == 0
+    assert reached == ["A", "B", "C"]  # B is skipped, not the batch
+    err = capsys.readouterr().err
+    assert "cohort B has a config file the sync cannot read" in err
+    assert "this run stays green" in err
+
+
+def test_a_people_yml_that_is_not_yaml_skips_its_cohort_too(monkeypatch, capsys):
+    # The other half of the same rule, and the other exception a content fault arrives as:
+    # `load_yaml_config` raises the loader's own error for a people.yml that does not
+    # parse. Reconciling from what a half-read file says would prune every instructor the
+    # parse dropped.
+    def instructors(course, org, *a, **k):
+        if org == "B":
+            raise yaml.YAMLError("mapping values are not allowed here")
+        return 0
+
+    _one_cohort(monkeypatch, instructors=instructors)
+    assert sync_membership.sync("Course", all_cohorts=True) == 0
+    assert "cohort B has a config file the sync cannot read" in capsys.readouterr().err
+
+
+def test_the_teams_the_cohort_did_reconcile_are_not_undone_by_a_later_fault(
+    monkeypatch,
+):
+    # A content fault stops the cohort AT the fault: whatever ran before it stands. The
+    # test that matters is the negative one - nothing after it runs on a file nobody could
+    # read, so a broken teams.csv never reaches the instructor reconcile with an empty map.
+    ran: list[str] = []
+    fault = _semicolon_roster_fault()
+
+    def teams(org, **k):
+        ran.append(f"teams {org}")
+        raise fault
+
+    _one_cohort(
+        monkeypatch,
+        roster=lambda org, **k: ran.append(f"roster {org}") or 0,
+        teams=teams,
+        instructors=lambda course, org, *a, **k: ran.append(f"people {org}") or 0,
+    )
+    assert sync_membership.sync("Course", cohort_org="A") == 0
+    assert ran == ["roster A", "teams A"]
+
+
+def test_a_read_that_failed_still_reds_the_run(monkeypatch, capsys):
+    # The line the whole distinction rests on. `Unusable` IS a RuntimeError, so a plain
+    # one - a rate limit, a token that lost its scope - must not fall into the content
+    # branch and be reported to faculty as "your file is broken" on a green run.
+    def roster_sync(org, **k):
+        raise RuntimeError("HTTP 502 reading the roster")
+
+    _one_cohort(monkeypatch, roster=roster_sync)
+    assert sync_membership.sync("Course", cohort_org="A") == 1
+    assert "cohort A failed to sync" in capsys.readouterr().err

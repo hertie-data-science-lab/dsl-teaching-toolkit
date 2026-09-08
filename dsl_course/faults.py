@@ -421,6 +421,18 @@ class ConfigFault:
         return f"{self.label}{at} - {self.what} - {when}"
 
 
+class Unusable(RuntimeError):
+    """A hand-edited file the toolkit cannot read AT ALL - the header of a `;`-delimited
+    CSV export, and nothing else so far.
+
+    A RuntimeError, because every consumer already stops for one of those and must go on
+    doing exactly that: skip the file, prune nothing, act on none of it. A TYPE of its own
+    because an unattended run has to tell it apart from a `gh` read that failed, and the
+    message text is not something to match on. The two are opposite jobs - a file faculty
+    have to fix is a CONTENT fault, so the run skips it, stays green and lets the digest
+    carry it, while a read that failed is the toolkit's own problem and earns the red X."""
+
+
 def header_fault(file: str, missing: list[str]) -> ConfigFault:
     """The fault a CSV whose header cannot be read produces - one per file, not per row,
     because a header nobody can read costs the whole file.

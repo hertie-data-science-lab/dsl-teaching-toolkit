@@ -15,7 +15,7 @@ from typing import Any
 
 import yaml
 
-from .faults import ConfigFault, header_fault
+from .faults import ConfigFault, Unusable, header_fault
 from .ghcli import gh, gh_json, is_missing_resource
 from .log import log_err, log_err_person, log_skip
 from .repos import default_branch
@@ -37,10 +37,14 @@ def _require_csv_header(
     The failure this exists for: a German-locale Excel saves `;`-delimited CSV. DictReader
     then sees ONE header column, every field reads "", nothing raises, and the caller
     proceeds on an empty roster / empty marks - `enrol_codes` even wrote such a file back
-    mangled, exit 0. A header that cannot name the required columns is a hard error."""
+    mangled, exit 0. A header that cannot name the required columns is a hard error.
+
+    `Unusable` rather than a bare RuntimeError: it is still one (nothing that stops for a
+    RuntimeError stops doing so), but an unattended run must not report a file faculty
+    saved from Excel the same way it reports a `gh` read that failed - see `faults`."""
     missing = missing_columns(fieldnames, required)
     if missing:
-        raise RuntimeError(
+        raise Unusable(
             f"{what}: header lacks {', '.join(missing)} (got {list(fieldnames or [])}). "
             f"A semicolon-delimited export looks like this - save the file as "
             f"comma-separated UTF-8 CSV and try again."
@@ -874,7 +878,9 @@ def load_yaml_config(
             f"(got {type(data).__name__}) - refusing to use it"
         )
         log_err(msg)
-        # RuntimeError (not TypeError) to match the house style for a bad read/config -
-        # get_file_content and list_org_repos raise it too, and status.main catches it.
-        raise RuntimeError(msg)  # noqa: TRY004
+        # `Unusable`, which IS a RuntimeError - the house style for a bad read/config,
+        # which get_file_content and list_org_repos raise too and status.main catches -
+        # and which additionally says this is a file faculty must fix rather than a read
+        # that failed, so an unattended run can skip it and stay green (see `faults`).
+        raise Unusable(msg)
     return data

@@ -17,6 +17,14 @@ Every reconcile here is FULL (add + remove) - there is no --prune flag at this l
 config is the live truth, so a deleted roster row or a lapsed faculty `end` date
 revokes access on the very next sync.
 
+A CONTENT fault never reds this run. A students.csv saved as a `;`-delimited export, a
+teams.csv with no header, a people.yml that is not YAML: each skips its cohort and is
+reported where the person who left it there will see it - the per-file digest issue in
+that cohort's classroom-config, and the mail beside it. The exit code is kept for the
+run's own failures (a `gh` write that was refused, a token that lost its scope), because
+this cron's red X opens `Sync membership is failing` in the course org and emails the
+maintainer, and neither of them can fix a CSV in a cohort org.
+
 Usage:
     python3 -m dsl_course.sync_membership --course-org hertie-dsl-demo-course-e1234
     python3 -m dsl_course.sync_membership --course-org hertie-dsl-demo-course-e1234 --cohort-org hertie-dsl-demo-f2026
@@ -28,6 +36,8 @@ from __future__ import annotations
 import argparse
 import sys
 
+import yaml
+
 from . import sync_faculty, sync_roster, sync_teams
 from .discovery import (
     COHORTS_PATH,
@@ -35,9 +45,17 @@ from .discovery import (
     discover_cohorts,
     discover_content_repos,
 )
+from .faults import Unusable
 from .gh_teams import acting_login
 from .grades import write_team_lock
 from .log import log_err, log_ok
+
+# What a cohort's hand-edited config can be wrong in a way this sync cannot act on: a CSV
+# whose header nobody can read (`faults.Unusable`, raised by `gh_contents.read_csv`) and a
+# people.yml that is not YAML at all. Both mean the same thing here - the file says
+# nothing this run may reconcile from, and reconciling from what it does say would prune
+# a cohort's teams down to whatever survived the parse.
+_CONTENT_FAULT = (Unusable, yaml.YAMLError)
 
 
 def sync(
@@ -105,6 +123,20 @@ def sync(
             # and a form answering off a stale mirror either refuses a real team or lets
             # one form for an assignment the template says is individual.
             errors += 0 if write_team_lock(course_org, org, dry_run=dry_run) else 1
+        except _CONTENT_FAULT as exc:
+            # A file faculty have to fix, not a run that broke. This cohort is skipped -
+            # a roster nobody can read is not an empty roster, and acting on it would
+            # revoke access from everybody the parse dropped - but the run stays GREEN
+            # and files no "Sync membership is failing" issue: the fault already reaches
+            # the person who left it there, through the digest issue in this cohort's
+            # classroom-config and the mail beside it (`scheduler._preflight_configs`).
+            # A red X here said only "something is wrong somewhere", every hour, to a
+            # course-admin team that cannot fix a CSV in a cohort org.
+            log_err(
+                f"cohort {org} has a config file the sync cannot read ({exc}) - "
+                f"skipping this cohort. The digest issue in {org}/classroom-config "
+                f"names the line to fix; this run stays green."
+            )
         except Exception as exc:
             # Broad by design: this is the batch-isolation boundary, so one cohort's
             # failure (even an unexpected programming error) must not abandon the rest.
