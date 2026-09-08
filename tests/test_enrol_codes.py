@@ -650,6 +650,24 @@ def test_a_semicolon_roster_sends_nothing_and_leaves_the_run_green(monkeypatch, 
     assert "ada@uni.edu" not in err  # the log is public
 
 
+def test_a_roster_with_no_header_row_names_no_cell_in_the_public_log(
+    monkeypatch, capsys
+):
+    # The other way a header goes missing: somebody deletes the row. DictReader then reads
+    # the FIRST STUDENT as the header, so the columns it "found" are a name, an address
+    # and a handle - and this message is logged verbatim by a workflow running in a public
+    # repo. It says which columns are MISSING (the toolkit's own vocabulary) and never
+    # which it found.
+    headerless = "ada@uni.edu,Ada,enrolled,ada-l,42,\nbob@uni.edu,Bob,enrolled,,,\n"
+    outcome, sent, written = _run_with(monkeypatch, headerless)
+    assert outcome is enrol_codes.Outcome.UNUSABLE_ROSTER
+    assert sent == [] and written == []
+    err = capsys.readouterr().err
+    assert "header lacks" in err
+    for cell in ("ada@uni.edu", "Ada", "ada-l"):
+        assert cell not in err
+
+
 def test_an_absent_roster_and_a_missing_transport_still_red(monkeypatch):
     # The line the green outcome must not cross. A roster that is not there and a mail
     # transport that is not configured are the toolkit's own problem, not a file somebody

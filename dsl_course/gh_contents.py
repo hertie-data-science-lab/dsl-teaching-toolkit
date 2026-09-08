@@ -41,13 +41,19 @@ def _require_csv_header(
 
     `Unusable` rather than a bare RuntimeError: it is still one (nothing that stops for a
     RuntimeError stops doing so), but an unattended run must not report a file faculty
-    saved from Excel the same way it reports a `gh` read that failed - see `faults`."""
+    saved from Excel the same way it reports a `gh` read that failed - see `faults`.
+
+    It names the columns that are MISSING - a constant of the toolkit's - and never the
+    ones it FOUND. A file whose header row was deleted has DictReader reading the first
+    student as the header, so `fieldnames` is then a name, an address and a handle; this
+    message is logged verbatim by `enrol_codes.run` and `sync_membership.sync`, both of
+    which run in a PUBLIC repo. Same rule as `faults.header_fault`, which says the same
+    thing to the digest issue and the mail."""
     missing = missing_columns(fieldnames, required)
     if missing:
         raise Unusable(
-            f"{what}: header lacks {', '.join(missing)} (got {list(fieldnames or [])}). "
-            f"A semicolon-delimited export looks like this - save the file as "
-            f"comma-separated UTF-8 CSV and try again."
+            f"{what}: header lacks {', '.join(missing)}. A semicolon-delimited export "
+            f"looks like this - save the file as comma-separated UTF-8 CSV and try again."
         )
 
 
