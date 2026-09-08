@@ -99,7 +99,8 @@ def test_faculty_and_cohort_team_sets_are_disjoint():
 
 def test_cohort_infra_repos_get_the_faculty_grant():
     # A cohort org is default_repository_permission=none, so a non-owner instructor could
-    # not open classroom-config (schedule.yml/students.csv/teams.csv/people.yml + grades/)
+    # not open classroom-config (schedule.yml/students.csv/teams.csv/people.yml, and the
+    # grading sheets)
     # or triage welcome's needs-review onboarding issues without these.
     assert set(bootstrap_course.COHORT_FACULTY_REPOS) == {"welcome", "classroom-config"}
     # ...and single-sourced with the nightly sweep's write floor, so a repo cannot be

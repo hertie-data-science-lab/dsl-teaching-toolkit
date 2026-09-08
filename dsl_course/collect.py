@@ -422,9 +422,9 @@ def submission_targets(
         # teams.csv is student-writable (the welcome "Join team" issue appends rows), so its
         # handles pass the SAME roster allowlist `assign.provision_all` vets them through
         # before they are handed out - `sync_teams.vet_groups` is that one allowlist.
-        # Unvetted, a typo'd or invented handle earned a row of its OWN in the grades CSV -
-        # the file faculty mark from and `render` fans out into per-student gradebooks -
-        # for an account with no place in the cohort at all.
+        # Unvetted, a typo'd or invented handle earned a block of its OWN in the grading
+        # sheet - the file faculty mark in, and `distribute` fans out from - for an account
+        # with no place in the cohort at all.
         out = []
         for team, vetted, rejected in sync_teams.vet_groups(
             groups, roster.enrolled(roster.load(cohort_org) or [])
@@ -1849,7 +1849,8 @@ def collect(
     scheduled: bool = False,
 ) -> int:
     """Autograde every submission for `template` as of `deadline`, archiving result.json and
-    recording the machine score into the cohort's private grades CSV. Idempotent.
+    recording the machine score into the cohort's grading sheet (`info.autograde`).
+    Idempotent.
 
     `scheduled` marks the hourly cron: an assignment with no submission targets is then a
     "not yet", never the permanent not-machine-graded record a button press writes."""
@@ -2023,8 +2024,8 @@ def collect(
         # `{unit key: "passed/total"}` - what `info.autograde` shows a grader at the
         # cutoff. Per UNIT, not per member: a team is graded once, on one commit.
         scores: dict[str, str] = {}
-        # The per-target result archives are held here and written only AFTER the grades CSV
-        # is durable (see below), with the `_graded.json` sentinel written last of all. Writing
+        # The per-target result archives are held here and written only AFTER the grading
+        # sheet is durable (see below), with the `_graded.json` sentinel written last. Writing
         # archives mid-loop is what let an aborted run un-grade everyone back when bare
         # `autograde/<slug>/` existence was the marker; the explicit sentinel now decouples the
         # marker from any archive write, but the ordering is kept as defence in depth.

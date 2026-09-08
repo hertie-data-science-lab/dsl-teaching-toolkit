@@ -52,7 +52,7 @@ is_template: main + solution branch`"]
     wel["`welcome
 Join course issue → onboard`"]
     ros["`classroom-config
-roster, teams, grades, snapshots, schedule, people`"]
+roster, teams, grading sheets, snapshots, schedule, people`"]
     cmat["`materials
 released lectures/readings`"]
     stu["`slug-handle
@@ -214,7 +214,7 @@ so an admin added via the Teams UI or a one-off `gh api` call must also be decla
 
 A **cohort** is bootstrapped from the course org's own **Bootstrap cohort** button (not the
 central action), given the empty cohort org's name. It runs the same `bootstrap_course` with
-`--cohort`: seeds `welcome` + `classroom-config` (roster, teams, grades, `schedule.yml`,
+`--cohort`: seeds `welcome` + `classroom-config` (roster, teams, `schedule.yml`,
 `people.yml`), creates the `students` + `auditors` teams, tightens permissions, scaffolds the
 website, applies the course's current `course_admins`, registers the cohort in the course's
 `cohort-courses-pages.yml`, and writes a small `.github/dsl-course.yml` **pointer** (`course:`,

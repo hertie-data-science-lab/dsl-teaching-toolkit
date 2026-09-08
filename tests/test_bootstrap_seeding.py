@@ -54,8 +54,8 @@ from dsl_course.central import CENTRAL
 from dsl_course.repos import Converged
 from tests.conftest import repo_row, stub_bootstrap
 
-# Derived from the seeding tables, so a sixth config file cannot silently miss the set
-# these tests police - which is the whole point of the tables existing.
+# Derived from the seeding table, so a fifth config file cannot silently miss the set
+# these tests police - which is the whole point of the table existing.
 USER_OWNED = set(welcome.CLASSROOM_SCAFFOLDS)
 SYSTEM_OWNED = {
     ".github/workflows/dispatch-sync.yml",
@@ -1461,8 +1461,8 @@ def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypat
     # THE no-clobber invariant. refresh_classroom_system_files runs nightly against LIVE
     # cohorts, so every path it writes is a path overwritten from a template every night.
     # The cohort's own config - students.csv (enrol codes + onboarded handles), teams.csv,
-    # schedule.yml, people.yml, grades/ - is seeded create-if-missing at bootstrap and must
-    # stay that way; adding one of them to the refresh set would destroy a live roster
+    # schedule.yml, people.yml - is seeded create-if-missing at bootstrap and must stay
+    # that way; adding one of them to the refresh set would destroy a live roster
     # (which is exactly what happened once, in hertie-dsl-demo-f2026).
     #
     # Hard-coded on purpose: deriving the expectation from welcome.CLASSROOM_SYSTEM_FILES
@@ -1486,8 +1486,8 @@ def test_the_nightly_classroom_refresh_touches_only_system_owned_files(monkeypat
         ".github/workflows/validate-schedule.yml",
     }, (
         "the nightly refresh may only re-push SYSTEM-owned classroom-config files; a "
-        "USER-owned file here (students.csv, teams.csv, schedule.yml, people.yml, "
-        "grades/) would be overwritten from the template every night"
+        "USER-owned file here (students.csv, teams.csv, schedule.yml, people.yml) "
+        "would be overwritten from the template every night"
     )
     assert {repo for repo, _ in written} == {roster.CONFIG_REPO}
     # No path is written twice, so the count callers add up is one per file.

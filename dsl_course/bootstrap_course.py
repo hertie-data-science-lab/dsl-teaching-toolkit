@@ -565,7 +565,7 @@ def setup_cohort_extras(org: str, central_ref: str) -> int:
         # One commit for the set: seeding a cohort's config is a single act, and writing it
         # file by file put a burst of near-identical `init:`/`docs: seed` commits at the top
         # of a repo faculty then work in by hand. Create-only is unchanged and still per
-        # file - a re-run that finds five of six present writes only the sixth.
+        # file - a re-run that finds three of the four present writes only the fourth.
         if not put_files(
             org,
             "classroom-config",
