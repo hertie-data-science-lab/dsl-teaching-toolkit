@@ -769,6 +769,40 @@ def test_a_people_fault_names_its_own_file(wired):
     assert "people.yml#L6" in sent.one["body"]
 
 
+def _sheet_fault() -> notify.ConfigFault:
+    """A mark a grader typed that is not a number - the sheet's own shape of fault: the
+    line and never the unit, because the unit key is a student's handle."""
+    return notify.ConfigFault(
+        "a3 line 5",
+        "a mark on this line is not a number, so nothing for this unit is sent",
+        file="grading_sheets/a3.yml",
+        field="score_individual",
+        lineno=5,
+        fix_text="correct the mark on line 5 - a mark must be a number, or blank",
+    )
+
+
+def test_a_grading_sheet_fault_links_the_sheet_it_is_in_not_the_folder(wired):
+    # ONE issue and one letter for every sheet in the cohort, and every line in it links
+    # the sheet it is about: the digest names the folder, the fault names the file.
+    sent = wired(blame={5: "JanG"})
+    routing = notify.route(COHORT, COURSE, [_sheet_fault()], NOW)
+    _mail_config([_sheet_fault()], routing, spec=config_digest.GRADING_SHEETS)
+    assert sent.one["subject"] == (
+        "[Course Name f2026] grading_sheets/ has 1 entry the toolkit cannot use"
+    )
+    assert "that sheet is not refreshed, and nothing on it is sent" in sent.one["body"]
+    assert "classroom-config/blob/main/grading_sheets/a3.yml#L5" in sent.one["body"]
+    assert "a3 line 5 -&gt; score_individual" in sent.one["body"]
+
+
+def test_a_grading_sheet_mail_never_names_the_student_it_is_about(wired):
+    sent = wired(blame={5: "JanG"})
+    routing = notify.route(COHORT, COURSE, [_sheet_fault()], NOW)
+    _mail_config([_sheet_fault()], routing, spec=config_digest.GRADING_SHEETS)
+    assert "ada-l" not in sent.one["body"] and "ada-l" not in sent.one["subject"]
+
+
 def test_no_mail_transport_says_so_once_and_never_raises(wired, capsys):
     wired(pushers=("JanG",), configured=False)
     routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)

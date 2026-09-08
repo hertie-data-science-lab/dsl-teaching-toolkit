@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tempfile
 import textwrap
@@ -61,6 +62,7 @@ from .discovery import (
     list_org_repos,
     org_meta,
 )
+from .faults import ConfigFault
 from .gh_contents import (
     blob_sha,
     dump_csv,
@@ -408,10 +410,15 @@ def _no_duplicate_keys(loader: yaml.SafeLoader, node, deep: bool = False) -> dic
     for key_node, value_node in node.value:
         key = loader.construct_object(key_node, deep=deep)
         if key in mapping:
+            # The key is NOT named. In a grading sheet the key of a unit is a student
+            # handle (or a team name), and this message reaches a public run log, a
+            # public issue and an email - see the privacy rule in CLAUDE.md. The line
+            # the mark carries is what somebody needs anyway.
             raise yaml.constructor.ConstructorError(
                 "while reading a grading sheet",
                 node.start_mark,
-                f"the key `{key}` appears twice",
+                "the key on this line appears twice - the second copy would "
+                "silently replace the first",
                 key_node.start_mark,
             )
         mapping[key] = loader.construct_object(value_node, deep=deep)
@@ -423,18 +430,69 @@ _SheetLoader.add_constructor(
 )
 
 
-def parse_sheet(text: str) -> dict:
+def _mark_line(exc: yaml.YAMLError) -> int | None:
+    """The 1-based line a YAML error happened on, or None when it does not say."""
+    mark = getattr(exc, "problem_mark", None) or getattr(exc, "context_mark", None)
+    return mark.line + 1 if mark is not None else None
+
+
+def _problem(exc: yaml.YAMLError) -> str:
+    """The parser's own complaint about a sheet that does not parse, and nothing else.
+
+    Not `str(exc)`, which is what the message used to be: PyYAML renders the offending
+    source LINE into it, and in a grading sheet that line carries a handle, a team name or
+    a mark. The message travels to a public run log, a public issue and an email."""
+    return " ".join(str(getattr(exc, "problem", "") or "").split())
+
+
+def _unreadable(exc: yaml.YAMLError) -> str:
+    """`_problem`, plus the line - what a reader with no other citation is told."""
+    problem, line = _problem(exc), _mark_line(exc)
+    if not problem:
+        return "the file is not valid YAML"
+    return f"{problem} (line {line})" if line else problem
+
+
+def parse_sheet(
+    text: str, faults: list[ConfigFault] | None = None, slug: str = ""
+) -> dict:
     """A grading sheet's YAML into a dict ({} when the file is empty).
 
     Raises `SheetUnreadable` rather than returning anything for a file that does not parse
     or is not a mapping. This is hand-typed YAML in a repo a grader edits in the browser,
     so a broken save is ordinary; what must never happen is the toolkit reading one as an
-    empty sheet and writing a blank file back over it."""
+    empty sheet and writing a blank file back over it.
+
+    A caller that passes `faults` gets the same thing RECORDED as well as raised - the
+    raise is what every reader already does the right thing about (leave the file alone),
+    and the fault is what reaches the grader who saved it. Recorded first, so the caller
+    catching the error still has it. `slug` names the sheet the fault is in."""
     try:
         data = yaml.load(text, Loader=_SheetLoader) or {}
     except yaml.YAMLError as exc:
-        raise SheetUnreadable(" ".join(str(exc).split())) from exc
+        if faults is not None:
+            faults.append(
+                _sheet_fault(
+                    slug,
+                    "this sheet is not valid YAML, so nothing on it is refreshed or "
+                    "sent" + (f": {_problem(exc)}" if _problem(exc) else ""),
+                    lineno=_mark_line(exc),
+                    fix="fix the YAML on the line above; nothing on this sheet is "
+                    "refreshed or sent until it parses",
+                )
+            )
+        raise SheetUnreadable(_unreadable(exc)) from exc
     if not isinstance(data, dict):
+        if faults is not None:
+            faults.append(
+                _sheet_fault(
+                    slug,
+                    "this sheet is not a mapping of submission units, so it is left "
+                    "exactly as it is",
+                    fix="restore the sheet's shape - a `submissions:` (or `teams:`) "
+                    "block of one entry per submission unit",
+                )
+            )
         raise SheetUnreadable("the file is not a mapping")
     return data
 
@@ -1869,7 +1927,13 @@ def _score_fault(spec: SheetSpec, score: object) -> str:
     return "score" if any(_is_typo(value) for value in score.values()) else ""
 
 
-def sheet_hold_reasons(spec: SheetSpec, sheet: dict) -> dict[str, str]:
+def sheet_hold_reasons(
+    spec: SheetSpec,
+    sheet: dict,
+    faults: list[ConfigFault] | None = None,
+    text: str = "",
+    slug: str = "",
+) -> dict[str, str]:
     """Every handle in this sheet whose mark a person still has to settle, and why.
 
     What a grader TYPED, checked before any of it is sent - as against
@@ -1879,9 +1943,33 @@ def sheet_hold_reasons(spec: SheetSpec, sheet: dict) -> dict[str, str]:
     penalty had been waived; a stray `Q5` was added to a total the assignment has no
     maximum for; and a handle in two teams took whichever team the loop reached last.
 
-    One reason per handle, the first found: this is a line in a log, not a diagnosis."""
+    One reason per handle, the first found: this is a line in a log, not a diagnosis.
+
+    A caller that passes `faults` gets the same list as `ConfigFault`s, so the grader who
+    typed it hears about it instead of a dry-run count nobody is watching. Each names its
+    LINE in `text` and never the unit it is in: a unit key is a student handle or a team
+    name, and a fault travels to a public issue and an email."""
     held: dict[str, str] = {}
     seen: set[str] = set()
+    lines = key_lines(text) if faults is not None else {}
+
+    def record(unit_key: str, handle: str, reason: str) -> None:
+        held[handle] = reason
+        if faults is None:
+            return
+        lineno = _hold_line(lines, spec, unit_key, handle, reason)
+        what, fix = _HOLD_FAULT[reason]
+        faults.append(
+            _sheet_fault(
+                slug,
+                what,
+                lineno=lineno,
+                # No field for a duplicate: the key that repeats IS the handle.
+                field="" if reason == "duplicate" else _hold_field(spec, reason),
+                fix=fix.format(at=f"line {lineno}" if lineno else "that line"),
+            )
+        )
+
     for unit_key, block in ((sheet or {}).get(spec.container_key) or {}).items():
         if not isinstance(block, dict):
             continue  # a unit mid-edit; the next run reads a whole block
@@ -1889,7 +1977,7 @@ def sheet_hold_reasons(spec: SheetSpec, sheet: dict) -> dict[str, str]:
         people = (block.get("members") or {}) if spec.is_group else {unit_key: block}
         for handle, person in people.items():
             if handle in seen:
-                held[handle] = "duplicate"
+                record(unit_key, handle, "duplicate")
                 continue
             seen.add(handle)
             person = person if isinstance(person, dict) else {}
@@ -1897,8 +1985,191 @@ def sheet_hold_reasons(spec: SheetSpec, sheet: dict) -> dict[str, str]:
                 "adjustment" if _is_typo(person.get("adjustment_individual")) else ""
             )
             if reason:
-                held[handle] = reason
+                record(unit_key, handle, reason)
     return held
+
+
+# ------------------------------------------- what the grader is told, and where it is
+
+# What each hold reason IS and what would put it right, in the words that reach a public
+# issue and an email. Every sentence names a LINE and never the unit it is in, because a
+# unit key is a student handle or a team name (see the privacy rule in CLAUDE.md) - which
+# is also why the sentences read "this line" rather than naming what is on it.
+_HOLD_FAULT = {
+    "score": (
+        "a mark on this line is not a number, so nothing for this unit is sent",
+        "correct the mark on {at} - a mark must be a number, or blank",
+    ),
+    "adjustment": (
+        (
+            "the adjustment on this line is not a number, so nothing for this person "
+            "is sent"
+        ),
+        "correct the adjustment on {at} - a word processor's minus sign is not one",
+    ),
+    "question": (
+        (
+            "this line marks a question the assignment does not declare, so nothing "
+            "for this unit is sent"
+        ),
+        (
+            "remove the question on {at}, or declare it in the assignment's "
+            "grading_config.yml"
+        ),
+    ),
+    "duplicate": (
+        "the handle on this line is also in another submission unit, so both are held",
+        "leave the handle on {at} in one submission unit only",
+    ),
+}
+
+
+def _hold_field(spec: SheetSpec, reason: str) -> str:
+    """The key a hold reason is about - the one thing in the fault's heading that is safe
+    to name, because it is the toolkit's own vocabulary rather than anything a grader
+    typed."""
+    return (
+        spec.score_key if reason in ("score", "question") else "adjustment_individual"
+    )
+
+
+def _hold_line(
+    lines: dict[tuple[str, ...], int],
+    spec: SheetSpec,
+    unit: str,
+    handle: str,
+    reason: str,
+) -> int | None:
+    """The line of the sheet a hold reason is written on, or None when the scan cannot
+    see it - a fault citing the file without a line still beats no fault."""
+    base = (spec.container_key, unit)
+    if reason in ("score", "question"):
+        path = base + (spec.score_key,)
+    elif reason == "adjustment":
+        path = base + (
+            ("members", handle, "adjustment_individual")
+            if spec.is_group
+            else ("adjustment_individual",)
+        )
+    else:
+        # The repeated handle itself: its own line in a group's `members:`, and the unit
+        # key in an individual sheet, where the unit IS the handle.
+        path = base + (("members", handle) if spec.is_group else ())
+    return lines.get(path) or lines.get(base) or lines.get((spec.container_key,))
+
+
+# A block key and the indent it sits at. A leading `- ` counts as indent, so a list item's
+# first key nests under the list rather than beside it; a `#` line is not a key at all.
+_BLOCK_KEY = re.compile(r"^(\s*(?:-\s+)?)(?![#\s])([^:#]+?):(?:\s|$)")
+
+
+def key_lines(text: str) -> dict[tuple[str, ...], int]:
+    """`{(key, sub-key, ...): the 1-based line it is written on}` for one YAML file.
+
+    A TEXT scan, and deliberately so. The grading sheet's loader hands back a plain dict -
+    stamping line numbers into it the way `gh_contents.LineLoader` does would put a
+    reserved key inside a mapping that gets written straight back into the grader's file -
+    and this is only ever asked WHERE a fault is, never what the file says. Indentation is
+    the whole of the nesting rule, which is all these files use; a key the scan cannot see
+    (a flow mapping, a folded block) simply leaves its fault citing the file with no line.
+
+    The FIRST occurrence of a path wins: the sheet's own parser refuses a duplicate key
+    long before anything asks this."""
+    out: dict[tuple[str, ...], int] = {}
+    stack: list[tuple[int, str]] = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        match = _BLOCK_KEY.match(line)
+        if not match:
+            continue
+        indent = len(match.group(1))
+        key = match.group(2).strip().strip("\"'")
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        out.setdefault(tuple(k for _indent, k in stack) + (key,), lineno)
+        stack.append((indent, key))
+    return out
+
+
+def _sheet_fault(
+    slug: str, what: str, lineno: int | None = None, field: str = "", fix: str = ""
+) -> ConfigFault:
+    """One thing in one grading sheet a grader has to settle.
+
+    `where` is the sheet and the LINE, never the unit: a unit key is a student handle or a
+    team name, and `where` is this fault's heading in the mail and its identity in the
+    digest's state. The slug is part of it because one digest issue carries every sheet in
+    the cohort, so two sheets' line 42 must not be one fault."""
+    return ConfigFault(
+        f"{slug} line {lineno}" if lineno else slug,
+        what,
+        field=field,
+        lineno=lineno,
+        # The SHEET's own path, not the digest's label for the folder: this is what the
+        # deep link and the blame query use, so each fault lands on the sheet it is in.
+        file=sheet_path(slug),
+        fix_text=fix,
+    )
+
+
+def sheet_faults(
+    slug: str, text: str, spec: SheetSpec | None = None
+) -> list[ConfigFault]:
+    """Everything in ONE grading sheet that a grader has to settle before anything can be
+    refreshed or sent: a file that does not parse, a container that is not a mapping of
+    units, and every mark the pipeline would otherwise hold.
+
+    Immediate faults, every one of them (`fires` is None): nothing about a mark nobody can
+    read improves by waiting, and the sheet is not refreshed or distributed while it
+    stands.
+
+    `spec` is the assignment's definition, for the question names a mark is checked
+    against; without one the sheet's own shape is read off it and the maxima are simply
+    unknown."""
+    faults: list[ConfigFault] = []
+    try:
+        sheet = parse_sheet(text, faults, slug)
+    except SheetUnreadable:
+        return faults  # `parse_sheet` recorded it; there is nothing else to read
+    spec = spec or _spec_from_sheet(slug, sheet)
+    container = sheet.get(spec.container_key)
+    if container is not None and not isinstance(container, dict):
+        return [
+            _sheet_fault(
+                slug,
+                f"`{spec.container_key}:` is not a mapping of submission units, so the "
+                f"sheet is left exactly as it is",
+                lineno=key_lines(text).get((spec.container_key,)),
+                field=spec.container_key,
+                fix=f"restore `{spec.container_key}:` to one indented entry per "
+                f"submission unit",
+            )
+        ]
+    sheet_hold_reasons(spec, sheet, faults, text, slug)
+    return faults
+
+
+def cohort_sheet_faults(
+    course_org: str, cohort_org: str, sched, found: list[ConfigFault]
+) -> None:
+    """Every grading sheet this cohort's plan declares, and everything in each of them a
+    grader has to settle.
+
+    Asked on the scheduled tick and NOWHERE else - no push fast path. A sheet is edited
+    all day while marking, so a notification per save would mail a grader about a file
+    they are still typing into; the tick catches it once it has been left that way.
+
+    Nothing is appended until every sheet has been READ. Half a list is worse than none:
+    the digest closes what it is not handed, so a rate limit part-way through would report
+    the sheets it never reached as repaired. A read that failed raises, and the caller
+    drops the sheets from this tick (see `scheduler._config_faults`)."""
+    specs = sheet_specs(course_org, sched)
+    faults: list[ConfigFault] = []
+    for name in sorted(specs):
+        text = get_file_content(cohort_org, CONFIG_REPO, sheet_path(name))
+        if text is None:
+            continue  # no sheet yet - the normal state before an assignment is due
+        faults += sheet_faults(name, text, specs[name])
+    found.extend(faults)
 
 
 def needs_hand_decision(view: dict) -> bool:

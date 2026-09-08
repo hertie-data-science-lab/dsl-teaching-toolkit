@@ -64,6 +64,7 @@ from .faults import (
     hours,
     zone_name,
 )
+from .grades import SHEETS_DIR
 from .issues import close_issues_titled, find_issues, issue_url, upsert_issue
 from .log import log_err, log_ok, log_step
 from .roster import ROSTER_PATH
@@ -117,6 +118,14 @@ TEAMS = Digest(
     title="teams.csv has rows the toolkit cannot use",
     file=TEAMS_PATH,
     doc="docs/09-release-assignment-to-cohort.md",
+)
+# The FOLDER, not one sheet: a cohort marks half a dozen assignments at once and an issue
+# per sheet would be six threads about one grader's afternoon. Each fault still carries
+# its own sheet's path, so every line in the body links the sheet it is in.
+GRADING_SHEETS = Digest(
+    title="grading sheets have entries the grader cannot read",
+    file=f"{SHEETS_DIR}/",
+    doc="docs/10-grade-and-return-assignments.md",
 )
 
 # What closing one of these issues says. One string, because two issues are closed with

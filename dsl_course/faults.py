@@ -146,6 +146,9 @@ CONSEQUENCE = {
         "the whole roster is skipped: nobody new is enrolled or sent a code"
     ),
     "teams.csv": "that row is ignored: the team is not created or the member not added",
+    # Keyed on the DIGEST's label for the folder, not on one sheet's path: every grading
+    # sheet in the cohort is carried by one issue and one letter.
+    "grading_sheets/": "that sheet is not refreshed, and nothing on it is sent",
 }
 
 # What to do about a CSV whose header the toolkit cannot read. The same sentence for every

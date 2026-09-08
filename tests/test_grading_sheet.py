@@ -14,6 +14,7 @@ from decimal import Decimal
 
 import pytest
 
+from dsl_course import grades
 from dsl_course.grades import (
     INFO_COMMENT,
     NOTES_KEY,
@@ -21,11 +22,13 @@ from dsl_course.grades import (
     SheetUnreadable,
     dump_sheet,
     final_grade,
+    key_lines,
     merge_sheet,
     new_sheet,
     parse_sheet,
     penalty_rate,
     score_total,
+    sheet_faults,
     sheet_path,
 )
 
@@ -619,3 +622,194 @@ def test_a_duplicate_key_is_refused_rather_than_silently_resolved():
 def test_the_header_tells_a_grader_their_comments_do_not_survive_a_rewrite():
     spec = SheetSpec(slug="assignment-1", title="Intro", is_group=False)
     assert "comments you add are not preserved" in dump_sheet({}, spec, "OPEN")
+
+
+# ------------------------------------------- what the grader is told about their sheet
+#
+# A grading sheet is the one hand-typed file whose keys are PEOPLE, so everything below is
+# two promises at once: the fault says enough to fix the line, and it says it without ever
+# naming the student or the team it is about. The dry-run count that used to carry these
+# is printed into a run nobody is watching.
+
+INDIVIDUAL_SHEET = """\
+submissions:
+  ada-l:
+    info:
+      submitted: 2026-10-01
+    score_individual:
+      Q1: 14/15
+    adjustment_individual: null
+  ben-k:
+    score_individual:
+      Q1: 8
+    adjustment_individual: "\u22123"
+"""
+
+GROUP_SHEET = """\
+teams:
+  team-alpha:
+    score_group:
+      Q1: 12
+    members:
+      ada-l:
+        adjustment_individual: null
+      ben-k:
+        adjustment_individual: null
+  team-beta:
+    score_group:
+      Q1: 9
+    members:
+      ben-k:
+        adjustment_individual: null
+"""
+
+
+def _pii_free(faults, *secrets: str) -> None:
+    """Nothing a fault carries to a public issue or an email may name a person."""
+    for fault in faults:
+        text = f"{fault.where} {fault.what} {fault.field} {fault.fix()} {fault.at}"
+        for secret in secrets:
+            assert secret not in text, text
+
+
+def test_a_mark_that_is_not_a_number_is_a_fault_on_its_own_line():
+    (fault,) = [
+        f
+        for f in sheet_faults("a3", INDIVIDUAL_SHEET, individual(questions=QUESTIONS))
+        if f.field == "score_individual"
+    ]
+    assert fault.lineno == 5 and fault.at == "grading_sheets/a3.yml:5"
+    assert fault.where == "a3 line 5"
+    assert "not a number" in fault.what
+    assert fault.fires is None  # nothing about it improves by waiting
+
+
+def test_a_word_processors_minus_sign_is_a_fault_on_the_adjustment_line():
+    (fault,) = [
+        f
+        for f in sheet_faults("a3", INDIVIDUAL_SHEET, individual(questions=QUESTIONS))
+        if f.field == "adjustment_individual"
+    ]
+    assert fault.lineno == 11
+    assert "adjustment" in fault.what and "not a number" in fault.what
+
+
+def test_a_question_the_assignment_never_declared_is_a_fault():
+    text = "submissions:\n  ada-l:\n    score_individual:\n      Q5: 3\n"
+    (fault,) = sheet_faults("a3", text, individual(questions=QUESTIONS))
+    assert fault.lineno == 3  # the score cell, which is the block to correct
+    assert "does not declare" in fault.what
+
+
+def test_a_handle_in_two_teams_is_a_fault_on_the_second_line_it_is_on():
+    faults = sheet_faults("a3", GROUP_SHEET, group(questions=QUESTIONS))
+    assert [f.lineno for f in faults] == [14]
+    assert "also in another submission unit" in faults[0].what
+    # No field: the key that repeats IS the handle, and a fault names the toolkit's
+    # vocabulary or nothing at all.
+    assert faults[0].field == ""
+
+
+def test_no_fault_from_a_sheet_ever_names_the_student_or_the_team():
+    _pii_free(
+        sheet_faults("a3", INDIVIDUAL_SHEET, individual(questions=QUESTIONS)),
+        "ada-l",
+        "ben-k",
+    )
+    _pii_free(
+        sheet_faults("a3", GROUP_SHEET, group(questions=QUESTIONS)),
+        "ada-l",
+        "ben-k",
+        "team-alpha",
+        "team-beta",
+    )
+
+
+def test_a_duplicate_key_is_reported_by_line_and_never_by_name():
+    # The duplicated key here is the STUDENT's - which is what a repeated unit block is -
+    # and PyYAML's own message renders the offending source line into itself.
+    text = "submissions:\n  ada-l:\n    score_individual: 18\n  ada-l:\n"
+    faults = sheet_faults("a3", text, individual())
+    assert [f.lineno for f in faults] == [4]
+    assert "not valid YAML" in faults[0].what
+    _pii_free(faults, "ada-l")
+
+
+def test_a_sheet_that_does_not_parse_is_recorded_as_well_as_refused():
+    # Recorded FIRST: every reader of a broken sheet catches the raise and leaves the file
+    # alone, so the fault is the only thing that reaches the grader who saved it.
+    faults = []
+    with pytest.raises(SheetUnreadable):
+        parse_sheet("submissions:\n  ada-l:\n  bad: [\n", faults, "a3")
+    assert len(faults) == 1 and faults[0].file == "grading_sheets/a3.yml"
+
+
+def test_a_container_that_is_not_a_mapping_of_units_is_a_fault_not_a_rebuild():
+    (fault,) = sheet_faults("a3", "submissions: ada-l\n", individual())
+    assert fault.lineno == 1 and fault.field == "submissions"
+    assert "not a mapping of submission units" in fault.what
+
+
+def test_a_sheet_the_grader_has_not_touched_yet_reports_nothing():
+    text = "submissions:\n  ada-l:\n    score_individual:\n      Q1: null\n"
+    assert sheet_faults("a3", text, individual(questions=QUESTIONS)) == []
+
+
+def test_the_line_scan_reads_nesting_off_the_indentation():
+    lines = key_lines(GROUP_SHEET)
+    assert lines[("teams", "team-beta", "members", "ben-k")] == 14
+    assert lines[("teams", "team-alpha", "score_group", "Q1")] == 4
+
+
+def _cohort_sheets(monkeypatch, sheets: dict, failing: str = "") -> list:
+    """`cohort_sheet_faults` over `sheets`, with one of them refusing to be read."""
+    monkeypatch.setattr(
+        grades, "sheet_specs", lambda course, sched: dict.fromkeys(sheets, individual())
+    )
+
+    def _read(org, repo, path):
+        name = path.removeprefix("grading_sheets/").removesuffix(".yml")
+        if name == failing:
+            raise RuntimeError("rate-limited")
+        return sheets[name]
+
+    monkeypatch.setattr(grades, "get_file_content", _read)
+    found: list = []
+    grades.cohort_sheet_faults("Course", "Cohort", None, found)
+    return found
+
+
+def test_every_sheet_in_the_cohort_reaches_one_list_carrying_its_own_path(monkeypatch):
+    found = _cohort_sheets(
+        monkeypatch, {"a1": "submissions: nope\n", "a2": "submissions: nope\n"}
+    )
+    assert [f.file for f in found] == ["grading_sheets/a1.yml", "grading_sheets/a2.yml"]
+    # One issue for the folder, so the keys have to tell two sheets' faults apart.
+    assert len({f.key for f in found}) == 2
+
+
+def test_a_sheet_that_could_not_be_read_reports_none_of_them(monkeypatch):
+    # The digest closes what it is not handed. Half a list would report the sheets this
+    # tick never reached as repaired.
+    found: list = []
+    monkeypatch.setattr(
+        grades, "sheet_specs", lambda course, sched: {"a1": individual()}
+    )
+    monkeypatch.setattr(
+        grades,
+        "get_file_content",
+        lambda *a: (_ for _ in ()).throw(RuntimeError("rate-limited")),
+    )
+    with pytest.raises(RuntimeError):
+        grades.cohort_sheet_faults("Course", "Cohort", None, found)
+    assert found == []
+
+
+def test_an_assignment_with_no_sheet_yet_is_not_a_fault(monkeypatch):
+    monkeypatch.setattr(
+        grades, "sheet_specs", lambda course, sched: {"a1": individual()}
+    )
+    monkeypatch.setattr(grades, "get_file_content", lambda *a: None)
+    found: list = []
+    grades.cohort_sheet_faults("Course", "Cohort", None, found)
+    assert found == []

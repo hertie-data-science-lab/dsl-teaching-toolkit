@@ -196,3 +196,29 @@ def test_a_scheduled_digest_still_holds(gh):
     gh([])
     out = source_digest.sync("Cohort", "Course", [fault], NIGHT)
     assert out.mail == {}
+
+
+# ------------------------------------------------------- one issue, several files in it
+
+
+def _sheet(slug: str, lineno: int) -> ConfigFault:
+    return ConfigFault(
+        f"{slug} line {lineno}",
+        "a mark on this line is not a number, so nothing for this unit is sent",
+        file=f"grading_sheets/{slug}.yml",
+        field="score_individual",
+        lineno=lineno,
+    )
+
+
+def test_every_grading_sheet_is_one_issue_and_each_line_links_its_own_sheet():
+    # A cohort marks half a dozen assignments at once, so an issue per sheet would be six
+    # threads about one grader's afternoon - but the digest's label for the folder must
+    # not become the link, or every line would point at the wrong file.
+    body = cd.render_body(
+        cd.GRADING_SHEETS, [_sheet("a1", 5), _sheet("a2", 9)], NOW, COHORT
+    )
+    assert "`classroom-config/grading_sheets/` has broken entries" in body
+    assert "/grading_sheets/a1.yml#L5" in body
+    assert "/grading_sheets/a2.yml#L9" in body
+    assert "### needs fixing" in body  # no deadline: it is a line nobody can read

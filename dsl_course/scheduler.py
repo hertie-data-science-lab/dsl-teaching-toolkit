@@ -98,7 +98,7 @@ from .collect import (
     sync_sheet,
 )
 from .deploy import deploy_many
-from .grades import cutoff_at, load_grading_spec, sheet_path
+from .grades import cohort_sheet_faults, cutoff_at, load_grading_spec, sheet_path
 from .log import log, log_err, log_ok, log_step
 from .schedule import Release
 from .schedule_plan import deploy_dest
@@ -578,7 +578,7 @@ def _preflight_sources(
     return 0
 
 
-def _config_faults(cohort_org: str) -> dict:
+def _config_faults(course_org: str, cohort_org: str, sched: schedule.Schedule) -> dict:
     """Every hand-edited file in this cohort's classroom-config EXCEPT schedule.yml, and
     what is wrong with each. `{digest: faults}`, and a file left OUT of it is one this tick
     could not read.
@@ -624,6 +624,13 @@ def _config_faults(cohort_org: str) -> dict:
     # actually read: an empty one would report every member as a stranger.
     known = sync_teams.known_handles(students) if config_digest.ROSTER in out else None
     collect(config_digest.TEAMS, lambda found: teams.load(cohort_org, found, known))
+    # The grading sheets, on this tick and no other: they have no push fast path, because a
+    # sheet is edited all day while somebody marks and a mail per save would be a mail
+    # about a file still being typed into.
+    collect(
+        config_digest.GRADING_SHEETS,
+        lambda found: cohort_sheet_faults(course_org, cohort_org, sched, found),
+    )
     return out
 
 
@@ -699,7 +706,7 @@ def _preflight_configs(
     itself. The signature keeps its int so the caller's `errors +=` reads the same as
     every other phase."""
     local = schedule.in_cohort_zone(sched, now)
-    for spec, faults in _config_faults(cohort_org).items():
+    for spec, faults in _config_faults(course_org, cohort_org, sched).items():
         if faults:
             log_step(
                 f"{len(faults)} entr(y/ies) in {cohort_org}/{spec.file} the toolkit "

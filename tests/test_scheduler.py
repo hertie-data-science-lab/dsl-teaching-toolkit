@@ -2550,9 +2550,11 @@ def test_a_routing_that_raised_still_lets_the_digest_speak(monkeypatch, capsys):
 # file does not stop the next, and that "we could not look" never reports a file as fixed.
 
 
-def _config_preflight(monkeypatch, *, roster_faults=None, roster_raises=None):
-    """Drive `_preflight_configs` with the four readers stubbed, capturing what each
-    digest was handed."""
+def _config_preflight(
+    monkeypatch, *, roster_faults=None, roster_raises=None, sheet_faults=None
+):
+    """Drive `_preflight_configs` with every reader stubbed, capturing what each digest
+    was handed."""
     synced: dict = {}
     mailed: list = []
 
@@ -2569,6 +2571,11 @@ def _config_preflight(monkeypatch, *, roster_faults=None, roster_raises=None):
     )
     monkeypatch.setattr(
         scheduler.teams, "load", lambda cohort, found=None, known=None: {}
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "cohort_sheet_faults",
+        lambda course, cohort, sched, found: found.extend(sheet_faults or []),
     )
     monkeypatch.setattr(
         scheduler.config_digest,
@@ -2599,8 +2606,9 @@ def test_the_config_preflight_checks_every_hand_edited_file(monkeypatch):
     # source pre-flight keeps, and the plan this tick is running is already parsed.
     rc, synced, mailed = _config_preflight(monkeypatch)
     assert rc == 0
-    assert set(synced) == {"people.yml", "students.csv", "teams.csv"}
-    assert sorted(mailed) == ["people.yml", "students.csv", "teams.csv"]
+    everything = {"people.yml", "students.csv", "teams.csv", "grading_sheets/"}
+    assert set(synced) == everything
+    assert sorted(mailed) == sorted(everything)
 
 
 def test_a_content_fault_reaches_that_files_digest_and_nobody_elses(monkeypatch):
