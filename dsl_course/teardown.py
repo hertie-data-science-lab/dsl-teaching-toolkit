@@ -34,8 +34,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import csv
-import io
 import sys
 from datetime import date, datetime, timezone
 from typing import NamedTuple
@@ -48,7 +46,7 @@ from .discovery import (
     is_student_repo,
     list_org_repos,
 )
-from .gh_contents import get_file_content, put_file
+from .gh_contents import get_file_content, put_file, read_csv
 from .grades import COHORT_CSV_NAME
 from .log import log, log_err, log_ok, log_person, log_step
 from .repos import archive_repo
@@ -158,7 +156,7 @@ def registrar_summary(cohort_org: str) -> str:
     text = get_file_content(cohort_org, CONFIG_REPO, COHORT_CSV_NAME)
     if text is None:
         return f"{COHORT_CSV_NAME} is NOT here - no grade was ever distributed"
-    rows = max(len(list(csv.reader(io.StringIO(text)))) - 1, 0)
+    rows = len(list(read_csv(text, (), COHORT_CSV_NAME)))
     return f"{COHORT_CSV_NAME}, {rows} student row(s)"
 
 
