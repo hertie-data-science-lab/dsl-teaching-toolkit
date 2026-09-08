@@ -403,9 +403,9 @@ def _sanitised_env() -> dict:
     than by reading a comment.
 
     What DOES vary is layered on by the caller: the hidden tests add their runspace
-    PYTHONPATH and the two `DSL_*` variables `run.sh` reads (after this, deliberately), the
-    completion check takes the network away and gives the kernel its own directory back
-    (`_completion_env`)."""
+    PYTHONPATH and the two `DSL_*` variables `run.sh` reads (after this, deliberately), and
+    the completion check takes the network away and gives the notebook's own directory back
+    to the kernel (`_completion_env`)."""
     env = {
         key: value
         for key, value in os.environ.items()
@@ -1934,9 +1934,23 @@ def _completion_notebook(workdir: Path) -> Path | None:
 
 
 def _completion_env() -> dict:
-    """The graded sandbox environment, plus the one thing only the completion check adds:
-    no network."""
+    """The graded sandbox environment as the completion check needs it: no network, and the
+    notebook's own directory back on the kernel's `sys.path`.
+
+    `PYTHONSAFEPATH` is what the rest of the sandbox uses to keep a student-writable
+    directory off `sys.path[0]`, and it is inherited straight through nbconvert into
+    `ipykernel_launcher` - where IPython reads it and never adds the notebook's directory
+    at all. So `import helpers` in a notebook committed beside `helpers.py` raised
+    ModuleNotFoundError, and an ordinary submission was recorded `errors:N` for work that
+    runs perfectly on the student's machine.
+
+    Dropping it costs nothing here that is not already spent: the kernel exists to execute
+    the student's code, in this same token-free environment, so a module of theirs
+    shadowing one of ours changes nothing about what runs. The GRADER-side subprocesses -
+    the notebook-to-script conversion, the hidden tests, the reading-copy export - keep it,
+    because there a shadowed import is our code being redirected, not theirs."""
     env = _sanitised_env()
+    env.pop("PYTHONSAFEPATH", None)
     for var in _PROXY_VARS:
         env[var] = COMPLETION_DEAD_PROXY
     for var in ("no_proxy", "NO_PROXY"):

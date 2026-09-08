@@ -2230,7 +2230,32 @@ def test_the_completion_check_runs_offline_and_without_the_bot_token(monkeypatch
     assert env["https_proxy"] == collect.COMPLETION_DEAD_PROXY
     assert env["HTTPS_PROXY"] == collect.COMPLETION_DEAD_PROXY
     assert "NO_PROXY" not in env and "no_proxy" not in env
-    assert env["PYTHONSAFEPATH"] == "1"
+    # ...but NOT PYTHONSAFEPATH - see the test below. Every other graded subprocess keeps
+    # it; this is the one whose whole job is to run the student's own code.
+    assert "PYTHONSAFEPATH" not in env
+    assert collect._sanitised_env()["PYTHONSAFEPATH"] == "1"
+
+
+def test_a_notebook_can_import_the_module_committed_beside_it(tmp_path):
+    # PYTHONSAFEPATH travels through nbconvert into ipykernel_launcher, where IPython reads
+    # it and never puts the notebook's own directory on sys.path. `import helpers` beside
+    # `helpers.py` then raised ModuleNotFoundError and the cell was counted as the
+    # student's error - a false `errors:N` on work that runs on their machine.
+    #
+    # Against a REAL interpreter, because the behaviour being pinned is the interpreter's.
+    (tmp_path / "helpers.py").write_text("VALUE = 7\n")
+    (tmp_path / "notebook_cell.py").write_text("import helpers\nprint(helpers.VALUE)\n")
+
+    done = subprocess.run(
+        [sys.executable, "notebook_cell.py"],
+        cwd=tmp_path,
+        env=collect._completion_env(),
+        capture_output=True,
+        text=True,
+        check=False,  # the import failure IS the finding; stderr says which
+    )
+
+    assert done.stdout.strip() == "7", done.stderr
 
 
 def test_a_notebook_that_never_finishes_is_recorded_not_red(
