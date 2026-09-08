@@ -85,7 +85,6 @@ from .collect import (
     snapshot_assignment,
     snapshot_path,
     sync_sheet,
-    template_is_group,
 )
 from .deploy import deploy_many
 from .grades import cutoff_at, load_grading_spec, sheet_path
@@ -241,7 +240,7 @@ def _snapshot_passed_deadlines(
         # A template that cannot be found leaves it individual, which is the parse's
         # default anyway.
         template = _assignment_template(course_org, slug, entry)
-        is_group = bool(template) and template_is_group(course_org, template)
+        is_group = bool(template) and load_grading_spec(course_org, template).is_group
         # `name` names the repos, `slug` (the schedule key) is what teams.csv is keyed on.
         # A FAILED freeze counts; NOTHING_TO_FREEZE (nobody handed out yet) does not, and
         # neither writes a snapshot file - which is what keeps the autograde phase off an
@@ -566,7 +565,7 @@ def _refresh_sheets(
         log_step(f"  grading sheet {name}")
         # Spelt exactly as the snapshot pass above spells it, off the one memoised read
         # of the template's grading_config.yml.
-        is_group = template_is_group(course_org, template)
+        is_group = load_grading_spec(course_org, template).is_group
         if not sync_sheet(
             course_org,
             cohort_org,

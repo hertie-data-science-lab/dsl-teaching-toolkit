@@ -1163,7 +1163,6 @@ def _no_sheet_refresh(monkeypatch) -> list[tuple[str, str]]:
     It sits between the freeze and the autograde and reads the template's grading_config.yml, so
     every `run()` test would otherwise reach the API for a file it does not care about."""
     refreshed: list[tuple[str, str]] = []
-    monkeypatch.setattr(scheduler, "template_is_group", lambda org, template: False)
     monkeypatch.setattr(
         scheduler,
         "sync_sheet",
@@ -2354,7 +2353,6 @@ def test_the_snapshot_pass_reads_each_passed_deadline_once(monkeypatch):
     monkeypatch.setattr(
         scheduler, "load_snapshots", lambda org, name: reads.append(name) or None
     )
-    monkeypatch.setattr(scheduler, "template_is_group", lambda org, repo: None)
     monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
     monkeypatch.setattr(
         scheduler,
@@ -2398,7 +2396,6 @@ def _real_snapshot_then_autograde(monkeypatch, targets):
         raise AssertionError("nothing may be written when there is nothing to freeze")
 
     monkeypatch.setattr(collect_mod, "put_file", no_write)
-    monkeypatch.setattr(scheduler, "template_is_group", lambda org, repo: None)
     monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
     monkeypatch.setattr(scheduler, "has_autograde_results", lambda org, slug: False)
     monkeypatch.setattr(scheduler, "collect", lambda *a, **k: graded.append(a) or 0)

@@ -43,7 +43,6 @@ from .collect import (
     load_grading_spec,
     sheet_spec,
     sync_sheet,
-    template_is_group,
 )
 from .course import (
     CONFIG_REPO,
@@ -677,9 +676,15 @@ def provision_all(
     if master_org == cohort_org:
         log_err("master-org and cohort-org must differ.")
         return 1, False
+    # The assignment's own definition, read ONCE here: it answers the shape (below), and
+    # it composes both the grading sheet's header and the Feedback issue's body further
+    # down. Two reads of one memoised file is not expensive, but it is two places for the
+    # answer to be spelt, which is how a handout came to provision a shape the sheet did
+    # not expect.
+    gspec = load_grading_spec(master_org, template)
     if group is None:
         # The assignment's own grading_config.yml is the only declaration there is.
-        group = template_is_group(master_org, template)
+        group = gspec.is_group
         if group:
             log("  (declared `type: group` - provisioning per team)")
 
@@ -708,11 +713,8 @@ def provision_all(
     found = schedule.entry_for_repo(sched, template)
     key = found[0] if found else assignment_slug(template)
     slug = schedule.cohort_name(*found) if found else key
-    # The assignment's own facts, read once: they compose both the grading sheet's header
-    # (below) and the Feedback issue's body (per unit, since a team's names it).
-    spec = sheet_spec(
-        sched, key, slug, load_grading_spec(master_org, template), bool(group)
-    )
+    # The sheet's header and the Feedback issue's body, off the definition read above.
+    spec = sheet_spec(sched, key, slug, gspec, bool(group))
     feedback_bodies: dict[str, str] = {}
 
     # A provisioning unit is (repo_name, [member handles], team slug). Individual = one per

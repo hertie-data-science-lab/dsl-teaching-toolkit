@@ -1410,7 +1410,9 @@ def test_collect_records_a_cohort_of_genuine_non_submissions(monkeypatch):
     assert "autograde/assignment-1/_graded.json" in [p for p, _t in written]
 
 
-def test_template_is_group_reads_the_solution_branch_grading_yml(monkeypatch):
+def test_the_shape_is_read_off_the_solution_branch_grading_config(monkeypatch):
+    # The clean break: schedule.yml is timing, grading_config.yml is the assignment, and
+    # the file on the TEMPLATE's solution branch is the only answer there is.
     seen = {}
 
     def fake_get(org, repo, path, ref=""):
@@ -1418,7 +1420,9 @@ def test_template_is_group_reads_the_solution_branch_grading_yml(monkeypatch):
         return "type: group\nformat: py\n"
 
     monkeypatch.setattr(collect.grades, "get_file_content", fake_get)
-    assert collect.template_is_group("Course-Org", "assignment-4-project-f2026")
+    assert collect.load_grading_spec(
+        "Course-Org", "assignment-4-project-f2026"
+    ).is_group
     assert seen == {
         "org": "Course-Org",
         "repo": "assignment-4-project-f2026",
@@ -1427,21 +1431,10 @@ def test_template_is_group_reads_the_solution_branch_grading_yml(monkeypatch):
     }
 
 
-def test_template_is_group_defaults_to_individual_without_grading_yml(monkeypatch):
+def test_the_shape_defaults_to_individual_without_grading_config(monkeypatch):
     # No solution branch / no grading_config.yml -> the contents fetch misses -> individual.
     monkeypatch.setattr(collect.grades, "get_file_content", lambda *a, **k: None)
-    assert not collect.template_is_group("Course-Org", "assignment-1-f2026")
-
-
-def test_the_cohort_schedule_no_longer_gets_a_say_in_the_shape(monkeypatch):
-    # The clean break: schedule.yml is timing, grading_config.yml is the assignment. A
-    # cohort that still carries the retired `type:` cannot flip an individual template to
-    # group, or a group one to individual - the template's own answer is the only one.
-    monkeypatch.setattr(
-        collect.grades, "get_file_content", lambda *a, **k: "type: group\n"
-    )
-    monkeypatch.setattr(collect.schedule, "load", lambda org: Schedule())
-    assert collect.template_is_group("Course", "assignment-4-project-f2026")
+    assert not collect.load_grading_spec("Course-Org", "assignment-1-f2026").is_group
 
 
 # ---------------------------------------------------------- autograde sandbox (fix 1)

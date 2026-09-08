@@ -196,21 +196,6 @@ _STUDENT_TEST_RIGGING = (
 # --------------------------------------------------------------------------- pure core
 
 
-def template_is_group(master_org: str, template: str) -> bool:
-    """Whether an assignment declares itself group-provisioned: `type: group` in the
-    grading_config.yml on its template's solution branch (written by the New assignment
-    scaffold). No solution branch / no grading_config.yml means individual (the parse's
-    default).
-
-    THE resolution every consumer (handout, snapshot, sheet, grading) shares, now that
-    the cohort's schedule.yml no longer gets a say. Through `load_grading_spec`, so the
-    scheduler's group resolution shares the memoised read with the sheet refresh and the
-    collection that follow it in the same tick."""
-    return resolve_is_group(
-        force=False, template_type=load_grading_spec(master_org, template).type
-    )
-
-
 def score_from_junit(xml_text: str) -> dict:
     """Turn a pytest junit XML report into the result.json contract {score, max, tests}.
 

@@ -37,7 +37,6 @@ from . import schedule
 from .course import (
     assignment_slug,
     pages_repo,
-    resolve_is_group,
     session_number,
     submission_repo,
     term_tag,
@@ -799,16 +798,12 @@ def _assignment_entry(
     )
     out = slug in handed_out or pinned_out
     # A group assignment fans out one repo per TEAM, so the shape a student looks for
-    # differs. Through `resolve_is_group` rather than testing `type == "group"` here:
-    # that is the single precedence every other consumer resolves through, and a second
-    # copy of it in the one place students READ the answer is how the site comes to name
-    # a shape the handout does not create. It costs the template's grading_config.yml,
-    # which is where the answer now lives and is memoised per template per process - the
-    # cohort's schedule.yml, which the site used to read it from for free, no longer has
-    # a say.
-    group = resolve_is_group(
-        force=False, template_type=load_grading_spec(course_org, repo).type
-    )
+    # differs. Off the assignment's own spec, like every other consumer, rather than a
+    # second copy of the rule here - which is how the site comes to name a shape the
+    # handout does not create. It costs the template's grading_config.yml, memoised per
+    # template per process; the cohort's schedule.yml, which the site used to read it
+    # from for free, no longer has a say.
+    group = load_grading_spec(course_org, repo).is_group
     repo_name = submission_repo(slug, "<your-team>" if group else "<your-handle>")
     # The slug's own name: the row's IDENTIFIER, bold beside its name, and the one half
     # that must not change at hand-out. It used to be overwritten by the README heading, so
