@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import gh_teams, roster, sync_teams
+from dsl_course import gh_teams, roster, sync_teams, teams
 from tests.conftest import ROSTER_HEADER
 
 
@@ -17,7 +17,7 @@ def test_team_slug_is_assignment_prefixed_and_lowercased():
     # Assignment-prefixed so a name reused across assignments stays org-unique; lower-cased
     # to match the slug GitHub derives from the team name.
     assert (
-        sync_teams.team_slug("assignment-4-project", "Wizards")
+        teams.team_slug("assignment-4-project", "Wizards")
         == "assignment-4-project-wizards"
     )
 

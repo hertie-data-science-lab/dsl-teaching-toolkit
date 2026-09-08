@@ -30,7 +30,6 @@ from .config_digest import (
     Digest,
     DigestResult,
     _read_marker,
-    cleared_body,
     current_state,
     in_quiet_hours,
     render_body,
@@ -43,21 +42,22 @@ from .config_digest import sync as _sync
 from .faults import NOTIFY_FROM, Severity
 from .schedule import SCHEDULE_PATH, SourceFault
 
-# Re-exported: `scheduler`, `notify` and their tests speak to the engine through this
-# module, which is where the schedule's own digests are declared.
+# What this module IS: schedule.yml's digest, its two frozen titles, its key migration and
+# the CLI the validate workflow calls. `scheduler` uses SCHEDULE, `sync` and `hold`;
+# `templates/classroom-config/validate-schedule.yml` uses `main --title`. The rest are the
+# engine's own names, re-exported so schedule.yml's tests can reach it through the same
+# alias they reach the schedule constants through - `notify` and everything else import
+# them from `config_digest` directly.
 __all__ = [
     "ABSORBED",
     "NOTIFY_FROM",
     "SCHEDULE",
-    "SOURCES",
     "TITLE",
     "_STATE",
     "Context",
-    "Digest",
     "DigestResult",
     "Severity",
     "_read_marker",
-    "cleared_body",
     "current_state",
     "hold",
     "in_quiet_hours",
@@ -77,9 +77,6 @@ TITLE = "schedule.yml: planned releases cite sources not staged in the course or
 ABSORBED = "schedule.yml has entries the scheduler cannot read"
 
 SCHEDULE = Digest(title=TITLE, file=SCHEDULE_PATH, doc="docs/07-schedule-releases.md")
-# What this digest was called while it carried sources alone. Kept because three modules
-# and their tests name it.
-SOURCES = SCHEDULE
 
 
 def migrated(previous: dict[str, str], faults: list[SourceFault]) -> dict[str, str]:

@@ -29,9 +29,9 @@ from . import roster, teams
 from .gh_teams import create_team, reconcile_team_members
 from .log import log_err, log_ok, log_person, log_step
 
-# The naming rules live with the file's parser, which is the only thing that can
-# refuse a row for breaking them. Re-exported because three modules and their tests
-# have always asked `sync_teams` for them.
+# The naming rules live with the file's parser, which is the only thing that can refuse a
+# row for breaking them. Imported for this module's own reconcile below, not re-exported:
+# everything else asks `teams` for them.
 from .teams import is_reserved_slug, team_slug
 
 

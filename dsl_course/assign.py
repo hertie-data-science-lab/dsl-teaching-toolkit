@@ -1147,7 +1147,7 @@ def provision_all(
                     f"DSL_VERBOSE=1 to see which."
                 )
             units.append(
-                (submission_repo(slug, team), vetted, sync_teams.team_slug(key, team))
+                (submission_repo(slug, team), vetted, teams.team_slug(key, team))
             )
             sheet_units.append((team, vetted))
             feedback_bodies[units[-1][0]] = grades.feedback_body(spec, team, vetted)
