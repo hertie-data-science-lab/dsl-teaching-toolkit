@@ -266,6 +266,56 @@ def test_a_new_gradebook_grants_faculty_read_and_an_existing_one_is_left_alone(
     assert faculty == [("COHORT", "grades-bob-b", grades.FACULTY_READ_ACCESS)]
 
 
+def test_an_existing_gradebook_missing_its_topic_is_retagged(monkeypatch):
+    # The stamp is a separate PUT after the create, so a gradebook whose PUT failed - or
+    # that predates the topic - stayed untagged until the nightly sweep. Untagged means
+    # discovery reads `grades-<handle>` as a cohort repo, handle and all.
+    tagged = []
+    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
+    monkeypatch.setattr(
+        grades, "set_repo_topics", lambda o, r, t, **k: tagged.append((r, t)) or True
+    )
+    grades.provision_one(
+        "COHORT",
+        "ada-l",
+        existing={"grades-ada-l": {"name": "grades-ada-l", "topics": ["keep-me"]}},
+    )
+    # additive: the PUT replaces the whole list, so what it already carried comes back
+    assert tagged == [("grades-ada-l", ["gradebook", "keep-me"])]
+
+
+def test_an_already_tagged_gradebook_costs_no_call(monkeypatch):
+    # The listing carries `topics`, so the common case - every gradebook tagged - is free.
+    tagged = []
+    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
+    monkeypatch.setattr(
+        grades, "set_repo_topics", lambda o, r, t, **k: tagged.append(r) or True
+    )
+    grades.provision_one(
+        "COHORT",
+        "ada-l",
+        existing={"grades-ada-l": {"name": "grades-ada-l", "topics": ["gradebook"]}},
+    )
+    assert tagged == []
+
+
+def test_a_failed_gradebook_tag_is_reported_with_its_consequence(monkeypatch, capsys):
+    # The return used to be discarded. The consequence - `grades-<handle>` is a candidate
+    # for the public landing page - is what a reader needs, and the line names nobody.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
+    monkeypatch.setattr(grades, "set_repo_topics", lambda *a, **k: False)
+    grades.provision_one(
+        "COHORT",
+        "ada-l",
+        existing={"grades-ada-l": {"name": "grades-ada-l", "topics": []}},
+    )
+    captured = capsys.readouterr()
+    assert "carries no `gradebook` topic" in captured.err
+    assert "landing page" in captured.err
+    assert "ada-l" not in captured.out + captured.err
+
+
 def test_unsent_grade_notifications_are_reported(monkeypatch, capsys):
     # The send count used to be discarded, so a student who never got the "your grades are
     # updated" mail left no trace in the log at all.

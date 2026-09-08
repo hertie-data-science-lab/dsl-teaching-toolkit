@@ -71,6 +71,7 @@ from .repos import (
     generate_from_template,
     repo_exists,
     set_repo_topics,
+    topic_name,
 )
 
 # Fire-once sentinel for the SCHEDULED solution push, in classroom-config. Needed because
@@ -137,6 +138,34 @@ def _template_is_ready(entry: dict | None, slug: str) -> bool:
         return False
     wanted = {slug.lower().replace("_", "-"), ASSIGNMENT_TEMPLATE_TOPIC}
     return bool(entry.get("isTemplate")) and wanted <= set(entry.get("topics") or [])
+
+
+def tag_submission(cohort_org: str, repo: str, slug: str, have: set[str]) -> bool:
+    """Stamp `submission` + the assignment's own name on one submission repo. Checked.
+
+    The topic is not decoration: it is what keeps this repo out of
+    `discovery.discover_cohort_repos`, and therefore off the public org landing page -
+    where the repo NAME carries a student's handle. So a failed PUT is said out loud with
+    its consequence attached rather than dropped.
+
+    Called on the ALREADY-EXISTS path too, because the stamp is a separate PUT after the
+    create and one that failed used to stand until `access.converge_topics` came round on
+    the nightly refresh, up to a day later. `have` is the repo's topics off the caller's
+    listing, so a repo already carrying them costs no call at all, and whatever else it
+    carries is written back with them (the PUT replaces the whole list).
+    """
+    wanted = {topic_name(slug), "submission"}
+    if wanted <= have:
+        return True
+    if set_repo_topics(cohort_org, repo, sorted(have | wanted), person=True):
+        return True
+    log_err(
+        f"  ! a submission repo in {cohort_org} carries no `submission` topic. That "
+        f"topic is what keeps it out of discovery, so until it is set its name - which "
+        f"carries a student handle - is a candidate for the public org landing page. "
+        f"The next tick with a repo listing retries it, as does the nightly refresh."
+    )
+    return False
 
 
 def withhold_from_template(cohort_org: str, template: str) -> bool:
@@ -346,14 +375,16 @@ def provision_one(
     sol_dir: Path | None = None,
     team: str | None = None,
     touch_existing: bool = True,
-    existing: frozenset[str] | None = None,
+    existing: dict[str, dict] | None = None,
     feedback_body: str = "",
 ) -> str:
     """Generate one submission repo and grant its members access.
 
-    `existing` is the cohort's repo names off ONE listing (`_org_listing`); membership in
-    it answers "does this repo already exist?" without a GET per student. None - no listing
-    to hand - falls back to probing this one repo.
+    `existing` is the cohort's repos off ONE listing (`_org_listing`), keyed by name;
+    membership in it answers "does this repo already exist?" without a GET per student,
+    and each row carries the `topics` that `tag_submission` converges off. None - no
+    listing to hand - falls back to probing this one repo, and skips that convergence
+    rather than paying a read per student for it.
 
     `touch_existing=False` (the hourly scheduler): a repo that already exists, with no
     solution due, is left exactly as it is - no access re-grant, no team reconcile. The
@@ -375,6 +406,9 @@ def provision_one(
     )
     if existed:
         log_person(f"  [skip] repo {cohort_org}/{repo}")
+        entry = existing.get(repo) if existing is not None else None
+        if entry is not None:
+            tag_submission(cohort_org, repo, slug, set(entry.get("topics") or []))
         if sol_dir is None and not touch_existing:
             # Nothing is due for this repo. The scheduler re-runs every handed-out release
             # on every hourly tick, so re-granting access here cost 2-4 API calls per
@@ -396,7 +430,7 @@ def provision_one(
         return "failed-create"
     else:
         log_person(f"  [ok] created {cohort_org}/{repo}")
-        set_repo_topics(cohort_org, repo, [slug, "submission"], person=True)
+        tag_submission(cohort_org, repo, slug, set())
         # The Feedback issue, on the CREATE path only. It is where every receipt and,
         # eventually, the grade is posted, so the student is told at handout where to
         # look. Never re-probed for a repo that already exists: that would be one listing
@@ -759,7 +793,7 @@ def provision_all(
     # ONE listing of the cohort, taken before anything is created, answers "is it already
     # there?" for the template below and for every unit in stage 2.
     listing = _org_listing(cohort_org)
-    existing = frozenset(r["name"] for r in listing) if listing is not None else None
+    existing = {r["name"]: r for r in listing} if listing is not None else None
 
     # Stage 1: freeze the cohort-level template.
     cohort_template = ensure_cohort_template(

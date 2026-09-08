@@ -2120,14 +2120,18 @@ def load_grade_sources(cohort_org: str) -> dict[str, list[GradeRow] | dict]:
     return per | sheets
 
 
-def _existing_repos(cohort_org: str) -> frozenset[str] | None:
-    """The cohort's repo names off ONE paginated listing, or None when it could not be read.
+def _existing_repos(cohort_org: str) -> dict[str, dict] | None:
+    """The cohort's repos off ONE paginated listing keyed by name, or None when it could
+    not be read.
 
     Asking `repo_exists` per student cost a GET per student on every nightly sync, for a
     question one listing answers for the whole cohort. None falls the caller back to that
-    probe: the listing is an optimisation, not a new way for a sync to fail."""
+    probe: the listing is an optimisation, not a new way for a sync to fail.
+
+    Each row carries the repo's `topics`, which is what lets `_tag_gradebook` converge a
+    missing stamp on an existing gradebook without a read of its own."""
     try:
-        return frozenset(r["name"] for r in list_org_repos(cohort_org))
+        return {r["name"]: r for r in list_org_repos(cohort_org)}
     except RuntimeError as exc:
         log_err(
             f"could not list {cohort_org}'s repos - falling back to a probe per repo: {exc}"
@@ -2135,20 +2139,51 @@ def _existing_repos(cohort_org: str) -> frozenset[str] | None:
         return None
 
 
+def _tag_gradebook(cohort_org: str, repo: str, have: set[str]) -> bool:
+    """Stamp `gradebook` on one private gradebook repo. Checked.
+
+    The topic is what keeps the repo out of `discovery.discover_cohort_repos`, and
+    therefore off the public org landing page - where `grades-<handle>` carries a
+    student's handle. So a failed PUT is said out loud with its consequence attached
+    rather than dropped.
+
+    Called on the ALREADY-EXISTS path too: the stamp is a separate PUT after the create,
+    and one that failed used to stand until `access.converge_topics` came round on the
+    nightly refresh. `have` is the repo's topics off the caller's listing, so a gradebook
+    already carrying the topic costs no call, and whatever else it carries is written back
+    with it (the PUT replaces the whole list)."""
+    if "gradebook" in have:
+        return True
+    if set_repo_topics(cohort_org, repo, sorted(have | {"gradebook"}), person=True):
+        return True
+    log_err(
+        f"  ! a gradebook in {cohort_org} carries no `gradebook` topic. That topic is "
+        f"what keeps it out of discovery, so until it is set its name - which carries a "
+        f"student handle - is a candidate for the public org landing page. The next sync "
+        f"with a repo listing retries it, as does the nightly refresh."
+    )
+    return False
+
+
 def provision_one(
-    cohort_org: str, handle: str, existing: frozenset[str] | None = None
+    cohort_org: str, handle: str, existing: dict[str, dict] | None = None
 ) -> str:
     """Ensure a private grades-<handle> repo exists with the student as read collaborator.
 
-    `existing` is the cohort's repo names off ONE listing (`_existing_repos`); membership
-    in it answers "is this gradebook already there?" without a GET per student. None - no
-    listing to hand - falls back to probing this one repo."""
+    `existing` is the cohort's repos off ONE listing (`_existing_repos`), keyed by name;
+    membership in it answers "is this gradebook already there?" without a GET per student,
+    and each row carries the `topics` that `_tag_gradebook` converges off. None - no
+    listing to hand - falls back to probing this one repo, and skips that convergence
+    rather than paying a read per student for it."""
     repo = f"{GRADEBOOK_PREFIX}{handle}"
     existed = (
         repo in existing if existing is not None else repo_exists(cohort_org, repo)
     )
     if existed:
         log_person(f"  [skip] gradebook {cohort_org}/{repo}")
+        entry = existing.get(repo) if existing is not None else None
+        if entry is not None:
+            _tag_gradebook(cohort_org, repo, set(entry.get("topics") or []))
     else:
         if not create_repo(
             cohort_org,
@@ -2166,7 +2201,7 @@ def provision_one(
             "init gradebook",
             person=True,
         )
-        set_repo_topics(cohort_org, repo, ["gradebook"], person=True)
+        _tag_gradebook(cohort_org, repo, set())
 
         # At creation only: a team grant does not decay, and the nightly sweep
         # (access.converge_faculty_access) owns the floor for every gradebook that already

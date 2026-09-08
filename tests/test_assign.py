@@ -1464,7 +1464,7 @@ def test_a_new_submission_repo_gets_its_feedback_issue(monkeypatch, feedback_iss
         "assignment-1-ada-l",
         ["ada-l"],
         "assignment-1",
-        existing=frozenset(),
+        existing={},
         feedback_body="BODY",
     )
     assert feedback_issues == [("assignment-1-ada-l", "BODY")]
@@ -1485,10 +1485,84 @@ def test_an_existing_repo_is_never_probed_for_its_feedback_issue(
         ["ada-l"],
         "assignment-1",
         touch_existing=True,
-        existing=frozenset({"assignment-1-ada-l"}),
+        existing={"assignment-1-ada-l": {"name": "assignment-1-ada-l", "topics": []}},
         feedback_body="BODY",
     )
     assert feedback_issues == []
+
+
+def test_an_existing_submission_repo_missing_its_topic_is_retagged(monkeypatch):
+    # The stamp is a separate PUT after the create, so a repo whose PUT failed - or that
+    # predates the topic - stayed untagged until the nightly sweep. Untagged means
+    # discovery reads it as a cohort repo, and its NAME carries a student's handle.
+    tagged = []
+    _provision_one_env(monkeypatch)
+    monkeypatch.setattr(
+        assign, "set_repo_topics", lambda o, r, t, **k: tagged.append((r, t)) or True
+    )
+    assign.provision_one(
+        "COURSE",
+        "assignment-1",
+        "COHORT",
+        "assignment-1-ada-l",
+        ["ada-l"],
+        "assignment-1",
+        touch_existing=False,
+        existing={
+            "assignment-1-ada-l": {"name": "assignment-1-ada-l", "topics": ["keep-me"]}
+        },
+    )
+    # additive: the PUT replaces the whole list, so what the repo already carried is
+    # written back with what was missing
+    assert tagged == [("assignment-1-ada-l", ["assignment-1", "keep-me", "submission"])]
+
+
+def test_an_already_tagged_submission_repo_costs_no_call(monkeypatch):
+    # The listing carries `topics`, so the common case - every repo tagged - is free. A
+    # PUT per student per hourly tick for the rest of the term would not be.
+    tagged = []
+    _provision_one_env(monkeypatch)
+    monkeypatch.setattr(
+        assign, "set_repo_topics", lambda o, r, t, **k: tagged.append(r) or True
+    )
+    assign.provision_one(
+        "COURSE",
+        "assignment-1",
+        "COHORT",
+        "assignment-1-ada-l",
+        ["ada-l"],
+        "assignment-1",
+        touch_existing=False,
+        existing={
+            "assignment-1-ada-l": {
+                "name": "assignment-1-ada-l",
+                "topics": ["assignment-1", "submission"],
+            }
+        },
+    )
+    assert tagged == []
+
+
+def test_a_failed_submission_tag_is_reported_with_its_consequence(monkeypatch, capsys):
+    # The return used to be discarded. The consequence - the repo NAME, which carries a
+    # handle, is a candidate for the public landing page - is what a reader needs, and the
+    # line itself names nobody.
+    _provision_one_env(monkeypatch)
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    monkeypatch.setattr(assign, "set_repo_topics", lambda *a, **k: False)
+    assign.provision_one(
+        "COURSE",
+        "assignment-1",
+        "COHORT",
+        "assignment-1-ada-l",
+        ["ada-l"],
+        "assignment-1",
+        existing={},
+    )
+    captured = capsys.readouterr()
+    assert "carries no `submission` topic" in captured.err
+    assert "landing page" in captured.err
+    assert "ada-l" not in captured.out + captured.err
 
 
 def test_the_handout_composes_one_feedback_body_per_team(
