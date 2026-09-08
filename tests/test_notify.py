@@ -1013,3 +1013,119 @@ def test_a_dsl_course_yml_nobody_can_parse_still_sends_its_mail(
     routing = notify.route_course(COURSE, [_course_fault()], NOW)
     assert _mail_course([_course_fault()], routing).addressees == 0
     assert sent.one["subject"].startswith(f"[{COURSE}] dsl-course.yml has 1 entry")
+
+
+# ------------------------------------------- an edit the site sync rebuilt over
+
+
+SITE = "cohort-f2026.github.io"
+SITE_ISSUE = "https://github.com/Cohort-f2026/cohort-f2026.github.io/issues/3"
+SHA = "a1b2c3d4e5f67890"
+
+
+def _overwritten(by_login, dry_run=False) -> notify.Unsent:
+    return notify.notify_overwritten_edits(
+        COHORT, SITE, COURSE, by_login, SITE_ISSUE, NOW, dry_run=dry_run
+    )
+
+
+def test_the_person_whose_edit_was_rebuilt_over_is_the_one_told(wired):
+    # The committer, by the login GitHub gave the commit - not blame, and not the team:
+    # the file was rewritten whole, so there is no line in it that is anybody's edit.
+    sent = wired()
+    _overwritten({"JanG": [("_data/people.yml", SHA)]})
+    assert sent.one["to"] == ["jan@x.edu"]
+    assert sent.one["cc"] == []  # never the maintainer: this is a habit, not an outage
+    assert sent.one["subject"] == (
+        "[Course Name f2026] Your edit to _data/people.yml was overwritten by the "
+        "site sync"
+    )
+    assert sent.one["html"] is True
+
+
+def test_the_mail_says_what_was_lost_where_it_is_and_what_to_do(wired):
+    sent = wired()
+    _overwritten({"JanG": [("_data/people.yml", SHA)]})
+    body = sent.one["body"]
+    assert (
+        "Your edit to <code>_data/people.yml</code> was overwritten by the sync" in body
+    )
+    assert "generated files are rebuilt every run" in body
+    # The commit is the only place the change still exists, so it is linked.
+    assert f"https://github.com/{COHORT}/{SITE}/commit/{SHA}" in body
+    assert "a1b2c3d" in body
+    assert "move the change to the file the docs name as yours" in body
+    assert SITE_ISSUE in body
+    # No deadline and no line: neither exists for a file that was rebuilt whole.
+    assert "fix by date" not in body and ":None" not in body
+
+
+def test_a_ta_who_lost_an_edit_has_the_instructors_copied(wired):
+    sent = wired()
+    _overwritten({"cpj97": [("_events/final.md", SHA)]})
+    assert sent.one["to"] == ["cam@x.edu"]
+    assert sent.one["cc"] == ["jan@x.edu"]
+
+
+def test_an_author_github_cannot_name_reaches_the_whole_team(wired):
+    # The incident itself: a git email linked to no account is un-@mentionable, so the
+    # issue reached nobody. The empty key is that case, and the team is the fallback.
+    sent = wired()
+    _overwritten({"": [("_data/people.yml", SHA)]})
+    assert sent.one["to"] == ["jan@x.edu", "cam@x.edu"]
+
+
+def test_two_files_from_one_person_are_one_letter_that_counts_them(wired):
+    sent = wired()
+    _overwritten(
+        {"JanG": [("_data/people.yml", SHA), ("_events/final.md", "ffffffffffff")]}
+    )
+    assert sent.one["subject"] == (
+        "[Course Name f2026] 2 of your edits were overwritten by the site sync"
+    )
+    assert "2 files you edited were overwritten" in sent.one["body"]
+    assert sent.one["body"].count("error line:") == 2
+
+
+def test_two_people_who_lost_edits_get_a_letter_each(wired):
+    sent = wired()
+    _overwritten(
+        {"JanG": [("_data/people.yml", SHA)], "cpj97": [("_events/final.md", SHA)]}
+    )
+    assert [b["to"] for b in sent.batches] == [["jan@x.edu"], ["cam@x.edu"]]
+    assert sent.calls == 1  # one batch, one Graph token
+
+
+def test_a_site_org_with_nobody_to_address_sends_nothing(wired, capsys):
+    # The public COURSE site: the org declares no people.yml at all, so the issue's cc is
+    # the only channel there is. Not an error, and not a raise inside a site sync.
+    sent = wired(people=None)
+    assert _overwritten({"JanG": [("_data/people.yml", SHA)]}) == notify.Unsent()
+    assert sent.batches == []
+    assert "no notification address" in capsys.readouterr().out
+
+
+def test_nothing_overwritten_asks_github_for_nothing(wired):
+    sent = wired()
+    assert _overwritten({}) == notify.Unsent()
+    assert sent.batches == []
+
+
+def test_an_unreadable_people_file_never_raises_into_the_sync(wired, monkeypatch):
+    # This runs after the site is pushed. Whatever went wrong with the notification, the
+    # sync's exit code is not the place to say so.
+    wired()
+
+    def boom(*a, **k):
+        raise RuntimeError("HTTP 502")
+
+    monkeypatch.setattr(notify.sync_faculty, "load_cohort_faculty", boom)
+    assert _overwritten({"JanG": [("_data/people.yml", SHA)]}) == notify.Unsent()
+
+
+def test_no_address_reaches_the_public_run_log(wired, capsys):
+    sent = wired()
+    _overwritten({"JanG": [("_data/people.yml", SHA)]})
+    printed = capsys.readouterr()
+    assert "jan@x.edu" not in printed.out + printed.err
+    assert sent.one["to"] == ["jan@x.edu"]

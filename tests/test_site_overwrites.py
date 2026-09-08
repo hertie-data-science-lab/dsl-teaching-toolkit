@@ -7,6 +7,11 @@ sync commit rewrote and files an issue in the site repo naming the discarded com
 Two invariants dominate: a machine author (the previous sync, the token account, an App)
 must NEVER be mistaken for a person, and no failure in the notice may change the sync's
 exit code - the site is already regenerated and pushed by then.
+
+The issue is one half of the notice. The other is the mail beside it, which is what
+reaches an author whose git email is linked to no account - what site_repo owes it is the
+committer-to-files map and the issue's URL, and that is what is asserted here;
+`test_notify` covers the letter itself.
 """
 
 from __future__ import annotations
@@ -15,7 +20,7 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import ghcli, site_repo
+from dsl_course import ghcli, issues, site_repo
 
 ORG = "Cohort-f2026"
 SITE = "cohort-f2026.github.io"
@@ -36,6 +41,16 @@ class _Fakes:
         self.replies = replies or {}
         self.gh_calls: list[tuple[str, ...]] = []
         self.git_calls: list[tuple[str, ...]] = []
+        self.mailed: list[tuple] = []
+
+    def gh_json(self, *args):
+        """`issues._titled`'s listing. `replies["list"]` is the rows it comes back with,
+        or an exception for a listing that could not be read at all."""
+        self.gh_calls.append(args)
+        found = self.replies.get("list", [])
+        if isinstance(found, Exception):
+            raise found
+        return found
 
     def git(self, *args):
         self.git_calls.append(args)
@@ -67,10 +82,12 @@ class _Fakes:
             return (0, "")
         if args[0] == "api":
             return self.replies.get("login", (0, "jan-gh"))
-        if args[:2] == ("issue", "list"):
-            return self.replies.get("list", (0, ""))
+        if args[:2] == ("issue", "edit"):
+            return self.replies.get("edit", (0, ""))
         if args[:2] == ("issue", "create"):
-            return self.replies.get("create", (0, "https://github.com/i/1"))
+            return self.replies.get(
+                "create", (0, f"https://github.com/{ORG}/{SITE}/issues/1")
+            )
         if args[:2] == ("issue", "comment"):
             return self.replies.get("comment", (0, ""))
         return (0, "")
@@ -87,10 +104,29 @@ class _Fakes:
         return comment[comment.index("--body") + 1]
 
 
+def _open_issue(number: int, title: str | None = None) -> dict:
+    """One row of `gh issue list --json number,body,title,state`."""
+    return {
+        "number": number,
+        "body": "",
+        "title": title or site_repo.OVERWRITE_ISSUE_TITLE,
+        "state": "OPEN",
+    }
+
+
 def _run(monkeypatch, fakes: _Fakes) -> int:
     monkeypatch.setattr(site_repo, "gh", fakes.gh)
     monkeypatch.setattr(ghcli, "gh", fakes.gh)
+    # `issues` binds its own names off ghcli at import, so patching ghcli is not enough.
+    monkeypatch.setattr(issues, "gh", fakes.gh)
+    monkeypatch.setattr(issues, "gh_json", fakes.gh_json)
     monkeypatch.setattr(site_repo, "git", fakes.git)
+    monkeypatch.setattr(site_repo, "course_org_for_cohort", lambda org: "Course-Org")
+    monkeypatch.setattr(
+        site_repo.notify,
+        "notify_overwritten_edits",
+        lambda *a, **k: fakes.mailed.append(a),
+    )
     monkeypatch.setattr(site_repo, "repo_exists", lambda org, name: True)
     monkeypatch.setattr(site_repo, "repo_is_archived", lambda org, name: False)
     monkeypatch.setattr(site_repo, "acting_login", lambda: "dsl-bot-account")
@@ -154,7 +190,7 @@ def test_a_file_this_sync_created_is_nobodys_edit(monkeypatch):
 
 def test_an_open_issue_gets_a_comment_not_a_duplicate(human_edit):
     fakes, run = human_edit
-    fakes.replies["list"] = (0, "7\n")
+    fakes.replies["list"] = [_open_issue(7)]
     assert run() == 0
     assert not [c for c in fakes.gh_calls if c[:2] == ("issue", "create")]
     comment = next(c for c in fakes.gh_calls if c[:2] == ("issue", "comment"))
@@ -162,12 +198,29 @@ def test_an_open_issue_gets_a_comment_not_a_duplicate(human_edit):
     assert HUMAN[0][:7] in fakes.commented_body()
 
 
-def test_an_unreadable_issue_list_still_notifies(human_edit):
-    # Filing a duplicate beats telling nobody their work was discarded.
+def test_an_issue_a_human_filed_quoting_the_title_is_not_adopted(human_edit):
+    # `--search` is a WORD match, so a human's "Manual edits to generated site files are
+    # overwritten by the sync - is this expected?" came back in the listing and the notice
+    # was appended to THEIR thread. The match is exact and client-side now, so that issue
+    # is not ours and this files its own.
     fakes, run = human_edit
-    fakes.replies["list"] = (1, "gh: HTTP 502")
+    fakes.replies["list"] = [
+        _open_issue(7, f"{site_repo.OVERWRITE_ISSUE_TITLE} - why?")
+    ]
+    assert run() == 0
+    assert not [c for c in fakes.gh_calls if c[:2] == ("issue", "comment")]
+    assert fakes.created_body()
+
+
+def test_an_unreadable_issue_list_still_notifies(human_edit, capsys):
+    # Filing a duplicate beats telling nobody their work was discarded - the one place
+    # that answer is right, so the lookup is guarded here rather than left to upsert's
+    # "a listing we could not read is not 'there is no issue'".
+    fakes, run = human_edit
+    fakes.replies["list"] = RuntimeError("gh: HTTP 502")
     assert run() == 0
     assert fakes.created_body()
+    assert "filing a fresh one" in capsys.readouterr().err
 
 
 def test_a_failed_issue_creation_is_loud_but_never_fails_the_sync(human_edit, capsys):
@@ -208,6 +261,29 @@ def test_a_mentioned_author_is_not_backed_by_a_team_ping(human_edit):
     fakes, run = human_edit
     assert run() == 0
     assert f"{ORG}/instructors" not in fakes.created_body()
+
+
+def test_the_mail_is_handed_the_committer_the_files_and_the_issue(human_edit):
+    # The issue emails only the accounts it @mentions - which is nobody when a git email
+    # is linked to no account, and nobody who muted the repo either. What the sync owes
+    # the mail is who lost what, and the record to point them at.
+    fakes, run = human_edit
+    assert run() == 0
+    (site_org, site, course_org, by_login, issue_url, _now) = fakes.mailed[0]
+    assert (site_org, site, course_org) == (ORG, SITE, "Course-Org")
+    assert by_login == {"jan-gh": [("_data/people.yml", HUMAN[0])]}
+    # The URL `gh issue create` printed: the mail's "GH issue record:" row, which the raw
+    # `gh` call this replaced could not report at all.
+    assert issue_url == f"https://github.com/{ORG}/{SITE}/issues/1"
+
+
+def test_an_author_github_cannot_name_is_still_mailed_about(human_edit):
+    # Jan's case: the commits API answers `null`, so there is no login to key on. The
+    # empty key is what the letter falls back on the whole teaching team for.
+    fakes, run = human_edit
+    fakes.replies["login"] = (0, "null")
+    assert run() == 0
+    assert list(fakes.mailed[0][3]) == [""]
 
 
 def test_an_up_to_date_run_inspects_nothing(monkeypatch):

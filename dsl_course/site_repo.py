@@ -15,13 +15,13 @@ import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from functools import cache
 from pathlib import Path
 
-from . import scaffold, welcome
+from . import issues, notify, scaffold, welcome
 from .course import INSTRUCTORS_TEAM, active_today, pages_repo
-from .discovery import list_org_repos
+from .discovery import course_org_for_cohort, list_org_repos
 from .gh_contents import load_yaml_config
 from .gh_teams import acting_login
 from .ghcli import GIT_ENV, clone, gh, git, is_missing_resource
@@ -858,8 +858,18 @@ def _commit_login(org: str, site: str, sha: str) -> str | None:
 def _notify_overwritten_edits(
     org: str, site: str, overwritten: dict[str, tuple[str, list[str]]]
 ) -> None:
-    """Open (or comment on) one issue in the site repo naming the edits this sync just
-    replaced, linking the discarded commits and pointing at the files to edit instead.
+    """Open (or update) one issue in the site repo naming the edits this sync just
+    replaced, linking the discarded commits and pointing at the files to edit instead -
+    and email each person whose edit was lost.
+
+    Two channels for the same reason the config faults have two: the issue is the durable
+    record, in the repo the edit was made in, and it emails only the people it @mentions -
+    which reaches nobody at all when the git email behind a commit is linked to no GitHub
+    account, and reaches nobody who has muted the repo either.
+
+    The issue is addressed by its EXACT title (`issues.upsert_issue`). The search this
+    used to do is full-text, so an issue a HUMAN filed quoting the title came back first
+    and was commented on instead - somebody else's thread, and this notice nowhere.
 
     A courtesy, not data: every failure here is logged and swallowed, including by the
     caller. The site is already regenerated and pushed by the time this runs, so making
@@ -867,12 +877,14 @@ def _notify_overwritten_edits(
     new source of red crons - inverting the incident it exists to prevent."""
     rows = []
     unmentionable = False
+    by_login: dict[str, list[tuple[str, str]]] = {}
     for sha, (name, paths) in overwritten.items():
         # An @-mention when the git email is linked to an account, else the git author
         # name - which is all GitHub knows about that author either.
         login = _commit_login(org, site, sha)
         unmentionable = unmentionable or login is None
         who = f"@{login}" if login else f"`{name}`"
+        by_login.setdefault(login or "", []).extend((path, sha) for path in paths)
         for path in paths:
             rows.append(
                 f"- `{path}` - edited by {who} in "
@@ -904,40 +916,38 @@ def _notify_overwritten_edits(
             "GitHub account, so they could not be mentioned directly.\n"
         )
     repo = f"{org}/{site}"
-    code, out = gh(
-        "issue",
-        "list",
-        "--repo",
-        repo,
-        "--state",
-        "open",
-        "--search",
-        f"{OVERWRITE_ISSUE_TITLE} in:title",
-        "--json",
-        "number",
-        "--jq",
-        ".[0].number",
-    )
-    # A lookup that failed (or answered with anything but a number) is not fatal: filing a
-    # duplicate issue beats not telling anyone their edit was discarded.
-    existing = out.strip() if code == 0 and out.strip().isdigit() else ""
-    if existing:
-        code, out = gh("issue", "comment", existing, "--repo", repo, "--body", body)
-    else:
-        code, out = gh(
-            "issue",
-            "create",
-            "--repo",
-            repo,
-            "--title",
-            OVERWRITE_ISSUE_TITLE,
-            "--body",
-            body,
+    try:
+        existing = issues.find_issue(repo, OVERWRITE_ISSUE_TITLE)
+    except RuntimeError as exc:
+        # A listing that could not be read is not fatal HERE, unlike everywhere else this
+        # question is asked: filing a duplicate beats not telling somebody their work was
+        # discarded. Handed over explicitly so `upsert_issue` does not ask again and stop.
+        log_err(
+            f"could not look for {repo}'s overwrite issue ({exc}) - filing a fresh one"
         )
-    if code != 0:
-        log_err(f"could not notify {repo} about the overwritten edits: {out[:200]}")
+        existing = None
+    # The body is this sync's report and the comment is the same text, so the issue always
+    # OPENS on the most recent one and every earlier report stays on the thread beneath
+    # it. `upsert_issue` posts the comment only on an issue that already existed - a fresh
+    # one notifies by being created.
+    upserted = issues.upsert_issue(
+        repo, OVERWRITE_ISSUE_TITLE, body, comment=body, existing=existing
+    )
+    if upserted.errors:
+        log_err(f"could not notify {repo} about the overwritten edits")
     else:
         log(f"  (manual edits to {len(rows)} file(s) were overwritten - issue filed)")
+    # The mail, beside the issue and never instead of it: a course org's site has no
+    # people.yml to address, and a cohort whose transport is unset gets the issue alone.
+    # `course_org_for_cohort` is "" for the course org itself, which IS the course org.
+    notify.notify_overwritten_edits(
+        org,
+        site,
+        course_org_for_cohort(org) or org,
+        by_login,
+        upserted.url,
+        datetime.now(UTC),
+    )
 
 
 def _stale_site_repo(org: str, site: str) -> str | None:
