@@ -417,6 +417,64 @@ def test_a_blob_comes_back_byte_for_byte(monkeypatch):
     assert asked[0][1] == f"repos/O/R/git/blobs/{sha}"
 
 
+def _writing_repo(calls: list, *, blob: tuple[int, str]):
+    """A `gh` that answers every leg of a `put_files` commit into a repo that already has
+    one, recording each call. `blob` is what the loose-blob upload answers."""
+
+    def fake_gh(*args, stdin=None, **kwargs):
+        calls.append((args, stdin))
+        url = " ".join(args)
+        if args[1] == "repos/O/R":
+            return (0, _REPO_OBJECT)  # the repo object, for default_branch
+        if "git/blobs" in url:
+            return blob
+        if "git/trees" in url:
+            return (0, "newtree") if "--method" in args else (0, "false")
+        if "/commits/" in url:
+            return (0, "headsha treesha")
+        if "git/commits" in url:
+            return (0, "newcommit")
+        return (0, "")  # the ref move
+
+    return fake_gh
+
+
+def test_a_file_that_is_not_text_travels_as_a_blob(monkeypatch):
+    # A tree entry's `content` field is TEXT. `get_blob` reads bytes, so Patch could pick
+    # up a corrected image or dataset that this could not then write: the `.decode()` here
+    # raised UnicodeDecodeError, which is not the RuntimeError `patch_one_repo` catches, so
+    # one binary under a patched folder abandoned the run mid-cohort. Binaries go up as a
+    # loose blob and into the tree by sha.
+    png = b"\x89PNG\r\n\x1a\n\x00\xff\xfe"
+    calls: list[tuple] = []
+    _stub_gh(monkeypatch, _writing_repo(calls, blob=(0, "b10b5ha")))
+
+    assert gh_contents.put_files("O", "R", {"data/fig.png": png}, "fix: the figure")
+
+    (_blob_args, blob_stdin) = next(c for c in calls if "git/blobs" in " ".join(c[0]))
+    assert json.loads(blob_stdin) == {
+        "content": base64.b64encode(png).decode(),
+        "encoding": "base64",
+    }
+    # ...and the tree references it by sha rather than trying to carry the bytes.
+    (_tree_args, tree_stdin) = next(
+        c for c in calls if "git/trees" in " ".join(c[0]) and "--method" in c[0]
+    )
+    assert json.loads(tree_stdin)["tree"] == [
+        {"path": "data/fig.png", "mode": "100644", "type": "blob", "sha": "b10b5ha"}
+    ]
+
+
+def test_a_binary_that_could_not_be_uploaded_writes_nothing_at_all(monkeypatch):
+    # All or nothing, like every other put_files failure: a commit carrying half a
+    # correction is worse than none, and the caller re-runs.
+    calls: list[tuple] = []
+    _stub_gh(monkeypatch, _writing_repo(calls, blob=(1, "HTTP 422")))
+
+    assert gh_contents.put_files("O", "R", {"a.png": b"\xff\xfe"}, "fix: x") is False
+    assert not [c for c in calls if "git/commits" in " ".join(c[0])]
+
+
 def test_a_blob_that_comes_back_empty_is_refused_rather_than_believed(monkeypatch):
     # The other half: the Contents API answers `content: ""` on a 200 for anything over
     # 1 MiB, so a plot-heavy notebook read as an EMPTY file and was committed as one into
