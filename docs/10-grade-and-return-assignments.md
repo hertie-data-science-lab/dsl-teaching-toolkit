@@ -194,6 +194,26 @@ Two things it is worth writing the assignment for:
   on the grading runner, which has the toolkit's own dependencies and whatever your workflow
   installs.
 
+## The grader's reading copy (optional)
+
+Off unless you ask for it. Mark the hand-marked questions in the starter with Otter's
+fences - `<!-- BEGIN QUESTION -->` and `<!-- END QUESTION -->` in a markdown cell (or on
+their own line in an Rmd/qmd) - and set `grader_pdf: true` in the template's
+`grading_config.yml`. At the cutoff every submission is filtered down to just those
+questions and archived beside the autograde detail, as
+`classroom-config/autograde/<slug>/<key>.pdf`. Setup cells, imports and machine-marked
+work are left out, so you read the answers rather than the repo.
+
+It is **not** behind `autograde:`, deliberately: the fences delimit what a *person* marks,
+so an all-manual assignment is the one that wants this most.
+
+The runner may not be able to render a PDF - nbconvert's PDF path needs a LaTeX
+installation that a bare Actions runner has not got - so the export falls back to
+`.html`, and then to the filtered source (`.ipynb`, or `.Rmd`, which nothing on the runner
+can knit). The run log says which, in counts. None of that ever reds the cutoff pass: a
+submission with no fences in it, or one repo that could not be read, is counted and the
+freeze carries on.
+
 ## Closing the cohort out
 
 Once the last grades have gone out, run **Archive cohort** on that cohort. It is the end of

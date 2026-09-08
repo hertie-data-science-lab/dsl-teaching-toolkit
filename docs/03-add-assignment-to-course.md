@@ -84,6 +84,48 @@ works in Python and nothing else changes.
 repo, so a student who works in a notebook on a `py` assignment still grades, and `none`
 is the raw-repo option.
 
+### One notebook, not two: derive the starter
+
+Keeping the starter on `main` and the answer on `solution` by hand means writing the same
+notebook twice and keeping the two in step for the rest of the term. You don't have to.
+
+Write **one** notebook - the one you teach from - on the `solution` branch, in
+`solution/`, and fence the answers off in the vocabulary nbgrader and Otter already use:
+
+```python
+def fit(x, y):
+    ### BEGIN SOLUTION
+    return x @ y
+    ### END SOLUTION
+```
+
+Three ways to say it, and you can mix them in one file:
+
+| Fence | Where | What the student gets |
+|---|---|---|
+| `### BEGIN SOLUTION` … `### END SOLUTION` | anywhere in a code cell, script or Rmd | `pass  # YOUR CODE HERE`, at the same indent (`# YOUR CODE HERE` outside Python) |
+| a cell tagged `solution` | a whole notebook cell | the cell's heading, then `_YOUR ANSWER HERE_` - so `### Question 2 (3 points)` survives |
+| `solution=TRUE` | an Rmd/qmd chunk option | the chunk, its name and its other options, with `# YOUR CODE HERE` for a body |
+
+Then run **Derive student version** (course org → `.github` → Actions), pick the template,
+and untick `dry_run`. It reads `solution/` on the `solution` branch, strips the fences, and
+writes the result onto `main` - `solution/starter.ipynb` becomes `starter.ipynb`, which is
+what template-generate hands each student. It never writes to `solution`.
+
+Three things it refuses to do, because each one publishes the answer:
+
+- **a file with nothing fenced in it is not written at all** - the "starter" derived from it
+  would be your model answer, so the run names the file and goes red;
+- **an unbalanced fence is refused** - a `BEGIN` with no `END` is a typo the run will not
+  guess its way past;
+- **a stripped code cell loses its stored outputs** - a solution notebook is a *run*
+  notebook, and its outputs are the answers in print. Cells it did not change keep theirs,
+  so a worked example in the brief still shows its output.
+
+`dry_run` is on by default and prints the file list and the counts - never a line of the
+content, because that log is public. Only `.ipynb`, `.Rmd`, `.qmd`, `.py` and `.R` are
+derived; anything else under `solution/` stays where it is.
+
 ### Group vs individual assignments
 
 - If not defined, an assignment is default `type` = `individual`; it is individually assessed and returned to students.

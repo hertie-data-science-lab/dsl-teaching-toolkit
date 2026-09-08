@@ -52,10 +52,14 @@ breaks a live link that faculty click:
 Things whose *literal spelling* is depended on from outside Python:
 
 - **CLI module names.** Seeded workflows and templates invoke `python3 -m dsl_course.<x>`:
-  `assign`, `bootstrap_course`, `collect`, `deploy`, `enrol_codes`, `grades`, `list_orgs`,
-  `notify`, `scaffold`, `schedule`, `scheduler`, `seed`, `site`, `source_digest`, `status`,
-  `syllabus`, `sync_faculty`, `sync_membership`, `sync_roster`, `sync_teams`, `teardown`.
-  A rename strands every org until it refreshes.
+  `assign`, `bootstrap_course`, `collect`, `deploy`, `derive`, `enrol_codes`, `grades`,
+  `list_orgs`, `notify`, `scaffold`, `schedule`, `scheduler`, `seed`, `site`,
+  `source_digest`, `status`, `syllabus`, `sync_faculty`, `sync_membership`, `sync_roster`,
+  `sync_teams`, `teardown`.
+  A rename strands every org until it refreshes. `assign` carries TWO modes on one flat
+  parser rather than a subcommand, for the same reason: `--patch-path` switches it from
+  handing an assignment out to patching one that is already out, and every org's Release
+  assignment workflow spells the bare form.
 - **`roster.FIELDS` / `roster.normalise_role` / `teams.FIELDS`** are re-implemented in the
   shipped JavaScript (`templates/welcome/onboard.yml`, `team-formation.yml`), which cites them by
   name. Change a column and change both sides.

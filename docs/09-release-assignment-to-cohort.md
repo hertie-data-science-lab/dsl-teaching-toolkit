@@ -103,6 +103,36 @@ assignments:
   pin. To deliberately re-freeze (e.g. repos provisioned late), delete the CSV and the next
   scheduled tick rebuilds it.
 
+## Fixing a file after the assignment has gone out
+
+A broken cell, a wrong path, a dataset that moved. The repos are in students' hands
+already, so editing the template changes nothing for them - **Patch released assignment**
+is what distributes the fix.
+
+1. Commit the correction to the **template's default branch** (`main`) as you normally
+   would. This button only distributes what is already there.
+2. Course org → `.github` → **Actions** → **Patch released assignment**. Inputs:
+   `cohort_org`, `course_source_repo` (the template), `path` (a file, or a folder to push
+   whole), `slug` (only when two schedule entries hand out from this one template),
+   `overwrite` (default **off**) and `dry_run` (default **on**).
+3. Dry run first: it counts the repos it would touch and writes nothing.
+
+What a real run does:
+
+- pushes the file into every submission repo of that assignment as a **new commit** on the
+  student's own branch. Never a force-push, so nothing they have committed is lost;
+- **skips any file the student has already changed** - unless you tick `overwrite`, which
+  is a decision to discard their version of that file. "Changed" means the file no longer
+  matches the frozen cohort-side hand-out their repo was generated from;
+- patches that frozen hand-out too, so a student who onboards tomorrow is given the
+  corrected file rather than the one everybody else was just patched off;
+- posts one note on each patched repo's **Feedback** issue: *"The teaching team updated
+  `starter.ipynb` in this repository on 2026-10-14; pull before you continue. Your own
+  commits are untouched."* A second press that changes nothing says nothing.
+
+Text files only - notebooks, scripts, briefs, CSVs. The run log carries counts, never a
+repo name.
+
 ## Next
 
 - [Grade and return the assignment](10-grade-and-return-assignments.md).
