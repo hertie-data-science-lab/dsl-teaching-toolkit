@@ -302,12 +302,43 @@ def test_solve_runs():
 # option. A stub is a CONVENIENCE and nothing more: grading reads whatever is in the repo,
 # so a student who works in a notebook on a `py` assignment still grades.
 _STARTER_CODE = "def solve():\n    raise NotImplementedError  # TODO"
+
+
+def _latex_starter(title: str) -> str:
+    """A document that compiles as it stands - a Markdown heading in a `.tex` does not."""
+    return (
+        "\\documentclass{article}\n"
+        "\\begin{document}\n\n"
+        f"\\section*{{{title}}}\n\n"
+        "Replace this placeholder.\n\n"
+        "\\end{document}\n"
+    )
+
+
+def _markdown_starter(title: str, output: str) -> str:
+    """A document that knits/renders as it stands - front matter, a heading, a chunk."""
+    return (
+        "---\n"
+        f'title: "{title}"\n'
+        f"{output}\n"
+        "---\n\n"
+        "## Task\n\n"
+        "```{r}\n"
+        "# Replace this placeholder.\n"
+        "```\n"
+    )
+
+
+# Phase 3 c1 replaces these placeholders with real, format-specific starters.
 _STARTERS = {
     "ipynb": ("starter.ipynb", lambda title: _notebook([f"# {title}"], _STARTER_CODE)),
     "py": ("starter.py", lambda title: f'"""{title}."""\n\n\n{_STARTER_CODE}\n'),
-    "rmd": ("starter.Rmd", lambda title: f"# {title}\n\n_Your work goes here._\n"),
-    "qmd": ("starter.qmd", lambda title: f"# {title}\n\n_Your work goes here._\n"),
-    "latex": ("starter.tex", lambda title: f"# {title}\n\n_Your work goes here._\n"),
+    "rmd": (
+        "starter.Rmd",
+        lambda title: _markdown_starter(title, "output: html_document"),
+    ),
+    "qmd": ("starter.qmd", lambda title: _markdown_starter(title, "format: html")),
+    "latex": ("starter.tex", _latex_starter),
 }
 # CONTRIBUTIONS.md goes into a GROUP assignment's `main` only. It carries the stub mark,
 # because `collect._contributions` reads it at the pin and has to tell an untouched

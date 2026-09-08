@@ -219,6 +219,31 @@ def test_fresh_assignment_seeds_the_starter(fake, monkeypatch):
     assert {"README.md", "starter.py"} <= fake.written("assignment-1-f2026")
 
 
+def test_the_markup_starters_are_valid_files_of_their_own_format(fake, monkeypatch):
+    # A `.tex` holding Markdown does not compile, and an .Rmd/.qmd without front matter
+    # does not knit - a stub the student has to repair is worse than no stub at all.
+    _clone_ok(monkeypatch, _git_ok)
+    for number, fmt in (("1", "latex"), ("2", "rmd"), ("3", "qmd")):
+        assert (
+            scaffold.scaffold_assignment("Org", number, "f2026", fmt, name="Backprop")
+            == 0
+        )
+
+    tex = fake.files[("assignment-1-f2026", "starter.tex")]
+    assert tex.startswith("\\documentclass{article}\n")
+    assert "\\section*{Backprop}" in tex
+    assert tex.rstrip().endswith("\\end{document}")
+
+    for number, path, output_key in (
+        ("2", "starter.Rmd", "output:"),
+        ("3", "starter.qmd", "format:"),
+    ):
+        doc = fake.files[(f"assignment-{number}-f2026", path)]
+        front = doc.split("---\n")[1]
+        assert 'title: "Backprop"' in front and output_key in front
+        assert "## Task" in doc and "```{r}" in doc
+
+
 def test_the_brief_stub_has_the_two_headings_and_no_more(fake, monkeypatch):
     # The page students read. Two headings, both empty: seeding a plausible-looking brief
     # is how a placeholder ships as the assignment.
