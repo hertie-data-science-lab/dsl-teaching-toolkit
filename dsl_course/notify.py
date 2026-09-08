@@ -16,6 +16,11 @@ schedule.yml line and the last committer of the materials repo it names are the 
 who can act, and telling the whole teaching team about every entry is how a notification
 stops being read. The whole team is the FALLBACK, for a line nobody can be named for.
 
+A fault in the COURSE org's own config is the one exception (`route_course`). Its
+addressees are the course admins, out of an org SECRET rather than out of the public file
+half these faults are IN - so there is no handle to address one of them by, and git's
+answer is spent on the digest's @mention instead of on the To line.
+
 Neither mail ever fails a run. A notification that could not be delivered must not take a
 release cron down with it - the same contract the digest has.
 
@@ -194,6 +199,24 @@ def _wrote_it(cohort_org: str, fault: ConfigFault, bot: str) -> str | None:
     )
 
 
+def _last_pusher(org: str, fault: ConfigFault, bot: str) -> str | None:
+    """Who last pushed the FILE this fault is in, skipping the bot, or None.
+
+    The answer for a fault about the whole of a file rather than one line of it. `_wrote_it`
+    asks git blame, and blame needs a line - a file that is missing, unparseable or the
+    wrong shape has none, and those are precisely the faults somebody has just pushed."""
+    if not fault.file:
+        return None
+    return next(
+        (
+            login
+            for login in _pushed(org, fault.in_repo, fault.file)
+            if login.lower() != bot
+        ),
+        None,
+    )
+
+
 def _last_committer(course_org: str, repo: str) -> str | None:
     """Who last committed to a materials or template repo, or None if it cannot be told."""
     try:
@@ -285,6 +308,49 @@ def route(
         for handle in sorted(unaddressable):
             log_person(f"    no people.yml address: {handle}")
     return Routing(routed, sorted(dict.fromkeys(mention)))
+
+
+def route_course(
+    course_org: str,
+    faults: list[ConfigFault],
+    now: datetime,
+    admins: Iterable[str] = (),
+) -> Routing:
+    """Who hears about a fault in the COURSE org's own config. `route`'s course-level twin.
+
+    Two things differ, and both follow from the file being the course's rather than a
+    cohort's. The addresses are the course ADMINS' and they come from an org SECRET
+    (`mailer.course_admin_addresses`), never from the public `dsl-course.yml` that half
+    these faults are IN - so there is no handle-to-address map here, and therefore no way
+    to write to one admin rather than another. And the person git names is @mentioned on
+    the issue rather than addressed: the issue is where the line is, and the mail goes to
+    the people who own the course.
+
+    `admins` is the handles the course declares, for the degraded-mode count alone - the
+    caller has already parsed them, and a second read to print a number would be an API
+    call spent on a log line."""
+    loud = [f for f in faults if f.severity(now) >= NOTIFY_FROM]
+    if not loud:
+        return Routing()
+    to = _addresses(mailer.course_admin_addresses())
+    if not to:
+        # A COUNT and the variable's NAME, never an address and never who is missing one:
+        # this runs in the course org's public `.github`. `_deliver` then says that the
+        # digest @mention is the only channel left.
+        log(
+            f"  [skip] {len(list(admins))} addressee(s) without email - "
+            f"{mailer.COURSE_ADMIN_ENV} is not set on {course_org}"
+        )
+    bot = _bot()
+    mention: list[str] = []
+    for f in loud:
+        # Blame first, then whoever last pushed the file: a fault about the whole of a
+        # file (missing, unparseable, the wrong shape) has no line to blame, and that is
+        # the commonest way this config breaks.
+        login = _wrote_it(course_org, f, bot) or _last_pusher(course_org, f, bot)
+        if login and login not in mention:
+            mention.append(login)
+    return Routing({f.key: Routed(to, ()) for f in loud}, sorted(mention))
 
 
 # ---------------------------------------------------------------------- the mail
@@ -392,12 +458,28 @@ def _block(
     return _rows(rows)
 
 
+def _course_name(course_org: str) -> str:
+    """The course's display name, or its org slug when nothing names it.
+
+    Guarded, because `course_name_of` reads the course org's `dsl-course.yml` - which is
+    one of the files this module mails ABOUT. A malformed one raises out of the YAML
+    loader, and letting that through would mean the single fault that most needs an email
+    is the one fault that sends none."""
+    try:
+        return course_name_of(course_org) or course_org
+    except Exception:
+        return course_org
+
+
 def _course_label(course_org: str, cohort_org: str) -> str:
     """`Deep Learning (Demo) f2026`: the course's display name and the cohort's term tag,
     which is how a reader tells two cohorts of one course apart in a subject line. The
     org slug stands in for a course that declares no name."""
-    name = course_name_of(course_org) or course_org
-    tag = term_tag(cohort_org)
+    name = _course_name(course_org)
+    # A COURSE-level fault is the course org's own, so there is no cohort and no term to
+    # name - and a course org whose slug happens to carry one would otherwise put a
+    # cohort's tag on a subject line that is not about that cohort.
+    tag = None if cohort_org == course_org else term_tag(cohort_org)
     return f"{name} {tag}" if tag else name
 
 
@@ -437,7 +519,7 @@ def _mail(
     that ends on the issue holding the history."""
     label = _course_label(course_org, cohort_org)
     org_url = f"https://github.com/{course_org}"
-    sender = html.escape(course_name_of(course_org) or course_org)
+    sender = html.escape(_course_name(course_org))
     parts = [
         f"<p>This is an automated email sent on behalf of {sender}.</p>",
         f"<p>{_linked(_INTRO[loudest], 'course org', org_url)}</p>",
@@ -664,7 +746,7 @@ def notify_config_faults(
         def message(_routed: Routed, keys: list[str]) -> tuple[str, str]:
             keys.sort()
             faults_in = [digest.faults_by_key[k] for k in keys]
-            sender = html.escape(course_name_of(course_org) or course_org)
+            sender = html.escape(_course_name(course_org))
             parts = [
                 f"<p>This is an automated email sent on behalf of {sender}.</p>",
                 _immediate_intro(spec, len(faults_in), digest.reminder),
@@ -685,8 +767,11 @@ def notify_config_faults(
             message,
             # The maintainer joins once the file has been unusable for two days: by then
             # it is not a slip somebody is about to fix, and somebody outside the cohort
-            # has to know its enrolment (or its teams, or its plan) is not running.
-            lambda _keys: bool(digest.reminder),
+            # has to know its enrolment (or its teams, or its plan) is not running. On a
+            # COURSE-level digest they are on it from the first mail (`cc_maintainer`):
+            # the course admins it goes to are the same small group who may have written
+            # the line, so there is nobody else outside it to notice.
+            lambda _keys: spec.cc_maintainer or bool(digest.reminder),
             f"{spec.file} fault(s)",
             dry_run,
         )

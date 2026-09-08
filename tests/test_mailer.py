@@ -385,3 +385,20 @@ def test_a_dry_run_counts_the_copies_without_naming_them(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "...copying 1 address(es)" in out
     assert "boss@x.edu" not in out
+
+
+def test_the_course_admin_addresses_come_out_of_one_org_secret(monkeypatch):
+    # A comma-separated list, because that is what fits in one org secret and one central
+    # repository variable. Never a line in the public dsl-course.yml, which is itself one
+    # of the files these mails are about.
+    monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, "a@x.edu, b@x.edu")
+    assert mailer.course_admin_addresses() == ("a@x.edu", "b@x.edu")
+
+
+def test_a_course_org_without_the_secret_has_no_admin_addresses(monkeypatch):
+    for value in (None, "", "   ", ",,", "nothing-like-an-address"):
+        if value is None:
+            monkeypatch.delenv(mailer.COURSE_ADMIN_ENV, raising=False)
+        else:
+            monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, value)
+        assert mailer.course_admin_addresses() == ()

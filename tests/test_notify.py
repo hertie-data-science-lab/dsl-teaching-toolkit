@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
+import yaml
 from conftest import source_fault
 
 from dsl_course import config_digest, mailer, notify, source_digest
@@ -862,3 +863,153 @@ def test_no_mail_transport_says_so_once_and_never_raises(wired, capsys):
     routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
     assert _mail_config([_row_fault()], routing).addressees == 0
     assert "mail not configured" in capsys.readouterr().out
+
+
+# --------------------------------------------- a fault in the COURSE org's own config
+#
+# The course org's dsl-course.yml and cohort registry decide whether the course is synced
+# at all. Their addressees are the course ADMINS, out of an org secret - never out of the
+# public file half these faults are in - so there is no handle to address one of them by,
+# and git's answer goes to the digest's @mention instead of to the To line.
+
+COURSE_ISSUE = "https://github.com/Course-Org/.github/issues/3"
+ADMINS = ("lonny@x.edu", "luis@x.edu")
+
+
+def _course_fault(field: str = "central_ref", lineno: int | None = 8):
+    return notify.ConfigFault(
+        "dsl-course.yml",
+        "`central_ref:` is not `main`, `release` or a full 40-character commit SHA",
+        file="dsl-course.yml",
+        field=field,
+        in_repo=".github",
+        lineno=lineno,
+    )
+
+
+def _course_digest(faults, reminder=None) -> source_digest.DigestResult:
+    by_key = {f.key: f for f in faults}
+    return source_digest.DigestResult(
+        issue_url=COURSE_ISSUE,
+        faults_by_key=by_key,
+        mail=dict.fromkeys(by_key, Severity.WARNING),
+        reminder=reminder,
+    )
+
+
+def _mail_course(faults, routing, reminder=None):
+    return notify.notify_config_faults(
+        config_digest.COURSE,
+        COURSE,
+        COURSE,
+        _course_digest(faults, reminder),
+        NOW,
+        routing,
+        dry_run=False,
+    )
+
+
+@pytest.fixture
+def admins(monkeypatch):
+    """The `DSL_COURSE_ADMIN_EMAILS` org secret, as a course org's workflows read it."""
+
+    def _set(value: str | None) -> None:
+        if value is None:
+            monkeypatch.delenv(mailer.COURSE_ADMIN_ENV, raising=False)
+        else:
+            monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, value)
+
+    return _set
+
+
+def test_a_course_fault_is_addressed_to_the_admins_and_mentions_the_committer(
+    wired, admins
+):
+    admins(", ".join(ADMINS))
+    wired(blame={8: "JanG"})
+    routing = notify.route_course(COURSE, [_course_fault()], NOW)
+    (routed,) = routing.by_key.values()
+    # The admins act on it; the person git names is @mentioned on the issue, because the
+    # secret is a flat address list with no handle to match them against.
+    assert routed.to == ADMINS and routed.cc == ()
+    assert routing.logins == ["JanG"]
+
+
+def test_a_fault_about_the_whole_file_falls_back_to_whoever_pushed_it(wired, admins):
+    # Missing, unparseable, the wrong shape: no line to blame, and precisely the faults
+    # somebody has just pushed.
+    admins(ADMINS[0])
+    wired(blame={8: "JanG"}, pushers=("dsl-bot", "cpj97"))
+    routing = notify.route_course(COURSE, [_course_fault(lineno=None)], NOW)
+    assert routing.logins == ["cpj97"]
+
+
+def test_the_maintainer_is_copied_on_the_very_first_course_mail(wired, admins):
+    # Not at 48 hours as a cohort's file is: the course admins in the To line are the same
+    # small group who may have written the line, so there is nobody else to notice.
+    admins(",".join(ADMINS))
+    sent = wired(blame={8: "JanG"})
+    routing = notify.route_course(COURSE, [_course_fault()], NOW)
+    _mail_course([_course_fault()], routing)
+    assert sent.one["cc"] == ["maint@x.edu"]
+    assert sent.one["to"] == list(ADMINS)
+
+
+def test_the_course_subject_names_the_course_and_no_cohort(wired, admins):
+    admins(ADMINS[0])
+    sent = wired(blame={8: "JanG"})
+    routing = notify.route_course(COURSE, [_course_fault()], NOW)
+    _mail_course([_course_fault()], routing)
+    # No term tag: this is the course org's own file, not a cohort's.
+    assert sent.one["subject"] == (
+        "[Course Name] dsl-course.yml has 1 entry the toolkit cannot use"
+    )
+    assert "the sync skips this course" in sent.one["body"]
+    assert "dsl-course.yml#L8" in sent.one["body"]
+
+
+def test_a_course_org_with_no_admin_secret_says_so_without_naming_anyone(
+    wired, admins, capsys
+):
+    # Appendix H's degraded mode: a count and the variable's name, in a PUBLIC repo's log.
+    admins(None)
+    sent = wired(blame={8: "JanG"})
+    routing = notify.route_course(COURSE, [_course_fault()], NOW, ["jan-g", "lonny"])
+    assert _mail_course([_course_fault()], routing).addressees == 0
+    out = capsys.readouterr().out
+    assert "[skip] 2 addressee(s) without email" in out
+    assert mailer.COURSE_ADMIN_ENV in out
+    assert "the digest @mention is the only channel" in out
+    assert sent.calls == 0
+
+
+def test_a_stray_comma_in_the_secret_costs_nobody_a_mail(admins):
+    admins(" lonny@x.edu ,, not-an-address, luis@x.edu")
+    assert mailer.course_admin_addresses() == ("lonny@x.edu", "luis@x.edu")
+
+
+def test_no_course_admin_address_ever_reaches_the_log(wired, admins, capsys):
+    admins(",".join(ADMINS))
+    wired(blame={8: "JanG"})
+    routing = notify.route_course(COURSE, [_course_fault()], NOW)
+    _mail_course([_course_fault()], routing)
+    out = capsys.readouterr().out
+    assert all(address not in out for address in ADMINS)
+
+
+def test_a_dsl_course_yml_nobody_can_parse_still_sends_its_mail(
+    wired, admins, monkeypatch
+):
+    # The sender line asks the course org for its display name, which reads the very file
+    # this mail is about. The one fault that most needs an email must not be the one that
+    # sends none - it falls back to the org slug and goes out.
+    admins(ADMINS[0])
+    sent = wired(blame={8: "JanG"})
+
+    def unparseable(org):
+        raise yaml.YAMLError("bad")
+
+    monkeypatch.setattr(notify, "course_name_of", unparseable)
+    routing = notify.route_course(COURSE, [_course_fault()], NOW)
+    assert _mail_course([_course_fault()], routing).addressees == 0
+    assert sent.one["subject"].startswith(f"[{COURSE}] dsl-course.yml has 1 entry")

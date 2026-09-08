@@ -106,6 +106,13 @@ _SINGLE_LINE = ("GRAPH_TENANT_ID", "GRAPH_CLIENT_ID", "GRAPH_SENDER")
 # out of `secrets.` like the rest of the mail env. `workflows_render._MAIL_ENV` carries it
 # alongside GRAPH_ENV, so a rename cannot leave an org silently unaddressed.
 MAINTAINER_ENV = "DSL_MAINTAINER_EMAIL"
+# Where a fault in the COURSE org's own config goes: the course admins, comma-separated.
+# An org SECRET and never a line in `dsl-course.yml`, which is public and is itself one of
+# the files these mails are about. Held centrally as a repository variable on the toolkit
+# and propagated onto each course org by `bootstrap_course`, exactly as MAINTAINER_ENV is.
+# COURSE orgs only: every course-level mail is sent from the course org's `.github`, and
+# no workflow seeded into a cohort may wire the mail env at all (see maintainers.md).
+COURSE_ADMIN_ENV = "DSL_COURSE_ADMIN_EMAILS"
 
 
 def graph_config_from_env() -> GraphConfig | None:
@@ -156,6 +163,24 @@ def maintainer_address() -> str | None:
         if value:
             return value
     return None
+
+
+def course_admin_addresses() -> tuple[str, ...]:
+    """The course admins' addresses for THIS org, in declaration order. `()` when the
+    secret is unset, blank, or holds nothing that can be an address.
+
+    A comma-separated list, because that is what fits in one org secret and one repository
+    variable - there is no handle here, and therefore no way (and no need) to address one
+    admin rather than another: a course-level fault is the course's to fix, and the
+    committer git names is @mentioned on the digest issue instead.
+
+    Anything without an `@` is dropped rather than handed to Graph, so one stray comma in
+    the secret costs a mail to nobody instead of a 400 for everybody.
+
+    Never logged: every faculty workflow runs in a PUBLIC repo. Log the NAME, a count, or
+    `mask_email` of the value."""
+    raw = os.environ.get(COURSE_ADMIN_ENV) or ""
+    return tuple(a for a in (part.strip() for part in raw.split(",")) if "@" in a)
 
 
 def _b64url(raw: bytes) -> str:
