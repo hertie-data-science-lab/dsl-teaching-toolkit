@@ -142,6 +142,7 @@ def _clear_process_memos():
     grades.course_assignment_defaults.cache_clear()
     collect._starter_notebook_shas.cache_clear()
     gh_contents.last_committer.cache_clear()
+    gh_contents.path_committers.cache_clear()
     sync_faculty.load_cohort_faculty.cache_clear()
     ghcli.bot_login.cache_clear()
 

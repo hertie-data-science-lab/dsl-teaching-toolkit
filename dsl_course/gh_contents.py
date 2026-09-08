@@ -821,6 +821,23 @@ def last_committer(org: str, repo: str) -> str | None:
     return ((rows[0] or {}).get("author") or {}).get("login") or None
 
 
+@cache
+def path_committers(org: str, repo: str, path: str, limit: int = 5) -> tuple[str, ...]:
+    """The logins behind the most recent commits that touched `path`, newest first.
+
+    Blame answers "who wrote this LINE", which is the right question for a file people
+    edit a line of. It is the wrong one for a CSV: the bot writes `enrol_code` and
+    `code_sent_at` back into rows faculty typed, so the blame answer for half the roster
+    is an account that cannot fix anything. So a CSV asks who PUSHED the file, and takes
+    the newest login that is not the bot - hence several, not one.
+
+    Raises on a read it could not make, for the reason `blame_logins` does. Memoised per
+    process: one file, one answer, several faults. `tests/conftest.py` clears it."""
+    rows = gh_json("api", f"repos/{org}/{repo}/commits?per_page={limit}&path={path}")
+    logins = [((r or {}).get("author") or {}).get("login") for r in rows or []]
+    return tuple(dict.fromkeys(login for login in logins if login))
+
+
 def load_yaml_config(
     org: str, repo: str, path: str, lines: bool = False
 ) -> dict | None:
