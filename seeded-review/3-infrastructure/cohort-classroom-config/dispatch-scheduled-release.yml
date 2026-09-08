@@ -1,0 +1,53 @@
+# SYSTEM-OWNED - do not edit, edits here are overwritten. This workflow is re-seeded
+# from the central DSL teaching toolkit by 'Refresh actions' (nightly).
+name: Dispatch scheduled release
+
+# Seeded into a cohort's private classroom-config repo as
+# .github/workflows/dispatch-scheduled-release.yml (sibling of dispatch-sync-site.yml,
+# which refreshes the website). Its only job: fire the course org's Scheduled release
+# whenever schedule.yml changes here, so an edited release, handout, freeze or solution
+# moment takes effect NOW rather than at the next cron tick.
+#
+# Why a push trigger at all: the scheduler's own `schedule:` cron is delivered
+# best-effort by GitHub - a few per cent of fires arrive, and observed gaps run to
+# hours - so "a schedule edit takes effect within ~15 minutes" is only true if the edit
+# itself starts a run. Firing is always safe: Scheduled release runs for every cohort in
+# the course org and is idempotent (one-shot work is guarded by its own markers,
+# cumulative work re-converges), so an extra run does no more than the cron would.
+#
+# Reads the course org from THIS cohort's own .github/dsl-course.yml `course:` pointer
+# (single source of truth). Fires a repository_dispatch (not workflow_dispatch) so the
+# scheduler's ungated automatic path picks it up. Runs under secrets.DSL_BOT_TOKEN, which
+# classroom-config already carries (an infra repo).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - schedule.yml
+
+# Everything here authenticates with DSL_BOT_TOKEN (reading this org's dsl-course.yml, and
+# dispatching to the course org - neither of which the ambient token can do), so the
+# ambient GITHUB_TOKEN is dropped to zero scopes.
+permissions: {}
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger Scheduled release in the course org
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          COHORT_ORG: ${{ github.repository_owner }}
+        run: |
+          course_org=$(gh api "repos/$COHORT_ORG/.github/contents/dsl-course.yml" \
+            --jq '.content | @base64d' | grep '^course:' | cut -d: -f2- | xargs)
+          if [ -z "$course_org" ]; then
+            echo "::error::no 'course:' line in $COHORT_ORG/.github/dsl-course.yml - can't find the course org to dispatch to."
+            exit 1
+          fi
+          gh api "repos/$course_org/.github/dispatches" \
+            -f event_type=scheduled-release \
+            -f "client_payload[cohort_org]=$COHORT_ORG" \
+            -f "client_payload[driver]=classroom-config"

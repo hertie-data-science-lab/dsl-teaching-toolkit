@@ -53,6 +53,11 @@ jobs:
           DSL_BOT_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           COURSE: ${{ github.repository_owner }}
           COHORT: ${{ inputs.cohort_org }}
+          # Forwarded, not looked up: this runs in the COURSE org, whose own bootstrap
+          # propagated the address here, so --propagate-secret can pass it down to the
+          # cohort. Empty on a course org that never got one - the cohort then falls back
+          # to GRAPH_SENDER like everything else.
+          DSL_MAINTAINER_EMAIL: ${{ secrets.DSL_MAINTAINER_EMAIL }}
         run: |
           python3 -m dsl_course.bootstrap_course --org "$COHORT" --org-name "$COHORT" \
             --cohort --course "$COURSE" --propagate-secret

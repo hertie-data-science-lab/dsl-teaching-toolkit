@@ -2,9 +2,13 @@
 # re-rendered from the central DSL teaching toolkit by 'Refresh actions' (nightly).
 name: Distribute grades
 
-# Run AFTER merging the Render grades preview PR. Copies each merged gradebook/<handle>.yml
-# into that student's private grades-<handle> repo and (unless silenced) emails them a
-# notification to their Hertie email address. Needs the GRAPH_* secrets for the email.
+# Reads the grading sheets in classroom-config and sends what they hold: a feedback comment
+# on each submission repo's Feedback issue, each student's private grades-<handle> repo, the
+# registrar export, and (unless silenced) an email saying there is something new to read.
+# Nothing is said twice - a re-run after one correction reaches one student.
+# `assignment` narrows the run to one slug; blank is every sheet in the cohort, which is
+# right at the end of term and wrong in the middle of one.
+# Dry run first; it writes nothing and prints the counts. Needs the GRAPH_* secrets to mail.
 
 on:
   workflow_dispatch:
@@ -16,6 +20,10 @@ on:
         default: "hertie-dsl-demo-f2026"
         options:
           - hertie-dsl-demo-f2026
+      assignment:
+        description: "One assignment slug - leave blank for every sheet in the cohort"
+        type: string
+        required: false
       dry_run:
         description: "Preview the grade emails - push nothing, send nothing"
         type: boolean
@@ -54,7 +62,7 @@ jobs:
   distribute-grades:
     needs: check-team
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4.4.0
         with:
@@ -68,14 +76,17 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           COHORT_ORG: ${{ inputs.cohort_org }}
+          ASSIGNMENT: ${{ inputs.assignment }}
           DRY_RUN: ${{ inputs.dry_run }}
           SILENT: ${{ inputs.silent }}
           GRAPH_TENANT_ID: ${{ secrets.GRAPH_TENANT_ID }}
           GRAPH_CLIENT_ID: ${{ secrets.GRAPH_CLIENT_ID }}
           GRAPH_CLIENT_CERT: ${{ secrets.GRAPH_CLIENT_CERT }}
           GRAPH_SENDER: ${{ secrets.GRAPH_SENDER }}
+          DSL_MAINTAINER_EMAIL: ${{ secrets.DSL_MAINTAINER_EMAIL }}
         run: |
           args=(--cohort-org "$COHORT_ORG")
+          [ -n "$ASSIGNMENT" ] && args+=(--assignment "$ASSIGNMENT")
           if [ "$DRY_RUN" = "false" ]; then args+=(--no-dry-run); else args+=(--dry-run); fi
           [ "$SILENT" = "true" ] && args+=(--no-notify)
           python3 -m dsl_course.grades distribute "${args[@]}"

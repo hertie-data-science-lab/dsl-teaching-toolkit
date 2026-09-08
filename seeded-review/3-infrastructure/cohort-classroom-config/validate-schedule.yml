@@ -19,13 +19,29 @@ name: Validate schedule
 # checker - could drift, and its failure mode is the worst one available: passing a file
 # the scheduler will silently drop entries from.
 #
+# A THIRD verdict arrives here and has no channel of its own: an empty course org means
+# the toolkit could not read this cohort's own dsl-course.yml, which is nothing faculty can
+# fix. It reds the run and says so in the annotation, and the annotation asks for the
+# maintainer by name - it cannot email them. A cohort org carries DSL_BOT_TOKEN and nothing
+# else: the GRAPH_* transport and DSL_MAINTAINER_EMAIL are set on COURSE orgs, nothing
+# propagates them down here, and a mail step wired to secrets an org does not have sends to
+# nobody while reading as a channel that works.
+#
 # The red X and the issue above are the DROPPED-ENTRY channel and nothing else. The run
 # also checks whether the plan's sources exist in the course org, but that answer changes
-# week to week (a lecture nobody has written yet is normal in August), so it is reported as
-# ::warning:: annotations on a green run and never touches the exit code. Escalating one of
-# those to a failure is the scheduler's job, which files its own, separately-titled
-# digest issue - routing it through here would name the fault "entries the scheduler cannot
-# read" and close it on the next clean parse, staged or not.
+# week to week (a lecture nobody has written yet is normal in August), so it never touches
+# the exit code. Escalating one of those to a failure is the scheduler's job, which files
+# its own, separately-titled digest issue - routing it through here would name the fault
+# "entries the scheduler cannot read" and close it on the next clean parse, staged or not.
+#
+# What a source fault DOES get here is a commit comment, and only when the release is
+# close enough that somebody is meant to hear about it. That is the one moment this
+# workflow can say something the scheduler cannot: the person who just pushed is still at
+# their keyboard, and the alternative is finding out from an email tomorrow. Distant faults
+# get nothing - the digest issue holds them. The comment's TEXT is written by the engine
+# (`--comment-file`), not assembled here: this step used to grep the report back for a rung
+# prefix, which matched some rungs and not others, and counted an entry that had already
+# fired among the ones still to come.
 
 on:
   push:
@@ -37,12 +53,14 @@ on:
       - schedule.yml
   workflow_dispatch:
 
-# contents: read is what the ambient GITHUB_TOKEN needs to check this private repo out.
-# issues: write is the escalation path this workflow exists for (see the header); the issue
-# steps below run on DSL_BOT_TOKEN, so this is the declared intent rather than the token in
-# use, and it stays at the two scopes rather than the default all.
+# contents: write covers both things this job does to the repo it runs in: checking it
+# out, and leaving a comment on the pushed commit (a commit comment is under the Contents
+# permission, not Issues - the endpoint is repos/.../commits/<sha>/comments).
+# issues: write is the escalation path this workflow exists for (see the header). Every
+# write below actually runs on DSL_BOT_TOKEN, so this block is the declared intent rather
+# than the token in use, and it stays at the two scopes rather than the default all.
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 jobs:
@@ -67,11 +85,12 @@ jobs:
 
       # The course org this cohort belongs to, read from its own dsl-course.yml (the same
       # single source of truth dispatch-sync.yml reads - no org name baked in at bootstrap
-      # time). Only the source check needs it, and that check is advisory, so a failure to
-      # resolve it leaves this empty and the check is skipped rather than breaking the run.
+      # time). A cohort's dsl-course.yml is SYSTEM-OWNED and always names `course:`, so an
+      # empty answer here is an API error or a token that lost its scope - infrastructure,
+      # not anything in the file that was just pushed. It used to be swallowed, which meant
+      # the source check silently stopped running and every push looked clean.
       - name: Resolve the course org
         id: course
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           COHORT_ORG: ${{ github.repository_owner }}
@@ -90,16 +109,21 @@ jobs:
           COURSE_ORG: ${{ steps.course.outputs.org }}
         run: |
           set +e
-          check=""
+          # The PARSE runs first and unconditionally. It is the verdict about the file
+          # that was just pushed, it needs nothing but that file, and its channel - the
+          # red X, the issue naming what was dropped, the close on the next clean push -
+          # hangs off the `rc` written below. Failing the step here for an empty course
+          # org skipped all of it: those steps have no status function in their `if:`, so
+          # a failed step above them means they never run, and a push that dropped an
+          # entry went unreported because an unrelated API call came back empty.
+          args=(--file ../cohort/schedule.yml --validate)
           if [ -n "$COURSE_ORG" ]; then
-            check="--check-sources $COURSE_ORG --annotate"
-          else
-            echo "::notice::could not resolve this cohort's course org - the source check did not run"
+            args+=(--check-sources "$COURSE_ORG" --annotate --comment-file comment.txt)
           fi
           # stdout is the report; the ::warning:: annotations go to stderr, so they reach
           # the job log (where Actions renders them against schedule.yml in the commit's
           # own diff) without landing in the summary as raw workflow-command text.
-          python3 -m dsl_course.schedule --file ../cohort/schedule.yml --validate $check > report.txt
+          python3 -m dsl_course.schedule "${args[@]}" > report.txt
           echo "rc=$?" >> "$GITHUB_OUTPUT"
           {
             echo "## schedule.yml"
@@ -119,6 +143,37 @@ jobs:
             echo "REPORT_EOF_ba31d7c94f68"
           } >> "$GITHUB_OUTPUT"
           exit 0
+
+      # The push that planned it is the cheapest moment to say so: the person who wrote
+      # the line is still here. `sources_notify` and comment.txt are both written by the
+      # process that knows the rung (dsl_course.schedule --annotate --comment-file), so
+      # this step decides nothing - it posts what it was handed, and adds the one thing
+      # only the workflow knows: where this repo's digest issue actually is.
+      - name: Comment on the push about a release with no materials
+        if: github.event_name == 'push' && steps.validate.outputs.sources_notify == 'true'
+        working-directory: central
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          [ -s comment.txt ] || exit 0
+          # The title comes from the engine that writes the issue. Every lookup of it
+          # matches EXACTLY, so a copy typed here would stop finding the issue the day
+          # the wording changed - and this line would point at a search finding nothing.
+          title=$(python3 -m dsl_course.source_digest --title)
+          # `--search` is a WORD match, so the exact-title filter is client-side. jq reads
+          # the title from the environment rather than from its own program text: it is
+          # engine output, not a string to splice into an expression.
+          url=$(TITLE="$title" gh issue list --repo "$REPO" --state open \
+            --search "$title in:title" --json url,title \
+            --jq 'map(select(.title == env.TITLE))[0].url // empty') || true
+          # Nothing open yet: this push is often what opens it, on the scheduler's next
+          # tick. A search is then the honest answer - it holds the issue within a minute.
+          [ -n "$url" ] || url="https://github.com/$REPO/issues?q=is%3Aissue+is%3Aopen+schedule.yml"
+          body=$(printf '%s\nThe generated GitHub record issue is %s.\n' \
+            "$(cat comment.txt)" "$url")
+          gh api "repos/$REPO/commits/$SHA/comments" -f body="$body" >/dev/null
 
       - name: Open an issue naming what was dropped
         if: steps.validate.outputs.rc != '0' && github.event_name == 'push'
@@ -156,4 +211,17 @@ jobs:
         if: steps.validate.outputs.rc != '0'
         run: |
           echo "::error file=schedule.yml::schedule.yml has entries the scheduler cannot read - see the run summary"
+          exit 1
+
+      # LAST, so the dropped-entry channel above has already run. A cohort's dsl-course.yml
+      # is SYSTEM-OWNED and always names `course:`, so an empty answer is an API error or a
+      # token that lost its scope - infrastructure, and nothing in the file just pushed. It
+      # used to be swallowed, which meant the source check silently stopped running and
+      # every push looked clean; it then failed the validate step instead, which skipped
+      # everything after it. The annotation asks for the maintainer by name because this
+      # repo cannot email them - see the header.
+      - name: Fail the run because the course org could not be read
+        if: steps.course.outputs.org == ''
+        run: |
+          echo "::error::could not read this cohort's dsl-course.yml - the source check could not run. This is not a fault in your file - the toolkit could not reach the course org. Tell the maintainer."
           exit 1
