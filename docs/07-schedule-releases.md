@@ -180,6 +180,8 @@ Unlike a `releases:` label, **an assignment's slug is shown to students**: it na
 
 **This file is timing only.** `type:` and `max_team_size:` used to be accepted here and are not any more: what an assignment IS - its shape, its team cap, how it is handed in, its question maxima, its late policy, whether it is autograded - lives in that assignment's own `grading_config.yml`, on the course template's `solution` branch (see [Add an assignment](03-add-assignment-to-course.md)). Written here they are flagged by **Validate schedule**, which names the file they moved to, and ignored.
 
+Adding or renaming an assignment here also wakes **Sync membership**, which rewrites `classroom-config/assignments.lock.yml` - the generated mirror the **Join team** form reads to decide whether a team may form for a slug and how big it may be. So a new group assignment is joinable within a minute or so of the push, provided its template already declares `team_formation: self_select`.
+
 ```yaml
 assignments:
   assignment-1:

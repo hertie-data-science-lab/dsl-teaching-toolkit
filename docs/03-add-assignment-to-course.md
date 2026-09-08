@@ -74,6 +74,14 @@ Repeat for each assignment (`number` = 2, 3, …).
 >team_formation: self_select   # or `assigned`, and you write teams.csv
 >max_team_size: 4
 >```
+>
+> `team_formation` and `max_team_size` are also what the **Join team** form in each
+> cohort's `welcome` repo answers on. It cannot read this file - it runs in a public repo
+> under a token that has no access to the templates - so the toolkit mirrors those two
+> values into each cohort's `classroom-config/assignments.lock.yml` and the form reads
+> that. Editing them here is enough: the mirror catches up on the next **Sync
+> membership**, **Release assignment** or nightly **Refresh actions**. Until this template
+> exists, its schedule entry is locked to "no teams", so nobody can form one for it.
 
 > **Deadlines aren't set here.** The due date students see is *per cohort*, in that cohort's `schedule.yml` - see [Release assignment → Deadlines](09-release-assignment-to-cohort.md#deadlines).
 

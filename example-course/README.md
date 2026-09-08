@@ -41,6 +41,12 @@ example-course/
     grading_sheets/*.yml            # one marking sheet per assignment (individual + group)
 ```
 
+> Not shown, because nobody writes it: each live cohort also carries
+> `assignments.lock.yml` in `classroom-config` - generated from the assignments'
+> `grading_config.yml` files, and the only thing the **Join team** form reads. It is not in
+> the worked example for the same reason there is no `.sample` twin of it: there is nothing
+> in it for a person to copy.
+
 > NB: **`cohort-org/` is shipped, not just documented.** Every file in it is seeded into each
 > cohort's private `classroom-config` repo as the `.sample` twin of the scaffold faculty fill
 > in - `students.csv` → `students.csv.sample`, and so on for every other file here. The set is

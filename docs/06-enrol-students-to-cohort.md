@@ -55,10 +55,18 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
 - There are 2 methods to form groups:
    1. Students open a **Join team** issue in `welcome`, 
    2. instructors edit `classroom-config/teams.csv`(`assignment, team, github_handle`)
-- The issue flow only accepts an assignment already **declared under `assignments:` in
-  `classroom-config/schedule.yml`** (declare it before students form teams) and enforces its
-  `max_team_size`, which lives in that assignment's own `grading_config.yml` (default:
-  the course's `assignment_defaults`, else 5).
+- The issue flow only accepts an assignment that is **declared under `assignments:` in
+  `classroom-config/schedule.yml`** (declare it before students form teams) **and whose
+  template says `team_formation: self_select`**. It enforces that assignment's
+  `max_team_size` (default: the course's `assignment_defaults`, else 5). Both answers come
+  from the assignment's own `grading_config.yml`, through the generated mirror
+  `classroom-config/assignments.lock.yml` that nobody edits. Three refusals a student can
+  meet, all labelled `needs-review`:
+  - `assignment-1 is an individual assignment - no teams.`
+  - `teams for assignment-1 are assigned by the instructor.` (write `teams.csv` yourself)
+  - `team-alpha already has 3 members (the cap for assignment-1 is 3).`
+- An assignment whose course template does not exist yet refuses every request until the
+  template is created - nobody can form a team for an assignment nobody has described yet.
 - Team names are lower-cased; a GitHub handle or a faculty team name (`course-admin`) is refused.
 - The **Sync membership** workflow then creates a GitHub team per group.
 - A **Release assignment** run with `group` ticked then grants each team its shared repo.

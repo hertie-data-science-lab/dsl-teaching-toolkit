@@ -59,6 +59,13 @@ Things whose *literal spelling* is depended on from outside Python:
 - **`roster.FIELDS` / `roster.normalise_role` / `teams.FIELDS`** are re-implemented in the
   shipped JavaScript (`templates/welcome/onboard.yml`, `team-formation.yml`), which cites them by
   name. Change a column and change both sides.
+- **`grades.team_lock_text`'s LAYOUT.** `classroom-config/assignments.lock.yml` is parsed by
+  a line scanner in `templates/welcome/team-formation.yml` (github-script has no YAML
+  library), which matches a two-space assignment key and four-space `team_formation:` /
+  `max_team_size:` under it. Re-indenting the writer, or nesting the entries any deeper,
+  makes every Join-team request in every cohort read as "not an assignment here" - and the
+  form is the only place a student would find out. `tests/test_welcome_templates.py` runs
+  the SHIPPED scanner over the writer's real output; keep that pairing.
 - **`gh_contents.STUB_MARKS` and `SUPERSEDED_DESCRIPTIONS` / `SUPERSEDED_COHORT_*` / `SUPERSEDED_COURSE_*`**
   are convergence chains matched against *live* state. Rewording a stub or a repo description
   means **adding a link to the chain**, never editing one. For the descriptions, an org on the
@@ -157,6 +164,28 @@ Seeded files carry their owner on the first line, and the write site enforces it
 
 The full rule is the ownership note at the top of `bootstrap_course.py`.
 
+### The one SYSTEM-OWNED file that is not a template
+
+`classroom-config/assignments.lock.yml` is SYSTEM-OWNED like the dispatchers, but it is
+DERIVED - rendered per cohort from that cohort's `schedule.yml` and each named template's
+`grading_config.yml` - so it cannot join `welcome.CLASSROOM_SYSTEM_FILES`, which maps a
+repo path to a file under `templates/`. Adding a file like this is four places:
+
+1. the renderer and the writer, beside what owns the subject (`grades.team_lock_text` /
+   `grades.write_team_lock`), with the SYSTEM-OWNED stamp emitted by the writer itself;
+2. `seed.refresh`'s per-cohort loop - which is BOTH how it is seeded (a Bootstrap cohort
+   run ends in `seed refresh`) and how it converges nightly. An archived cohort is skipped
+   there, which is what keeps a finished semester frozen;
+3. every path that can move one of its inputs, so it does not wait for the night:
+   `sync_membership.sync` (its dispatcher fires on a `schedule.yml` push) and
+   `assign.provision_all`. `put_file` blob-compares, so the extra call sites cost a read
+   apiece and no commit;
+4. a test that the nightly loop reaches every live cohort, beside the pointer's
+   (`tests/test_bootstrap_seeding.py`).
+
+It carries no `.sample` twin and is absent from `example-course/cohort-org/`: nobody edits
+it, so there is nothing in it for a person to copy.
+
 A course website is wholly the toolkit's: `scaffold_site` creates `<org>.github.io` EMPTY and
 seeds only its Pages build, then every sync writes `templates/site/` (SYSTEM-OWNED) and seeds
 `templates/site-seed/` into any path the site lacks (INSTRUCTOR-OWNED). There is no
@@ -197,6 +226,30 @@ Four places, in order - miss the last and every org keeps two buttons for one jo
 3. `tests/test_renderers.py`'s `ALL_RENDERED` - a completeness test fails otherwise;
 4. when *retiring* a path, add it to that call's `delete=` tuple (or
    `workflows_place.RETIRED_WORKFLOWS`), so orgs seeded before the change drop the old file.
+
+## The clean break in `schedule.yml`
+
+`type:` and `max_team_size:` were accepted on an assignment entry and BEAT the template's
+own `grading_config.yml`. They are gone from `KNOWN_ASSIGNMENT` and from `AssignmentEntry`:
+`schedule.yml` says WHEN, `grading_config.yml` says WHAT, and the two no longer overlap.
+Written in a schedule now they are unknown keys - `Validate schedule` names the file they
+moved to and the entry still runs.
+
+No fallback, and deliberately none: a fallback is how the two files came to disagree, with
+repos of one kind graded as the other. **The migration is by hand, per org, after the
+promote** - the toolkit never rewrites an instructor's file:
+
+1. add `type:` (and `team_formation:` / `max_team_size:` where the assignment is a group
+   one) to each template's `grading_config.yml`, on its `solution` branch;
+2. only then delete the two lines from every live cohort's `schedule.yml`;
+3. run **Sync membership** (or wait for 06:13) so `assignments.lock.yml` is rewritten from
+   the templates.
+
+Between (2) and (3) the Join-team form answers off the previous lock file, which is the
+reason the file exists rather than the form reading the schedule. A schedule assignment
+whose template does not exist yet locks to `none` and refuses every team - the case Maths
+a2-a4 were in, and the reason the button that creates a template writes its
+`grading_config.yml` for you.
 
 ## Crons and gates
 

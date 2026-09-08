@@ -44,7 +44,7 @@ teams:
 
 | Field | Owner | Student sees |
 | --- | --- | --- |
-| `info.submitted`, `info.days_late`, `info.contributions`, `info.autograde` | toolkit, refreshed until frozen | `submitted`, `days_late` |
+| `info.submitted`, `info.days_late`, `info.contributions`, `info.autograde`, `info.submitted_note` | toolkit, refreshed until frozen | `submitted`, `days_late` |
 | `score_individual` (per question, or one value) | you | the total, and the breakdown behind it |
 | `feedback_group`, `feedback_individual` | you | yes (own + team) |
 | `score_group` | you | the team's, in the TEAM repo's comment - never in a member's gradebook |
@@ -62,11 +62,26 @@ edit them **there**, never in the sheet. The toolkit writes the file only when t
 that header really moved, so your quoting and spacing survive the quarter-hourly tick; YAML
 comments you add do not survive a rewrite when one happens.
 
-`info.submitted` is the pinned commit's **committer** date, which is a value the student's
-own git client writes. Where GitHub's record of when the repo last received a push is later
-than the due moment while that commit claims to predate it, `info.submitted_note` says
-`commit dated before the push that delivered it - check` and the snapshot row records
-`suspect`. The late arithmetic still says what the dates say; the note is for you.
+### Where `info.submitted` comes from
+
+A git committer date is written by the student's own client, so a submission dated before
+the deadline is a claim, not an observation. At the **cutoff** the freeze therefore asks
+GitHub when it saw the push that delivered the pinned commit, and records which rung
+answered in `snapshots/<slug>.csv`:
+
+| `submitted_source` | what `info.submitted` is | `info.submitted_note` |
+|---|---|---|
+| `push` | when **GitHub** recorded the push that delivered the pinned commit | none - there is nothing to flag |
+| `commit` | its committer date - no push record matched | `no push record matched this commit - the time shown is its committer date, which the student sets` |
+| `suspect` | its committer date, contradicted: GitHub's record of the repo's last push is later than the due moment while the commit claims to predate it | `commit dated before the push that delivered it - check` |
+
+`days_late` and the penalty are derived from whatever `info.submitted` holds, so a `push`
+row is timed by the server and the other two are the student's word plus a note. The
+arithmetic says what the dates say either way; the note is for you.
+
+Between the due date and the cutoff the sheet refreshes off committer dates alone (asking
+GitHub per repo four times an hour would be one call per student per tick), so `submitted`
+can move at the freeze - which is the last derivation there will ever be.
 
 An assignment whose `grading_config.yml` says `submit_via: external` has no `info:` block at all:
 there is no commit to time.

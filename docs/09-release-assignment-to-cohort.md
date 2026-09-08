@@ -68,9 +68,12 @@ Live example: [`example-course/cohort-org/teams.csv`](../example-course/cohort-o
 
 Teams must exist **before** you release a group assignment. Two ways to form them - both end up in `classroom-config/teams.csv` (`assignment, team, github_handle`), and **Sync membership** turns each into a GitHub team on push:
 
-- **Instructor-allocated**: you edit `teams.csv` directly - add one row per member.
-- **Student self-service**: students open a **Join team** issue in the cohort's `welcome` repo.
-  - Team size is capped per assignment by `max_team_size` in that assignment's own `grading_config.yml` (default: the course's `assignment_defaults`, else 5)
+Which of the two an assignment uses is its own declaration - `team_formation` in the `grading_config.yml` on the template's `solution` branch:
+
+- **`assigned`** - you edit `teams.csv` directly, one row per member. The **Join team** form refuses every request for this assignment and says so.
+- **`self_select`** - students open a **Join team** issue in the cohort's `welcome` repo. Team size is capped by that assignment's `max_team_size` (default: the course's `assignment_defaults`, else 5).
+
+The form reads both answers out of `classroom-config/assignments.lock.yml`, which the toolkit generates from each assignment's definition and nobody edits. Change the assignment's `grading_config.yml` and the mirror catches up on the next **Sync membership**, **Release assignment** or nightly **Refresh actions**.
 
 
 The release then grants each team its one shared repo. Full flow:
