@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from functools import cache
 
 from .course import CONFIG_REPO
+from .faults import ConfigFault, csv_row
 from .gh_contents import get_file_content, read_csv
 from .log import log_err
 
@@ -84,6 +85,15 @@ class Student:
         return not self.is_auditor
 
 
+def known_role(value: str) -> bool:
+    """Whether this `role` cell is one the engine understands - blank included, since a
+    roster seeded before the column existed has no cell at all.
+
+    Asked by `normalise_role` (which logs) and by `parse` (which records the fault), so
+    the two cannot disagree about what counts as a typo."""
+    return value.strip().lower() in ("", ROLE_ENROLLED, ROLE_AUDITOR)
+
+
 def normalise_role(value: str) -> str:
     """Map a raw `role` cell to `enrolled` / `auditor`.
 
@@ -93,20 +103,72 @@ def normalise_role(value: str) -> str:
     role = value.strip().lower()
     if role == ROLE_AUDITOR:
         return ROLE_AUDITOR
-    if role and role != ROLE_ENROLLED:
+    if not known_role(value):
         log_err(f"unknown roster role '{value.strip()}' - treating as {ROLE_ENROLLED}")
     return ROLE_ENROLLED
 
 
-def parse(text: str) -> list[Student]:
+def _row_fault(lineno: int, field: str, what: str) -> ConfigFault:
+    """One students.csv row the toolkit cannot use as written.
+
+    ROW AND COLUMN ONLY. Never the cell: every cell of this file is a name, an address, a
+    handle or an enrolment code, and this text travels to an email, to a digest issue and
+    to a run log. The row number is enough to open the file at the line."""
+    return ConfigFault(
+        csv_row(lineno),
+        what,
+        file=ROSTER_PATH,
+        field=field,
+        lineno=lineno,
+        fix_text=f"fix row {lineno} of {ROSTER_PATH}",
+    )
+
+
+def parse(text: str, faults: list[ConfigFault] | None = None) -> list[Student]:
     """Parse students.csv text into Student rows.
 
     Tolerant of a roster written before a column existed: a missing `enrol_code` or
-    `role` column is fine (blank / `enrolled` respectively)."""
+    `role` column is fine (blank / `enrolled` respectively).
+
+    `faults` collects what a human has to fix, as well as logging it: an unreadable header
+    (recorded by `read_csv`, which then raises as it always has), a `role` nobody can act
+    on, and the two duplicates that were silent until now - one handle or one address on
+    two rows means one student's repos, grades and enrolment code land on the other's row.
+    A caller that passes nothing gets exactly the behaviour it always got."""
     rows = []
-    for row in read_csv(text, REQUIRED_FIELDS, ROSTER_PATH):
+    handles: dict[str, int] = {}
+    emails: dict[str, int] = {}
+    reader = read_csv(text, REQUIRED_FIELDS, ROSTER_PATH, faults)
+    for row in reader:
+        # The row's own line in the file, quoted newlines and all - `csv` counts what it
+        # actually read, so this is the line an editor jumps to.
+        lineno = reader.line_num
         values = {f: (row.get(f) or "").strip() for f in FIELDS}
+        if faults is not None and not known_role(values["role"]):
+            faults.append(
+                _row_fault(
+                    lineno,
+                    "role",
+                    f"unrecognised role - the row is treated as {ROLE_ENROLLED} "
+                    f"(expected {ROLE_ENROLLED} or {ROLE_AUDITOR})",
+                )
+            )
         values["role"] = normalise_role(values["role"])
+        if faults is not None:
+            for column, seen in (("github_handle", handles), ("hertie_email", emails)):
+                cell = values[column].casefold()
+                if not cell:
+                    continue
+                if cell in seen:
+                    faults.append(
+                        _row_fault(
+                            lineno,
+                            column,
+                            f"this {column} is already on row {seen[cell]} - the two "
+                            f"rows are one student to everything downstream",
+                        )
+                    )
+                seen.setdefault(cell, lineno)
         rows.append(Student(**values))
     return rows
 

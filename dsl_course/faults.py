@@ -148,6 +148,14 @@ CONSEQUENCE = {
     "teams.csv": "that row is ignored: the team is not created or the member not added",
 }
 
+# What to do about a CSV whose header the toolkit cannot read. The same sentence for every
+# such file, because the failure is the same one every time: Excel in a German locale hands
+# back a `;`-delimited export (or a BOM), which DictReader reads as one nameless column and
+# every consumer then reads as an empty file.
+CSV_HEADER_FIX = (
+    "save the file as comma-separated UTF-8 with the header shown in the template"
+)
+
 # The FALLBACK fix sentence per file, for a fault whose parser had nothing more specific
 # to say. A parser that can name the row or the key sets `fix_text` instead - "fix row 4"
 # beats "fix the file" every time - and this is what the rest get.
@@ -157,10 +165,8 @@ FIX = {
         "expected"
     ),
     "people.yml": "fix the handle/email on the line above",
-    "students.csv": (
-        "save the file as comma-separated UTF-8 with the header shown in the template"
-    ),
-    "teams.csv": "fix row {row}; handles must be onboarded roster handles",
+    "students.csv": CSV_HEADER_FIX,
+    "teams.csv": CSV_HEADER_FIX,
 }
 
 
@@ -373,6 +379,25 @@ class ConfigFault:
         at = f" - {cite or self.at}" if self.lineno else ""
         when = f"fires {self.due}" if self.fires else self.due
         return f"{self.where} -> {self.field}{at} - {self.what} - {when}"
+
+
+def header_fault(file: str, missing: list[str]) -> ConfigFault:
+    """The fault a CSV whose header cannot be read produces - one per file, not per row,
+    because a header nobody can read costs the whole file.
+
+    Built here rather than in each reader so students.csv, teams.csv and the sheets say the
+    same thing. It names the columns that are MISSING (a constant of the toolkit's) and not
+    the ones it found: a file whose header row was deleted has cell values there, and this
+    text travels to an email and an issue - see the privacy rule in CLAUDE.md."""
+    return ConfigFault(
+        "header",
+        f"header lacks {', '.join(missing)} - a semicolon-delimited export looks "
+        f"like this",
+        file=file,
+        field=", ".join(missing),
+        lineno=1,
+        fix_text=CSV_HEADER_FIX,
+    )
 
 
 def csv_row(lineno: int | None) -> str:

@@ -15,9 +15,18 @@ from typing import Any
 
 import yaml
 
+from .faults import ConfigFault, header_fault
 from .ghcli import gh, gh_json, is_missing_resource
 from .log import log_err, log_err_person, log_skip
 from .repos import default_branch
+
+
+def missing_columns(
+    fieldnames: list[str] | None, required: tuple[str, ...]
+) -> list[str]:
+    """The required columns this header does not have, in declaration order."""
+    have = {f.strip() for f in (fieldnames or [])}
+    return [f for f in required if f not in have]
 
 
 def _require_csv_header(
@@ -29,8 +38,7 @@ def _require_csv_header(
     then sees ONE header column, every field reads "", nothing raises, and the caller
     proceeds on an empty roster / empty marks - `enrol_codes` even wrote such a file back
     mangled, exit 0. A header that cannot name the required columns is a hard error."""
-    have = {f.strip() for f in (fieldnames or [])}
-    missing = [f for f in required if f not in have]
+    missing = missing_columns(fieldnames, required)
     if missing:
         raise RuntimeError(
             f"{what}: header lacks {', '.join(missing)} (got {list(fieldnames or [])}). "
@@ -46,15 +54,32 @@ def _strip_bom(text: str) -> str:
     return text.lstrip("﻿")
 
 
-def read_csv(text: str, required: tuple[str, ...], what: str) -> csv.DictReader:
+def read_csv(
+    text: str,
+    required: tuple[str, ...],
+    what: str,
+    faults: list[ConfigFault] | None = None,
+) -> csv.DictReader:
     """A DictReader over `text`, BOM stripped and the header checked for `required`.
 
     The single door every HAND-EDITED CSV comes through - the roster, teams.csv, a grades
     CSV, the enrol-code writers. Excel's two ways of handing back an unreadable file (a
     leading BOM, a `;`-delimited export) each look like ordinary empty data to DictReader,
     so neither is optional and neither is left to a caller to remember. `what` names the
-    file in the error."""
+    file in the error.
+
+    A caller that passes `faults` gets the header fault RECORDED as well as raised: the
+    raise is what every consumer already does the right thing about (skip the file, do not
+    prune), and the fault is what reaches the person who saved it that way. Recorded
+    first, so the caller catching the error still has it.
+
+    The row of a fault found further down is `reader.line_num` - the reader is handed back
+    live, so a parser reading it knows which row it is on."""
     reader = csv.DictReader(io.StringIO(_strip_bom(text)))
+    if faults is not None:
+        missing = missing_columns(reader.fieldnames, required)
+        if missing:
+            faults.append(header_fault(what, missing))
     _require_csv_header(reader.fieldnames, required, what)
     return reader
 
