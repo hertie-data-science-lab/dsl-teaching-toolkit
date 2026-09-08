@@ -1520,9 +1520,9 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
             # there is to check. `/` and `.` mean the whole repo, likewise - and which
             # spellings those are is `course.is_repo_root`, the same rule the release
             # itself resolves by (deploy._resolve_within).
-            clean = w.path.strip("/").strip()
             if is_repo_root(w.path):
                 continue
+            clean = w.path.strip("/").strip()
             if clean in withheld:
                 # The file EXISTS, so nothing looks wrong - which is why this is worth
                 # saying here rather than leaving to the `::warning::` a green release run
