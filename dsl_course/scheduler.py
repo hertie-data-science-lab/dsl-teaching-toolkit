@@ -75,7 +75,18 @@ import json
 import sys
 from datetime import datetime, timezone
 
-from . import cadence, notify, schedule, site, source_digest
+from . import (
+    cadence,
+    config_digest,
+    notify,
+    roster,
+    schedule,
+    site,
+    source_digest,
+    sync_faculty,
+    sync_teams,
+    teams,
+)
 from .assign import provision_all, solution_released
 from .collect import (
     SnapshotResult,
@@ -540,6 +551,135 @@ def _preflight_sources(
     return 0
 
 
+def _config_faults(cohort_org: str, sched: schedule.Schedule) -> dict:
+    """Every hand-edited file in this cohort's classroom-config, and what is wrong with
+    each. `{digest: faults}`, and a file left OUT of it is one this tick could not read.
+
+    Absent from the map is not the same as no faults: syncing a digest with an empty list
+    closes its issue and tells the cohort the file is fine, and "we could not look" is not
+    that. A rate limit on students.csv must not report the roster as repaired - so a read
+    that failed drops that file from this tick and leaves its issue exactly as it was.
+
+    A content fault is not a read failure, though, and the roster and teams readers RAISE
+    on an unreadable header (every consumer depends on that). Recording the fault first is
+    what lets this tell the two apart: faults in hand means the file was read and is
+    broken."""
+    out: dict = {}
+
+    def collect(spec, load) -> None:
+        found: list = []
+        try:
+            load(found)
+        except Exception as exc:
+            if not found:
+                log_err(
+                    f"could not read {cohort_org}'s {spec.file} "
+                    f"({type(exc).__name__}): {exc}"
+                )
+                return
+        out[spec] = found
+
+    # schedule.yml is already parsed - the plan this tick is running IS the parse, and
+    # re-reading it here could disagree with what released.
+    out[source_digest.UNREADABLE] = list(sched.faults)
+    collect(
+        config_digest.PEOPLE,
+        lambda found: sync_faculty.read_cohort_people(cohort_org, found),
+    )
+    students: list[roster.Student] = []
+    collect(
+        config_digest.ROSTER,
+        lambda found: students.extend(roster.load(cohort_org, found) or []),
+    )
+    # The roster is the allowlist teams.csv is vetted against, and only where it was
+    # actually read: an empty one would report every member as a stranger.
+    known = sync_teams.known_handles(students) if config_digest.ROSTER in out else None
+    collect(config_digest.TEAMS, lambda found: teams.load(cohort_org, found, known))
+    return out
+
+
+def _sync_config_digest(
+    spec: config_digest.Digest,
+    course_org: str,
+    cohort_org: str,
+    faults: list,
+    local: datetime,
+    dry_run: bool,
+) -> None:
+    """One file's digest issue and the mail beside it. Swallows everything.
+
+    The same shape as `_preflight_sources`, and for the same reason: a notification that
+    could not be delivered must not take a release cron down with it, and one file's
+    unreadable digest must not stop the next file's from being written."""
+    routing = notify.Routing()
+
+    def whom() -> list[str]:
+        nonlocal routing
+        try:
+            routing = notify.route(cohort_org, course_org, faults, local)
+        except Exception as exc:
+            log_err(f"could not work out who to tell about {spec.file}: {exc}")
+        return routing.logins
+
+    try:
+        digest = config_digest.sync(
+            spec,
+            cohort_org,
+            course_org,
+            faults,
+            local,
+            dry_run=dry_run,
+            resolve_mention=whom,
+        )
+    except Exception as exc:
+        log_err(f"could not update {cohort_org}'s {spec.file} digest: {exc}")
+        return
+    if digest.errors:
+        log_step(f"{cohort_org}'s {spec.file} digest: {digest.errors} error(s)")
+    try:
+        unsent = notify.notify_config_faults(
+            spec, cohort_org, course_org, digest, local, routing, dry_run=dry_run
+        )
+        # A mail that did not go out is un-RECORDED rather than lost - see
+        # `config_digest.hold`.
+        if unsent.keys and not dry_run:
+            config_digest.hold(
+                spec, cohort_org, {k: digest.was.get(k) for k in unsent.keys}
+            )
+    except Exception as exc:
+        log_err(f"could not mail {cohort_org}'s {spec.file} faults: {exc}")
+
+
+def _preflight_configs(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule,
+    now: datetime,
+    dry_run: bool,
+) -> int:
+    """Check every hand-edited file in this cohort's classroom-config and keep one digest
+    issue per file in step. Always returns 0.
+
+    The hourly floor under the push fast path. An edit that leaves students.csv unreadable
+    fires the dispatcher and is mailed within the minute; this is what catches the one
+    that was pushed before any of this existed, the one whose dispatch failed, and the
+    people.yml entry whose `end:` date lapsed while nobody was pushing anything.
+
+    Nothing here fails the run, at any rung, for the reason `_preflight_sources` does not:
+    a file faculty have to fix is a CONTENT fault, and the exit code belongs to the run
+    itself. The signature keeps its int so the caller's `errors +=` reads the same as
+    every other phase."""
+    local = schedule.in_cohort_zone(sched, now)
+    for spec, faults in _config_faults(cohort_org, sched).items():
+        if faults:
+            log_step(
+                f"{len(faults)} entr(y/ies) in {cohort_org}/{spec.file} the toolkit "
+                f"cannot use"
+            )
+        _sync_config_digest(spec, course_org, cohort_org, faults, local, dry_run)
+    return 0
+
+
 def _refresh_sheets(
     course_org: str,
     cohort_org: str,
@@ -656,6 +796,11 @@ def _release_phase(
     # needs catching. Never fatal to the run, at any rung: the fault is faculty's to fix
     # and the digest issue is how they hear about it (see _preflight_sources).
     errors += _preflight_sources(course_org, cohort_org, sched, now, dry_run)
+    # The same treatment for every other file faculty edit by hand: a roster nobody can be
+    # enrolled from, a people.yml entry that grants nothing, a teams.csv row that will not
+    # materialise. Each has its own digest issue and its own mail, and none of them can
+    # red this run either.
+    errors += _preflight_configs(course_org, cohort_org, sched, now, dry_run)
 
     if dry_run:
         for release in due:

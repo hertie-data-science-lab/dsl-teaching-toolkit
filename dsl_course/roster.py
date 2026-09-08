@@ -200,7 +200,9 @@ def _roster_text(cohort_org: str) -> str | None:
     return get_file_content(cohort_org, CONFIG_REPO, ROSTER_PATH)
 
 
-def load(cohort_org: str) -> list[Student] | None:
+def load(
+    cohort_org: str, faults: list[ConfigFault] | None = None
+) -> list[Student] | None:
     """Fetch + parse students.csv from the cohort's PRIVATE classroom-config repo.
 
     Returns None (after logging why) when the file can't be fetched at all - callers
@@ -213,7 +215,7 @@ def load(cohort_org: str) -> list[Student] | None:
             f"bootstrap the cohort first (bootstrap_course --cohort)."
         )
         return None
-    return parse(content)
+    return parse(content, faults)
 
 
 def load_path(path: str) -> list[Student]:

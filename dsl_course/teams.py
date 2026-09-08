@@ -99,6 +99,10 @@ def parse(
     stranger."""
     out: dict[str, dict[str, list[str]]] = {}
     claimed: dict[tuple[str, str], tuple[str, int]] = {}  # (assignment, handle) -> team
+    # Folded here, not by the caller: GitHub logins are case-insensitive and the rows are
+    # folded on the way in, so an allowlist in the roster's own casing would read every
+    # differently-typed handle as a stranger.
+    allowed = None if known_handles is None else {h.casefold() for h in known_handles}
     reader = read_csv(text, FIELDS, TEAMS_PATH, faults)
     for row in reader:
         lineno = reader.line_num
@@ -108,9 +112,7 @@ def parse(
         if not (assignment and team and handle):
             continue
         if faults is not None:
-            faults += _row_faults(
-                lineno, assignment, team, handle, claimed, known_handles
-            )
+            faults += _row_faults(lineno, assignment, team, handle, claimed, allowed)
         claimed.setdefault((assignment, handle), (team, lineno))
         members = out.setdefault(assignment, {}).setdefault(team, [])
         if handle not in members:
@@ -180,14 +182,21 @@ def _teams_text(cohort_org: str) -> str | None:
     return get_file_content(cohort_org, CONFIG_REPO, TEAMS_PATH)
 
 
-def load(cohort_org: str) -> dict[str, dict[str, list[str]]]:
+def load(
+    cohort_org: str,
+    faults: list[ConfigFault] | None = None,
+    known_handles: set[str] | None = None,
+) -> dict[str, dict[str, list[str]]]:
     """Fetch + parse teams.csv from the cohort's PRIVATE classroom-config repo.
 
     A pure loader: a missing CSV returns {} silently. Whether that is benign (a
     cohort with no group assignments yet) or an error (group provisioning/grading
-    asked for) is the caller's call - each contextualises it for itself."""
+    asked for) is the caller's call - each contextualises it for itself.
+
+    `faults` and `known_handles` are `parse`'s, for the caller that is checking the file
+    rather than reading it."""
     content = _teams_text(cohort_org)
-    return parse(content) if content is not None else {}
+    return parse(content, faults, known_handles) if content is not None else {}
 
 
 def teams_for(

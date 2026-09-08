@@ -686,14 +686,22 @@ def test_classroom_config_site_dispatcher_fires_on_schedule_or_people_change():
 def test_classroom_config_scheduler_dispatcher_fires_on_a_schedule_change():
     # GitHub delivers only a fraction of `schedule:` cron fires, so the promise that a
     # schedule.yml edit takes effect within minutes holds only if the edit itself starts a
-    # run. schedule.yml alone: no other file in classroom-config moves a release moment.
+    # run. The other three are the hand-edited files the same run checks: a push that
+    # leaves one of them unreadable is mailed within the minute rather than at the hour.
+    # Grading sheets are deliberately absent - a grader saves one all day.
     tmpl = (
         ROOT / "templates" / "classroom-config" / "dispatch-scheduled-release.yml"
     ).read_text()
     doc = yaml.safe_load(tmpl)
     trigger = doc.get("on", doc.get(True))
     assert set(trigger) == {"push"}
-    assert trigger["push"]["paths"] == ["schedule.yml"]
+    assert trigger["push"]["paths"] == [
+        "schedule.yml",
+        "people.yml",
+        "students.csv",
+        "teams.csv",
+    ]
+    assert not any("grading_sheets" in p for p in trigger["push"]["paths"])
     assert trigger["push"]["branches"] == ["main"]
     # DSL_BOT_TOKEN does every call here, so the ambient token gets no scopes at all.
     assert doc["permissions"] == {}

@@ -18,7 +18,17 @@ import yaml
 from conftest import source_fault
 
 from dsl_course import collect as collect_mod
-from dsl_course import course, deploy, ghcli, notify, scheduler, seed, source_digest
+from dsl_course import (
+    config_digest,
+    course,
+    deploy,
+    ghcli,
+    notify,
+    scheduler,
+    seed,
+    source_digest,
+)
+from dsl_course.faults import ConfigFault
 from dsl_course.grades import GradingSpec
 from dsl_course.schedule import (
     AssignmentEntry,
@@ -1688,6 +1698,9 @@ def _phase_spies(monkeypatch, sched: Schedule):
     monkeypatch.setattr(
         scheduler, "_preflight_sources", lambda *a: calls.append("preflight") or 0
     )
+    # Not a phase these tests are about, and it reads four files over the API: stubbed
+    # silently rather than spied, so the sequence they assert stays the release sequence.
+    monkeypatch.setattr(scheduler, "_preflight_configs", lambda *a: 0)
     monkeypatch.setattr(
         scheduler, "_run_releases", lambda *a: calls.append("release") or 0
     )
@@ -2528,3 +2541,111 @@ def test_a_routing_that_raised_still_lets_the_digest_speak(monkeypatch, capsys):
     )
     assert seen["kw"]["resolve_mention"]() == []
     assert "could not work out who to tell" in capsys.readouterr().err
+
+
+# ------------------------------------------------ config pre-flight (unattended)
+#
+# The hourly floor under the push fast path: every hand-edited file in classroom-config,
+# one digest issue each. What matters is that it cannot red the run, that one unreadable
+# file does not stop the next, and that "we could not look" never reports a file as fixed.
+
+
+def _config_preflight(monkeypatch, *, roster_faults=None, roster_raises=None):
+    """Drive `_preflight_configs` with the four readers stubbed, capturing what each
+    digest was handed."""
+    synced: dict = {}
+    mailed: list = []
+
+    def _roster(cohort, found=None):
+        if found is not None:
+            found.extend(roster_faults or [])
+        if roster_raises:
+            raise roster_raises
+        return []
+
+    monkeypatch.setattr(scheduler.roster, "load", _roster)
+    monkeypatch.setattr(
+        scheduler.sync_faculty, "read_cohort_people", lambda cohort, found: {}
+    )
+    monkeypatch.setattr(
+        scheduler.teams, "load", lambda cohort, found=None, known=None: {}
+    )
+    monkeypatch.setattr(
+        scheduler.config_digest,
+        "sync",
+        lambda spec, *a, **k: (
+            synced.update({spec.file: a[2]}) or config_digest.DigestResult()
+        ),
+    )
+    monkeypatch.setattr(
+        scheduler.notify,
+        "notify_config_faults",
+        lambda spec, *a, **k: mailed.append(spec.file) or notify.Unsent(),
+    )
+    rc = scheduler._preflight_configs(
+        "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+    )
+    return rc, synced, mailed
+
+
+def _csv_fault():
+    return ConfigFault(
+        "row 4", "unrecognised role", file="students.csv", field="role", lineno=4
+    )
+
+
+def test_the_config_preflight_checks_every_hand_edited_file(monkeypatch):
+    rc, synced, mailed = _config_preflight(monkeypatch)
+    assert rc == 0
+    assert set(synced) == {"schedule.yml", "people.yml", "students.csv", "teams.csv"}
+    assert sorted(mailed) == [
+        "people.yml",
+        "schedule.yml",
+        "students.csv",
+        "teams.csv",
+    ]
+
+
+def test_a_content_fault_reaches_that_files_digest_and_nobody_elses(monkeypatch):
+    fault = _csv_fault()
+    _rc, synced, _mailed = _config_preflight(monkeypatch, roster_faults=[fault])
+    assert synced["students.csv"] == [fault]
+    assert synced["teams.csv"] == []
+
+
+def test_a_file_that_could_not_be_read_is_left_exactly_as_it_was(monkeypatch):
+    # Syncing an empty list CLOSES the issue and tells the cohort the file is fine. A rate
+    # limit is not that, so the file drops out of the tick.
+    _rc, synced, mailed = _config_preflight(
+        monkeypatch, roster_raises=RuntimeError("rate limited")
+    )
+    assert "students.csv" not in synced and "students.csv" not in mailed
+    assert "people.yml" in synced  # the others are still checked
+
+
+def test_an_unreadable_header_is_a_content_fault_not_a_read_failure(monkeypatch):
+    # `roster.parse` records the fault and then raises, because every consumer skips the
+    # file on that. Faults in hand mean the file WAS read.
+    fault = ConfigFault(
+        "header", "header lacks hertie_email", file="students.csv", lineno=1
+    )
+    _rc, synced, _mailed = _config_preflight(
+        monkeypatch, roster_faults=[fault], roster_raises=RuntimeError("header")
+    )
+    assert synced["students.csv"] == [fault]
+
+
+def test_a_digest_that_cannot_be_written_never_touches_the_exit_code(monkeypatch):
+    # A release is the job. An unreachable issue tracker is not a reason to stop shipping
+    # one, and the whole point of this pre-flight is that a content fault never reds a run.
+    def boom(*a, **k):
+        raise RuntimeError("the digest is unreachable")
+
+    monkeypatch.setattr(
+        scheduler, "_config_faults", lambda *a: {config_digest.ROSTER: [_csv_fault()]}
+    )
+    monkeypatch.setattr(scheduler.config_digest, "sync", boom)
+    rc = scheduler._preflight_configs(
+        "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+    )
+    assert rc == 0
