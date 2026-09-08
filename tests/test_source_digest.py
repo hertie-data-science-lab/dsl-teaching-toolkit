@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import CREATED_ISSUE_URL, issue_row, source_fault
 
+from dsl_course import config_digest as engine
 from dsl_course import schedule
 from dsl_course import source_digest as sd
 
@@ -38,20 +39,25 @@ def _f(where, offset, field="course_source_path", lineno=None, repo="cm"):
 def _the_tier_is_not_what_this_is_about(monkeypatch):
     """The body's field-reference link is pinned to the tier the course org runs; that
     read is not what any of these tests is about."""
-    monkeypatch.setattr(sd, "central_ref_for", lambda org: "release")
+    monkeypatch.setattr(engine, "central_ref_for", lambda org: "release")
 
 
 # ------------------------------------------------------------------ state round-trip
 
 
 def _state(body: str) -> dict:
-    return sd._read_marker(body, sd._STATE, {})
+    """The rung each key was last reported at. The marker carries the moment it was first
+    seen beside the rung (an immediate fault's reminders count from it); what every
+    assertion below is about is the rung."""
+    return engine._rungs(sd._read_marker(body, sd._STATE, {}))
 
 
 def test_the_body_carries_its_own_previous_state():
     # No committed state file and no database - the issue IS the record, so the digest
     # can tell "still broken" from "just got worse" with nothing but what it last wrote.
-    body = sd.render_body([_f("releases.a", timedelta(hours=2))], NOW, COURSE)
+    body = sd.render_body(
+        sd.SOURCES, [_f("releases.a", timedelta(hours=2))], NOW, COURSE
+    )
     assert _state(body) == {"releases.a[x].course_source_path": "critical"}
 
 
@@ -65,7 +71,9 @@ def test_a_body_this_module_did_not_write_reads_as_no_state():
 
 
 def test_the_state_markers_are_invisible_in_the_rendered_issue():
-    body = sd.render_body([_f("releases.a", timedelta(days=30))], NOW, COURSE)
+    body = sd.render_body(
+        sd.SOURCES, [_f("releases.a", timedelta(days=30))], NOW, COURSE
+    )
     assert body.count("<!-- dsl-source-state:") == 1
     assert body.count("<!-- dsl-source-mention:") == 1
     assert body.strip().endswith("-->")  # last lines, out of the reader's way
@@ -73,7 +81,10 @@ def test_the_state_markers_are_invisible_in_the_rendered_issue():
 
 def test_the_body_names_the_field_to_edit_not_just_the_entry():
     body = sd.render_body(
-        [_f("assignments.a1", None, field="course_source_repo")], NOW, COURSE
+        sd.SOURCES,
+        [_f("assignments.a1", None, field="course_source_repo")],
+        NOW,
+        COURSE,
     )
     assert "**assignments.a1 -> course_source_repo**" in body
     assert "no date (tbc)" in body
@@ -81,6 +92,7 @@ def test_the_body_names_the_field_to_edit_not_just_the_entry():
 
 def test_rungs_are_rendered_loudest_first():
     body = sd.render_body(
+        sd.SOURCES,
         [
             _f("releases.far", timedelta(days=40)),
             _f("releases.fired", -timedelta(hours=1)),
@@ -105,6 +117,7 @@ def test_every_rung_heading_carries_its_own_deadline():
     # and the hours are in the heading so "URGENT" is a number rather than a mood. The
     # top rung is not "deploys soon" - it has already failed to ship.
     body = sd.render_body(
+        sd.SOURCES,
         [
             _f("releases.fired", -timedelta(hours=1)),
             _f("releases.tomorrow", timedelta(hours=3)),
@@ -131,7 +144,7 @@ def test_the_body_carries_the_one_sentence_that_would_fix_each_fault():
     # The issue and the mail say the SAME remedy, because both ask the fault - an issue
     # and an email disagreeing about the fix is worse than either on its own.
     body = sd.render_body(
-        [_f("releases.a", timedelta(hours=3), lineno=36)], NOW, COHORT
+        sd.SOURCES, [_f("releases.a", timedelta(hours=3), lineno=36)], NOW, COHORT
     )
     assert "|  fix: push the materials to that folder in Course/cm," in body
 
@@ -140,6 +153,7 @@ def test_the_body_addresses_the_people_git_named():
     # A team mention reaches everybody and is therefore what nobody reads. The planner of
     # the line and the committer of the repo are the two people who can act.
     body = sd.render_body(
+        sd.SOURCES,
         [_f("releases.a", timedelta(hours=3))],
         NOW,
         COHORT._replace(mention=("JanG", "cpj97")),
@@ -149,21 +163,25 @@ def test_the_body_addresses_the_people_git_named():
 
 
 def test_with_nobody_named_the_body_falls_back_to_the_team():
-    body = sd.render_body([_f("releases.a", timedelta(hours=3))], NOW, COHORT)
+    body = sd.render_body(
+        sd.SOURCES, [_f("releases.a", timedelta(hours=3))], NOW, COHORT
+    )
     assert "cc @Cohort/instructors" in body
 
 
 def test_the_body_tells_the_reader_not_to_close_it_by_hand():
     # Closing it fixes nothing in the file and the next tick re-opens it. Saying so is
     # cheaper than the state adoption that has to cope with it.
-    body = sd.render_body([_f("releases.a", timedelta(hours=3))], NOW, COHORT)
+    body = sd.render_body(
+        sd.SOURCES, [_f("releases.a", timedelta(hours=3))], NOW, COHORT
+    )
     assert "**Do not close or edit this issue by hand.**" in body
 
 
 def test_the_body_links_at_the_line_to_edit():
     # `releases.lecture_02` still leaves faculty scrolling a file they wrote in August.
     body = sd.render_body(
-        [_f("releases.a", timedelta(hours=3), lineno=36)], NOW, COHORT
+        sd.SOURCES, [_f("releases.a", timedelta(hours=3), lineno=36)], NOW, COHORT
     )
     assert (
         "at [`schedule.yml:36`](https://github.com/Cohort/classroom-config/blob/main/"
@@ -174,7 +192,9 @@ def test_the_body_links_at_the_line_to_edit():
 def test_a_fault_whose_line_is_unknown_is_listed_without_one():
     # The parser has no line for a plan a caller built itself, and a broken link is worse
     # than no link - the fault itself still has to be reported.
-    body = sd.render_body([_f("releases.a", timedelta(hours=3))], NOW, COHORT)
+    body = sd.render_body(
+        sd.SOURCES, [_f("releases.a", timedelta(hours=3))], NOW, COHORT
+    )
     assert "**releases.a -> course_source_path** at `schedule.yml`" in body
     assert "schedule.yml#L" not in body
 
@@ -183,6 +203,7 @@ def test_the_field_reference_points_at_the_tier_the_org_runs():
     # The runbook describes the engine the org actually runs; a trunk org sent to release's
     # docs reads a schema for code it does not have.
     body = sd.render_body(
+        sd.SOURCES,
         [_f("releases.a", timedelta(hours=2))],
         NOW,
         COHORT._replace(central_ref="main"),
@@ -303,7 +324,7 @@ def test_a_body_carrying_both_shapes_keeps_the_rung_it_reported_at():
 def _open(*faults, state=None, mention=()):
     """An OPEN digest whose body is what a previous tick would have written."""
     body = sd.render_body(
-        list(faults), NOW, COHORT._replace(mention=tuple(mention)), state
+        sd.SOURCES, list(faults), NOW, COHORT._replace(mention=tuple(mention)), state
     )
     return [issue_row(7, sd.TITLE, body)]
 
@@ -450,6 +471,7 @@ def test_the_body_says_fired_off_the_clock_and_not_off_the_rung():
     # has still passed. "fires <yesterday>" reads as a plan rather than as a release that
     # shipped nothing.
     body = sd.render_body(
+        sd.SOURCES,
         [
             source_fault(
                 "releases.a",
