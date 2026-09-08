@@ -4,6 +4,7 @@ unreadable one."""
 
 from __future__ import annotations
 
+import base64
 import json
 
 import pytest
@@ -333,6 +334,26 @@ def test_put_file_without_an_expected_sha_still_reads_then_writes(monkeypatch):
     calls = _record_gh(monkeypatch, [(0, "livesha"), (0, "")])
     assert gh_contents.put_file("O", "R", "f", b"new", "msg")
     assert len(calls) == 2 and "sha=livesha" in calls[1]
+
+
+def test_put_file_sends_the_content_on_stdin_not_in_argv(monkeypatch):
+    # Linux caps ONE argv string at 128 KiB, so a `--field content=<base64>` of anything
+    # past ~96 KiB raised `OSError: Argument list too long` out of subprocess.run - which
+    # nothing catches, so it escaped the whole cutoff run and left no fire-once sentinel
+    # behind. Archived notebooks and grader copies are megabytes.
+    seen: dict = {}
+
+    def fake_gh(*args, **kwargs):
+        seen.update(args=args, kwargs=kwargs)
+        return (0, "")
+
+    _stub_gh(monkeypatch, fake_gh)
+    content = b"x" * 400_000
+    assert gh_contents.put_file("O", "R", "big.ipynb", content, "msg", expected_sha="")
+
+    assert max(len(a) for a in seen["args"]) < 1024
+    assert seen["kwargs"]["stdin"] == base64.b64encode(content).decode()
+    assert "content=@-" in seen["args"]
 
 
 def test_get_file_with_sha_splits_the_sha_off_the_content(monkeypatch):

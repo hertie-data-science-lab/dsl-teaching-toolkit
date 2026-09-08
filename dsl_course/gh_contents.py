@@ -119,6 +119,12 @@ def put_file(
     re-read, re-apply its change, and retry.
 
     One file, one commit. Use put_files when several files belong in the SAME commit.
+
+    The base64 content goes to `gh` on STDIN (`--field content=@-`), never in argv: Linux
+    caps a single argument at 128 KiB, so anything past ~96 KiB of content used to raise
+    `OSError: Argument list too long` out of `subprocess.run`. Nothing catches that, so it
+    escaped the whole cutoff run - no fire-once sentinel, red job, and the next tick
+    repeating the freeze for ever. Every other field is small and stays in argv.
     """
     b64 = base64.b64encode(content).decode()
     args = [
@@ -129,7 +135,7 @@ def put_file(
         "--field",
         f"message={message}",
         "--field",
-        f"content={b64}",
+        "content=@-",
     ]
     if expected_sha is not None:
         if expected_sha == blob_sha(content):
@@ -148,7 +154,7 @@ def put_file(
             if sha == blob_sha(content):
                 return True
             args += ["--field", f"sha={sha}"]
-    code, out = gh(*args)
+    code, out = gh(*args, stdin=b64)
     if code == 0:
         return True
     if person:

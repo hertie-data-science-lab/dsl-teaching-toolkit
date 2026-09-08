@@ -1818,10 +1818,12 @@ COMPLETION_DEP_SKIP = (
     "the completion check needs " + " and ".join(COMPLETION_DEPS) + " in the grading "
     "environment, and they are not installed"
 )
-# The executed notebook is archived, and a notebook full of plots is base64 PNG all the way
-# down. Past this the STATE is still recorded and the copy is not: classroom-config is a
-# git repo somebody has to clone, and a term of 40 MB notebooks makes it one nobody can.
-COMPLETION_ARCHIVE_MAX_BYTES = 5 * 1024**2
+# The ceiling on ANYTHING this module archives per submission - the executed notebook and
+# the grader's reading copy alike. Both are notebooks full of plots, i.e. base64 PNG all
+# the way down. Past this the state/verdict is still recorded and the copy is not:
+# classroom-config is a git repo somebody has to clone, and a term of 40 MB notebooks per
+# student makes it one nobody can.
+ARCHIVE_MAX_BYTES = 5 * 1024**2
 # The completion check runs OFFLINE. Not a jail - a real one needs a network namespace this
 # job does not have - but every well-behaved HTTP client (requests, urllib, pandas.read_csv
 # on a URL) honours these, so a notebook that only reproduces because it downloads its data
@@ -2152,6 +2154,7 @@ GRADER_PDF = "pdf"
 GRADER_HTML = "html"  # nbconvert's PDF path needs LaTeX; this is the fallback
 GRADER_SOURCE = "filtered source"  # nothing in the runner can render this format
 GRADER_NONE = "no marked questions"  # the assignment does not use the question fences
+GRADER_TOO_BIG = "too large to archive"  # past ARCHIVE_MAX_BYTES, for the same reason
 GRADER_UNREADABLE = "not readable"  # unclonable, unpinnable, or a malformed document
 GRADER_UNWRITTEN = "not archived"  # produced, but the archive write failed
 
@@ -2235,6 +2238,11 @@ def _grader_document_for(
         source, filtered = picked
         source.write_text(filtered.text)
         verdict, content = _export_document(source, env)
+        if len(content) > ARCHIVE_MAX_BYTES:
+            # The same cap the executed notebook gets, for the same reason: an HTML export
+            # of a plot-heavy notebook is base64 PNG all the way down, and one per student
+            # makes classroom-config a repo nobody can clone.
+            return GRADER_TOO_BIG
         suffix = {GRADER_PDF: "pdf", GRADER_HTML: "html"}.get(
             verdict, source.suffix.lstrip(".")
         )
@@ -2716,7 +2724,7 @@ def collect(
                 # because a notebook of plots is base64 all the way down and
                 # classroom-config is a repo somebody has to clone. No path in this log -
                 # it would name the handle.
-                if len(executed) <= COMPLETION_ARCHIVE_MAX_BYTES:
+                if len(executed) <= ARCHIVE_MAX_BYTES:
                     archives.append(
                         (
                             f"{autograde_path(slug)}/{target_key}.ipynb",
@@ -2727,7 +2735,7 @@ def collect(
                 else:
                     log(
                         f"    (an executed notebook came to {len(executed) // 1024} KiB, "
-                        f"over the {COMPLETION_ARCHIVE_MAX_BYTES // 1024} KiB archive cap "
+                        f"over the {ARCHIVE_MAX_BYTES // 1024} KiB archive cap "
                         f"- the state is recorded, the copy is not)"
                     )
             # A count, shown to the grader for information - never a mark by itself, and

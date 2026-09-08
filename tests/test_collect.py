@@ -2319,7 +2319,7 @@ def test_an_oversized_executed_notebook_is_recorded_but_not_archived(
     # somebody has to clone. The STATE is the record; the copy is a convenience.
     _stub_collect(monkeypatch, None, grading="format: ipynb\nautograde: false\n")
     monkeypatch.setattr(collect, "_starter_notebook_shas", lambda *a: frozenset())
-    monkeypatch.setattr(collect, "COMPLETION_ARCHIVE_MAX_BYTES", 16)
+    monkeypatch.setattr(collect, "ARCHIVE_MAX_BYTES", 16)
     monkeypatch.setattr(
         collect,
         "_grade_target",
@@ -4581,6 +4581,23 @@ def test_the_grader_copy_renders_in_the_same_sandbox_as_everything_else(
     # The credential the clone stored and the student's startup hook are both gone from
     # the directory the exporter runs in.
     assert ".git" not in seen["siblings"] and "sitecustomize.py" not in seen["siblings"]
+
+
+def test_a_grader_copy_past_the_archive_cap_is_counted_not_committed(
+    monkeypatch, capsys
+):
+    # The same rule the executed notebook follows: an HTML export of a plot-heavy notebook
+    # is base64 PNG all the way down, and one per student makes classroom-config a repo
+    # nobody can clone.
+    _checkout(monkeypatch, {"submission.ipynb": _QUESTION_NB})
+    written = _capture_archive(monkeypatch)
+    monkeypatch.setattr(collect, "ARCHIVE_MAX_BYTES", 16)
+    monkeypatch.setattr(collect, "_run_limited", lambda argv, **k: True)
+
+    collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", False)
+
+    assert written == {}
+    assert collect.GRADER_TOO_BIG in capsys.readouterr().out
 
 
 def test_grader_pdf_is_off_unless_the_assignment_asks_for_it():
