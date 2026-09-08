@@ -183,6 +183,17 @@ def test_rmd_also_honours_the_line_fences():
     assert "x <- 1" not in stripped.text
 
 
+def test_an_unclosed_solution_chunk_is_refused_rather_than_truncating_the_file():
+    # The skip that drops a solution chunk's body ran to the end of the file, so the
+    # derived "starter" silently lost every section after it - and still counted a
+    # replacement, so the nothing-was-fenced guard passed it through to `main`.
+    with pytest.raises(derive.DeriveError):
+        derive.strip_rmd(
+            "```{r fit, solution=TRUE}\nfit <- lm(y ~ x)\n\n## Question 2\n\ntext\n",
+            "solution/report.Rmd",
+        )
+
+
 def test_only_the_formats_it_can_strip_are_picked_up_and_the_folder_is_dropped():
     tree = (
         "grading_config.yml",
@@ -324,6 +335,28 @@ def test_only_the_fenced_question_reaches_the_grader_copy():
 def test_a_notebook_with_no_question_fences_filters_to_nothing_to_export():
     nb = {"cells": [{"cell_type": "code", "metadata": {}, "source": "x = 1\n"}]}
     assert derive.filter_notebook_questions(json.dumps(nb), "sub.ipynb").questions == 0
+
+
+def test_a_question_fenced_inside_one_cell_is_a_whole_question():
+    # Otter's fences are usually two markdown cells, but nothing stops a question being
+    # opened and closed in one. Reading only the first fence left it open for ever, the
+    # notebook raised "opened and never closed", and `pick_grader_document` swallowed that
+    # - so the whole cohort reported "no marked questions".
+    nb = {
+        "cells": [
+            {"cell_type": "code", "metadata": {}, "source": "import numpy\n"},
+            {
+                "cell_type": "markdown",
+                "metadata": {},
+                "source": "<!-- BEGIN QUESTION -->\n## Q1 (5 points)\n<!-- END QUESTION -->\n",
+            },
+            {"cell_type": "code", "metadata": {}, "source": "grader.check('q1')\n"},
+        ]
+    }
+    filtered = derive.filter_notebook_questions(json.dumps(nb), "sub.ipynb")
+    assert filtered.questions == 1
+    out = json.loads(filtered.text)
+    assert [_source(c) for c in out["cells"]] == ["## Q1 (5 points)"]
 
 
 def test_an_unclosed_question_is_refused_rather_than_exported_whole():

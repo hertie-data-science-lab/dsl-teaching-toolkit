@@ -261,6 +261,14 @@ def strip_rmd(text: str, where: str) -> Stripped:
             skipping = True
             continue
         out.append(line)
+    if skipping:
+        # Everything after an unclosed chunk was swallowed by the skip, and the file still
+        # counted a replacement - so the safety predicate passed and a TRUNCATED starter
+        # went to `main`. Refused like every other unbalanced fence here.
+        raise DeriveError(
+            f"{where}: a `solution=TRUE` chunk is opened and never closed - refusing to "
+            f"derive a starter that would lose everything after it"
+        )
     return Stripped("\n".join(out), regions, chunks)
 
 
@@ -299,13 +307,16 @@ class Filtered(NamedTuple):
     questions: int
 
 
-def _question_marker(source: str) -> str:
-    """`"BEGIN"`, `"END"` or `""` for a cell/line, by its FIRST question fence.
+def _question_markers(source: str) -> tuple[str, str]:
+    """`(first, last)` question fence in a cell/line - each `"BEGIN"`, `"END"` or `""`.
 
-    First, not last: a cell holding both closes the question it opened, and treating it as
-    an END would run the next question's content into this one."""
-    found = _QUESTION.search(source)
-    return found.group(1).upper() if found else ""
+    Both ends, because a cell can carry both: `BEGIN ... END` in one markdown cell is one
+    whole question, and reading only the first fence left it open for ever (the notebook
+    then raised "opened and never closed" and the submission lost its grader copy
+    entirely). The FIRST fence says whether this cell opens a question, the LAST whether
+    it closes one."""
+    found = [m.upper() for m in _QUESTION.findall(source)]
+    return (found[0], found[-1]) if found else ("", "")
 
 
 def _without_markers(source: str) -> str:
@@ -335,25 +346,21 @@ def filter_notebook_questions(text: str, where: str) -> Filtered:
     for cell in nb["cells"]:
         if not isinstance(cell, dict):
             continue
-        marker = _question_marker(_cell_source(cell))
-        if marker == "BEGIN":
+        opens, closes = _question_markers(_cell_source(cell))
+        if closes == "END" and not inside and opens != "BEGIN":
+            raise DeriveError(f"{where}: a question is closed that was never opened")
+        if opens == "BEGIN":
             inside = True
         if inside:
-            if marker:
+            if opens:
                 stripped = _without_markers(_cell_source(cell))
-                if not stripped:
-                    # A fence on its own in a cell of its own: dropped rather than exported
-                    # as a blank page-break in the middle of the question.
-                    if marker == "END":
-                        inside, questions = False, questions + 1
-                    continue
-                cell = {**cell, "source": stripped}
-            kept.append(cell)
-        if marker == "END":
-            if not inside:
-                raise DeriveError(
-                    f"{where}: a question is closed that was never opened"
-                )
+                if stripped:
+                    kept.append({**cell, "source": stripped})
+                # else: a fence on its own in a cell of its own, dropped rather than
+                # exported as a blank page-break in the middle of the question.
+            else:
+                kept.append(cell)
+        if closes == "END":
             inside, questions = False, questions + 1
     if inside:
         raise DeriveError(f"{where}: a question is opened and never closed")
@@ -377,7 +384,7 @@ def filter_rmd_questions(text: str, where: str) -> Filtered:
     inside = False
     questions = 0
     for line in lines[start:]:
-        marker = _question_marker(line)
+        marker, _ = _question_markers(line)
         if marker == "BEGIN":
             if inside:
                 raise DeriveError(f"{where}: a question is opened inside another")
