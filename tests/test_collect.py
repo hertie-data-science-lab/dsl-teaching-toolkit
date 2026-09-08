@@ -1817,6 +1817,158 @@ def test_collect_holds_the_marker_when_some_repos_are_unreachable(monkeypatch):
     assert not any(p.startswith("autograde/") for p in paths)
 
 
+# ---------------------------------------------------------------- the run.sh escape hatch
+
+
+def test_score_from_junit_counts_every_suite_in_the_file():
+    # testthat's JunitReporter writes one <testsuite> per test FILE. Taking the first would
+    # have scored an R course out of however many cases were in its alphabetically-first
+    # file - and reported a max nobody could reconcile with the tests they wrote.
+    xml = (
+        "<testsuites>"
+        '<testsuite name="test-a.R"><testcase name="a1"/></testsuite>'
+        '<testsuite name="test-b.R">'
+        '<testcase name="b1"/><testcase name="b2"><failure>no</failure></testcase>'
+        "</testsuite>"
+        "</testsuites>"
+    )
+    result = collect.score_from_junit(xml)
+    assert result["max"] == 3 and result["score"] == 2
+
+
+def _hidden_tests_with_runner(tmp_path: Path, script: str) -> Path:
+    tests = tmp_path / "hidden"
+    tests.mkdir()
+    (tests / collect.RUN_SCRIPT).write_text(script)
+    return tests
+
+
+def test_a_run_script_replaces_pytest_and_its_report_is_the_score(
+    monkeypatch, tmp_path
+):
+    # A REAL `sh`, not a stub: the contract this commit adds is what a course's own runner
+    # is handed, so the test has to be the thing that hands it over.
+    work = tmp_path / "sub"
+    work.mkdir()
+    (work / "answer.txt").write_text("42\n")
+    tests = _hidden_tests_with_runner(
+        tmp_path,
+        # Everything the recipe in docs/10 relies on: the report path, the submission path,
+        # and a non-zero exit that must NOT be read as a broken run.
+        'test "$(cat "$DSL_SUBMISSION_DIR/answer.txt")" = "42" || exit 3\n'
+        'printf \'<testsuites><testsuite><testcase name="a"/>\' > "$DSL_JUNIT_OUT"\n'
+        'printf \'<testcase name="b"><failure>no</failure></testcase>\' >> "$DSL_JUNIT_OUT"\n'
+        "printf '</testsuite></testsuites>' >> \"$DSL_JUNIT_OUT\"\n"
+        "exit 1\n",
+    )
+
+    result = collect._run_tests(work, tests)
+
+    assert result == {
+        "score": 1,
+        "max": 2,
+        "tests": [{"name": "a", "passed": True}, {"name": "b", "passed": False}],
+    }
+
+
+def test_the_run_script_is_handed_the_report_path_the_submission_and_the_runspace(
+    monkeypatch, tmp_path
+):
+    seen: dict = {}
+
+    def fake_run_limited(argv, *, cwd, env, timeout):
+        seen.update(argv=argv, cwd=cwd, env=env, timeout=timeout)
+        Path(env[collect.JUNIT_OUT_ENV]).write_text(_JUNIT)
+        return True
+
+    monkeypatch.setattr(collect, "_run_limited", fake_run_limited)
+    work = tmp_path / "sub"
+    work.mkdir()
+    tests = _hidden_tests_with_runner(tmp_path, "true\n")
+
+    assert collect._run_tests(work, tests)["score"] == 1
+
+    # `sh`, not the exec bit: it does not survive every checkout, and the name says which
+    # interpreter.
+    assert seen["argv"][0] == "sh"
+    assert seen["argv"][1].endswith(f"/{collect.RUN_SCRIPT}")
+    assert seen["env"][collect.SUBMISSION_ENV] == str(work)
+    # The report lands OUTSIDE the checkout, which is what stops a committed report.xml
+    # being scored - the same boundary the pytest path keeps.
+    assert not seen["env"][collect.JUNIT_OUT_ENV].startswith(str(work))
+    # Same working dir and same wall clock as pytest: the runspace, and RUN_TIMEOUT.
+    assert seen["cwd"] != str(work) and seen["timeout"] == collect.RUN_TIMEOUT
+    assert "GH_TOKEN" not in seen["env"]
+
+
+def test_a_run_script_that_writes_no_report_is_a_named_failure(
+    monkeypatch, tmp_path, capsys
+):
+    # `_run_limited` reports ANY exit code as a completed run, so a runner that never wrote
+    # its XML looked exactly like a submission that failed every test. It is the one thing
+    # the escape hatch can get wrong, so it says so by name.
+    work = tmp_path / "sub"
+    work.mkdir()
+    tests = _hidden_tests_with_runner(tmp_path, "exit 0\n")
+
+    assert collect._run_tests(work, tests) is None
+    err = capsys.readouterr().err
+    assert collect.RUN_SCRIPT in err and collect.JUNIT_OUT_ENV in err
+
+
+def test_a_report_that_is_not_xml_costs_one_submission_not_the_cohort(
+    monkeypatch, tmp_path, capsys
+):
+    work = tmp_path / "sub"
+    work.mkdir()
+    tests = _hidden_tests_with_runner(
+        tmp_path, 'printf "not xml at all" > "$DSL_JUNIT_OUT"\n'
+    )
+
+    assert collect._run_tests(work, tests) is None  # not a traceback out of the job
+    assert "not valid XML" in capsys.readouterr().err
+
+
+def test_a_run_script_is_never_looked_for_in_the_submission(monkeypatch, tmp_path):
+    # The hatch is on the SOLUTION branch. A `tests/run.sh` a student committed is in the
+    # checkout, which is never on this path - it would be a submission grading itself.
+    spawned: list[list[str]] = []
+
+    def fake_run_limited(argv, *, cwd, env, timeout):
+        spawned.append(argv)
+        if "pytest" in argv:
+            report = next(a for a in argv if a.startswith("--junitxml="))
+            Path(report.split("=", 1)[1]).write_text(_JUNIT)
+        return True
+
+    monkeypatch.setattr(collect, "_run_limited", fake_run_limited)
+    work = tmp_path / "sub"
+    (work / "tests").mkdir(parents=True)
+    (work / "tests" / collect.RUN_SCRIPT).write_text("echo rigged\n")
+    tests = tmp_path / "hidden"
+    tests.mkdir()
+    (tests / "test_x.py").write_text("def test_ok(): pass\n")
+
+    assert collect._run_tests(work, tests)["score"] == 1
+    assert all("pytest" in argv for argv in spawned)
+
+
+def test_a_run_script_does_not_need_pytest_installed(monkeypatch, tmp_path):
+    # The point of the hatch: an R course's grading image has no pytest in it, and the
+    # probe that keeps a missing pytest from reading as a cohort of failures must not
+    # refuse a run that was never going to call it.
+    monkeypatch.setattr(collect.importlib.util, "find_spec", lambda name: None)
+    _clear_dep_caches()
+    work = tmp_path / "sub"
+    work.mkdir()
+    tests = _hidden_tests_with_runner(
+        tmp_path,
+        'printf \'<testsuite><testcase name="a"/></testsuite>\' > "$DSL_JUNIT_OUT"\n',
+    )
+
+    assert collect._run_tests(work, tests)["score"] == 1
+
+
 # ------------------------------------------------------------------- the completion check
 
 

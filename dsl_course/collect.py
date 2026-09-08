@@ -77,6 +77,11 @@ The two are INDEPENDENT. A hand-marked notebook assignment (`autograde: false`) 
 its completion check, which is the common case: the "restart the kernel and run all" rule
 is stated by courses that mark by hand, and it is the one rule nobody could verify.
 
+ANOTHER LANGUAGE.  The hidden tests are pytest by default and need not be: a `run.sh` in the
+tests directory is run INSTEAD, in the same sandbox and under the same wall clock, and
+whatever JUnit XML it leaves at `$DSL_JUNIT_OUT` is the score. That is how an R course grades
+with `testthat` (see docs/10) without this module learning a word of R.
+
 Usage:
     python3 -m dsl_course.collect \\
         --master-org COURSE --course-source-repo assignment-1-f2026 \\
@@ -170,6 +175,26 @@ SUBMITTED_NOTES = {
     SUBMITTED_SOURCE_COMMIT: COMMIT_ONLY_NOTE,
 }
 RUN_TIMEOUT = 300  # wall-clock seconds per graded subprocess
+# The escape hatch out of pytest. A `run.sh` at the top of the hidden tests is run INSTEAD
+# of pytest, with the same rlimits, the same token-free environment, the same wall clock and
+# the same cwd - so a course whose language is not Python grades through the same sandbox
+# rather than through a second one nobody maintains.
+#
+# THE CONTRACT, and it is short on purpose:
+#   * run with `sh`, not executed - the `+x` bit does not survive every checkout, and the
+#     name says which interpreter;
+#   * `$DSL_JUNIT_OUT` is an absolute path the script MUST write a JUnit XML to. That XML is
+#     the result: passed/total out of it become `info.autograde`, exactly as pytest's would;
+#   * `$DSL_SUBMISSION_DIR` is the absolute path of the submitted checkout. Python tests do
+#     not need it (a startup hook puts the submission on sys.path); everything else does;
+#   * the EXIT CODE is ignored. A suite with failures exits non-zero and is still a perfectly
+#     good result - "the tests ran and three of them failed" is the answer, not an error.
+#     No XML at all is the failure, and it records the usual grading-failed zero;
+#   * cwd is the runspace, not the checkout - the tests and the report live outside anything
+#     the student wrote, which is what the pytest path buys and this must not give away.
+RUN_SCRIPT = "run.sh"
+JUNIT_OUT_ENV = "DSL_JUNIT_OUT"
+SUBMISSION_ENV = "DSL_SUBMISSION_DIR"
 # The note on the one zero that means "the RUNNER broke", not "the student didn't submit".
 # `collect` keys its systemic-failure guard on it, so it is a constant, not a loose string.
 GRADE_FAILED_NOTE = "grading failed to run"
@@ -227,15 +252,17 @@ _STUDENT_TEST_RIGGING = (
 
 
 def score_from_junit(xml_text: str) -> dict:
-    """Turn a pytest junit XML report into the result.json contract {score, max, tests}.
+    """Turn a JUnit XML report into the result.json contract {score, max, tests}.
 
-    A case passes only if it has neither failure, error, nor skipped child element."""
+    A case passes only if it has neither failure, error, nor skipped child element.
+
+    EVERY suite in the file, not the first: pytest writes one, but testthat's
+    `JunitReporter` writes one per test file, and taking the first would have scored an R
+    course out of however many cases happened to be in its alphabetically-first file."""
     root = ET.fromstring(xml_text)
-    if root.tag == "testsuite":
-        suite = root
-    else:
-        nested = root.find("testsuite")
-        suite = nested if nested is not None else root
+    suites = (
+        [root] if root.tag == "testsuite" else (root.findall("testsuite") or [root])
+    )
     cases = [
         {
             "name": tc.get("name"),
@@ -243,6 +270,7 @@ def score_from_junit(xml_text: str) -> dict:
             and tc.find("error") is None
             and tc.find("skipped") is None,
         }
+        for suite in suites
         for tc in suite.findall("testcase")
     ]
     return {
@@ -2050,11 +2078,19 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
             f"import sys\nsys.path.append({str(workdir)!r})\n"
         )
         env["PYTHONPATH"] = str(startup)
-        if _grader_dep_missing("pytest"):
-            return None
         report = Path(run) / "report.xml"
-        completed = _run_limited(
-            [
+        runner = tests_dir / RUN_SCRIPT
+        if runner.is_file():
+            # The escape hatch (see RUN_SCRIPT). The script says how to run this course's
+            # tests and where the submission is; everything else about the sandbox is
+            # unchanged, including that the report lands outside the checkout.
+            env[JUNIT_OUT_ENV] = str(report)
+            env[SUBMISSION_ENV] = str(workdir)
+            argv = ["sh", str(runner)]
+        elif _grader_dep_missing("pytest"):
+            return None
+        else:
+            argv = [
                 sys.executable,
                 "-m",
                 "pytest",
@@ -2064,7 +2100,9 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
                 f"--confcutdir={tests_dir}",
                 str(tests_dir),
                 f"--junitxml={report}",
-            ],
+            ]
+        completed = _run_limited(
+            argv,
             # Run FROM the runspace, NOT the checkout. On Python < 3.11 (no PYTHONSAFEPATH)
             # `python -m` puts cwd on sys.path[0], so a checkout cwd would let a committed
             # `operator.py`/`collections.py` shadow the stdlib during interpreter startup -
@@ -2082,8 +2120,20 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
             )
             return None
         if not report.exists():
+            if runner.is_file():
+                log_err(
+                    f"  ! the hidden tests' `{RUN_SCRIPT}` wrote no report to "
+                    f"${JUNIT_OUT_ENV} - nothing can be scored from this run"
+                )
             return None
-        return score_from_junit(report.read_text())
+        try:
+            return score_from_junit(report.read_text())
+        except ET.ParseError as exc:
+            # A hand-written runner is the likely author of an XML nobody can parse, and an
+            # unhandled traceback here would abort the whole cohort's job rather than this
+            # one submission.
+            log_err(f"  ! the test report is not valid XML ({exc}) - nothing scored")
+            return None
 
 
 def _grade_target(
