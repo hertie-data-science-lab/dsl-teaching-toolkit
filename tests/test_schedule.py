@@ -2123,7 +2123,7 @@ def test_one_entry_leaving_the_cohort_repo_to_default_re_breaks_the_pair():
     assert "EVERY one of them sets its own `cohort_dest_repo`" in drop
 
 
-def test_pick_entry_refuses_to_choose_between_two_entries_on_one_template():
+def test_resolve_target_refuses_to_choose_between_two_entries_on_one_template():
     # The refusal that makes the relaxation safe: a caller acting on ONE of them has to
     # say which, or nothing happens.
     meta = {
@@ -2141,15 +2141,23 @@ def test_pick_entry_refuses_to_choose_between_two_entries_on_one_template():
         }
     }
     sched = parse(meta)
-    refusal = schedule.pick_entry(sched, "a2-f2026")
+    refusal = schedule.resolve_target(sched, "a2-f2026")
     assert isinstance(refusal, str)
     assert "assignment-2" in refusal and "assignment-2-resit" in refusal
-    chosen = schedule.pick_entry(sched, "a2-f2026", "assignment-2-resit")
-    assert chosen[0] == "assignment-2-resit"
+    # Named, it answers with the KEY and the cohort-side NAME - the only two things a
+    # caller starting from a template wants, and never one standing in for the other.
+    assert schedule.resolve_target(sched, "a2-f2026", "assignment-2-resit") == (
+        "assignment-2-resit",
+        "assignment-2-resit",
+    )
     # A slug that names no entry on this template is a refusal too, not a silent fallback
-    assert isinstance(schedule.pick_entry(sched, "a2-f2026", "nope"), str)
-    # ... and the unambiguous cases are unchanged
-    assert schedule.pick_entry(sched, "nothing-cites-this") is None
+    assert isinstance(schedule.resolve_target(sched, "a2-f2026", "nope"), str)
+    # A template the plan does not name at all still resolves - the manual buttons work on
+    # an unscheduled template - and the fallback is spelt HERE, not at three call sites.
+    assert schedule.resolve_target(sched, "wk3-regression-f2026") == (
+        "wk3-regression",
+        "wk3-regression",
+    )
 
 
 def test_two_assignments_cannot_resolve_to_one_cohort_name():

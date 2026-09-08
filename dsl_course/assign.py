@@ -48,7 +48,6 @@ from .course import (
     ASSIGNED,
     CONFIG_REPO,
     SOLUTION_BRANCH,
-    assignment_slug,
     submission_repo,
 )
 from .discovery import ASSIGNMENT_TEMPLATE_TOPIC, list_org_repos
@@ -737,12 +736,11 @@ def provision_all(
     sched = schedule.load(cohort_org)
     # The parameter is consumed HERE and nowhere else: from the next line on, `slug` means
     # the cohort-side name, exactly as it does everywhere else in this file.
-    found = schedule.pick_entry(sched, template, slug)
-    if isinstance(found, str):
-        log_err(found)
+    target = schedule.resolve_target(sched, template, slug)
+    if isinstance(target, str):
+        log_err(target)
         return 1, False
-    key = found[0] if found else assignment_slug(template)
-    slug = schedule.cohort_name(*found) if found else key
+    key, slug = target
     # The sheet's header and the Feedback issue's body, off the definition read above.
     spec = sheet_spec(sched, key, slug, gspec, bool(group))
     feedback_bodies: dict[str, str] = {}

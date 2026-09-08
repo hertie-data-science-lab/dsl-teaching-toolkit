@@ -81,7 +81,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 
-from .course import CONFIG_REPO, coerce_date, is_repo_root
+from .course import CONFIG_REPO, assignment_slug, coerce_date, is_repo_root
 from .gh_contents import get_file_content, get_file_with_sha, put_file, repo_tree
 from .log import log, log_err, log_step
 from .releaseignore import RELEASEIGNORE, excluded_in_tree
@@ -1044,32 +1044,46 @@ def entry_for_repo(sched: Schedule, repo: str) -> tuple[str, AssignmentEntry] | 
     return found[0] if found else None
 
 
-def pick_entry(
-    sched: Schedule, repo: str, slug: str = ""
-) -> tuple[str, AssignmentEntry] | None | str:
-    """`(slug, entry)` for the assignment `repo` hands out from, `None` when the plan does
-    not name it, or an ERROR MESSAGE (a `str`) when it names more than one and `slug` does
-    not say which.
+def resolve_target(sched: Schedule, repo: str, slug: str = "") -> tuple[str, str] | str:
+    """`(schedule key, cohort-side name)` for the assignment `repo` hands out, or an ERROR
+    MESSAGE (a `str`) when the plan names more than one of them and `slug` does not say
+    which.
 
-    The one place the ambiguity is resolved, so the handout and the collection cannot
-    disagree about which of two entries they are acting on. `slug` is the SCHEDULE KEY, the
-    same one `teams.csv` and the grading sheet are keyed on."""
+    The two names, and the only two, that every consumer starting from a TEMPLATE needs:
+    the KEY is what `teams.csv`, the fire-once marker and the grading sheet are keyed on;
+    the NAME is what the cohort-side repos are called (`cohort_dest_repo`, else the key).
+    A template the plan does not name AT ALL answers with `assignment_slug(repo)` for
+    both - the manual buttons must still work on a template nobody has scheduled - and
+    that fallback lives here rather than at each call site, because a caller that copied
+    only half of it would write cohort-side artefacts under the schedule key.
+
+    `slug` is the SCHEDULE KEY. Two entries handing out from one template are REFUSED
+    rather than guessed between: they make different repos for different students and
+    keep separate grades, so the handout and the collection must not be free to disagree
+    about which of them they are acting on.
+
+    A `str` rather than a raise, deliberately: the hourly scheduler calls straight into
+    these consumers and has to count one assignment's refusal without abandoning the tick.
+    """
     found = entries_for_repo(sched, repo)
     if slug:
-        chosen = [pair for pair in found if pair[0] == slug]
-        if chosen:
-            return chosen[0]
-        return (
-            f"`{slug}` is not an assignment in this cohort's schedule.yml that hands out "
-            f"from {repo} (it names {', '.join(s for s, _ in found) or 'none'})"
-        )
-    if len(found) > 1:
+        found = [pair for pair in found if pair[0] == slug]
+        if not found:
+            return (
+                f"`{slug}` is not an assignment in this cohort's schedule.yml that hands "
+                f"out from {repo} (it names "
+                f"{', '.join(s for s, _ in entries_for_repo(sched, repo)) or 'none'})"
+            )
+    elif len(found) > 1:
         return (
             f"{repo} is handed out by {len(found)} assignments in this cohort's "
             f"schedule.yml ({', '.join(s for s, _ in found)}) - say which with `slug`, "
             f"since they make different repos and keep different grades"
         )
-    return found[0] if found else None
+    if not found:
+        unscheduled = assignment_slug(repo)
+        return unscheduled, unscheduled
+    return found[0][0], cohort_name(*found[0])
 
 
 def grading_datetime_at(sched: Schedule, slug: str) -> datetime | None:

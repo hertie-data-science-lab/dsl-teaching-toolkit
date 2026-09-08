@@ -174,11 +174,6 @@ def test_the_handout_sheet_for_a_group_assignment_is_keyed_on_the_team_name(
     assert sheet["units"] == [("alpha", ["ada-l"])]
 
 
-def test_assignment_slug_drops_the_cohort_suffix():
-    assert assign.assignment_slug("assignment-1-f2026") == "assignment-1"
-    assert assign.assignment_slug("assignment-4-project") == "assignment-4-project"
-
-
 def test_an_unusable_solution_branch_does_not_block_provisioning(
     tmp_path, monkeypatch, capsys
 ):

@@ -102,7 +102,6 @@ from . import course, grades, roster, schedule, sync_teams, teams
 from .course import (
     CONFIG_REPO,
     SOLUTION_BRANCH,
-    assignment_slug,
     resolve_is_group,
     submission_repo,
 )
@@ -1913,12 +1912,11 @@ def refresh_assignment_sheet(
     sched = schedule.load(cohort_org)
     # `slug` arrives as the SCHEDULE KEY (which of two entries handing out from this one
     # template) and is consumed here; from the next line on it means the cohort-side name.
-    found = schedule.pick_entry(sched, template, slug)
-    if isinstance(found, str):
-        log_err(found)
+    target = schedule.resolve_target(sched, template, slug)
+    if isinstance(target, str):
+        log_err(target)
         return 1
-    key = found[0] if found else assignment_slug(template)
-    slug = schedule.cohort_name(*found) if found else key
+    key, slug = target
     gspec = load_grading_spec(master_org, template)
     is_group = resolve_is_group(force=group, template_type=gspec.type)
     ok = sync_sheet(
@@ -1974,12 +1972,11 @@ def collect(
     sched = schedule.load(cohort_org)
     # As in `provision_all`: the parameter is the SCHEDULE KEY, consumed here, and `slug`
     # then means the cohort-side name for the rest of the run.
-    found = schedule.pick_entry(sched, template, slug)
-    if isinstance(found, str):
-        log_err(found)
+    target = schedule.resolve_target(sched, template, slug)
+    if isinstance(target, str):
+        log_err(target)
         return 1
-    key = found[0] if found else assignment_slug(template)
-    slug = schedule.cohort_name(*found) if found else key
+    key, slug = target
     # The assignment's definition, read from the API (memoised) rather than from the clone
     # below, because the grading SHEET must be frozen at the cutoff on every path - and two
     # of them never reach a clone: a template with no solution branch, and an all-manual
