@@ -2139,30 +2139,31 @@ def _existing_repos(cohort_org: str) -> dict[str, dict] | None:
         return None
 
 
-def _tag_gradebook(cohort_org: str, repo: str, have: set[str]) -> bool:
+def _tag_gradebook(cohort_org: str, repo: str, have: set[str]) -> None:
     """Stamp `gradebook` on one private gradebook repo. Checked.
-
-    The topic is what keeps the repo out of `discovery.discover_cohort_repos`, and
-    therefore off the public org landing page - where `grades-<handle>` carries a
-    student's handle. So a failed PUT is said out loud with its consequence attached
-    rather than dropped.
 
     Called on the ALREADY-EXISTS path too: the stamp is a separate PUT after the create,
     and one that failed used to stand until `access.converge_topics` came round on the
     nightly refresh. `have` is the repo's topics off the caller's listing, so a gradebook
     already carrying the topic costs no call, and whatever else it carries is written back
-    with it (the PUT replaces the whole list)."""
+    with it (the PUT replaces the whole list).
+
+    A failed PUT is said out loud rather than dropped, because the topic is what the
+    faculty-access floor and the release targets read. It is not a leak, though:
+    `discovery._has_infra_topic` recognises `grades-<handle>` by NAME whatever its topics
+    say, precisely so a failed stamp cannot put it on a public page. A backstop is not a
+    reason to leave the record wrong - it is the reason the line below does not cry fire.
+    """
     if "gradebook" in have:
-        return True
-    if set_repo_topics(cohort_org, repo, sorted(have | {"gradebook"}), person=True):
-        return True
-    log_err(
-        f"  ! a gradebook in {cohort_org} carries no `gradebook` topic. That topic is "
-        f"what keeps it out of discovery, so until it is set its name - which carries a "
-        f"student handle - is a candidate for the public org landing page. The next sync "
-        f"with a repo listing retries it, as does the nightly refresh."
-    )
-    return False
+        return
+    if not set_repo_topics(cohort_org, repo, sorted(have | {"gradebook"}), person=True):
+        log_err(
+            f"  ! a gradebook in {cohort_org} carries no `gradebook` topic. The name rule "
+            f"in `discovery._has_infra_topic` still keeps it off the public org landing "
+            f"page, so no handle is published - but the record stays wrong until the "
+            f"stamp lands. The next sync with a repo listing retries it, as does the "
+            f"nightly refresh."
+        )
 
 
 def provision_one(
@@ -2181,9 +2182,13 @@ def provision_one(
     )
     if existed:
         log_person(f"  [skip] gradebook {cohort_org}/{repo}")
-        entry = existing.get(repo) if existing is not None else None
-        if entry is not None:
-            _tag_gradebook(cohort_org, repo, set(entry.get("topics") or []))
+        # Converge the stamp off the listing row that already answered "is it there?",
+        # rather than pay a read per student for it. An ARCHIVED gradebook is passed over:
+        # it is read-only, so the PUT would 403 on every sync, and a finished cohort is
+        # meant to stay frozen - `access.converge_topics` skips them for the same reason.
+        row = existing[repo] if existing is not None else None
+        if row is not None and not row.get("archived"):
+            _tag_gradebook(cohort_org, repo, set(row.get("topics") or []))
     else:
         if not create_repo(
             cohort_org,

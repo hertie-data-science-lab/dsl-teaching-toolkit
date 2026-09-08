@@ -1543,6 +1543,34 @@ def test_an_already_tagged_submission_repo_costs_no_call(monkeypatch):
     assert tagged == []
 
 
+def test_an_archived_submission_repo_is_left_frozen(monkeypatch):
+    # A finished semester's cohort is archived, and an archived repo is read-only: the PUT
+    # 403s. The scheduler re-runs every handed-out release on every tick, so an untagged
+    # archived repo would buy a failed write and a public error line every hour, forever.
+    tagged = []
+    _provision_one_env(monkeypatch)
+    monkeypatch.setattr(
+        assign, "set_repo_topics", lambda o, r, t, **k: tagged.append(r) or True
+    )
+    assign.provision_one(
+        "COURSE",
+        "assignment-1",
+        "COHORT",
+        "assignment-1-ada-l",
+        ["ada-l"],
+        "assignment-1",
+        touch_existing=False,
+        existing={
+            "assignment-1-ada-l": {
+                "name": "assignment-1-ada-l",
+                "topics": [],
+                "archived": True,
+            }
+        },
+    )
+    assert tagged == []
+
+
 def test_a_failed_submission_tag_is_reported_with_its_consequence(monkeypatch, capsys):
     # The return used to be discarded. The consequence - the repo NAME, which carries a
     # handle, is a candidate for the public landing page - is what a reader needs, and the

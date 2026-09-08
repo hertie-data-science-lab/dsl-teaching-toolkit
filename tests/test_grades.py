@@ -300,6 +300,24 @@ def test_an_already_tagged_gradebook_costs_no_call(monkeypatch):
     assert tagged == []
 
 
+def test_an_archived_gradebook_is_left_frozen(monkeypatch):
+    # An archived repo is read-only, so the PUT 403s, and a finished cohort is meant to
+    # stay frozen. `access.converge_topics` passes over archived repos for the same reason.
+    tagged = []
+    monkeypatch.setattr(grades, "add_collaborator", lambda *a, **k: True)
+    monkeypatch.setattr(
+        grades, "set_repo_topics", lambda o, r, t, **k: tagged.append(r) or True
+    )
+    grades.provision_one(
+        "COHORT",
+        "ada-l",
+        existing={
+            "grades-ada-l": {"name": "grades-ada-l", "topics": [], "archived": True}
+        },
+    )
+    assert tagged == []
+
+
 def test_a_failed_gradebook_tag_is_reported_with_its_consequence(monkeypatch, capsys):
     # The return used to be discarded. The consequence - `grades-<handle>` is a candidate
     # for the public landing page - is what a reader needs, and the line names nobody.
