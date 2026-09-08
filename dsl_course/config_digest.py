@@ -39,8 +39,13 @@ new and mail the cohort about all of it again.
 Who is @mentioned is decided by git, not by the team: `notify.route` names the planner of
 the line and the last committer of the repo, and the same people are the mail's To line.
 That answer costs several API reads, so it is asked for only on a tick with something to
-say, and the logins it gave ride in the body too - see `resolve_mention`. The cohort's
-instructors team is the fallback.
+say, and the logins it gave ride in the body too - see `resolve_mention`. The team the
+digest names (`cc_team`) is the fallback.
+
+One of these issues is not a cohort's: `COURSE` lives in the COURSE org's own `.github`
+and carries the two files that decide whether the course is synced at all. Everything
+above is the same for it - the repo and the team are the digest's own answers, not this
+module's.
 """
 
 from __future__ import annotations
@@ -53,6 +58,7 @@ from datetime import datetime, timedelta
 from typing import NamedTuple
 
 from .central import CENTRAL, CENTRAL_REF
+from .course import COURSE_ADMIN_TEAM, COURSE_CONFIG
 from .discovery import central_ref_for
 from .faults import (
     NOTIFY_FROM,
@@ -99,6 +105,13 @@ class Digest:
     # a template's `solution` branch, and the issue about it is the cohort's - so the
     # heading has to say which file without claiming it is in the repo the issue is in.
     cite: str = ""
+    # Whether the maintainer is copied on EVERY mail this digest sends, rather than only
+    # on the age reminders (`notify.notify_config_faults`). True for the course-level
+    # files: a cohort's broken roster is one cohort's term and the people who can fix it
+    # are all in the To line, but a course whose identity file or registry cannot be read
+    # has stopped syncing every cohort under it - and the course admins the mail goes to
+    # are the same small group who may have just broken it.
+    cc_maintainer: bool = False
 
     def cite_file(self) -> str:
         return f"`{self.cite or f'{self.repo}/{self.file}'}`"
@@ -141,6 +154,21 @@ GRADING_CONFIG = Digest(
     file=GRADING_FILE,
     doc="docs/03-add-assignment-to-course.md",
     cite=f"<assignment template>/{GRADING_FILE}",
+)
+# The one digest that is not a cohort's. It lives in the COURSE org's own public
+# `.github`, beside the two files it is about, and it is the exception to "one issue per
+# FILE": `dsl-course.yml` and the cohort registry are one issue because they are one
+# failure - either of them unreadable and the sync walks past the whole course, admins
+# and cohorts alike, so the consequence sentence and the audience are identical. `file`
+# names dsl-course.yml because that is what the subject line has to say; each fault still
+# cites the file it is actually in.
+COURSE = Digest(
+    title="dsl-course.yml / cohort registry has entries the sync cannot use",
+    file=COURSE_CONFIG,
+    doc="docs/01-new-course-org.md",
+    repo=".github",
+    cc_team=COURSE_ADMIN_TEAM,
+    cc_maintainer=True,
 )
 
 # What closing one of these issues says. One string, because two issues are closed with
@@ -930,7 +958,11 @@ def sync(
     # digest's own contract is that it never takes a release cron down.
     try:
         ref = central_ref_for(course_org)
-    except RuntimeError:
+    except Exception:
+        # Every exception, not just the RuntimeError a bad ref raises: this reads the
+        # course org's `dsl-course.yml`, which is one of the files the COURSE digest is
+        # written ABOUT. A malformed one raises `yaml.YAMLError` from the loader, and
+        # letting that out of here would silence the digest reporting exactly that.
         ref = CENTRAL_REF
     # A comment is the only half of this that emails anyone, so a tick with no transition
     # to announce and no issue to open has nobody to name: it reuses what the last body

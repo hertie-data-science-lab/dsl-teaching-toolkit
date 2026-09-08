@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
+import yaml
 from conftest import issue_row, source_fault
 
 from dsl_course import config_digest as cd
@@ -286,3 +287,58 @@ def test_a_fault_with_a_moment_earns_no_age_reminder(gh):
     gh([issue_row(7, cd.GRADING_CONFIG.title, body)])
     out = cd.sync(cd.GRADING_CONFIG, "Cohort", "Course", [fault], NOW)
     assert out.reminder is None
+
+
+# ------------------------------------------------- the one digest that is not a cohort's
+
+
+COURSE = cd.COURSE
+COURSE_CTX = cd.Context("Course", "Course")
+
+
+def _course_fault(file: str = "dsl-course.yml", field: str = "central_ref"):
+    return ConfigFault(
+        file,
+        "this file is not valid YAML, so none of it is read",
+        file=file,
+        field=field,
+        in_repo=".github",
+    )
+
+
+def test_the_course_digest_is_written_in_the_course_orgs_own_github(gh):
+    # The repo is the DIGEST's answer, not the engine's: hard-wired to classroom-config
+    # this issue would open in a repo the course org does not have.
+    fake = gh([])
+    cd.sync(COURSE, "Course", "Course", [_course_fault()], NOW)
+    (create,) = fake.did("issue", "create")
+    assert create[create.index("--repo") + 1] == "Course/.github"
+    assert COURSE.title in create
+
+
+def test_the_course_digest_falls_back_to_the_course_admin_team(gh):
+    body = cd.render_body(COURSE, [_course_fault()], NOW, COURSE_CTX)
+    assert "cc @Course/course-admin" in body
+    assert "`.github/dsl-course.yml` has broken entries" in body
+    assert "/docs/01-new-course-org.md" in body
+
+
+def test_both_course_files_sit_in_the_one_issue(gh):
+    # dsl-course.yml and the registry are one failure - either unreadable and the sync
+    # walks past the whole course - so they are one issue, each fault citing its own file.
+    faults = [_course_fault(), _course_fault("cohort-courses-pages.yml", "cohorts")]
+    body = cd.render_body(COURSE, faults, NOW, COURSE_CTX)
+    assert "`dsl-course.yml`" in body and "`cohort-courses-pages.yml`" in body
+
+
+def test_the_course_digest_survives_the_very_file_it_reports_on(gh, monkeypatch):
+    # The docs link asks the course org which tier it runs, which reads the dsl-course.yml
+    # this issue is being written ABOUT. A malformed one raises out of the YAML loader, and
+    # letting that through would silence the digest reporting exactly that.
+    def unparseable(org):
+        raise yaml.YAMLError("bad")
+
+    monkeypatch.setattr(cd, "central_ref_for", unparseable)
+    fake = gh([])
+    out = cd.sync(COURSE, "Course", "Course", [_course_fault()], NOW)
+    assert out.errors == 0 and fake.did("issue", "create")
