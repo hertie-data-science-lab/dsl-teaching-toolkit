@@ -188,8 +188,14 @@ true` / `false` in `grading_config.yml` overrides either way. It is independent 
 
 Two things it is worth writing the assignment for:
 
-- **It runs offline.** A notebook that downloads its data at run time reports `errors:N`.
-  Commit the data, or cache it in the repo.
+- **It runs with network access blocked as far as the runner allows** - the proxy
+  variables point at a dead port, which every well-behaved client honours, but it is not a
+  jail. A notebook that downloads its data at run time reports `errors:N`. Commit the data,
+  or cache it in the repo.
+- **It checks one notebook: the first one you did not hand out.** Notebooks are taken
+  shallowest first, and any still byte-identical to the starter are skipped - so a
+  `00-setup.ipynb` you shipped alongside is passed over. Only when EVERY notebook in the
+  repo is still the untouched starter is the state `not-attempted`.
 - **It runs the notebook, not your kernel.** Anything the notebook needs must be importable
   on the grading runner, which has the toolkit's own dependencies and whatever your workflow
   installs.

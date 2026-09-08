@@ -213,7 +213,8 @@ solution branch  solution/ + grading_config.yml + tests/       -> faculty-only; 
 
 `grading_config.yml`, on the `solution` branch, is the assignment's whole definition:
 `title`, `type`, `team_formation`, `max_team_size`, `submit_via`, `format`, `questions`,
-`late_window_days`, `late_penalty_per_day`, `autograde`, `completion_check`, `tests`. The
+`late_window_days`, `late_penalty_per_day`, `autograde`, `completion_check`, `grader_pdf`,
+`tests`. The
 button writes it from its eight inputs plus the course's `assignment_defaults:`; every key
 is documented inline in the generated file and in
 [Add an assignment](03-add-assignment-to-course.md). Two of them drive the cutoff:

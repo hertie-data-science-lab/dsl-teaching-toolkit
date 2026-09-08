@@ -123,10 +123,14 @@ Things whose *literal spelling* is depended on from outside Python:
   `nbconvert` (nbconvert converts without a kernel and cannot execute without one) - both
   pinned in `requirements.txt`, which every seeded workflow installs; a runner without them
   records the decision once and stays green rather than reporting a cohort of failures.
-  `not-attempted` is byte identity (`_blob_sha`) against the notebooks still on the
-  template's default branch, so **rewriting a template's `main` after handout makes every
-  submission look attempted** - which is the safe way round. It runs OFFLINE (the proxy
-  variables point at a dead port), which docs/10 tells faculty to write the assignment for.
+  `not-attempted` is byte identity (`gh_contents.blob_sha`) against the notebooks still on
+  the template's default branch, and needs EVERY notebook in the checkout to match one; the
+  notebook executed is the first that does not. The baseline is the course template's `main`
+  as it stands NOW, not the frozen cohort-side hand-out, so **rewriting a template's `main`
+  after handout makes every submission look attempted** - which is the safe way round, and
+  is a deliberate deviation from the plan's "frozen hand-out" wording. It runs OFFLINE (the
+  proxy variables point at a dead port - best-effort, not a jail), which docs/10 tells
+  faculty to write the assignment for.
 
   It is independent of `autograde`: `collect` now reaches its target loop for a hand-marked
   assignment, and only "no tests AND no completion check" is the exit that records a skip.
