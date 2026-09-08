@@ -112,6 +112,33 @@ def repo_is_archived(org: str, name: str) -> bool:
         return False
 
 
+def archive_repo(org: str, name: str, *, person: bool = False) -> bool:
+    """Archive a repo - GitHub's reversible read-only freeze. Idempotent (an archived repo
+    re-archives fine).
+
+    The strongest thing this toolkit can do to a repo, deliberately: the bot's token holds
+    no `delete_repo` scope, so a finished cohort is CLOSED rather than destroyed, and a repo
+    frozen in error is un-archived from its own Settings page with nothing lost.
+
+    An archived repo takes no push, no issue and NO COLLABORATOR CHANGE, so anything a
+    caller means to revoke has to be revoked BEFORE this lands - see `dsl_course.teardown`,
+    whose whole order follows from that.
+
+    `person=True` when the repo is somebody's, so the failure line names it only in the
+    verbose log (see `log.log_err_person`)."""
+    code, out = gh(
+        "api", "--method", "PATCH", f"repos/{org}/{name}", "--field", "archived=true"
+    )
+    if code == 0:
+        return True
+    _failed_on(
+        person,
+        f"could not archive a repo in {org}",
+        f"could not archive {org}/{name}: {out[:160]}",
+    )
+    return False
+
+
 def default_branch(org: str, name: str, *, fallback: str | None = None) -> str:
     """The repo's default branch.
 
