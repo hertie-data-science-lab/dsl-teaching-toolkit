@@ -399,6 +399,38 @@ def _shared_state(student_handle: str) -> dict[str, bytes | None]:
     }
 
 
+def _lock_state() -> bytes | None:
+    """`assignments.lock.yml` as it stands, or None if the cohort has none yet.
+
+    Read BEFORE the walk, unlike everything in `_shared_state`: the handout is what moves
+    this file (`assign.provision_all` ends in `grades.write_team_lock`, and every schedule
+    push dispatches the membership sync, which writes it too), so by the time distribute
+    runs it already carries this run's assignment. Recording it at step 11 would hand back
+    the drift instead of the file."""
+    return cleanup.file_bytes(COHORT_ORG, course.CONFIG_REPO, grades.TEAM_LOCK_PATH)
+
+
+def _config_restore(
+    lock: bytes | None, recorded: Stage | None
+) -> dict[str, bytes | None]:
+    """Every `classroom-config` file the walk moves that no run id owns, keyed by path -
+    what the teardown hands back in one commit.
+
+    Two recordings, because the two move at different points: the lock before the walk
+    starts, the distribute pair at step 11. A walk that died before step 11 still has a
+    lock to put back, so `recorded` may be None and the lock is unconditional.
+
+    A value of None is a file that was ABSENT - a cohort bootstrapped before the lock
+    existed - and `cleanup.restore_files` deletes those rather than writing them;
+    `gh_contents.put_files` in turn drops a delete for a path that is not there, so an
+    absent-then-still-absent file costs no commit."""
+    files: dict[str, bytes | None] = {grades.TEAM_LOCK_PATH: lock}
+    if recorded is not None:
+        files[grades.COHORT_CSV_NAME] = recorded.detail["registrar"]
+        files[grades.DISTRIBUTED_PATH] = recorded.detail["distributed"]
+    return files
+
+
 def _text(recorded: bytes | None) -> str:
     """One recorded file as text, for the assertions that read words out of it."""
     return (recorded or b"").decode()
@@ -601,6 +633,12 @@ def pipeline():
     run_id = cleanup.new_run_id()
     _preflight(run_id)
     before = {org: estate.fingerprint(org) for org in (COURSE_ORG, COHORT_ORG)}
+    # Recorded at the same instant as the fingerprint, because that is what the assertion
+    # below measures against: the handout adds this run's assignment to the lock file, and
+    # cleanup cannot sweep a file no run id owns. In production the removal push dispatches
+    # the membership sync, which rewrites it within the minute; here the check runs the
+    # moment cleanup returns.
+    lock_before = _lock_state()
     # Held outside the try so the teardown can read what the walk got as far as recording,
     # however it ended.
     stages_recorded: dict[str, Stage] = {}
@@ -615,24 +653,18 @@ def pipeline():
         )
     finally:
         assert cleanup.cleanup(run_id) == 0, f"cleanup of {run_id} left work undone"
-        # Distribute writes three files this run's namespace does not cover. They were
-        # recorded before it ran; hand them back, or the fingerprint below is a false
-        # alarm every time and a real change hides behind it.
+        # The handout and distribute between them move four files this run's namespace
+        # does not cover. They were recorded before they moved; hand them back, or the
+        # fingerprint below is a false alarm every time and a real change hides behind it.
         recorded = stages_recorded.get("shared_before")
-        if recorded is not None:
-            handle = student.handle()
-            book = f"{course.GRADEBOOK_PREFIX}{handle}"
-            assert (
-                cleanup.restore_files(
-                    COHORT_ORG,
-                    course.CONFIG_REPO,
-                    {
-                        grades.COHORT_CSV_NAME: recorded.detail["registrar"],
-                        grades.DISTRIBUTED_PATH: recorded.detail["distributed"],
-                    },
-                )
-                == 0
+        assert (
+            cleanup.restore_files(
+                COHORT_ORG, course.CONFIG_REPO, _config_restore(lock_before, recorded)
             )
+            == 0
+        )
+        if recorded is not None:
+            book = f"{course.GRADEBOOK_PREFIX}{student.handle()}"
             assert (
                 cleanup.restore_files(
                     COHORT_ORG,

@@ -182,10 +182,12 @@ def file_bytes(org: str, repo: str, path: str) -> bytes | None:
 def restore_files(org: str, repo: str, before: dict[str, bytes | None]) -> int:
     """Put shared files back exactly as they were found, in ONE commit.
 
-    Distribute writes two files no run id owns - `cohort-gradebook.csv` and
-    `gradebook/distributed.csv` - plus the test student's own gradebook. They cannot be
-    swept by namespace, so the harness records them before the run and hands them back
-    here. A path recorded as None was absent and is deleted.
+    A run moves files no run id owns, so nothing above can sweep them: the handout
+    rewrites `assignments.lock.yml`, and distribute writes `cohort-gradebook.csv`,
+    `gradebook/distributed.csv` and the test student's own gradebook. The harness records
+    each before it moves and hands them back here. A path recorded as None was absent and
+    is deleted - and `put_files` drops a delete for a path that is not there, so an
+    absent file that stayed absent costs no commit.
 
     BYTES, from `file_bytes`: "exactly as they were found" is measured by the estate check
     as a blob sha, so a round trip through text is a restore that does not restore."""
