@@ -2028,6 +2028,60 @@ def test_a_path_the_template_has_not_got_is_refused(monkeypatch, capsys):
     assert "nothing to patch" in capsys.readouterr().err
 
 
+def test_a_rerun_finishes_the_repos_the_first_run_could_not(monkeypatch):
+    # The failure line tells the operator to re-run. The frozen hand-out is the baseline
+    # the "did the student change this?" test reads, so patching it on run 1 made the
+    # repo that FAILED on run 1 look like a student edit on run 2 - kept, and reported as
+    # a clean run. It moves last now, and only when nothing failed.
+    live = {
+        "assignment-1": {"starter.py": AS_HANDED_OUT},
+        "assignment-1-ada": {"starter.py": AS_HANDED_OUT},
+        "assignment-1-bob": {"starter.py": AS_HANDED_OUT},
+    }
+    commits = _cohort(monkeypatch, live)
+    real_put = assign.put_files
+    monkeypatch.setattr(
+        assign,
+        "put_files",
+        lambda org, repo, *a, **k: (
+            False if repo == "assignment-1-bob" else real_put(org, repo, *a, **k)
+        ),
+    )
+
+    assert _run(dry_run=False) == 1
+    # ada is fixed, bob is not - and the hand-out is deliberately still the broken one.
+    assert live["assignment-1-ada"]["starter.py"] == FIXED
+    assert live["assignment-1-bob"]["starter.py"] == AS_HANDED_OUT
+    assert live["assignment-1"]["starter.py"] == AS_HANDED_OUT
+
+    commits.clear()
+    monkeypatch.setattr(assign, "put_files", real_put)
+    assert _run(dry_run=False) == 0
+    assert live["assignment-1-bob"]["starter.py"] == FIXED
+    assert live["assignment-1"]["starter.py"] == FIXED
+    assert sorted(repo for repo, _ in commits) == ["assignment-1", "assignment-1-bob"]
+
+
+def test_the_note_names_only_the_files_this_repo_actually_got(monkeypatch):
+    # A patch of two files where the student had already rewritten one of them touches
+    # one file; telling them both changed sends them looking for a diff that is not there.
+    _cohort(
+        monkeypatch,
+        {
+            "assignment-1": {"starter.py": AS_HANDED_OUT, "util.py": AS_HANDED_OUT},
+            "assignment-1-ada": {
+                "starter.py": b"print('my own work')\n",
+                "util.py": AS_HANDED_OUT,
+            },
+        },
+        corrected={"starter.py": FIXED, "util.py": FIXED},
+    )
+    assert _run(dry_run=False) == 0
+    assert len(notes) == 1
+    body = notes[0][3]
+    assert "`util.py`" in body and "starter.py" not in body
+
+
 def test_the_note_reads_as_a_sentence_however_many_files_it_names():
     one = assign.patch_note(["starter.ipynb"], date(2026, 10, 14))
     assert one == (

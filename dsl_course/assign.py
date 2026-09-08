@@ -482,8 +482,13 @@ def patch_one_repo(
     corrected: dict[str, bytes],
     handout: dict[str, str],
     overwrite: bool,
-) -> str:
-    """Commit the correction into one submission repo. Returns one of the PATCH_* verdicts.
+) -> tuple[str, list[str]]:
+    """Commit the correction into one submission repo. Returns `(verdict, paths written)`
+    - one of the PATCH_* verdicts, and exactly what this repo got.
+
+    The paths are what the Feedback note then names: a patch of two files where the
+    student had already rewritten one of them touched one file and used to tell them both
+    had changed.
 
     A NEW COMMIT on the student's own default branch, through `put_files` - so it is one
     commit whatever the patch touches, it is never a force-push (the trees API can only add
@@ -496,14 +501,14 @@ def patch_one_repo(
             "  ! a submission repo could not be read - not patched",
             f"{cohort_org}/{repo}",
         )
-        return PATCH_FAILED
+        return PATCH_FAILED, []
     write, kept = _to_patch(live, corrected, handout, overwrite)
     if kept:
         log_person(
             f"    {cohort_org}/{repo}: keeping the student's own {', '.join(kept)}"
         )
     if not write:
-        return PATCH_KEPT if kept else PATCH_UNCHANGED
+        return (PATCH_KEPT if kept else PATCH_UNCHANGED), []
     if not put_files(
         cohort_org,
         repo,
@@ -511,9 +516,9 @@ def patch_one_repo(
         f"fix: the teaching team updated {', '.join(sorted(write))}",
         person=True,
     ):
-        return PATCH_FAILED
+        return PATCH_FAILED, []
     log_person(f"  [ok] patched {cohort_org}/{repo}")
-    return PATCHED
+    return PATCHED, sorted(write)
 
 
 def note_the_patch(
@@ -554,8 +559,12 @@ def patch_released(
     and it patches the cohort-side TEMPLATE too - so a student who onboards tomorrow is
     given the corrected file rather than the one everyone else was just patched off.
 
-    The template is patched AFTER the hand-out baseline is read off it, and that ordering
-    is the whole of how "did the student change this?" stays answerable across two runs.
+    That template is the BASELINE the third rule rests on ("does this repo still hold what
+    it was given?"), so it moves LAST and only once every submission repo is patched.
+    Patched first, a run that failed on one repo would leave that repo holding the
+    original while the baseline said corrected - and the re-run this function asks for
+    would read the untouched file as the student's own work and refuse to fix it, while
+    reporting success.
 
     Counts only in the log: this runs in the course org's PUBLIC `.github`, and one
     `<slug>-<handle>` line there publishes who is in the cohort."""
@@ -602,18 +611,22 @@ def patch_released(
     on = datetime.now(timezone.utc).date()
     marker = patch_marker(corrected)
     tally: dict[str, int] = {}
-    # The cohort-side template FIRST, now that the baseline above is read: it is what late
-    # onboarders generate from, and leaving it stale would hand the broken file to exactly
-    # the students who were not there to be patched.
-    frozen = patch_one_repo(cohort_org, cohort_slug, corrected, handout, True)
     notes = 0
     for repo in targets:
-        verdict = patch_one_repo(cohort_org, repo, corrected, handout, overwrite)
+        verdict, written = patch_one_repo(
+            cohort_org, repo, corrected, handout, overwrite
+        )
         tally[verdict] = tally.get(verdict, 0) + 1
-        if verdict == PATCHED and note_the_patch(
-            cohort_org, repo, list(corrected), marker, on
-        ):
+        if verdict == PATCHED and note_the_patch(cohort_org, repo, written, marker, on):
             notes += 1
+    # The cohort-side template LAST, and only once every submission repo is done: it is
+    # what late onboarders generate from, but it is also the baseline that tells a
+    # student's own edit from the file they were given, so moving it while a repo still
+    # holds the original is what would strand that repo on the re-run (see above).
+    if tally.get(PATCH_FAILED):
+        frozen = "deferred - a submission repo failed"
+    else:
+        frozen, _ = patch_one_repo(cohort_org, cohort_slug, corrected, handout, True)
     log(
         f"  {cohort_slug} (the frozen hand-out): {frozen}; "
         + "; ".join(f"{n} {what}" for what, n in sorted(tally.items()))
