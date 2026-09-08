@@ -75,6 +75,12 @@ the last one goes.
 Neither the issue nor the email ever names the student or the team: a unit key is a person,
 and both are public. They cite the line.
 
+The assignment's own `grading_config.yml` is checked the same way, in its own issue
+(*assignment grading_config.yml has values that will not grade as written*) - a value that
+will not grade as it reads is reported against the moment it is used, so it reaches you
+before the marking does, not after. For the whole set of these, see
+[Why did I get this email?](reference/actions-reference.md#why-did-i-get-this-email).
+
 ### Where `info.submitted` comes from
 
 A git committer date is written by the student's own client, so a submission dated before

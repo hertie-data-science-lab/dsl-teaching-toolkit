@@ -17,8 +17,8 @@ grants it: [`access-reference.md`](access-reference.md).
 | **Derive student version** | Write a template's student starter onto `main` from the ONE notebook you keep on its `solution` branch: `### BEGIN SOLUTION` / `### END SOLUTION` regions, `solution`-tagged cells and `solution=TRUE` Rmd chunks are replaced with placeholders, and a stripped code cell loses its stored outputs. It never writes to `solution`, and a file with nothing fenced in it is never written at all. **`dry_run` defaults to `true`** and prints the file list and counts only. See [03](../03-add-assignment-to-course.md#one-notebook-not-two-derive-the-starter). |
 | **Generate syllabus** | Write the syllabus's "Course sessions and readings" section - one block per session, with its title, learning objectives and reading list - from a cohort's `schedule.yml` and this repo's `readings/`. Lands in `SYLLABUS.sessions.md` beside your syllabus, never released to students; it never touches `SYLLABUS.md` itself. |
 | **Refresh actions** | Re-seed the run-from-repo workflows, propagate the repo secret, repopulate every dropdown, rebuild the profile READMEs. No inputs. Also runs itself daily, so every org converges on the toolkit tier its course org runs within 24h without anyone clicking. _(All DSL orgs at once: [Refresh Course Orgs Inventory](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml).)_ |
-| **Check cohort setup** | Read-only per-cohort checklist of what's configured and what's missing, with an edit link for each gap. |
-| **Sync membership** | Reconcile `students`/`auditors` teams (`students.csv`), project teams (`teams.csv`) and instructor/course-admin access (`people.yml`, `dsl-course.yml`), and rewrite `assignments.lock.yml` - the generated mirror the **Join team** form reads (hence the `schedule.yml` trigger). Automatic on push to any of those files, plus a daily cron - run it by hand only to apply a `start`/`end` date that rolled over without an edit. See [05](../05-manage-teaching-team.md), [`access-reference.md`](access-reference.md). |
+| **Check cohort setup** | Read-only per-cohort checklist of what's configured and what's missing, with an edit link for each gap. The last two rows say which of the cohort's fault issues are open, so the table agrees with the mail in your inbox. |
+| **Sync membership** | Reconcile `students`/`auditors` teams (`students.csv`), project teams (`teams.csv`) and instructor/course-admin access (`people.yml`, `dsl-course.yml`), and rewrite `assignments.lock.yml` - the generated mirror the **Join team** form reads (hence the `schedule.yml` trigger). Automatic on push to any of those files, plus a daily cron - run it by hand only to apply a `start`/`end` date that rolled over without an edit. A push to the course org's own `dsl-course.yml` or `cohort-courses-pages.yml` instead checks just those two and reports them; a cohort whose files it cannot use is skipped and reported, not failed. See [05](../05-manage-teaching-team.md), [`access-reference.md`](access-reference.md). |
 
 ## Release
 
@@ -52,6 +52,38 @@ Full flow: [Grade and return assignments](../10-grade-and-return-assignments.md)
 | --- | --- |
 | **Publish course website** | Build/refresh a **public** `<course-org>.github.io` sharing this course's lectures + readings. Pick a `source_repo`; `readings_mode` = `reading-list` (citations only, default), `actual-readings` (host the files) or `none`. The first run opts in and records its settings in `_publish-config.yml`; a daily cron re-syncs from them - delete that file to stop. |
 
+## Why did I get this email?
+
+Every file you edit by hand is checked, and anything the toolkit cannot use opens **one
+issue per file** and emails whoever committed that line. Fix the line and the issue closes
+itself; nothing here reds a run.
+
+| The issue you were cc'd on | is about | explained in |
+| --- | --- | --- |
+| *schedule.yml: planned releases cite sources not staged in the course org* | a release naming a folder nobody has staged, and any entry the scheduler had to drop | [07](../07-schedule-releases.md#the-digest-issue) |
+| *people.yml has entries the sync cannot use* | a teaching-team entry that grants nobody access, or that nobody can be emailed at | [05](../05-manage-teaching-team.md) |
+| *students.csv has rows the toolkit cannot use* | a roster row - or a whole file - the enrolment cannot read | [06](../06-enrol-students-to-cohort.md) |
+| *teams.csv has rows the toolkit cannot use* | a project-team row that will not be acted on | [09](../09-release-assignment-to-cohort.md) |
+| *grading sheets have entries the grader cannot read* | a mark, key or unit in `grading_sheets/` that stops a return | [10](../10-grade-and-return-assignments.md#when-a-sheet-has-something-nobody-can-act-on) |
+| *assignment grading_config.yml has values that will not grade as written* | an assignment definition that will not grade the way it reads | [03](../03-add-assignment-to-course.md) |
+| *dsl-course.yml / cohort registry has entries the sync cannot use* | the course org's own two files, which decide whether the course is synced at all | [01](../01-new-course-org.md) |
+
+The first six live in that cohort's private `classroom-config` and cc its `instructors`; the
+last lives in the course org's `.github` and cc's `course-admin`.
+
+**When it reaches you.** A fault tied to a *moment* - a source a release needs, a value used
+to grade - gets louder as that moment nears (24h, 12h, 6h, and once more if it passes), and
+is never emailed between 23:00 and 07:00 in the cohort's timezone. A fault that is simply
+unreadable is emailed the minute it is pushed, again if it is still there after two days, and
+again after a week - then the issue stands and says no more.
+
+**Who gets it.** Whoever git says edited that line, or pushed that CSV. A TA's email copies
+the cohort's instructors; if git can name nobody, the whole teaching team is emailed.
+Addresses come from `email:` in `classroom-config/people.yml`. A row or line and a column are
+named - never a cell value, never a student.
+
+**Check cohort setup** lists which of these are open right now.
+
 ## When a scheduled run fails
 
 The five scheduled actions (Scheduled release, Sync membership, Sync site, Refresh actions,
@@ -61,9 +93,10 @@ the six **opens an issue in your `.github` repo** titled *"&lt;action&gt; is fai
 link to the run and a cc to your org's `course-admin` team, so it reaches an inbox. It comments on
 that same issue while the failure persists, and closes it as soon as a run succeeds - so an
 open one always means "still broken". Don't close it by hand; fix the cause and re-run the
-action. A file **faculty** have to fix never opens one of these: Sync membership skips that
-cohort and Send enrolment codes sends nothing, both stay green, and the fault is reported in
-that cohort's own digest issue and emailed to whoever left it there.
+action. A file **faculty** have to fix never opens one of these - a file that is missing, one
+saved in the wrong format, a row naming somebody who is not on the roster: Sync membership
+skips that cohort and Send enrolment codes sends nothing, both stay green, and the fault is
+reported in that cohort's own digest issue and emailed to whoever left it there - see below.
 
 On the same throttle, the **toolkit maintainer is emailed** the run's URL and the last 30
 lines of the step that failed. A broken run is infrastructure rather than teaching, so the

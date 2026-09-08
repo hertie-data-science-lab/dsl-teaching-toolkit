@@ -40,12 +40,18 @@ breaks a live link that faculty click:
 
 | Doc | Linked from |
 |---|---|
+| `docs/01-new-course-org.md` | `config_digest.COURSE` |
+| `docs/03-add-assignment-to-course.md` | `config_digest.GRADING_CONFIG` |
+| `docs/05-manage-teaching-team.md` | `templates/classroom-config/people.yml`, `config_digest.PEOPLE` |
+| `docs/06-enrol-students-to-cohort.md` | `config_digest.ROSTER` |
 | `docs/07-schedule-releases.md` | `source_digest.py`, `profile_readme.py`, `templates/classroom-config/schedule.yml`, `templates/classroom-config/validate-schedule.yml` |
 | `docs/08-release-materials-to-cohort.md` | `scaffold._RELEASEIGNORE_STUB` (seeded into every materials repo) |
-| `docs/05-manage-teaching-team.md` | `templates/classroom-config/people.yml` |
-| `docs/README.md` | `profile_readme.py` |
-| `docs/03-add-assignment-to-course.md` | `config_digest.GRADING_CONFIG` |
+| `docs/09-release-assignment-to-cohort.md` | `config_digest.TEAMS` |
 | `docs/10-grade-and-return-assignments.md` | `config_digest.GRADING_SHEETS` |
+| `docs/README.md` | `profile_readme.py` |
+
+Every `Digest.doc` is one of these: each digest issue ends with a `Field reference:` link built
+from it, so the seven of them are the widest surface in this table.
 
 `grep -rn 'blob/.*/docs/' dsl_course/ templates/` before any rename.
 
@@ -353,6 +359,67 @@ whose template does not exist yet locks to `none` and refuses every team - the c
 a2-a4 were in, and the reason the button that creates a template writes its
 `grading_config.yml` for you.
 
+## Config faults
+
+Every file faculty edit by hand can be wrong in a way the toolkit detects and only a human
+can fix. One type carries all of them (`faults.ConfigFault`), one engine keeps their issues
+(`config_digest`), one notifier addresses them (`notify`).
+
+**Seven digest issues**, one per file, each found by its EXACT title - a title that varied
+with the faults would never match and every run would open a new issue, so these are frozen:
+
+| issue title | file | where it lives |
+| --- | --- | --- |
+| `schedule.yml: planned releases cite sources not staged in the course org` | `schedule.yml` | cohort `classroom-config` |
+| `people.yml has entries the sync cannot use` | `people.yml` | cohort `classroom-config` |
+| `students.csv has rows the toolkit cannot use` | `students.csv` | cohort `classroom-config` |
+| `teams.csv has rows the toolkit cannot use` | `teams.csv` | cohort `classroom-config` |
+| `grading sheets have entries the grader cannot read` | `grading_sheets/` | cohort `classroom-config` |
+| `assignment grading_config.yml has values that will not grade as written` | template `solution` branch | cohort `classroom-config` |
+| `dsl-course.yml / cohort registry has entries the sync cannot use` | both course files | course `.github` |
+
+The body is rewritten every tick (GitHub does not email about that); a comment - which it
+does - is posted only on appearance, escalation and clearing. An empty fault list CLOSES the
+issue, which is why a file that could not be READ drops out of the tick instead of syncing
+empty. `schedule.yml` absorbed the old *entries the scheduler cannot read* issue, closing it
+once (`source_digest.ABSORBED`); the grading sheets share one issue because a cohort marks
+half a dozen assignments in one afternoon.
+
+**Two ladders**, and `ConfigFault.fires` is which:
+
+- A **moment** - a source the plan cites, a `grading_config.yml` value used to grade -
+  climbs as its moment approaches: WARNING at 24h, URGENT at 12h, CRITICAL at 6h, MISSED
+  once it has passed, maintainer copied from CRITICAL. Held 23:00-07:00 in the cohort's own
+  zone, then sent once at the loudest rung crossed overnight.
+- **No moment** - a line nobody can read - sits flat at WARNING from the moment it exists:
+  waiting changes nothing about it. Mailed on appearance, again at 2 days and at 7 days with
+  the maintainer copied, then silence. Never held: the value of saying it inside the minute
+  is that whoever pushed it is still at the keyboard.
+
+**Recipients** are the committer of the faulty line, by blame of the file at that line (for a
+CSV, the actor who pushed it, skipping the bot). Any addressee who is a TA puts the
+instructors on Cc; nobody identifiable falls back to every instructor. The course-level
+digest goes to `DSL_COURSE_ADMIN_EMAILS` (see [Secrets an org carries](#secrets-an-org-carries))
+with the maintainer copied from the first mail, and falls back to `cc @<course>/course-admin`.
+A CSV or sheet fault carries the row or line and the column - never a cell value, never a
+handle - in the mail, the issue and the log alike.
+
+**What still reds an unattended run.** Nothing above does. A content fault is delivered by
+its digest issue and the mail beside it, never by an exit code: Sync membership skips the
+cohort it cannot read (`sync_membership._CONTENT_FAULT` - `faults.Unusable` plus a YAML
+error), skips a cohort with no `people.yml` and no `students.csv`, and does not count a
+`teams.csv` handle that is not on the roster; Send enrolment codes returns
+`Outcome.UNUSABLE_ROSTER`, which `reds_the_run` treats as green. A red X means the RUN broke
+- a `gh` read or write refused, a token that lost its scope, an unset mail transport - and
+the maintainer is emailed its log tail. `faults.Unusable` is the whole distinction: it IS a
+RuntimeError, so every consumer still stops for it, but a `gh` read that failed is not one.
+`gh_contents.get_file_content` draws the same line at the API - None only for a 404, raise
+otherwise - which is why an absent file is faculty's to fix and a rate limit is not.
+
+`Validate schedule` keeps its red X, its annotations and its commit comment on a push: those
+reach a person who is at the keyboard. `Check cohort setup` shows which digests are standing
+(rows C8 and C9).
+
 ## Crons and gates
 
 Five seeded crons: **Scheduled release** at :07/:22/:37/:52 every hour; **Refresh actions**
@@ -368,25 +435,14 @@ most contended minutes first (on `0 * * * *` the scheduler was delivered 6 ticks
 and membership must write the teams that Sync site then reads. Both rules are enforced by
 `tests/test_renderers.py`; the reasoning sits above the cron literals in `workflows_render`.
 
-**A content fault never reds an unattended run.** Anything faculty have to fix - a source the
-plan cites and the org has not got, a `;`-delimited students.csv, a teams.csv with no header, a
-people.yml that is not YAML - is delivered by the cohort's digest issue and an email to the
-people git names for that line, never by the exit code. Sync membership skips the cohort it
-cannot read (`sync_membership._CONTENT_FAULT`, which is `faults.Unusable` plus a YAML error)
-and Send enrolment codes returns `Outcome.UNUSABLE_ROSTER`, which `reds_the_run` treats as
-green. A red X on any of the six means the run itself broke - a `gh` write refused, a token
-that lost its scope, an absent roster, an unset mail transport - which is why the maintainer is
-emailed its log tail. `faults.Unusable` is the whole of the distinction: it IS a RuntimeError,
-so every consumer still stops for it, but a `gh` read that failed is not one and still reds.
-
-That holds one level up too. The COURSE org's own `dsl-course.yml` and `cohort-courses-pages.yml`
-are checked once per scheduler tick (`scheduler._preflight_course`) and again on a push to
-either, from Sync membership (`--check-course-config`); the two share one digest issue in the
-course org's `.github` and mail the course admins, from `DSL_COURSE_ADMIN_EMAILS` above, with
-the maintainer copied from the first message. Neither pass changes an exit code - though a
-registry nobody can parse still reds the scheduler tick that follows, because the cohort
-listing raises on it and there is genuinely nothing to release. That is why the check runs
-BEFORE the listing: reported there, or not at all.
+A red X on any of the six means the run itself broke, never that a file faculty own is wrong
+- see [Config faults](#config-faults) for the line between the two, and for where each of
+these checks runs. The COURSE org's own two files are checked once per scheduler tick
+(`scheduler._preflight_course`) and again on a push to either, from Sync membership
+(`--check-course-config`). Neither pass changes an exit code - though a registry nobody can
+parse still reds the tick that follows, because the cohort listing raises on it and there is
+genuinely nothing to release. That is why the check runs BEFORE the listing: reported there,
+or not at all.
 
 ## The scheduler's two drivers
 
