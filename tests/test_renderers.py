@@ -1144,6 +1144,46 @@ def _issue_title(step: dict) -> str:
     return re.search(r'^ *title=(".*")$', step["run"], re.MULTILINE).group(1)
 
 
+# What a rendered `run:` block looks like when it executes the STUDENTS' own code - the
+# module that clones a submission and runs its notebook, its `run.sh` and the hidden tests,
+# by either of the two ways in.
+STUDENT_CODE = ("dsl_course.collect", "--autograde-only")
+
+
+def _runs_student_code(step: dict) -> bool:
+    return any(entry in step.get("run", "") for entry in STUDENT_CODE)
+
+
+# The two shapes a reporting job comes in, as `{what "the run failed" is: its success
+# counterpart}`.
+#
+# The first is ordinary: the reporting steps sit IN the job they report on, so the job's
+# own status answers, and the log is the one the failing step teed to $RUNNER_TEMP.
+#
+# The second is the scheduler's grading legs. `autograde` ends on the students' own code -
+# the runner sources whatever a step leaves in $GITHUB_ENV before starting the next one, so
+# a step after that one carrying the bot token would run their code as the org owner - so
+# its reporting moved to a job of its own and has to ASK the jobs API instead. `skipped`
+# there means "no leg ran at all", which is neither a failure to file nor a recovery to
+# close; every other non-success conclusion, `cancelled` included, is the fault to report.
+FAILURE_GATES = {
+    "(failure() || cancelled())": "success()",
+    (
+        "steps.graded.outputs.result != 'success' "
+        "&& steps.graded.outputs.result != 'skipped'"
+    ): "steps.graded.outputs.result == 'success'",
+}
+MANUAL = " && github.event_name != 'workflow_dispatch'"
+
+
+def _failure_gate(step: dict) -> str:
+    """The `if` fragment that says "the run this reports on went wrong", checked against the
+    two shapes above so a third cannot appear unremarked."""
+    gate = step["if"].partition(" && steps.notice")[0].removesuffix(MANUAL)
+    assert gate in FAILURE_GATES, step["if"]
+    return gate
+
+
 def _assert_reports_a_failure(opener: dict) -> None:
     # An issue is the only channel that reaches a human: the scheduled-failure email goes
     # to the bot. One open issue tracks the current state - opened/commented on failure,
@@ -1172,10 +1212,12 @@ def _assert_reports_a_failure(opener: dict) -> None:
     assert "updatedAt" in opener["run"]
     assert "21600" in opener["run"]
     # A job killed by its own `timeout-minutes` is CANCELLED, not failed - and a cron that
-    # reliably runs out of time is exactly the silent failure this exists to surface.
-    assert "cancelled()" in opener["if"]
+    # reliably runs out of time is exactly the silent failure this exists to surface. Both
+    # gates cover it: `cancelled()` in the job's own status, and "concluded as anything but
+    # success" in the jobs-API answer the detached reporting job reads.
+    _failure_gate(opener)
     # A manual run's failure is already in front of the person who clicked.
-    assert "github.event_name != 'workflow_dispatch'" in opener["if"]
+    assert opener["if"].endswith(MANUAL)
     # A transient search failure must not abort the step BEFORE it files anything (the
     # step runs under `bash -e`, so an unguarded capture would).
     assert ") || true" in opener["run"]
@@ -1190,28 +1232,37 @@ def _assert_reports_a_failure(opener: dict) -> None:
     assert "report=false" in opener["run"]
 
 
-def _assert_emails_the_maintainer(step: dict) -> None:
+def _assert_emails_the_maintainer(step: dict, detached: bool) -> None:
     # The issue is the durable record; this is the only channel the MAINTAINER is on.
     # GitHub's own scheduled-failure email goes to whoever last committed the workflow
     # file, which is always the bot, which is to say nobody.
-    # The step's OWN log, teed by the step that failed. The jobs API cannot answer this
-    # from in here: the job is still RUNNING, so its `conclusion` is null and a lookup
-    # for the failed job mailed an empty tail - and on the grading matrix it could match
-    # another cohort's leg.
-    assert f"tail -n 30 {workflows_render._RUN_LOG}" in step["run"]
-    assert "actions/runs" not in step["run"]
+    if not detached:
+        # The step's OWN log, teed by the step that failed. The jobs API cannot answer this
+        # from in here: the job is still RUNNING, so its `conclusion` is null and a lookup
+        # for the failed job mailed an empty tail - and on the grading matrix it could
+        # match another cohort's leg.
+        assert f"tail -n 30 {workflows_render._RUN_LOG}" in step["run"]
+        assert "actions/runs" not in step["run"]
+    else:
+        # Reporting from a job of its own is the one case where the API IS the answer: the
+        # leg it reports on has finished, so its log can be fetched - and it must be,
+        # because $RUNNER_TEMP belonged to a runner this job never shared.
+        assert 'gh api "repos/$REPO/actions/jobs/$JOB_ID/logs"' in step["run"]
+        assert "| tail -n 30" in step["run"]
+        assert step["env"]["JOB_ID"] == "${{ steps.graded.outputs.job_id }}"
+        assert step["env"]["GH_TOKEN"] == "${{ secrets.DSL_BOT_TOKEN }}"
     assert "dsl_course.notify run-failed" in step["run"]
     # Piped, never interpolated: a log tail is arbitrary text and must not become argv.
     assert "${{" not in step["run"]
-    # A job that died before the teeing step ran leaves no log, and a missing tail must
-    # not lose the mail as well - the run URL is in it either way. This job has also
-    # already failed for its own reasons; reddening it twice says nothing new.
+    # A run that left no log to read, and a missing tail must not lose the mail as well -
+    # the run URL is in it either way. This job has also already failed for its own
+    # reasons; reddening it twice says nothing new.
     assert "|| true" in step["run"]
     # Throttled WITH the issue, off the notice step's own output, so a maintainer who gets
     # an email can always find the issue it came from - and a thread being kept quiet for
     # six hours does not mail either.
     assert "steps.notice.outputs.report == 'true'" in step["if"]
-    assert "cancelled()" in step["if"]
+    _failure_gate(step)
     assert "github.event_name != 'workflow_dispatch'" in step["if"]
     # It can only mail if it carries the transport.
     assert set(mailer.GRAPH_ENV) <= set(step["env"])
@@ -1248,6 +1299,12 @@ _OPEN_ISSUES = [
         "updatedAt": "2020-01-01T00:00:00Z",
     },
 ]
+
+
+def _closer(job: dict) -> dict:
+    """The step that closes this job's failure issue once its run comes back green."""
+    (closer,) = [s for s in job["steps"] if "gh issue close" in s.get("run", "")]
+    return closer
 
 
 def _step_outputs(path: Path) -> dict[str, str]:
@@ -1315,13 +1372,12 @@ def test_a_recovery_closes_only_the_issue_its_own_job_filed(tmp_path):
     # grading issues, the still-failing leg refiled with a fresh cc, and the 6h throttle
     # never engaged - ~96 mentions a day per faulty cohort.
     jobs = yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]
-    release_closer = next(
-        s for s in jobs["release"]["steps"] if s.get("if") == "success()"
-    )
+    release_closer = _closer(jobs["release"])
     assert _run_issue_step(release_closer, tmp_path / "r", _OPEN_ISSUES) == ["close 11"]
-    grading_closer = next(
-        s for s in jobs["autograde"]["steps"] if s.get("if") == "success()"
-    )
+    # The grading legs' recovery is closed from `autograde-report`, not from the job that
+    # graded: that one ends on the students' own code, and nothing carrying the bot token
+    # may follow it on the same runner.
+    grading_closer = _closer(jobs["autograde-report"])
     assert _run_issue_step(
         grading_closer, tmp_path / "a", _OPEN_ISSUES, COHORT="Cohort-f2026"
     ) == ["close 22"]
@@ -1334,7 +1390,7 @@ def test_a_failure_files_its_own_issue_rather_than_commenting_on_a_sibling(tmp_p
     opener = next(
         s
         for s in yaml.safe_load(ALL_RENDERED["scheduler"])["jobs"]["release"]["steps"]
-        if "failure()" in s.get("if", "")
+        if s.get("id") == "notice"
     )
     grading_only = [i for i in _OPEN_ISSUES if "autograde" in i["title"]]
     assert _run_issue_step(opener, tmp_path / "x", grading_only) == ["create --repo"]
@@ -1348,19 +1404,17 @@ def test_every_cron_files_and_closes_its_own_failure_issue(name):
     reporting = [
         (n, j)
         for n, j in doc["jobs"].items()
-        if any("failure()" in s.get("if", "") for s in j.get("steps", []))
+        if any("gh issue create" in s.get("run", "") for s in j.get("steps", []))
     ]
     assert reporting, f"{name}: nothing reports its unattended failures"
     for job_name, job in reporting:
-        failing = [s for s in job["steps"] if "failure()" in s.get("if", "")]
-        openers = [s for s in failing if "gh issue create" in s.get("run", "")]
-        mailers = [s for s in failing if "dsl_course.notify" in s.get("run", "")]
+        openers = [s for s in job["steps"] if "gh issue create" in s.get("run", "")]
+        mailers = [s for s in job["steps"] if "dsl_course.notify" in s.get("run", "")]
         # ONE of each per job: the durable issue, and the mail that is how the maintainer
-        # hears at all. The scheduler releases and grades in two CONCURRENT jobs, so the
+        # hears at all. The scheduler releases and grades in CONCURRENT jobs, so the
         # contract is per job - but two notices in one job still double-file.
         assert len(openers) == 1, f"{name}.{job_name}"
         assert len(mailers) == 1, f"{name}.{job_name}: nobody emails the maintainer"
-        assert len(failing) == 2, f"{name}.{job_name}"
         (opener,) = openers
         # ...and the job is UNGATED. check-team only runs on workflow_dispatch, so a job
         # that needs it is SKIPPED on the cron - parking the notice on a trailing gated job
@@ -1369,34 +1423,77 @@ def test_every_cron_files_and_closes_its_own_failure_issue(name):
             f"{name}: the notice rides {job_name}, which is skipped on the cron"
         )
         _assert_reports_a_failure(opener)
-        _assert_emails_the_maintainer(mailers[0])
-        _assert_the_reported_step_writes_its_log(job, f"{name}.{job_name}")
+        detached = _failure_gate(opener) != "(failure() || cancelled())"
+        _assert_emails_the_maintainer(mailers[0], detached)
+        if not detached:
+            _assert_the_reported_step_writes_its_log(job, f"{name}.{job_name}")
+        else:
+            # A reporting job that is not the job it reports on must never be the one
+            # running student code - moving the secrets off that runner is the whole point.
+            assert not any(_runs_student_code(s) for s in job["steps"]), job_name
 
     # "Fix it and re-run" is how a human confirms the recovery, so EVERY job a human can
     # dispatch closes the ticket too - not just the schedule-gated one carrying the notice.
+    # The exception is a job that runs the STUDENTS' code: no step holding the bot token
+    # may follow that, so its recovery is closed by the reporting job that `needs:` it.
+    graders = {
+        n
+        for n, j in doc["jobs"].items()
+        if any(_runs_student_code(s) for s in j.get("steps", []))
+    }
     closers = {
         n
         for n, j in doc["jobs"].items()
-        if any(s.get("if") == "success()" for s in j.get("steps", []))
+        if any("gh issue close" in s.get("run", "") for s in j.get("steps", []))
     }
-    assert closers == set(doc["jobs"]) - {"check-team"}
+    assert closers == set(doc["jobs"]) - {"check-team"} - graders
+    for grader in graders:
+        assert any(grader in str(doc["jobs"][n].get("needs", "")) for n in closers), (
+            f"{name}.{grader}: nothing closes the ticket its failures file"
+        )
     for closer_job in closers:
-        closer = next(
-            s for s in doc["jobs"][closer_job]["steps"] if s.get("if") == "success()"
-        )
-        assert "gh issue close" in closer["run"]
-        # A job closes exactly the title it FILES, or a recovery closes nothing - and,
-        # worse, on a workflow whose jobs run at once it would close a sibling's
-        # still-standing failure instead of its own.
+        closer = _closer(doc["jobs"][closer_job])
+        # A job closes exactly the title it FILES, on exactly the condition that title was
+        # filed on - or a recovery closes nothing, and, worse, on a workflow whose jobs run
+        # at once it closes a sibling's still-standing failure instead of its own.
         own = dict(reporting).get(closer_job)
-        want = (
-            _issue_title(
-                next(s for s in own["steps"] if "failure()" in s.get("if", ""))
-            )
-            if own
-            else '"$WORKFLOW is failing"'
+        opener = (
+            next(s for s in own["steps"] if s.get("id") == "notice") if own else None
         )
+        want = _issue_title(opener) if opener else '"$WORKFLOW is failing"'
         assert _issue_title(closer) == want, f"{name}.{closer_job}"
+        gate = _failure_gate(opener) if opener else "(failure() || cancelled())"
+        assert closer["if"] == FAILURE_GATES[gate], f"{name}.{closer_job}"
+
+
+@pytest.mark.parametrize("name", sorted(ALL_RENDERED))
+def test_student_code_is_the_last_thing_its_runner_ever_does(name):
+    # RELEASE-BLOCKING if this ever stops holding. A graded run executes the students' own
+    # notebooks, `run.sh` and hidden tests, and the runner SOURCES whatever a step left in
+    # $GITHUB_ENV / $GITHUB_PATH before it starts the next step of the same job. So a cell
+    # appending `BASH_ENV=/tmp/x` runs in that next step - and every step this estate has
+    # after a grading step used to carry `secrets.DSL_BOT_TOKEN`, i.e. the org owner.
+    #
+    # The environment scrub in collect._sanitised_env is the second lock, not this one.
+    # This is the structural fix: the grading step is the LAST step of its job, so anything
+    # that has to happen afterwards happens in a separate `jobs:` entry - which is a fresh
+    # runner, with none of that job's files or exported environment.
+    doc = yaml.safe_load(ALL_RENDERED[name])
+    found = 0
+    for job_name, job in doc["jobs"].items():
+        steps = job.get("steps", [])
+        for i, step in enumerate(steps):
+            if not _runs_student_code(step):
+                continue
+            found += 1
+            assert i == len(steps) - 1, (
+                f"{name}.{job_name}: {steps[i + 1].get('name')!r} runs on the runner that "
+                f"just executed student code"
+            )
+    # ...and the sweep is looking at something. `collect` is reached both directly (the
+    # Collect submissions button) and through the scheduler's `--autograde-only`.
+    if name in ("collect_submissions", "scheduler"):
+        assert found == 1, name
 
 
 def test_only_the_nightly_refresh_joins_the_seed_refresh_group():
@@ -1500,8 +1597,12 @@ def test_the_scheduler_serialises_each_job_and_nothing_more():
         ),
         "cancel-in-progress": False,
     }
-    for job in jobs.values():
-        assert job["concurrency"]["cancel-in-progress"] is False
+    for name in ("release", "autograde"):
+        assert jobs[name]["concurrency"]["cancel-in-progress"] is False
+    # The reporting job is deliberately UNGROUPED. It writes nothing but a deduped issue,
+    # and a group holds one pending run - so joining either queue could only ever drop the
+    # report of a failure, which is the one thing this workflow may not do silently.
+    assert "concurrency" not in jobs["autograde-report"]
 
 
 def test_the_scheduler_grades_every_cohort_without_waiting_on_the_releases():
