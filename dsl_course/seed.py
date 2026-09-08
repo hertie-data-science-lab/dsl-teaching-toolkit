@@ -77,6 +77,7 @@ from .workflows_render import (
     render_generate_syllabus,
     render_new_assignment,
     render_new_materials,
+    render_patch_assignment,
     render_provision,
     render_publish_site,
     render_refresh,
@@ -254,6 +255,9 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
             cohorts, assignments
         ),
         ".github/workflows/collect-submissions.yml": render_collect_submissions(
+            cohorts, assignments
+        ),
+        ".github/workflows/patch-assignment.yml": render_patch_assignment(
             cohorts, assignments
         ),
         ".github/workflows/new-materials.yml": render_new_materials(),

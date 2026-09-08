@@ -252,8 +252,9 @@ _MAIL_ENV = "\n".join(
 # Fail CLOSED: only an explicit `false` acts. Any other value - "True", "1", a blank from a
 # renamed input - previews. Shared by the buttons whose `dry_run` DEFAULTS TO TRUE, which is
 # the set whose real run reaches further than a second click can take back: Distribute
-# grades emails a whole cohort, Archive cohort freezes one, and Derive student version
-# overwrites instructor-written files on a template's `main`. Their CLIs spell the flag
+# grades emails a whole cohort, Archive cohort freezes one, Derive student version
+# overwrites instructor-written files on a template's `main`, and Patch released
+# assignment commits into every student's repo. Their CLIs spell the flag
 # `--dry-run/--no-dry-run` and default it ON, so the gate has to pass one of the two
 # EXPLICITLY - "add nothing when the box is unticked" would preview for ever. The other
 # dry-run gates in this module guard convergent work and keep the simpler spelling.
@@ -1305,6 +1306,65 @@ on:
             --team-formation "$TEAM_FORMATION" --submit-via "$SUBMIT_VIA" \\
             --autograde "$AUTOGRADE"
           python3 -m dsl_course.seed refresh --course-org "$ORG"
+"""
+
+
+def render_patch_assignment(
+    cohort_orgs: list[str], assignments: list[str] | None = None
+) -> str:
+    """Push a correction into every submission repo of an assignment already handed out."""
+    return f"""name: Patch released assignment
+
+# A broken cell, a wrong path, a dataset that moved - after the assignment went out.
+# Commit the fix to the TEMPLATE's default branch first, then run this: it pushes that
+# file (or folder) into every submission repo of the assignment, as a NEW COMMIT on each
+# student's own branch, and posts a note on each Feedback issue telling them to pull.
+# It never force-pushes, and it never replaces a file a student has already changed
+# unless `overwrite` says so - their version is kept and counted instead.
+# The frozen cohort-side hand-out is patched too, so a student who onboards tomorrow is
+# given the corrected file rather than the one everyone else was just patched off.
+# `dry_run` defaults to true. See docs/09-release-assignment-to-cohort.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+{_choice_input("cohort_org", "Cohort org holding the submission repos", cohort_orgs)}
+{_assignment_input(assignments or [], "Assignment template holding the corrected file")}
+      path:
+        description: "File or folder on the template's default branch to push (e.g. starter.ipynb, or data/)"
+        required: true
+      slug:
+        description: "Only if TWO schedule.yml assignments hand out from this template: which one (the schedule key). Leave empty otherwise"
+        required: false
+        default: ""
+      overwrite:
+        description: "Replace the file even where the student has already changed it (their work on that file is lost)"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Preview only - count the repos that would be patched, write nothing"
+        type: boolean
+        default: true
+
+{_concurrency("patch-assignment")}
+{_PERMISSIONS_JOBS}{_CHECK_TEAM}
+  patch:
+{_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Patch released assignment
+        env:
+          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
+          MASTER_ORG: ${{{{ github.repository_owner }}}}
+          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
+          PATH_INPUT: ${{{{ inputs.path }}}}
+          SLUG: ${{{{ inputs.slug }}}}
+          OVERWRITE: ${{{{ inputs.overwrite }}}}
+          DRY_RUN: ${{{{ inputs.dry_run }}}}
+        run: |
+          args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG" --patch-path "$PATH_INPUT")
+          [ -n "$SLUG" ] && args+=(--slug "$SLUG")
+          [ "$OVERWRITE" = "true" ] && args+=(--overwrite)
+{_DRY_RUN_GATE}
+          python3 -m dsl_course.assign "${{args[@]}}"
 """
 
 

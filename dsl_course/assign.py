@@ -32,7 +32,7 @@ import json
 import sys
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import yaml
@@ -51,9 +51,17 @@ from .course import (
     SOLUTION_DIR,
     submission_repo,
 )
-from .discovery import ASSIGNMENT_TEMPLATE_TOPIC, list_org_repos
+from .discovery import ASSIGNMENT_TEMPLATE_TOPIC, classify_repos, list_org_repos
 from .fs import copy_tree
-from .gh_contents import file_exists, get_file_content, put_file, put_files, repo_tree
+from .gh_contents import (
+    blob_sha,
+    file_exists,
+    get_file_content,
+    put_file,
+    put_files,
+    repo_blob_shas,
+    repo_tree,
+)
 from .ghcli import GIT_ENV, clone, gh, git
 from .log import (
     log,
@@ -364,6 +372,267 @@ def push_solution(cohort_org: str, repo: str, sol_dir: Path) -> bool:
         return git("-C", str(wd), *GIT_ENV, "push", "-q", "origin", "HEAD")[0] == 0
 
 
+# ------------------------------------------ patching an assignment that is already out
+
+# One patch, one comment. The digest is over the paths and the CONTENT written, so a second
+# press that changes nothing says nothing, and a genuinely different correction to the same
+# path is a new note rather than a silent one. Same idea as the `dsl-receipt:` marker the
+# grading receipts carry - see `grades.post_marked_comment`, which is what enforces it.
+PATCH_MARKER = "<!-- dsl-patch:{digest} -->"
+
+# What one submission repo came to. Counted into the summary line; per-repo detail goes
+# through `log_person`, because the repo NAME is `<slug>-<handle>`.
+PATCHED = "patched"
+PATCH_UNCHANGED = "already up to date"
+PATCH_KEPT = "the student's own edit kept"
+PATCH_FAILED = "failed"
+
+
+def patch_marker(files: dict[str, bytes]) -> str:
+    """The idempotence marker for one patch: a digest of what it writes."""
+    fingerprint = "\n".join(
+        f"{path}:{blob_sha(body)}" for path, body in sorted(files.items())
+    )
+    return PATCH_MARKER.format(digest=blob_sha(fingerprint.encode())[:12])
+
+
+def patch_note(paths: list[str], on: date) -> str:
+    """The line each Feedback issue gets. It names the FILES, never the student, and says
+    the one thing a student has to do about it."""
+    listed = ", ".join(f"`{path}`" for path in sorted(paths))
+    what = (
+        f"updated {listed}"
+        if len(paths) == 1
+        else f"updated {len(paths)} files - {listed} -"
+    )
+    return (
+        f"The teaching team {what} in this repository on {on}; pull before you continue. "
+        f"Your own commits are untouched."
+    )
+
+
+def template_files(course_org: str, template: str, path: str) -> dict[str, bytes]:
+    """`{path: content}` for `path` on the TEMPLATE's default branch - one file, or every
+    file under it when `path` names a folder.
+
+    Text only, and that is a property of the whole write path rather than a shortcut here:
+    the Contents API hands text back and `put_files` sends text, so a binary asset cannot
+    travel this way in either direction. A corrected notebook, script or brief can."""
+    branch = default_branch(course_org, template, fallback="main")
+    prefix = path.strip("/") + "/"
+    files: dict[str, bytes] = {}
+    for candidate in repo_tree(course_org, template, branch, "blob"):
+        if candidate != path.strip("/") and not candidate.startswith(prefix):
+            continue
+        text = get_file_content(course_org, template, candidate, ref=branch)
+        if text is None:
+            log_err(f"  ! {template}/{candidate} could not be read - not patched")
+            continue
+        files[candidate] = text.encode()
+    return files
+
+
+def patch_targets(listing: list[dict], slug: str) -> list[str]:
+    """Every LIVE submission repo generated from the cohort-side template `slug`.
+
+    Off the org listing rather than the roster, deliberately: what has to be patched is
+    what EXISTS. A student who has since left the course still holds their repo and still
+    has the broken file in it, and a team repo whose members changed is one repo either
+    way. Archived repos are skipped - they are read-only, so the write would 403, and a
+    frozen repo is a finished one."""
+    derived = classify_repos(listing)
+    return sorted(
+        row["name"]
+        for row in listing
+        if derived.get(row["name"]) == slug and not row.get("archived")
+    )
+
+
+def _to_patch(
+    live: dict[str, str],
+    corrected: dict[str, bytes],
+    handout: dict[str, str],
+    overwrite: bool,
+) -> tuple[dict[str, bytes], list[str]]:
+    """`(what to write, what the student changed and we are leaving alone)` for one repo.
+
+    Three states per path, decided on blob shas off ONE tree read: already the corrected
+    content (nothing to do), still exactly what the hand-out put there (safe to replace),
+    or something else - which is the student's work on that file. The hand-out baseline is
+    the cohort-side TEMPLATE every one of these repos was generated from, so "the student
+    changed it" is a comparison against what they were actually given rather than a guess
+    off commit authorship (the generate commit is the bot's, so authorship says nothing).
+    """
+    write: dict[str, bytes] = {}
+    kept: list[str] = []
+    for path, body in corrected.items():
+        current = live.get(path)
+        if current == blob_sha(body):
+            continue
+        if current is not None and current != handout.get(path) and not overwrite:
+            kept.append(path)
+            continue
+        write[path] = body
+    return write, kept
+
+
+def patch_one_repo(
+    cohort_org: str,
+    repo: str,
+    corrected: dict[str, bytes],
+    handout: dict[str, str],
+    overwrite: bool,
+) -> str:
+    """Commit the correction into one submission repo. Returns one of the PATCH_* verdicts.
+
+    A NEW COMMIT on the student's own default branch, through `put_files` - so it is one
+    commit whatever the patch touches, it is never a force-push (the trees API can only add
+    a commit on top of the ref it read), and a path already carrying the corrected bytes
+    costs no commit at all."""
+    try:
+        live = repo_blob_shas(cohort_org, repo, default_branch(cohort_org, repo))
+    except RuntimeError:
+        log_err_person(
+            "  ! a submission repo could not be read - not patched",
+            f"{cohort_org}/{repo}",
+        )
+        return PATCH_FAILED
+    write, kept = _to_patch(live, corrected, handout, overwrite)
+    if kept:
+        log_person(
+            f"    {cohort_org}/{repo}: keeping the student's own {', '.join(kept)}"
+        )
+    if not write:
+        return PATCH_KEPT if kept else PATCH_UNCHANGED
+    if not put_files(
+        cohort_org,
+        repo,
+        write,
+        f"fix: the teaching team updated {', '.join(sorted(write))}",
+        person=True,
+    ):
+        return PATCH_FAILED
+    log_person(f"  [ok] patched {cohort_org}/{repo}")
+    return PATCHED
+
+
+def note_the_patch(
+    cohort_org: str, repo: str, paths: list[str], marker: str, on: date
+) -> bool:
+    """Tell one student, on the Feedback issue they were pointed at when the repo appeared.
+
+    Only where that issue already EXISTS: `assign` opens it at hand-out with the assignment's
+    due date and brief in the body, and a patch has neither to hand - opening one here would
+    put a thread with the wrong body over the one the student is reading. A repo whose issue
+    is missing is counted and named through `log_person`, not silently passed over."""
+    found = grades.find_feedback_issue(cohort_org, repo)
+    if isinstance(found, grades.IssueLookupFailed) or found is None:
+        log_person(
+            f"    {cohort_org}/{repo}: no Feedback issue to post the patch note on"
+        )
+        return False
+    return grades.post_marked_comment(
+        cohort_org, repo, found[0], patch_note(paths, on), marker
+    )
+
+
+def patch_released(
+    master_org: str,
+    template: str,
+    cohort_org: str,
+    path: str,
+    slug: str = "",
+    overwrite: bool = False,
+    dry_run: bool = True,
+) -> int:
+    """Push a corrected file (or folder) from `template`'s default branch into every
+    submission repo of the assignment it handed out, and say so on each Feedback issue.
+
+    The three things it will not do, because each of them is how a fix becomes a loss:
+    it never force-pushes (the commit goes on top of whatever the student has), it never
+    replaces a file the student has changed unless `overwrite` says so in as many words,
+    and it patches the cohort-side TEMPLATE too - so a student who onboards tomorrow is
+    given the corrected file rather than the one everyone else was just patched off.
+
+    The template is patched AFTER the hand-out baseline is read off it, and that ordering
+    is the whole of how "did the student change this?" stays answerable across two runs.
+
+    Counts only in the log: this runs in the course org's PUBLIC `.github`, and one
+    `<slug>-<handle>` line there publishes who is in the cohort."""
+    sched = schedule.load(cohort_org)
+    target = schedule.resolve_target(sched, template, slug)
+    if isinstance(target, str):
+        log_err(target)
+        return 1
+    _key, cohort_slug = target
+    log_step(
+        f"Patching {cohort_slug} in {cohort_org} from {master_org}/{template}:{path}"
+        f"{' (dry run)' if dry_run else ''}"
+    )
+    corrected = template_files(master_org, template, path)
+    if not corrected:
+        log_err(
+            f"`{path}` is not on {master_org}/{template}'s default branch - nothing to "
+            f"patch. Commit the correction to the template first; this button only "
+            f"distributes what is already there."
+        )
+        return 1
+    try:
+        handout = repo_blob_shas(
+            cohort_org, cohort_slug, default_branch(cohort_org, cohort_slug)
+        )
+    except RuntimeError as exc:
+        log_err(
+            f"{cohort_org}/{cohort_slug} could not be read: {exc}. That repo is the frozen "
+            f"hand-out every submission was generated from, and without it there is no way "
+            f"to tell a student's own edit from the file they were given."
+        )
+        return 1
+    listing = list_org_repos(cohort_org)
+    targets = patch_targets(listing, cohort_slug)
+    log(f"  {len(corrected)} file(s) -> {len(targets)} submission repo(s)")
+    if dry_run:
+        log_ok(
+            f"dry run: {len(corrected)} file(s) would be patched into {len(targets)} "
+            f"submission repo(s) and into {cohort_slug}; overwrite is "
+            f"{'ON' if overwrite else 'OFF'}"
+        )
+        return 0
+
+    on = datetime.now(timezone.utc).date()
+    marker = patch_marker(corrected)
+    tally: dict[str, int] = {}
+    # The cohort-side template FIRST, now that the baseline above is read: it is what late
+    # onboarders generate from, and leaving it stale would hand the broken file to exactly
+    # the students who were not there to be patched.
+    frozen = patch_one_repo(cohort_org, cohort_slug, corrected, handout, True)
+    notes = 0
+    for repo in targets:
+        verdict = patch_one_repo(cohort_org, repo, corrected, handout, overwrite)
+        tally[verdict] = tally.get(verdict, 0) + 1
+        if verdict == PATCHED and note_the_patch(
+            cohort_org, repo, list(corrected), marker, on
+        ):
+            notes += 1
+    log(
+        f"  {cohort_slug} (the frozen hand-out): {frozen}; "
+        + "; ".join(f"{n} {what}" for what, n in sorted(tally.items()))
+    )
+    failures = tally.get(PATCH_FAILED, 0) + (1 if frozen == PATCH_FAILED else 0)
+    if failures:
+        log_err(
+            f"{failures} repo(s) were NOT patched (named above through the private log) - "
+            f"re-run once the cause is fixed; a repo already carrying the correction is "
+            f"passed over, so a second run costs nothing"
+        )
+        return 1
+    log_ok(
+        f"{cohort_slug}: {tally.get(PATCHED, 0)} repo(s) patched, {notes} note(s) posted, "
+        f"{tally.get(PATCH_KEPT, 0)} left as the student wrote them"
+    )
+    return 0
+
+
 def provision_one(
     master_org: str,
     template: str,
@@ -600,12 +869,44 @@ def main() -> int:
         default="",
         help="Which assignment in the cohort's schedule.yml this is, when two of them hand out from the same template (each with its own cohort_dest_repo). Leave empty otherwise.",
     )
-    parser.add_argument("--dry-run", action="store_true")
+    # The PATCH mode: `--patch-path` switches this CLI from handing an assignment out to
+    # correcting one that is already out. A flag rather than a subcommand, because
+    # `python3 -m dsl_course.assign --master-org ...` is a frozen public contract - every
+    # bootstrapped org's Release assignment workflow spells it, and an org that has not
+    # refreshed yet must keep working.
+    parser.add_argument(
+        "--patch-path",
+        default="",
+        help="PATCH MODE: push this file/folder from the template's default branch into "
+        "every submission repo of the assignment it handed out.",
+    )
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Patch mode: replace the file even where the student has changed it.",
+    )
+    # Tri-state on purpose. Provisioning has always defaulted to a REAL run (an operator
+    # who pressed Release assignment meant it), and patching defaults to a preview like
+    # every other button that writes into student repos. `None` is "the caller said
+    # nothing", so each mode keeps its own default and `--no-dry-run` reaches both.
+    parser.add_argument(
+        "--dry-run", action=argparse.BooleanOptionalAction, default=None
+    )
     args = parser.parse_args()
     kind = args.kind
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
+        if args.patch_path:
+            return patch_released(
+                args.master_org,
+                args.template,
+                args.cohort_org,
+                args.patch_path,
+                slug=args.slug,
+                overwrite=args.overwrite,
+                dry_run=True if args.dry_run is None else args.dry_run,
+            )
         rc, _changed = provision_all(
             args.master_org,
             args.template,
@@ -613,7 +914,7 @@ def main() -> int:
             roster_path=args.roster,
             solution=args.solution,
             group={"auto": None, "individual": False, "group": True}[kind],
-            dry_run=args.dry_run,
+            dry_run=bool(args.dry_run),
             slug=args.slug,
         )
         return rc

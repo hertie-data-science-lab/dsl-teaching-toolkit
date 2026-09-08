@@ -6,6 +6,7 @@ without touching gh/git.
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -1857,3 +1858,190 @@ def test_a_tick_that_handed_nothing_out_does_not_rewrite_the_lock(
         "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
     )
     assert locked == []
+
+
+# ------------------------------- patching an assignment that is already in student hands
+
+FIXED = b"print('fixed')\n"
+AS_HANDED_OUT = b"print('broken')\n"
+
+
+def _cohort(monkeypatch, live: dict[str, dict[str, bytes]], corrected=None):
+    """A cohort holding one frozen hand-out and three submission repos.
+
+    `live` is `{repo: {path: content}}` - what each repo has right now, which is how the
+    "did the student change this?" question is answered. Returns the commits the run makes.
+    """
+    corrected = {"starter.py": FIXED} if corrected is None else corrected
+    commits: list[tuple[str, dict[str, bytes]]] = []
+
+    monkeypatch.setattr(assign, "template_files", lambda org, tmpl, path: corrected)
+    monkeypatch.setattr(assign, "default_branch", lambda org, repo, **k: "main")
+    monkeypatch.setattr(
+        assign,
+        "repo_blob_shas",
+        lambda org, repo, branch: {
+            path: assign.blob_sha(body) for path, body in live[repo].items()
+        },
+    )
+    monkeypatch.setattr(
+        assign,
+        "list_org_repos",
+        lambda org: [
+            {"name": "assignment-1", "isTemplate": True, "archived": False},
+            *(
+                {"name": name, "isTemplate": False, "archived": False}
+                for name in live
+                if name != "assignment-1"
+            ),
+        ],
+    )
+
+    def fake_put_files(org, repo, files, message, *, person=False, **k):
+        commits.append((repo, files))
+        live[repo].update(files)
+        return True
+
+    monkeypatch.setattr(assign, "put_files", fake_put_files)
+    monkeypatch.setattr(
+        assign.grades, "find_feedback_issue", lambda org, repo: (7, "open")
+    )
+    monkeypatch.setattr(
+        assign.grades, "post_marked_comment", lambda *a, **k: notes.append(a) or True
+    )
+    return commits
+
+
+notes: list = []
+
+
+@pytest.fixture(autouse=True)
+def _clear_notes():
+    notes.clear()
+
+
+def _run(**kw):
+    return assign.patch_released(
+        "COURSE", "assignment-1-f2026", "COHORT", "starter.py", **kw
+    )
+
+
+def test_the_correction_reaches_every_untouched_submission_repo(monkeypatch):
+    commits = _cohort(
+        monkeypatch,
+        {
+            "assignment-1": {"starter.py": AS_HANDED_OUT},
+            "assignment-1-ada": {"starter.py": AS_HANDED_OUT},
+            "assignment-1-bob": {"starter.py": AS_HANDED_OUT},
+        },
+    )
+    assert _run(dry_run=False) == 0
+    # The frozen hand-out is patched too, or tomorrow's onboarder gets the broken file.
+    assert sorted(repo for repo, _ in commits) == [
+        "assignment-1",
+        "assignment-1-ada",
+        "assignment-1-bob",
+    ]
+    assert all(files == {"starter.py": FIXED} for _, files in commits)
+
+
+def test_a_file_the_student_has_changed_is_kept_unless_overwrite_says_otherwise(
+    monkeypatch,
+):
+    live = {
+        "assignment-1": {"starter.py": AS_HANDED_OUT},
+        "assignment-1-ada": {"starter.py": b"print('my own work')\n"},
+    }
+    commits = _cohort(monkeypatch, live)
+    assert _run(dry_run=False) == 0
+    assert [repo for repo, _ in commits] == ["assignment-1"]
+    assert live["assignment-1-ada"]["starter.py"] == b"print('my own work')\n"
+
+
+def test_overwrite_replaces_the_students_own_version(monkeypatch):
+    live = {
+        "assignment-1": {"starter.py": AS_HANDED_OUT},
+        "assignment-1-ada": {"starter.py": b"print('my own work')\n"},
+    }
+    _cohort(monkeypatch, live)
+    assert _run(dry_run=False, overwrite=True) == 0
+    assert live["assignment-1-ada"]["starter.py"] == FIXED
+
+
+def test_a_repo_already_carrying_the_correction_costs_no_commit(monkeypatch):
+    commits = _cohort(
+        monkeypatch,
+        {
+            "assignment-1": {"starter.py": FIXED},
+            "assignment-1-ada": {"starter.py": FIXED},
+        },
+    )
+    assert _run(dry_run=False) == 0
+    assert commits == []
+    assert notes == []  # and says nothing a second time
+
+
+def test_each_patched_repo_gets_one_note_on_its_feedback_issue(monkeypatch):
+    _cohort(
+        monkeypatch,
+        {
+            "assignment-1": {"starter.py": AS_HANDED_OUT},
+            "assignment-1-ada": {"starter.py": AS_HANDED_OUT},
+        },
+    )
+    assert _run(dry_run=False) == 0
+    assert len(notes) == 1
+    org, repo, issue, body, marker = notes[0]
+    assert (org, repo, issue) == ("COHORT", "assignment-1-ada", 7)
+    assert "`starter.py`" in body and "pull before you continue" in body
+    assert marker.startswith("<!-- dsl-patch:")
+
+
+def test_a_dry_run_writes_nothing_and_says_nothing(monkeypatch):
+    commits = _cohort(
+        monkeypatch,
+        {
+            "assignment-1": {"starter.py": AS_HANDED_OUT},
+            "assignment-1-ada": {"starter.py": AS_HANDED_OUT},
+        },
+    )
+    assert _run(dry_run=True) == 0
+    assert commits == [] and notes == []
+
+
+def test_the_public_log_never_names_a_submission_repo(monkeypatch, capsys):
+    _cohort(
+        monkeypatch,
+        {
+            "assignment-1": {"starter.py": AS_HANDED_OUT},
+            "assignment-1-ada": {"starter.py": AS_HANDED_OUT},
+        },
+    )
+    _run(dry_run=False)
+    out = capsys.readouterr().out
+    assert "assignment-1-ada" not in out
+
+
+def test_a_path_the_template_has_not_got_is_refused(monkeypatch, capsys):
+    _cohort(monkeypatch, {"assignment-1": {}}, corrected={})
+    assert _run(dry_run=False) == 1
+    assert "nothing to patch" in capsys.readouterr().err
+
+
+def test_the_note_reads_as_a_sentence_however_many_files_it_names():
+    one = assign.patch_note(["starter.ipynb"], date(2026, 10, 14))
+    assert one == (
+        "The teaching team updated `starter.ipynb` in this repository on 2026-10-14; "
+        "pull before you continue. Your own commits are untouched."
+    )
+    several = assign.patch_note(["b.py", "a.py"], date(2026, 10, 14))
+    assert several == (
+        "The teaching team updated 2 files - `a.py`, `b.py` - in this repository on "
+        "2026-10-14; pull before you continue. Your own commits are untouched."
+    )
+
+
+def test_the_marker_changes_when_the_correction_does():
+    first = assign.patch_marker({"starter.py": AS_HANDED_OUT})
+    assert first != assign.patch_marker({"starter.py": FIXED})
+    assert first == assign.patch_marker({"starter.py": AS_HANDED_OUT})
