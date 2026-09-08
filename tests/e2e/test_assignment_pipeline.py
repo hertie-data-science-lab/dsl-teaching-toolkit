@@ -399,6 +399,38 @@ def _shared_state(student_handle: str) -> dict[str, bytes | None]:
     }
 
 
+def _lock_state() -> bytes | None:
+    """`assignments.lock.yml` as it stands, or None if the cohort has none yet.
+
+    Read BEFORE the walk, unlike everything in `_shared_state`: the handout is what moves
+    this file (`assign.provision_all` ends in `grades.write_team_lock`, and every schedule
+    push dispatches the membership sync, which writes it too), so by the time distribute
+    runs it already carries this run's assignment. Recording it at step 11 would hand back
+    the drift instead of the file."""
+    return cleanup.file_bytes(COHORT_ORG, course.CONFIG_REPO, grades.TEAM_LOCK_PATH)
+
+
+def _config_restore(
+    lock: bytes | None, recorded: Stage | None
+) -> dict[str, bytes | None]:
+    """Every `classroom-config` file the walk moves that no run id owns, keyed by path -
+    what the teardown hands back in one commit.
+
+    Two recordings, because the two move at different points: the lock before the walk
+    starts, the distribute pair at step 11. A walk that died before step 11 still has a
+    lock to put back, so `recorded` may be None and the lock is unconditional.
+
+    A value of None is a file that was ABSENT - a cohort bootstrapped before the lock
+    existed - and `cleanup.restore_files` deletes those rather than writing them;
+    `gh_contents.put_files` in turn drops a delete for a path that is not there, so an
+    absent-then-still-absent file costs no commit."""
+    files: dict[str, bytes | None] = {grades.TEAM_LOCK_PATH: lock}
+    if recorded is not None:
+        files[grades.COHORT_CSV_NAME] = recorded.detail["registrar"]
+        files[grades.DISTRIBUTED_PATH] = recorded.detail["distributed"]
+    return files
+
+
 def _text(recorded: bytes | None) -> str:
     """One recorded file as text, for the assertions that read words out of it."""
     return (recorded or b"").decode()
@@ -601,6 +633,12 @@ def pipeline():
     run_id = cleanup.new_run_id()
     _preflight(run_id)
     before = {org: estate.fingerprint(org) for org in (COURSE_ORG, COHORT_ORG)}
+    # Recorded at the same instant as the fingerprint, because that is what the assertion
+    # below measures against: the handout adds this run's assignment to the lock file, and
+    # cleanup cannot sweep a file no run id owns. In production the removal push dispatches
+    # the membership sync, which rewrites it within the minute; here the check runs the
+    # moment cleanup returns.
+    lock_before = _lock_state()
     # Held outside the try so the teardown can read what the walk got as far as recording,
     # however it ended.
     stages_recorded: dict[str, Stage] = {}
@@ -615,24 +653,18 @@ def pipeline():
         )
     finally:
         assert cleanup.cleanup(run_id) == 0, f"cleanup of {run_id} left work undone"
-        # Distribute writes three files this run's namespace does not cover. They were
-        # recorded before it ran; hand them back, or the fingerprint below is a false
-        # alarm every time and a real change hides behind it.
+        # The handout and distribute between them move four files this run's namespace
+        # does not cover. They were recorded before they moved; hand them back, or the
+        # fingerprint below is a false alarm every time and a real change hides behind it.
         recorded = stages_recorded.get("shared_before")
-        if recorded is not None:
-            handle = student.handle()
-            book = f"{course.GRADEBOOK_PREFIX}{handle}"
-            assert (
-                cleanup.restore_files(
-                    COHORT_ORG,
-                    course.CONFIG_REPO,
-                    {
-                        grades.COHORT_CSV_NAME: recorded.detail["registrar"],
-                        grades.DISTRIBUTED_PATH: recorded.detail["distributed"],
-                    },
-                )
-                == 0
+        assert (
+            cleanup.restore_files(
+                COHORT_ORG, course.CONFIG_REPO, _config_restore(lock_before, recorded)
             )
+            == 0
+        )
+        if recorded is not None:
+            book = f"{course.GRADEBOOK_PREFIX}{student.handle()}"
             assert (
                 cleanup.restore_files(
                     COHORT_ORG,
@@ -683,6 +715,31 @@ def test_the_snapshot_pins_the_pushed_commit(pipeline):
     assert rows[pipeline.submission_repo] == pipeline.stages["submission"].detail["sha"]
 
 
+def test_the_freeze_timed_the_submission_by_githubs_own_push_record(pipeline):
+    # The live proof that the bot token may read `GET /repos/{o}/{r}/activity` on a
+    # PRIVATE submission repo. That endpoint is the one rung of `collect._submitted`
+    # nobody can write - a committer date is client-supplied, so a student can set it to
+    # whatever they like - and it is the rung every late penalty rests on. It is also the
+    # one thing no unit test can show: a 403 or a 404 there falls straight through to the
+    # committer date, and the run would still pass every other assertion in this file.
+    row = collect.parse_snapshot_rows(pipeline.stages["artefacts"].detail["snapshot"])[
+        pipeline.submission_repo
+    ]
+    assert row.submitted_at
+    assert row.submitted_source == collect.SUBMITTED_SOURCE_PUSH, (
+        f"the freeze recorded {row.submitted_source!r}, not "
+        f"{collect.SUBMITTED_SOURCE_PUSH!r} - the bot could not read the repository "
+        f"activity of a private submission repo, so the student timed their own hand-in"
+    )
+    # The sheet's half of the same fact. `info.submitted_note` exists only for the two
+    # rungs built from the student's clock - `COMMIT_ONLY_NOTE` and `SUSPECT_NOTE` - so a
+    # row GitHub timed carries none at all.
+    info = grades.parse_sheet(pipeline.stages["artefacts"].detail["sheet"])[
+        "submissions"
+    ][pipeline.student]["info"]
+    assert "submitted_note" not in info, info.get("submitted_note")
+
+
 def test_the_autograde_marker_was_written(pipeline):
     # `_graded.json`, not the bare `autograde/<slug>/` directory: that is the fire-once
     # sentinel the next tick reads to decide it has nothing to do.
@@ -731,6 +788,12 @@ def test_the_due_date_fills_info_from_the_students_own_push(pipeline):
     # `parse_sheet` hands back what the file says, as text (`grades._SheetLoader`): a mark
     # a grader typed must come back the way they typed it, so `0` here is "0".
     assert int(info["days_late"]) == 0
+    # The refresh reads no push records (`_provisional_pins` says why), so the only note
+    # it can write is `SUSPECT_NOTE` - the pinned commit dated before the push that
+    # delivered it. A genuine push seconds ago earns none, and `days_late: 0` above is
+    # therefore a time the grader can act on. The push rung itself is proved at the
+    # freeze, where it is decided once and written down.
+    assert "submitted_note" not in info, info.get("submitted_note")
     assert "# Status: OPEN - 1 of " in pipeline.stages["after_due"].detail["sheet"]
 
 

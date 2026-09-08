@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import ghcli, schedule
+from dsl_course import ghcli, grades, schedule
 from tests.e2e import allowlist, cleanup, drive, estate, schedule_edit, student
 
 GATE = 'pytest.skip("live e2e - set DSL_E2E=1", allow_module_level=True)'
@@ -552,6 +552,38 @@ def _pipeline_module(monkeypatch):
 def test_the_live_pipeline_module_imports(monkeypatch):
     module = _pipeline_module(monkeypatch)
     assert {module.COURSE_ORG, module.COHORT_ORG} == set(allowlist.DEMO_ORGS)
+
+
+def test_the_lock_file_goes_back_even_when_the_walk_died_before_distribute(monkeypatch):
+    # The two recordings the teardown puts back are taken at different points - the lock
+    # before the walk, because the HANDOUT is what moves it, and the distribute pair at
+    # step 11. A run that died in between has only the first, and the lock still has to go
+    # back: cleanup sweeps by run id, and this file carries none.
+    module = _pipeline_module(monkeypatch)
+    assert module._config_restore(b"assignments: {}\n", None) == {
+        grades.TEAM_LOCK_PATH: b"assignments: {}\n"
+    }
+
+
+def test_a_lock_file_that_was_not_there_is_restored_by_deleting_it(monkeypatch):
+    # A cohort bootstrapped before the lock existed records None, which `restore_files`
+    # spells as a delete - so the handout's write comes out rather than being left as a
+    # file that org never had.
+    module = _pipeline_module(monkeypatch)
+    recorded = module.Stage(
+        "shared_before",
+        detail={
+            "registrar": CRLF_CSV,
+            "distributed": b"target,channel\n",
+            "grades_yml": b"",
+            "readme": b"",
+        },
+    )
+    assert module._config_restore(None, recorded) == {
+        grades.TEAM_LOCK_PATH: None,
+        grades.COHORT_CSV_NAME: CRLF_CSV,
+        grades.DISTRIBUTED_PATH: b"target,channel\n",
+    }
 
 
 def test_a_central_ref_that_no_longer_resolves_is_reported_not_raised(monkeypatch):
