@@ -27,7 +27,14 @@ import re
 
 from . import mailer
 from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER, pin_central_ref
-from .course import MATERIALS_REPO_PREFIX, term_tag
+from .course import (
+    ASSIGNMENT_TYPES,
+    FORMATS,
+    MATERIALS_REPO_PREFIX,
+    SUBMIT_VIA,
+    TEAM_FORMATIONS,
+    term_tag,
+)
 
 # Third-party actions pinned to full commit SHAs. Every job below runs with an org-owner
 # PAT in its env, so a mutable tag (`@v4`) is a standing invitation: whoever can move the
@@ -1175,36 +1182,38 @@ on:
 def render_new_assignment() -> str:
     """Scaffold an assignment-N-<tag> template repo (main + solution branch), then refresh.
 
-    format/type land in the solution branch's grading_config.yml (and shape the starter/hidden
-    tests), so the choice made on this workflow is the one the grader later obeys - the
-    grading_config.yml vocabulary is picked here, not hand-edited in afterwards."""
+    EIGHT boxes, and between them they are the whole assignment: everything but `format`
+    lands verbatim in the solution branch's `grading_config.yml`, which the handout, the
+    grading sheet, the receipts and the Join-team form all read. What the form does NOT ask
+    - the team cap, the late window, the penalty, the question maxima - comes from the
+    course's own `assignment_defaults:` in dsl-course.yml, and is written into that same
+    file so it can be revised there per assignment afterwards.
+
+    GitHub caps a workflow_dispatch at 10 inputs, and there is deliberately no ninth here:
+    an assignment's remaining settings belong in a file the instructor can revise, not in a
+    form filled in once, before the brief has even been written."""
     return f"""name: New assignment
 
 on:
   workflow_dispatch:
     inputs:
-      number:
-        description: "Assignment number (e.g. 1)"
+      assignment_name:
+        description: "1. The assignment's name, e.g. Neural networks from scratch"
         required: true
-      tag:
-        description: "Year tag, e.g. f2026 or s2026 - creates assignment-<number>-<tag>"
+      assignment_number:
+        description: "2. Assignment number, e.g. 1"
         required: true
-      format:
-        description: "Starter format - a .py script or a Jupyter notebook"
+      semester_tag:
+        description: "3. Year tag, e.g. f2026 or s2026 - creates assignment-<number>-<tag>"
         required: true
-        type: choice
-        default: py
-        options:
-          - py
-          - notebook
-      type:
-        description: "individual = one repo per student; group = one repo per team (teams.csv)"
-        required: true
-        type: choice
-        default: individual
-        options:
-          - individual
-          - group
+{_choice_input("format", "4. Which starter file to seed - none = the brief only. Grading reads whatever students commit either way", list(FORMATS), "ipynb")}
+{_choice_input("type", "5. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual")}
+{_choice_input("team_formation", "6. Group only: self_select = students use the Join team form; assigned = you write teams.csv", list(TEAM_FORMATIONS), "self_select")}
+{_choice_input("submit_via", "7. external = handed in off GitHub (Moodle, Kaggle, in class) - no receipts, no late arithmetic", list(SUBMIT_VIA), "github")}
+      autograde:
+        description: "8. Run the template's tests/ at the cutoff. The count is shown to graders, never to a student"
+        type: boolean
+        default: false
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
@@ -1213,14 +1222,20 @@ on:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           ORG: ${{{{ github.repository_owner }}}}
-          NUMBER: ${{{{ inputs.number }}}}
-          TAG: ${{{{ inputs.tag }}}}
+          NAME: ${{{{ inputs.assignment_name }}}}
+          NUMBER: ${{{{ inputs.assignment_number }}}}
+          TAG: ${{{{ inputs.semester_tag }}}}
           FORMAT: ${{{{ inputs.format }}}}
           TYPE: ${{{{ inputs.type }}}}
+          TEAM_FORMATION: ${{{{ inputs.team_formation }}}}
+          SUBMIT_VIA: ${{{{ inputs.submit_via }}}}
+          AUTOGRADE: ${{{{ inputs.autograde }}}}
         run: |
           gh auth setup-git
           python3 -m dsl_course.scaffold assignment --org "$ORG" --number "$NUMBER" \\
-            --tag "$TAG" --format "$FORMAT" --type "$TYPE"
+            --tag "$TAG" --name "$NAME" --format "$FORMAT" --type "$TYPE" \\
+            --team-formation "$TEAM_FORMATION" --submit-via "$SUBMIT_VIA" \\
+            --autograde "$AUTOGRADE"
           python3 -m dsl_course.seed refresh --course-org "$ORG"
 """
 

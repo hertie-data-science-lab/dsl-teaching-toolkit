@@ -46,6 +46,27 @@ FACULTY_ONLY_HEADING = "delete this section before releasing the README"
 # The branch an assignment template keeps its solution and grading_config.yml on.
 SOLUTION_BRANCH = "solution"
 
+# ------------------------------------------- the vocabulary an assignment is defined in
+
+# The closed vocabularies of `grading_config.yml`. Here rather than beside the parser
+# because three layers spell them: `workflows_render` builds the New assignment dropdowns
+# from them, `scaffold` writes the chosen values into the file, and `grades` reads them
+# back - and a dropdown offering a word the reader would refuse is a form that lies.
+SUBMIT_VIA = (
+    "github",
+    "external",
+)  # `external` = handed in off GitHub (Moodle, Kaggle)
+ASSIGNMENT_TYPES = ("individual", "group")
+# How a group assignment's teams come about. `none` is NOT one of them: it is the answer
+# an INDIVIDUAL assignment gives, which is why the Join-team form can refuse a slug
+# outright, and it is not a value an instructor ever writes.
+TEAM_FORMATIONS = ("self_select", "assigned")
+NO_TEAMS = "none"
+# Which starter stub `New assignment` seeds, and nothing else: grading reads whatever is
+# in the repo, and a student may commit anything. `none` is the raw-repo option.
+FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", "none")
+
+
 # The four ROLE teams every org's access is expressed in: the two faculty teams, created
 # in course and cohort orgs alike, and the two cohort-only student teams. Named here
 # because the grants (access), the reconciles (sync_faculty, sync_roster), the bootstrap

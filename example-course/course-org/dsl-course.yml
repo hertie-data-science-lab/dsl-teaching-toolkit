@@ -9,9 +9,8 @@ course_description: A demo course - the blurb every cohort site shows under the 
 # what it does and can be edited there afterwards; changing them here changes the NEXT
 # assignment, never one that already exists.
 assignment_defaults:
-  submit_via: github          # github | external (Moodle, Kaggle, in class...)
+  submit_via: github          # github | external - the button's own choice wins
   autograde: false            # true -> run the template's tests/ at the cutoff
-  team_formation: self_select # self_select (students use Join team) | assigned (you write teams.csv)
   max_team_size: 5            # group assignments only
   late_window_days: 7         # 0 = nothing after the due date is accepted
   late_penalty_per_day: 10%   # of the EARNED grade, per day started

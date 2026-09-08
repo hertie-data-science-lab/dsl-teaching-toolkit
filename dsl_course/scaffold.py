@@ -26,14 +26,19 @@ from pathlib import Path
 from .access import COURSE_TEAM_ACCESS, grant_faculty, grant_tagged_team_access
 from .central import CENTRAL
 from .course import (
+    ASSIGNMENT_TYPES,
     FACULTY_ONLY_HEADING,
+    FORMATS,
     MATERIALS_REPO_PREFIX,
+    SUBMIT_VIA,
     SYLLABUS_SAMPLE_FILE,
+    TEAM_FORMATIONS,
     pages_repo,
 )
 from .discovery import central_ref_for, discover_assignments, discover_cohorts
 from .gh_contents import put_files, seed_if_absent
 from .ghcli import GIT_ENV, clone, gh, git, is_already_exists
+from .grades import course_assignment_defaults
 from .log import log, log_err, log_ok, log_skip, log_step
 from .readings import READING_OVERLAY_FILE
 from .releaseignore import RELEASEIGNORE
@@ -153,16 +158,118 @@ _READINGS_STUB = (
     b"schedule.yml.\n"
 )
 
-_GRADING_YML = """\
-# How this assignment is defined and marked. Dates live in the cohort's schedule.yml.
-# Hand-marking is the default; set `autograde: true` to run the hidden tests below
-# at the cutoff.
-type: {kind}      # individual (one repo per student) or group (one repo per team)
-autograde: false      # true -> run the hidden tests at the cutoff (needs `tests:` below)
-tests: tests          # path (on THIS solution branch) holding the hidden tests
-                      # how many passed is shown to you as `info.autograde` in the grading
-                      # sheet - never a mark by itself, and never something a student sees
+# The assignment's own definition, written from what New assignment was asked for and
+# what the course declares in `dsl-course.yml assignment_defaults`. INSTRUCTOR-OWNED from
+# the moment it lands: nothing ever rewrites it, and every setting in it is meant to be
+# edited here afterwards. A setting the course has no default for is seeded COMMENTED OUT,
+# so the file teaches the whole vocabulary without asserting an opinion nobody expressed.
+_GRADING_STAMP = (
+    "# INSTRUCTOR-OWNED - defines the assignment. "
+    "Dates live in the cohort's schedule.yml."
+)
+_QUESTIONS_STUB = """\
+# questions:                  # OPTIONAL - the score skeleton, and the maximum shown beside
+#   Q1: 15                    # each blank in the grading sheet. The total is their sum;
+#   Q2: 10                    # there is no `points:` field anywhere.
 """
+
+
+# YAML's indicator characters, which mean something else when a scalar OPENS with one.
+# Inside a word they are ordinary text, which is why `10%` and `A - B` need no quotes.
+_YAML_INDICATORS = "-?:,[]{}#&*!|>'\"%@`"
+
+
+def _yaml_scalar(value: object) -> str:
+    """A value safe to write on the right of a `key:`. Quoted only when it has to be - a
+    title with `: ` in it would otherwise make that line a nested mapping, and the reader
+    would drop the key it thought it was reading."""
+    text = str(value)
+    unsafe = (
+        text == ""
+        or text != text.strip()
+        or text[0] in _YAML_INDICATORS
+        or ": " in text
+        or " #" in text
+        or text.endswith(":")
+    )
+    if unsafe:
+        return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return text
+
+
+def _setting(key: str, value: object, comment: str, live: bool = True) -> str:
+    """One line of grading_config.yml: `key: value` padded to a common column, then its
+    explanation. `live=False` comments the whole line out - the setting is documented and
+    inert until an instructor uncomments it."""
+    line = f"{key}: {_yaml_scalar(value)}"
+    if not live:
+        line = f"# {line}"
+    return f"{line:<29} # {comment}".rstrip()
+
+
+def _grading_config(
+    *,
+    title: str,
+    kind: str,
+    team_formation: str,
+    submit_via: str,
+    fmt: str,
+    autograde: bool,
+    defaults: dict,
+) -> str:
+    """`grading_config.yml` as New assignment writes it."""
+    group = kind == "group"
+    cap = defaults.get("max_team_size")
+    window = defaults.get("late_window_days")
+    penalty = defaults.get("late_penalty_per_day")
+    lines = [
+        _GRADING_STAMP,
+        _setting(
+            "title", title, "the assignment's name, shown to graders and on the site"
+        ),
+        _setting("type", kind, "individual | group"),
+        _setting(
+            "team_formation",
+            team_formation,
+            "self_select (students use the Join-team form) | assigned (you write teams.csv)",
+            live=group,
+        ),
+        _setting(
+            "max_team_size", cap or 5, "group only", live=group and cap is not None
+        ),
+        _setting(
+            "submit_via", submit_via, "github | external (Moodle, Kaggle, in class...)"
+        ),
+        _setting(
+            "format",
+            fmt,
+            "ipynb | py | rmd | qmd | latex | none - chooses the starter stub only; "
+            "grading reads whatever is in the repo",
+        ),
+        "",
+        _QUESTIONS_STUB.rstrip(),
+        "",
+        _setting(
+            "late_window_days",
+            window if window is not None else 7,
+            "0 or absent = nothing after the due date is accepted",
+            live=window is not None,
+        ),
+        _setting(
+            "late_penalty_per_day",
+            penalty or "10%",
+            "of the EARNED grade, per day started",
+            live=penalty is not None,
+        ),
+        "",
+        _setting(
+            "autograde",
+            "true" if autograde else "false",
+            "true: run tests/ at the cutoff and show the count to graders",
+        ),
+    ]
+    return "\n".join(lines) + "\n"
+
 
 _HIDDEN_TEST_PY = """\
 # HIDDEN tests - run faculty-side at the cutoff, never shipped to students.
@@ -185,6 +292,56 @@ from starter import solve
 def test_solve_runs():
     assert solve() is not None
 """
+
+
+# The starter each `format` seeds on `main`. `none` seeds nothing at all - the raw-repo
+# option. A stub is a CONVENIENCE and nothing more: grading reads whatever is in the repo,
+# so a student who works in a notebook on a `py` assignment still grades.
+_STARTER_NAMES = {
+    "ipynb": "starter.ipynb",
+    "py": "starter.py",
+    "rmd": "starter.Rmd",
+    "qmd": "starter.qmd",
+    "latex": "starter.tex",
+}
+_STARTER_CODE = "def solve():\n    raise NotImplementedError  # TODO"
+# CONTRIBUTIONS.md goes into a GROUP assignment's `main` only. It carries the stub mark,
+# because `collect._contributions` reads it at the pin and has to tell an untouched
+# scaffold from a team that wrote nothing - "(not filled in)" is a fact about the team,
+# and a blank would read as "the toolkit did not look".
+_CONTRIBUTIONS_STUB = """\
+# Contributions
+
+<!-- dsl-stub: replace this with who did what. The teaching team reads it at the
+     deadline, alongside your commit history, when deciding individual adjustments. -->
+
+| Member | What they did |
+|---|---|
+| @handle | |
+"""
+
+
+def _brief_stub(title: str, defaults: dict) -> str:
+    """`README.md` on `main` - the page students read, and the only one only faculty can
+    write. A STUB, unmistakably: seeding a plausible-looking brief invites shipping it
+    unedited. The late-work line repeats what the course already declared, so the two
+    cannot disagree on the page a student actually opens."""
+    window = defaults.get("late_window_days")
+    penalty = defaults.get("late_penalty_per_day")
+    if not window:
+        late = "not accepted after the deadline"
+    elif penalty:
+        late = f"{penalty} per day, up to {window} days"
+    else:
+        late = f"accepted up to {window} days late"
+    return (
+        f"# {title}\n\n"
+        f"**Points:** __ · **Due:** see the course schedule · **Late work:** {late}\n\n"
+        "## Task\n\n"
+        "_Write the assignment here (dsl-stub: replace this whole file)._\n\n"
+        "## What to submit\n\n"
+        "_Say which files you expect back, and in what shape._\n"
+    )
 
 
 def _notebook(title_lines: list[str], code: str) -> str:
@@ -248,8 +405,9 @@ def _actions_table(org: str) -> str:
         "repo per student (or per team). |\n"
         "| **New materials repo** | Scaffold a correctly structured materials repo; the "
         "release workflows come bootstrapped with it. |\n"
-        "| **New assignment** | Scaffold an assignment template (starter + hidden "
-        "autograder); the release workflows come bootstrapped with it. |\n"
+        "| **New assignment** | Scaffold an assignment template (brief + starter; the "
+        "`solution` branch holds the model answer and `grading_config.yml`); the release "
+        "workflows come bootstrapped with it. |\n"
         "| **Refresh actions** | Re-seed the run-from-repo workflows and repopulate dropdowns "
         "after you add sessions/sections. |\n"
         "| **Check cohort setup** | Read-only per-cohort checklist of what's configured. |\n\n"
@@ -457,15 +615,31 @@ def scaffold_materials(org: str, tag: str) -> int:
 
 
 def scaffold_assignment(
-    org: str, number: str, tag: str, fmt: str = "py", kind: str = "individual"
+    org: str,
+    number: str,
+    tag: str,
+    fmt: str = "py",
+    kind: str = "individual",
+    *,
+    name: str = "",
+    team_formation: str = "self_select",
+    submit_via: str = "github",
+    autograde: bool = False,
 ) -> int:
-    """fmt: 'py' (starter.py) or 'notebook' (starter.ipynb). It picks the starter stub and
-    nothing else - the grader never reads it, converting whatever `.ipynb` a submission
-    holds, so a student who works in a notebook on a `py` assignment still grades.
-    kind: 'individual' (one repo per student) or 'group' (one repo per team, graded
-    per team from classroom-config/teams.csv). This one DOES land verbatim in the solution
-    branch's grading_config.yml, so the scaffold and the grader can never disagree."""
+    """Create `assignment-<number>-<tag>` and write the assignment's own definition into it.
+
+    Every argument but `fmt` lands verbatim in the solution branch's `grading_config.yml`,
+    which is what the handout, the grading sheet and the Join-team form all read - so the
+    answers given on the button are the ones the rest of the term obeys, and nothing has to
+    be hand-edited in afterwards. What the button does NOT ask - the team cap, the late
+    window, the penalty - comes from the course's own `assignment_defaults`.
+
+    `fmt` is the exception: it picks which starter stub is seeded on `main` and nothing
+    else. The grader reads whatever is in the repo, so a student who works in a notebook on
+    a `py` assignment still grades; `none` seeds no starter at all."""
     repo = f"assignment-{number}-{tag}"
+    title = name.strip() or f"Assignment {number}"
+    defaults = course_assignment_defaults(org)
     log_step(f"Scaffolding {org}/{repo} ({kind}, {fmt}; template + solution branch)")
     if not create_repo(
         org,
@@ -477,33 +651,28 @@ def scaffold_assignment(
         return 1
     grant_faculty(org, repo, COURSE_TEAM_ACCESS)
     grant_tagged_team_access(org, repo, tag)
-    starter_name = "starter.ipynb" if fmt == "notebook" else "starter.py"
-    brief = "group assignment" if kind == "group" else "assignment"
-    # main: starter only (what students receive on generate). No tests, no autograder -
-    # grading runs faculty-side from the solution branch. Create-only:
-    # a re-run against a repo whose starter faculty have since authored must not revert it.
-    # Count a failed create-only seed (not a skip of a live file) so a half-written starter
-    # reds the scaffold, matching scaffold_materials rather than reporting a green "ready".
-    seed_failures = 0
-    if not seed_if_absent(
-        org,
-        repo,
-        "README.md",
-        # A STUB, deliberately: this is the page students read, and only faculty can
-        # write it. Seeding a plausible-looking brief invites shipping it unedited, so
-        # the placeholder is unmistakably one.
-        f"# Assignment {number}\n\n_Write the {brief} instructions here._\n".encode(),
-        "init: assignment starter",
-    ):
-        seed_failures += 1
-    starter_code = "def solve():\n    raise NotImplementedError  # TODO"
-    starter = (
-        _notebook([f"# Assignment {number}"], starter_code)
-        if fmt == "notebook"
-        else f'"""Assignment {number}."""\n\n\n{starter_code}\n'
+    # main: the brief, one starter stub, and (for a group assignment) CONTRIBUTIONS.md -
+    # what students receive on generate. No tests, no autograder - grading runs
+    # faculty-side from the solution branch. Create-only: a re-run against a repo whose
+    # starter faculty have since authored must not revert it. Count a failed create-only
+    # seed (not a skip of a live file) so a half-written starter reds the scaffold,
+    # matching scaffold_materials rather than reporting a green "ready".
+    seeds = {"README.md": _brief_stub(title, defaults)}
+    starter_name = _STARTER_NAMES.get(fmt)
+    if starter_name:
+        seeds[starter_name] = (
+            _notebook([f"# {title}"], _STARTER_CODE)
+            if fmt == "ipynb"
+            else f'"""{title}."""\n\n\n{_STARTER_CODE}\n'
+            if fmt == "py"
+            else f"# {title}\n\n_Your work goes here._\n"
+        )
+    if kind == "group":
+        seeds["CONTRIBUTIONS.md"] = _CONTRIBUTIONS_STUB
+    seed_failures = sum(
+        not seed_if_absent(org, repo, path, text.encode(), "init: assignment starter")
+        for path, text in seeds.items()
     )
-    if not seed_if_absent(org, repo, starter_name, starter.encode(), "init: starter"):
-        seed_failures += 1
     set_repo_topics(org, repo, [f"assignment-{number}", "assignment"])
 
     # solution branch: the model solution, grading_config.yml, and the HIDDEN tests -
@@ -545,7 +714,7 @@ def scaffold_assignment(
         sol = wd / "solution"
         sol.mkdir()
         solution_code = "def solve():\n    return 42  # TODO"
-        if fmt == "notebook":
+        if fmt == "ipynb":
             (sol / "solution.ipynb").write_text(
                 _notebook(
                     [f"# Assignment {number} - model solution (stub)"], solution_code
@@ -569,16 +738,29 @@ def scaffold_assignment(
             "Both do the same thing, idempotently, so a scheduled release you then "
             "re-run by hand changes nothing.\n"
         )
-        # grading_config.yml + hidden tests for the faculty-side autograder. The
-        # type chosen at scaffold time is recorded here - edit this file to change it
-        # later. `fmt` is NOT: the grader converts whatever notebooks a submission holds,
-        # so it only picks which starter and hidden-test stub are written below.
-        (wd / "grading_config.yml").write_text(_GRADING_YML.format(kind=kind))
-        tests = wd / "tests"
-        tests.mkdir()
-        (tests / "test_solution.py").write_text(
-            _HIDDEN_TEST_NOTEBOOK if fmt == "notebook" else _HIDDEN_TEST_PY
+        # The assignment's whole definition, from the button's answers and the course's
+        # own defaults - edit this file to change any of it later.
+        (wd / "grading_config.yml").write_text(
+            _grading_config(
+                title=title,
+                kind=kind,
+                team_formation=team_formation,
+                submit_via=submit_via,
+                fmt=fmt,
+                autograde=autograde,
+                defaults=defaults,
+            )
         )
+        # Hidden tests ONLY when the assignment asked to be autograded. Seeded next to a
+        # hand-marked assignment they were never written for, they read as work the course
+        # is expected to do - and `autograde: true` over a `tests/` full of placeholders is
+        # a machine score nobody meant.
+        if autograde:
+            tests = wd / "tests"
+            tests.mkdir()
+            (tests / "test_solution.py").write_text(
+                _HIDDEN_TEST_NOTEBOOK if fmt == "ipynb" else _HIDDEN_TEST_PY
+            )
         git("-C", str(wd), *GIT_ENV, "add", "-A")
         git(
             "-C",
@@ -588,7 +770,7 @@ def scaffold_assignment(
             "-q",
             "--no-verify",
             "-m",
-            f"solution: assignment {number} (model + grading_config.yml + hidden tests)",
+            f"solution: assignment {number} (model answer + grading_config.yml)",
         )
         if (
             git("-C", str(wd), *GIT_ENV, "push", "-q", "-u", "origin", "solution")[0]
@@ -782,18 +964,48 @@ def main() -> int:
     pa.add_argument("--number", required=True)
     pa.add_argument("--tag", required=True, help="Year tag, e.g. f2026 or s2026")
     pa.add_argument(
+        "--name",
+        default="",
+        help="The assignment's name, e.g. 'Neural networks from scratch' (default: "
+        "'Assignment <number>'). Goes into grading_config.yml as `title:`.",
+    )
+    pa.add_argument(
         "--format",
         dest="fmt",
-        choices=["py", "notebook"],
+        choices=list(FORMATS),
         default="py",
-        help="Starter/solution format: a .py script or a Jupyter notebook",
+        help="Which starter stub to seed on main, and nothing else; `none` seeds no "
+        "starter at all (grading reads whatever is in the repo either way)",
     )
     pa.add_argument(
         "--type",
         dest="kind",
-        choices=["individual", "group"],
+        choices=list(ASSIGNMENT_TYPES),
         default="individual",
         help="individual = one repo per student; group = one repo per team (teams.csv)",
+    )
+    pa.add_argument(
+        "--team-formation",
+        dest="team_formation",
+        choices=list(TEAM_FORMATIONS),
+        default="self_select",
+        help="Group assignments only: self_select = students use the welcome repo's "
+        "'Join team' form; assigned = you write classroom-config/teams.csv",
+    )
+    pa.add_argument(
+        "--submit-via",
+        dest="submit_via",
+        choices=list(SUBMIT_VIA),
+        default="github",
+        help="external = handed in off GitHub (Moodle, Kaggle, in class): the repo "
+        "carries the brief and the Feedback issue, and nothing is ever collected",
+    )
+    pa.add_argument(
+        "--autograde",
+        choices=["false", "true"],
+        default="false",
+        help="true = seed a tests/ stub on the solution branch and run it at the "
+        "cutoff; the count is shown to graders and never to a student",
     )
     ps = sub.add_parser("site")
     ps.add_argument("--org", required=True)
@@ -806,7 +1018,17 @@ def main() -> int:
             return scaffold_materials(args.org, args.tag)
         if args.cmd == "site":
             return scaffold_site(args.org)
-        return scaffold_assignment(args.org, args.number, args.tag, args.fmt, args.kind)
+        return scaffold_assignment(
+            args.org,
+            args.number,
+            args.tag,
+            args.fmt,
+            args.kind,
+            name=args.name,
+            team_formation=args.team_formation,
+            submit_via=args.submit_via,
+            autograde=args.autograde == "true",
+        )
     except RuntimeError as exc:
         log_err(str(exc))
         return 1

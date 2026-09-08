@@ -37,13 +37,18 @@ import yaml
 from . import mailer, roster, schedule
 from .access import FACULTY_READ_ACCESS, grant_faculty
 from .course import (
+    ASSIGNMENT_TYPES,
     CONFIG_REPO,
     COURSE_CONFIG,
     FEEDBACK_ISSUE_LABEL,
     FEEDBACK_ISSUE_MARKS,
     FEEDBACK_ISSUE_TITLE,
+    FORMATS,
     GRADEBOOK_PREFIX,
+    NO_TEAMS,
     SOLUTION_BRANCH,
+    SUBMIT_VIA,
+    TEAM_FORMATIONS,
     feedback_issue_body,
     receipt_body,
     resolve_is_group,
@@ -807,20 +812,6 @@ def final_grade(
 # names `collect` still spells are re-exported there, so no caller had to move.
 GRADING_FILE = "grading_config.yml"  # on the template's solution branch
 
-SUBMIT_VIA = (
-    "github",
-    "external",
-)  # `external` = handed in off GitHub (Moodle, Kaggle)
-ASSIGNMENT_TYPES = ("individual", "group")
-# How a group assignment's teams come about. `none` is NOT one of them: it is the answer
-# an INDIVIDUAL assignment gives (see `GradingSpec.team_formation_resolved`), which is why
-# the Join-team form can refuse a slug outright, and it is not a value an instructor writes.
-TEAM_FORMATIONS = ("self_select", "assigned")
-NO_TEAMS = "none"
-# Which starter stub `New assignment` seeds, and nothing else: grading reads whatever is
-# in the repo, and a student may commit anything. `none` is the raw-repo option.
-FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", "none")
-
 
 def _one_of(
     value: object,
@@ -952,7 +943,6 @@ SPEC_KEYS = tuple(_READERS)
 COURSE_DEFAULT_KEYS = (
     "submit_via",
     "autograde",
-    "team_formation",
     "max_team_size",
     "late_window_days",
     "late_penalty_per_day",

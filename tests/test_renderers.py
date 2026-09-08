@@ -18,6 +18,7 @@ import yaml
 from conftest import workflow_inputs, workflow_jobs
 
 from dsl_course import (
+    course,
     mailer,
     profile_readme,
     seed,
@@ -549,9 +550,16 @@ def test_scaffold_buttons_route_inputs_through_env_not_the_shell():
     for rendered in (materials, assignment):
         step = workflow_jobs(rendered)["scaffold"]["steps"][-1]
         assert "${{" not in step["run"]
-        assert step["env"]["TAG"] == "${{ inputs.tag }}"
-    assert '--tag "$TAG"' in materials
+        assert '--tag "$TAG"' in rendered
+    assert workflow_jobs(materials)["scaffold"]["steps"][-1]["env"]["TAG"] == (
+        "${{ inputs.tag }}"
+    )
+    assert workflow_jobs(assignment)["scaffold"]["steps"][-1]["env"]["TAG"] == (
+        "${{ inputs.semester_tag }}"
+    )
     assert '--number "$NUMBER"' in assignment
+    # The free-text ones are the ones that matter here: a name is prose a person types.
+    assert '--name "$NAME"' in assignment
 
 
 def test_bootstrap_org_workflow_routes_inputs_through_env_not_the_shell():
@@ -667,20 +675,51 @@ def test_classroom_config_roster_dispatcher_fires_send_codes_on_students_csv():
     assert "contents/dsl-course.yml" in tmpl
 
 
-def test_new_assignment_button_exposes_format_and_type():
-    # The grading_config.yml vocabulary (type: individual/group) is chosen
-    # on the button and recorded by the scaffold - not hand-edited in afterwards.
+# The whole assignment, in the order the eight boxes are numbered. Pinned as a LIST: the
+# order is what a person reads down, and GitHub caps a workflow_dispatch at ten - a ninth
+# box means one of these earned its place over an edit to a file, so it is a decision, not
+# a diff nobody noticed.
+NEW_ASSIGNMENT_INPUTS = [
+    "assignment_name",
+    "assignment_number",
+    "semester_tag",
+    "format",
+    "type",
+    "team_formation",
+    "submit_via",
+    "autograde",
+]
+
+
+def test_new_assignment_button_asks_for_the_whole_assignment():
+    # Every one of these but `format` lands verbatim in grading_config.yml, so the answers
+    # given here are the ones the handout, the sheet and the Join-team form later obey -
+    # none of them is hand-edited in afterwards.
     rendered = workflows_render.render_new_assignment()
     inputs = workflow_inputs(rendered)
-    assert inputs["format"]["options"] == ["py", "notebook"]
-    assert inputs["format"]["default"] == "py"
-    assert inputs["type"]["options"] == ["individual", "group"]
-    assert inputs["type"]["default"] == "individual"
+    assert list(inputs) == NEW_ASSIGNMENT_INPUTS
+    assert len(inputs) <= GITHUB_MAX_DISPATCH_INPUTS
+    assert inputs["format"]["options"] == list(course.FORMATS)
+    assert inputs["type"]["options"] == list(course.ASSIGNMENT_TYPES)
+    assert inputs["team_formation"]["options"] == list(course.TEAM_FORMATIONS)
+    assert inputs["submit_via"]["options"] == list(course.SUBMIT_VIA)
+    # Hand-marking is the default, so `tests/` is seeded only when someone asks for it.
+    assert inputs["autograde"]["type"] == "boolean"
+    assert inputs["autograde"]["default"] is False
     step = workflow_jobs(rendered)["scaffold"]["steps"][-1]
     assert "${{" not in step["run"]
-    assert step["env"]["FORMAT"] == "${{ inputs.format }}"
-    assert step["env"]["TYPE"] == "${{ inputs.type }}"
-    assert '--format "$FORMAT"' in rendered and '--type "$TYPE"' in rendered
+    for env_name, field in (
+        ("NAME", "assignment_name"),
+        ("NUMBER", "assignment_number"),
+        ("TAG", "semester_tag"),
+        ("FORMAT", "format"),
+        ("TYPE", "type"),
+        ("TEAM_FORMATION", "team_formation"),
+        ("SUBMIT_VIA", "submit_via"),
+        ("AUTOGRADE", "autograde"),
+    ):
+        assert step["env"][env_name] == f"${{{{ inputs.{field} }}}}"
+        assert f'"${env_name}"' in rendered
 
 
 @pytest.mark.parametrize("name", sorted(ALL_RENDERED))

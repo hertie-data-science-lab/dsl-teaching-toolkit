@@ -590,7 +590,6 @@ def test_the_seeded_assignment_defaults_block_parses_with_the_real_reader(capsys
         assert grades.parse_assignment_defaults(block) == {
             "submit_via": "github",
             "autograde": False,
-            "team_formation": "self_select",
             "max_team_size": 5,
             "late_window_days": 7,
             "late_penalty_per_day": "10%",
@@ -634,10 +633,11 @@ def test_every_example_assignment_parses_with_the_real_grading_reader():
         assert spec.dropped == (), f"{a.name}: {spec.dropped}"
         kinds[a.name] = spec.type
         autograded.add(spec.autograde)
-        # the hidden tests the autograder runs live where the file says - seeded even where
-        # this assignment is hand-marked, so turning `autograde` on needs no other edit
-        assert (a / "solution" / spec.tests).is_dir(), (
-            f"{a.name}: `tests: {spec.tests}` names no directory"
+        # `tests/` exists exactly where `autograde: true` asked for it - which is what
+        # New assignment now seeds, and what stops a hand-marked assignment shipping a
+        # directory of placeholder tests it never meant to run.
+        assert (a / "solution" / spec.tests).is_dir() == spec.autograde, (
+            f"{a.name}: `tests: {spec.tests}` and `autograde: {spec.autograde}` disagree"
         )
         assert spec.title, (
             f"{a.name}: no `title:` - the grading sheet's header needs it"

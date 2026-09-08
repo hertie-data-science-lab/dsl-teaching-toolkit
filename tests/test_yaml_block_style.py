@@ -34,7 +34,7 @@ from dsl_course.grades import (
     new_sheet,
     render_yaml,
 )
-from dsl_course.scaffold import _GRADING_YML
+from dsl_course.scaffold import _grading_config
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -187,8 +187,29 @@ SEEDED = {
     "cohort/dsl-course.yml (seeded)": lambda: bootstrap_course._cohort_metadata(
         "Org", "Course"
     ),
-    "grading_config.yml (scaffolded)": lambda: _GRADING_YML.format(
-        kind="group", fmt="notebook"
+    "grading_config.yml (scaffolded, group)": lambda: _grading_config(
+        title="Neural networks from scratch",
+        kind="group",
+        team_formation="assigned",
+        submit_via="github",
+        fmt="ipynb",
+        autograde=True,
+        defaults={
+            "max_team_size": 3,
+            "late_window_days": 7,
+            "late_penalty_per_day": "10%",
+        },
+    ),
+    "grading_config.yml (scaffolded, individual, no course defaults)": (
+        lambda: _grading_config(
+            title="Introduce Yourself",
+            kind="individual",
+            team_formation="self_select",
+            submit_via="external",
+            fmt="none",
+            autograde=False,
+            defaults={},
+        )
     ),
 }
 

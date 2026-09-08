@@ -9,9 +9,11 @@ Release buttons (or the solution branch) must report non-zero, not a green "read
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from dsl_course import gh_contents, ghcli, releaseignore, scaffold
+from dsl_course import gh_contents, ghcli, grades, releaseignore, scaffold
 
 
 class FakeRepo:
@@ -185,10 +187,141 @@ def _git_ok(*args):
     return (2, "") if "ls-remote" in args else (0, "")
 
 
+def _solution_files(monkeypatch) -> dict[str, str]:
+    """What the scaffold writes onto the solution branch, by path relative to the clone.
+
+    The solution branch is built in a real temp checkout and pushed with git, so the only
+    seam is the work dir itself - captured here at the moment `git add -A` runs."""
+    written: dict[str, str] = {}
+
+    def git_fake(*args):
+        if "ls-remote" in args:
+            return (2, "")
+        if "add" in args:
+            wd = Path(args[1])
+            written.clear()
+            written.update(
+                {
+                    str(f.relative_to(wd)): f.read_text()
+                    for f in wd.rglob("*")
+                    if f.is_file()
+                }
+            )
+        return (0, "")
+
+    _clone_ok(monkeypatch, git_fake)
+    return written
+
+
 def test_fresh_assignment_seeds_the_starter(fake, monkeypatch):
     _clone_ok(monkeypatch, _git_ok)
     assert scaffold.scaffold_assignment("Org", "1", "f2026") == 0
     assert {"README.md", "starter.py"} <= fake.written("assignment-1-f2026")
+
+
+def test_the_brief_stub_has_the_two_headings_and_no_more(fake, monkeypatch):
+    # The page students read. Two headings, both empty: seeding a plausible-looking brief
+    # is how a placeholder ships as the assignment.
+    _clone_ok(monkeypatch, _git_ok)
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", name="Neural networks from scratch"
+        )
+        == 0
+    )
+    brief = fake.files[("assignment-1-f2026", "README.md")]
+    assert brief.startswith("# Neural networks from scratch\n")
+    assert "## Task" in brief and "## What to submit" in brief
+    assert "**Points:** __" in brief and "**Due:** see the course schedule" in brief
+
+
+def test_a_format_of_none_seeds_the_brief_and_nothing_else(fake, monkeypatch):
+    # The raw-repo option: grading reads whatever is in the repo, so an assignment that
+    # wants no starter gets none rather than a stub its students must delete.
+    _clone_ok(monkeypatch, _git_ok)
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", "none") == 0
+    assert fake.written("assignment-1-f2026") == {"README.md"}
+
+
+def test_a_group_assignment_seeds_contributions_and_an_individual_one_does_not(
+    fake, monkeypatch
+):
+    # CONTRIBUTIONS.md is read at the pin into the grading sheet, and carries the stub
+    # mark so a team that never wrote it reads as "(not filled in)" rather than blank.
+    _clone_ok(monkeypatch, _git_ok)
+    assert scaffold.scaffold_assignment("Org", "4", "f2026", "none", "group") == 0
+    seeded = fake.files[("assignment-4-f2026", "CONTRIBUTIONS.md")]
+    assert gh_contents.is_untouched_stub(seeded)
+    assert scaffold.scaffold_assignment("Org", "5", "f2026", "none") == 0
+    assert "CONTRIBUTIONS.md" not in fake.written("assignment-5-f2026")
+
+
+def test_hidden_tests_are_seeded_only_when_the_assignment_asked_to_be_autograded(
+    fake, monkeypatch
+):
+    # `tests/` beside a hand-marked assignment reads as work the course owes, and
+    # `autograde: true` over a directory of placeholders is a machine score nobody meant.
+    written = _solution_files(monkeypatch)
+    assert scaffold.scaffold_assignment("Org", "1", "f2026") == 0
+    assert not [f for f in written if f.startswith("tests/")]
+    assert scaffold.scaffold_assignment("Org", "2", "f2026", autograde=True) == 0
+    assert "tests/test_solution.py" in written
+
+
+def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
+    fake, monkeypatch
+):
+    # The whole point of the eight boxes: what the button was asked lands in the file the
+    # handout, the sheet and the Join-team form all read, over the course's own defaults.
+    written = _solution_files(monkeypatch)
+    monkeypatch.setattr(
+        scaffold,
+        "course_assignment_defaults",
+        lambda org: {
+            "max_team_size": 3,
+            "late_window_days": 7,
+            "late_penalty_per_day": "10%",
+        },
+    )
+    assert (
+        scaffold.scaffold_assignment(
+            "Org",
+            "1",
+            "f2026",
+            "ipynb",
+            "group",
+            name="Neural networks: from scratch",
+            team_formation="assigned",
+            submit_via="external",
+            autograde=True,
+        )
+        == 0
+    )
+    spec = grades.parse_grading_spec(written["grading_config.yml"])
+    assert spec.dropped == ()
+    assert (
+        spec.title == "Neural networks: from scratch"
+    )  # the colon survives the round trip
+    assert (spec.type, spec.team_formation, spec.max_team_size) == (
+        "group",
+        "assigned",
+        3,
+    )
+    assert (spec.submit_via, spec.format, spec.autograde) == ("external", "ipynb", True)
+    assert (spec.late_window_days, spec.late_penalty_per_day) == (7, "10%")
+    assert written["grading_config.yml"].startswith("# INSTRUCTOR-OWNED")
+
+
+def test_a_course_with_no_defaults_gets_the_settings_commented_out(fake, monkeypatch):
+    # Nothing is asserted on the course's behalf: the file teaches the whole vocabulary,
+    # and a late window nobody declared stays a comment rather than becoming a policy.
+    written = _solution_files(monkeypatch)
+    monkeypatch.setattr(scaffold, "course_assignment_defaults", lambda org: {})
+    assert scaffold.scaffold_assignment("Org", "1", "f2026") == 0
+    spec = grades.parse_grading_spec(written["grading_config.yml"])
+    assert (spec.late_window_days, spec.late_penalty_per_day) == (None, None)
+    assert spec.max_team_size is None
+    assert "# late_window_days:" in written["grading_config.yml"]
 
 
 def test_rerun_never_overwrites_an_authored_assignment_starter(fake, monkeypatch):

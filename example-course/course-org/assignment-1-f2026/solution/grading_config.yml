@@ -1,6 +1,16 @@
-# How this assignment is defined and marked. Dates live in the cohort's schedule.yml.
-title: Linear regression
-type: individual      # individual (one repo per student) or group (one repo per team)
-submit_via: external  # github | external (handed in on Moodle, Kaggle, in class...)
-autograde: false      # true -> run the hidden tests at the cutoff (needs `tests:` below)
-tests: tests          # path (on THIS solution branch) holding the hidden tests
+# INSTRUCTOR-OWNED - defines the assignment. Dates live in the cohort's schedule.yml.
+title: Linear regression      # the assignment's name, shown to graders and on the site
+type: individual              # individual | group
+# team_formation: self_select # group only: self_select (Join-team form) | assigned (teams.csv)
+# max_team_size: 5            # group only
+submit_via: external          # github | external (Moodle, Kaggle, in class...)
+format: py                    # ipynb | py | rmd | qmd | latex | none - the starter stub only
+
+# questions:                  # OPTIONAL - the score skeleton, and the maximum shown beside
+#   Q1: 15                    # each blank in the grading sheet. The total is their sum;
+#   Q2: 10                    # there is no `points:` field anywhere.
+
+# late_window_days: 7         # nothing is collected from GitHub here, so nothing is late
+# late_penalty_per_day: 10%   # of the EARNED grade, per day started
+
+autograde: false              # true: run tests/ at the cutoff and show the count to graders
