@@ -1987,6 +1987,37 @@ def test_a_run_script_does_not_need_pytest_installed(monkeypatch, tmp_path):
     assert collect._run_tests(work, tests)["score"] == 1
 
 
+def test_no_graded_subprocess_can_reach_back_into_the_actions_job(monkeypatch):
+    # The escalation this closes: the runner EXECUTES whatever a step leaves in
+    # $GITHUB_ENV / $GITHUB_PATH once the step ends, so a notebook cell appending
+    # `BASH_ENV=/tmp/x` to that file runs in the next step of the same job - with that
+    # step's org-owner PAT in scope. The workflows are the real fix (no secret-bearing
+    # step follows student code in its job); this is the second lock, and it takes the
+    # directory those files live in ($RUNNER_TEMP/_runner_file_commands/) and the Actions
+    # runtime token with it, or the handles would still be there to find.
+    handed = {
+        "GITHUB_ENV": "/home/runner/work/_temp/_runner_file_commands/set_env_1",
+        "GITHUB_PATH": "/home/runner/work/_temp/_runner_file_commands/add_path_1",
+        "GITHUB_OUTPUT": "/home/runner/work/_temp/_runner_file_commands/set_output_1",
+        "GITHUB_STATE": "/home/runner/work/_temp/_runner_file_commands/save_state_1",
+        "GITHUB_STEP_SUMMARY": "/home/runner/work/_temp/_runner_file_commands/summary_1",
+        "RUNNER_TEMP": "/home/runner/work/_temp",
+        "ACTIONS_RUNTIME_TOKEN": "eyJhbGciOi",
+        "GH_TOKEN": "ghs_secret",
+        "GITHUB_TOKEN": "ghs_secret",
+        "DSL_BOT_TOKEN": "ghp_org_owner",
+    }
+    for key, value in handed.items():
+        monkeypatch.setenv(key, value)
+
+    env = collect._sanitised_env()
+
+    assert not [key for key in handed if key in env]
+    # ...and it is still an environment a subprocess can run in.
+    assert env["PATH"] == os.environ["PATH"]
+    assert env["PYTHONSAFEPATH"] == "1"
+
+
 # ------------------------------------------------------------------- the completion check
 
 

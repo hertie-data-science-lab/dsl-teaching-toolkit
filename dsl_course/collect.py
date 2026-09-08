@@ -371,21 +371,46 @@ def parse_snapshots(text: str) -> dict[str, str]:
 # ---------------------------------------------------------------------- gh/git wiring
 
 
+# Everything the CI harness put in the environment, gone before student code sees it.
+#
+# A token in scope is the obvious half (`GH_*`, `GITHUB_TOKEN`, the `DSL_*` the job
+# carries). The subtler half is the ACTIONS FILE COMMANDS: the runner hands every step a
+# set of writable paths - `$GITHUB_ENV`, `$GITHUB_PATH`, `$GITHUB_OUTPUT`, `$GITHUB_STATE`,
+# `$GITHUB_STEP_SUMMARY` - and executes what it finds in them when the step ends. A
+# notebook cell appending `BASH_ENV=/tmp/x` to `$GITHUB_ENV` therefore runs in the NEXT
+# step of the same job, with that step's secrets in its environment. `RUNNER_*` goes with
+# them because the same files live under `$RUNNER_TEMP/_runner_file_commands/`, so leaving
+# that one behind hands back the directory the handles pointed into, and `ACTIONS_*`
+# carries the runtime token the cache/artifact services authenticate with.
+#
+# This is the SECOND lock, not the first: what actually closes the escalation is that no
+# step carrying a secret ever follows the student-code step in its job (each is the last
+# step of its own job - see workflows_render.render_scheduled_release and the renderer
+# test that holds it there). Prefixes rather than a name list, so a variable the runner
+# adds in a future version is dropped by default rather than by amendment.
+_SANDBOX_DROP_PREFIXES = ("ACTIONS_", "DSL_", "GH_", "GITHUB_", "RUNNER_")
+
+
 def _sanitised_env() -> dict:
     """The environment EVERY graded subprocess runs in - the one place the two rules that
     never vary are written down.
 
-    No GitHub token: student code must never run with the bot credential in scope. And
-    `PYTHONSAFEPATH`, because all three of these run `python -m` somewhere the student can
-    write, which would otherwise put that directory on `sys.path[0]` and let a committed
-    `json.py` / `nbformat.py` be imported before the real one. A fourth subprocess site
-    added later inherits both by construction rather than by reading a comment.
+    Nothing of the job it runs inside: no GitHub token, and no handle back into the runner
+    (see `_SANDBOX_DROP_PREFIXES`). And `PYTHONSAFEPATH`, because all three of these run
+    `python -m` somewhere the student can write, which would otherwise put that directory
+    on `sys.path[0]` and let a committed `json.py` / `nbformat.py` be imported before the
+    real one. A fourth subprocess site added later inherits both by construction rather
+    than by reading a comment.
 
     What DOES vary is layered on by the caller: the hidden tests add their runspace
-    PYTHONPATH, the completion check takes the network away (`_completion_env`)."""
-    env = dict(os.environ)
-    for key in ("GH_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN", "GH_ENTERPRISE_TOKEN"):
-        env.pop(key, None)
+    PYTHONPATH and the two `DSL_*` variables `run.sh` reads (after this, deliberately), the
+    completion check takes the network away and gives the kernel its own directory back
+    (`_completion_env`)."""
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(_SANDBOX_DROP_PREFIXES)
+    }
     env["PYTHONSAFEPATH"] = "1"
     # Caps glibc arena proliferation, which would otherwise reserve a heap arena per core and
     # push a legitimate multi-threaded run past RLIMIT_DATA_BYTES.
