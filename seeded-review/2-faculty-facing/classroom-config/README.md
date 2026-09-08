@@ -32,30 +32,36 @@ Any OTHER column you add (a registrar id, a lecture section, notes) is yours: th
 
 A push to this file triggers **Sync membership** automatically, reconciling the `students` and `auditors` teams to match this SSOT file (a deleted row revokes access on that same push). It also triggers **Send enrolment codes** - the only way codes are sent, so adding a row is all it takes to get that student their code, within a minute or so. Nobody is ever mailed twice: only rows with a blank `code_sent_at` go out.
 
-## `grades/<assignment>.csv` - marks (optional, when returning grades)
+## `grading_sheets/<assignment>.yml` - marks
 
-One file per assignment,
+One file per assignment, created at handout with every row already in it. It is the ONE
+place you type: scores, feedback, an `adjustment_individual` where you need one, and notes
+that never leave this repo. Worked examples of both shapes ship as
+`grading_sheets/*.yml.sample`.
 
-The autograder pre-fills `autograde_score` from the hidden tests (plus `team` on a group assignment), creating the file if it doesn't exist; faculty & instructors fill the rest, then the following workflows:
-```
-Sync gradebooks -> Render grades -> Distribute grades
-```
-It runs itself **once** per assignment, at that
-assignment's grading deadline in `schedule.yml`
+Everything under `info:` is the toolkit's - when the work came in, how late it was, what
+`CONTRIBUTIONS.md` said, the autograde count, and `checked`, the minute the row was last
+looked at. It refreshes every quarter of an hour from the
+due date and freezes at the cutoff. Everything else is yours and is never touched, including
+keys you invent and rows for students who have left. The file is only rewritten when the data
+or the header really changed, so your own formatting survives an ordinary tick - but YAML
+comments you add are not preserved when a rewrite does happen.
 
-For an all-manual assignment (`autograde: false`), copy the sample's header into `grades/<slug>.csv` and fill it yourself. 
+The question names, the `# /N` maxima and the header come from the template's `grading_config.yml`
+and this cohort's `schedule.yml`. Edit them **there** - the sheet's copy is regenerated on
+every write.
 
-> ### Changing grades:
+> ### Changing a grade
 >
->`autograde_score` and `team` are **write-once**: once filled, no run overwrites them, so your corrections stand. `team_score` is yours outright - nothing machine-written ever competes for it. 
->
->To recompute, clear those cells and delete `autograde/<slug>/`. 
+> Retype it and re-run **Distribute grades**. Nothing is said twice, so only that student is
+> reached. To recompute an autograde count, delete `autograde/<slug>/`.
 
-### What reaches students, when:
-A generated, read-only `cohort-gradebook.csv` (one row per student, one column-group per assignment) appears alongside the per-student gradebooks on every **Render grades** - never hand-edit it, it's a glance view, not a source. **Nothing in `grades/`,`autograde/` or the gradebooks reaches a student until the separate Distribute grades
-workflow** - autograding and your review happen entirely in this private repo.
+### What reaches students, when
 
-`gradebook/notified.csv` records which student has been told about which version of their gradebook. SYSTEM-owned, do not hand-edit: it is what lets a failed notification be retried by simply re-running **Distribute grades**.
+**Nothing here reaches a student until you run Distribute grades.** It then writes
+`cohort-gradebook.csv` (the registrar export - generated, never hand-edited) and records
+every comment, gradebook and email in `gradebook/distributed.csv`. That file is SYSTEM-owned:
+it is what stops a re-run repeating itself and what lets a failed notification be retried.
 
 ## `teams.csv` - group membership (optional, for group assignments)
 

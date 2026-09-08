@@ -6,22 +6,22 @@
 # - see reference: https://github.com/hertie-dsl-demo-f2026/classroom-config/blob/main/schedule.yml
 # - see deployed end-product: https://hertie-dsl-demo-f2026.github.io/schedule/
 #
-# Times are Europe/Berlin unless you set `timezone:`. The Scheduled release cron runs four
-# times an hour and GitHub delivers scheduled runs best-effort, so a time is honoured to
-# roughly the quarter-hour, not to the minute. Pin a release AHEAD of the class that needs
-# it (see `deploy_datetime` below) rather than at its start time.
+# Times are Europe/Berlin unless you set `timezone:`. Scheduled release ticks about every
+# 15 minutes, so a time is honoured to roughly that, not to the minute. Pin a release AHEAD
+# of the class that needs it (see `deploy_datetime` below) rather than at its start time.
 #
 # Each block encodes BEHAVIOUR:
 #   releases:     entries that DEPLOY materials (course org -> this cohort org)
 #   assignments:  each assignment's handout / due / grading lifecycle
 #   events:       display-only calendar rows - nothing deploys
 #
-# Changing a date later? Just commit the edit to this file on main; the cron reads
-# whatever is on main at each tick, so the change simply takes effect on the next one.
+# Changing a date later? Just commit the edit to this file on main; the push itself fires
+# the scheduler, so the change takes effect straight away.
 #
-# NB already-fired ONE-SHOT actions don't rewind: a release already shipped stays
-# shipped, and a snapshot/autograde that already ran needs its marker deleted to redo.
-# Unshipping a release means rewriting the cohort repo's git history and force-pushing.
+# NB already-fired ONE-SHOT actions don't rewind: a snapshot, an autograde or a solution
+# push needs its marker deleted to redo. Everything else re-applies on every tick, so a
+# release already shipped stays shipped - unshipping it means rewriting the repo's git
+# history.
 #
 # What follows is a SKELETON: uncomment and fill what you want. For a full worked term -
 # a real release plan, a group project, exams - see `schedule.yml.sample`.
@@ -87,9 +87,9 @@
 #     cohort_dest_repo:             # OPTIONAL - default: the slug above (here assignment-1)
 #     handout_datetime:             # technically OPTIONAL, but REQUIRED for a scheduled handout - omit it if you hand out via the manual "Release assignment" workflow (which auto-records it here for you)
 #     due_datetime:                 # REQUIRED - a bare date without time -> end of that day (23:59:59)
-#     grading_datetime:             # OPTIONAL - default: due_datetime, so leaving it empty still autogrades at the deadline. Snapshot freezes + autograder fires. Not shown to students. To NOT autograde at all, set `autograde: false` in the template's grading.yml
+#     grading_datetime:             # OPTIONAL - default: due_datetime plus the template's `late_window_days`, i.e. the end of the late window (with no window, the due date). Snapshot freezes + autograder fires. Not shown to students. Autograding is off unless the template's grading_config.yml says `autograde: true`
 #     solution_datetime:            # OPTIONAL - NO default: if empty, the solution only ever goes out by hand ("Release assignment" with include_solution ticked). Pushes the `solution/` folder (from the template's `solution` branch) into every student/team repo. Must be AFTER handout_datetime, and needs it set
-#     type: group                   # OPTIONAL - default: individual (also settable in the template's grading.yml)
+#     type: group                   # OPTIONAL - default: individual (also settable in the template's grading_config.yml)
 #     max_team_size:                # OPTIONAL - default: 5. Group only: the welcome "Join team" flow refuses a member beyond this
 
 # events:                           # DISPLAY-ONLY calendar rows - nothing deploys

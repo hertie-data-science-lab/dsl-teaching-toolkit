@@ -4,10 +4,12 @@ org: hertie-dsl-demo-course-e1234
 org_name: DSL Demo Course
 course_name: Deep Learning (Demo)
 course_code: E1234
-# central_ref: staging   # OPTIONAL: which tier of the central toolkit this course's
-#   # workflows run - `release` (the default, and where every real course belongs),
-#   # `staging` (the soak tier), `main`, or a full 40-character commit SHA. Cohorts
-#   # inherit this; setting it in a cohort's own file does nothing.
+# central_ref: <40-character commit SHA>   # OPTIONAL: pin this course to one known
+#   # commit of the central toolkit - the way to hold a course still, or back, while
+#   # something is fixed. Unset means `release`, which is where every real course belongs.
+#   # (`main` is the trunk and is also accepted, but only the demo course runs it: an org
+#   # on `main` takes every merge the moment it lands.) Cohorts inherit this; setting it
+#   # in a cohort's own file does nothing.
 # course_description: One or two sentences, on ONE line - the blurb on every cohort site.
 # site_link_extensions: [pdf, html, ipynb]   # OPTIONAL: on the COHORT sites, link ONLY
 #   # these file types. Default (unset): each session's root files, plus one link per
