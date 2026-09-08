@@ -3,11 +3,12 @@ workflow can.
 
 The operational properties every shipped workflow shares are asserted in
 test_shipped_workflows.py. What is unique here is the routing of three DIFFERENT verdicts
-that all arrive in one run: an entry the parser dropped (faculty's file, red X plus an
-issue), a source the course org has not got (faculty's file, a comment on the push and
-nothing else), and a course org the toolkit could not read at all (infrastructure, red X
-and an annotation that asks for the maintainer). Sending any of them down another's channel
-is how a fault gets the wrong name and closes itself without being fixed.
+that all arrive in one run: an entry the parser dropped (faculty's file, a red X and an
+annotation - the RECORD is the engine's digest issue, not anything written here), a source
+the course org has not got (faculty's file, a comment on the push and nothing else), and a
+course org the toolkit could not read at all (infrastructure, red X and an annotation that
+asks for the maintainer). Sending any of them down another's channel is how a fault gets
+the wrong name and closes itself without being fixed.
 
 The comment's TEXT belongs to the engine (`schedule.source_comment`), which is where it is
 asserted; what is asserted here is that the workflow posts it rather than rebuilding it -
@@ -89,8 +90,7 @@ def test_the_parse_is_reported_even_when_the_course_org_cannot_be_read():
     # The source check is what is conditional, not the parse.
     assert 'if [ -n "$COURSE_ORG" ]; then' in validate["run"]
     assert "--check-sources" in validate["run"]
-    # ...and the org failure is the LAST step, after the dropped-entry issue is opened,
-    # closed and annotated.
+    # ...and the org failure is the LAST step, after the red X the dropped entry earns.
     names = [s.get("name", "") for s in JOB["steps"]]
     assert names[-1].startswith("Fail the run because the course org")
 
@@ -159,7 +159,24 @@ def test_a_commit_comment_needs_contents_write():
     # The endpoint is repos/.../commits/<sha>/comments, which lives under Contents rather
     # than Issues - declared at read, the intent this block records would be wrong.
     doc = yaml.safe_load(RAW)
-    assert doc["permissions"] == {"contents": "write", "issues": "write"}
+    assert doc["permissions"] == {"contents": "write"}
+
+
+def test_nothing_here_writes_an_issue_any_more():
+    # This workflow used to open, comment on and close the dropped-entry issue in a block
+    # of shell that searched by title and assigned the pusher - which could not tell a
+    # fault that ESCALATED from one that was merely still there, and re-notified on every
+    # push. The engine owns that issue now (it adopts the same title), so the only writes
+    # left here are the red X, the annotations and the commit comment.
+    assert "gh issue create" not in RAW
+    assert "gh issue close" not in RAW
+    assert "gh issue comment" not in RAW
+    # Nothing here SEARCHES for that issue either. (The only title this template looks up
+    # is the sources digest's, and it asks the engine for it - see the test above.)
+    assert f'"{source_digest.UNREADABLE_TITLE} in:title"' not in RAW
+    # The red X and the annotation stay - they are the half only a push can give.
+    assert "::error file=schedule.yml::" in RAW
+    assert "--annotate" in RAW
 
 
 # ------------------------------------------------------- the text the step is handed

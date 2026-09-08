@@ -857,8 +857,9 @@ def test_validate_schedule_workflow_is_seeded_with_the_central_repo_pinned():
     assert "--file ../cohort/schedule.yml --validate" in run
     assert "$GITHUB_STEP_SUMMARY" in run
 
-    # the run must end red so the commit is marked, and needs issues:write to escalate
-    assert doc["permissions"]["issues"] == "write"
+    # The run must end red so the commit is marked. Nothing here writes an ISSUE - the
+    # engine's digest does - so that scope is gone; the commit comment needs contents.
+    assert doc["permissions"] == {"contents": "write"}
     assert any("exit 1" in s.get("run", "") for s in steps)
 
 
