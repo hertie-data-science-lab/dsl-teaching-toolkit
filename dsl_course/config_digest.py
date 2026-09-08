@@ -818,8 +818,14 @@ def sync(
         repo,
         digest.title,
         render_body(digest, faults, now, ctx, _state_marker(state, since), since)
-        + "\n"
-        + _write_marker(_CLOCK, {"sent": sent}, digest.state_key),
+        # The reminder count, and only where there are reminders: a scheduled digest
+        # counts none, and a third marker in the two issues that predate this engine is
+        # churn in a body faculty read.
+        + (
+            ""
+            if digest.scheduled
+            else "\n" + _write_marker(_CLOCK, {"sent": sent}, digest.state_key)
+        ),
         comment=note or None,
         existing=open_issue,
     )
