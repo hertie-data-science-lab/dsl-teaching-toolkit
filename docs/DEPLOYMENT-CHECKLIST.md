@@ -412,11 +412,11 @@ Verify with `python3 -m dsl_course.schedule --cohort-org <COHORT> --validate`. F
 
 **What happens at the grading deadline.** The scheduler freezes each submission repo's
 commit into `classroom-config/snapshots/<slug>.csv` (write-once - delete it to re-freeze),
-then, where that template's `grading_config.yml` says `autograde: true`, autogrades
-**once** against it (the `_graded.json` / `_skipped.json`
-record in `classroom-config/autograde/<slug>/` is the fired marker - delete it, or the whole
-folder, to re-grade). Machine grade columns are write-once too. All of
-this happens whether or not the cohort uses `releases`.
+then, where the `<slug>-<tag>` template's `grading_config.yml` says `autograde: true`,
+autogrades **once** against it (the `_graded.json` / `_skipped.json` record in
+`classroom-config/autograde/<slug>/` is the fired marker - delete it, or the whole folder,
+to re-grade). Machine grade columns are write-once too. All of this happens whether or not
+the cohort uses `releases`.
 
 ## Token
 
