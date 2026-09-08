@@ -3621,3 +3621,122 @@ def test_the_public_log_counts_receipts_and_names_no_submission_repo(
     out = capsys.readouterr().out
     assert "2 submission receipt(s) up to date" in out
     assert "ada-l" not in out and "ben-k" not in out
+
+
+# ------------------------------------- from the push GitHub timed to the final grade
+
+
+def test_a_late_push_the_server_timed_reaches_the_final_grade(monkeypatch):
+    # The whole chain, end to end, because every link of it used to rest on a date the
+    # student typed: the push GitHub recorded -> `info.submitted` -> `days_late`, counted
+    # in the cohort's own calendar -> the penalty -> the grade the student is sent.
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        rows={
+            "assignment-1-ada-l": collect.SnapshotRow(
+                repo="assignment-1-ada-l",
+                sha=SHA,
+                # Committed before the deadline; GitHub saw it two days after.
+                submitted_at="2026-10-06T07:30:00Z",
+                submitted_source=collect.SUBMITTED_SOURCE_PUSH,
+            )
+        },
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 11, 23, 59, tzinfo=BERLIN),
+    )
+    ((_path, text),) = written
+    sheet = grades.parse_sheet(text)
+    info = sheet["submissions"]["ada-l"]["info"]
+    assert info["submitted"] == "2026-10-06T09:30+02:00"  # the cohort's own clock
+    assert info["days_late"] == "2"
+    assert "submitted_note" not in info  # the server timed it; nothing to flag
+
+    # And the arithmetic the student is sent, off that same block: 10% per day started,
+    # of the earned grade, floored at 0 and applied before the one human override.
+    spec = grades.sheet_spec(
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        grades.parse_grading_spec(GRADING_YML),
+        False,
+    )
+    sheet["submissions"]["ada-l"]["score_individual"] = {"Q1": "15", "Q2": "10"}
+    view = grades.student_view(spec, "ada-l", sheet["submissions"]["ada-l"], "ada-l")
+    assert view["days_late"] == "2"
+    assert view["penalty"] == "-20%"
+    assert view["final_grade"] == "20"  # 25 x (1 - 0.10 x 2)
+
+
+def test_a_submission_on_the_deadline_is_not_late_and_loses_nothing(monkeypatch):
+    # The other end of the same chain: the penalty must not apply to a push GitHub saw
+    # inside the deadline, and `days_late` is floored at 0 rather than going negative.
+    written = _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        rows={
+            "assignment-1-ada-l": collect.SnapshotRow(
+                repo="assignment-1-ada-l",
+                sha=SHA,
+                submitted_at="2026-10-04T21:58:00Z",  # 23:58 Berlin, a minute to spare
+                submitted_source=collect.SUBMITTED_SOURCE_PUSH,
+            )
+        },
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 11, 23, 59, tzinfo=BERLIN),
+    )
+    ((_path, text),) = written
+    sheet = grades.parse_sheet(text)
+    assert sheet["submissions"]["ada-l"]["info"]["days_late"] == "0"
+    spec = grades.sheet_spec(
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        grades.parse_grading_spec(GRADING_YML),
+        False,
+    )
+    sheet["submissions"]["ada-l"]["score_individual"] = {"Q1": "15", "Q2": "10"}
+    view = grades.student_view(spec, "ada-l", sheet["submissions"]["ada-l"], "ada-l")
+    assert view["final_grade"] == "25" and "penalty" not in view
+
+
+def test_the_due_moment_the_sheet_counts_from_is_the_cohorts_own(monkeypatch):
+    # `due_datetime` is coerced into the cohort's timezone when the schedule is parsed (a
+    # bare date meaning the END of that day), so the sheet counts from the moment students
+    # were actually given. Read as UTC, "the 4th" ran until 01:59 on the 5th in Berlin.
+    sched = collect.schedule.parse(
+        {
+            "timezone": "Europe/Berlin",
+            "assignments": {
+                "assignment-1": {
+                    "course_source_repo": "assignment-1-f2026",
+                    "due_datetime": "2026-10-04",
+                }
+            },
+        }
+    )
+    due = sched.assignments["assignment-1"].due_datetime
+    assert due == collect.local_deadline("2026-10-04", sched.timezone)
+    # 00:30 Berlin on the 5th is one day started, not zero.
+    assert (
+        collect.days_late(
+            datetime(2026, 10, 5, 0, 30, tzinfo=BERLIN), due, sched.timezone
+        )
+        == 1
+    )

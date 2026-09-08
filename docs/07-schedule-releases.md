@@ -358,9 +358,17 @@ Full details of this are in [10-grade-and-return-assignments.md](10-grade-and-re
 
 Each assignment's **cutoff** is `grading_datetime` if you set it, else `due_datetime` plus the template's `late_window_days`. From the **due date** the cron refreshes the grading sheet (and posts submission receipts) every quarter of an hour; at the cutoff it does three things, once each:
 
-1. **Freezes** each submission repo's HEAD into `classroom-config/snapshots/<slug>.csv`, using the **server's** clock.
+1. **Freezes** each submission repo's HEAD into `classroom-config/snapshots/<slug>.csv`, using the **server's** clock, and records against it when GitHub saw the push that delivered that commit.
 2. **Freezes** the grading sheet - its `info:` never moves again.
 3. **Autogrades** it (optional).
+
+> **If your course has a late policy, set `grading_datetime` past `due_datetime`.**
+> How late a submission is comes off the frozen snapshot, and the snapshot is taken at
+> the **cutoff**. With the two on the same moment there is no window to be late in: every
+> repo freezes at the deadline, `days_late` is 0 for everyone, and the penalty your
+> `grading_config.yml` advertises never applies to anybody. Leaving `grading_datetime`
+> unset does the right thing on its own - the cutoff is then the due date plus the
+> template's `late_window_days`.
 
 ### Releasing the model solution
 
