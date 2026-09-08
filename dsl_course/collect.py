@@ -659,9 +659,12 @@ def _push_activity(cohort_org: str, repo: str) -> list[tuple[str, str]] | None:
         _ACTIVITY_FIELDS,
     )
     if code != 0:
-        # A repo that is not there has no pushes; anything else is "could not tell", and
-        # the caller falls back to the committer date rather than abandoning the freeze -
-        # a snapshot never taken is worse, because the pin then moves with every push.
+        # A repo that is not there has no pushes, and neither has one whose activity GitHub
+        # will not serve at all - both are answers. Anything else (a rate limit, a 5xx) is
+        # "could not tell", and the caller abandons the freeze over it: the snapshot is
+        # never rewritten, so recording the student's own committer date on the strength of
+        # a read that failed would fix a wrong submission time - and the late penalty that
+        # follows from it - for good. A retry costs a tick.
         return [] if is_missing_resource(out) else None
     rows = []
     for line in out.splitlines():
@@ -703,16 +706,24 @@ def _submitted(
     pin: Pin,
     pushed_at: str,
     moment: datetime | None,
-) -> tuple[str, str]:
-    """`(submitted_at, submitted_source)` for one pinned commit - the ladder in full.
+) -> tuple[str, str] | None:
+    """`(submitted_at, submitted_source)` for one pinned commit - the ladder in full, or
+    None when GitHub's push records could not be READ.
 
     Recorded now or never: the snapshot is write-once, and this is the only pass that
     reads GitHub's push records. Everything downstream - `days_late`, the penalty, the
     receipt a student reads - rests on which rung answered, which is why the row carries
-    the rung as well as the time."""
-    server = push_time_for(
-        _push_activity(cohort_org, repo) or [], pin.sha, pin.committed
-    )
+    the rung as well as the time.
+
+    None is kept distinct from "no push record matched" for exactly that reason: falling
+    to the committer date is a permanent decision, and taking it on a read that failed
+    would time a backdated submission by the date the student typed into it. The caller
+    abandons the snapshot instead and the next tick takes it - the same answer
+    `_snapshot_sha` gives an unreadable commits read."""
+    activity = _push_activity(cohort_org, repo)
+    if activity is None:
+        return None
+    server = push_time_for(activity, pin.sha, pin.committed)
     if server:
         return server, SUBMITTED_SOURCE_PUSH
     # Nothing GitHub timed. The committer date is a CLAIM, so it is warned about here and
@@ -920,10 +931,14 @@ def snapshot_assignment(
             # server's push record if GitHub has one, else the committer date, which the
             # student supplied and can backdate. The snapshot is write-once, so it is
             # recorded now or never.
-            submitted_at, source = _submitted(
-                cohort_org, repo, pin, pushed.get(repo, ""), moment
-            )
-            rows.append((repo, pin.sha, recorded_at, submitted_at, source))
+            submitted = _submitted(cohort_org, repo, pin, pushed.get(repo, ""), moment)
+            if submitted is None:
+                log_err(
+                    f"  ! could not read {target_ref(repo)}'s push records - abandoning "
+                    f"the {slug} snapshot, will retry on the next run"
+                )
+                return SnapshotResult.FAILED
+            rows.append((repo, pin.sha, recorded_at, *submitted))
         else:
             # Absent, or reachable with nothing pushed by the deadline. Either way there is
             # no submission, so there is no submission time: both cells stay blank.

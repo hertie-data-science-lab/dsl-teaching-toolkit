@@ -1015,14 +1015,33 @@ def test_a_commit_no_push_record_matches_falls_back_and_says_so(monkeypatch, cap
     assert "anna" not in out  # the log is public: the repo is named by tag only
 
 
-def test_an_unreadable_activity_read_does_not_abandon_the_freeze(monkeypatch):
-    # A supplementary endpoint that 403s must not stop the write-once snapshot: without it
-    # the assignment is never frozen at all, and the pin then moves with every later push.
-    # The row falls to the committer date, which is exactly what shipped before this rung.
+def test_an_unreadable_activity_read_abandons_the_freeze(monkeypatch, capsys):
+    # "Could not tell" is not "no push record". The snapshot is never rewritten, so
+    # falling to the student's own committer date on a rate-limited read would fix a
+    # backdated submission as on time for good; a retry costs a tick instead.
     written = _stub_snapshot_write(
         monkeypatch, {"assignment-1-anna": collect.Pin(SHA, "2026-10-13T21:40:00Z")}
     )
     monkeypatch.setattr(collect, "_push_activity", lambda org, repo: None)
+    assert (
+        collect.snapshot_assignment(
+            "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
+        )
+        is collect.SnapshotResult.FAILED
+    )
+    assert not written  # nothing half-timed is left behind
+    err = capsys.readouterr().err
+    assert "will retry on the next run" in err
+    assert "anna" not in err  # the log is public: the repo is named by tag only
+
+
+def test_a_repo_whose_activity_github_will_not_serve_is_not_a_failure(monkeypatch):
+    # A 404 IS an answer - the repo has no push records the toolkit can see - so the row
+    # falls to the committer date and says so, exactly as it did before this rung existed.
+    written = _stub_snapshot_write(
+        monkeypatch, {"assignment-1-anna": collect.Pin(SHA, "2026-10-13T21:40:00Z")}
+    )
+    monkeypatch.setattr(collect, "_push_activity", lambda org, repo: [])
     assert (
         collect.snapshot_assignment(
             "Cohort", "assignment-1", "2026-10-15T23:59:59+02:00", is_group=False
