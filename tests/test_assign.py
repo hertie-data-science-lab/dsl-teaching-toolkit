@@ -1926,6 +1926,40 @@ def _run(**kw):
     )
 
 
+def test_the_correction_is_read_as_the_templates_own_blob(monkeypatch):
+    # What this returns is hashed and then compared against every repo's tree, so bytes
+    # that are merely equivalent are not good enough. Read through the Contents API a file
+    # over 1 MiB came back EMPTY (`content: ""` on a 200) and was written as an empty file
+    # into every untouched repo, and `gh()`'s `.strip()` ate the trailing newline off the
+    # rest - so a repo already holding the exact hand-out was "patched" for whitespace and
+    # told to pull.
+    body = b"print('fixed')\n\n"
+    sha = assign.blob_sha(body)
+    monkeypatch.setattr(assign, "default_branch", lambda org, repo, **k: "main")
+    monkeypatch.setattr(
+        assign,
+        "repo_blob_shas",
+        lambda org, repo, branch: {"starter.py": sha, "README.md": "other"},
+    )
+    monkeypatch.setattr(
+        assign, "get_blob", lambda org, repo, want: body if want == sha else None
+    )
+    # The old transport, left stubbed exactly as `gh()` would have answered through it.
+    monkeypatch.setattr(
+        assign, "repo_tree", lambda *a, **k: ("starter.py", "README.md")
+    )
+    monkeypatch.setattr(
+        assign, "get_file_content", lambda *a, **k: body.decode().strip()
+    )
+
+    files = assign.template_files("COURSE", "assignment-1", "starter.py")
+
+    assert files == {"starter.py": body}
+    # ...and the digests the patch decides on ARE the template's own shas, which is what
+    # makes a re-run idempotent against the template rather than only against itself.
+    assert assign.corrected_digests(files) == {"starter.py": sha}
+
+
 def test_the_correction_reaches_every_untouched_submission_repo(monkeypatch):
     commits = _cohort(
         monkeypatch,

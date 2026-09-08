@@ -398,6 +398,36 @@ def test_an_untruncated_tree_drops_the_flag_line(monkeypatch):
     assert gh_contents.repo_blob_shas("O", "R", "main") == {"a.yml": "sha1"}
 
 
+def test_a_blob_comes_back_byte_for_byte(monkeypatch):
+    # The read for bytes that will be hashed, compared against a tree, and committed into
+    # somebody else's repo. `gh()` hands its callers `(stdout+stderr).strip()`, so a
+    # trailing newline is eaten off any TEXT answer - base64 survives that untouched, which
+    # is half of why this goes through the blobs API rather than the Contents one.
+    content = b"print('fixed')\n\n"
+    sha = _blob_sha(content)
+    asked = []
+
+    def fake_gh(*args, **kwargs):
+        asked.append(args)
+        return (0, base64.b64encode(content).decode())
+
+    _stub_gh(monkeypatch, fake_gh)
+
+    assert gh_contents.get_blob("O", "R", sha) == content
+    assert asked[0][1] == f"repos/O/R/git/blobs/{sha}"
+
+
+def test_a_blob_that_comes_back_empty_is_refused_rather_than_believed(monkeypatch):
+    # The other half: the Contents API answers `content: ""` on a 200 for anything over
+    # 1 MiB, so a plot-heavy notebook read as an EMPTY file and was committed as one into
+    # every student's repo. Whatever the transport does, bytes that do not hash to the sha
+    # they were asked for are not the file.
+    _stub_gh(monkeypatch, lambda *a, **k: (0, ""))
+
+    with pytest.raises(RuntimeError, match="did not send the content"):
+        gh_contents.get_blob("O", "R", _blob_sha(b"a 2 MiB notebook"))
+
+
 # --------------------------------------------------------------------- who wrote it
 
 _BLAME = {

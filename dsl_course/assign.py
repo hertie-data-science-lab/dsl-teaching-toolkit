@@ -56,6 +56,7 @@ from .fs import copy_tree
 from .gh_contents import (
     blob_sha,
     file_exists,
+    get_blob,
     get_file_content,
     put_file,
     put_files,
@@ -422,20 +423,30 @@ def template_files(course_org: str, template: str, path: str) -> dict[str, bytes
     """`{path: content}` for `path` on the TEMPLATE's default branch - one file, or every
     file under it when `path` names a folder.
 
-    Text only, and that is a property of the whole write path rather than a shortcut here:
-    the Contents API hands text back and `put_files` sends text, so a binary asset cannot
-    travel this way in either direction. A corrected notebook, script or brief can."""
+    Read as BLOBS, off the same recursive tree that names the paths, and not through the
+    Contents API. What this returns is hashed (`corrected_digests`), compared against every
+    repo's tree, and committed into student repos, so bytes that are merely equivalent are
+    not good enough: the Contents API inlines nothing over 1 MiB - it returns `content: ""`
+    on a 200, so a plot-heavy notebook came back EMPTY and was written as an empty file
+    into every untouched submission - and `gh()`'s `.strip()` eats a trailing newline, so
+    the written blob never equalled the template's and a repo already holding the exact
+    hand-out was "patched" for whitespace. Off the blobs API the digests here ARE the
+    template's shas (`gh_contents.get_blob` verifies that before returning), which is what
+    makes a re-run idempotent against the template rather than only against itself.
+
+    Text in practice: `put_files` sends text, so a binary asset cannot travel this way even
+    though it can now be read. A corrected notebook, script or brief can."""
     branch = default_branch(course_org, template, fallback="main")
     prefix = path.strip("/") + "/"
     files: dict[str, bytes] = {}
-    for candidate in repo_tree(course_org, template, branch, "blob"):
+    for candidate, sha in sorted(repo_blob_shas(course_org, template, branch).items()):
         if candidate != path.strip("/") and not candidate.startswith(prefix):
             continue
-        text = get_file_content(course_org, template, candidate, ref=branch)
-        if text is None:
+        content = get_blob(course_org, template, sha)
+        if content is None:
             log_err(f"  ! {template}/{candidate} could not be read - not patched")
             continue
-        files[candidate] = text.encode()
+        files[candidate] = content
     return files
 
 

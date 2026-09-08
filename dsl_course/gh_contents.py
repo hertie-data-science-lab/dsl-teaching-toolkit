@@ -226,6 +226,37 @@ def repo_blob_shas(org: str, repo: str, branch: str) -> dict[str, str]:
     return {path: sha for path, sha in entries}
 
 
+def get_blob(org: str, repo: str, sha: str) -> bytes | None:
+    """The exact bytes of one blob, addressed by its git sha. None when the blob is gone.
+
+    The read to use when the bytes have to come back EXACTLY - when they will be hashed,
+    compared against a tree, or written into another repo. `get_file_content` cannot do
+    that and is not meant to: the Contents API refuses to inline anything over 1 MiB (it
+    returns `content: ""` on a 200, which reads as an empty file - a plot-heavy notebook
+    silently becomes nothing), and `gh()` hands every caller `(stdout+stderr).strip()`,
+    which eats a trailing newline. The git blobs API answers for anything up to 100 MiB,
+    and base64 survives that strip unharmed.
+
+    What comes back is checked against the sha it was asked for, so an empty or truncated
+    payload is a failure here rather than an empty file somewhere downstream. Same
+    fail-loud rule as the rest of this module: only a genuine 404 is None."""
+    code, out = gh("api", f"repos/{org}/{repo}/git/blobs/{sha}", "--jq", ".content")
+    if code != 0:
+        if is_missing_resource(out):
+            return None
+        raise RuntimeError(f"could not read blob {sha} of {org}/{repo}: {out[:200]}")
+    try:
+        content = base64.b64decode(out, validate=False)
+    except ValueError as exc:
+        raise RuntimeError(f"blob {sha} of {org}/{repo} did not decode: {exc}") from exc
+    if blob_sha(content) != sha:
+        raise RuntimeError(
+            f"blob {sha} of {org}/{repo} came back as {len(content)} bytes that hash to "
+            f"{blob_sha(content)} - GitHub did not send the content it was asked for"
+        )
+    return content
+
+
 def put_files(
     org: str,
     repo: str,
