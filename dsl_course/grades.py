@@ -2664,13 +2664,17 @@ def distribute(
     )
     log_step(f"Distributing {len(books)} gradebook(s) in {cohort_org}")
     record: Distributed = dict(distributed)
+    # Key ORDER is the order the spec prints the `Done` line in, because that line is a
+    # JSON dump of this dict and a grader reads it as text. `unknown` is the one key the
+    # spec does not name: marks for handles nobody enrolled are worth a count, and it is
+    # slotted where it disturbs the spec's own sequence least.
     counts = {
         "comments": 0,
         "gradebooks": 0,
         "emails": 0,
+        "skipped": 0,
         "held": sum(len(whose) for whose in held.values()),
         "unknown": unknown,
-        "skipped": 0,
         "failed": 0,
     }
     for slug in sorted(held):

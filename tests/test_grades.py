@@ -5,6 +5,7 @@ deliberately not mocked, per the testing strategy. No network here.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -702,6 +703,29 @@ def test_a_real_run_reaches_all_four_channels(tmp_path, monkeypatch):
     assert "ada@uni.edu,Ada,ada-l,43" in cfg_files[grades.COHORT_CSV_NAME]
     # and the email
     assert [m[0] for batch in out["outbox"] for m in batch] == ["ada@uni.edu"]
+
+
+def test_the_done_line_is_the_spec_counts_in_the_spec_order(
+    tmp_path, monkeypatch, capsys
+):
+    # `Done - {...}` is a JSON dump of the counts dict, so the dict's key order is what a
+    # grader reads. Nothing asserted it, and it had drifted out of the order the spec
+    # prints. `unknown` is the one key the spec does not name - marks for handles nobody
+    # enrolled - and it is kept.
+    _distribute(monkeypatch, tmp_path)
+    done = next(
+        line for line in capsys.readouterr().out.splitlines() if "Done - " in line
+    )
+    counts = json.loads(done.split("Done - ", 1)[1])
+    assert list(counts) == [
+        "comments",
+        "gradebooks",
+        "emails",
+        "skipped",
+        "held",
+        "unknown",
+        "failed",
+    ]
 
 
 def test_nothing_a_student_may_not_see_reaches_them(tmp_path, monkeypatch):
