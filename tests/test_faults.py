@@ -127,9 +127,14 @@ def test_a_source_fault_reads_its_fix_off_the_kind_and_the_rung():
     assert "the next 15-minute tick releases them" in fired
 
 
-def test_the_consequence_is_per_file():
-    assert "nobody new is enrolled" in _immediate().consequence
-    assert ConfigFault("x", "y", file="nothing.txt").consequence == ""
+def test_the_consequence_is_keyed_on_the_digest_and_not_on_the_fault():
+    # Read by the DIGEST's label for the file, never by one fault's own path - a grading
+    # sheet's fault carries `grading_sheets/<slug>.yml` while its issue and its letter are
+    # about `grading_sheets/`, so a lookup off the fault would answer nothing for the one
+    # file where the two differ.
+    assert "nobody new is enrolled" in faults.CONSEQUENCE["students.csv"]
+    assert faults.CONSEQUENCE.get("grading_sheets/a3.yml") is None
+    assert "that sheet is not refreshed" in faults.CONSEQUENCE["grading_sheets/"]
 
 
 def test_a_csv_fault_names_the_row_and_never_a_cell():

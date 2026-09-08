@@ -549,7 +549,7 @@ def test_a_course_config_that_is_absent_or_unreadable_is_itself_the_fault(monkey
         assert fault.file == "dsl-course.yml" and fault.lineno is None
         # One sentence for both of the course org's files, because both cost the course
         # the same thing (`faults.CONSEQUENCE`).
-        assert "the sync skips this course" in fault.consequence
+        assert "the sync skips this course" in faults_mod.CONSEQUENCE[fault.file]
         # And no line, so the file's fallback sentence ("correct the line above") is an
         # instruction about a line that is not there, under a bare filename with nothing
         # to link to.

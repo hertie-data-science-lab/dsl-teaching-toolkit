@@ -49,12 +49,12 @@ def _open(*faults, state=None, since=None, sent=None):
     """An OPEN digest whose body is what a previous tick would have written."""
     body = cd.render_body(ROSTER, list(faults), NOW, COHORT, state, since)
     if sent is not None:
-        body += "\n" + cd._write_marker(cd._CLOCK, {"sent": sent}, ROSTER.state_key)
+        body += "\n" + cd._write_marker(cd._CLOCK, {"sent": sent})
     return [issue_row(7, ROSTER.title, body)]
 
 
 def _state(body: str) -> dict:
-    return cd._read_marker(body, cd._STATE, {}, ROSTER.state_key)
+    return cd._read_marker(body, cd._STATE, {})
 
 
 # ------------------------------------------------------------------------- the body
@@ -175,7 +175,7 @@ def test_a_reminder_names_only_the_faults_on_its_own_clock(gh):
     body = (
         cd.render_body(schedule_digest, [dropped, later], NOW, COHORT, state, seen)
         + "\n"
-        + cd._write_marker(cd._CLOCK, {"sent": 0}, schedule_digest.state_key)
+        + cd._write_marker(cd._CLOCK, {"sent": 0})
     )
     fake = gh([issue_row(7, schedule_digest.title, body)])
     out = cd.sync(schedule_digest, "Cohort", "Course", [dropped, later], NOW)
@@ -203,7 +203,7 @@ def test_the_clock_resets_when_the_issue_closes_itself(gh):
     fake = gh(_open(_fault(), sent=2))
     cd.sync(ROSTER, "Cohort", "Course", [], NOW)
     body = fake.body_of("issue", "edit")
-    assert cd._read_marker(body, cd._CLOCK, {}, ROSTER.state_key) == {}
+    assert cd._read_marker(body, cd._CLOCK, {}) == {}
     assert "Every entry in `classroom-config/students.csv` was usable" in body
     (close,) = fake.did("issue", "close")
     assert (
@@ -246,12 +246,12 @@ def test_a_reminder_whose_mail_failed_is_owed_again_next_tick(gh):
     body = (
         cd.render_body(ROSTER, [fault], NOW, COHORT, state, seen)
         + "\n"
-        + (cd._write_marker(cd._CLOCK, {"sent": 1}, ROSTER.state_key))
+        + (cd._write_marker(cd._CLOCK, {"sent": 1}))
     )
     fake = gh([issue_row(7, ROSTER.title, body)])
     assert cd.hold(ROSTER, "Cohort", {fault.key: "warning"}, out.reminder_was) == 0
     put_back = fake.body_of("issue", "edit")
-    assert cd._read_marker(put_back, cd._CLOCK, {}, ROSTER.state_key) == {"sent": 0}
+    assert cd._read_marker(put_back, cd._CLOCK, {}) == {"sent": 0}
 
 
 # ------------------------------------------------------- one issue, several files in it

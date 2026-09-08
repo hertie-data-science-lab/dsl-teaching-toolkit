@@ -88,16 +88,12 @@ class Digest:
     a title that varied with the faults would never match, and every run would open a new
     issue. The two schedule.yml digests keep the titles their issues already carry.
 
-    `state_key` names the marker the body carries its state in. It is `source` for all of
-    them and must stay that way for the one that predates this engine: the marker name is
-    the key to what an OPEN issue has already reported, and renaming it would read as
-    "nothing recorded" and re-announce - and re-mail - every standing fault in every live
-    cohort."""
+    The marker name every body carries its state under is `_MARKER_KEY`, one constant for
+    all of them - see it for why it can never vary."""
 
     title: str
     file: str
     doc: str
-    state_key: str = "source"
     repo: str = CONFIG_REPO
     cc_team: str = "instructors"
     # How the file is NAMED where a reader is sent to it, when `<repo>/<file>` is not
@@ -221,7 +217,13 @@ _STATE = "state"  # {fault key: {rung: last reported, since: first seen}}
 _MENTION = "mention"  # the logins git named, reused by a tick with nothing to ask
 _CLOCK = "clock"  # {sent: how many age reminders have gone out for this issue}
 _ABSORBED = "absorbed"  # the title of an issue this one took over, once it is closed
-_MARKER_RE = "<!-- dsl-{key}-{name}: (.*?) -->"
+# The middle word of every marker, shared by all seven digests and FROZEN. The marker name
+# is the key to what an OPEN issue has already reported: renaming it would read as
+# "nothing recorded" and re-announce - and re-mail - every standing fault in every live
+# cohort. `source` because that is what the one digest predating this engine already
+# carries. A constant rather than a `Digest` field, so it cannot be set wrong.
+_MARKER_KEY = "source"
+_MARKER_RE = f"<!-- dsl-{_MARKER_KEY}-{{name}}: (.*?) -->"
 
 
 def in_quiet_hours(when) -> bool:
@@ -330,14 +332,14 @@ class DigestResult:
     reminder_was: int | None = None
 
 
-def _read_marker(body: str, name: str, default, key: str = "source"):
+def _read_marker(body: str, name: str, default):
     """The JSON in `<!-- dsl-<key>-<name>: ... -->`, or `default` for a body that does not
     carry that marker, carries junk in it, or was written before the marker existed.
 
     One reader for every piece of state this issue keeps in its own body: an unreadable
     marker must degrade to "nothing recorded" rather than raise inside a release tick, and
     a second copy of that rule is a second chance to get it wrong."""
-    m = re.search(_MARKER_RE.format(key=key, name=name), body or "", re.DOTALL)
+    m = re.search(_MARKER_RE.format(name=name), body or "", re.DOTALL)
     if not m:
         return default
     try:
@@ -347,10 +349,10 @@ def _read_marker(body: str, name: str, default, key: str = "source"):
     return value if isinstance(value, type(default)) else default
 
 
-def _write_marker(name: str, value, key: str = "source") -> str:
+def _write_marker(name: str, value) -> str:
     """One state marker, as the HTML comment the body ends with (invisible when
     rendered)."""
-    return f"<!-- dsl-{key}-{name}: {json.dumps(value, sort_keys=True)} -->"
+    return f"<!-- dsl-{_MARKER_KEY}-{name}: {json.dumps(value, sort_keys=True)} -->"
 
 
 def _rungs(state: dict) -> dict[str, str]:
@@ -551,12 +553,11 @@ def render_body(
         _write_marker(
             _STATE,
             _state_marker(current_state(faults, now), seen) if state is None else state,
-            digest.state_key,
         ),
-        _write_marker(_MENTION, list(ctx.mention), digest.state_key),
+        _write_marker(_MENTION, list(ctx.mention)),
     ]
     if absorbed:
-        out.append(_write_marker(_ABSORBED, absorbed, digest.state_key))
+        out.append(_write_marker(_ABSORBED, absorbed))
     return "\n".join(out)
 
 
@@ -654,9 +655,9 @@ def cleared_body(digest: Digest) -> str:
                 f"It reopens on its own if that changes."
             ),
             "",
-            _write_marker(_STATE, {}, digest.state_key),
-            _write_marker(_MENTION, [], digest.state_key),
-            _write_marker(_CLOCK, {}, digest.state_key),
+            _write_marker(_STATE, {}),
+            _write_marker(_MENTION, []),
+            _write_marker(_CLOCK, {}),
         ]
     )
 
@@ -766,7 +767,7 @@ def hold(
         # to put back and the next tick will find it as new regardless.
         return 0
     body = found.open.body or ""
-    state = dict(_read_marker(body, _STATE, {}, digest.state_key))
+    state = dict(_read_marker(body, _STATE, {}))
     for key, rung in held.items():
         if rung is None:
             state.pop(key, None)
@@ -777,18 +778,16 @@ def hold(
     # A body with no marker at all is one somebody rewrote by hand; appending would leave
     # two, and `_read_marker` takes the first. Left alone, it reads as "nothing recorded",
     # which is what a held mail wants anyway.
-    marker = _MARKER_RE.format(key=digest.state_key, name=_STATE)
+    marker = _MARKER_RE.format(name=_STATE)
     if not re.search(marker, body, re.DOTALL):
         return 0
-    patched = _patch_marker(body, _STATE, state, digest.state_key, marker)
+    patched = _patch_marker(body, _STATE, state, marker)
     if clock is not None:
         # Only where the body already carries the counter - one that does not is an issue
         # whose faults all have deadlines, which is never owed a reminder anyway.
-        clock_marker = _MARKER_RE.format(key=digest.state_key, name=_CLOCK)
+        clock_marker = _MARKER_RE.format(name=_CLOCK)
         if re.search(clock_marker, patched, re.DOTALL):
-            patched = _patch_marker(
-                patched, _CLOCK, {"sent": clock}, digest.state_key, clock_marker
-            )
+            patched = _patch_marker(patched, _CLOCK, {"sent": clock}, clock_marker)
     errors = upsert_issue(repo, digest.title, patched, existing=found.open).errors
     if not errors:
         log_ok(
@@ -798,14 +797,14 @@ def hold(
     return errors
 
 
-def _patch_marker(body: str, name: str, value, key: str, pattern: str) -> str:
+def _patch_marker(body: str, name: str, value, pattern: str) -> str:
     """One marker rewritten in place, leaving the rest of the body exactly as it stands.
 
     `re.sub` with a FUNCTION, not a replacement string: a marker is JSON, and a backslash
     in it would be read as a group reference."""
     return re.sub(
         pattern,
-        lambda _m: _write_marker(name, value, key),
+        lambda _m: _write_marker(name, value),
         body,
         count=1,
         flags=re.DOTALL,
@@ -841,7 +840,7 @@ def _superseded(repo: str, digest: Digest, absorb: str | None, body: str):
     the first tick that finds nothing left to fold records that in the body. Without that
     every tick, for the rest of the term, would spend a second issue listing looking for
     an issue that was closed in September."""
-    if not absorb or _read_marker(body, _ABSORBED, "", digest.state_key) == absorb:
+    if not absorb or _read_marker(body, _ABSORBED, "") == absorb:
         return None
     try:
         return find_issues(repo, absorb).open
@@ -933,7 +932,7 @@ def sync(
         return DigestResult(faults_by_key=by_key)
 
     body = open_issue.body if open_issue else (closed.body if closed else "")
-    recorded = _read_marker(body, _STATE, {}, digest.state_key)
+    recorded = _read_marker(body, _STATE, {})
     superseded = _superseded(repo, digest, absorb, body)
     if superseded:
         # The absorbed issue's rungs, UNDER this issue's own: a key both recorded is a key
@@ -941,7 +940,7 @@ def sync(
         # fault the old issue was carrying appears afresh here - a comment and a mail
         # apiece, about nothing that changed.
         recorded = {
-            **_read_marker(superseded.body or "", _STATE, {}, digest.state_key),
+            **_read_marker(superseded.body or "", _STATE, {}),
             **recorded,
         }
     previous = _rungs(recorded)
@@ -970,7 +969,7 @@ def sync(
     # down to its own deadline and is told about on that ladder; reminding anybody that it
     # is "unfixed for 2 days" would be a second, contradictory schedule for one fault.
     immediate = [f for f in faults if keeps_the_age_clock(f)]
-    sent = _read_marker(body, _CLOCK, {}, digest.state_key).get("sent")
+    sent = _read_marker(body, _CLOCK, {}).get("sent")
     was_sent = sent if isinstance(sent, int) else 0
     reminder, sent = _due_reminder(oldest_seen(immediate, since), now, was_sent)
     if reminder:
@@ -995,7 +994,7 @@ def sync(
     mention = (
         tuple(resolve_mention() or ())
         if speaking and resolve_mention
-        else tuple(_read_marker(body, _MENTION, [], digest.state_key))
+        else tuple(_read_marker(body, _MENTION, []))
     )
     ctx = Context(course_org, cohort_org, ref, mention)
     note = _comment(
@@ -1037,11 +1036,7 @@ def sync(
         # The reminder count, and only where there is a clock to keep: a plan whose only
         # faults are sources counts none, and a marker that says nothing is churn in a
         # body faculty read.
-        + (
-            "\n" + _write_marker(_CLOCK, {"sent": sent}, digest.state_key)
-            if immediate
-            else ""
-        ),
+        + ("\n" + _write_marker(_CLOCK, {"sent": sent}) if immediate else ""),
         comment=note or None,
         existing=open_issue,
     )

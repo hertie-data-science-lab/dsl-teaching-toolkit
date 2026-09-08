@@ -321,17 +321,6 @@ class ConfigFault:
         return f"{self.fires:%a %d %b %Y, %H:%M} {zone_name(self.fires)}"
 
     @property
-    def due_short(self) -> str:
-        """`due` without the year - the subject-line form, where every character is paid
-        for by the sender's name beside it."""
-        if self.fires is None:
-            return "no date (tbc)"
-        return (
-            f"{self.fires:%a} {self.fires.day} {self.fires:%b} "
-            f"{self.fires:%H:%M} {zone_name(self.fires)}"
-        )
-
-    @property
     def moment(self) -> str:
         """What the date IS: a release ships, an assignment is handed out, a mark is
         computed.
@@ -343,13 +332,6 @@ class ConfigFault:
         if not self.is_source:
             return "grading"
         return "handout" if self.is_assignment else "release"
-
-    @property
-    def consequence(self) -> str:
-        """What the cohort loses while this stands - see CONSEQUENCE. Empty for a file
-        with no sentence written for it yet, which reads as "say nothing" rather than as a
-        guess about somebody's term."""
-        return CONSEQUENCE.get(self.file, "")
 
     def severity(self, now: datetime) -> Severity:
         """How loud this should be at `now` - see the SOURCE_*_WINDOW constants.
