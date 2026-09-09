@@ -404,17 +404,20 @@ with the maintainer copied from the first mail, and falls back to `cc @<course>/
 A CSV or sheet fault carries the row or line and the column - never a cell value, never a
 handle - in the mail, the issue and the log alike.
 
-**What still reds an unattended run.** Nothing above does. A content fault is delivered by
-its digest issue and the mail beside it, never by an exit code: Sync membership skips the
-cohort it cannot read (`sync_membership._CONTENT_FAULT` - `faults.Unusable` plus a YAML
-error), skips a cohort with no `people.yml` and no `students.csv`, and does not count a
-`teams.csv` handle that is not on the roster; Send enrolment codes returns
-`Outcome.UNUSABLE_ROSTER`, which `reds_the_run` treats as green. A red X means the RUN broke
-- a `gh` read or write refused, a token that lost its scope, an unset mail transport - and
-the maintainer is emailed its log tail. `faults.Unusable` is the whole distinction: it IS a
-RuntimeError, so every consumer still stops for it, but a `gh` read that failed is not one.
-`gh_contents.get_file_content` draws the same line at the API - None only for a 404, raise
-otherwise - which is why an absent file is faculty's to fix and a rate limit is not.
+**What still reds an unattended run.** Nothing above does, and there is no exception. A
+content fault is delivered by its digest issue and the mail beside it, never by an exit
+code: Sync membership skips the cohort it cannot read (`sync_membership._CONTENT_FAULT` -
+`faults.Unusable` plus a YAML error), skips a cohort with no `people.yml` and no
+`students.csv`, and does not count a `teams.csv` handle that is not on the roster; a course
+file it cannot read reconciles nothing at all and still exits 0; a `schedule.yml` that does
+not parse is one fault on the file, not a red scheduler tick; Send enrolment codes returns
+`Outcome.UNUSABLE_ROSTER`, which `reds_the_run` treats as green. A
+red X means the RUN broke - a `gh` read or write refused, a token that lost its scope, an
+unset mail transport - and the maintainer is emailed its log tail. `faults.Unusable` is the
+whole distinction: it IS a RuntimeError, so every consumer still stops for it, but a `gh`
+read that failed is not one. `gh_contents.get_file_content` draws the same line at the API -
+None only for a 404, raise otherwise - which is why an absent file is faculty's to fix and a
+rate limit is not.
 
 `Validate schedule` keeps its red X, its annotations and its commit comment on a push: those
 reach a person who is at the keyboard. `Check cohort setup` shows which digests are standing
@@ -439,10 +442,9 @@ A red X on any of the six means the run itself broke, never that a file faculty 
 - see [Config faults](#config-faults) for the line between the two, and for where each of
 these checks runs. The COURSE org's own two files are checked once per scheduler tick
 (`scheduler._preflight_course`) and again on a push to either, from Sync membership
-(`--check-course-config`). Neither pass changes an exit code - though a registry nobody can
-parse still reds the tick that follows, because the cohort listing raises on it and there is
-genuinely nothing to release. That is why the check runs BEFORE the listing: reported there,
-or not at all.
+(`--check-course-config`). Neither pass changes an exit code, and neither does the cohort
+listing that follows: a registry nobody can parse lists no cohorts and releases nothing.
+That is why the check runs BEFORE the listing - reported there, or not at all.
 
 ## The scheduler's two drivers
 

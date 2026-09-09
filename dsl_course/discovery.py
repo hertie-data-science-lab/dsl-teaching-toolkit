@@ -29,7 +29,7 @@ from .course import (
     GRADEBOOK_PREFIX,
     session_dirs,
 )
-from .faults import ConfigFault
+from .faults import ConfigFault, Unusable
 from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
 from .ghcli import gh
 from .log import log_err, log_ok
@@ -212,7 +212,9 @@ def _read_cohorts(
     `faults` collects the same two verdicts for the notifier INSTEAD of raising them: a
     caller that passes one is asking what is wrong with the file so it can tell somebody,
     not asking for a list of cohorts it is about to act on. Everything else still raises,
-    because a registry nobody can read is a registry nothing may be pruned against."""
+    because a registry nobody can read is a registry nothing may be pruned against - as
+    `faults.Unusable`, which says this is a file faculty must fix rather than a read that
+    failed, so an unattended run can skip it and stay green."""
     content = get_file_content(course_org, ".github", COHORTS_PATH)
     if not content:
         return []
@@ -225,7 +227,7 @@ def _read_cohorts(
         msg = f"malformed cohort registry in {course_org}/.github/{COHORTS_PATH}: {exc}"
         log_err(msg)
         if faults is None:
-            raise RuntimeError(msg) from exc
+            raise Unusable(msg) from exc
         faults.append(
             _registry_fault(
                 "this file is not valid YAML, so no cohort under this course is synced"
@@ -240,7 +242,7 @@ def _read_cohorts(
         )
         log_err(msg)
         if faults is None:
-            raise RuntimeError(msg)
+            raise Unusable(msg)
         faults.append(
             _registry_fault(
                 "this is not a list of cohort org names (bare, or under a `cohorts:` "

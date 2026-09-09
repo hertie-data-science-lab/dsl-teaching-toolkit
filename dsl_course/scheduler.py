@@ -102,6 +102,7 @@ from .collect import (
 )
 from .course import COURSE_ADMIN_TEAM
 from .deploy import deploy_many
+from .faults import Unusable
 from .grades import (
     cohort_sheet_faults,
     cutoff_at,
@@ -790,9 +791,9 @@ def _preflight_course(course_org: str, now: datetime, dry_run: bool) -> int:
     cohort saying the same thing.
 
     Nothing here fails the run, for the reason `_preflight_configs` does not: a file
-    faculty have to fix is a CONTENT fault and the exit code belongs to the run itself. A
-    registry nobody can parse does still red the tick that follows - the cohort listing
-    raises on it and there is genuinely nothing to release - which is why this runs BEFORE
+    faculty have to fix is a CONTENT fault and the exit code belongs to the run itself.
+    Nor does the cohort listing that follows - a registry nobody can parse lists no
+    cohorts and releases nothing (`_registered_cohorts`) - which is why this runs BEFORE
     that listing: reported here or not at all.
 
     `now` is UTC and stays UTC. The cohort zone that dates a cohort's notifications is a
@@ -1017,9 +1018,18 @@ def _parse_now(raw: str | None) -> datetime:
 def _registered_cohorts(course_org: str) -> list[str] | None:
     """The course org's registered cohorts, or None once it has said why it could not read
     them. The listing is one API read at the very top of every tick; a fault there must
-    end the run with an `[err]` line a faculty member can act on, not a raw traceback."""
+    end the run with an `[err]` line a faculty member can act on, not a raw traceback.
+
+    A registry that is MALFORMED is not a failed read: it is a hand-edited file a course
+    admin has to fix, already reported to them by `_preflight_course` (which runs first,
+    for exactly this reason), so it lists no cohorts and leaves the tick green. Anything
+    else - a rate limit, a token that lost its scope - is a read that failed, and the run
+    is owed its red X for it."""
     try:
         return discover_cohorts(course_org)
+    except Unusable as exc:
+        log_err(f"{exc} - nothing to release until it is fixed; this run stays green.")
+        return []
     except Exception as exc:
         log_err(f"could not list cohorts for {course_org}: {exc}")
         return None

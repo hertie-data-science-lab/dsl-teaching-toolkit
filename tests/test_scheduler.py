@@ -28,7 +28,7 @@ from dsl_course import (
     seed,
     source_digest,
 )
-from dsl_course.faults import ConfigFault
+from dsl_course.faults import ConfigFault, Unusable
 from dsl_course.grades import GradingSpec
 from dsl_course.schedule import (
     AssignmentEntry,
@@ -2046,6 +2046,31 @@ def test_a_cohort_listing_that_cannot_be_read_says_so_and_goes_red(
     assert "[err] could not list cohorts for Course-Org" in out.err
     assert "Traceback" not in out.err
     assert out.out == ""  # never a half-written cohort matrix on stdout
+
+
+@pytest.mark.parametrize("flag", ["--all-cohorts", "--list-cohorts"])
+def test_a_registry_nobody_can_parse_releases_nothing_and_stays_green(
+    monkeypatch, capsys, flag
+):
+    # A malformed registry is a hand-edited file a course admin has to fix, and it was the
+    # one content fault still spending an exit code: `Scheduled release is failing` in the
+    # course org and a maintainer mail every six hours, about a file the maintainer cannot
+    # edit. `_preflight_course` has already put it on the course digest and mailed the
+    # admins, so the listing lists nothing and the tick is green.
+    def boom(org):
+        raise Unusable("malformed cohort registry in Course-Org/.github")
+
+    monkeypatch.setattr(scheduler, "discover_cohorts", boom)
+    monkeypatch.setattr(scheduler, "_preflight_course", lambda *a: 0)
+    monkeypatch.setattr(sys, "argv", ["scheduler", "--course-org", "Course-Org", flag])
+    assert scheduler.main() == 0
+    out = capsys.readouterr()
+    assert "malformed cohort registry" in out.err
+    assert "this run stays green" in out.err
+    if flag == "--list-cohorts":
+        assert out.out == "[]\n"  # an empty grading matrix, never a half-written one
+    else:
+        assert "nothing to release" in out.out
 
 
 # ----------------------------------------------------- source pre-flight (unattended)

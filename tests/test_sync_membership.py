@@ -293,6 +293,50 @@ def test_the_teams_the_cohort_did_reconcile_are_not_undone_by_a_later_fault(
     assert ran == ["roster A", "teams A"]
 
 
+def test_a_registry_nobody_can_parse_reconciles_nothing_and_stays_green(
+    monkeypatch, capsys
+):
+    # The course org's own files are hand-edited too, and they used to be the exception:
+    # both reads happen BEFORE the per-cohort try, so a malformed registry reddened this
+    # cron every night - and every 15-minute scheduler tick - over a file only a course
+    # admin can fix. The course digest issue and the admin mail carry it.
+    def boom(org):
+        raise faults.Unusable(f"malformed cohort registry in {org}/.github")
+
+    monkeypatch.setattr(sync_membership, "discover_cohorts", boom)
+    _stub_course_admins(monkeypatch)
+    assert sync_membership.sync("Course", all_cohorts=True) == 0
+    err = capsys.readouterr().err
+    assert "Course has a course config file the sync cannot read" in err
+    assert "nothing under this course is reconciled or pruned" in err
+
+
+def test_a_dsl_course_yml_that_is_not_yaml_reconciles_nothing_and_stays_green(
+    monkeypatch, capsys
+):
+    # The other course file: the admin reconcile reads it for the `people:` block, and it
+    # arrives as the loader's own error rather than as `Unusable`.
+    monkeypatch.setattr(sync_membership, "discover_cohorts", lambda org: ["A"])
+    monkeypatch.setattr(
+        sync_membership.sync_faculty,
+        "sync_course_admins",
+        lambda *a, **k: (_ for _ in ()).throw(yaml.YAMLError("bad indent")),
+    )
+    assert sync_membership.sync("Course", all_cohorts=True) == 0
+    assert "has a course config file the sync cannot read" in capsys.readouterr().err
+
+
+def test_a_course_config_read_that_failed_still_reds_the_run(monkeypatch, capsys):
+    # The same line as below, drawn at the course level: a rate limit is not a file
+    # faculty have to fix, and the maintainer is the one who has to hear about it.
+    def boom(org):
+        raise RuntimeError("HTTP 502 listing the cohorts")
+
+    monkeypatch.setattr(sync_membership, "discover_cohorts", boom)
+    with pytest.raises(RuntimeError, match="HTTP 502"):
+        sync_membership.sync("Course", all_cohorts=True)
+
+
 def test_a_read_that_failed_still_reds_the_run(monkeypatch, capsys):
     # The line the whole distinction rests on. `Unusable` IS a RuntimeError, so a plain
     # one - a rate limit, a token that lost its scope - must not fall into the content

@@ -20,10 +20,13 @@ revokes access on the very next sync.
 A CONTENT fault never reds this run. A students.csv saved as a `;`-delimited export, a
 teams.csv with no header, a people.yml that is not YAML: each skips its cohort and is
 reported where the person who left it there will see it - the per-file digest issue in
-that cohort's classroom-config, and the mail beside it. The exit code is kept for the
-run's own failures (a `gh` write that was refused, a token that lost its scope), because
-this cron's red X opens `Sync membership is failing` in the course org and emails the
-maintainer, and neither of them can fix a CSV in a cohort org.
+that cohort's classroom-config, and the mail beside it. The COURSE org's own two files
+(`dsl-course.yml`, the cohort registry) are the same rule at a wider blast radius: nothing
+is reconciled under the course at all, and the course digest issue and the admin mail are
+what say so. The exit code is kept for the run's own failures (a `gh` write that was
+refused, a token that lost its scope), because this cron's red X opens `Sync membership is
+failing` in the course org and emails the maintainer, and neither of them can fix a CSV in
+a cohort org.
 
 Usage:
     python3 -m dsl_course.sync_membership --course-org hertie-dsl-demo-course-e1234
@@ -59,6 +62,24 @@ from .log import log_err, log_ok
 _CONTENT_FAULT = (Unusable, yaml.YAMLError)
 
 
+def _unreadable_course_config(course_org: str, exc: Exception) -> int:
+    """The COURSE org's own config cannot be read - the exit code for that, which is 0.
+
+    `dsl-course.yml` and the cohort registry are hand-edited like every other file here,
+    and a course admin is the only person who can fix either. Nothing is reconciled or
+    pruned while one of them stands broken, and that is reported where they are looking:
+    the course org's digest issue and the mail beside it
+    (`scheduler._preflight_course`, which a push to either file runs within the minute).
+    Written as a function so both reads answer for it in the same words."""
+    log_err(
+        f"{course_org} has a course config file the sync cannot read "
+        f"({read_error(exc)}) - nothing under this course is reconciled or pruned. The "
+        f"digest issue in {course_org}/.github names the line to fix; this run stays "
+        f"green."
+    )
+    return 0
+
+
 def sync(
     course_org: str,
     cohort_org: str | None = None,
@@ -67,7 +88,10 @@ def sync(
 ) -> int:
     # course_admins always reconciles everywhere, independent of which cohort (if
     # any) triggered this sync.
-    all_registered = discover_cohorts(course_org)
+    try:
+        all_registered = discover_cohorts(course_org)
+    except _CONTENT_FAULT as exc:
+        return _unreadable_course_config(course_org, exc)
     if not all_registered:
         # An empty registry can be legitimate for a brand-new course org, so this does not
         # fail the run - but it must be VISIBLE, not a silent green "Sync complete": only
@@ -98,9 +122,12 @@ def sync(
             f"the cohort first if this is genuinely its course org."
         )
         return 1
-    errors = sync_faculty.sync_course_admins(
-        course_org, all_registered, dry_run=dry_run
-    )
+    try:
+        errors = sync_faculty.sync_course_admins(
+            course_org, all_registered, dry_run=dry_run
+        )
+    except _CONTENT_FAULT as exc:
+        return _unreadable_course_config(course_org, exc)
 
     # Roster/teams/instructors reconcile only for whichever cohort(s) are in scope -
     # not fanned out to every other, unrelated cohort.
