@@ -13,6 +13,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -2170,6 +2171,83 @@ def test_off_a_runner_the_degraded_sandbox_says_so_out_loud(monkeypatch, capsys)
     assert "running graded code as THIS user" in capsys.readouterr().err
 
 
+# ------------------------------------- reading a graded run's results back (`_result_bytes`)
+
+
+def _wrote_the_report(
+    text: str | None = None, *, fifo: bool = False, link: Path | None = None
+):
+    """A `_run_limited` stub that leaves `text` / a FIFO / a symlink at the report path."""
+
+    def fake_run_limited(argv, *, cwd, env, timeout, **_):
+        report = Path(
+            next(arg.split("=", 1)[1] for arg in argv if arg.startswith("--junitxml="))
+        )
+        if fifo:
+            os.mkfifo(report)
+        elif link is not None:
+            report.symlink_to(link)
+        elif text is not None:
+            report.write_text(text)
+        return True
+
+    return fake_run_limited
+
+
+def test_a_fifo_where_the_report_belongs_is_no_report_not_a_hang(
+    monkeypatch, tmp_path, capsys
+):
+    # The runspace is handed to the sandbox user for the hidden-tests run, so student code
+    # the tests import can replace `report.xml` with a FIFO. `Path.exists()` is True for one
+    # and a read of it BLOCKS until someone opens the write end - which the `pkill` has just
+    # made impossible. Unguarded, the grading job sits on that read until the six-hour
+    # Actions ceiling, is cancelled before the fire-once sentinel is written, and is
+    # re-wedged on the same submission by every following tick.
+    work, tests = _sandbox(tmp_path, "def solve(x):\n    return 0\n")
+    monkeypatch.setattr(collect, "_run_limited", _wrote_the_report(fifo=True))
+    scored: list[dict | None] = []
+
+    read = threading.Thread(
+        target=lambda: scored.append(collect._run_tests(work, tests)), daemon=True
+    )
+    read.start()
+    read.join(20)
+
+    assert not read.is_alive(), "the report read blocked instead of coming back"
+    # No report, so the caller records its usual "grading failed to run" zero.
+    assert scored == [None]
+    assert "not a regular file" in capsys.readouterr().err
+
+
+def test_a_symlink_where_the_report_belongs_is_never_followed(
+    monkeypatch, tmp_path, capsys
+):
+    # The other half of the same seam: the sandbox user can aim a symlink at a file the
+    # PARENT can read - here an all-pass report outside the graded tree, which following
+    # the link would score as this submission's.
+    work, tests = _sandbox(tmp_path, "def solve(x):\n    return 0\n")
+    forged = tmp_path / "forged.xml"
+    forged.write_text(
+        '<testsuite><testcase name="test_one"/><testcase name="test_two"/></testsuite>'
+    )
+    monkeypatch.setattr(collect, "_run_limited", _wrote_the_report(link=forged))
+
+    assert collect._run_tests(work, tests) is None  # not the forged 2/2
+    assert "is a symlink" in capsys.readouterr().err
+
+
+def test_a_result_past_the_read_cap_is_not_read_at_all(tmp_path, capsys):
+    # A bounded read, so a student's multi-gigabyte file cannot grow the parent - which no
+    # rlimit caps. Looser than the ARCHIVE cap on purpose: that one is applied to the bytes
+    # AFTER they are read, and a result too big to archive is still a result.
+    report = tmp_path / "report.xml"
+    report.write_bytes(b"x" * 8192)
+
+    assert collect._result_bytes("the test report", report, cap=4096) is None
+    assert "past 4 KiB" in capsys.readouterr().err
+    assert collect._result_bytes("the test report", report) == b"x" * 8192
+
+
 class _Exits:
     """A `Popen` that has already finished successfully."""
 
@@ -2510,6 +2588,26 @@ def test_nbconvert_that_writes_nothing_is_did_not_run(monkeypatch, tmp_path):
     # OUR fault or a corrupt submission - a file it would not open, a kernel that would not
     # start - not a verdict on the work, so it is spelt differently from a timeout.
     _fake_execute(monkeypatch, None)
+    work = tmp_path / "sub"
+    work.mkdir()
+    (work / "a.ipynb").write_bytes(_notebook_bytes("pass\n"))
+
+    assert collect._check_completion(work, frozenset(), tmp_path / "r") == (
+        collect.COMPLETION_DID_NOT_RUN,
+        None,
+    )
+
+
+def test_an_executed_notebook_that_is_not_a_file_is_did_not_run(monkeypatch, tmp_path):
+    # `run_root` is handed to the sandbox user for the execution, so `executed.ipynb` is a
+    # name the notebook's own code can replace with something that is not a file - a FIFO
+    # whose read would never come back. Not a file, then not a run we can read.
+    def fifo_instead(argv, *, cwd, env, timeout, **_):
+        out = Path(argv[argv.index("--output-dir") + 1])
+        os.mkfifo(out / argv[argv.index("--output") + 1])
+        return True
+
+    monkeypatch.setattr(collect, "_run_limited", fifo_instead)
     work = tmp_path / "sub"
     work.mkdir()
     (work / "a.ipynb").write_bytes(_notebook_bytes("pass\n"))
@@ -4984,6 +5082,27 @@ def test_a_grader_copy_past_the_archive_cap_is_counted_not_committed(
 
     assert written == {}
     assert collect.GRADER_TOO_BIG in capsys.readouterr().out
+
+
+def test_an_export_that_is_not_a_file_is_not_read_as_one(monkeypatch, capsys):
+    # nbconvert writes into the tree the sandbox user owned, so the export path is another
+    # name student code can replace with a FIFO. Not a file, not an export: the fallback
+    # chain carries on to the filtered source, exactly as when nothing rendered at all.
+    _checkout(monkeypatch, {"submission.ipynb": _QUESTION_NB})
+    written = _capture_archive(monkeypatch)
+
+    def fifo_instead(argv, *, cwd, env, timeout):
+        fmt = argv[argv.index("--to") + 1]
+        os.mkfifo(Path(argv[-1]).with_suffix(f".{fmt}"))
+        return True
+
+    monkeypatch.setattr(collect, "_run_limited", fifo_instead)
+    monkeypatch.setattr(collect, "_pdf_engine_present", lambda: False)
+
+    collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", False)
+
+    assert list(written) == ["autograde/a1/alice.ipynb"]
+    assert "not a regular file" in capsys.readouterr().err
 
 
 def test_grader_pdf_is_off_unless_the_assignment_asks_for_it():

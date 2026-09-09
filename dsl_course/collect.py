@@ -92,6 +92,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import errno
 import hashlib
 import importlib.util
 import io
@@ -101,6 +102,7 @@ import resource
 import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -1980,6 +1982,55 @@ def _run_limited(
                 _sudo("chown", "-R", f"{os.getuid()}:{os.getgid()}", str(root))
 
 
+# The ceiling on ONE parent-side read of something a graded run left behind. Looser than
+# `ARCHIVE_MAX_BYTES` on purpose: that cap is an archive policy applied to the bytes AFTER
+# they are read (an executed notebook past it still has its state recorded, and an export
+# past it is still counted), so capping the read at it would turn "too big to archive" into
+# "the run produced nothing". This is the bound that keeps a student's symlink or a
+# multi-gigabyte file out of the parent's memory, and nothing else.
+RESULT_MAX_BYTES = 20 * 1024**2
+
+
+def _result_bytes(what: str, path: Path, cap: int = RESULT_MAX_BYTES) -> bytes | None:
+    """The bytes a graded run was supposed to leave at `path`, or None when there is nothing
+    there this process may read - which every caller already has an answer for ("the run
+    wrote no report", `did-not-run`, the next export format).
+
+    Everything the grader reads back comes out of a tree the SANDBOX USER owned while the
+    run was in it, so `path` is a name student code could have replaced with something that
+    is not a file at all. A FIFO is the sharp case: `Path.exists()` is True for one and a
+    read of it BLOCKS until someone opens the write end - and by the time we get here the
+    `pkill` has ended every process that ever could. The grading job would then sit on that
+    read until the six-hour Actions ceiling, be cancelled before the fire-once sentinel is
+    written, and be re-run and re-wedged on the same submission by every following tick. So:
+
+      O_NOFOLLOW  a symlink at `path` is refused rather than followed, because the sandbox
+                  user could aim one at a parent-owned file this process can read.
+      O_NONBLOCK  a FIFO OPENS instead of hanging, and is then rejected as not a file.
+      S_ISREG     only a regular file is a result; a directory, socket or device is not.
+      `cap`       a bounded read, so nothing here can be made to grow the parent."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        # Absent is the ordinary case and says nothing. A symlink is not: it is the one
+        # rejection here that somebody chose, so it is worth a line in the log.
+        if exc.errno in (errno.ELOOP, errno.EMLINK):
+            log_err(f"  ! {what} is a symlink, not a file - nothing was read from it")
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            log_err(f"  ! {what} is not a regular file - nothing was read from it")
+            return None
+        with open(fd, "rb", closefd=False) as handle:
+            data = handle.read(cap + 1)
+    finally:
+        os.close(fd)
+    if len(data) > cap:
+        log_err(f"  ! {what} is past {cap // 1024} KiB - nothing was read from it")
+        return None
+    return data
+
+
 # ------------------------------------------------------------------ the completion check
 #
 # "Restart the kernel and run all cells before you hand in" is a rule several syllabuses
@@ -2236,10 +2287,9 @@ def _check_completion(
             f"killed) - recording `{COMPLETION_TIMED_OUT}`"
         )
         return COMPLETION_TIMED_OUT, None
-    executed = out / "executed.ipynb"
-    if not executed.is_file():
+    data = _result_bytes("the executed notebook", out / "executed.ipynb")
+    if data is None:
         return COMPLETION_DID_NOT_RUN, None
-    data = executed.read_bytes()
     return _completion_state(data), data
 
 
@@ -2376,7 +2426,8 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
                 f"  ! grading timed out after {RUN_TIMEOUT}s (process group killed)"
             )
             return None
-        if not report.exists():
+        raw = _result_bytes("the test report", report)
+        if raw is None:
             if scripted:
                 log_err(
                     f"  ! the hidden tests' `{RUN_SCRIPT}` wrote no report to "
@@ -2384,7 +2435,7 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
                 )
             return None
         try:
-            return score_from_junit(report.read_text())
+            return score_from_junit(raw.decode())
         except (ET.ParseError, UnicodeDecodeError) as exc:
             # A hand-written runner is the likely author of an XML nobody can parse, and an
             # unhandled traceback here would abort the whole cohort's job rather than this
@@ -2414,7 +2465,7 @@ _PDF_ENGINES = ("xelatex", "pdflatex", "lualatex")
 GRADER_SOURCE = "filtered source"  # nothing in the runner can render this format
 GRADER_NONE = "no marked questions"  # the assignment does not use the question fences
 GRADER_TOO_BIG = "too large to archive"  # past ARCHIVE_MAX_BYTES, for the same reason
-GRADER_UNREADABLE = "not readable"  # unclonable, unpinnable, or a malformed document
+GRADER_UNREADABLE = "not readable"  # unclonable, unpinnable, or nothing readable
 GRADER_UNWRITTEN = "not archived"  # produced, but the archive write failed
 
 
@@ -2458,29 +2509,40 @@ def _pdf_engine_present() -> bool:
     return any(shutil.which(engine) for engine in _PDF_ENGINES)
 
 
-def _export_document(source: Path, env: dict) -> tuple[str, bytes]:
-    """Render `source` for a grader: `(what it came to, the bytes to archive)`.
+def _export_document(source: Path, env: dict) -> tuple[str, bytes] | None:
+    """Render `source` for a grader: `(what it came to, the bytes to archive)`, or None when
+    nothing readable came back out of the tree at all (see `_result_bytes`).
 
     PDF first, HTML second, the source itself last. nbconvert's PDF path shells out to
     LaTeX, which a bare Actions runner has not got - so the verdict is taken from whether
     the OUTPUT FILE appeared, never from the exit code, and a missing toolchain is a
     quieter answer rather than a red run. Nothing here executes the notebook: these are
     student submissions, and rendering one must not run it."""
-    if source.suffix.lower() != ".ipynb" or _grader_dep_missing("nbconvert"):
-        return GRADER_SOURCE, source.read_bytes()
-    formats = (GRADER_PDF, GRADER_HTML) if _pdf_engine_present() else (GRADER_HTML,)
-    for fmt in formats:
-        out = source.with_suffix(f".{fmt}")
-        out.unlink(missing_ok=True)
-        _run_limited(
-            [sys.executable, "-m", "jupyter", "nbconvert", "--to", fmt, str(source)],
-            cwd=str(source.parent),
-            env=env,
-            timeout=RUN_TIMEOUT,
-        )
-        if out.is_file():
-            return fmt, out.read_bytes()
-    return GRADER_SOURCE, source.read_bytes()
+    if source.suffix.lower() == ".ipynb" and not _grader_dep_missing("nbconvert"):
+        formats = (GRADER_PDF, GRADER_HTML) if _pdf_engine_present() else (GRADER_HTML,)
+        for fmt in formats:
+            out = source.with_suffix(f".{fmt}")
+            out.unlink(missing_ok=True)
+            _run_limited(
+                [
+                    sys.executable,
+                    "-m",
+                    "jupyter",
+                    "nbconvert",
+                    "--to",
+                    fmt,
+                    str(source),
+                ],
+                cwd=str(source.parent),
+                env=env,
+                timeout=RUN_TIMEOUT,
+            )
+            # The export is written by the sandbox user, into the tree it owned: a name
+            # that is not a regular file is not an export, and the next format tries.
+            if (rendered := _result_bytes(f"the {fmt} export", out)) is not None:
+                return fmt, rendered
+    own_source = _result_bytes("the submission's own source", source)
+    return None if own_source is None else (GRADER_SOURCE, own_source)
 
 
 def _grader_document_for(
@@ -2510,7 +2572,10 @@ def _grader_document_for(
             return GRADER_NONE
         source, filtered = picked
         source.write_text(filtered.text)
-        verdict, content = _export_document(source, env)
+        exported = _export_document(source, env)
+        if exported is None:
+            return GRADER_UNREADABLE
+        verdict, content = exported
         if len(content) > ARCHIVE_MAX_BYTES:
             # The same cap the executed notebook gets, for the same reason: an HTML export
             # of a plot-heavy notebook is base64 PNG all the way down, and one per student

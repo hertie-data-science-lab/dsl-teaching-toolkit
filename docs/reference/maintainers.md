@@ -163,7 +163,12 @@ spawned. What it guarantees, and what it does not:
 - **The graded trees are handed over and taken back.** The checkout and the runspace are
   `chown`ed to the sandbox user before the run and back afterwards (widened to their
   `mkdtemp` roots - a 0700 root would otherwise leave the checkout unreachable), and
-  `HOME`/`TMPDIR` are re-pointed into them.
+  `HOME`/`TMPDIR` are re-pointed into them. What the grader reads back out of them - the
+  JUnit report, the executed notebook, the rendered copy - has to be a REGULAR file, read
+  under a size cap with `O_NOFOLLOW`/`O_NONBLOCK` (`collect._result_bytes`); anything else
+  counts as "the run produced no result", because a FIFO at the report path would otherwise
+  block that read until the six-hour job ceiling and a symlink would score whatever it
+  pointed at.
 - **Best-effort, and only that: the network.** The proxy variables point at a dead port, so
   every well-behaved client fails - but there is no network namespace here, and a
   determined socket still opens. docs/10 tells faculty to commit the data rather than rely
