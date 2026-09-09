@@ -10,13 +10,13 @@ The schedule file can be updated throughout the semester.
 - A bootstrapped [cohort org](04-new-cohort-org.md) 
 - Source material repos to be released (staged in course-org, released to cohort-org)
 
-# Write your term's plan
+## Write your term's plan
 
 > For a fully worked example schedule.yml (a full term) see [here](../example-course/cohort-org/schedule.yml).
 
 > An example of the automatically generated schedule on the deployed `.github.io` site can also be seen live [here](https://hertie-dsl-demo-f2026.github.io/schedule/). 
 
-Four blocks carry the whole term, and each is defined by what it **does**:
+Three blocks carry the whole term, and each is defined by what it **does**:
 
 - **`releases:`** - the entries that **deploy**: file(s) copied from course org staging -> the cohort org, where students can access them.
 - **`assignments:`** - each assignment's whole lifecycle: hand-out, due date, grading.
@@ -40,10 +40,7 @@ Each entry is a label you choose (`lecture-1`, `lab-1`, `bonus-dataset`) - yours
 | `show_on_site` | no | `true` | `false` releases **silently**: the deploys ship exactly as written, but the entry raises no row of its own and never sets an existing row's date or name (it still contributes where its files will land). For content that belongs to a session without being an occasion of its own; see [Silent releases](#silent-releases) |
 
 
-NB: **the calendar event is not the release.** 
-  - A release entry's `event_datetime:` is when the session *happens* - that is what the cohort's `.github.io` site's deployed schedule shows, and it is the default fire time for the entry's deploys. 
-  - However, a deploy can also carry its own separate `deploy_datetime:` to ship its files earlier (or later) than the class they belong to. 
-  - If nothing needs to ship at all, the row belongs under `events:`, not here.
+NB: **the calendar event is not the release.** If nothing needs to ship at all, the row belongs under `events:`, not here.
 
 ### Silent releases
 
@@ -62,7 +59,7 @@ Most weeks a session's readings ride the lecture's own entry, so they ship on it
 
 The files still reach students on the 15th, and still appear on session 4's row once released - what is withheld is the entry's claim on the schedule, not its content. The same applies to any release that is not an occasion: an errata drop, a dataset added mid-term.
 
-What is *not* withheld is where the files are going: session 4's row still names `materials/readings/04_week-4` among the paths its materials will appear at, and is flagged as having a reading list pending, so an unreleased session can say readings are coming. Only the date and the name are silenced.
+What is *not* withheld is where the files are going: session 4's row still names `materials/readings/04_week-4` among the paths its materials will appear at, and is flagged as having a reading list pending, so an unreleased session can say readings are coming.
 
 A silenced entry is also left out of the **generated syllabus** (Generate syllabus reads the same plan), which is usually what you want for a readings drop that belongs to a session already listed there.
 
@@ -80,7 +77,7 @@ Nested under `deploy:` we have the following:
 
 NB: `cohort_dest_repo` is yours to choose - one shared `materials` repo, or one repo for lectures, another for labs etc; any non-existent repo and/or directory structure specified between `cohort_dest_repo` and `cohort_dest_path` is created on release if non-exist.
 
-NB: `course_source_path: /` (or `.`) releases the **whole repo**. Two root entries are left behind: `.github` (the faculty Release workflows) and `MAINTAINING.md` (your operating notes, which the scaffold marks as never released). Nested copies - a `labs/.github/` of your own - travel normally. The workflow uses the identical spelling, so this reads straight across from `docs/08`.
+NB: `course_source_path: /` (or `.`) releases the **whole repo**. Two root entries are left behind: `.github` (the faculty Release workflows) and `MAINTAINING.md` (your operating notes, which the scaffold marks as never released). Nested copies - a `labs/.github/` of your own - travel normally.
 
 NB: a root `README.md` or `SYLLABUS.md` still carrying the scaffold's placeholder is **withheld** from the release, with a warning on the run summary and everything else shipped - see [08 -> The unwritten root stubs](08-release-materials-to-cohort.md#the-unwritten-root-stubs-are-withheld-until-you-write-them).
 
@@ -101,9 +98,7 @@ releases:
       - course_source_repo: course-materials-f2026
         course_source_path: labs/02_intro
 ```
-Each item under `deploy:` is one file to be deployed. Paths are **relative to their repo**: 
-- `course_source_path` inside `course_source_repo`
-- `cohort_dest_path` inside `cohort_dest_repo`. 
+Each item under `deploy:` is one copy, and every path is relative to its own repo.
 
 Spell fields out only where a default doesn't fit - a different
 destination repo/path, or an early ship time:
@@ -172,12 +167,6 @@ Unlike a `releases:` label, **an assignment's slug is shown to students**: it na
 | `course_source_repo` | **yes** | - | the course-org repo this hands out from - one repo per student (or team) is generated from it |
 | `cohort_dest_repo` | no | the slug | what the cohort-side repos are called: `<name>-<handle>` per student (or `<name>-<team>`), and the frozen cohort template `<name>` |
 
-**Three defaults worth knowing, because none of them is written in the file:**
-
-- **grading** - `due_datetime` plus the template's `late_window_days`, i.e. the END of the late window. With no window declared, the due date itself.
-- **solution** - *never*. Omit `solution_datetime:` and the model answer only goes out when someone ticks `include_solution` on **Release assignment**.
-- **cohort repo name** - the slug, which is the course repo name minus its term tag unless you set `cohort_dest_repo:` (`assignment-1-f2026` -> `assignment-1`).
-
 **This file is timing only.** `type:` and `max_team_size:` used to be accepted here and are not any more: what an assignment IS - its shape, its team cap, how it is handed in, its question maxima, its late policy, whether it is autograded - lives in that assignment's own `grading_config.yml`, on the course template's `solution` branch (see [Add an assignment](03-add-assignment-to-course.md)). Written here they are flagged by **Validate schedule**, which names the file they moved to, and ignored.
 
 Adding or renaming an assignment here also wakes **Sync membership**, which rewrites `classroom-config/assignments.lock.yml` - the generated mirror the **Join team** form reads to decide whether a team may form for a slug and how big it may be. So a new group assignment is joinable within a minute or so of the push, provided its template already declares `team_formation: self_select`.
@@ -234,8 +223,6 @@ events:
 ---
 Full schema, field by field, see [here](DEPLOYMENT-CHECKLIST.md#scheduleyml).
 
- For a fully worked example schedule.yml (a full term) see [here](../example-course/cohort-org/schedule.yml).
-
 ---
 
 
@@ -268,7 +255,7 @@ Everything else is **cumulative**: material deploys, assignment handouts, the si
 
 **It checks itself.** Every commit touching `schedule.yml` runs **Validate schedule** in `classroom-config`. A commit that parses clean gets a green tick; one the scheduler cannot fully read gets a **red X** and a run summary naming what it dropped. That run emails nobody: the fault joins the standing *schedule.yml* [digest issue](#the-digest-issue) in `classroom-config` instead, on the next tick - within the minute, since this push fires one - and that is what emails whoever wrote the line.
 
-> The run happens *after* the push, not before it: GitHub Actions cannot gate a commit, and branch protection needs a paid plan on a private repo. So the red X and the digest issue are how a fault reaches you, rather than the commit being refused.
+> The run happens *after* the push: Actions cannot gate a commit, so the red X and the digest issue are how a fault reaches you, rather than the commit being refused.
 
 The run summary shows what the parser *understood*, not just what it rejected - counts one short of what you wrote is how you catch a mistake that is valid YAML:
 
@@ -304,7 +291,7 @@ So the sources are checked against the course org in two places: **Validate sche
 
 **And a push gets an immediate reply.** Committing a `schedule.yml` that leaves a release inside 24 hours with nothing staged gets a comment on that commit, naming each line and its deadline. Distant faults get nothing - the digest issue holds those.
 
-**No rung reds the scheduled run.** A source nobody has written is content only faculty can write, so it is delivered where faculty are looking rather than spent on an exit code. A red X on **Scheduled release** keeps the one meaning it has everywhere else - the run itself broke.
+**No rung reds the scheduled run.** A red X on **Scheduled release** keeps the one meaning it has everywhere else - the run itself broke.
 
 **Validate schedule never goes red for a missing source either.** Its red X means one thing - an entry you wrote is not in your plan - and it clears when the file next parses cleanly. A missing source is not a broken file and doesn't clear when the file is edited, so it gets its own channel: annotations on the commit, and the digest issue below.
 
@@ -316,7 +303,7 @@ One issue per cohort, titled **"schedule.yml: planned releases cite sources not 
 - it **comments** only when something crosses a rung - a fault appears at warning, escalates, or clears - and `cc`s the same people the email is addressed to.
 - it **closes itself** when nothing in the file is left to fix.
 
-Appears, escalates, clears - three notifications over the life of a problem, however many ticks happen in between. A term written months ahead sits entirely at *advisory* and opens no issue at all.
+A term written months ahead sits entirely at *advisory* and opens no issue at all.
 
 Don't close it by hand. Closing changes nothing in the file, and the next tick reopens it; it does remember what it had already told you, so reopening does not email everybody again.
 
@@ -379,8 +366,6 @@ Each assignment's **cutoff** is `grading_datetime` if you set it, else `due_date
 `solution_datetime` is separate from all of the above, and has no default - a solution released the moment submissions close rewards anyone who pushes late, so you name the moment or it never fires. At that datetime the scheduled run pushes the template's `solution/` folder into every student/team repo, which is exactly what **Release assignment** with `include_solution` does by hand. Both are idempotent, so doing one after the other changes nothing.
 
 It needs `handout_datetime` set: the schedule can only push a solution into repos the schedule provisioned. If you hand out manually, release the solution manually too.
-
-Both ways of getting the two dates wrong are **refused at validate time**, not honoured: a `solution_datetime` with no `handout_datetime` (nothing to push into), and one at or before the handout - which would ship the answers with the questions on the first release, and no later run could take that back. In either case the solution simply waits for a human, and `--validate` names the entry.
 
 ---
 
