@@ -40,7 +40,7 @@ Accompanies the e2e [worked example](../example-course/).
 Live example: [`example-course/course-org/dsl-course.yml`](../example-course/course-org/dsl-course.yml).
 
 - Course org's `.github` repo - the course's identity card. 
-- Bootstrap writes it; you can optionally edit it; edits here are propagated to the course orgs' `.github` (which is mostly a series of pointers to this file).
+- Bootstrap writes it; edit it as needed.
 
 ```yaml
 org: hertie-dsl-demo-course-e1234
@@ -103,7 +103,10 @@ Add any other column you want (a registrar id, a lecture section, notes) - the e
 Live example: [`example-course/cohort-org/people.yml`](../example-course/cohort-org/people.yml).
 
 `classroom-config/people.yml` - this cohort's teaching team. Grants the cohort's `instructors`
-team necessary access permissions at both the course- and cohort-org levels. This includes the ability to push content from the course-org to that year's content repos (`instructors-<tag>`), and supplies the cohort site's cards. `github_handle` is the only required field, the rest are optional.
+team necessary access permissions at both the course- and cohort-org levels, including push
+from the course org into that year's content repos (`instructors-<tag>`), and supplies the
+cohort site's cards. `github_handle` and `email` are required on every instructor and TA
+entry; the rest are optional.
 
 ```yaml
 people:
@@ -146,7 +149,7 @@ cron (~24h)** - run **Sync membership** by hand if you need it sooner. Runbook:
 
 Live example: [`example-course/cohort-org/teams.csv`](../example-course/cohort-org/teams.csv).
 
-`classroom-config/teams.csv` - group membership, per assignment. This can be popualted in 2 ways:
+`classroom-config/teams.csv` - group membership, per assignment. It is populated in 2 ways:
 1. Students self-select via the `welcome` **Join team** issue - only where the assignment declares `team_formation: self_select`, and only up to its `max_team_size` (default 5); both are read from the generated `classroom-config/assignments.lock.yml`,
 2. you edit it directly;
 either way a push materialises a GitHub team per group, and releasing a group assignment grants each team one shared repo.
@@ -247,16 +250,14 @@ repos, never orgs. Every release is idempotent - re-runs are no-ops.
 | `deploy` | copy a source path → a cohort repo | `course_source_repo`, `course_source_path`, `cohort_dest_repo` (default `materials`), `cohort_dest_path` (default: mirror). A list, or a single mapping for one copy |
 | `assignment` | one private repo per onboarded student - or per team, when the template's `grading_config.yml` says `type: group` | the template repo name |
 
-(Grading takes no action here - each assignment is frozen at its `grading_datetime`
-under `assignments:`, and autograded there only if its template says `autograde: true`.)
-
 Per entry: `event_datetime` (required - when the thing happens; the site schedule shows it,
 and it is the default fire time), `title` and `description` (optional - the session's name,
 shown beside its ordinal, and a sentence about it on the Lectures tab), and the `deploy`
-actions. A deploy item may carry its own
-`deploy_datetime` to ship earlier or later than the calendar event.
-Assignments take no entry here: their whole lifecycle (handout_datetime/due_datetime/grading_datetime) lives under
-`assignments:` below (an `assignment:` action is also supported, for handing out by hand).
+actions. A deploy item may carry its own `deploy_datetime` to ship earlier or later than
+the calendar event.
+An assignment's whole lifecycle (handout_datetime/due_datetime/grading_datetime), grading
+included, lives under `assignments:` below - an `assignment:` action is also supported
+here, for handing out by hand.
 Anything that ships nothing - an exam, a clinic, a guest lecture - goes under `events:`.
 Uncertain dates:
 `tbc: true` beside a date = provisional, shown "(TBC)" but fires; `event_datetime: tbc`
