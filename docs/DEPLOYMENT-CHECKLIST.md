@@ -111,7 +111,8 @@ entry; the rest are optional.
 ```yaml
 people:
   instructors:
-    - github_handle: "janedoe"     # required - everything else is optional
+    - github_handle: "janedoe"     # required, with `email` - everything else is optional
+      email: "jane@example.org"    # required, and private
       name: "Prof. Jane Doe"       # site card fields
       title: "Professor of ..."
       photo: "/_images/pp/jane.jpg"  # see "Staff photos" below
@@ -120,6 +121,7 @@ people:
       end: "2027-01-31"
   teaching_assistants:
     - github_handle: "anOther"
+      email: "another@example.org"
 ```
 
 The **course** org's `dsl-course.yml` accepts the same `instructors`/`teaching_assistants`
