@@ -629,7 +629,8 @@ def pipeline():
 
     Teardown is not optional and not conditional: it runs whether the walk finished or
     died halfway, and it asserts that the estate came back byte for byte - the repos, their
-    visibility and topics, and every blob in classroom-config."""
+    visibility and topics, every blob in classroom-config, and the org-level workflow set,
+    which the run's own template rewrote and cleanup re-renders."""
     run_id = cleanup.new_run_id()
     _preflight(run_id)
     before = {org: estate.fingerprint(org) for org in (COURSE_ORG, COHORT_ORG)}

@@ -9,6 +9,10 @@ inserted, and only the snapshot / autograde / grading-sheet artefacts named afte
 run's slug. Anything else that looks like e2e leavings is REPORTED and left alone: a
 cleanup that guesses is how a demo org loses a real repo.
 
+Then it re-renders the course org's org-level workflows (`_refresh_workflows`), because
+deleting the run's template leaves four of the buttons still offering it in their
+dropdowns - which is the state the next run's preflight refuses to start against.
+
 It refuses to start unless `DSL_ORG_ALLOWLIST` is set, because deletion runs with a
 maintainer token that carries `delete_repo` - the bot never holds one, which is also why
 cleanup is a command here and never a seeded workflow.
@@ -30,10 +34,11 @@ from dsl_course import (
     grades,
     repos,
     schedule,
+    seed,
 )
 from dsl_course.log import log, log_err, log_ok, log_person, log_step
 
-from . import allowlist, schedule_edit
+from . import allowlist, estate, schedule_edit
 
 # The number the harness hands out under - far past any real assignment, so a real
 # `assignment-1` can never fall inside this run's namespace.
@@ -157,6 +162,59 @@ def _is_artefact(path: str, run_id: str) -> bool:
     return rest == mine or rest.startswith((f"{mine}/", f"{mine}."))
 
 
+def _refresh_workflows(org: str, run_id: str, dry_run: bool) -> int:
+    """Re-render a course org's org-level workflows, the way Refresh actions does.
+
+    Deleting the repos is not enough. Four of the buttons carry an assignment dropdown
+    rendered from the course org's own repo listing (`release-assignment.yml`,
+    `collect-submissions.yml`, `patch-assignment.yml`, `derive-student-version.yml`), so
+    every run rewrites them the moment it creates its template - and the deletion above
+    takes the template away while leaving the four still offering it. The org is then a
+    state no refresh has produced, and it is the NEXT run's preflight that pays for it:
+    `estate.workflow_drift` refuses with "run Refresh actions" before anything is
+    dispatched. So the teardown presses that button itself, in process, through the same
+    writer the workflow runs (`seed.seed_github_workflows`).
+
+    A no-op in a cohort org, which holds no org-level workflows, and a no-op in a course
+    org already converged - `put_files` drops a path whose sha already matches, so there
+    is no commit at all when nothing moved. That is what makes this safe to run by hand.
+
+    Returns the number of things left undone."""
+    listing = discovery.list_org_repos(org)
+    if discovery.org_tier(listing) != "course":
+        return 0
+    still_here = [row["name"] for row in listing if is_run_repo(row["name"], run_id)]
+    if still_here:
+        # Rendering from a listing that still holds this run's template would write the
+        # assignment straight back into the dropdowns. Either a delete failed (counted
+        # above) or the org listing has not caught up with one yet; both are answered by
+        # re-running cleanup.
+        log_err(
+            f"{org} still lists {len(still_here)} of this run's repo(s) - NOT re-rendering "
+            "its workflows; re-run cleanup"
+        )
+        return 1
+    try:
+        central_ref = discovery.central_ref_for(org)
+        rendered = seed.github_workflow_files(org, central_ref)
+        if dry_run:
+            drift = estate.workflow_drift(org, rendered)
+            log(f"  {org}: {len(drift)} workflow(s) to re-render")
+            return 0
+        failures = seed.seed_github_workflows(org, central_ref)
+        drift = estate.workflow_drift(org, rendered)
+    except RuntimeError as exc:
+        log_err(f"could not re-render {org}'s workflows: {exc}")
+        return 1
+    if drift:
+        log_err(
+            f"{org} still runs {', '.join(drift)}, which is not what this checkout "
+            "renders - the next run's preflight will refuse"
+        )
+        failures += 1
+    return failures
+
+
 def file_bytes(org: str, repo: str, path: str) -> bytes | None:
     """A file's content BYTE FOR BYTE, or None if it is absent.
 
@@ -221,6 +279,9 @@ def cleanup(
         log_step(f"cleanup {slug(run_id)} in {org}")
         failures += _clean_repos(org, run_id, dry_run, left)
         failures += _clean_config(org, run_id, dry_run)
+        # Last in the org, because it renders from the listing the deletions above leave
+        # behind: the dropdowns have to be rebuilt without this run's assignment in them.
+        failures += _refresh_workflows(org, run_id, dry_run)
     if failures:
         log_err(f"cleanup left {failures} thing(s) undone - re-run it")
     return 1 if failures else 0
