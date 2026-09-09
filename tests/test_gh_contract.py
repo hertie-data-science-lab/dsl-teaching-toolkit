@@ -17,7 +17,7 @@ import subprocess
 import pytest
 
 from dsl_course import bootstrap_course as bc
-from dsl_course import seed
+from dsl_course import pulls, seed
 
 needs_gh = pytest.mark.skipif(shutil.which("gh") is None, reason="gh CLI not installed")
 
@@ -91,3 +91,66 @@ def test_the_help_probe_would_catch_an_invented_flag():
     published = _published_flags("secret", "set")
     assert "--body" in published  # the real flag we deliberately omit, to use stdin
     assert "--body-file" not in published  # the invented one that shipped green
+
+
+def _record_pr_calls(monkeypatch) -> list[tuple[str, ...]]:
+    """Every `gh pr ...` argv `pulls` builds, captured from the real call sites - the
+    listing, the create, the review request and the body refresh are four different
+    verbs, and each publishes its own flags."""
+    calls: list[tuple[str, ...]] = []
+
+    def fake_gh(*args: str, **kwargs) -> tuple[int, str]:
+        calls.append(args)
+        return (0, "https://github.com/Cohort/materials/pull/7\n")
+
+    def listing(rows):
+        def fake_json(*args: str, **kwargs):
+            calls.append(args)
+            return rows
+
+        return fake_json
+
+    monkeypatch.setattr(pulls, "gh", fake_gh)
+    # No PR yet: the create path, with the review request that follows it.
+    monkeypatch.setattr(pulls, "gh_json", listing([]))
+    pulls.upsert_pr(
+        "Cohort/materials",
+        head="upstream",
+        base="main",
+        title="Release held for review",
+        body="materials/week02",
+        reviewer="Cohort/instructors",
+    )
+    # One already open: the body refresh.
+    monkeypatch.setattr(
+        pulls,
+        "gh_json",
+        listing([{"number": 7, "url": "u", "headRefName": "upstream"}]),
+    )
+    pulls.upsert_pr(
+        "Cohort/materials",
+        head="upstream",
+        base="main",
+        title="Release held for review",
+        body="materials/week02",
+        refresh_body=True,
+    )
+    assert {a[1] for a in calls} == {"list", "create", "edit"}, (
+        f"the `gh pr` harness has drifted - captured {calls}"
+    )
+    return calls
+
+
+@needs_gh
+def test_every_pr_flag_the_code_passes_really_exists(monkeypatch):
+    # A PR the release opens is the only channel a held-back merge has to a human, so an
+    # invented flag here is a conflict nobody is told about.
+    for args in _record_pr_calls(monkeypatch):
+        published = _published_flags("pr", args[1])
+        for token in args:
+            if token.startswith("--"):
+                flag = token.split("=", 1)[0]
+                assert flag in published, (
+                    f"`gh pr {args[1]} {flag}` is not a real flag - gh publishes "
+                    f"{sorted(published)}"
+                )
