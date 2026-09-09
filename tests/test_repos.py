@@ -21,23 +21,56 @@ def test_repo_is_archived_reads_the_flag_and_assumes_live_when_it_cannot(monkeyp
     assert repos.repo_is_archived("Cohort-f2026", "classroom-config") is False
 
 
-def test_allow_forking_patches_the_repo_and_a_refusal_is_a_warning(monkeypatch, capsys):
-    # `create_repo`'s POST takes no forking field, so this is a PATCH of its own, run on
-    # every release. A refusal must not red the release that carries it: whether the
-    # setting exists at all depends on the org's plan.
-    calls = []
-    monkeypatch.setattr(repos, "gh", lambda *a, **k: calls.append(a) or (0, ""))
+def _forking(monkeypatch, answer: str | tuple[int, str]):
+    """Answer the repo GET with `answer` and record every call. Returns the PATCHes."""
+    calls: list[tuple[str, ...]] = []
+    read = answer if isinstance(answer, tuple) else (0, answer)
+
+    def fake_gh(*args, **k):
+        calls.append(args)
+        return (0, "") if "--method" in args else read
+
+    monkeypatch.setattr(repos, "gh", fake_gh)
+    return calls
+
+
+def test_allow_forking_patches_a_private_repo_that_is_not_forkable_yet(monkeypatch):
+    # `create_repo`'s POST takes no forking field, so this is a PATCH of its own.
+    calls = _forking(monkeypatch, '{"private": true, "allow_forking": false}')
     assert repos.allow_forking("Cohort-f2026", "materials") is True
-    assert calls == [
-        (
-            "api",
-            "--method",
-            "PATCH",
-            "repos/Cohort-f2026/materials",
-            "--field",
-            "allow_forking=true",
-        )
-    ]
+    assert calls[-1] == (
+        "api",
+        "--method",
+        "PATCH",
+        "repos/Cohort-f2026/materials",
+        "--field",
+        "allow_forking=true",
+    )
+
+
+def test_allow_forking_writes_nothing_when_there_is_nothing_to_change(monkeypatch):
+    # The release runs every quarter of an hour, so an unconditional PATCH is 96 writes a
+    # day per dest for a flag that changes once - and on a PUBLIC repo GitHub refuses the
+    # field outright (422 "only be changed on org-owned private repositories"), which the
+    # demo cohort logged as a warning on every single tick. Both are already forkable.
+    calls = _forking(monkeypatch, '{"private": false, "allow_forking": false}')
+    assert repos.allow_forking("Cohort-f2026", "public-materials") is True
+    calls += _forking(monkeypatch, '{"private": true, "allow_forking": true}')
+    assert repos.allow_forking("Cohort-f2026", "already-forkable") is True
+    assert [c for c in calls if "--method" in c] == []
+
+
+def test_allow_forking_still_patches_a_repo_it_could_not_read(monkeypatch):
+    # Fail-open, like every other read here: a 502 on the GET must not silently stop the
+    # setting from converging.
+    calls = _forking(monkeypatch, (1, "gh: HTTP 502 - bad gateway"))
+    assert repos.allow_forking("Cohort-f2026", "materials") is True
+    assert [c for c in calls if "--method" in c]
+
+
+def test_a_refused_forking_patch_is_a_warning_not_an_error(monkeypatch, capsys):
+    # Whether the setting exists at all depends on the org's plan, and reddening a
+    # quarter-hourly release for a button is how a real failure stops being noticed.
     monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 403"))
     assert repos.allow_forking("Cohort-f2026", "materials") is False
     out = capsys.readouterr().out
