@@ -314,7 +314,8 @@ releases:
 ```
 
 **Dates** - the website schedule and the grading deadlines. Absent values are synthesised
-(semester from the tag, lectures weekly, assignments fortnightly, exams weeks 8 + 15).
+(semester from the tag, lectures weekly, assignments fortnightly, a MidTerm Exam and a
+Final Exam).
 
 Per assignment (`assignments.<slug>`); `due_datetime` and `course_source_repo` are required,
 so a minimal entry is a slug, a date and the repo it hands out from:
