@@ -99,6 +99,21 @@ def test_a_marker_written_before_the_moment_was_recorded_still_reads():
     assert cd._first_seen({"a.f": "urgent"}) == {}
 
 
+def test_a_since_stamp_nobody_can_read_is_ignored_not_compared(monkeypatch):
+    # A marker somebody edited by hand: one stamp reads, the other does not. The
+    # unreadable one used to be sorted last as a NAIVE `datetime.max`, and comparing that
+    # with the aware stamp beside it raised `TypeError` inside the tick - swallowed, so
+    # the digest silently stopped updating until the marker was fixed by hand.
+    a, b = _fault(), _fault(where="row 9")
+    seen = {a.key: (NOW - timedelta(days=2)).isoformat(), b.key: "last tuesday"}
+
+    assert cd.oldest_seen([a, b], seen) == NOW - timedelta(days=2)
+    assert cd.oldest_seen([b], seen) is None  # nothing readable: no clock at all
+    assert "### unfixed for 2 days" in cd.render_body(
+        ROSTER, [a, b], NOW, COHORT, since=seen
+    )
+
+
 # ------------------------------------------------------------------------- the clock
 
 

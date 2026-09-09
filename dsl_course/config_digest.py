@@ -608,8 +608,12 @@ def oldest_seen(faults: list[SourceFault], seen: dict[str, str]) -> datetime | N
     """When the oldest of these faults first turned up, or None when none of them says.
 
     THE issue's clock: the reminders count from it, and so does the age heading, so both
-    are asking one question of one list."""
-    return min((_moment(seen.get(f.key)) for f in faults), default=None, key=_sortable)
+    are asking one question of one list. A timestamp this module cannot read is left OUT
+    rather than sorted last: a hand-edited marker used to pit a naive sentinel against the
+    aware stamps beside it, and the `TypeError` stopped the digest updating at all until
+    somebody fixed the marker by hand."""
+    known = [m for m in (_moment(seen.get(f.key)) for f in faults) if m]
+    return min(known, default=None)
 
 
 def _moment(iso: str | None) -> datetime | None:
@@ -620,12 +624,6 @@ def _moment(iso: str | None) -> datetime | None:
         return datetime.fromisoformat(iso) if iso else None
     except ValueError:
         return None
-
-
-def _sortable(when: datetime | None) -> datetime:
-    """Sort key that puts "not known" last, so one unreadable timestamp cannot make the
-    whole issue look older (or newer) than it is."""
-    return when or datetime.max.replace(tzinfo=None)
 
 
 def _seen_line(iso: str | None, fault: SourceFault) -> str:
