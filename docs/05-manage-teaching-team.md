@@ -47,7 +47,7 @@ Never edit the GitHub teams directly; the file is the auditable record.
          email: "another@example.org"
    ```
 
-   `email` is required and private: it is where this cohort's notifications go (a schedule fault, a source that has not been staged), and nothing publishes it. Add `show_email: true` to an entry to show that address on the cohort site's staff card. A `course_admins` entry needs no `email`.
+   `email` is required and private: it is where this cohort's notifications go (a schedule fault, a source that has not been staged), and nothing publishes it. Add `show_email: true` to an entry to show that address on the cohort site's staff card. A `course_admins` entry needs no `email`. Leave every entry without one and the cohort's notifications go to the course admins instead, and to the toolkit maintainer if the course names none.
 
    Or **course org** → `.github` → `dsl-course.yml` (course-wide admin):
 

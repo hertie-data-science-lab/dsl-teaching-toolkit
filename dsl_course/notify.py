@@ -17,7 +17,9 @@ Two mails, each about a fault whose own channel reaches nobody in time:
 WHO IS TOLD is decided by git, not by a mailing list (`route`): the planner of the
 schedule.yml line and the last committer of the materials repo it names are the two people
 who can act, and telling the whole teaching team about every entry is how a notification
-stops being read. The whole team is the FALLBACK, for a line nobody can be named for.
+stops being read. The whole team is the FALLBACK, for a line nobody can be named for, and
+below it the course admins and then the maintainer (`_fallback_to`), for a cohort whose
+people.yml can address nobody at all.
 
 A fault in the COURSE org's own config is the one exception (`route_course`). Its
 addressees are the course admins, out of an org SECRET rather than out of the public file
@@ -241,6 +243,28 @@ def _bot() -> str:
         return ""
 
 
+def _fallback_to() -> tuple[str, ...]:
+    """The To line for a cohort fault its own people.yml can address nobody for: the course
+    ADMINS, then the MAINTAINER, then nobody.
+
+    A cohort with no `email:` anywhere is not a cohort with nothing to hear: its releases
+    still ship nothing, and its digest issue is still open. Left to the @mention alone the
+    fault stood for two days before the 48h rung copied the maintainer - so it falls one
+    level up instead, to the admins whose course this cohort is, and past them to the
+    maintainer, who is the last person who can act on an org that declares neither.
+
+    A count and which fallback it was, never an address: this runs in a PUBLIC repo."""
+    admins = _addresses(mailer.course_admin_addresses())
+    if admins:
+        log(f"  [fallback] no cohort address - mailing {len(admins)} course admin(s)")
+        return admins
+    maintainer = mailer.maintainer_address()
+    if maintainer:
+        log("  [fallback] no cohort address - mailing the maintainer")
+        return (maintainer,)
+    return ()
+
+
 def route(
     cohort_org: str, course_org: str, faults: list[SourceFault], now: datetime
 ) -> Routing:
@@ -253,7 +277,11 @@ def route(
 
     Only faults at or above the digest's own threshold are routed - below it nothing is
     said on either channel, so nothing needs addressing and a quiet tick costs no API
-    calls at all."""
+    calls at all.
+
+    A cohort whose people.yml holds no address at all falls through to `_fallback_to` -
+    the course admins, then the maintainer - so the To line is empty only for a course
+    that declares neither."""
     loud = [f for f in faults if f.severity(now) >= NOTIFY_FROM]
     if not loud:
         return Routing()
@@ -307,6 +335,13 @@ def route(
         log(f"  [skip] {len(unaddressable)} addressee(s) without email in people.yml")
         for handle in sorted(unaddressable):
             log_person(f"    no people.yml address: {handle}")
+    if not any(r.to for r in routed.values()):
+        # people.yml holds no address at all, so `everyone` is empty and so is every group
+        # git could name from it - all of this tick's faults or none. One fallback set for
+        # the lot, and the @mention (`mention`) is untouched: who wrote the line does not
+        # change because nobody in the cohort can be written to.
+        fallback = _fallback_to()
+        routed = {key: Routed(fallback, ()) for key in routed}
     return Routing(routed, sorted(dict.fromkeys(mention)))
 
 
@@ -574,7 +609,15 @@ def _deliver(
             continue
         subject, body = message(routed, keys)
         copies = list(routed.cc)
-        if maintainer and copy_maintainer(keys):
+        # Not twice: a cohort no address of its own could be found for is addressed TO the
+        # maintainer (`_fallback_to`), and the rung that copies them must not then put the
+        # same mailbox on the Cc line - the same mailbox written two ways included.
+        addressed_to = {a.lower() for a in routed.to}
+        if (
+            maintainer
+            and copy_maintainer(keys)
+            and maintainer.lower() not in addressed_to
+        ):
             copies.append(maintainer)
         if dry_run:
             log(f"  [dry-run] would mail {len(routed.to)} recipient(s): {subject}")

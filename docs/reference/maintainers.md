@@ -395,9 +395,12 @@ half a dozen assignments in one afternoon.
 
 **Recipients** are the committer of the faulty line, by blame of the file at that line (for a
 CSV, the actor who pushed it, skipping the bot). Any addressee who is a TA puts the
-instructors on Cc; nobody identifiable falls back to every instructor. The course-level
-digest goes to `DSL_COURSE_ADMIN_EMAILS` (see [Secrets an org carries](#secrets-an-org-carries))
-with the maintainer copied from the first mail, and falls back to `cc @<course>/course-admin`.
+instructors on Cc; nobody identifiable falls back to every instructor, and a cohort whose
+`people.yml` holds no address at all falls further - to `DSL_COURSE_ADMIN_EMAILS`, then to the
+maintainer, with the run log naming which fallback it used and never an address. The
+course-level digest goes to `DSL_COURSE_ADMIN_EMAILS` (see
+[Secrets an org carries](#secrets-an-org-carries)) with the maintainer copied from the first
+mail, and falls back to `cc @<course>/course-admin`.
 A CSV or sheet fault carries the row or line and the column - never a cell value, never a
 handle - in the mail, the issue and the log alike.
 
