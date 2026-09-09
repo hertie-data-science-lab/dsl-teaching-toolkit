@@ -71,6 +71,8 @@ from .gh_contents import (
     put_file,
     put_files,
     read_csv,
+    yaml_mark_line,
+    yaml_problem,
 )
 from .ghcli import bot_login, clone, gh
 from .log import log, log_err, log_ok, log_person, log_step
@@ -431,24 +433,9 @@ _SheetLoader.add_constructor(
 )
 
 
-def _mark_line(exc: yaml.YAMLError) -> int | None:
-    """The 1-based line a YAML error happened on, or None when it does not say."""
-    mark = getattr(exc, "problem_mark", None) or getattr(exc, "context_mark", None)
-    return mark.line + 1 if mark is not None else None
-
-
-def _problem(exc: yaml.YAMLError) -> str:
-    """The parser's own complaint about a sheet that does not parse, and nothing else.
-
-    Not `str(exc)`, which is what the message used to be: PyYAML renders the offending
-    source LINE into it, and in a grading sheet that line carries a handle, a team name or
-    a mark. The message travels to a public run log, a public issue and an email."""
-    return " ".join(str(getattr(exc, "problem", "") or "").split())
-
-
 def _unreadable(exc: yaml.YAMLError) -> str:
-    """`_problem`, plus the line - what a reader with no other citation is told."""
-    problem, line = _problem(exc), _mark_line(exc)
+    """`yaml_problem`, plus the line - what a reader with no other citation is told."""
+    problem, line = yaml_problem(exc), yaml_mark_line(exc)
     if not problem:
         return "the file is not valid YAML"
     return f"{problem} (line {line})" if line else problem
@@ -472,13 +459,13 @@ def parse_sheet(
         data = yaml.load(text, Loader=_SheetLoader) or {}
     except yaml.YAMLError as exc:
         if faults is not None:
-            problem = _problem(exc)
+            problem = yaml_problem(exc)
             faults.append(
                 _sheet_fault(
                     slug,
                     "this sheet is not valid YAML, so nothing on it is refreshed or "
                     "sent" + (f": {problem}" if problem else ""),
-                    lineno=_mark_line(exc),
+                    lineno=yaml_mark_line(exc),
                     fix="fix the YAML on the line above; nothing on this sheet is "
                     "refreshed or sent until it parses",
                 )
@@ -1327,7 +1314,7 @@ def grading_spec_faults(
                 fires,
                 "this file is not valid YAML, so none of it is read and the whole "
                 "assignment grades on the toolkit's defaults",
-                lineno=_mark_line(exc),
+                lineno=yaml_mark_line(exc),
                 fix="fix the YAML on the line above",
             )
         ]

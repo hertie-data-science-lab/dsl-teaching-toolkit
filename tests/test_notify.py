@@ -572,6 +572,25 @@ def test_no_line_this_module_prints_carries_an_address(wired, capsys):
     assert sent.one["cc"] == ["jan@x.edu", "maint@x.edu"]
 
 
+def test_a_people_yml_that_will_not_parse_never_prints_the_line_it_broke_on(
+    wired, monkeypatch, capsys
+):
+    # PyYAML renders the offending SOURCE LINE into `str(exc)`, and the line that breaks a
+    # people.yml is as often as not the one carrying somebody's address. The parser's own
+    # complaint and the line NUMBER say everything a reader needs (`read_error`).
+    wired(blame={131: "cpj97"}, committer=None)
+
+    def boom(*a, **k):
+        yaml.safe_load("people:\n  instructors:\n  - email: jan@x.edu: typo\n")
+
+    monkeypatch.setattr(notify.sync_faculty, "load_cohort_faculty", boom)
+    notify.route(COHORT, COURSE, [_fault()], NOW)
+    err = capsys.readouterr().err
+    assert "jan@x.edu" not in err
+    assert f"could not read {COHORT}'s people.yml" in err
+    assert "ScannerError: mapping values are not allowed here (line 3)" in err
+
+
 def test_the_transport_itself_names_nobody_in_the_log(monkeypatch, capsys, wired):
     # The test above stubs `send_bulk`, which is where the notifier's own counts are
     # printed - so the rule is pinned again through the real batch loop, with nothing

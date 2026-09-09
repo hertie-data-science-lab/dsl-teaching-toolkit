@@ -105,6 +105,37 @@ def load_yaml_lines(text: str) -> object:
     return yaml.load(text, LineLoader)
 
 
+def yaml_mark_line(exc: yaml.YAMLError) -> int | None:
+    """The 1-based line a YAML error happened on, or None when it does not say."""
+    mark = getattr(exc, "problem_mark", None) or getattr(exc, "context_mark", None)
+    return mark.line + 1 if mark is not None else None
+
+
+def yaml_problem(exc: yaml.YAMLError) -> str:
+    """The parser's own complaint about a file that does not parse, and nothing else.
+
+    Not `str(exc)`, which is what these messages used to be: PyYAML renders the offending
+    source LINE into it, and the line that broke a people.yml is the one carrying somebody's
+    email address. Every message here travels to a public run log, a public issue and an
+    email."""
+    return " ".join(str(getattr(exc, "problem", "") or "").split())
+
+
+def read_error(exc: BaseException) -> str:
+    """What a PUBLIC log line may say about a read of a hand-edited file that failed.
+
+    A parse failure is named by its class, the parser's own complaint and the line it is
+    on - never `str(exc)`, for the reason `yaml_problem` gives. Anything else is the
+    toolkit's own message and prints as it stands."""
+    if not isinstance(exc, yaml.YAMLError):
+        return f"{type(exc).__name__}: {exc}"
+    line = yaml_mark_line(exc)
+    return (
+        f"{type(exc).__name__}: {yaml_problem(exc) or 'not valid YAML'}"
+        f"{f' (line {line})' if line else ''}"
+    )
+
+
 def take_lines(mapping: dict) -> dict[str, int]:
     """This mapping's key lines, REMOVING the loader's stamp. `{}` for a mapping loaded
     any other way - a dict built by hand in a test, or a plain `safe_load` - which every
@@ -880,7 +911,7 @@ def load_yaml_config(
     try:
         data = load_yaml_lines(content) if lines else yaml.safe_load(content)
     except yaml.YAMLError as exc:
-        log_err(f"malformed YAML in {org}/{repo}/{path}: {exc}")
+        log_err(f"malformed YAML in {org}/{repo}/{path}: {read_error(exc)}")
         raise
     if data is None:
         return {}

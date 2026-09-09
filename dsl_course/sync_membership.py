@@ -46,6 +46,7 @@ from .discovery import (
     discover_content_repos,
 )
 from .faults import Unusable
+from .gh_contents import read_error
 from .gh_teams import acting_login
 from .grades import write_team_lock
 from .log import log_err, log_ok
@@ -133,7 +134,8 @@ def sync(
             # A red X here said only "something is wrong somewhere", every hour, to a
             # course-admin team that cannot fix a CSV in a cohort org.
             log_err(
-                f"cohort {org} has a config file the sync cannot read ({exc}) - "
+                f"cohort {org} has a config file the sync cannot read "
+                f"({read_error(exc)}) - "
                 f"skipping this cohort. The digest issue in {org}/classroom-config "
                 f"names the line to fix; this run stays green."
             )

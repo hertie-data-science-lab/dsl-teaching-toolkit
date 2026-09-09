@@ -62,7 +62,7 @@ from .faults import (
     Severity,
     hours,
 )
-from .gh_contents import blame_logins, last_committer, path_committers
+from .gh_contents import blame_logins, last_committer, path_committers, read_error
 from .log import log, log_err, log_ok, log_person
 from .schedule import SourceFault
 
@@ -260,7 +260,7 @@ def route(
     try:
         faculty = sync_faculty.load_cohort_faculty(cohort_org) or {}
     except Exception as exc:
-        log_err(f"could not read {cohort_org}'s people.yml ({exc})")
+        log_err(f"could not read {cohort_org}'s people.yml ({read_error(exc)})")
         faculty = {}
     contacts = sync_faculty.teaching_contacts(faculty, now.date().isoformat())
     by_handle = {c.handle.lower(): c for c in contacts}
@@ -885,7 +885,7 @@ def notify_overwritten_edits(
     try:
         faculty = sync_faculty.load_cohort_faculty(site_org) or {}
     except Exception as exc:
-        log_err(f"could not read {site_org}'s people.yml ({exc})")
+        log_err(f"could not read {site_org}'s people.yml ({read_error(exc)})")
         faculty = {}
     contacts = sync_faculty.teaching_contacts(faculty, now.date().isoformat())
     by_handle = {c.handle.lower(): c for c in contacts}
