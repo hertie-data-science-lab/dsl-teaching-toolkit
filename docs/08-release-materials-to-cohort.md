@@ -12,9 +12,7 @@ Deploy any path - a session folder, a dataset, a syllabus file, a code subpackag
 
 ## The schedule automatically handles releases in advance (recommended)
 
-A `deploy` entry in the cohort's `schedule.yml` releases exactly what the workflow below does, at the datetime you give it: [Schedule releases](07-schedule-releases.md). 
-
-This is the recommended method for releasing materials, as it involves a one-time setup cost and also creates an entry in the deployed `<course>.github.io` site, so students can clearly understand the course plan in advance.
+A `deploy` entry in the cohort's `schedule.yml` releases exactly what the workflow below does, at the datetime you give it: [Schedule releases](07-schedule-releases.md). One setup cost, and the entry appears on the deployed `<course>.github.io` site so students see the plan in advance.
 
 ## Release materials via manual dispatch
 
@@ -43,7 +41,7 @@ The workflow's inputs are **the same fields as a `schedule.yml` `deploy` entry**
   - `.github` (the Release workflows and their token wiring) 
   - and `MAINTAINING.md` (your operating notes - the scaffold marks it never released). 
 
-Re-releasing is safe to re-run - copies are additive and idempotent.
+Re-releasing is safe - copies are additive and idempotent.
 
 ### Phased code release
 
@@ -67,8 +65,7 @@ Materials repos are scaffolded with a `.releaseignore` whose lines are all comme
 uncomment or add to it.
 
 Its syntax is **exactly `.gitignore`'s** - patterns, `**`, character classes, `!` to
-re-include, `/` to anchor or to mean a directory, `#` comments. Anything you can write in a
-`.gitignore` means the same thing here.
+re-include, `/` to anchor or to mean a directory, `#` comments.
 
 It applies to every copy out of the repo it sits in: the cohort release, the public course
 site, and the assignment handout.
@@ -108,10 +105,10 @@ Only the ROOT file is ever withheld - a `README.md` inside a session folder is y
 writing about that session and always ships.
 
 ## Live updates to the deployed `<course>.github.io` site
-- Any released materials will automatically show up in the deployed site (i.e. their release triggers a redeploy).
-  - Releases trigger **Sync site** for you, as does a push to `classroom-config/schedule.yml` or `people.yml`
-  - Plus a daily sync
-- You can also run [Sync site](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/sync-site.yml)
+
+Released materials appear on the site automatically: a release triggers **Sync site**, as
+does a push to `classroom-config/schedule.yml` or `people.yml`, and there is a daily sync
+besides. Run [Sync site](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/sync-site.yml)
 by hand only when you don't want to wait - e.g. after editing a file inside an already-released repo.
 
 > What the site shows, what redeploys it, and which files it overwrites:
@@ -120,7 +117,7 @@ by hand only when you don't want to wait - e.g. after editing a file inside an a
 ## Next
 
 - [Add an assignment](03-add-assignment-to-course.md), then [release it](09-release-assignment-to-cohort.md).
-- [Schedule releases](07-schedule-releases.md) - the same four fields, fired automatically.
+- [Schedule releases](07-schedule-releases.md) - the same fields, fired automatically.
 
 ---
 **Demo:** released into [`hertie-dsl-demo-f2026`](https://github.com/hertie-dsl-demo-f2026); site at
