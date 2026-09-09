@@ -44,7 +44,7 @@ NB: **the calendar event is not the release.** If nothing needs to ship at all, 
 
 ### Silent releases
 
-Most weeks a session's readings ride the lecture's own entry, so they ship on its clock and there is nothing to decide. Give them their own entry - because they go out a week ahead, say - and by default that entry announces itself: readings land in the same site row as that session's lecture, and the row takes the **earliest** date and title of every entry touching it. So a readings entry dated the 15th silently moves "Session 4" from the 22nd to the 15th, and can rename it.
+Most weeks a session's readings ride the lecture's own entry and ship on its clock. Give them their own entry - because they go out a week ahead, say - and by default that entry announces itself: readings land in the same site row as that session's lecture, and the row takes the **earliest** date and title of every entry touching it. So a readings entry dated the 15th silently moves "Session 4" from the 22nd to the 15th, and can rename it.
 
 `show_on_site: false` is the opt-out. The entry deploys exactly as written and tells the schedule nothing:
 
@@ -61,9 +61,9 @@ The files still reach students on the 15th, and still appear on session 4's row 
 
 What is *not* withheld is where the files are going: session 4's row still names `materials/readings/04_week-4` among the paths its materials will appear at, and is flagged as having a reading list pending, so an unreleased session can say readings are coming.
 
-A silenced entry is also left out of the **generated syllabus** (Generate syllabus reads the same plan), which is usually what you want for a readings drop that belongs to a session already listed there.
+A silenced entry is also left out of the **generated syllabus** (Generate syllabus reads the same plan).
 
-NB: **a row appears as soon as you write it, not when it ships.** Every dated `releases:` entry gets its schedule row from the moment it lands on `main` - so writing the term up front publishes the whole term. Until its files ship the row carries no links and says so (*"**Materials for session 3 are not yet released** - they will appear in `materials/lectures/03_week-3` when they are."*), then picks up the links on release. An `assignments:` entry works the same way: its hand-out and due rows appear the day you write them, and what waits for the hand-out is the assignment's *content* - the brief, and the title the template's README gives it. Until then the row carries only the plan-side name (`Assignment 1`) and says it is not handed out yet, because the template repo exists from the day faculty write the assignment, weeks early, and the cohort site is public. An entry with `event_datetime: tbc` has nowhere to sit on a dated table, so it waits for a real date.
+NB: **a row appears as soon as you write it, not when it ships.** Every dated `releases:` entry gets its schedule row from the moment it lands on `main` - so writing the term up front publishes the whole term. Until its files ship the row carries no links and says so (*"**Materials for session 3 are not yet released** - they will appear in `materials/lectures/03_week-3` when they are."*), then picks up the links on release. An `assignments:` entry works the same way: its hand-out and due rows appear the day you write them, and what waits for the hand-out is the assignment's *content* - the brief, and the title the template's README gives it. Until then the row carries only the plan-side name (`Assignment 1`) and says it is not handed out yet. An entry with `event_datetime: tbc` has nowhere to sit on a dated table, so it waits for a real date.
 
 Nested under `deploy:` we have the following:
 
@@ -189,7 +189,7 @@ assignments:
 
 A `course_source_repo:` naming a repo that does not exist is reported loudly and the assignment is skipped - it can only be a typo, and its one other symptom is an assignment that never hands out and never grades. An entry missing the field altogether is dropped, like one missing `due_datetime:`.
 
-**Two assignments off one template** - a resit off the same brief, or one template handed out to two halves of a cohort - are allowed, but only when **every** entry citing that template sets its own `cohort_dest_repo:`. That name is what the student repos, the teams.csv rows, the snapshot and the grading sheet all key on, so two explicit ones can never touch each other's work; one left to default makes the pair ambiguous and the second entry is dropped. **Release assignment** and **Collect submissions** both start from the template, so both gain an optional `slug` box for saying which of the two you mean - and both refuse rather than guess if you leave it empty.
+**Two assignments off one template** - a resit off the same brief, or one template handed out to two halves of a cohort - are allowed, but only when **every** entry citing that template sets its own `cohort_dest_repo:`. That name is what the student repos, the teams.csv rows, the snapshot and the grading sheet all key on, so two explicit ones can never touch each other's work; one left to default makes the pair ambiguous and the second entry is dropped. **Release assignment** and **Collect submissions** both start from the template, so both take an optional `slug` for saying which of the two you mean - and both refuse rather than guess if you leave it empty.
 
 ## `events:` 
 
@@ -293,7 +293,7 @@ So the sources are checked against the course org in two places: **Validate sche
 
 **No rung reds the scheduled run.** A red X on **Scheduled release** keeps the one meaning it has everywhere else - the run itself broke.
 
-**Validate schedule never goes red for a missing source either.** Its red X means one thing - an entry you wrote is not in your plan - and it clears when the file next parses cleanly. A missing source is not a broken file and doesn't clear when the file is edited, so it gets its own channel: annotations on the commit, and the digest issue below.
+**Validate schedule never goes red for a missing source either.** Its red X means one thing - an entry you wrote is not in your plan - and it clears when the file next parses cleanly. A missing source gets its own channel: annotations on the commit, and the digest issue below.
 
 ### The digest issue
 
@@ -305,9 +305,9 @@ One issue per cohort, titled **"schedule.yml: planned releases cite sources not 
 
 A term written months ahead sits entirely at *advisory* and opens no issue at all.
 
-Don't close it by hand. Closing changes nothing in the file, and the next tick reopens it; it does remember what it had already told you, so reopening does not email everybody again.
+Don't close it by hand: closing changes nothing in the file, and the next tick reopens it without emailing everybody again.
 
-A source that cannot be *read* (a rate limit, a permissions blip) is never reported as missing - that would turn every entry in the plan into a phantom typo.
+A source that cannot be *read* (a rate limit, a permissions blip) is never reported as missing.
 
 This is one of seven such issues, one per file you edit by hand, all of them working the same way: [Why did I get this email?](reference/actions-reference.md#why-did-i-get-this-email).
 
