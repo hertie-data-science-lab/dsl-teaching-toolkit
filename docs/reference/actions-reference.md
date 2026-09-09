@@ -60,7 +60,7 @@ itself; nothing here reds a run.
 
 | The issue you were cc'd on | is about | explained in |
 | --- | --- | --- |
-| *schedule.yml: planned releases cite sources not staged in the course org* | a release naming a folder nobody has staged, and any entry the scheduler had to drop | [07](../07-schedule-releases.md#the-digest-issue) |
+| *schedule.yml: planned releases cite sources not staged in the course org* | a release naming a folder nobody has staged, any entry the scheduler had to drop, and a file that does not parse at all | [07](../07-schedule-releases.md#the-digest-issue) |
 | *people.yml has entries the sync cannot use* | a teaching-team entry that grants nobody access, or that nobody can be emailed at | [05](../05-manage-teaching-team.md) |
 | *students.csv has rows the toolkit cannot use* | a roster row - or a whole file - the enrolment cannot read | [06](../06-enrol-students-to-cohort.md) |
 | *teams.csv has rows the toolkit cannot use* | a project-team row that will not be acted on | [09](../09-release-assignment-to-cohort.md) |
