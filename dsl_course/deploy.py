@@ -39,7 +39,7 @@ from pathlib import Path
 
 from . import pulls, site
 from .access import (
-    FACULTY_READ_ACCESS,
+    COURSE_TEAM_ACCESS,
     INSTRUCTORS_TEAM,
     grant_faculty,
     grant_read_teams,
@@ -297,10 +297,16 @@ def deploy_many(
                 description="Released lectures, labs, readings, & other materials",
             )
             grant_read_teams(cohort_org, repo)
-            # Read, not write: this is the RELEASED copy, and a re-release copies over it
-            # (`copytree(dirs_exist_ok=True)`), so an edit made here would vanish. A
-            # correction belongs in the course org's materials repo, then re-release.
-            grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
+            # Write, because an edit made here is now DURABLE: the release lands on
+            # `upstream` and is merged in, so a correction typed into the cohort repo
+            # survives the next tick instead of being copied over. It was read for
+            # exactly as long as it was not.
+            #
+            # The course org is still the source of truth - a fix made here reaches next
+            # term only when somebody carries it back - and `propagate` is what carries
+            # it. The floor (`access.faculty_floor`) stays at read: the sweep never
+            # demotes, and this grant runs on every release, so the two agree.
+            grant_faculty(cohort_org, repo, COURSE_TEAM_ACCESS, missing_is_note=True)
             dd = root / "out" / repo
             if not clone(cohort_org, repo, dd):
                 log_err(f"could not clone dest {cohort_org}/{repo}")

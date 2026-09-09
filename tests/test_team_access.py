@@ -265,6 +265,23 @@ def test_the_sweep_reads_the_permission_booleans_and_never_demotes_write(monkeyp
     assert (changed, granted) == (0, [])
 
 
+def test_the_sweep_leaves_a_released_dest_at_the_push_a_release_gave_it(monkeypatch):
+    # A release grants the instructors PUSH on its dest, because an edit made in the
+    # cohort repo now survives the next release (deploy merges rather than copies over).
+    # The floor stays at read - a cohort dest is not a repo faculty author - and the two
+    # only agree because the sweep raises and never lowers. Demote here and every
+    # instructor loses the write the release just handed them, nightly.
+    listings = {
+        "instructors": _listing(
+            _row("materials", "write", pull=True, triage=True, push=True)
+        ),
+        "course-admin": _listing(_admin_row("materials")),
+    }
+    changed, granted = _sweep(monkeypatch, listings, [{"name": "materials"}], "cohort")
+    assert (changed, granted) == (0, [])
+    assert access.faculty_floor("materials", "cohort") is access.FACULTY_READ_ACCESS
+
+
 def test_the_sweep_grants_the_per_repo_floor_where_a_team_holds_nothing(monkeypatch):
     # Nothing granted anywhere: a cohort's write repos converge at push, the rest at pull,
     # course-admin at admin throughout. A course org converges at push everywhere.

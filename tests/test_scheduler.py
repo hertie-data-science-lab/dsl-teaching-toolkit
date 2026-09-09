@@ -17,8 +17,8 @@ import pytest
 import yaml
 from conftest import source_fault
 
-from dsl_course import collect as collect_mod
 from dsl_course import (
+    access,
     config_digest,
     course,
     deploy,
@@ -28,6 +28,7 @@ from dsl_course import (
     seed,
     source_digest,
 )
+from dsl_course import collect as collect_mod
 from dsl_course.faults import ConfigFault, Unusable
 from dsl_course.grades import GradingSpec
 from dsl_course.schedule import (
@@ -474,10 +475,10 @@ def _no_io(monkeypatch, fake_gh):
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
 
-def test_a_released_repo_grants_faculty_read(monkeypatch):
-    # Read, not write: a re-release copies over the released copy
-    # (copytree dirs_exist_ok=True), so a correction made here would vanish - it belongs in
-    # the course org's materials repo, then re-release.
+def test_a_released_repo_grants_the_instructors_push(monkeypatch):
+    # Write, because an edit made in the cohort repo is now durable: the release lands on
+    # `upstream` and is merged in, so a correction typed here survives the next tick. It
+    # was read for exactly as long as a re-release copied straight over it.
     _no_io(monkeypatch, _clone_failing("Course-Org/cm"))
     faculty = []
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: faculty.append(a))
@@ -487,7 +488,8 @@ def test_a_released_repo_grants_faculty_read(monkeypatch):
         [Deploy("cm", "lectures/00_x", "materials", None)],
         sync=False,
     )
-    assert faculty == [("Cohort-Org", "materials", deploy.FACULTY_READ_ACCESS)]
+    assert faculty == [("Cohort-Org", "materials", deploy.COURSE_TEAM_ACCESS)]
+    assert deploy.COURSE_TEAM_ACCESS[access.INSTRUCTORS_TEAM] == "push"
 
 
 def test_deploy_many_counts_a_doomed_deploy_once(monkeypatch):
