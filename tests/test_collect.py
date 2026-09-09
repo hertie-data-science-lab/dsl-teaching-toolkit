@@ -2770,6 +2770,45 @@ def test_the_notebook_is_executed_before_it_is_converted_to_a_script(
     assert executed == _executed_bytes(False)
 
 
+def test_a_spawn_that_never_started_fails_only_its_own_target(
+    monkeypatch, tmp_path, capsys
+):
+    # How the first Linux run of the sandbox ended: `Popen` raised PermissionError on the
+    # cwd (see the 0o711 hand-over) and it came out of `_grade_target` as a traceback, so
+    # the FIRST target to hit it took the whole cohort's leg with it - nothing graded,
+    # nothing recorded, and the same fault waiting on the next tick. A run that could not
+    # be STARTED is one target's failure, on the same route a timed-out one takes.
+    ran = _sandboxed(monkeypatch, tmp_path)
+    monkeypatch.setattr(collect, "clone", _clone_writing_notebook())
+    monkeypatch.setattr(collect, "_pin_commit", lambda *a, **k: SHA)
+    tests = tmp_path / "hidden"
+    tests.mkdir()
+    (tests / "test_x.py").write_text("def test_solve(): pass\n")
+    spawned: list[list[str]] = []
+
+    def popen(argv, **kw):
+        spawned.append(argv)
+        if len(spawned) == 1:
+            raise PermissionError(13, "Permission denied", "/tmp/tmp9pu4nz5x")
+        if junit := next((a for a in argv if a.startswith("--junitxml=")), None):
+            Path(junit.split("=", 1)[1]).write_text(_JUNIT)
+        return _Exits()
+
+    monkeypatch.setattr(collect.subprocess, "Popen", popen)
+
+    first, _ = collect._grade_target("Cohort", "assignment-1-anna", tests, "2026-11-15")
+    second, _ = collect._grade_target("Cohort", "assignment-1-ben", tests, "2026-11-15")
+
+    assert first["note"] == collect.GRADE_FAILED_NOTE and first["score"] == 0
+    assert first["commit"] == SHA  # examined and recorded, not "never reached"
+    assert second["score"] == 1  # and the next target was graded normally
+    # The sandbox teardown still ran on the way out of the spawn that blew up.
+    assert ["pkill", "-9", "-u", collect.SANDBOX_USER] in ran
+    err = capsys.readouterr().err
+    assert "could not be started" in err
+    assert "anna" not in err  # this log is public: the tag stands in, never the handle
+
+
 def test_a_repo_with_nothing_pushed_reads_as_not_attempted(monkeypatch, tmp_path):
     # The row a grader most wants to see, and the one a blank would say nothing about:
     # what is in the repo is the handout, which is exactly what `not-attempted` means.

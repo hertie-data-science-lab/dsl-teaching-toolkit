@@ -2730,14 +2730,29 @@ def _grade_target(
         _harden_checkout(wd)
         executed = None
         completion = ""
-        if starters is not None:
-            # BEFORE the tests: `_run_tests` converts every notebook in the checkout to a
-            # script, and the rule this verifies is about the notebook.
-            completion, executed = _check_completion(wd, starters, Path(work))
-        if tests_src is None:
-            result = {}
-        else:
-            result = _run_tests(wd, tests_src) or _zero_result(GRADE_FAILED_NOTE)
+        try:
+            if starters is not None:
+                # BEFORE the tests: `_run_tests` converts every notebook in the checkout
+                # to a script, and the rule this verifies is about the notebook.
+                completion, executed = _check_completion(wd, starters, Path(work))
+            if tests_src is None:
+                result = {}
+            else:
+                result = _run_tests(wd, tests_src) or _zero_result(GRADE_FAILED_NOTE)
+        except OSError as exc:
+            # A run that never STARTED, on the same route as one that timed out or wrote no
+            # report: this target's `GRADE_FAILED_NOTE` zero, and the leg carries on to the
+            # next one. `_run_limited`'s `Popen` is what raises here - an unenterable cwd
+            # (the 0700 hand-over above), a missing interpreter, no file descriptor left -
+            # and it used to come out of this function as a traceback, so the FIRST target
+            # to hit it un-graded the whole cohort. Nothing is lost by containing it: if it
+            # is every graded target then the fault is the runner's, and the systemic guard
+            # in `collect` reds the run and writes no sentinel just as it does for timeouts.
+            log_err(
+                f"  ! grading {target_ref(repo)} could not be started ({exc}) - "
+                f"scoring 0 and carrying on to the next submission"
+            )
+            result = _zero_result(GRADE_FAILED_NOTE)
         result["commit"] = sha
         if completion:
             result["completion"] = completion
