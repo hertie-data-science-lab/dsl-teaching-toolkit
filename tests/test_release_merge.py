@@ -121,6 +121,7 @@ def world(tmp_path, monkeypatch) -> World:
 
     monkeypatch.setattr(ghcli, "gh", clone_only)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: False)
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)

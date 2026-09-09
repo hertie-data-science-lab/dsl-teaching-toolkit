@@ -24,6 +24,7 @@ from dsl_course import (
     deploy,
     ghcli,
     notify,
+    repos,
     scheduler,
     seed,
     source_digest,
@@ -409,6 +410,7 @@ def test_deploy_many_clones_each_repo_once(monkeypatch):
     # everything else (add/commit/push) succeeds.
     monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: False)
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
@@ -440,6 +442,7 @@ def test_deploy_many_missing_course_source_path_is_an_error_not_silent(monkeypat
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "git", lambda *a: (0, ""))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: False)
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
@@ -472,6 +475,7 @@ def _no_io(monkeypatch, fake_gh):
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "git", lambda *a: (0, ""))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: False)
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
@@ -518,7 +522,80 @@ def test_a_dest_that_could_not_be_made_forkable_still_releases(monkeypatch):
     monkeypatch.setattr(ghcli, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
     monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: False)
     monkeypatch.setattr(deploy, "allow_forking", lambda *a: False)
+    monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
+
+    assert deploy.deploy_many(
+        "Course-Org",
+        "Cohort-Org",
+        [Deploy("cm", "lectures/00_x", "materials", None)],
+        sync=False,
+    ) == (0, True)
+
+
+def test_an_archived_dest_is_skipped_rather_than_failed(monkeypatch, capsys):
+    # A closed cohort still has `deploy:` entries in its schedule. Every write into an
+    # archived repo 403s, so the release used to fail its grants and its push every
+    # quarter of an hour, for ever, for a cohort that is deliberately finished.
+    monkeypatch.setattr(ghcli, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
+    monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
+    monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
+    for name in ("create_repo", "allow_forking", "grant_read_teams", "grant_faculty"):
+        monkeypatch.setattr(
+            deploy,
+            name,
+            lambda *a, _called=name, **k: pytest.fail(
+                f"wrote into an archived repo: {_called}"
+            ),
+        )
+
+    assert deploy.deploy_many(
+        "Course-Org",
+        "Cohort-Org",
+        [Deploy("cm", "lectures/00_x", "materials", None)],
+        sync=False,
+    ) == (0, False)
+    assert "[skip]" in capsys.readouterr().out
+
+
+def test_a_live_dest_beside_an_archived_one_still_releases(monkeypatch):
+    # The skip is per DEST, not per run: one closed repo in a batch must not take the
+    # rest of the release with it.
+    monkeypatch.setattr(ghcli, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
+    monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
+    monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
+    monkeypatch.setattr(
+        deploy, "repo_is_archived", lambda org, repo: repo == "last-term"
+    )
+
+    assert deploy.deploy_many(
+        "Course-Org",
+        "Cohort-Org",
+        [
+            Deploy("cm", "lectures/00_x", "last-term", None),
+            Deploy("cm", "lectures/00_x", "materials", None),
+        ],
+        sync=False,
+    ) == (0, True)
+
+
+def test_a_dest_whose_archived_flag_cannot_be_read_is_released_anyway(monkeypatch):
+    # `repo_is_archived` fails OPEN, and this is the call site that makes that matter: a
+    # rate-limited read must not silently skip a live cohort's release. Guess wrong that
+    # way and the write itself fails loudly, which is the alarm we want.
+    monkeypatch.setattr(ghcli, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 502 - bad gateway"))
+    monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
+    monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
@@ -677,6 +754,7 @@ def test_deploy_many_never_copies_a_dot_git_directory(monkeypatch):
     copied_rel: list[str] = []
     monkeypatch.setattr(deploy, "git", _git_spying_staged(copied_rel))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: False)
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
@@ -797,6 +875,7 @@ def test_deploy_many_counts_a_real_commit_failure(monkeypatch, capsys):
     monkeypatch.setattr(ghcli, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
     monkeypatch.setattr(deploy, "git", _git_commit_failing)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: False)
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
@@ -822,6 +901,7 @@ def test_deploy_many_reports_nothing_new_when_index_is_empty(monkeypatch, capsys
         deploy, "git", lambda *a: (0, "")
     )  # diff --cached: nothing staged
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: False)
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
@@ -843,6 +923,7 @@ def test_deploy_many_counts_a_raised_site_sync(monkeypatch):
     monkeypatch.setattr(ghcli, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
     monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: False)
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
@@ -2341,6 +2422,7 @@ def _run_release(monkeypatch, seed_source, deploys) -> tuple[int, set[str]]:
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "git", fake_git)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: False)
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
@@ -2446,6 +2528,7 @@ def test_withholding_the_stub_never_deletes_the_cohorts_own_readme(monkeypatch):
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "git", fake_git)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: False)
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)

@@ -55,7 +55,13 @@ from .gh_contents import is_untouched_stub
 from .ghcli import GIT_ENV, clone, git
 from .log import log, log_err, log_ok, log_step, log_withheld
 from .releaseignore import RELEASEIGNORE, deny_for, excludes
-from .repos import allow_forking, create_repo, default_branch, is_never_material
+from .repos import (
+    allow_forking,
+    create_repo,
+    default_branch,
+    is_never_material,
+    repo_is_archived,
+)
 from .schedule import Deploy
 from .schedule_plan import deploy_dest
 
@@ -289,7 +295,18 @@ def deploy_many(
         # 2. clone (create if needed) each unique dest repo once (cohort org)
         dest_dirs: dict[str, Path] = {}
         bases: dict[str, str] = {}
+        archived: set[str] = set()
         for repo in sorted({d.cohort_dest_repo for d in deploys}):
+            if repo_is_archived(cohort_org, repo):
+                # A closed cohort. Everything below - the grants, the commit, the push -
+                # 403s on an archived repo, so a schedule that still names one would red
+                # this cron for the rest of time. Being finished is a state somebody
+                # chose, so it is a line, not an error. (`repo_is_archived` fails open, so
+                # a flag that could not be read releases as usual and the write itself is
+                # the alarm.)
+                log(f"  [skip] {cohort_org}/{repo} is archived - the cohort is closed")
+                archived.add(repo)
+                continue
             create_repo(
                 cohort_org,
                 repo,
@@ -321,11 +338,17 @@ def deploy_many(
 
         # A deploy whose source or dest failed to clone is one impossible copy - count it
         # ONCE, per deploy, not once per failed clone (both failing is still one copy lost).
+        # A deploy into an ARCHIVED dest is not a failure at all: it was skipped on
+        # purpose, and counting it would red every run of a course that has closed one of
+        # its cohorts.
         errors += sum(
             1
             for d in deploys
-            if d.course_source_repo not in src_dirs
-            or d.cohort_dest_repo not in dest_dirs
+            if d.cohort_dest_repo not in archived
+            and (
+                d.course_source_repo not in src_dirs
+                or d.cohort_dest_repo not in dest_dirs
+            )
         )
 
         # 3. apply every copy against the already-cloned trees

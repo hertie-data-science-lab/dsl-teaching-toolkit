@@ -590,6 +590,7 @@ def _stub_deploy_many(monkeypatch, build_source, real_grants=False):
 
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: False)
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     if not real_grants:
