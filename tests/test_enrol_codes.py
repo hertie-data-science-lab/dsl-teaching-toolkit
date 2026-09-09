@@ -675,11 +675,22 @@ def test_an_absent_roster_and_a_missing_transport_still_red(monkeypatch):
     reds = set(enrol_codes.Outcome) - set(enrol_codes._GREEN)
     assert reds == {
         enrol_codes.Outcome.NO_ROSTER,
-        enrol_codes.Outcome.EMPTY_ROSTER,
         enrol_codes.Outcome.NO_TRANSPORT,
         enrol_codes.Outcome.FAILED,
     }
     assert all(enrol_codes.reds_the_run(o) for o in reds)
+
+
+def test_a_roster_with_only_a_header_is_green(monkeypatch, capsys):
+    # A cohort is bootstrapped with the roster template and enrolled days later, and every
+    # push to the file fires this send. Nothing is outstanding, so there is nothing to be
+    # red about - it used to file `Send enrolment codes is failing` and mail the maintainer
+    # about a brand-new cohort.
+    outcome, sent, written = _run_with(monkeypatch, HEADER)
+    assert outcome is enrol_codes.Outcome.EMPTY_ROSTER
+    assert not enrol_codes.reds_the_run(outcome)
+    assert sent == [] and written == []
+    assert "no rows yet" in capsys.readouterr().err
 
 
 def test_run_reds_when_the_roster_is_missing(monkeypatch, capsys):

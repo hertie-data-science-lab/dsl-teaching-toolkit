@@ -222,9 +222,10 @@ class Outcome(enum.Enum):
     SENT = "the codes were emailed"
     NOTHING_TO_SEND = "every student who needs a code already has one"
     NO_ROSTER = "students.csv could not be read"
-    # The one outcome that is neither of those and still leaves the run green: the file
-    # IS there and says something no parser can use. See `reds_the_run`.
+    # The one outcome that is none of those and still leaves the run green: the file IS
+    # there and says something no parser can use. See `reds_the_run`.
     UNUSABLE_ROSTER = "students.csv cannot be read as written"
+    # A roster with nothing but its header - a cohort bootstrapped and not yet enrolled.
     EMPTY_ROSTER = "students.csv has no rows yet"
     NO_TRANSPORT = "no mail transport is configured (the GRAPH_* secrets)"
     FAILED = "the send failed"
@@ -449,14 +450,21 @@ def _release_unsent(cohort_org: str, unsent: list[str], stamp: str) -> None:
         log_person(f"  not emailed, still claimed: {to}")
 
 
-# The outcomes that leave **Send enrolment codes** green. Two mean nothing is outstanding;
-# the third is a CONTENT fault - a roster nobody can parse is faculty's to fix, it is
-# already reported to them by name through the students.csv digest issue, and reddening
-# this run instead files `Send enrolment codes is failing` in the course org and mails the
-# maintainer a CSV they cannot correct. Everything else - a roster that is not there, a
-# mail transport that is not configured, a write GitHub refused - is a real failure, and
-# the run that a roster push just fired is owed its red X for it.
-_GREEN = (Outcome.SENT, Outcome.NOTHING_TO_SEND, Outcome.UNUSABLE_ROSTER)
+# The outcomes that leave **Send enrolment codes** green. Three mean nothing is
+# outstanding - a roster with nothing but its header is the normal state of a freshly
+# bootstrapped cohort, not a failure. The fourth is a CONTENT fault: a roster nobody can
+# parse is faculty's to fix, it is already reported to them by name through the
+# students.csv digest issue, and reddening this run instead files `Send enrolment codes is
+# failing` in the course org and mails the maintainer a CSV they cannot correct.
+# Everything else - a roster that is not there, a mail transport that is not configured, a
+# write GitHub refused - is a real failure, and the run that a roster push just fired is
+# owed its red X for it.
+_GREEN = (
+    Outcome.SENT,
+    Outcome.NOTHING_TO_SEND,
+    Outcome.EMPTY_ROSTER,
+    Outcome.UNUSABLE_ROSTER,
+)
 
 
 def reds_the_run(outcome: Outcome) -> bool:

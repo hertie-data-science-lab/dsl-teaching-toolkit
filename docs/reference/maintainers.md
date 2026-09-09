@@ -410,8 +410,8 @@ code: Sync membership skips the cohort it cannot read (`sync_membership._CONTENT
 `faults.Unusable` plus a YAML error), skips a cohort with no `people.yml` and no
 `students.csv`, and does not count a `teams.csv` handle that is not on the roster; a course
 file it cannot read reconciles nothing at all and still exits 0; a `schedule.yml` that does
-not parse is one fault on the file, not a red scheduler tick; Send enrolment codes returns
-`Outcome.UNUSABLE_ROSTER`, which `reds_the_run` treats as green. A
+not parse is one fault on the file, not a red scheduler tick; Send enrolment codes is green
+for a roster nobody can parse and for one with nothing in it yet (`enrol_codes._GREEN`). A
 red X means the RUN broke - a `gh` read or write refused, a token that lost its scope, an
 unset mail transport - and the maintainer is emailed its log tail. `faults.Unusable` is the
 whole distinction: it IS a RuntimeError, so every consumer still stops for it, but a `gh`
