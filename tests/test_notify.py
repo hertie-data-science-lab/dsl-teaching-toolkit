@@ -256,6 +256,48 @@ def test_an_addressee_with_no_email_is_counted_not_named(wired, capsys):
     assert "Nobody" not in out  # the handle rides log_person, not the public log
 
 
+def test_a_cohort_no_address_can_be_found_for_falls_to_the_course_admins(
+    wired, admins, capsys
+):
+    # A people.yml with no `email:` anywhere used to leave the digest's @mention as the
+    # only channel until the 48h rung copied the maintainer. The course this cohort
+    # belongs to has admins, and a cohort that will ship nothing is theirs to chase.
+    admins(", ".join(ADMINS))
+    sent = wired(blame={}, committer=None, people={"people": {}})
+    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    assert routing.by_key[_KEY] == (ADMINS, ())
+    _run([_fault()], Severity.URGENT, routing)
+    assert sent.one["to"] == list(ADMINS)
+    out = capsys.readouterr().out
+    # A count and which fallback it was, in a public log - never an address.
+    assert "[fallback] no cohort address - mailing 2 course admin(s)" in out
+    assert "@x.edu" not in out
+
+
+def test_a_course_with_no_admins_either_falls_to_the_maintainer(wired, admins, capsys):
+    admins(None)
+    sent = wired(blame={}, committer=None, people={"people": {}})
+    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    _run([_fault()], Severity.URGENT, routing)
+    assert sent.one["to"] == ["maint@x.edu"]
+    assert sent.calls == 1
+    out = capsys.readouterr().out
+    assert "[fallback] no cohort address - mailing the maintainer" in out
+    assert "@x.edu" not in out
+
+
+def test_a_cohort_that_can_be_addressed_never_reaches_for_the_admins(
+    wired, admins, capsys
+):
+    # The fallback is for a cohort nobody can be written to, not a second Cc list on
+    # every fault the teaching team is already reading about.
+    admins(", ".join(ADMINS))
+    wired(blame={131: "JanG"}, committer=None)
+    routing = notify.route(COHORT, COURSE, [_fault()], NOW)
+    assert routing.by_key[_KEY] == (("jan@x.edu",), ())
+    assert "[fallback]" not in capsys.readouterr().out
+
+
 def test_a_distant_fault_is_routed_to_nobody_and_costs_no_api_call(monkeypatch):
     # Below the digest's own rung nothing is said on either channel, so a quiet tick must
     # not spend a blame read on 22 entries nobody is going to hear about.
@@ -484,10 +526,12 @@ def test_nothing_owed_sends_nothing(wired):
     assert sent.batches == []
 
 
-def test_a_cohort_with_no_addresses_at_all_says_so_once(wired, capsys):
+def test_a_cohort_with_no_addresses_at_all_says_so_once(wired, admins, capsys):
     # ...and holds nothing: no address is a standing state, and a held crossing would be
-    # recomputed - and commented on - every tick for the rest of the term.
-    sent = wired(blame={}, committer=None, people={"people": {}})
+    # recomputed - and commented on - every tick for the rest of the term. Nobody means
+    # nobody here: no admin secret and no maintainer either, so both fallbacks are spent.
+    admins(None)
+    sent = wired(blame={}, committer=None, people={"people": {}}, maintainer=None)
     routing = notify.route(COHORT, COURSE, [_fault()], NOW)
     assert _unsent([_fault()], Severity.URGENT, routing) == notify.Unsent()
     assert sent.batches == []
@@ -803,6 +847,22 @@ def test_a_reminder_changes_the_first_line_and_copies_the_maintainer(wired):
     _mail_config([_row_fault()], routing, reminder="2 days")
     assert "Still unfixed after 2 days:" in sent.one["body"]
     assert sent.one["cc"] == ["maint@x.edu"]
+
+
+def test_the_maintainer_as_the_fallback_addressee_is_not_copied_as_well(
+    wired, admins, capsys
+):
+    # The 48h rung copies the maintainer, and on a cohort no address could be found for
+    # the To line already IS the maintainer. One mailbox, one line.
+    admins(None)
+    sent = wired(pushers=("dsl-bot",), people={"people": {}})
+    routing = notify.route(COHORT, COURSE, [_row_fault()], NOW)
+    _mail_config([_row_fault()], routing, reminder="2 days")
+    assert sent.one["to"] == ["maint@x.edu"]
+    assert sent.one["cc"] == []
+    assert "[fallback] no cohort address - mailing the maintainer" in (
+        capsys.readouterr().out
+    )
 
 
 def test_a_people_fault_names_its_own_file(wired):
