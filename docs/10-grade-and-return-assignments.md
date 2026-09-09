@@ -97,9 +97,8 @@ answered in `snapshots/<slug>.csv`:
 `days_late` and the penalty are derived from whatever `info.submitted` holds; the note is
 for you.
 
-Between the due date and the cutoff the sheet refreshes off committer dates alone (asking
-GitHub per repo four times an hour would be one call per student per tick), so `submitted`
-can move at the freeze - which is the last derivation there will ever be.
+Between the due date and the cutoff the sheet refreshes off committer dates alone, so
+`submitted` can move at the freeze - the last derivation there will ever be.
 
 An assignment whose `grading_config.yml` says `submit_via: external` has no `info:` block at all:
 there is no commit to time.
@@ -245,9 +244,8 @@ freeze carries on.
 
 ## Closing the cohort out
 
-Once the last grades have gone out, run **Archive cohort** on that cohort. It is the end of
-the year's work, and it is what stops a finished cohort quietly keeping every student's
-write access to their repos for ever.
+Once the last grades have gone out, run **Archive cohort** on that cohort. It is what stops
+a finished cohort quietly keeping every student's write access to their repos for ever.
 
 It does five things, in this order:
 

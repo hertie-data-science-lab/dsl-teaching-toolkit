@@ -116,9 +116,9 @@ Three things it refuses to do, because each one publishes the answer:
   notebook, and its outputs are the answers in print. Cells it did not change keep theirs,
   so a worked example in the brief still shows its output.
 
-`dry_run` is on by default and prints the file list and the counts - never a line of the
-content, because that log is public. Only `.ipynb`, `.Rmd`, `.qmd`, `.py` and `.R` are
-derived; anything else under `solution/` stays where it is.
+`dry_run` is on by default and prints the file list and the counts, never a line of the
+content. Only `.ipynb`, `.Rmd`, `.qmd`, `.py` and `.R` are derived; anything else under
+`solution/` stays where it is.
 
 ### A value `grading_config.yml` cannot be read for
 
