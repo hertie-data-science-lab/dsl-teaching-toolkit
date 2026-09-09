@@ -14,7 +14,7 @@ Access is **declared in a config file and reconciled**:
   1. You edit the file, commit & push
   2. The **Sync membership** action in the **course** org's `.github` materialises the GitHub teams. 
 
-There is no need to edit GitHub team directly. This provides an auditable historical record.
+Never edit the GitHub teams directly; the file is the auditable record.
 
 ## Two levels
 
@@ -23,7 +23,7 @@ There is no need to edit GitHub team directly. This provides an auditable histor
 | Faculty, FAs | Administer the **whole course**, every cohort, indefinitely | course org `.github/dsl-course.yml` → `people:` `course_admins` | **course** - once, for all years | `course-admin` (admin) on the course org **and** every cohort org |
 | TAs, Guest Lecturers| Push materials/assignments for **one year** and run the release workflows | that cohort's `classroom-config/people.yml` → `instructors` / `teaching_assistants` | **cohort** - per year | cohort org `instructors` team + course org `instructors-<tag>`: push on `.github` and on every course-org repo named `*-<tag>` |
 
-**Prefer the cohort file** for anyone who isn't running the course across multiple years. It is per-year, self-retiring, and it also supplies the deployed site's staff cards with rich display and information.
+**Prefer the cohort file** for anyone who isn't running the course across multiple years. It is per-year, self-retiring, and supplies the deployed site's staff cards.
 
 >Full model - every team and what it reaches: [`access-reference.md`](reference/access-reference.md).
 
@@ -62,8 +62,7 @@ There is no need to edit GitHub team directly. This provides an auditable histor
   - It reconciles fully (adds *and* removes) to match the pushed file.
 
 3. **They accept the org invite.** 
-  - Membership shows `pending` in the Teams UI until they do.
-  - Once accepted, the workflows appear in their Actions tab afterwards. 
+  - Membership shows `pending` in the Teams UI until they do, and the workflows appear in their Actions tab once they have. 
 
 >Enrolling the student roster is a separate process to the above.
 
@@ -71,13 +70,8 @@ There is no need to edit GitHub team directly. This provides an auditable histor
 
 `photo` accepts either form:
 
-1. **A site-relative path** 
-  - E.g. `/_images/pp/jane.jpg`. 
-  - Commit the image into this cohort's site repo, `<cohort-org>.github.io`, under `_images/pp/`. 
-  - This is the **safe default**.
-2. **An absolute URL**
-  - It has to be a URL for a host that allows hotlinking. 
-  - GitHub avatars (`https://github.com/<handle>.png`) always work.
+1. **A site-relative path** like `/_images/pp/jane.jpg` - commit the image into this cohort's site repo, `<cohort-org>.github.io`, under `_images/pp/`. The **safe default**.
+2. **An absolute URL** on a host that allows hotlinking. GitHub avatars (`https://github.com/<handle>.png`) always work.
 
 > Institutional profile sites often block off-site requests. E.g. `hertie-school.org` returns **403** to anything not loaded from its own pages.
 
@@ -114,7 +108,7 @@ So a TA on f2026 can `git push` labs into the course org level `course-materials
 
 >The suffix match is the whole rule: a course-org repo **without** the year tag in its name is not covered. Name per-year content repos `<thing>-<tag>`. 
 >
->A repo scaffolded by **New materials repo** / **New assignment** is granted as it is created - there is nothing to run afterwards. The nightly **Refresh actions** sweep then re-checks every repo against the same floor, so an older repo that predates a grant catches up on its own. The sweep only ever raises access; it never removes any.
+>A repo scaffolded by **New materials repo** / **New assignment** is granted as it is created - there is nothing to run afterwards.
 
 ## Only staff in these teams
 

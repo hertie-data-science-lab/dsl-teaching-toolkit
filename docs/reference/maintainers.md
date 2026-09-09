@@ -27,9 +27,7 @@ a `git revert` on `main`, promoted forward - never a force-push. `central_ref:` 
 An org's seeded workflows check the toolkit out at **the ref they were rendered with**, so
 moving an org between refs is always: edit `central_ref:`, run that org's **Refresh actions**,
 *then* retire the old ref. Deleting a ref an org is still rendered against takes down its
-whole Actions tab, Refresh included. That is the order the `staging` retirement followed:
-2026-09-07, the demo course org was moved to `main` and refreshed green before this change
-merged, and the `staging` branch is deleted after the merge.
+whole Actions tab, Refresh included. That is the order the `staging` retirement followed.
 Tiers, the pre-promotion checklist and the full rollback procedure:
 [central-admin.md](../../docs-admin-arch/central-admin.md#deploying-the-toolkit).
 
@@ -135,12 +133,11 @@ Things whose *literal spelling* is depended on from outside Python:
   the template's default branch, and needs EVERY notebook in the checkout to match one; the
   notebook executed is the first that does not. The baseline is the course template's `main`
   as it stands NOW, not the frozen cohort-side hand-out, so **rewriting a template's `main`
-  after handout makes every submission look attempted** - which is the safe way round, and
-  is a deliberate deviation from the plan's "frozen hand-out" wording. It runs OFFLINE (the
-  proxy variables point at a dead port - best-effort, not a jail), which docs/10 tells
-  faculty to write the assignment for.
+  after handout makes every submission look attempted** - which is the safe way round. It
+  runs OFFLINE (the proxy variables point at a dead port - best-effort, not a jail), which
+  docs/10 tells faculty to write the assignment for.
 
-  It is independent of `autograde`: `collect` now reaches its target loop for a hand-marked
+  It is independent of `autograde`: `collect` reaches its target loop for a hand-marked
   assignment, and only "no tests AND no completion check" is the exit that records a skip.
 
 ### What the sandbox actually promises
@@ -182,7 +179,7 @@ spawned. What it guarantees, and what it does not:
   every well-behaved client fails - but there is no network namespace here, and a
   determined socket still opens. docs/10 tells faculty to commit the data rather than rely
   on this.
-- Also still true and unchanged: `RUN_TIMEOUT` per subprocess, the `_apply_rlimits` caps,
+- Also: `RUN_TIMEOUT` per subprocess, the `_apply_rlimits` caps,
   output to `DEVNULL`, `.git` and the student's own rigging files removed before anything
   starts, and no token of any kind in the child's environment.
 

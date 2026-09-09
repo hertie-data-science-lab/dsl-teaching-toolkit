@@ -94,13 +94,11 @@ answered in `snapshots/<slug>.csv`:
 | `commit` | its committer date - no push record matched | `no push record matched this commit - the time shown is its committer date, which the student sets` |
 | `suspect` | its committer date, contradicted: GitHub's record of the repo's last push is later than the due moment while the commit claims to predate it | `commit dated before the push that delivered it - check` |
 
-`days_late` and the penalty are derived from whatever `info.submitted` holds, so a `push`
-row is timed by the server and the other two are the student's word plus a note. The
-arithmetic says what the dates say either way; the note is for you.
+`days_late` and the penalty are derived from whatever `info.submitted` holds; the note is
+for you.
 
-Between the due date and the cutoff the sheet refreshes off committer dates alone (asking
-GitHub per repo four times an hour would be one call per student per tick), so `submitted`
-can move at the freeze - which is the last derivation there will ever be.
+Between the due date and the cutoff the sheet refreshes off committer dates alone, so
+`submitted` can move at the freeze - the last derivation there will ever be.
 
 An assignment whose `grading_config.yml` says `submit_via: external` has no `info:` block at all:
 there is no commit to time.
@@ -198,14 +196,13 @@ one word into `info.completion`:
 | `did-not-run` | our runner could not execute it at all - tell the maintainer |
 
 Like `info.autograde` it is **information, never a mark**, and a student never sees it. The
-executed notebook is archived beside the result JSON as `autograde/<slug>/<key>.ipynb`,
-which is what you read when the state is `errors:N`.
+executed notebook is archived beside the result JSON as `autograde/<slug>/<key>.ipynb`.
 
 It is **on by default for `format: ipynb`** and off for everything else; `completion_check:
 true` / `false` in `grading_config.yml` overrides either way. It is independent of
 `autograde`, and that is the point - most notebook assignments are marked by hand.
 
-Two things it is worth writing the assignment for:
+Four things to write the assignment for:
 
 - **It runs with network access blocked as far as the runner allows** - the proxy
   variables point at a dead port, which every well-behaved client honours, but it is not a
@@ -247,9 +244,8 @@ freeze carries on.
 
 ## Closing the cohort out
 
-Once the last grades have gone out, run **Archive cohort** on that cohort. It is the end of
-the year's work, and it is what stops a finished cohort quietly keeping every student's
-write access to their repos for ever.
+Once the last grades have gone out, run **Archive cohort** on that cohort. It is what stops
+a finished cohort quietly keeping every student's write access to their repos for ever.
 
 It does five things, in this order:
 

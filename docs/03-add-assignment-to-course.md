@@ -35,10 +35,7 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
    | `main` | `README.md` (brief) + `starter.*` + `CONTRIBUTIONS.md` (group only) | **what students get** |
    | `solution` | `solution/` (model answer) + `grading_config.yml` + hidden `tests/` (only when `autograde` is on) | **faculty & instructors only** |
 
-2. **Clone the repo locally**
-   - This allows you to make local edits and replace with your own content.
-
-3. **Push your content** 
+2. **Push your content** 
    - Brief + starter → `main`
    - Model solution, `grading_config.yml` and the hidden `tests/` → `solution`
    - Student repos are generated from **`main` only**, unless you tick `include_solution` at release time. 
@@ -46,7 +43,7 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
      template with no `solution` branch at all is hand-marked too. The cutoff still freezes the
      sheet and records the decision not to machine-mark it.
    - For a partially machine-marked assignment set `autograde: true` in `grading_config.yml`:
-      - put the hidden tests in `tests/` (path configurable via `grading_config.yml`'s `tests:` field) plain pytest files that `from starter import ...` and check the submission, run faculty-side only, never shipped to students. 
+     - put the hidden tests in `tests/` (the path is `grading_config.yml`'s `tests:` field): plain pytest files that `from starter import ...`, run faculty-side only and never shipped to students.
      - `info.autograde` in the grading sheet then shows how many of them each submission passed - a count for you to mark against, never the mark itself, and never shown to a student.
      - Not a Python course? Put a `run.sh` in `tests/` and the sandbox runs that instead - [the recipe](10-grade-and-return-assignments.md#tests-in-another-language-testsrunsh).
      - Full grading flow: [Grade and return assignments](10-grade-and-return-assignments.md).
@@ -72,22 +69,19 @@ knits, a `.qmd` that renders, a `.tex` that compiles, a notebook that runs.
 | `latex` | `starter.tex` | `starter.tex` **and** the compiled `starter.pdf` |
 | `none` | nothing at all | whatever your brief says |
 
-> **The graded artefact is the built one.** For every source format the rendered document -
-> the HTML, the PDF - is committed beside its source, and that is what a grader reads; the
-> source is what we check it against. The starter says so, and so does the brief the button
-> seeds, so it is on the page whatever else you write.
+> **The graded artefact is the built one** - a grader reads the rendered document and
+> checks it against the source. The starter and the seeded brief both say so.
 
 The `.Rmd` and `.qmd` stubs seed an `{r}` chunk; swap it for `{python}` if your course
 works in Python and nothing else changes.
 
-`format` picks the starter and nothing else. Grading reads whatever is actually in the
-repo, so a student who works in a notebook on a `py` assignment still grades, and `none`
-is the raw-repo option.
+Grading reads whatever is actually in the repo, so a student who works in a notebook on a
+`py` assignment still grades, and `none` is the raw-repo option.
 
 ### One notebook, not two: derive the starter
 
 Keeping the starter on `main` and the answer on `solution` by hand means writing the same
-notebook twice and keeping the two in step for the rest of the term. You don't have to.
+notebook twice and keeping the two in step for the rest of the term.
 
 Write **one** notebook - the one you teach from - on the `solution` branch, in
 `solution/`, and fence the answers off in the vocabulary nbgrader and Otter already use:
@@ -122,9 +116,9 @@ Three things it refuses to do, because each one publishes the answer:
   notebook, and its outputs are the answers in print. Cells it did not change keep theirs,
   so a worked example in the brief still shows its output.
 
-`dry_run` is on by default and prints the file list and the counts - never a line of the
-content, because that log is public. Only `.ipynb`, `.Rmd`, `.qmd`, `.py` and `.R` are
-derived; anything else under `solution/` stays where it is.
+`dry_run` is on by default and prints the file list and the counts, never a line of the
+content. Only `.ipynb`, `.Rmd`, `.qmd`, `.py` and `.R` are derived; anything else under
+`solution/` stays where it is.
 
 ### A value `grading_config.yml` cannot be read for
 
@@ -133,17 +127,15 @@ the default, silently, which is how `submit_via: emial` turned a cohort's late a
 off for a term. From 24 hours before the assignment's `grading_datetime` (its due date
 where it declares none) each such value opens the cohort's *assignment grading_config.yml
 has values that will not grade as written* issue and emails whoever wrote the line, louder
-as the moment approaches. Earlier than that nothing is said: the fix is the same in August
-as on the day, and a warning nobody has to act on yet is a warning nobody reads.
+as the moment approaches. Earlier than that nothing is said.
 
 A template still carrying the pre-rename `grading.yml` is reported the same way - nothing
 reads that file, so the assignment grades as if it declared nothing at all.
 
 ### Group vs individual assignments
 
-- If not defined, an assignment is default `type` = `individual`; it is individually assessed and returned to students.
-- A group project is the same flow with `type` = `group` - recorded in the solution branch's `grading_config.yml`.
-- For group projects, both handout and grading then run per team automatically (i.e one repo per team is created, and the grading run assesses at the team-level with individual carve outs for comments / grade adjustments).
+- An assignment with no `type` declared is `individual`: one repo per student, assessed and returned individually.
+- `type` = `group` runs the same flow per team - one repo per team, assessed at team level with individual carve-outs for comments and grade adjustments.
 
 > The shape is set in ONE place: `type: individual | group` in the assignment's own
 > `grading_config.yml`, on the template's `solution` branch. **New assignment** writes it
@@ -159,12 +151,12 @@ reads that file, so the assignment grades as if it declared nothing at all.
 >```
 >
 > `team_formation` and `max_team_size` are also what the **Join team** form in each
-> cohort's `welcome` repo answers on. It cannot read this file - it runs in a public repo
-> under a token that has no access to the templates - so the toolkit mirrors those two
-> values into each cohort's `classroom-config/assignments.lock.yml` and the form reads
-> that. Editing them here is enough: the mirror catches up on the next **Sync
-> membership**, **Release assignment** or nightly **Refresh actions**. Until this template
-> exists, its schedule entry is locked to "no teams", so nobody can form one for it.
+> cohort's `welcome` repo answers on. The form runs in a public repo and cannot read this
+> file, so the toolkit mirrors those two values into each cohort's
+> `classroom-config/assignments.lock.yml` and the form reads that. Editing them here is
+> enough: the mirror catches up on the next **Sync membership**, **Release assignment** or
+> nightly **Refresh actions**. Until this template exists, its schedule entry is locked to
+> "no teams", so nobody can form one for it.
 
 > **Deadlines aren't set here.** The due date students see is *per cohort*, in that cohort's `schedule.yml` - see [Release assignment → Deadlines](09-release-assignment-to-cohort.md#deadlines).
 

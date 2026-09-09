@@ -37,8 +37,6 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
       - **`hertie-dsl-demo-f2026.github.io`** auto-deployed website - what it shows, and what you must not hand-edit: [11](11-configure-cohort-site.md)
     - It also **registers the cohort** in the course org's `.github/cohort-courses-pages.yml`. That file is the registry every cohort dropdown reads, so an unregistered cohort is invisible to every workflow; a registered org that is later deleted is pruned from it automatically by the nightly refresh.
 
-> NB: Steps 4, 5 & 6 are covered in full detail in [07-schedule-releases.md](07-schedule-releases.md), [06-enrol-students-to-cohort.md](06-enrol-students-to-cohort.md), & [05-manage-teaching-team.md](05-manage-teaching-team.md).
-
 ---
 
 4. **Fill in `classroom-config/schedule.yml` for the whole term** (edit locally or in the web UI → commit to `main`).
@@ -59,16 +57,16 @@ Live example of every file below: [`example-course/cohort-org/`](../example-cour
          end: "2027-01-31"       # optional - omit for "indefinite"
    ```
 
-    - `github_handle` grants access; a named entry with no `github_handle` is also valid - it is display-only (a site card, no access granted). 
-    - The optional `start`/`end` dates **bound when the access is live**: it is granted from `start` and revoked after `end`, automatically - this is how you hand a guest lecturer or a fixed-term TA push access for one term. 
+    - `github_handle` grants access; a named entry with no `github_handle` is display-only (a site card, no access granted). 
+    - The optional `start`/`end` dates **bound when the access is live** - this is how you hand a guest lecturer or a fixed-term TA push access for one term. 
       - Course-wide admins are declared at the **course** level instead (course org → `.github` → `dsl-course.yml` → `course_admins`), not here. 
-      - Full guide, including removing people   and how quickly changes land: [05 Manage the teaching team](05-manage-teaching-team.md).
+      - Full guide, including removing people and how quickly changes land: [05 Manage the teaching team](05-manage-teaching-team.md).
 
 6. **Load the student roster.** 
   - Fill `classroom-config/students.csv` (seeded header-only) with registrar data (`hertie_email, name`)
-  - Leave `github_handle, github_id` blank - onboarding fills them). 
+  - Leave `github_handle, github_id` blank - onboarding fills them. 
   - Add `role: auditor` for anyone who should get the released materials but no assignments and no grades. 
-  - The seeded `students.csv.sample` in each newly bootstrapped shows a filled row of each kind, and that repo's `README.md` documents every column.
+  - The seeded `students.csv.sample` shows a filled row of each kind, and that repo's `README.md` documents every column.
   - Full details found in [06-enrol-students-to-cohort.md](06-enrol-students-to-cohort.md)
 
 ## Next

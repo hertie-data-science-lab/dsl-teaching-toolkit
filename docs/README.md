@@ -60,7 +60,7 @@ autograde → marks → preview → distribute`"]
   C --> G
   D --> G
 ```
-> NB: all workflows can be automated at the start of the semester by filling out the cohort org's `schedule.yml` for that semester. This will then automatically handle the release of materials / assignments / grading runs etc, with specific workflows manually run from the course org's `.github` repo for ad hoc use. 
+> NB: filling in the cohort org's `schedule.yml` up front automates the term's material releases, assignment hand-outs and grading runs; the course org's `.github` workflows are there for ad hoc use.
 
 ## The workflows
 
@@ -117,9 +117,9 @@ Field-by-field rules for all of these: [`DEPLOYMENT-CHECKLIST.md`](DEPLOYMENT-CH
 
 ## Demo orgs (live reference)
 
-A standing demo you can inspect at while reading - one course org, two cohorts, running the
+A standing demo you can inspect while reading - one course org, two cohorts, running the
 current engine:
 
 - Course org: **[`hertie-dsl-demo-course-e1234`](https://github.com/hertie-dsl-demo-course-e1234)** 
-- Cohort org (current): **[`hertie-dsl-demo-f2026`](https://github.com/hertie-dsl-demo-f2026)** <- read here, more filled out with example files.
-- Cohort org (last year): **[`hertie-dsl-demo-f2025`](https://github.com/hertie-dsl-demo-f2025)**  <- empty stub, demonstrates how legacy cohort orgs remain attached to their hub course org for historical & archival reference.
+- Cohort org (current): **[`hertie-dsl-demo-f2026`](https://github.com/hertie-dsl-demo-f2026)** <- read here: the most filled out.
+- Cohort org (last year): **[`hertie-dsl-demo-f2025`](https://github.com/hertie-dsl-demo-f2025)**  <- an empty stub, showing how a finished cohort stays attached to its course org.

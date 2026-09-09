@@ -8,7 +8,7 @@ You never edit what the site shows - you edit the file it reads, and it re-syncs
 
 | To change | Edit | Field |
 |---|---|---|
-| Course  blurb under the title | course org `.github/dsl-course.yml` | `course_description` |
+| Course blurb under the title | course org `.github/dsl-course.yml` | `course_description` |
 | Course title + code | course org `.github/dsl-course.yml` | `course_name`, `course_code` - **not** `org_name` |
 | Semester + year | *nothing to set* | inferred from the cohort org's `fYYYY`/`sYYYY` tag (`hertie-dsl-demo-f2026` → "Fall 2026") |
 | Instructor / TA cards | cohort `classroom-config/people.yml` ([05](05-manage-teaching-team.md)) | every field you declare displays, bar `github_handle`, `start`, `end` (access only) and `email` (private unless the entry adds `show_email: true`); a card needs a `name` to appear at all |
@@ -23,12 +23,10 @@ You never edit what the site shows - you edit the file it reads, and it re-syncs
 
 ## What never to touch
 
-These are rewritten on every sync. A hand edit is lost - the sync then opens (or updates) one
-issue in the site repo linking the overwritten commit and naming the file to edit instead, and
-**emails whoever made the edit**. Nothing is actually lost: the linked commit still holds the
-change, so it can be copied back out and made at the source. The email matters because an issue
-notifies only the accounts it @mentions, and a commit whose git email is linked to no GitHub
-account cannot be mentioned at all - which is how the first one of these went unnoticed.
+These are rewritten on every sync. A hand edit here is overwritten - the sync opens (or
+updates) one issue in the site repo linking the overwritten commit and naming the file to
+edit instead, and **emails whoever made the edit**. Nothing is actually lost: the linked
+commit still holds the change, to be copied back out and made at the source.
 
 | In the site repo | What happens |
 |---|---|

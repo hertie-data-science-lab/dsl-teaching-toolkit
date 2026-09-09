@@ -6,7 +6,7 @@ workflow),
 - Its teams,
 - Later teaching materials and assignment templates are added here
 
-This is setup once per course - it serves every future cohort. Per-semester setup of the student-facing org is [New cohort org](04-new-cohort-org.md).
+Set up once per course; it serves every future cohort. Per-semester setup of the student-facing org is [New cohort org](04-new-cohort-org.md).
 
 ## Prerequisites
 
@@ -41,7 +41,7 @@ This is setup once per course - it serves every future cohort. Per-semester setu
    | `admin` | *your handle* | adds you to `course-admin` so you can run the course workflows |
    | `central_ref` | `release` (default) | which toolkit tier this course runs - leave it unless you are setting up the demo course |
 
-   > This action is safe to re-run in case of need. 
+   > Safe to re-run.
    
    This seeds the `.github` repo with every workflow you'll need ([actions reference](reference/actions-reference.md)), the `course-admin` team, and `dsl-course.yml` at that repo's root (the course's identity card).
 
@@ -49,11 +49,11 @@ This is setup once per course - it serves every future cohort. Per-semester setu
    - Edit `people.course_admins` in course org → `.github` → `dsl-course.yml` and commit to `main` 
    - **Sync membership** runs on the push automatically (no need for additional input).
 
-   > Each admin handle gets an org invite that stays `pending` until that person accepts, and GitHub's member list only shows accepted members. Check *People → Pending invitations* if someone looks missing.
+   > Each admin handle gets an org invite that stays `pending` until they accept, so check *People → Pending invitations* if someone looks missing.
 
    NB: TAs and co-instructors are **not** granted access here; each cohort declares its own in `classroom-config/people.yml` when you [bootstrap that cohort](04-new-cohort-org.md).
 
-   > **If an edit here breaks the file**, nothing goes quiet. `dsl-course.yml` and `cohort-courses-pages.yml` (the cohort registry, written for you by **Bootstrap cohort**) are the two files that decide whether this course is synced at all, so a line the toolkit cannot use - a handle that is not a GitHub username, a `central_ref:` that is neither `main`, `release` nor a full 40-character commit SHA, a registry that is not a list of org names - opens **one** issue in this repo, *dsl-course.yml / cohort registry has entries the sync cannot use*, listing every such line with a link to it. Fix the line and the issue closes itself. The admins are emailed at the same time, and again if it is still unfixed after two days and after a week. Nothing here reds a run.
+   > **If an edit here breaks the file**, nothing goes quiet. `dsl-course.yml` and `cohort-courses-pages.yml` (the cohort registry, written for you by **Bootstrap cohort**) are the two files that decide whether this course is synced at all, so a line the toolkit cannot use - a handle that is not a GitHub username, a `central_ref:` that is neither `main`, `release` nor a full 40-character commit SHA, a registry that is not a list of org names - opens **one** issue in this repo, *dsl-course.yml / cohort registry has entries the sync cannot use*, listing every such line with a link to it, and emails the admins. Fix the line and the issue closes itself. Nothing here reds a run.
 
 ## Next
 

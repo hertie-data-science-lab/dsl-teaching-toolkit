@@ -25,19 +25,18 @@ A course lives once in a persistent **course** org and is delivered each year in
    - [Enrol students](docs/06-enrol-students-to-cohort.md)
    - [Set the schedule up front](docs/07-schedule-releases.md) - this automates release materials, assignments & grading runs from course org -> cohort org 
 3. **Run the course**
-   - The editable schedule will automate release & collection of any materials defined in its yaml file.
    - Further manual release of [materials](docs/08-release-materials-to-cohort.md) and [assignments](docs/09-release-assignment-to-cohort.md) can be managed on an ad hoc basis
-   - [Grade assignments](docs/10-grade-and-return-assignments.md) can be distributed.
+   - [Grade and return assignments](docs/10-grade-and-return-assignments.md)
 
 ## The model
 
 Two org tiers:
-1. The **course** org is the faculty-facing control panel - the persistent, historical registry, of course materials & assignments, where faculty & instructors push version-controlled materials from.
-2. The **cohort** org is the per-year student-facing delivery target - materials are released here, student assignments are submitted and assessed here, and student-facing features (onboarding, the website) live here.
+1. The **course** org is the faculty-facing control panel - the persistent registry of course materials & assignments, and where faculty & instructors push them from.
+2. The **cohort** org is the per-year student-facing delivery target - materials are released, assignments submitted and assessed, onboarding and the website live here.
 
 ```mermaid
 flowchart TB
-  subgraph COURSE["COURSE org — e.g. hertie-dsl-demo-course-e1234 (persistent)"]
+  subgraph COURSE["COURSE org, e.g. hertie-dsl-demo-course-e1234 (persistent)"]
     mat["`**course-materials-f/s202X**
 
 lectures/01_.../ + readings/01_.../ + labs/01_.../
@@ -57,7 +56,7 @@ profile (auto)
 + cohort registry`"]
   end
 
-  subgraph COHORT["COHORT org — e.g. hertie-dsl-demo-f/s202X (per-year)"]
+  subgraph COHORT["COHORT org, e.g. hertie-dsl-demo-f/s202X (per-year)"]
     cgh["`**.github**
 
 cohort config pointer + auto-generated student-facing org page`"]
@@ -99,7 +98,7 @@ open-courseware site - hosts shared lectures + readings`"]
   class mat,tmpl,cfg,cmat,repos,team,keypriv private;
 ```
 
-Each cohort further gets an auto-deployed `<cohort>.github.io` site whose material links are private (enrolled students and auditors only). A course can optionally also publish a **public** `<course-org>.github.io` open-courseware site - see [**Publish course website**](docs/reference/actions-reference.md#optional-public-course-website).
+A course can optionally also publish a **public** `<course-org>.github.io` open-courseware site - see [**Publish course website**](docs/reference/actions-reference.md#optional-public-course-website).
 
 ## Further References
 

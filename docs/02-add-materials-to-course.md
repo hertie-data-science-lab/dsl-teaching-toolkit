@@ -6,9 +6,9 @@ later copies session folders from here into a cohort. One repo per year: `course
 ## Prerequisites
 
 - A bootstrapped [course org](01-new-course-org.md).
-- Push access on its content repos, this involves either: 
+- Push access on its content repos, from either: 
    1. `course-admin` membership (course org), or
-   2. being declared an instructor/TA in a cohort's org's `classroom-config/people.yml`
+   2. being declared an instructor/TA in a cohort org's `classroom-config/people.yml`
 
 > see [Manage the teaching team](05-manage-teaching-team.md) for full access details.
 
@@ -27,12 +27,9 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
       - a `MAINTAINING.md`, 
       - a placeholder `SYLLABUS.md` 
       - a commented-out `.releaseignore` 
-      >It also seeds the two run-from-repo Release workflows (Release materials, Release assignment) & later scheduled release functionality. 
+      >It also seeds the two run-from-repo Release workflows (Release materials, Release assignment). 
    - You have push on it immediately.
 
-2. **Clone the repo locally**
-   - This allows you to make local edits and replace with your own content.
-   
 2. **Push your content** to remote's `main` (git push or the web uploader):
 
    ```
@@ -54,20 +51,20 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
    *NB: to withhold a file from every release, name it in `.releaseignore` - `.gitignore` syntax, in any folder ([08](08-release-materials-to-cohort.md#withholding-files-with-releaseignore)).*
 
-   *NB: a session folder is released whole, subfolders included - but the site lists its root files plus one link per subfolder, so a rendered deck links the deck rather than its hundreds of assets ([11](11-configure-cohort-site.md)).*
+   *NB: a session folder is released whole, subfolders included ([11](11-configure-cohort-site.md)).*
 
-   *NB: material with no `NN_` session folder (a root `SYLLABUS.md`, a flat `datasets/`) still releases, and appears on the cohort site's **All Materials** tab - the Lectures/Labs/Readings tabs are keyed on the session ordinal.*
+   *NB: material with no `NN_` session folder (a root `SYLLABUS.md`, a flat `datasets/`) still releases, and appears on the cohort site's **All Materials** tab.*
 
 3. **Run Refresh actions** in the course org's `.github` Actions tab - only after creating a
    *new repo*, not after pushing content into one.
-   - The Release workflows have no session dropdown: you type the path (`course_source_path`),
-     so new sessions need no refresh. What Refresh actions repopulates is the repo dropdowns -
-     `course_source_repo`, the assignment list, the cohort list - and it runs itself nightly.
+   - What it repopulates is the repo dropdowns - `course_source_repo`, the assignment list,
+     the cohort list - and it runs itself nightly. The Release workflows take a typed
+     `course_source_path`, so new sessions need no refresh.
 
 ## Next
 
 - [Add an assignment](03-add-assignment-to-course.md).
-- [Schedule releases](07-schedule-releases.md) - plan the term, and never run a release workflow by hand.
+- [Schedule releases](07-schedule-releases.md) - plan the term up front, the primary path.
 - [Release to a cohort](08-release-materials-to-cohort.md) - open sessions up to students by hand.
 
 ---
