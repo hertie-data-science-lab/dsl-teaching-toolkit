@@ -5061,6 +5061,49 @@ def test_a_runner_with_latex_gets_a_pdf_and_one_without_falls_back(monkeypatch, 
     assert "1 pdf" in capsys.readouterr().out
 
 
+def test_an_export_that_never_started_costs_one_copy_not_the_whole_pass(
+    monkeypatch, capsys
+):
+    # This function's contract is that no ONE submission can red the cutoff pass - the
+    # freeze it runs beside is not re-runnable for free. An `OSError` out of
+    # `_run_limited`'s `Popen` broke it: an unenterable cwd (the 0700 hand-over), a
+    # missing interpreter, no fd left, and the traceback took every remaining submission
+    # with it. It is counted like any other copy nothing readable came back from.
+    _checkout(monkeypatch, {"submission.ipynb": _QUESTION_NB})
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda *a: [("a1-alice", "alice", ["alice"]), ("a1-ben", "ben", ["ben"])],
+    )
+    monkeypatch.setattr(
+        collect,
+        "load_snapshots",
+        lambda org, slug: {"a1-alice": "abc", "a1-ben": "abc"},
+    )
+    written = _capture_archive(monkeypatch)
+    monkeypatch.setattr(collect, "_pdf_engine_present", lambda: False)
+    spawned: list[list[str]] = []
+
+    def popen(argv, **kw):
+        spawned.append(argv)
+        if len(spawned) == 1:
+            raise PermissionError(13, "Permission denied", "/tmp/tmp9pu4nz5x")
+        Path(argv[-1]).with_suffix(".html").write_text("<html>Q1</html>")
+        return _Exits()
+
+    monkeypatch.setattr(collect.subprocess, "Popen", popen)
+
+    collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", False)
+
+    # The second submission was still exported and archived.
+    assert list(written) == ["autograde/a1/ben.html"]
+    out, err = capsys.readouterr()
+    assert "1 html" in out and f"1 {collect.GRADER_UNREADABLE}" in out
+    # Not silent either: a runner fault counted only as `not readable` reads like a fault
+    # of the submission. Counts and the tag, never the handle.
+    assert "counting it unreadable" in err and "alice" not in err
+
+
 def test_a_runner_without_latex_never_tries_to_make_a_pdf(monkeypatch, capsys):
     # A bare Actions runner has no TeX, so `--to pdf` writes nothing for EVERY student -
     # and each attempt costs an interpreter start and a full notebook render before the

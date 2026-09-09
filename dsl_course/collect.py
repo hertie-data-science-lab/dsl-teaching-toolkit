@@ -2598,7 +2598,21 @@ def _grader_document_for(
             return GRADER_NONE
         source, filtered = picked
         source.write_text(filtered.text)
-        exported = _export_document(source, env)
+        try:
+            exported = _export_document(source, env)
+        except OSError as exc:
+            # An export that never STARTED - `_run_limited`'s `Popen` raising on an
+            # unenterable cwd, a missing interpreter, no file descriptor left. Counted
+            # exactly like a clone that failed or a render that produced nothing, because
+            # this function's contract is that no ONE submission may red the cutoff pass:
+            # a traceback here aborted the whole freeze, and the pass is not re-runnable
+            # for free. Said out loud all the same - a runner fault that shows up only as
+            # a `not readable` count reads like a fault of the submission.
+            log_err(
+                f"  ! the grader copy for {target_ref(repo)} could not be started "
+                f"({exc}) - counting it unreadable"
+            )
+            return GRADER_UNREADABLE
         if exported is None:
             return GRADER_UNREADABLE
         verdict, content = exported
