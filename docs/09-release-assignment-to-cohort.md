@@ -20,7 +20,7 @@ A `handout_datetime:` datetime under `assignments.<slug>` in the cohort's `sched
 
 The `release assignment` workflow can be found in the course org's: 
   1. `.github` → **Actions** tab → **Release assignment** - e.g. [this demo repo](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/release-assignment.yml) 
-  2. within any bootstrapped assignment repo (i.e. any repo created using the **New assignment** workflow) → **Actions** tab → **Release assignment** - e.g. [this demo repo](https://github.com/hertie-dsl-demo-course-e1234/course-materials-f2026/actions)
+  2. within any bootstrapped assignment repo (i.e. any repo created using the **New assignment** workflow) → **Actions** tab → **Release assignment** - e.g. [this demo repo](https://github.com/hertie-dsl-demo-course-e1234/assignment-1-f2026/actions)
 
 
 Pick the `course_source_repo` - the same field a scheduled handout names in `schedule.yml`.
