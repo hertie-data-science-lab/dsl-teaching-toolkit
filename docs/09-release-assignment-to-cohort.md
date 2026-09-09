@@ -12,10 +12,7 @@ Hand out one **private repo per student** from a course org assignment template,
 
 ## The schedule automatically handles releases in advance (recommended)
 
-
-A `handout_datetime:` datetime under `assignments.<slug>` in the cohort's `schedule.yml` hands out the same repos automatically - the assignment's whole lifecycle (handout, due date, grading deadline) sits in one block: [Schedule releases](07-schedule-releases.md).
-
-This is the recommended method for releasing assignments, as it involves a one-time setup cost and also creates an entry in the deployed `<course>.github.io` site, so students can clearly understand the course plan in advance.
+A `handout_datetime:` datetime under `assignments.<slug>` in the cohort's `schedule.yml` hands out the same repos automatically - the assignment's whole lifecycle (handout, due date, grading deadline) sits in one block: [Schedule releases](07-schedule-releases.md). One setup cost, and the entry appears on the deployed `<course>.github.io` site so students see the plan in advance.
 
 > NB: a manual release stays compatible with the schedule: on success the workflow **records the release moment into `schedule.yml`** (`assignments.<slug>.handout_datetime`, write-once - a scheduled value is never touched), so the schedule remains the one record of when every assignment went out - and late onboarders get their repo on the next tick.
 
@@ -23,7 +20,7 @@ This is the recommended method for releasing assignments, as it involves a one-t
 
 The `release assignment` workflow can be found in the course org's: 
   1. `.github` → **Actions** tab → **Release assignment** - e.g. [this demo repo](https://github.com/hertie-dsl-demo-course-e1234/.github/actions/workflows/release-assignment.yml) 
-  2. within any bootstrapped assignment repo (i.e. any repo created using the `new assignment repo` workflow) → **Actions** tab → **Release assignment** - e.g. [this demo repo](https://github.com/hertie-dsl-demo-course-e1234/course-materials-f2026/actions)
+  2. within any bootstrapped assignment repo (i.e. any repo created using the **New assignment** workflow) → **Actions** tab → **Release assignment** - e.g. [this demo repo](https://github.com/hertie-dsl-demo-course-e1234/course-materials-f2026/actions)
 
 
 Pick the `course_source_repo` - the same field a scheduled handout names in `schedule.yml`.
@@ -31,36 +28,33 @@ Pick the `course_source_repo` - the same field a scheduled handout names in `sch
 - then it creates one **private** `<name>-<handle>` repo per onboarded student/group, with that student as
 collaborator.
 
-Other inputs, all default **off**: 
-- `include_solution` (also push the template's `solution`
+Other inputs: 
+- `include_solution` (**off** by default; also push the template's `solution`
 branch into each student repo). Schedulable instead, as `solution_datetime:` on the
 assignment - see [07](07-schedule-releases.md#releasing-the-model-solution)
-- `type` (`auto` **default** = follow `schedule.yml` / the template's `grading_config.yml`;
+- `type` (`auto` **default** = follow the template's `grading_config.yml`;
 or force `individual` / `group` for this dispatch -
 see [Group or individual?](#group-or-individual))
-- `dry_run` (list the repos that *would* be created).
+- `dry_run` (**off** by default; list the repos that *would* be created).
 
-Auditors (`role=auditor`) are skipped. The assignment's brief appears on the cohort site automatically - at hand-out, not before. Its schedule rows are up from the day the dates land in `schedule.yml`; until you release it they carry only the plan-side name and say it is not handed out yet, and the Assignments tab lists it unlinked. That holds however you hand out: this workflow and a scheduled `handout_datetime` both open it.
+Auditors (`role=auditor`) are skipped. The assignment's brief appears on the cohort site automatically - at hand-out, not before, however you hand out.
 
 ## Group or individual?
 
-Two places to say it, depending on how you release:
+The shape is the template's own declaration - `type:` in the `grading_config.yml` on its
+`solution` branch, which **New assignment** writes at scaffold time. The schedule carries
+only the dates:
 
-- **Scheduling up front** (the recommended path): declare it in the cohort's
-  `classroom-config/schedule.yml`, next to the handout:
+```yaml
+assignments:
+  assignment-4-project:
+    handout_datetime: 2026-10-20T14:00
+```
 
-  ```yaml
-  assignments:
-    assignment-4-project:
-      handout_datetime: 2026-10-20T14:00
-  ```
-
-- **Manual dispatch**: the **Release assignment** workflow asks for `type` - pick `individual` or `group`, or leave the default `auto` (= whatever the template's `grading_config.yml` declares; unwritten means individual).
+**Release assignment** can override it for one dispatch: its `type` input takes `individual` or `group`, and the default `auto` follows the template.
 
 - `group` = one shared repo per team from `teams.csv` (repo `<slug>-<team>`, every member a collaborator), marked per team in the grading sheet's `teams:` block, with one `adjustment_individual` per member.
 - `individual` = one private repo per onboarded, enrolled student (`<slug>-<handle>`), marked in the sheet's `submissions:` block.
-
-> NB: The template's `grading_config.yml` also carries a `type:` - the **New assignment** workflow's `type` input writes it at scaffold time, so most assignments are already declared there.
 
 ## Group assignments: creating the teams
 
@@ -74,7 +68,6 @@ Which of the two an assignment uses is its own declaration - `team_formation` in
 - **`self_select`** - students open a **Join team** issue in the cohort's `welcome` repo. Team size is capped by that assignment's `max_team_size` (default: the course's `assignment_defaults`, else 5).
 
 The form reads both answers out of `classroom-config/assignments.lock.yml`, which the toolkit generates from each assignment's definition and nobody edits. Change the assignment's `grading_config.yml` and the mirror catches up on the next **Sync membership**, **Release assignment** or nightly **Refresh actions**.
-
 
 The release then grants each team its one shared repo. Full flow:
 [Enrol students → groups](06-enrol-students-to-cohort.md#group-assignments-rolling-basis).
