@@ -1,12 +1,15 @@
 """What the demo orgs look like, before and after - the harness's "left no trace" proof.
 
-A pipeline run creates repos, flips topics and writes into `classroom-config`. Cleanup is
-meant to undo all of it; the only way to know it did is to photograph the estate first and
-compare afterwards. The fingerprint is deliberately cheap (one repo listing per org, one
-recursive tree per config repo) so it can be taken twice in a 20-minute run.
+A pipeline run creates repos, flips topics, writes into `classroom-config` and re-renders
+the org's buttons. Cleanup is meant to undo all of it; the only way to know it did is to
+photograph the estate first and compare afterwards. The fingerprint is deliberately cheap
+(one repo listing per org, one recursive tree per config repo, one workflows tree per
+course org) so it can be taken twice in a 20-minute run.
 
-`workflow_drift` answers the other estate question, asked before a run rather than after:
-are the workflows the org would actually execute the ones this checkout renders?
+`workflow_drift` answers the same question the other way round - by name rather than by
+blob, so a failure says which file: are the workflows the org would actually execute the
+ones this checkout renders? The preflight asks it before a run, and the teardown asks it
+again after re-rendering them.
 """
 
 from __future__ import annotations
@@ -25,12 +28,20 @@ CONFIG_REPO = course.CONFIG_REPO
 
 
 def fingerprint(org: str) -> dict[str, dict]:
-    """`{"repos": {name: {...}}, "classroom-config": {path: blob sha}}` for one org.
+    """`{"repos": ..., "classroom-config": ..., ".github/workflows": ...}` for one org.
 
     `private`, `topics` and `archived` are the three fields the pipeline can change
     without adding or removing a repo: a submission repo that came back public, a lost
     `dsl-assignment` topic or an archived cohort repo are all silent until something
-    compares them."""
+    compares them.
+
+    The workflow blob shas are here for the same reason, one layer up: creating this run's
+    assignment template repopulates the assignment dropdowns of four of the org's buttons,
+    so a teardown that deleted the template without re-rendering them left the org in a
+    state no refresh produces - and nothing in the repo listing or in classroom-config
+    says so. Course orgs only; a cohort org holds no org-level workflows (its own live in
+    `welcome` and `classroom-config`), and asking for a directory that is not there
+    raises."""
     listing = discovery.list_org_repos(org)
     fp: dict[str, dict] = {
         "repos": {
@@ -47,6 +58,9 @@ def fingerprint(org: str) -> dict[str, dict]:
         branch = repos.default_branch(org, CONFIG_REPO, fallback="main")
         config = gh_contents.repo_blob_shas(org, CONFIG_REPO, branch)
     fp[CONFIG_REPO] = config
+    fp[WORKFLOWS_DIR] = (
+        deployed_workflow_shas(org) if discovery.org_tier(listing) == "course" else {}
+    )
     return fp
 
 

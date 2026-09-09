@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import ghcli, grades, schedule
+from dsl_course import course, ghcli, grades, schedule
 from tests.e2e import allowlist, cleanup, drive, estate, schedule_edit, student
 
 GATE = 'pytest.skip("live e2e - set DSL_E2E=1", allow_module_level=True)'
@@ -150,7 +150,60 @@ def test_the_fingerprint_reads_visibility_as_private(monkeypatch):
 def test_a_config_repo_that_is_not_there_is_not_an_error(monkeypatch):
     # The course org has no classroom-config; only cohorts do.
     monkeypatch.setattr(estate.discovery, "list_org_repos", lambda org: [])
-    assert estate.fingerprint(COURSE) == {"repos": {}, estate.CONFIG_REPO: {}}
+    assert estate.fingerprint(COURSE) == {
+        "repos": {},
+        estate.CONFIG_REPO: {},
+        estate.WORKFLOWS_DIR: {},
+    }
+
+
+def test_the_fingerprint_photographs_the_org_level_workflows(monkeypatch):
+    # The run's own template repopulates four of the buttons' dropdowns, and a teardown
+    # that deleted the template without re-rendering them left the org in a state no
+    # refresh produces - invisible to a fingerprint of repos and classroom-config alone.
+    monkeypatch.setattr(
+        estate.discovery,
+        "list_org_repos",
+        lambda org: [
+            {
+                "name": ".github",
+                "visibility": "public",
+                "topics": [course.COURSE_HUB_TOPIC],
+                "archived": False,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        estate.ghcli, "gh_json", lambda *args: _tree({"release-assignment.yml": "abc"})
+    )
+    fp = estate.fingerprint(COURSE)
+    assert fp[estate.WORKFLOWS_DIR] == {"release-assignment.yml": "abc"}
+    assert estate.diff(fp, {**fp, estate.WORKFLOWS_DIR: {}}) == {
+        ".github/workflows/release-assignment.yml": ("abc", None)
+    }
+
+
+def test_a_cohort_org_is_not_asked_for_org_level_workflows(monkeypatch):
+    # It holds none - its own workflows live in `welcome` and `classroom-config` - and a
+    # tree fetch of a directory that is not there raises rather than coming back empty.
+    monkeypatch.setattr(
+        estate.discovery,
+        "list_org_repos",
+        lambda org: [
+            {
+                "name": ".github",
+                "visibility": "public",
+                "topics": [course.COHORT_TOPIC],
+                "archived": False,
+            }
+        ],
+    )
+
+    def refuse(*args):
+        raise AssertionError("a cohort org has no org-level workflows to read")
+
+    monkeypatch.setattr(estate.ghcli, "gh_json", refuse)
+    assert estate.fingerprint(COHORT)[estate.WORKFLOWS_DIR] == {}
 
 
 # ------------------------------------------------------- are the org's workflows current
@@ -432,6 +485,85 @@ def test_the_repo_names_in_those_commands_are_verbose_only(monkeypatch, capsys):
     monkeypatch.setenv("DSL_VERBOSE", "1")
     cleanup.main(["--run-id", RUN])
     assert filled in capsys.readouterr().out
+
+
+# ------------------------------------- and puts the buttons back the way it found them
+
+
+def _a_course_org(
+    monkeypatch, *, holds_run_repo: bool = False, drift=()
+) -> list[tuple]:
+    """One course org in scope, with the refresh's own writer recorded rather than run."""
+    monkeypatch.setenv("DSL_ORG_ALLOWLIST", COURSE)
+    monkeypatch.setenv("DSL_E2E_ORGS", COURSE)
+    listing = [
+        {"name": ".github", "visibility": "public", "topics": [course.COURSE_HUB_TOPIC]}
+    ]
+    if holds_run_repo:
+        listing.append({"name": cleanup.slug(RUN), "visibility": "private"})
+    monkeypatch.setattr(cleanup.discovery, "list_org_repos", lambda org: listing)
+    monkeypatch.setattr(cleanup.discovery, "central_ref_for", lambda org: "main")
+    monkeypatch.setattr(cleanup, "_clean_config", lambda *args: 0)
+    monkeypatch.setattr(ghcli, "gh", lambda *args, **kwargs: (0, ""))
+    monkeypatch.setattr(
+        cleanup.seed, "github_workflow_files", lambda org, ref: {"a.yml": b"x"}
+    )
+    written: list[tuple] = []
+
+    def write(org, ref):
+        written.append((org, ref))
+        return 0
+
+    monkeypatch.setattr(cleanup.seed, "seed_github_workflows", write)
+    monkeypatch.setattr(
+        cleanup.estate, "workflow_drift", lambda org, rendered: list(drift)
+    )
+    return written
+
+
+def test_the_teardown_re_renders_the_course_orgs_buttons(monkeypatch):
+    # Deleting the template is not enough: four of the buttons list it in a dropdown
+    # rendered from the org's repo listing, and the next run's preflight refuses on
+    # exactly that drift. So cleanup runs the refresh's writer at the org's own ref.
+    written = _a_course_org(monkeypatch)
+    assert cleanup.cleanup(RUN) == 0
+    assert written == [(COURSE, "main")]
+
+
+def test_a_cohort_org_has_no_buttons_to_re_render(monkeypatch):
+    written = _a_course_org(monkeypatch)
+    monkeypatch.setattr(
+        cleanup.discovery,
+        "list_org_repos",
+        lambda org: [{"name": "welcome", "visibility": "public"}],
+    )
+    assert cleanup.cleanup(RUN) == 0
+    assert written == []
+
+
+def test_a_re_render_that_left_the_org_stale_is_counted_undone(monkeypatch, capsys):
+    # The write went out and the org still runs something else: silence here is the next
+    # run refusing to start, hours later, with nothing to connect it to this teardown.
+    _a_course_org(monkeypatch, drift=("release-assignment.yml",))
+    assert cleanup.cleanup(RUN) == 1
+    assert "release-assignment.yml" in capsys.readouterr().err
+
+
+def test_the_buttons_are_not_re_rendered_while_the_template_is_still_listed(
+    monkeypatch, capsys
+):
+    # Rendering from a listing that still holds this run's template would write the
+    # assignment straight back into the dropdowns - the opposite of a teardown.
+    written = _a_course_org(monkeypatch, holds_run_repo=True)
+    assert cleanup.cleanup(RUN) == 1
+    assert written == []
+    assert "NOT re-rendering" in capsys.readouterr().err
+
+
+def test_a_dry_run_re_renders_nothing(monkeypatch):
+    written = _a_course_org(monkeypatch)
+    assert cleanup.cleanup(RUN, dry_run=True) == 0
+    assert written == []
 
 
 def test_cleanup_refuses_without_the_transport_fence(monkeypatch):
