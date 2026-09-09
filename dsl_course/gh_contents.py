@@ -119,6 +119,12 @@ def put_file(
     re-read, re-apply its change, and retry.
 
     One file, one commit. Use put_files when several files belong in the SAME commit.
+
+    The base64 content goes to `gh` on STDIN (`--field content=@-`), never in argv: Linux
+    caps a single argument at 128 KiB, so anything past ~96 KiB of content used to raise
+    `OSError: Argument list too long` out of `subprocess.run`. Nothing catches that, so it
+    escaped the whole cutoff run - no fire-once sentinel, red job, and the next tick
+    repeating the freeze for ever. Every other field is small and stays in argv.
     """
     b64 = base64.b64encode(content).decode()
     args = [
@@ -129,7 +135,7 @@ def put_file(
         "--field",
         f"message={message}",
         "--field",
-        f"content={b64}",
+        "content=@-",
     ]
     if expected_sha is not None:
         if expected_sha == blob_sha(content):
@@ -148,7 +154,7 @@ def put_file(
             if sha == blob_sha(content):
                 return True
             args += ["--field", f"sha={sha}"]
-    code, out = gh(*args)
+    code, out = gh(*args, stdin=b64)
     if code == 0:
         return True
     if person:
@@ -220,6 +226,83 @@ def repo_blob_shas(org: str, repo: str, branch: str) -> dict[str, str]:
     return {path: sha for path, sha in entries}
 
 
+def get_blob(org: str, repo: str, sha: str) -> bytes | None:
+    """The exact bytes of one blob, addressed by its git sha. None when the blob is gone.
+
+    The read to use when the bytes have to come back EXACTLY - when they will be hashed,
+    compared against a tree, or written into another repo. `get_file_content` cannot do
+    that and is not meant to: the Contents API refuses to inline anything over 1 MiB (it
+    returns `content: ""` on a 200, which reads as an empty file - a plot-heavy notebook
+    silently becomes nothing), and `gh()` hands every caller `(stdout+stderr).strip()`,
+    which eats a trailing newline. The git blobs API answers for anything up to 100 MiB,
+    and base64 survives that strip unharmed.
+
+    What comes back is checked against the sha it was asked for, so an empty or truncated
+    payload is a failure here rather than an empty file somewhere downstream. Same
+    fail-loud rule as the rest of this module: only a genuine 404 is None."""
+    code, out = gh("api", f"repos/{org}/{repo}/git/blobs/{sha}", "--jq", ".content")
+    if code != 0:
+        if is_missing_resource(out):
+            return None
+        raise RuntimeError(f"could not read blob {sha} of {org}/{repo}: {out[:200]}")
+    try:
+        content = base64.b64decode(out, validate=False)
+    except ValueError as exc:
+        raise RuntimeError(f"blob {sha} of {org}/{repo} did not decode: {exc}") from exc
+    if blob_sha(content) != sha:
+        raise RuntimeError(
+            f"blob {sha} of {org}/{repo} came back as {len(content)} bytes that hash to "
+            f"{blob_sha(content)} - GitHub did not send the content it was asked for"
+        )
+    return content
+
+
+def create_blob(org: str, repo: str, content: bytes) -> str | None:
+    """Upload `content` as a loose blob and return its sha. None when it could not be sent.
+
+    The write half of `get_blob`, and the only way BYTES reach a repo through the git data
+    API: a tree entry's `content` field is text, so anything that is not UTF-8 has to be
+    posted as a blob first and referenced by sha. Without it a corrected image or dataset
+    under a patched folder raised `UnicodeDecodeError` out of a `.decode()`, past the
+    `RuntimeError` the caller catches, and abandoned a patch run mid-cohort."""
+    code, out = gh(
+        "api",
+        "--method",
+        "POST",
+        f"repos/{org}/{repo}/git/blobs",
+        "--input",
+        "-",
+        "--jq",
+        ".sha",
+        stdin=json.dumps(
+            {"content": base64.b64encode(content).decode(), "encoding": "base64"}
+        ),
+    )
+    if code != 0:
+        log_err(f"could not upload a blob to {org}/{repo}: {out[:200]}")
+        return None
+    return out.strip()
+
+
+def _tree_entry(
+    org: str, repo: str, path: str, content: bytes
+) -> dict[str, Any] | None:
+    """One tree entry for `content`, by whichever route its bytes can travel. None when a
+    binary could not be uploaded, which is the caller's signal to write nothing at all."""
+    try:
+        return {
+            "path": path,
+            "mode": "100644",
+            "type": "blob",
+            "content": content.decode(),
+        }
+    except UnicodeDecodeError:
+        sha = create_blob(org, repo, content)
+        if sha is None:
+            return None
+        return {"path": path, "mode": "100644", "type": "blob", "sha": sha}
+
+
 def put_files(
     org: str,
     repo: str,
@@ -272,15 +355,12 @@ def put_files(
         if create_only and path in live:
             log_skip(f"{repo}/{path}")
             continue
-        if live.get(path) != blob_sha(content):
-            tree.append(
-                {
-                    "path": path,
-                    "mode": "100644",
-                    "type": "blob",
-                    "content": content.decode(),
-                }
-            )
+        if live.get(path) == blob_sha(content):
+            continue
+        entry = _tree_entry(org, repo, path, content)
+        if entry is None:
+            return False
+        tree.append(entry)
     for path in delete:
         if path in live:
             # A null sha is how the trees API spells "remove this path".
@@ -327,10 +407,21 @@ def _seed_first_commit(
     ok = True
     for entry in tree:
         content = entry.get("content")
-        if content is None:  # a `sha: None` delete - nothing there to delete
-            continue
-        if not put_file(
-            org, repo, entry["path"], content.encode(), message, person=person
+        if content is not None:
+            body: bytes | None = content.encode()
+        elif entry.get("sha") is None:
+            continue  # a `sha: None` delete - nothing there to delete
+        else:
+            # A binary, already uploaded as a loose blob (see `_tree_entry`). Read back
+            # rather than threaded down here: this path runs once in a repo's life, and
+            # only for a file that is not text.
+            try:
+                body = get_blob(org, repo, entry["sha"])
+            except RuntimeError as exc:
+                _failed(person, f"could not read a blob in {org}", str(exc))
+                body = None
+        if body is None or not put_file(
+            org, repo, entry["path"], body, message, person=person
         ):
             ok = False
     return ok

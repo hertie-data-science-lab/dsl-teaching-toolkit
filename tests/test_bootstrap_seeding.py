@@ -28,6 +28,7 @@ schema-stale in silence - which is how a cohort's schedule.yml once parsed as ze
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 import yaml
@@ -516,6 +517,9 @@ def test_the_people_sample_names_nobody_real():
 # - so a schema move that leaves this tree behind fails here rather than in a faculty repo.
 
 
+WT_EXAMPLES = Path(__file__).resolve().parents[1] / "example-course" / "course-org"
+
+
 def _shipped_syllabus_sample() -> str:
     return scaffold.materials_system_files("Course-E1", "course-materials-f2026")[
         course.SYLLABUS_SAMPLE_FILE
@@ -571,6 +575,28 @@ def test_the_example_course_declares_every_key_the_generator_writes():
     assert set(generated) <= set(example), (
         f"the worked example omits {sorted(set(generated) - set(example))}"
     )
+
+
+def test_the_worked_examples_assignments_parse_with_the_real_reader(capsys):
+    # example-course/course-org/ is where docs/03 and DEPLOYMENT-CHECKLIST send faculty to
+    # see what a `grading_config.yml` looks like. Read by the ENGINE's own parser, so a key
+    # renamed or retired fails here rather than teaching three orgs a spelling the reader
+    # would silently drop.
+    configs = sorted((WT_EXAMPLES).glob("assignment-*/solution/grading_config.yml"))
+    assert configs, "the worked example has lost its assignments"
+    for path in configs:
+        spec = grades.parse_grading_spec(path.read_text())
+        assert spec.dropped == (), f"{path.name}: {spec.dropped}"
+        assert spec.title
+    assert capsys.readouterr().err == ""
+    # And the showcase is opinionated: the notebook assignment declares the completion
+    # check rather than leaving a reader to infer it from `format:`.
+    notebooks = [
+        grades.parse_grading_spec(p.read_text())
+        for p in configs
+        if grades.parse_grading_spec(p.read_text()).format == "ipynb"
+    ]
+    assert notebooks and all(s.completion_check is True for s in notebooks)
 
 
 def test_the_seeded_assignment_defaults_block_parses_with_the_real_reader(capsys):

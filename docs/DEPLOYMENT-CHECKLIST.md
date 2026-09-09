@@ -200,16 +200,27 @@ course-materials-f2026/
 Live example: [`example-course/course-org/assignment-1-f2026`](../example-course/course-org/assignment-1-f2026).
 
 `assignment-N-<tag>` - a template repo with two branches. Student repos are generated from
-`main` only. The **New assignment** workflow's `format` (py/notebook) picks the starter
-stub; `type` (individual/group) is recorded in `grading_config.yml`, and handout and grading obey
-`type: group` automatically. The autograder takes either format - it converts any `.ipynb`
-the submission holds before running the hidden tests.
+`main` only. The **New assignment** workflow's `format` (`ipynb`/`py`/`rmd`/`qmd`/`latex`/`none`)
+picks the starter stub; `type` (individual/group) is recorded in `grading_config.yml`, and handout
+and grading obey `type: group` automatically. The autograder takes any format - it converts any
+`.ipynb` the submission holds before running the hidden tests.
 
 ```
 main branch      README.md (the brief) + starter.*      -> what students get
 solution branch  solution/ + grading_config.yml + tests/       -> faculty-only; hidden tests
                                                             power the (optional) autograder
 ```
+
+`grading_config.yml`, on the `solution` branch, is the assignment's whole definition:
+`title`, `type`, `team_formation`, `max_team_size`, `submit_via`, `format`, `questions`,
+`late_window_days`, `late_penalty_per_day`, `autograde`, `completion_check`, `grader_pdf`,
+`tests`. The
+button writes it from its eight inputs plus the course's `assignment_defaults:`; every key
+is documented inline in the generated file and in
+[Add an assignment](03-add-assignment-to-course.md). Two of them drive the cutoff:
+`autograde: true` runs `tests/` (or `tests/run.sh`, in any language), and `completion_check`
+(default: on for `format: ipynb`) executes the notebook and records whether it runs top to
+bottom.
 
 ### `schedule.yml`
 
@@ -410,10 +421,11 @@ Verify with `python3 -m dsl_course.schedule --cohort-org <COHORT> --validate`. F
 
 **What happens at the grading deadline.** The scheduler freezes each submission repo's
 commit into `classroom-config/snapshots/<slug>.csv` (write-once - delete it to re-freeze),
-then, where the `<slug>-<tag>` template's `grading_config.yml` says `autograde: true`,
-autogrades **once** against it (the `_graded.json` / `_skipped.json` record in
-`classroom-config/autograde/<slug>/` is the fired marker - delete it, or the whole folder,
-to re-grade). All of this happens whether or not the cohort uses `releases`.
+then examines it **once** - the hidden tests where the `<slug>-<tag>` template's
+`grading_config.yml` says `autograde: true`, the completion check where it asks for one (the
+`_graded.json` / `_skipped.json` record in `classroom-config/autograde/<slug>/` is the fired
+marker - delete it, or the whole folder, to re-grade). All of this happens whether or not the
+cohort uses `releases`.
 
 ## Token
 

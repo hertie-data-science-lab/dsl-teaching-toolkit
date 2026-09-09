@@ -31,6 +31,7 @@ from .course import (
     ASSIGNMENT_TYPES,
     FORMATS,
     MATERIALS_REPO_PREFIX,
+    SANDBOX_USER,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     term_tag,
@@ -214,7 +215,25 @@ _TIMEOUT_GRADING = 120
 # gate via _run_preamble by every workflow. Ends after `pip install`, so a renderer appends
 # its own `      - name: ...` step directly. The timeout is the ONE thing that varies, so
 # it is a parameter rather than a second copy of the preamble.
-def _ungated_preamble(minutes: int = _TIMEOUT_DEFAULT) -> str:
+# The account graded code runs as, created once per job by the jobs that grade. Its reason
+# is in `course.SANDBOX_USER`: a uid is the boundary, and a graded subprocess sharing this
+# job's uid can read the org-owner PAT out of `/proc/<pid>/environ` however carefully its
+# own environment was stripped. `collect` execs every graded command through `sudo -n -u`
+# this account and fails closed without it, so a job that grades and does not run this step
+# grades nothing at all - which is why it belongs to the preamble rather than to a renderer.
+#
+# No `env:`: it holds no secret, and it must not. `--system` and a nologin shell because
+# nothing ever signs in as it; `id -u` first because a re-run on a warm self-hosted runner
+# finds the account already there and `useradd` would fail the job.
+_SANDBOX_STEP = f"""      - name: Create the account graded code runs as
+        run: |
+          id -u {SANDBOX_USER} >/dev/null 2>&1 \\
+            || sudo useradd --system --no-create-home --shell /usr/sbin/nologin {SANDBOX_USER}
+          sudo -n -u {SANDBOX_USER} true
+"""
+
+
+def _ungated_preamble(minutes: int = _TIMEOUT_DEFAULT, *, sandbox: bool = False) -> str:
     return f"""    runs-on: ubuntu-latest
     timeout-minutes: {minutes}
     steps:
@@ -222,15 +241,21 @@ def _ungated_preamble(minutes: int = _TIMEOUT_DEFAULT) -> str:
         with:
           repository: {CENTRAL}
           ref: {CENTRAL_REF_PLACEHOLDER}
+          # No credential left behind in $GITHUB_WORKSPACE/.git/config. Nothing here ever
+          # pushes to the checkout - the central repo is public and read-only to these
+          # jobs, and every write goes through `gh`/`gh auth setup-git` against ANOTHER
+          # repo - so the persisted header buys nothing, and the grading jobs run the
+          # student's own code with this directory on disk.
+          persist-credentials: false
       - uses: {_SETUP_PYTHON}
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
-"""
+{_SANDBOX_STEP if sandbox else ""}"""
 
 
-def _run_preamble(minutes: int = _TIMEOUT_DEFAULT) -> str:
-    return f"    needs: check-team\n{_ungated_preamble(minutes)}"
+def _run_preamble(minutes: int = _TIMEOUT_DEFAULT, *, sandbox: bool = False) -> str:
+    return f"    needs: check-team\n{_ungated_preamble(minutes, sandbox=sandbox)}"
 
 
 # Mail secrets, wired into the env of the workflows that send email (enrolment codes and
@@ -250,10 +275,14 @@ _MAIL_ENV = "\n".join(
 )
 
 # Fail CLOSED: only an explicit `false` acts. Any other value - "True", "1", a blank from a
-# renamed input - previews. The two buttons that share it are the two whose real run cannot
-# be taken back by clicking again: Distribute grades emails a whole cohort, and Archive
-# cohort freezes one. The other dry-run gates in this module guard convergent work and keep
-# the simpler spelling.
+# renamed input - previews. Shared by the buttons whose `dry_run` DEFAULTS TO TRUE, which is
+# the set whose real run reaches further than a second click can take back: Distribute
+# grades emails a whole cohort, Archive cohort freezes one, Derive student version
+# overwrites instructor-written files on a template's `main`, and Patch released
+# assignment commits into every student's repo. Their CLIs spell the flag
+# `--dry-run/--no-dry-run` and default it ON, so the gate has to pass one of the two
+# EXPLICITLY - "add nothing when the box is unticked" would preview for ever. The other
+# dry-run gates in this module guard convergent work and keep the simpler spelling.
 _DRY_RUN_GATE = (
     '          if [ "$DRY_RUN" = "false" ]; '
     "then args+=(--no-dry-run); else args+=(--dry-run); fi"
@@ -300,8 +329,24 @@ _DRY_RUN_GATE = (
 # every green tick, the failing leg would refile with a fresh cc, and the 6h throttle would
 # never engage. The search stays as the cheap server-side narrowing; `select(.title == ..)`
 # is the guard. `source_digest._open_issue` matches client-side for the same reason.
-_SCOPE = "__CRON_ISSUE_SCOPE__"  # replaced per job; see _fill_scope
+_SCOPE = "__CRON_ISSUE_SCOPE__"  # replaced per job; see _fill
 _SCOPE_ENV = "__CRON_SCOPE_ENV__"  # any env the scope's shell fragment reads
+
+# How a reporting step learns whether the run it reports on failed, and where it reads that
+# run's log. Ordinarily these steps sit INSIDE the job they report on, so both answers are
+# ambient: `failure()`/`success()` are that job's own status, and the log is the one the
+# failing step teed to $RUNNER_TEMP.
+#
+# A job that runs STUDENT CODE cannot host them. Its last step is the student's, and the
+# runner executes whatever that step left in $GITHUB_ENV/$GITHUB_PATH before running the
+# next one - so a following step holding secrets.DSL_BOT_TOKEN runs the student's code as
+# the org owner. Such a job's reporting therefore lives in a job of its own, on a fresh
+# runner, and has to ASK: by then the leg it reports on has finished, so the jobs API can
+# answer it (which is exactly what it could not do from inside the still-running job).
+_FAILED = "__CRON_FAILED_IF__"
+_SUCCEEDED = "__CRON_SUCCEEDED_IF__"
+_LOG_TAIL = "__CRON_LOG_TAIL__"
+_MAIL_LOG_ENV = "__CRON_MAIL_LOG_ENV__"
 
 # Where a cron step keeps its own output for the mail step below to tail. The runner's
 # temp directory, so it is per JOB - the scheduler's grading matrix runs a leg per cohort,
@@ -329,16 +374,21 @@ _TEE_RUN_LOG = f' 2>&1 | tee {_RUN_LOG}\n          exit "${{PIPESTATUS[0]}}"'
 # shell could reinterpret.
 _CRON_MAIL_TEMPLATE = (
     """      - name: Email the maintainer the failed step's log
-        if: (failure() || cancelled()) && github.event_name != 'workflow_dispatch' && steps.notice.outputs.report == 'true'
+        if: """
+    + _FAILED
+    + """ && github.event_name != 'workflow_dispatch' && steps.notice.outputs.report == 'true'
         env:
           WORKFLOW: ${{ github.workflow }}
           COURSE: ${{ github.repository_owner }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
 """
+    + _MAIL_LOG_ENV
     + _MAIL_ENV
-    + f"""
+    + """
         run: |
-          tail -n 30 {_RUN_LOG} 2>/dev/null \\
+          """
+    + _LOG_TAIL
+    + """ \\
             | python3 -m dsl_course.notify run-failed --course-org "$COURSE" \\
                 --workflow "$WORKFLOW" --run-url "$RUN_URL" || true
 """
@@ -346,7 +396,9 @@ _CRON_MAIL_TEMPLATE = (
 
 _CRON_CLOSE_TEMPLATE = (
     """      - name: Close the failure issue once a run succeeds
-        if: success()
+        if: """
+    + _SUCCEEDED
+    + """
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           WORKFLOW: ${{ github.workflow }}
@@ -370,7 +422,9 @@ _CRON_CLOSE_TEMPLATE = (
 _CRON_NOTICE_TEMPLATE = (
     """      - name: Report an unattended failure as an issue
         id: notice
-        if: (failure() || cancelled()) && github.event_name != 'workflow_dispatch'
+        if: """
+    + _FAILED
+    + """ && github.event_name != 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
           WORKFLOW: ${{ github.workflow }}
@@ -422,28 +476,98 @@ _CRON_NOTICE_TEMPLATE = (
 )
 
 
-def _fill_scope(template: str, scope: str = "", scope_env: str = "") -> str:
-    """Bind one job's issue scope into a reporting template.
+def _fill(
+    template: str,
+    scope: str = "",
+    scope_env: str = "",
+    *,
+    failed: str = "(failure() || cancelled())",
+    succeeded: str = "success()",
+    log_tail: str = f"tail -n 30 {_RUN_LOG} 2>/dev/null",
+    mail_log_env: str = "",
+) -> str:
+    """Bind one job's issue scope - and how it tells a failure from a success, and where it
+    reads the failed log - into a reporting template.
 
     `scope` is a SHELL fragment, so it may name an env var (`$COHORT`) and `scope_env` is
     where that var comes from - a value must never reach a run block as a `${{ }}`
-    expression, which GitHub substitutes before the shell parses the line."""
-    return template.replace(_SCOPE, f" ({scope})" if scope else "").replace(
-        _SCOPE_ENV, scope_env
+    expression, which GitHub substitutes before the shell parses the line. The three
+    keyword arguments default to the in-job answers (this job's own status, this job's own
+    teed log) and are only given for reporting that had to be moved off the runner it
+    reports on - see `_AUTOGRADE_REPORT`."""
+    return (
+        template.replace(_SCOPE, f" ({scope})" if scope else "")
+        .replace(_SCOPE_ENV, scope_env)
+        .replace(_FAILED, failed)
+        .replace(_SUCCEEDED, succeeded)
+        .replace(_LOG_TAIL, log_tail)
+        .replace(_MAIL_LOG_ENV, mail_log_env)
     )
 
 
 # The unscoped pair, for the workflows with a single unattended job.
-_CRON_NOTICE = _fill_scope(_CRON_NOTICE_TEMPLATE)
-_CRON_CLOSE = _fill_scope(_CRON_CLOSE_TEMPLATE)
+_CRON_NOTICE = _fill(_CRON_NOTICE_TEMPLATE)
+_CRON_CLOSE = _fill(_CRON_CLOSE_TEMPLATE)
 
-# The scheduler's grading job reports PER COHORT: its matrix legs run in parallel, so on a
-# shared title a green cohort would close a red cohort's open issue. A cohort org name is
-# not per-person data, so it may be said out loud in a public repo's issue title.
-_AUTOGRADE_NOTICE = _fill_scope(
+# The scheduler's grading legs report PER COHORT: they run in parallel, so on a shared
+# title a green cohort would close a red cohort's open issue. A cohort org name is not
+# per-person data, so it may be said out loud in a public repo's issue title.
+#
+# And they report from a job of their OWN. The grading job runs the student's code, which
+# makes it the one place in the estate where a following step holding an org-owner PAT is
+# an escalation rather than a convenience (see `_FAILED`), so its last step is the
+# student's and everything below runs on a fresh runner. What that costs is the two things
+# the in-job form got for free - the job's status and its log - so the first step here buys
+# both back off the jobs API, keyed on the leg's own name.
+_AUTOGRADE_OUTCOME = """      - name: How this cohort's grading leg ended
+        id: graded
+        env:
+          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          ATTEMPT: ${{ github.run_attempt }}
+          COHORT: ${{ matrix.cohort }}
+        run: |
+          # The leg's `name:` is `autograde <cohort>`, set explicitly on the job so this
+          # lookup matches a string the workflow declares rather than one GitHub composes.
+          # `|| true` and a `head`: under `bash -e` a transient search failure would
+          # otherwise abort the job that exists to report, and a re-run reads its OWN
+          # attempt.
+          row=$(gh api "repos/$REPO/actions/runs/$RUN_ID/attempts/$ATTEMPT/jobs" --paginate \\
+            --jq ".jobs[] | select(.name == \\"autograde $COHORT\\") | \\"\\(.conclusion) \\(.id)\\"" | head -n 1) || true
+          if [ -z "$row" ]; then
+            # No leg for this cohort in this attempt - a cohort registered between the two
+            # jobs, or a matrix leg GitHub never started. Nothing happened, so nothing is
+            # filed and nothing is closed.
+            echo "no grading leg for this cohort in this run - nothing to report"
+            echo "result=skipped" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "graded leg concluded: ${row%% *}"
+          echo "result=${row%% *}" >> "$GITHUB_OUTPUT"
+          echo "job_id=${row##* }" >> "$GITHUB_OUTPUT"
+"""
+
+_AUTOGRADE_REPORT = _AUTOGRADE_OUTCOME + _fill(
     _CRON_NOTICE_TEMPLATE,
     "autograde $COHORT",
     "          COHORT: ${{ matrix.cohort }}\n",
+    # `skipped` is "there was no run to report on", which is neither a failure to file nor
+    # a recovery to close. Anything else that is not a success - including the `cancelled`
+    # a leg killed by its own timeout-minutes ends in - is the fault this exists to surface.
+    failed=(
+        "steps.graded.outputs.result != 'success' "
+        "&& steps.graded.outputs.result != 'skipped'"
+    ),
+    succeeded="steps.graded.outputs.result == 'success'",
+    # The failed leg's log, fetched now that the leg has finished. Piped, never
+    # interpolated: a log tail is arbitrary text and must not become argv.
+    log_tail='gh api "repos/$REPO/actions/jobs/$JOB_ID/logs" 2>/dev/null | tail -n 30',
+    mail_log_env=(
+        "          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}\n"
+        "          REPO: ${{ github.repository }}\n"
+        "          JOB_ID: ${{ steps.graded.outputs.job_id }}\n"
+    ),
 )
 
 
@@ -610,15 +734,20 @@ def render_central_release(source_repos: list[str], cohort_orgs: list[str]) -> s
     )
 
 
-def _assignment_input(assignments: list[str]) -> str:
-    """The course-org repo to hand out from - a dropdown of discovered assignment
-    templates, or free-text. Named as in schedule.yml: `course_source_repo`."""
+def _assignment_input(
+    assignments: list[str], description: str = "Course-org repo to hand out from"
+) -> str:
+    """Which assignment TEMPLATE a button acts on - a dropdown of the discovered ones, or
+    free-text before any exists. Named as in schedule.yml: `course_source_repo`, on every
+    per-assignment button, so one word means one thing across the whole Actions tab.
+
+    `description` is for the buttons that do not hand anything out (deriving a starter,
+    patching a released one), where "hand out from" would be a lie about what the run does.
+    """
     if assignments:
-        return _choice_input(
-            "course_source_repo", "Course-org repo to hand out from", assignments
-        )
+        return _choice_input("course_source_repo", description, assignments)
     return (
-        '      course_source_repo:\n        description: "Course-org repo to hand out from (e.g. assignment-1-f2026)"\n'
+        f'      course_source_repo:\n        description: "{description} (e.g. assignment-1-f2026)"\n'
         "        required: true"
     )
 
@@ -714,7 +843,7 @@ on:
 {_concurrency("collect-submissions")}
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   collect-submissions:
-{_run_preamble(_TIMEOUT_GRADING)}      - name: Collect submissions
+{_run_preamble(_TIMEOUT_GRADING, sandbox=True)}      - name: Collect submissions
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           MASTER_ORG: ${{{{ github.repository_owner }}}}
@@ -1025,10 +1154,13 @@ def render_scheduler() -> str:
 # are - see the cron-minute rules above for why `0 * * * *` was delivered 6 times a day, not
 # 24 - and an idle tick is ~30s of reads, so the cost of arriving twice is negligible.
 #
-# TWO JOBS, because a grading pass can run for two hours and must not hold up a release due
-# meanwhile. `release` walks every cohort (fast: dated copies and repo provisioning);
-# `autograde` is one matrix leg per cohort, each queued only against itself, and runs even
-# when the release job failed - one cohort's fault is nobody else's wait.
+# THREE JOBS. `release` walks every cohort (fast: dated copies and repo provisioning) and is
+# separate because a grading pass can run for two hours and must not hold up a release due
+# meanwhile. `autograde` is one matrix leg per cohort, each queued only against itself, and
+# runs even when the release job failed - one cohort's fault is nobody else's wait. And
+# `autograde-report` files/closes the grading legs' failure issues from a runner of its own,
+# because `autograde` executes the STUDENTS' code and a step after that one holding the bot
+# token would run whatever they left in $GITHUB_ENV, as the org owner.
 
 on:
   schedule:
@@ -1080,6 +1212,9 @@ on:
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
           python3 -m dsl_course.scheduler "${{args[@]}}"{_TEE_RUN_LOG}
 {_CRON_NOTICE}  autograde:
+    # Named, because `autograde-report` below looks its legs up by name through the jobs
+    # API - a string this file declares rather than one GitHub composes from the matrix.
+    name: autograde ${{{{ matrix.cohort }}}}
     needs: [release]
     # always(), because grading is gated on the durable snapshot marker, not on this run's
     # release pass: a red release must not silently skip a cohort's grading. The output test
@@ -1091,7 +1226,13 @@ on:
       fail-fast: false
       matrix:
         cohort: ${{{{ fromJSON(needs.release.outputs.cohorts) }}}}
-{_AUTOGRADE_CONCURRENCY}{_ungated_preamble(_TIMEOUT_GRADING)}      - name: Autograde every passed deadline
+{_AUTOGRADE_CONCURRENCY}{_ungated_preamble(_TIMEOUT_GRADING, sandbox=True)}      # THE LAST STEP OF THIS JOB, and it has to stay that way. It executes the students'
+      # own notebooks, `run.sh` and hidden tests, and the runner sources whatever a step
+      # leaves in $GITHUB_ENV / $GITHUB_PATH before it starts the next one - so a step
+      # after this one holding secrets.DSL_BOT_TOKEN would run student code as the org
+      # owner. The failure issue, the mail and the recovery close therefore live in
+      # `autograde-report`, on a runner of their own. Held there by a renderer test.
+      - name: Autograde every passed deadline
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           COURSE: ${{{{ github.repository_owner }}}}
@@ -1101,8 +1242,18 @@ on:
           gh auth setup-git
           args=(--course-org "$COURSE" --cohort-org "$COHORT" --autograde-only)
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
-          python3 -m dsl_course.scheduler "${{args[@]}}"{_TEE_RUN_LOG}
-{_AUTOGRADE_NOTICE}"""
+          python3 -m dsl_course.scheduler "${{args[@]}}"
+  autograde-report:
+    # What the grading job may not do for itself. One leg per cohort, exactly like the
+    # matrix it reports on, so each cohort keeps its own failure issue and a green cohort
+    # never closes a red one's.
+    needs: [release, autograde]
+    if: always() && needs.release.outputs.cohorts != '' && needs.release.outputs.cohorts != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        cohort: ${{{{ fromJSON(needs.release.outputs.cohorts) }}}}
+{_ungated_preamble()}{_AUTOGRADE_REPORT}"""
 
 
 def render_status(cohort_orgs: list[str]) -> str:
@@ -1295,6 +1446,108 @@ on:
             --team-formation "$TEAM_FORMATION" --submit-via "$SUBMIT_VIA" \\
             --autograde "$AUTOGRADE"
           python3 -m dsl_course.seed refresh --course-org "$ORG"
+"""
+
+
+def render_patch_assignment(
+    cohort_orgs: list[str], assignments: list[str] | None = None
+) -> str:
+    """Push a correction into every submission repo of an assignment already handed out."""
+    return f"""name: Patch released assignment
+
+# A broken cell, a wrong path, a dataset that moved - after the assignment went out.
+# Commit the fix to the TEMPLATE's default branch first, then run this: it pushes that
+# file (or folder) into every submission repo of the assignment, as a NEW COMMIT on each
+# student's own branch, and posts a note on each Feedback issue telling them to pull.
+# It never force-pushes, and it never replaces a file a student has already changed
+# unless `overwrite` says so - their version is kept and counted instead.
+# The frozen cohort-side hand-out is patched too, so a student who onboards tomorrow is
+# given the corrected file rather than the one everyone else was just patched off.
+# `dry_run` defaults to true. See docs/09-release-assignment-to-cohort.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+{_choice_input("cohort_org", "Cohort org holding the submission repos", cohort_orgs)}
+{_assignment_input(assignments or [], "Assignment template holding the corrected file")}
+      path:
+        description: "File or folder on the template's default branch to push (e.g. starter.ipynb, or data/)"
+        required: true
+      slug:
+        description: "Only if TWO schedule.yml assignments hand out from this template: which one (the schedule key). Leave empty otherwise"
+        required: false
+        default: ""
+      overwrite:
+        description: "Replace the file even where the student has already changed it (their work on that file is lost)"
+        type: boolean
+        default: false
+      dry_run:
+        description: "Preview only - count the repos that would be patched, write nothing"
+        type: boolean
+        default: true
+
+{_concurrency("patch-assignment")}
+{_PERMISSIONS_JOBS}{_CHECK_TEAM}
+  patch:
+{_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Patch released assignment
+        env:
+          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
+          MASTER_ORG: ${{{{ github.repository_owner }}}}
+          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
+          PATH_INPUT: ${{{{ inputs.path }}}}
+          SLUG: ${{{{ inputs.slug }}}}
+          OVERWRITE: ${{{{ inputs.overwrite }}}}
+          DRY_RUN: ${{{{ inputs.dry_run }}}}
+        run: |
+          args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG" --patch-path "$PATH_INPUT")
+          [ -n "$SLUG" ] && args+=(--slug "$SLUG")
+          [ "$OVERWRITE" = "true" ] && args+=(--overwrite)
+{_DRY_RUN_GATE}
+          python3 -m dsl_course.assign "${{args[@]}}"
+"""
+
+
+def render_derive_student_version(assignments: list[str] | None = None) -> str:
+    """Write a template's student starter onto `main` from its `solution` branch.
+
+    A COURSE-org button: it touches one template repo and no cohort, so nothing it can
+    print names a person and its dry run may list the files it would write."""
+    return f"""name: Derive student version
+
+# ONE authored file, two branches. Keep the notebook you actually teach from on the
+# template's `solution` branch, under `solution/`, with the answers fenced off in the
+# nbgrader/Otter vocabulary: `### BEGIN SOLUTION` / `### END SOLUTION`, a `solution` cell
+# tag, or an Rmd/qmd chunk with `solution=TRUE`. This reads that branch and writes the
+# fenced-out version onto `main` - the only branch template-generate copies into a student
+# repo - so the starter is never maintained by hand beside the answer it is meant to be
+# missing. It never writes to `solution`, and a file with nothing fenced in it is never
+# written at all: the "starter" derived from that would be the model answer.
+# `dry_run` defaults to true and prints the file list and the counts, never the content.
+# See docs/03-add-assignment-to-course.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+{_assignment_input(assignments or [], "Assignment template to derive the student starter for")}
+      dry_run:
+        description: "Preview only - list the files and how much would be stripped out of each"
+        type: boolean
+        default: true
+
+{_concurrency("derive-student-version")}
+{_PERMISSIONS_JOBS}{_CHECK_TEAM}
+  derive:
+{_run_preamble()}      - name: Derive student version
+        env:
+          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
+          COURSE_ORG: ${{{{ github.repository_owner }}}}
+          COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
+          DRY_RUN: ${{{{ inputs.dry_run }}}}
+        run: |
+          args=(--course-org "$COURSE_ORG" --course-source-repo "$COURSE_SOURCE_REPO")
+{_DRY_RUN_GATE}
+          python3 -m dsl_course.derive "${{args[@]}}"
 """
 
 

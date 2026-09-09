@@ -9,11 +9,13 @@ Release buttons (or the solution branch) must report non-zero, not a green "read
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
+import yaml
 
-from dsl_course import gh_contents, ghcli, grades, releaseignore, scaffold
+from dsl_course import derive, gh_contents, ghcli, grades, releaseignore, scaffold
 
 
 class FakeRepo:
@@ -219,7 +221,7 @@ def test_fresh_assignment_seeds_the_starter(fake, monkeypatch):
     assert {"README.md", "starter.py"} <= fake.written("assignment-1-f2026")
 
 
-def test_the_markup_starters_are_valid_files_of_their_own_format(fake, monkeypatch):
+def test_the_markup_starters_are_valid_documents_of_their_own_format(fake, monkeypatch):
     # A `.tex` holding Markdown does not compile, and an .Rmd/.qmd without front matter
     # does not knit - a stub the student has to repair is worse than no stub at all.
     _clone_ok(monkeypatch, _git_ok)
@@ -230,18 +232,117 @@ def test_the_markup_starters_are_valid_files_of_their_own_format(fake, monkeypat
         )
 
     tex = fake.files[("assignment-1-f2026", "starter.tex")]
-    assert tex.startswith("\\documentclass{article}\n")
-    assert "\\section*{Backprop}" in tex
+    # Everything before the preamble is a `%` comment, so the file still compiles.
+    body = [line for line in tex.splitlines() if not line.startswith("%")]
+    assert body[0] == "\\documentclass[11pt,a4paper]{article}"
+    assert "\\title{Backprop}" in tex and "\\maketitle" in tex
+    assert "\\section{Task}" in tex
     assert tex.rstrip().endswith("\\end{document}")
 
-    for number, path, output_key in (
-        ("2", "starter.Rmd", "output:"),
-        ("3", "starter.qmd", "format:"),
+    for number, fmt, path, output_key, verb in (
+        ("2", "rmd", "starter.Rmd", "output", "Knit"),
+        ("3", "qmd", "starter.qmd", "format", "Render"),
     ):
         doc = fake.files[(f"assignment-{number}-f2026", path)]
-        front = doc.split("---\n")[1]
-        assert 'title: "Backprop"' in front and output_key in front
+        front = yaml.safe_load(doc.split("---\n")[1])
+        assert front["title"] == "Backprop" and output_key in front
         assert "## Task" in doc and "```{r}" in doc
+        # The graded artefact, named in the file the student opens - and in the SAME
+        # sentence the brief carries, because both read `_hand_in`.
+        assert f"{verb} `{path}` and commit **both** it and the `starter.html`" in doc
+        assert scaffold._hand_in(fmt) in doc
+
+
+def test_a_title_that_is_tex_syntax_still_compiles(fake, monkeypatch):
+    # `R&D`, `100% coverage`, `train_test_split`: unescaped, an `&` is an alignment tab, a
+    # `%` comments out the rest of the line and an `_` is a maths subscript - so the stub
+    # whose whole promise is "this compiles unedited" would not.
+    _clone_ok(monkeypatch, _git_ok)
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", "latex", name="R&D: 100% train_test_split"
+        )
+        == 0
+    )
+    tex = fake.files[("assignment-1-f2026", "starter.tex")]
+    assert "\\title{R\\&D: 100\\% train\\_test\\_split}" in tex
+
+
+def test_a_title_with_a_colon_or_a_quote_stays_one_yaml_scalar(fake, monkeypatch):
+    # Front matter is YAML: an unquoted `Lab 3: k-means` makes that line a nested mapping
+    # and knitr reads no title at all, and a bare `"` inside a quoted scalar ends it.
+    _clone_ok(monkeypatch, _git_ok)
+    title = 'Lab 3: the "hello world" of k-means'
+    assert scaffold.scaffold_assignment("Org", "2", "f2026", "rmd", name=title) == 0
+    doc = fake.files[("assignment-2-f2026", "starter.Rmd")]
+    assert yaml.safe_load(doc.split("---\n")[1])["title"] == title
+
+
+def test_the_notebook_starter_runs_carries_the_rule_and_names_its_language(
+    fake, monkeypatch
+):
+    # Three things at once, because all three are contracts: it is valid nbformat (it opens),
+    # its first cell states the restart-and-run-all rule the completion check verifies, and
+    # `language_info.file_extension` is `.py` so the grader's nbconvert names its script
+    # starter.py (see collect._stray_conversion).
+    _clone_ok(monkeypatch, _git_ok)
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", "ipynb", name="MLP") == 0
+    nb = json.loads(fake.files[("assignment-1-f2026", "starter.ipynb")])
+    assert nb["nbformat"] == 4
+    assert nb["metadata"]["language_info"]["file_extension"] == ".py"
+    first = "".join(nb["cells"][0]["source"])
+    assert first.startswith("# MLP\n")
+    assert "Restart the kernel and run all cells" in first
+    assert "raise NotImplementedError" in "".join(nb["cells"][1]["source"])
+
+
+def test_the_python_starter_survives_a_title_a_docstring_could_not_hold(
+    fake, monkeypatch
+):
+    # The title goes into a module docstring, so a `"""` or a trailing quote in it would
+    # end the docstring early and seed a file that does not even parse.
+    _clone_ok(monkeypatch, _git_ok)
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", "py", name='The """quoted""" one"'
+        )
+        == 0
+    )
+    starter = fake.files[("assignment-1-f2026", "starter.py")]
+    compile(starter, "starter.py", "exec")  # raises if the escaping slipped
+
+
+@pytest.mark.parametrize(
+    "fmt, says",
+    [
+        ("ipynb", "Restart kernel and run all"),
+        ("py", "Commit your `.py` files"),
+        ("rmd", "Knit `starter.Rmd`"),
+        ("qmd", "Render `starter.qmd`"),
+        ("latex", "Compile `starter.tex`"),
+    ],
+)
+def test_the_brief_names_the_artefact_this_format_hands_in(
+    fake, monkeypatch, fmt, says
+):
+    # THE convention: the built artefact is committed beside its source, and the built
+    # artefact is what a grader reads. Left to the author, a brief collects .Rmd files
+    # nobody can mark - so the stub says it, whatever else the author writes.
+    _clone_ok(monkeypatch, _git_ok)
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", fmt, name="A") == 0
+    brief = fake.files[("assignment-1-f2026", "README.md")]
+    assert says in brief
+    assert "_Say which files you expect back" in brief  # still a stub
+
+
+def test_a_raw_repo_brief_claims_no_artefact(fake, monkeypatch):
+    # `none` seeds no starter, so there is no `starter.*` to name - and a sentence about
+    # committing one would be a rule the repo cannot keep.
+    _clone_ok(monkeypatch, _git_ok)
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", "none") == 0
+    brief = fake.files[("assignment-1-f2026", "README.md")]
+    assert "starter" not in brief
+    assert "## What to submit\n\n_Say which files you expect back" in brief
 
 
 def test_the_brief_stub_has_the_two_headings_and_no_more(fake, monkeypatch):
@@ -335,6 +436,69 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
     assert (spec.submit_via, spec.format, spec.autograde) == ("external", "ipynb", True)
     assert (spec.late_window_days, spec.late_penalty_per_day) == (7, "10%")
     assert written["grading_config.yml"].startswith("# INSTRUCTOR-OWNED")
+
+
+def test_the_model_answer_is_seeded_where_derive_reads_it(fake, monkeypatch):
+    # `derive` writes `solution/X` onto `main` as `X`. A model answer seeded as
+    # `solution/solution.ipynb` therefore derived a SECOND notebook beside the untouched
+    # `starter.ipynb` - two files, the derived one named "solution", and the hidden tests
+    # still importing the stub. One stem on both branches.
+    written = _solution_files(monkeypatch)
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", "ipynb") == 0
+    assert "solution/starter.ipynb" in written
+    assert derive.student_path("solution/starter.ipynb") == "starter.ipynb"
+    assert scaffold.scaffold_assignment("Org", "2", "f2026", "py") == 0
+    assert "solution/starter.py" in written
+    # ...and it is FENCED, so pressing the button on a fresh template derives a starter
+    # rather than refusing one: an unfenced seed would derive the model answer itself.
+    seeded = derive.strip_source("solution/starter.py", written["solution/starter.py"])
+    assert seeded.replaced == 1 and "return 42" not in seeded.text
+
+
+@pytest.mark.parametrize("fmt, name", [("rmd", "starter.Rmd"), ("qmd", "starter.qmd")])
+def test_the_model_answer_is_seeded_in_the_format_the_template_uses(
+    fake, monkeypatch, fmt, name
+):
+    # It was always `starter.py`, whatever the assignment's format - so Derive on a fresh
+    # Rmd template wrote a `starter.py` onto `main` BESIDE the untouched `starter.Rmd`
+    # rather than becoming it. Same stem and same suffix on both branches.
+    written = _solution_files(monkeypatch)
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", fmt) == 0
+
+    assert f"solution/{name}" in written
+    assert "solution/starter.py" not in written
+    # ...and it is fenced in the vocabulary this format speaks, so the button derives a
+    # starter from it rather than refusing one.
+    seeded = derive.strip_source(f"solution/{name}", written[f"solution/{name}"])
+    assert seeded.replaced == 1 and "42" not in seeded.text
+
+
+@pytest.mark.parametrize("fmt", ["latex", "none"])
+def test_a_format_derive_cannot_read_is_seeded_no_model_answer(fake, monkeypatch, fmt):
+    # `.tex` is not derivable and `none` has no starter to become, so a stub either way
+    # could only ever be a file the button refuses.
+    written = _solution_files(monkeypatch)
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", fmt) == 0
+
+    assert [path for path in written if path.startswith("solution/")] == [
+        "solution/README.md"
+    ]
+
+
+def test_the_cutoff_switches_are_written_out_with_their_defaults(fake, monkeypatch):
+    # The file teaches the whole vocabulary, so every switch the cutoff reads is on the
+    # page with the value it would have had anyway - a faculty member flips a `false`
+    # rather than having to learn a key name from the docs. `completion_check` follows
+    # `format:`; `grader_pdf` is off for everything until someone fences the questions.
+    written = _solution_files(monkeypatch)
+    for fmt, notebook in (("ipynb", True), ("py", False)):
+        assert scaffold.scaffold_assignment("Org", "1", "f2026", fmt) == 0
+        text = written["grading_config.yml"]
+        spec = grades.parse_grading_spec(text)
+        assert spec.dropped == ()
+        assert (spec.completion_check, spec.grader_pdf) == (notebook, False)
+        assert f"completion_check: {str(notebook).lower()}" in text
+        assert "grader_pdf: false" in text
 
 
 def test_a_course_with_no_defaults_gets_the_settings_commented_out(fake, monkeypatch):

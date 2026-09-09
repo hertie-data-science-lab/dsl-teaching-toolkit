@@ -4,6 +4,7 @@ unreadable one."""
 
 from __future__ import annotations
 
+import base64
 import json
 
 import pytest
@@ -335,6 +336,26 @@ def test_put_file_without_an_expected_sha_still_reads_then_writes(monkeypatch):
     assert len(calls) == 2 and "sha=livesha" in calls[1]
 
 
+def test_put_file_sends_the_content_on_stdin_not_in_argv(monkeypatch):
+    # Linux caps ONE argv string at 128 KiB, so a `--field content=<base64>` of anything
+    # past ~96 KiB raised `OSError: Argument list too long` out of subprocess.run - which
+    # nothing catches, so it escaped the whole cutoff run and left no fire-once sentinel
+    # behind. Archived notebooks and grader copies are megabytes.
+    seen: dict = {}
+
+    def fake_gh(*args, **kwargs):
+        seen.update(args=args, kwargs=kwargs)
+        return (0, "")
+
+    _stub_gh(monkeypatch, fake_gh)
+    content = b"x" * 400_000
+    assert gh_contents.put_file("O", "R", "big.ipynb", content, "msg", expected_sha="")
+
+    assert max(len(a) for a in seen["args"]) < 1024
+    assert seen["kwargs"]["stdin"] == base64.b64encode(content).decode()
+    assert "content=@-" in seen["args"]
+
+
 def test_get_file_with_sha_splits_the_sha_off_the_content(monkeypatch):
     _record_gh(monkeypatch, [(0, "abc123\nname,email\nAda,a@x.edu")])
     assert gh_contents.get_file_with_sha("O", "R", "students.csv") == (
@@ -375,6 +396,94 @@ def test_an_untruncated_tree_drops_the_flag_line(monkeypatch):
     assert gh_contents.repo_tree("O", "R", "main") == ("a.md", "b.md")
     _record_gh(monkeypatch, [(0, "false\na.yml\tsha1")])
     assert gh_contents.repo_blob_shas("O", "R", "main") == {"a.yml": "sha1"}
+
+
+def test_a_blob_comes_back_byte_for_byte(monkeypatch):
+    # The read for bytes that will be hashed, compared against a tree, and committed into
+    # somebody else's repo. `gh()` hands its callers `(stdout+stderr).strip()`, so a
+    # trailing newline is eaten off any TEXT answer - base64 survives that untouched, which
+    # is half of why this goes through the blobs API rather than the Contents one.
+    content = b"print('fixed')\n\n"
+    sha = _blob_sha(content)
+    asked = []
+
+    def fake_gh(*args, **kwargs):
+        asked.append(args)
+        return (0, base64.b64encode(content).decode())
+
+    _stub_gh(monkeypatch, fake_gh)
+
+    assert gh_contents.get_blob("O", "R", sha) == content
+    assert asked[0][1] == f"repos/O/R/git/blobs/{sha}"
+
+
+def _writing_repo(calls: list, *, blob: tuple[int, str]):
+    """A `gh` that answers every leg of a `put_files` commit into a repo that already has
+    one, recording each call. `blob` is what the loose-blob upload answers."""
+
+    def fake_gh(*args, stdin=None, **kwargs):
+        calls.append((args, stdin))
+        url = " ".join(args)
+        if args[1] == "repos/O/R":
+            return (0, _REPO_OBJECT)  # the repo object, for default_branch
+        if "git/blobs" in url:
+            return blob
+        if "git/trees" in url:
+            return (0, "newtree") if "--method" in args else (0, "false")
+        if "/commits/" in url:
+            return (0, "headsha treesha")
+        if "git/commits" in url:
+            return (0, "newcommit")
+        return (0, "")  # the ref move
+
+    return fake_gh
+
+
+def test_a_file_that_is_not_text_travels_as_a_blob(monkeypatch):
+    # A tree entry's `content` field is TEXT. `get_blob` reads bytes, so Patch could pick
+    # up a corrected image or dataset that this could not then write: the `.decode()` here
+    # raised UnicodeDecodeError, which is not the RuntimeError `patch_one_repo` catches, so
+    # one binary under a patched folder abandoned the run mid-cohort. Binaries go up as a
+    # loose blob and into the tree by sha.
+    png = b"\x89PNG\r\n\x1a\n\x00\xff\xfe"
+    calls: list[tuple] = []
+    _stub_gh(monkeypatch, _writing_repo(calls, blob=(0, "b10b5ha")))
+
+    assert gh_contents.put_files("O", "R", {"data/fig.png": png}, "fix: the figure")
+
+    (_blob_args, blob_stdin) = next(c for c in calls if "git/blobs" in " ".join(c[0]))
+    assert json.loads(blob_stdin) == {
+        "content": base64.b64encode(png).decode(),
+        "encoding": "base64",
+    }
+    # ...and the tree references it by sha rather than trying to carry the bytes.
+    (_tree_args, tree_stdin) = next(
+        c for c in calls if "git/trees" in " ".join(c[0]) and "--method" in c[0]
+    )
+    assert json.loads(tree_stdin)["tree"] == [
+        {"path": "data/fig.png", "mode": "100644", "type": "blob", "sha": "b10b5ha"}
+    ]
+
+
+def test_a_binary_that_could_not_be_uploaded_writes_nothing_at_all(monkeypatch):
+    # All or nothing, like every other put_files failure: a commit carrying half a
+    # correction is worse than none, and the caller re-runs.
+    calls: list[tuple] = []
+    _stub_gh(monkeypatch, _writing_repo(calls, blob=(1, "HTTP 422")))
+
+    assert gh_contents.put_files("O", "R", {"a.png": b"\xff\xfe"}, "fix: x") is False
+    assert not [c for c in calls if "git/commits" in " ".join(c[0])]
+
+
+def test_a_blob_that_comes_back_empty_is_refused_rather_than_believed(monkeypatch):
+    # The other half: the Contents API answers `content: ""` on a 200 for anything over
+    # 1 MiB, so a plot-heavy notebook read as an EMPTY file and was committed as one into
+    # every student's repo. Whatever the transport does, bytes that do not hash to the sha
+    # they were asked for are not the file.
+    _stub_gh(monkeypatch, lambda *a, **k: (0, ""))
+
+    with pytest.raises(RuntimeError, match="did not send the content"):
+        gh_contents.get_blob("O", "R", _blob_sha(b"a 2 MiB notebook"))
 
 
 # --------------------------------------------------------------------- who wrote it

@@ -72,10 +72,12 @@ from .workflows_render import (
     render_bootstrap_cohort,
     render_central_release,
     render_collect_submissions,
+    render_derive_student_version,
     render_distribute_grades,
     render_generate_syllabus,
     render_new_assignment,
     render_new_materials,
+    render_patch_assignment,
     render_provision,
     render_publish_site,
     render_refresh,
@@ -255,11 +257,17 @@ def github_workflow_files(course_org: str, central_ref: str) -> dict[str, bytes]
         ".github/workflows/collect-submissions.yml": render_collect_submissions(
             cohorts, assignments
         ),
+        ".github/workflows/patch-assignment.yml": render_patch_assignment(
+            cohorts, assignments
+        ),
         ".github/workflows/new-materials.yml": render_new_materials(),
         ".github/workflows/generate-syllabus.yml": render_generate_syllabus(
             source_repos, cohorts
         ),
         ".github/workflows/new-assignment.yml": render_new_assignment(),
+        ".github/workflows/derive-student-version.yml": render_derive_student_version(
+            assignments
+        ),
         ".github/workflows/sync-site.yml": render_sync_site(cohorts),
         ".github/workflows/publish-site.yml": render_publish_site(source_repos),
         ".github/workflows/sync-membership.yml": render_sync_membership(cohorts),

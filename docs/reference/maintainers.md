@@ -52,10 +52,14 @@ breaks a live link that faculty click:
 Things whose *literal spelling* is depended on from outside Python:
 
 - **CLI module names.** Seeded workflows and templates invoke `python3 -m dsl_course.<x>`:
-  `assign`, `bootstrap_course`, `collect`, `deploy`, `enrol_codes`, `grades`, `list_orgs`,
-  `notify`, `scaffold`, `schedule`, `scheduler`, `seed`, `site`, `source_digest`, `status`,
-  `syllabus`, `sync_faculty`, `sync_membership`, `sync_roster`, `sync_teams`, `teardown`.
-  A rename strands every org until it refreshes.
+  `assign`, `bootstrap_course`, `collect`, `deploy`, `derive`, `enrol_codes`, `grades`,
+  `list_orgs`, `notify`, `scaffold`, `schedule`, `scheduler`, `seed`, `site`,
+  `source_digest`, `status`, `syllabus`, `sync_faculty`, `sync_membership`, `sync_roster`,
+  `sync_teams`, `teardown`.
+  A rename strands every org until it refreshes. `assign` carries TWO modes on one flat
+  parser rather than a subcommand, for the same reason: `--patch-path` switches it from
+  handing an assignment out to patching one that is already out, and every org's Release
+  assignment workflow spells the bare form.
 - **`roster.FIELDS` / `roster.normalise_role` / `teams.FIELDS`** are re-implemented in the
   shipped JavaScript (`templates/welcome/onboard.yml`, `team-formation.yml`), which cites them by
   name. Change a column and change both sides.
@@ -99,6 +103,80 @@ Things whose *literal spelling* is depended on from outside Python:
   marked file would still read as untouched and be rewritten by the nightly refresh -
   faculty's patterns gone, and whatever they withheld shipping again on a green run. The
   price is that its wording cannot be improved in a repo that already has it.
+
+## The grading sandbox's two outward contracts
+
+`collect` runs student code, so what it promises the outside world is short and load-bearing:
+
+- **`tests/run.sh`** (`collect.RUN_SCRIPT`) on a template's `solution` branch replaces pytest.
+  It is run with `sh`, from the runspace, under `RUN_TIMEOUT` and the same rlimits, and is
+  handed `DSL_JUNIT_OUT` (an absolute path it must write a JUnit XML to - that XML *is* the
+  score) and `DSL_SUBMISSION_DIR` (the checkout). **Its exit code is ignored**; no XML is the
+  failure. Faculty write these by hand, in R and whatever comes next, so the three names are
+  frozen the way a CLI module name is - renaming one silently stops scoring an entire course
+  and the run still goes green. `score_from_junit` counts every `<testsuite>` in the file
+  because testthat writes one per test file.
+- **The completion check** executes the pinned notebook with `nbconvert --execute
+  --allow-errors` and records `ran-clean` / `errors:N` / `not-attempted` / `no-notebook` /
+  `timed-out` / `did-not-run` into `info.completion`, archiving the executed copy at
+  `autograde/<slug>/<key>.ipynb` under a 5 MiB cap. It needs **`ipykernel`** as well as
+  `nbconvert` (nbconvert converts without a kernel and cannot execute without one) - both
+  pinned in `requirements.txt`, which every seeded workflow installs; a runner without them
+  records the decision once and stays green rather than reporting a cohort of failures.
+  `not-attempted` is byte identity (`gh_contents.blob_sha`) against the notebooks still on
+  the template's default branch, and needs EVERY notebook in the checkout to match one; the
+  notebook executed is the first that does not. The baseline is the course template's `main`
+  as it stands NOW, not the frozen cohort-side hand-out, so **rewriting a template's `main`
+  after handout makes every submission look attempted** - which is the safe way round, and
+  is a deliberate deviation from the plan's "frozen hand-out" wording. It runs OFFLINE (the
+  proxy variables point at a dead port - best-effort, not a jail), which docs/10 tells
+  faculty to write the assignment for.
+
+  It is independent of `autograde`: `collect` now reaches its target loop for a hand-marked
+  assignment, and only "no tests AND no completion check" is the exit that records a skip.
+
+### What the sandbox actually promises
+
+Every graded subprocess - the hidden tests, `run.sh`, the notebook execution, the grader's
+reading copy - goes through `collect._run_limited`, which is the only place any of them is
+spawned. What it guarantees, and what it does not:
+
+- **A separate uid.** Graded code runs as `dsl-sandbox` (`course.SANDBOX_USER`), created
+  once per job by the rendered preamble of every job that grades, via
+  `sudo -n -u dsl-sandbox env -i <sanitised env> <argv>`. This is the load-bearing one. A
+  UID is the boundary, not an environment: on Linux a process reads `/proc/<pid>/environ`
+  of anything running as its own user (Yama's `ptrace_scope` gates ATTACH, not that read),
+  and the grading process holds `GH_TOKEN` - the org-owner PAT - for the whole leg. Without
+  the separate uid, `grep -l GH_TOKEN= /proc/*/environ` from a notebook cell reads it
+  straight out, past the sanitised environment and past the "no secret-bearing step after
+  the graded one" rule alike.
+- **FAIL CLOSED under Actions.** No account, or no passwordless `sudo`, and `collect`
+  records a skip for the assignment before it clones anything. Student code is never run by
+  the process holding the token. Off a runner (`GITHUB_ACTIONS` unset - a maintainer's
+  laptop, where there is no such account and no bot token in the environment) it degrades
+  to the in-process sandbox and says so loudly, once per run.
+- **Nothing outlives a submission.** `sudo -n pkill -9 -u dsl-sandbox` runs after every
+  graded command, however it ended. A `fork(); setsid(); fork()` daemon escapes the process
+  GROUP by definition, and the leg walks submissions serially in one process - so a
+  survivor of one student's run would be alive while the next student's clone sits in a
+  predictable temp path. `killpg` cannot reach it at all once it runs as another uid.
+- **The graded trees are handed over and taken back.** The checkout and the runspace are
+  `chown`ed to the sandbox user before the run and back afterwards (widened to their
+  `mkdtemp` roots - a 0700 root would otherwise leave the checkout unreachable), and
+  `HOME`/`TMPDIR` are re-pointed into them. What the grader reads back out of them - the
+  JUnit report, the executed notebook, the rendered copy - has to be a REGULAR file, read
+  under a size cap with `O_NOFOLLOW`/`O_NONBLOCK` (`collect._result_bytes`); anything else
+  counts as "the run produced no result", because a FIFO at the report path would otherwise
+  block that read until the six-hour job ceiling and a symlink would score whatever it
+  pointed at. A chown-back that fails costs a log line and a temp tree left behind for the
+  length of the job, not a traceback out of the parent's own cleanup.
+- **Best-effort, and only that: the network.** The proxy variables point at a dead port, so
+  every well-behaved client fails - but there is no network namespace here, and a
+  determined socket still opens. docs/10 tells faculty to commit the data rather than rely
+  on this.
+- Also still true and unchanged: `RUN_TIMEOUT` per subprocess, the `_apply_rlimits` caps,
+  output to `DEVNULL`, `.git` and the student's own rigging files removed before anything
+  starts, and no token of any kind in the child's environment.
 
 ## Secrets an org carries
 

@@ -13,7 +13,10 @@ sheet, as information for whoever marks it. Faculty & instructors write the mark
   cohort/<slug>-<team>    (group)              |
                 v
   classroom-config/autograde/<slug>/<key>.json   (per-test detail, private archive)
-  classroom-config/grading_sheets/<slug>.yml     (`info.autograde`, never a mark)
+  classroom-config/autograde/<slug>/<key>.ipynb  (the executed notebook, where the
+                                                 completion check ran)
+  classroom-config/grading_sheets/<slug>.yml     (`info.autograde`, `info.completion` -
+                                                 never a mark)
 
 Student code is run in a subprocess with the GitHub token stripped from the environment.
 
@@ -67,6 +70,17 @@ grading_config.yml (on the template's solution branch):
     type: individual        # or group
     autograde: false        # the default; true -> run the hidden tests at the cutoff
     tests: tests            # path on the solution branch holding the hidden tests
+    completion_check: true  # default for `format: ipynb` -> execute the pinned notebook
+                            # at the cutoff and record whether it runs top to bottom
+
+The two are INDEPENDENT. A hand-marked notebook assignment (`autograde: false`) still gets
+its completion check, which is the common case: the "restart the kernel and run all" rule
+is stated by courses that mark by hand, and it is the one rule nobody could verify.
+
+ANOTHER LANGUAGE.  The hidden tests are pytest by default and need not be: a `run.sh` in the
+tests directory is run INSTEAD, in the same sandbox and under the same wall clock, and
+whatever JUnit XML it leaves at `$DSL_JUNIT_OUT` is the score. That is how an R course grades
+with `testthat` (see docs/10) without this module learning a word of R.
 
 Usage:
     python3 -m dsl_course.collect \\
@@ -78,6 +92,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import errno
 import hashlib
 import importlib.util
 import io
@@ -87,11 +102,12 @@ import resource
 import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
@@ -101,19 +117,23 @@ from pathlib import Path
 from . import course, grades, roster, schedule, sync_teams, teams
 from .course import (
     CONFIG_REPO,
+    SANDBOX_USER,
     SOLUTION_BRANCH,
     resolve_is_group,
     submission_repo,
 )
+from .derive import DeriveError, Filtered, filter_questions
 from .discovery import list_org_repos
 from .fs import copy_tree
 from .gh_contents import (
+    blob_sha,
     dump_csv,
     file_exists,
     get_file_content,
     get_file_with_sha,
     is_untouched_stub,
     put_file,
+    repo_blob_shas,
 )
 from .ghcli import BOT_EMAIL, GIT_ENV, bot_login, clone, gh, git, is_missing_resource
 
@@ -127,7 +147,7 @@ from .grades import (
     sheet_spec,
 )
 from .log import log, log_err, log_ok, log_person, log_skip, log_step
-from .repos import repo_missing
+from .repos import default_branch, repo_missing
 
 AUTOGRADE_DIR = "autograde"  # classroom-config/autograde/<slug>/<key>.json
 GRADED_RECORD = "_graded.json"  # fire-once sentinel: a successful run's LAST write
@@ -160,6 +180,26 @@ SUBMITTED_NOTES = {
     SUBMITTED_SOURCE_COMMIT: COMMIT_ONLY_NOTE,
 }
 RUN_TIMEOUT = 300  # wall-clock seconds per graded subprocess
+# The escape hatch out of pytest. A `run.sh` at the top of the hidden tests is run INSTEAD
+# of pytest, with the same rlimits, the same token-free environment, the same wall clock and
+# the same cwd - so a course whose language is not Python grades through the same sandbox
+# rather than through a second one nobody maintains.
+#
+# THE CONTRACT, and it is short on purpose:
+#   * run with `sh`, not executed - the `+x` bit does not survive every checkout, and the
+#     name says which interpreter;
+#   * `$DSL_JUNIT_OUT` is an absolute path the script MUST write a JUnit XML to. That XML is
+#     the result: passed/total out of it become `info.autograde`, exactly as pytest's would;
+#   * `$DSL_SUBMISSION_DIR` is the absolute path of the submitted checkout. Python tests do
+#     not need it (a startup hook puts the submission on sys.path); everything else does;
+#   * the EXIT CODE is ignored. A suite with failures exits non-zero and is still a perfectly
+#     good result - "the tests ran and three of them failed" is the answer, not an error.
+#     No XML at all is the failure, and it records the usual grading-failed zero;
+#   * cwd is the runspace, not the checkout - the tests and the report live outside anything
+#     the student wrote, which is what the pytest path buys and this must not give away.
+RUN_SCRIPT = "run.sh"
+JUNIT_OUT_ENV = "DSL_JUNIT_OUT"
+SUBMISSION_ENV = "DSL_SUBMISSION_DIR"
 # The note on the one zero that means "the RUNNER broke", not "the student didn't submit".
 # `collect` keys its systemic-failure guard on it, so it is a constant, not a loose string.
 GRADE_FAILED_NOTE = "grading failed to run"
@@ -217,15 +257,17 @@ _STUDENT_TEST_RIGGING = (
 
 
 def score_from_junit(xml_text: str) -> dict:
-    """Turn a pytest junit XML report into the result.json contract {score, max, tests}.
+    """Turn a JUnit XML report into the result.json contract {score, max, tests}.
 
-    A case passes only if it has neither failure, error, nor skipped child element."""
+    A case passes only if it has neither failure, error, nor skipped child element.
+
+    EVERY suite in the file, not the first: pytest writes one, but testthat's
+    `JunitReporter` writes one per test file, and taking the first would have scored an R
+    course out of however many cases happened to be in its alphabetically-first file."""
     root = ET.fromstring(xml_text)
-    if root.tag == "testsuite":
-        suite = root
-    else:
-        nested = root.find("testsuite")
-        suite = nested if nested is not None else root
+    suites = (
+        [root] if root.tag == "testsuite" else (root.findall("testsuite") or [root])
+    )
     cases = [
         {
             "name": tc.get("name"),
@@ -233,6 +275,7 @@ def score_from_junit(xml_text: str) -> dict:
             and tc.find("error") is None
             and tc.find("skipped") is None,
         }
+        for suite in suites
         for tc in suite.findall("testcase")
     ]
     return {
@@ -331,12 +374,47 @@ def parse_snapshots(text: str) -> dict[str, str]:
 # ---------------------------------------------------------------------- gh/git wiring
 
 
+# Everything the CI harness put in the environment, gone before student code sees it.
+#
+# A token in scope is the obvious half (`GH_*`, `GITHUB_TOKEN`, the `DSL_*` the job
+# carries). The subtler half is the ACTIONS FILE COMMANDS: the runner hands every step a
+# set of writable paths - `$GITHUB_ENV`, `$GITHUB_PATH`, `$GITHUB_OUTPUT`, `$GITHUB_STATE`,
+# `$GITHUB_STEP_SUMMARY` - and executes what it finds in them when the step ends. A
+# notebook cell appending `BASH_ENV=/tmp/x` to `$GITHUB_ENV` therefore runs in the NEXT
+# step of the same job, with that step's secrets in its environment. `RUNNER_*` goes with
+# them because the same files live under `$RUNNER_TEMP/_runner_file_commands/`, so leaving
+# that one behind hands back the directory the handles pointed into, and `ACTIONS_*`
+# carries the runtime token the cache/artifact services authenticate with.
+#
+# This is the SECOND lock, not the first: what actually closes the escalation is that no
+# step carrying a secret ever follows the student-code step in its job (each is the last
+# step of its own job - see workflows_render.render_scheduled_release and the renderer
+# test that holds it there). Prefixes rather than a name list, so a variable the runner
+# adds in a future version is dropped by default rather than by amendment.
+_SANDBOX_DROP_PREFIXES = ("ACTIONS_", "DSL_", "GH_", "GITHUB_", "RUNNER_")
+
+
 def _sanitised_env() -> dict:
-    """A copy of the environment with every GitHub token stripped - student code must
-    never run with the bot token in scope."""
-    env = dict(os.environ)
-    for key in ("GH_TOKEN", "GITHUB_TOKEN", "GITHUB_API_TOKEN", "GH_ENTERPRISE_TOKEN"):
-        env.pop(key, None)
+    """The environment EVERY graded subprocess runs in - the one place the two rules that
+    never vary are written down.
+
+    Nothing of the job it runs inside: no GitHub token, and no handle back into the runner
+    (see `_SANDBOX_DROP_PREFIXES`). And `PYTHONSAFEPATH`, because all three of these run
+    `python -m` somewhere the student can write, which would otherwise put that directory
+    on `sys.path[0]` and let a committed `json.py` / `nbformat.py` be imported before the
+    real one. A fourth subprocess site added later inherits both by construction rather
+    than by reading a comment.
+
+    What DOES vary is layered on by the caller: the hidden tests add their runspace
+    PYTHONPATH and the two `DSL_*` variables `run.sh` reads (after this, deliberately), and
+    the completion check takes the network away and gives the notebook's own directory back
+    to the kernel (`_completion_env`)."""
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(_SANDBOX_DROP_PREFIXES)
+    }
+    env["PYTHONSAFEPATH"] = "1"
     # Caps glibc arena proliferation, which would otherwise reserve a heap arena per core and
     # push a legitimate multi-threaded run past RLIMIT_DATA_BYTES.
     env["MALLOC_ARENA_MAX"] = "2"
@@ -1324,6 +1402,7 @@ def sync_sheet(
     now: datetime,
     units: list[tuple[str, list[str]]] | None = None,
     autograde: dict[str, str] | None = None,
+    completion: dict[str, str] | None = None,
     dry_run: bool = False,
 ) -> bool:
     """Write `grading_sheets/<slug>.yml` for this assignment, creating it if it is not
@@ -1443,6 +1522,10 @@ def sync_sheet(
         )
     for unit, count in (autograde or {}).items():
         info_updates.setdefault(unit, {})["autograde"] = count
+    # Beside the count, and on the same terms: information for whoever marks it, derived at
+    # the cutoff and never typed. `setdefault`, because a unit can carry both.
+    for unit, state in (completion or {}).items():
+        info_updates.setdefault(unit, {})["completion"] = state
 
     sheet = grades.merge_sheet(
         on_disk or None,
@@ -1623,6 +1706,18 @@ def _strip_student_test_rigging(workdir: Path) -> None:
             dirnames.remove(name)  # pruned - don't descend into what we just deleted
 
 
+def _harden_checkout(workdir: Path) -> None:
+    """Make a freshly cloned submission safe to run code out of. Idempotent, and called by
+    every path that starts a subprocess in it - the completion check and the hidden tests
+    both do, and the one that happens to go first must not be the only one that hardens.
+
+    The clone persists the bot credential in `.git/config`; env-stripping does not reach it
+    and student code runs next in the same workspace, so `.git` goes first. The student's
+    own grading-rigging files go with it (`_strip_student_test_rigging`)."""
+    shutil.rmtree(workdir / ".git", ignore_errors=True)
+    _strip_student_test_rigging(workdir)
+
+
 def _apply_rlimits() -> None:
     """`preexec_fn` for a graded subprocess: runs in the CHILD after fork, before exec, and
     lowers the POSIX resource caps a hostile submission can burn (see the RLIMIT_* constants).
@@ -1681,10 +1776,134 @@ def _grader_dep_missing(module: str) -> bool:
     return True
 
 
-def _run_limited(argv: list[str], *, cwd: str, env: dict, timeout: int) -> bool:
-    """Run `argv` in its OWN session/process group under `_apply_rlimits`. Returns True if it
-    exited on its own (ANY exit code - a non-zero pytest run is still a valid grading result),
-    False if it blew the wall-clock `timeout` and the whole group was killed.
+# --------------------------------------------------------------- the sandbox uid
+#
+# The boundary a graded subprocess is on the wrong side of is the UID, not the environment.
+# On Linux a process may read `/proc/<pid>/environ` of any process running as its own user,
+# and the grading process holds the org-owner PAT for the whole leg - so a notebook cell
+# doing `grep -l GH_TOKEN= /proc/*/environ` reads it straight out, whatever we stripped from
+# the child's own environment and whatever step ordering the workflow keeps. `_run_limited`
+# is the ONE place any of this is spawned from, so uid separation goes here and every
+# graded subprocess gets it by construction.
+#
+# In Actions the sandbox account is created once per job by the rendered preamble (see
+# workflows_render), and this fails CLOSED: no account, no `sudo -n`, nothing graded. Off a
+# runner - a maintainer's laptop - there is no account to sudo to and no bot token in the
+# environment either, so it degrades to the in-process sandbox and says so, once, loudly.
+_ACTIONS = "GITHUB_ACTIONS"
+
+SANDBOX_UNAVAILABLE = (
+    f"the `{SANDBOX_USER}` sandbox account is not usable on this runner (`sudo -n -u "
+    f"{SANDBOX_USER}` failed), and student code must never run as the process holding the "
+    f"bot token - nothing was executed"
+)
+_SANDBOX_LOCAL_WARNING = (
+    f"  ! running graded code as THIS user: there is no `{SANDBOX_USER}` account to drop "
+    f"to outside GitHub Actions. Anything a submission runs can read this process's "
+    f"environment and files. Local runs only - the unattended graders fail closed."
+)
+
+
+def _sudo(*args: str) -> bool:
+    """One non-interactive privileged helper command. True when it succeeded.
+
+    `-n` and never a prompt: this runs inside an unattended job, and a `sudo` that waits
+    for a password is a job that hangs until the six-hour ceiling. A runner without
+    passwordless sudo is a runner that grades nothing (see `sandbox_unusable`)."""
+    try:
+        return (
+            subprocess.run(
+                ["sudo", "-n", *args],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            ).returncode
+            == 0
+        )
+    except OSError:
+        return False  # no sudo binary at all
+
+
+@cache
+def sandbox_user() -> str:
+    """The account graded subprocesses run as, or `""` when they run as this process does.
+
+    Probed once per process, and only under Actions: on a laptop there is no such account,
+    and asking `sudo` about it would at best cost a password prompt in an interactive
+    terminal."""
+    if os.environ.get(_ACTIONS) != "true":
+        return ""
+    return SANDBOX_USER if _sudo("-u", SANDBOX_USER, "true") else ""
+
+
+@cache
+def sandbox_unusable() -> str:
+    """Why no student code may be run right now, or `""` when it may.
+
+    Asked ONCE per assignment, before anything clones a submission, so a runner without the
+    sandbox records one skip rather than grading a whole cohort as the token holder."""
+    if sandbox_user():
+        return ""
+    if os.environ.get(_ACTIONS) == "true":
+        return SANDBOX_UNAVAILABLE
+    log_err(_SANDBOX_LOCAL_WARNING)
+    return ""
+
+
+class SandboxUnavailable(RuntimeError):
+    """A graded subprocess was reached for on a runner that cannot isolate it.
+
+    A backstop, not a path anyone should hit: `collect` asks `sandbox_unusable` before it
+    reaches a target at all. It exists so a call site added later cannot quietly run
+    student code as the token holder."""
+
+
+def _sandbox_roots(paths: Iterable[str | Path]) -> list[Path]:
+    """The directory trees to hand to the sandbox user, one per temporary root.
+
+    Widened from each path to the outermost ancestor still inside the system temp
+    directory, because a `mkdtemp` root is mode 0700: chowning `…/tmpXYZ/sub` alone leaves
+    `…/tmpXYZ` unreadable to the sandbox user, which cannot then reach the checkout at all.
+    `/tmp` itself is world-traversable, so the widening stops there. A path outside the
+    temp directory is handed over as it stands."""
+    tmp = Path(tempfile.gettempdir()).resolve()
+    roots: list[Path] = []
+    for path in paths:
+        node = Path(path).resolve()
+        if tmp in node.parents:
+            while node.parent != tmp:
+                node = node.parent
+        if node not in roots:
+            roots.append(node)
+    return roots
+
+
+def _run_limited(
+    argv: list[str],
+    *,
+    cwd: str,
+    env: dict,
+    timeout: int,
+    writable: Iterable[str | Path] = (),
+) -> bool:
+    """Run `argv` AS THE SANDBOX USER, in its own session/process group under
+    `_apply_rlimits`. Returns True if it exited on its own (ANY exit code - a non-zero
+    pytest run is still a valid grading result), False if it blew the wall-clock `timeout`.
+
+    The single choke point every graded subprocess goes through, which is why the uid
+    separation lives here: the notebook execution, the notebook-to-script conversion, the
+    hidden tests / `run.sh`, and the grader's reading-copy export all arrive at this
+    function and none of them can opt out. `cwd` and `writable` name the trees the sandbox
+    user needs (widened to their temporary roots, see `_sandbox_roots`); they are chowned
+    to it before the run and back afterwards, so everything the grader reads next - the
+    executed notebook, the JUnit report, the rendered copy - is its own again.
+
+    Every sandbox process is killed by uid when this returns, however it returns. A
+    `fork(); setsid(); fork()` daemon escapes the process GROUP by definition, and this
+    function is called once per submission per stage: a survivor of student A's run would
+    otherwise still be alive while student B's clone sits in a predictable temp path, free
+    to read it, tamper with it, or forge the JUnit report B is scored on. `killpg` cannot
+    reach those processes at all once they run as another uid - only `pkill -u` can.
 
     `subprocess.run(timeout=)` SIGKILLs only the direct child, orphaning the grandchildren a
     fork/memory bomb spawns - and the bomb can OOM-kill the whole job before the timeout even
@@ -1698,31 +1917,391 @@ def _run_limited(argv: list[str], *, cwd: str, env: dict, timeout: int) -> bool:
     seconds) - a memory bomb wearing the runner's own uid. Discarding at the fd means the
     child's writes cost us nothing, and `proc.wait(timeout=)` replaces the `communicate()`
     that only existed to drain those pipes."""
-    proc = subprocess.Popen(
-        argv,
-        cwd=cwd,
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-        # The grading process is single-threaded, so the window between fork and exec runs no
-        # Python that could deadlock on a lock another thread held - the PLW1509 hazard.
-        preexec_fn=_apply_rlimits,  # noqa: PLW1509
-    )
+    if unusable := sandbox_unusable():
+        raise SandboxUnavailable(unusable)
+    user = sandbox_user()
+    roots = _sandbox_roots([cwd, *writable]) if user else []
+    for root in roots:
+        _sudo("chown", "-R", user, str(root))
+    # `env -i` and not sudo's own env handling: sudo's policy decides what survives, and
+    # what has to reach the child here is EXACTLY `_sanitised_env` - no more (the parent's
+    # leftovers) and no less (PATH, the proxy vars that take the network away). HOME and
+    # TMPDIR are re-pointed into the tree the sandbox user now owns, because the inherited
+    # ones belong to the runner's account: a `~/.jupyter` it cannot write is a stack of
+    # warnings on every submission, and a temp file it leaves outside the graded tree is
+    # one nothing cleans up.
+    spawn = argv
+    if user:
+        env = {**env, "HOME": str(roots[0]), "TMPDIR": str(roots[0])}
+        spawn = [
+            "sudo",
+            "-n",
+            "-u",
+            user,
+            "env",
+            "-i",
+            *(f"{name}={value}" for name, value in sorted(env.items())),
+            *argv,
+        ]
     try:
-        proc.wait(timeout=timeout)
-        return True
-    except subprocess.TimeoutExpired:
+        proc = subprocess.Popen(
+            spawn,
+            cwd=cwd,
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            # The grading process is single-threaded, so the window between fork and exec runs no
+            # Python that could deadlock on a lock another thread held - the PLW1509 hazard.
+            preexec_fn=_apply_rlimits,  # noqa: PLW1509
+        )
         try:
-            # Kill proc.pid AS the group id, not `getpgid(proc.pid)`: start_new_session makes
-            # the child its own group leader (pgid == pid) at exec, and re-reading the pgid now
-            # would follow a child that has since setsid()'d away - killing its NEW group and
-            # leaving the original group's workers (the fork bomb) alive.
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError):
-            proc.kill()  # group already gone / kill not permitted - fall back to the child
-        proc.wait()  # reap the (killed) group leader so it isn't left a zombie
-        return False
+            proc.wait(timeout=timeout)
+            return True
+        except subprocess.TimeoutExpired:
+            try:
+                # Kill proc.pid AS the group id, not `getpgid(proc.pid)`: start_new_session makes
+                # the child its own group leader (pgid == pid) at exec, and re-reading the pgid now
+                # would follow a child that has since setsid()'d away - killing its NEW group and
+                # leaving the original group's workers (the fork bomb) alive. Under the sandbox
+                # this reaches `sudo` and nothing beyond it; the `pkill -u` below is what
+                # actually ends the run.
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                proc.kill()  # group already gone / kill not permitted - fall back to the child
+            proc.wait()  # reap the (killed) group leader so it isn't left a zombie
+            return False
+    finally:
+        # Whatever happened above - a clean exit, a timeout, an exception on the way in -
+        # nothing of this submission's may still be running when the next one is cloned.
+        # Kill FIRST, then take the files back: a survivor that outlived the chown would be
+        # writing into a tree the grader is about to read as its own.
+        if user:
+            _sudo("pkill", "-9", "-u", user)
+            for root in roots:
+                if _sudo("chown", "-R", f"{os.getuid()}:{os.getgid()}", str(root)):
+                    continue
+                # Said out loud, because a tree we could not take back is a tree this
+                # process cannot delete either: a `mkdtemp` root is mode 0700 and now owned
+                # by someone else, so the `TemporaryDirectory` around it cannot remove it.
+                # Its cleanup is tolerant of exactly that (see `_run_tests`), so the cost
+                # is this line plus a directory under the runner's temp dir - not a
+                # traceback out of a context manager on a run that otherwise worked.
+                log_err(
+                    f"  ! could not take {root} back from {user} - it stays behind for "
+                    f"the length of this job (the run itself is unaffected)"
+                )
+
+
+# The ceiling on ONE parent-side read of something a graded run left behind. Looser than
+# `ARCHIVE_MAX_BYTES` on purpose: that cap is an archive policy applied to the bytes AFTER
+# they are read (an executed notebook past it still has its state recorded, and an export
+# past it is still counted), so capping the read at it would turn "too big to archive" into
+# "the run produced nothing". This is the bound that keeps a student's symlink or a
+# multi-gigabyte file out of the parent's memory, and nothing else.
+RESULT_MAX_BYTES = 20 * 1024**2
+
+
+def _result_bytes(what: str, path: Path, cap: int = RESULT_MAX_BYTES) -> bytes | None:
+    """The bytes a graded run was supposed to leave at `path`, or None when there is nothing
+    there this process may read - which every caller already has an answer for ("the run
+    wrote no report", `did-not-run`, the next export format).
+
+    Everything the grader reads back comes out of a tree the SANDBOX USER owned while the
+    run was in it, so `path` is a name student code could have replaced with something that
+    is not a file at all. A FIFO is the sharp case: `Path.exists()` is True for one and a
+    read of it BLOCKS until someone opens the write end - and by the time we get here the
+    `pkill` has ended every process that ever could. The grading job would then sit on that
+    read until the six-hour Actions ceiling, be cancelled before the fire-once sentinel is
+    written, and be re-run and re-wedged on the same submission by every following tick. So:
+
+      O_NOFOLLOW  a symlink at `path` is refused rather than followed, because the sandbox
+                  user could aim one at a parent-owned file this process can read.
+      O_NONBLOCK  a FIFO OPENS instead of hanging, and is then rejected as not a file.
+      S_ISREG     only a regular file is a result; a directory, socket or device is not.
+      `cap`       a bounded read, so nothing here can be made to grow the parent."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as exc:
+        # Absent is the ordinary case and says nothing. A symlink is not: it is the one
+        # rejection here that somebody chose, so it is worth a line in the log.
+        if exc.errno in (errno.ELOOP, errno.EMLINK):
+            log_err(f"  ! {what} is a symlink, not a file - nothing was read from it")
+        return None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            log_err(f"  ! {what} is not a regular file - nothing was read from it")
+            return None
+        with open(fd, "rb", closefd=False) as handle:
+            data = handle.read(cap + 1)
+    finally:
+        os.close(fd)
+    if len(data) > cap:
+        log_err(f"  ! {what} is past {cap // 1024} KiB - nothing was read from it")
+        return None
+    return data
+
+
+# ------------------------------------------------------------------ the completion check
+#
+# "Restart the kernel and run all cells before you hand in" is a rule several syllabuses
+# state and nobody could check: a notebook arrives with whatever outputs the student's
+# laptop happened to hold, and a grader opening it cannot tell a result that reproduces
+# from one that never will. At the cutoff, therefore, the same sandbox that runs the hidden
+# tests re-EXECUTES the pinned notebook and records what happened - one word into the
+# grading sheet's `info:` block, and the executed copy into the private archive beside the
+# result JSON, so the grader can read the notebook as the toolkit saw it run.
+#
+# It is information, exactly like `info.autograde`: never a mark, never shown to a student,
+# and never a reason to fail a run. Opt-in per assignment (`completion_check:` in
+# grading_config.yml, defaulted from `format:` - see GradingSpec.runs_completion_check).
+COMPLETION_CLEAN = "ran-clean"  # every cell executed, none raised
+COMPLETION_ERRORS = "errors:"  # + the number of cells that raised (`errors:3`)
+# Byte-identical to the starter the template handed out: the notebook was never opened.
+# Distinct from a zero, and distinct from a notebook that runs and does nothing.
+COMPLETION_NOT_ATTEMPTED = "not-attempted"
+COMPLETION_NO_NOTEBOOK = "no-notebook"  # the submission holds no .ipynb to run
+# The student's own notebook never finished - a cell that blocks, an infinite loop. Their
+# fact, and one a grader has to see: the wall clock is the same RUN_TIMEOUT everything else
+# here gets, and the process GROUP is killed (`_run_limited`).
+COMPLETION_TIMED_OUT = "timed-out"
+# nbconvert exited but produced no notebook - a file it would not open, a kernel that would
+# not start. OUR fault or a corrupt submission, not a verdict on the work, so it is spelt
+# differently from a timeout.
+COMPLETION_DID_NOT_RUN = "did-not-run"
+# What the executed notebook is executed WITH. `nbconvert --execute` drives a kernel
+# through `nbclient`, and the kernel itself is `ipykernel` - a separate distribution that
+# nbconvert does not pull in, so a runner with only nbconvert fails every notebook with
+# "no such kernel" and would report a cohort of `did-not-run`. Both are pinned in
+# requirements.txt, which every seeded workflow's preamble installs.
+COMPLETION_DEPS = ("nbconvert", "ipykernel")
+COMPLETION_DEP_SKIP = (
+    "the completion check needs " + " and ".join(COMPLETION_DEPS) + " in the grading "
+    "environment, and they are not installed"
+)
+# The ceiling on ANYTHING this module archives per submission - the executed notebook and
+# the grader's reading copy alike. Both are notebooks full of plots, i.e. base64 PNG all
+# the way down. Past this the state/verdict is still recorded and the copy is not:
+# classroom-config is a git repo somebody has to clone, and a term of 40 MB notebooks per
+# student makes it one nobody can.
+ARCHIVE_MAX_BYTES = 5 * 1024**2
+# The completion check runs OFFLINE. Not a jail - a real one needs a network namespace this
+# job does not have - but every well-behaved HTTP client (requests, urllib, pandas.read_csv
+# on a URL) honours these, so a notebook that only reproduces because it downloads its data
+# reports `errors:N` rather than passing on a resource that may not be there in March. Port
+# 9 is discard; nothing listens. Documented in docs/10, because it is a rule the assignment
+# has to be written for: commit the data.
+COMPLETION_DEAD_PROXY = "http://127.0.0.1:9"
+_PROXY_VARS = (
+    "http_proxy",
+    "https_proxy",
+    "all_proxy",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+)
+# Jupyter's own scratch directory inside a notebook's folder; never the submission.
+_CHECKPOINTS = ".ipynb_checkpoints"
+
+
+@cache
+def _starter_notebook_shas(course_org: str, template: str) -> frozenset[str]:
+    """The git blob shas of every notebook on the template's DEFAULT branch - the starters
+    exactly as students received them.
+
+    A submission whose notebook hashes to one of these was never opened, which is
+    `not-attempted` and not a run that produced nothing. Shas rather than content: one
+    recursive tree call answers for the whole template, and a sha comparison IS byte
+    identity - the plan's rule, not an approximation of it.
+
+    An empty set (no notebook on `main`, or a tree we could not read) simply means nothing
+    can be recognised as untouched this run; every notebook is then executed, which is the
+    safe way round. Memoised per template per process, like the grading spec."""
+    branch = default_branch(course_org, template, fallback="main")
+    try:
+        shas = repo_blob_shas(course_org, template, branch)
+    except RuntimeError as exc:
+        log_err(
+            f"  ! could not read {course_org}/{template}@{branch} ({exc}) - an untouched "
+            f"starter cannot be told from a submission this run"
+        )
+        return frozenset()
+    return frozenset(
+        sha
+        for path, sha in shas.items()
+        if path.endswith(".ipynb") and _CHECKPOINTS not in path.split("/")
+    )
+
+
+def _completion_notebooks(workdir: Path) -> list[Path]:
+    """Every `.ipynb` in the checkout, shallowest first and ties broken by path.
+
+    ORDERED on purpose. Most submissions hold exactly one notebook, but the state recorded
+    against a student must not depend on which file a directory walk happened to see first
+    - a re-run that picked the other one would move `info.completion` under a grader who
+    had already read it. Walked with `_walk_files` (no symlink following) and
+    `.ipynb_checkpoints` skipped: Jupyter's own autosave of the same notebook is not a
+    second submission."""
+    return sorted(
+        (
+            path
+            for path in _walk_files(workdir)
+            if path.suffix == ".ipynb"
+            and _CHECKPOINTS not in path.relative_to(workdir).parts
+        ),
+        key=lambda path: (
+            len(path.relative_to(workdir).parts),
+            str(path.relative_to(workdir)),
+        ),
+    )
+
+
+def _completion_env() -> dict:
+    """The graded sandbox environment as the completion check needs it: no network, and the
+    notebook's own directory back on the kernel's `sys.path`.
+
+    `PYTHONSAFEPATH` is what the rest of the sandbox uses to keep a student-writable
+    directory off `sys.path[0]`, and it is inherited straight through nbconvert into
+    `ipykernel_launcher` - where IPython reads it and never adds the notebook's directory
+    at all. So `import helpers` in a notebook committed beside `helpers.py` raised
+    ModuleNotFoundError, and an ordinary submission was recorded `errors:N` for work that
+    runs perfectly on the student's machine.
+
+    Dropping it costs nothing here that is not already spent: the kernel exists to execute
+    the student's code, in this same token-free environment, so a module of theirs
+    shadowing one of ours changes nothing about what runs. The GRADER-side subprocesses -
+    the notebook-to-script conversion, the hidden tests, the reading-copy export - keep it,
+    because there a shadowed import is our code being redirected, not theirs."""
+    env = _sanitised_env()
+    env.pop("PYTHONSAFEPATH", None)
+    for var in _PROXY_VARS:
+        env[var] = COMPLETION_DEAD_PROXY
+    for var in ("no_proxy", "NO_PROXY"):
+        env.pop(var, None)
+    return env
+
+
+def _completion_state(executed: bytes) -> str:
+    """`ran-clean`, or `errors:N` for the N cells that raised - read off the notebook
+    nbconvert wrote.
+
+    Counted per CELL, not per traceback: a cell can emit an error output and nothing else,
+    and what a grader wants is how many places the notebook stops working."""
+    try:
+        nb = json.loads(executed)
+    except (ValueError, UnicodeDecodeError):
+        return COMPLETION_DID_NOT_RUN
+    errors = sum(
+        1
+        for cell in nb.get("cells", [])
+        if any(
+            isinstance(out, dict) and out.get("output_type") == "error"
+            for out in (cell.get("outputs") or [])
+        )
+    )
+    return COMPLETION_CLEAN if not errors else f"{COMPLETION_ERRORS}{errors}"
+
+
+# The kernel a Python notebook is executed with, whatever kernel it was SAVED with.
+#
+# `metadata.kernelspec.name` is whatever the student's own machine called its environment -
+# `conda-env-ml-py`, `myenv`, a VS Code interpreter hash - and nbclient resolves that name
+# literally against the kernels installed on the grading runner, where the only one is
+# `python3`. Without this a submission written anywhere but a bare Jupyter install raised
+# NoSuchKernel, wrote no output file, and was recorded `did-not-run`, i.e. "tell the
+# maintainer" - for a large share of a real cohort.
+COMPLETION_KERNEL = "python3"
+
+
+def _kernel_argv(raw: bytes) -> list[str]:
+    """The kernel override for this notebook, or nothing at all.
+
+    Only for a notebook that says it is PYTHON, or says nothing: forcing `python3` onto an R
+    or Julia submission would trade a truthful `did-not-run` for a page of syntax errors
+    recorded as the student's. Read off `language_info` (what the notebook last ran as)
+    falling back to the kernelspec's own `language`, because a kernelspec NAME is exactly
+    the thing that cannot be trusted here."""
+    try:
+        meta = json.loads(raw).get("metadata") or {}
+    except (ValueError, UnicodeDecodeError, AttributeError):
+        return []  # not a notebook we can read; nbconvert will say so its own way
+    language = str(
+        (meta.get("language_info") or {}).get("name")
+        or (meta.get("kernelspec") or {}).get("language")
+        or ""
+    ).lower()
+    if language and not language.startswith("python"):
+        return []
+    return [f"--ExecutePreprocessor.kernel_name={COMPLETION_KERNEL}"]
+
+
+def _check_completion(
+    workdir: Path, starters: frozenset[str], run_root: Path
+) -> tuple[str, bytes | None]:
+    """Execute this submission's notebook top to bottom and say what happened, plus the
+    executed copy to archive (None where there is nothing to archive).
+
+    WHICH notebook: the first one, in `_completion_notebooks` order, that is not still
+    byte-identical to a starter the template handed out - so a template shipping
+    `00-setup.ipynb` beside `assignment.ipynb` is checked on the one the student worked in.
+    `not-attempted` needs EVERY notebook in the checkout to be an untouched starter; on the
+    shallowest one alone, a student who did all their work in the second notebook read as
+    having done none of it.
+
+    Runs BEFORE `_run_tests`, on the notebook as submitted: `_run_tests` converts every
+    `.ipynb` in the checkout to a script, and a script is not what the rule is about. The
+    checkout is hardened first by the caller, so no credential is in reach of the code this
+    starts, and the run is capped and group-killed exactly like the hidden tests are."""
+    notebooks = _completion_notebooks(workdir)
+    if not notebooks:
+        return COMPLETION_NO_NOTEBOOK, None
+    notebook = raw = None
+    for candidate in notebooks:
+        content = candidate.read_bytes()
+        if blob_sha(content) not in starters:
+            notebook, raw = candidate, content
+            break
+    if notebook is None:
+        return COMPLETION_NOT_ATTEMPTED, None
+    out = run_root / "executed"
+    out.mkdir(parents=True, exist_ok=True)
+    if not _run_limited(
+        [
+            sys.executable,
+            "-m",
+            "jupyter",
+            "nbconvert",
+            "--to",
+            "notebook",
+            "--execute",
+            *_kernel_argv(raw),
+            # Run the WHOLE notebook. Without this nbclient stops at the first traceback,
+            # and `errors:1` would mean "at least one" for every submission that has any.
+            "--allow-errors",
+            "--output-dir",
+            str(out),
+            "--output",
+            "executed.ipynb",
+            str(notebook),
+        ],
+        # The notebook's own directory, which is where the student ran it: a notebook that
+        # opens `data/train.csv` beside itself has to find it, or the check reports an
+        # error the submission does not have.
+        cwd=str(notebook.parent),
+        env=_completion_env(),
+        timeout=RUN_TIMEOUT,
+        # The executed copy lands under `run_root`, which is outside the checkout.
+        writable=(run_root,),
+    ):
+        log_err(
+            f"  ! the completion check timed out after {RUN_TIMEOUT}s (process group "
+            f"killed) - recording `{COMPLETION_TIMED_OUT}`"
+        )
+        return COMPLETION_TIMED_OUT, None
+    data = _result_bytes("the executed notebook", out / "executed.ipynb")
+    if data is None:
+        return COMPLETION_DID_NOT_RUN, None
+    return _completion_state(data), data
 
 
 def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
@@ -1744,18 +2323,15 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
     scores are faculty-reviewed before the grades pipeline distributes anything and are never
     shown to the student directly. See the `_STUDENT_TEST_RIGGING` note for where the
     trusted-out-of-band-result plugin would go if that ever needs closing."""
+    # `_sanitised_env` keeps cwd/'' off sys.path, so a committed `pytest.py` /
+    # `sitecustomize.py` can't shadow real modules. The submission is NOT put on PYTHONPATH
+    # either: every PYTHONPATH entry precedes the stdlib, so a student `json.py`/`operator.py`
+    # there would shadow a module the hidden tests import and let them force assertions.
+    # Instead the trusted hidden-tests conftest appends the submission to sys.path AFTER the
+    # stdlib (see the injection below), so a real module always wins the import while the
+    # submission's own uniquely-named module still resolves.
     env = _sanitised_env()
-    # Keep cwd/'' off sys.path so a committed `pytest.py`/`sitecustomize.py` can't shadow real
-    # modules. The submission is NOT put on PYTHONPATH: every PYTHONPATH entry precedes the
-    # stdlib, so a student `json.py`/`operator.py` there would shadow a module the hidden tests
-    # import and let them force assertions. Instead the trusted hidden-tests conftest appends
-    # the submission to sys.path AFTER the stdlib (see the injection below), so a real module
-    # always wins the import while the submission's own uniquely-named module still resolves.
-    env["PYTHONSAFEPATH"] = "1"
-    # The clone persists the bot credential in `.git/config`; env-stripping doesn't reach it,
-    # and student code runs next and can read the workspace - so drop `.git` first (fix 10).
-    shutil.rmtree(workdir / ".git", ignore_errors=True)
-    _strip_student_test_rigging(workdir)
+    _harden_checkout(workdir)
     # Convert every notebook the submission holds to an importable script first (Otter can
     # slot in here). Unconditional, and driven by what is actually in the checkout rather
     # than by a `format:` the template declared: the two disagreed silently whenever a
@@ -1799,7 +2375,12 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
             log(
                 "    (a notebook declares no python file_extension - renamed the stray output)"
             )
-    with tempfile.TemporaryDirectory() as run:
+    # `ignore_cleanup_errors`: this runspace is handed to the sandbox user and taken back
+    # in `_run_limited`'s `finally`, and a chown-back that failed leaves files here that
+    # this process cannot delete. A leftover directory under the runner's temp dir costs a
+    # log line (there) and nothing else; raising out of the `with` would red a run that
+    # graded the submission perfectly well.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as run:
         tests_dir = Path(run) / "tests"
         copy_tree(tests_src, tests_dir)
         # Make the submission importable by the hidden tests WITHOUT letting a student
@@ -1816,11 +2397,20 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
             f"import sys\nsys.path.append({str(workdir)!r})\n"
         )
         env["PYTHONPATH"] = str(startup)
-        if _grader_dep_missing("pytest"):
-            return None
         report = Path(run) / "report.xml"
-        completed = _run_limited(
-            [
+        runner = tests_dir / RUN_SCRIPT
+        scripted = runner.is_file()
+        if scripted:
+            # The escape hatch (see RUN_SCRIPT). The script says how to run this course's
+            # tests and where the submission is; everything else about the sandbox is
+            # unchanged, including that the report lands outside the checkout.
+            env[JUNIT_OUT_ENV] = str(report)
+            env[SUBMISSION_ENV] = str(workdir)
+            argv = ["sh", str(runner)]
+        elif _grader_dep_missing("pytest"):
+            return None
+        else:
+            argv = [
                 sys.executable,
                 "-m",
                 "pytest",
@@ -1830,7 +2420,9 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
                 f"--confcutdir={tests_dir}",
                 str(tests_dir),
                 f"--junitxml={report}",
-            ],
+            ]
+        completed = _run_limited(
+            argv,
             # Run FROM the runspace, NOT the checkout. On Python < 3.11 (no PYTHONSAFEPATH)
             # `python -m` puts cwd on sys.path[0], so a checkout cwd would let a committed
             # `operator.py`/`collections.py` shadow the stdlib during interpreter startup -
@@ -1841,28 +2433,267 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
             cwd=run,
             env=env,
             timeout=RUN_TIMEOUT,
+            # The runspace is the cwd; the SUBMISSION is a second tree, and the tests
+            # import from it.
+            writable=(workdir,),
         )
         if not completed:
             log_err(
                 f"  ! grading timed out after {RUN_TIMEOUT}s (process group killed)"
             )
             return None
-        if not report.exists():
+        raw = _result_bytes("the test report", report)
+        if raw is None:
+            if scripted:
+                log_err(
+                    f"  ! the hidden tests' `{RUN_SCRIPT}` wrote no report to "
+                    f"${JUNIT_OUT_ENV} - nothing can be scored from this run"
+                )
             return None
-        return score_from_junit(report.read_text())
+        try:
+            return score_from_junit(raw.decode())
+        except (ET.ParseError, UnicodeDecodeError) as exc:
+            # A hand-written runner is the likely author of an XML nobody can parse, and an
+            # unhandled traceback here would abort the whole cohort's job rather than this
+            # one submission. `UnicodeDecodeError` for the same reason: `run.sh` is written
+            # by faculty in whatever language their course uses, and a latin-1 report is a
+            # report we cannot read, not a run we may abandon a cohort over.
+            log_err(f"  ! the test report is not valid XML ({exc}) - nothing scored")
+            return None
+
+
+# ------------------------------------------------- the grader's reading copy (opt-in)
+
+# What a grader can be handed as a page rather than a repo. A notebook exports through
+# nbconvert, which every seeded workflow already installs; an Rmd/qmd would need pandoc and
+# an R toolchain that the runner has not got, so its FILTERED SOURCE is archived instead -
+# still the thing worth reading, and honest about being source.
+GRADER_DOCUMENTS = (".ipynb", ".rmd", ".qmd")
+# What one export came to, in the words the summary line counts. Not a student-visible
+# vocabulary - these appear only in the run log's totals and never beside a name.
+GRADER_PDF = "pdf"
+GRADER_HTML = "html"  # nbconvert's PDF path needs LaTeX; this is the fallback
+# The engines nbconvert's `--to pdf` shells out to. A bare Actions runner has none of
+# them, so the PDF leg fails for EVERY submission - and each failure costs a whole
+# interpreter start and notebook render before the HTML leg does the work again. Asked
+# once per run instead (`_pdf_engine_present`), which is what the exporter would ask.
+_PDF_ENGINES = ("xelatex", "pdflatex", "lualatex")
+GRADER_SOURCE = "filtered source"  # nothing in the runner can render this format
+GRADER_NONE = "no marked questions"  # the assignment does not use the question fences
+GRADER_TOO_BIG = "too large to archive"  # past ARCHIVE_MAX_BYTES, for the same reason
+GRADER_UNREADABLE = "not readable"  # unclonable, unpinnable, or nothing readable
+GRADER_UNWRITTEN = "not archived"  # produced, but the archive write failed
+
+
+def pick_grader_document(
+    workdir: Path,
+) -> tuple[Path, Filtered] | None:
+    """The one document in a checkout worth exporting for a grader, already filtered.
+
+    The submission with the MOST fenced questions wins, ties broken by path, because a
+    repo commonly holds several notebooks - a scratch copy, a provided demo, the answer -
+    and the one carrying the questions is by definition the one being marked. A checkout
+    where nothing carries a fence returns None, and the caller archives nothing.
+
+    A document that will not parse is skipped rather than raised on: one broken notebook in
+    a cohort must not cost the other hundred their grader copy."""
+    best: tuple[Path, Filtered] | None = None
+    for path in sorted(_walk_files(workdir)):
+        if path.suffix.lower() not in GRADER_DOCUMENTS:
+            continue
+        if _CHECKPOINTS in path.relative_to(workdir).parts:
+            continue  # Jupyter's own autosave, as `_completion_notebooks` also skips
+        try:
+            # Bounded before it is read: these are student-committed files, the read is
+            # into the PARENT process (which no rlimit caps), and a document too big to
+            # archive cannot produce an archivable export anyway.
+            if path.stat().st_size > ARCHIVE_MAX_BYTES:
+                continue
+            filtered = filter_questions(path.name, path.read_text(errors="replace"))
+        except (DeriveError, OSError):
+            continue
+        if filtered.questions and (
+            best is None or filtered.questions > best[1].questions
+        ):
+            best = (path, filtered)
+    return best
+
+
+@cache
+def _pdf_engine_present() -> bool:
+    """Whether this runner can make a PDF at all - one `which` per run."""
+    return any(shutil.which(engine) for engine in _PDF_ENGINES)
+
+
+def _export_document(source: Path, env: dict) -> tuple[str, bytes] | None:
+    """Render `source` for a grader: `(what it came to, the bytes to archive)`, or None when
+    nothing readable came back out of the tree at all (see `_result_bytes`).
+
+    PDF first, HTML second, the source itself last. nbconvert's PDF path shells out to
+    LaTeX, which a bare Actions runner has not got - so the verdict is taken from whether
+    the OUTPUT FILE appeared, never from the exit code, and a missing toolchain is a
+    quieter answer rather than a red run. Nothing here executes the notebook: these are
+    student submissions, and rendering one must not run it."""
+    if source.suffix.lower() == ".ipynb" and not _grader_dep_missing("nbconvert"):
+        formats = (GRADER_PDF, GRADER_HTML) if _pdf_engine_present() else (GRADER_HTML,)
+        for fmt in formats:
+            out = source.with_suffix(f".{fmt}")
+            out.unlink(missing_ok=True)
+            _run_limited(
+                [
+                    sys.executable,
+                    "-m",
+                    "jupyter",
+                    "nbconvert",
+                    "--to",
+                    fmt,
+                    str(source),
+                ],
+                cwd=str(source.parent),
+                env=env,
+                timeout=RUN_TIMEOUT,
+            )
+            # The export is written by the sandbox user, into the tree it owned: a name
+            # that is not a regular file is not an export, and the next format tries.
+            if (rendered := _result_bytes(f"the {fmt} export", out)) is not None:
+                return fmt, rendered
+    own_source = _result_bytes("the submission's own source", source)
+    return None if own_source is None else (GRADER_SOURCE, own_source)
+
+
+def _grader_document_for(
+    cohort_org: str,
+    repo: str,
+    target_key: str,
+    slug: str,
+    deadline: str,
+    snapshot: str | None,
+    env: dict,
+) -> str:
+    """Archive one submission's grader copy. Returns one of the GRADER_* verdicts."""
+    # Tolerant cleanup for the same reason `_run_tests`' runspace has it: the exporter runs
+    # in this tree as the sandbox user, and a failed chown-back leaves it undeletable.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as work:
+        wd = Path(work) / "sub"
+        if not clone(cohort_org, repo, wd):
+            return GRADER_UNREADABLE
+        if _pin_commit(wd, deadline, snapshot) is None:
+            return GRADER_UNREADABLE
+        # The same hardening the hidden tests and the completion check get, for the same
+        # reason: `_export_document` runs a subprocess with this checkout as its cwd, so
+        # the clone's stored credential and the student's own rigging files have to go
+        # first. Rendering does not execute the notebook - but it does import a stack of
+        # Python from a directory the student wrote.
+        _harden_checkout(wd)
+        picked = pick_grader_document(wd)
+        if picked is None:
+            return GRADER_NONE
+        source, filtered = picked
+        source.write_text(filtered.text)
+        exported = _export_document(source, env)
+        if exported is None:
+            return GRADER_UNREADABLE
+        verdict, content = exported
+        if len(content) > ARCHIVE_MAX_BYTES:
+            # The same cap the executed notebook gets, for the same reason: an HTML export
+            # of a plot-heavy notebook is base64 PNG all the way down, and one per student
+            # makes classroom-config a repo nobody can clone.
+            return GRADER_TOO_BIG
+        # The verdict for a rendered export IS its extension; only the fallback has to
+        # ask the file what it is.
+        suffix = (
+            verdict
+            if verdict in (GRADER_PDF, GRADER_HTML)
+            else source.suffix.lstrip(".")
+        )
+        # `person=True`: the PATH is `autograde/<slug>/<handle>.pdf`, and this log is
+        # world-readable even where classroom-config is not.
+        if not put_file(
+            cohort_org,
+            CONFIG_REPO,
+            f"{autograde_path(slug)}/{target_key}.{suffix}",
+            content,
+            f"autograde: {slug}/{target_key} grader copy",
+            person=True,
+        ):
+            return GRADER_UNWRITTEN
+        return verdict
+
+
+def export_grader_documents(
+    cohort_org: str,
+    slug: str,
+    key: str,
+    is_group: bool,
+    deadline: str,
+    dry_run: bool,
+) -> None:
+    """Archive a reading copy of every submission, filtered to its hand-marked questions.
+
+    Opt-in per assignment (`grader_pdf: true` in the template's `grading_config.yml`) and
+    deliberately NOT behind `autograde:`: it is the questions a PERSON marks that the
+    Otter `<!-- BEGIN QUESTION -->` fences delimit, so the assignment that wants this most
+    is the all-manual one, which never reaches the autograder at all.
+
+    Returns nothing, and that is the contract: a runner with no LaTeX, a submission with no
+    fences, one unclonable repo - none of those is a reason to red the cutoff pass and
+    re-run the whole freeze on the next tick. Every outcome is counted into one summary
+    line and the run carries on. Counts only: the archive PATHS carry handles."""
+    targets = submission_targets(cohort_org, slug, is_group, key)
+    if not targets:
+        return
+    if dry_run:
+        log(f"    DRY-RUN would archive {len(targets)} grader copy/copies for {slug}")
+        return
+    log_step(f"Grader copies for {slug}: {len(targets)} target(s)")
+    snapshots = load_snapshots(cohort_org, slug)
+    # `_export_document` runs `python -m jupyter` FROM the notebook's own directory (an
+    # exporter resolves a document's relative assets from there), so it needs the same
+    # sandbox environment the hidden tests and the completion check get.
+    env = _sanitised_env()
+    tally: dict[str, int] = {}
+    for repo, target_key, _members in targets:
+        verdict = _grader_document_for(
+            cohort_org,
+            repo,
+            target_key,
+            slug,
+            deadline,
+            None if snapshots is None else snapshots.get(repo),
+            env,
+        )
+        tally[verdict] = tally.get(verdict, 0) + 1
+    log_ok(
+        f"{slug}: grader copies - "
+        + ", ".join(f"{n} {what}" for what, n in sorted(tally.items()))
+        + f" (in {autograde_path(slug)}/)"
+    )
 
 
 def _grade_target(
     cohort_org: str,
     repo: str,
-    tests_src: Path,
+    tests_src: Path | None,
     deadline: str,
     snapshot: str | None = None,
-) -> dict | None:
-    """Clone one submission, pin it to its snapshot (else the deadline), run the hidden
-    tests. Always returns a result dict (a zero with a note for non-submissions /
-    failures), or None if unclonable."""
-    with tempfile.TemporaryDirectory() as work:
+    *,
+    starters: frozenset[str] | None = None,
+) -> tuple[dict | None, bytes | None]:
+    """Clone one submission, pin it to its snapshot (else the deadline), and examine it:
+    the completion check where the assignment asked for one, then the hidden tests where
+    there are any.
+
+    Returns `(result, executed notebook)`. `result` is None for the ONE reason the caller
+    treats as "never examined" - the repo could not be cloned; everything else comes back
+    as a dict (a zero with a note for a non-submission or a failed run). The executed
+    notebook is bytes to archive, or None where there is nothing to archive.
+
+    `tests_src` None = this assignment is hand-marked and only the completion check runs;
+    `starters` None = no completion check (else the blob shas of the handed-out starters,
+    which is how an untouched notebook is recognised)."""
+    # Tolerant cleanup: the checkout below is handed to the sandbox user by both the
+    # completion check and the hidden tests, and a failed chown-back leaves it undeletable.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as work:
         wd = Path(work) / "sub"
         if not clone(cohort_org, repo, wd):
             if repo_missing(cohort_org, repo):
@@ -1876,17 +2707,33 @@ def _grade_target(
                 log_err(
                     f"  ! {target_ref(repo)} does not exist - scoring 0 (no submission)"
                 )
-                return _zero_result("submission repo does not exist")
+                return _zero_result("submission repo does not exist"), None
             log_err(f"  ! could not clone {target_ref(repo)} (transient - will retry)")
-            return None
+            return None, None
         sha = _pin_commit(wd, deadline, snapshot)
         if sha is None:
-            return _zero_result(f"no submission on/before {deadline}")
-        result = _run_tests(wd, tests_src)
-        if result is None:
-            return _zero_result(GRADE_FAILED_NOTE)
+            zero = _zero_result(f"no submission on/before {deadline}")
+            if starters is not None:
+                # Nothing was pushed, so what is in the repo is the handout - which is
+                # exactly what `not-attempted` says, and saying nothing here would leave
+                # the one row a grader most wants to see blank.
+                zero["completion"] = COMPLETION_NOT_ATTEMPTED
+            return zero, None
+        _harden_checkout(wd)
+        executed = None
+        completion = ""
+        if starters is not None:
+            # BEFORE the tests: `_run_tests` converts every notebook in the checkout to a
+            # script, and the rule this verifies is about the notebook.
+            completion, executed = _check_completion(wd, starters, Path(work))
+        if tests_src is None:
+            result = {}
+        else:
+            result = _run_tests(wd, tests_src) or _zero_result(GRADE_FAILED_NOTE)
         result["commit"] = sha
-        return result
+        if completion:
+            result["completion"] = completion
+        return result, executed
 
 
 def refresh_assignment_sheet(
@@ -1951,9 +2798,10 @@ def collect(
     scheduled: bool = False,
     slug: str = "",
 ) -> int:
-    """Autograde every submission for `template` as of `deadline`, archiving result.json and
-    recording the machine score into the cohort's grading sheet (`info.autograde`).
-    Idempotent.
+    """Examine every submission for `template` as of `deadline` - the hidden tests where
+    the assignment asked to be autograded, the completion check where it asked for one -
+    archiving what each run produced and recording the machine facts into the cohort's
+    grading sheet (`info.autograde`, `info.completion`). Idempotent.
 
     `scheduled` marks the hourly cron: an assignment with no submission targets is then a
     "not yet", never the permanent not-machine-graded record a button press writes.
@@ -2013,7 +2861,37 @@ def collect(
     is_group = resolve_is_group(force=group, template_type=gspec.type)
     cutoff = local_deadline(deadline, sched.timezone)
 
-    def freeze_sheet(counts: dict[str, str] | None = None) -> bool:
+    # The grader's reading copy, when the assignment asks for one - BEFORE every autograde
+    # exit below, and deliberately so. The fences it filters on delimit the questions a
+    # PERSON marks, so an all-manual assignment (no solution branch, `autograde: false`,
+    # no tests written) is exactly the one that wants it, and each of those returns from
+    # this function a few lines further down. It never changes the exit code: see
+    # `export_grader_documents`.
+    # Whether student code may be run AT ALL, asked once and before anything clones a
+    # submission. Every stage below executes the students' own code - the reading-copy
+    # export included, which runs `python -m jupyter` from a directory the student wrote -
+    # and on a runner that is only safe under a separate uid (see `sandbox_unusable`).
+    #
+    # RED, and nothing recorded. This is a fault of the RUNNER, not of the assignment: the
+    # sheet stays open, no `_skipped.json` is written, and the run goes non-zero so the
+    # unattended-failure issue and the maintainer's mail fire - which is the channel that
+    # reaches the one person who can fix it. Recording a skip instead would be permanent
+    # (`_skipped.json` is fire-once) and would retire an assignment over a condition that
+    # is transient by nature; the next quarter-hourly tick grades it normally once the
+    # runner is right. `_run_limited` refuses the same way, as the backstop.
+    if unusable := sandbox_unusable():
+        log_err(
+            f"{slug}: {unusable}. Nothing is recorded - this is a runner fault, so the "
+            f"next scheduled run grades the assignment normally once it is fixed."
+        )
+        return 1
+    if gspec.grader_pdf:
+        export_grader_documents(cohort_org, slug, key, is_group, deadline, dry_run)
+
+    def freeze_sheet(
+        counts: dict[str, str] | None = None,
+        states: dict[str, str] | None = None,
+    ) -> bool:
         """Seal the grading sheet: one last derivation, off the write-once snapshot, and
         `info:` is never touched again. Every path out of a passed cutoff runs it, because
         a sheet left OPEN after the deadline tells a grader marks can still move."""
@@ -2027,10 +2905,14 @@ def collect(
             is_group=is_group,
             now=cutoff,
             autograde=counts,
+            completion=states,
             dry_run=dry_run,
         )
 
-    def sealed(counts: dict[str, str] | None = None) -> bool:
+    def sealed(
+        counts: dict[str, str] | None = None,
+        states: dict[str, str] | None = None,
+    ) -> bool:
         """Freeze the sheet, and say whether this run may record anything permanent.
 
         A skip or graded record is FIRE-ONCE. Written over a sheet the freeze could not
@@ -2039,7 +2921,7 @@ def collect(
         assignment with its header still OPEN and its `info:` still provisional, and
         nothing ever re-derives them. So the marker waits for the seal, and the next tick
         does both."""
-        if freeze_sheet(counts):
+        if freeze_sheet(counts, states):
             return True
         log_err(
             f"{slug}: the grading sheet could not be sealed - recording nothing, so the "
@@ -2065,32 +2947,45 @@ def collect(
                 f"no `{SOLUTION_BRANCH}` branch on {master_org}/{template}",
                 dry_run,
             )
+        # WHAT this run does, decided once: hidden tests, a completion check, either,
+        # both, or nothing at all. The two are independent - a hand-marked notebook
+        # assignment still gets its completion check - so neither can exit early on the
+        # other's behalf, and only "neither" is the hand-marked exit that records a skip.
+        tests_src: Path | None = soldir / gspec.tests
+        no_tests = ""
         if not gspec.autograde:
-            log_ok(
-                f"{slug}: autograde disabled in {GRADING_FILE} - all-manual, nothing to collect."
-            )
-            if not sealed():
-                return 1
-            return _record_skip(
-                cohort_org, slug, f"`autograde: false` in {GRADING_FILE}", dry_run
-            )
-        tests_src = soldir / gspec.tests
-        if not tests_src.is_dir():
-            # The third hand-marked exit: an assignment that asked to be autograded and
-            # whose hidden tests were never written. Recorded and frozen like the other
-            # two rather than red -
-            # a fault the cron re-decides every quarter of an hour is a fault nobody reads,
-            # and the sheet has to be sealed whether or not a machine ever marked anything.
-            log_err(
-                f"{slug}: no `{gspec.tests}/` on the solution branch - hand-marked, "
-                f"nothing to collect."
-            )
+            no_tests = f"`autograde: false` in {GRADING_FILE}"
+        elif not tests_src.is_dir():
+            # An assignment that asked to be autograded and whose hidden tests were never
+            # written. Reported rather than red: a fault the cron re-decides every quarter
+            # of an hour is a fault nobody reads.
+            log_err(f"  ! no `{gspec.tests}/` on the solution branch")
+            no_tests = f"no `{gspec.tests}/` on the solution branch - hand-marked"
+        if no_tests:
+            tests_src = None
+
+        starters: frozenset[str] | None = None
+        no_completion = ""
+        if gspec.runs_completion_check:
+            # Every missing one named, not just the first probed: a runner missing both
+            # should have to read the log once.
+            if [dep for dep in COMPLETION_DEPS if _grader_dep_missing(dep)]:
+                # A runner fault with one fix, said in words by `_grader_dep_missing`
+                # rather than through a cohort of `did-not-run`. Recorded like any other
+                # decision not to machine-mark, so the cron does not re-decide it hourly;
+                # deleting `autograde/<slug>/` re-runs it once the runner is fixed.
+                no_completion = COMPLETION_DEP_SKIP
+            else:
+                starters = _starter_notebook_shas(master_org, template)
+
+        if tests_src is None and starters is None:
+            log_ok(f"{slug}: hand-marked, nothing to collect.")
             if not sealed():
                 return 1
             return _record_skip(
                 cohort_org,
                 slug,
-                f"no `{gspec.tests}/` on the solution branch - hand-marked",
+                "; ".join(reason for reason in (no_tests, no_completion) if reason),
                 dry_run,
             )
 
@@ -2128,6 +3023,14 @@ def collect(
         # `{unit key: "passed/total"}` - what `info.autograde` shows a grader at the
         # cutoff. Per UNIT, not per member: a team is graded once, on one commit.
         scores: dict[str, str] = {}
+        # `{unit key: "ran-clean" | "errors:N" | ...}` - `info.completion`, on exactly the
+        # same terms, and kept apart from `scores` because an assignment can have one
+        # without the other.
+        completions: dict[str, str] = {}
+        # The unit keys this run actually EXAMINED - one entry per target that came back
+        # with a result, whether or not it produced a count. Not `len(archives)`: a target
+        # can archive two files (its result JSON and its executed notebook).
+        examined: list[str] = []
         # The per-target result archives are held here and written only AFTER the grading
         # sheet is durable (see below), with the `_graded.json` sentinel written last. Writing
         # archives mid-loop is what let an aborted run un-grade everyone back when bare
@@ -2163,18 +3066,23 @@ def collect(
                     f"the deadline freeze; scoring 0 rather than pinning on student-"
                     f"controlled commit dates"
                 )
-                result = _zero_result(f"absent from {snapshot_path(slug)}")
+                result, executed = (
+                    _zero_result(f"absent from {snapshot_path(slug)}"),
+                    None,
+                )
             else:
-                result = _grade_target(
+                result, executed = _grade_target(
                     cohort_org,
                     repo,
                     tests_src,
                     deadline,
                     snapshot=None if snapshots is None else snapshots[repo],
+                    starters=starters,
                 )
             if result is None:
                 unreachable.append(repo)
                 continue
+            examined.append(target_key)
             if result.get("note") == GRADE_FAILED_NOTE:
                 failed_to_run.append(repo)
             # The score and per-test detail go ONLY to the private archive: this log is
@@ -2187,6 +3095,26 @@ def collect(
                     f"autograde: {slug}/{target_key}",
                 )
             )
+            if executed is not None:
+                # The notebook as the toolkit ran it, beside the result JSON: `errors:3` is
+                # a number, and the grader has to be able to see WHICH three. Capped,
+                # because a notebook of plots is base64 all the way down and
+                # classroom-config is a repo somebody has to clone. No path in this log -
+                # it would name the handle.
+                if len(executed) <= ARCHIVE_MAX_BYTES:
+                    archives.append(
+                        (
+                            f"{autograde_path(slug)}/{target_key}.ipynb",
+                            executed,
+                            f"autograde: {slug}/{target_key} (executed notebook)",
+                        )
+                    )
+                else:
+                    log(
+                        f"    (an executed notebook came to {len(executed) // 1024} KiB, "
+                        f"over the {ARCHIVE_MAX_BYTES // 1024} KiB archive cap "
+                        f"- the state is recorded, the copy is not)"
+                    )
             # A count, shown to the grader for information - never a mark by itself, and
             # never a field a student sees. It reaches them, if at all, through whatever
             # the grader then types into `score_*`.
@@ -2196,11 +3124,15 @@ def collect(
             # its count would make the assignment look graded when no student can receive
             # it. The per-target archive above is still written - the run DID examine it.
             if members:
-                scores[target_key] = f"{result['score']}/{result['max']}"
+                if tests_src is not None:
+                    scores[target_key] = f"{result['score']}/{result['max']}"
+                if result.get("completion"):
+                    completions[target_key] = result["completion"]
 
         if dry_run:
             return 0
-        if not scores and unreachable:
+        recorded = scores or completions
+        if not recorded and unreachable:
             # Nothing graded because nothing could be READ - a repo that is not there yet,
             # or an API having a bad afternoon. The run is genuinely unfinished, so it goes
             # red and no record is written: the next tick must be free to try again, and
@@ -2210,7 +3142,7 @@ def collect(
                 f"(tagged above) - nothing graded, and nothing recorded; the next run retries"
             )
             return 1
-        if not scores:
+        if not recorded:
             # Every target WAS examined and none of them yielded a grade. Not a failure: the
             # snapshot is frozen, so an hourly retry would see exactly what this run saw and
             # go red for ever. Record the skip and stay green - a deliberate re-grade is
@@ -2227,7 +3159,7 @@ def collect(
                 f"nothing gradable across {len(targets)} target(s) as of {deadline}",
                 dry_run,
             )
-        if failed_to_run and len(failed_to_run) == len(archives):
+        if failed_to_run and len(failed_to_run) == len(examined):
             # EVERY target that was examined failed to grade for the same class of reason -
             # a broken image, a missing dependency, an rlimit the runner can't satisfy. That
             # is a runner fault, not a cohort of non-submitters, so it is treated like the
@@ -2247,7 +3179,7 @@ def collect(
         # and picks up the repo(s) that could not be read.
         if unreachable:
             log_err(
-                f"{slug}: graded {len(scores)} target(s), but {len(unreachable)} "
+                f"{slug}: examined {len(examined)} target(s), but {len(unreachable)} "
                 f"submission repo(s) could not be read (tagged above) - NOT marking {slug} "
                 f"machine-graded; the next run retries the missing one(s)"
             )
@@ -2271,15 +3203,18 @@ def collect(
         # unfrozen sheet would leave the cutoff's facts unrecorded for ever (nothing
         # re-derives them), and a frozen sheet with no sentinel is simply re-frozen next
         # tick to identical bytes, which writes nothing.
-        if not (archive_ok and sealed(scores) and mark_graded(cohort_org, slug)):
+        if not (
+            archive_ok and sealed(scores, completions) and mark_graded(cohort_org, slug)
+        ):
             log_err(
-                f"{slug}: graded {len(scores)} target(s) but a result archive, the grading "
+                f"{slug}: examined {len(examined)} target(s) but a result archive, the grading "
                 f"sheet or the fire-once sentinel failed to write - NOT marking "
                 f"machine-graded; retrying"
             )
             return 1
     log_ok(
-        f"graded {len(scores)} target(s) into {grades.sheet_path(slug)}; "
+        f"examined {len(examined)} target(s) into {grades.sheet_path(slug)}: "
+        f"{len(scores)} scored, {len(completions)} completion-checked; "
         f"{len(failed_to_run)} failed to run, {len(unreachable)} unreachable "
         f"(per-target detail in {autograde_path(slug)}/) - faculty mark in the sheet"
     )

@@ -17,9 +17,7 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
       - `assignment_number` = `1`, `2`, etc
       - `semester_tag` = `f/sYYYY`
       - `format` (`ipynb` / `py` / `rmd` / `qmd` / `latex` / `none`) - picks which starter
-        stub you get, and nothing else. Grading reads whatever is in the repo, so a student
-        who works in a notebook on a `py` assignment still grades; `none` seeds no starter
-        at all.
+        stub you get, and nothing else (see [Formats](#formats-and-what-students-hand-in)).
       - `type` (`individual` or `group` - one repo per student vs per team)
       - `team_formation` (group only: `self_select` = students use the welcome repo's
         **Join team** form; `assigned` = you write `classroom-config/teams.csv`)
@@ -50,11 +48,83 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
    - For a partially machine-marked assignment set `autograde: true` in `grading_config.yml`:
       - put the hidden tests in `tests/` (path configurable via `grading_config.yml`'s `tests:` field) plain pytest files that `from starter import ...` and check the submission, run faculty-side only, never shipped to students. 
      - `info.autograde` in the grading sheet then shows how many of them each submission passed - a count for you to mark against, never the mark itself, and never shown to a student.
+     - Not a Python course? Put a `run.sh` in `tests/` and the sandbox runs that instead - [the recipe](10-grade-and-return-assignments.md#tests-in-another-language-testsrunsh).
      - Full grading flow: [Grade and return assignments](10-grade-and-return-assignments.md).
+   - A **notebook** assignment also gets a [completion check](10-grade-and-return-assignments.md#the-completion-check-notebooks)
+     at the cutoff, hand-marked or not: the toolkit runs the notebook and records whether it
+     goes top to bottom. `completion_check: false` in `grading_config.yml` turns it off.
 
 3. **Run Refresh actions** so the assignment dropdowns update.
 
 Repeat for each assignment (`number` = 2, 3, …). 
+
+### Formats and what students hand in
+
+Each `format` seeds one starter on `main`, and each one already builds: an `.Rmd` that
+knits, a `.qmd` that renders, a `.tex` that compiles, a notebook that runs.
+
+| `format` | Starter on `main` | What the student commits |
+|---|---|---|
+| `ipynb` | `starter.ipynb` | the notebook, outputs saved, after **Restart kernel and run all** |
+| `py` | `starter.py` | the `.py` files, runnable from the repository root |
+| `rmd` | `starter.Rmd` | `starter.Rmd` **and** the knitted `starter.html` |
+| `qmd` | `starter.qmd` | `starter.qmd` **and** the rendered `starter.html` |
+| `latex` | `starter.tex` | `starter.tex` **and** the compiled `starter.pdf` |
+| `none` | nothing at all | whatever your brief says |
+
+> **The graded artefact is the built one.** For every source format the rendered document -
+> the HTML, the PDF - is committed beside its source, and that is what a grader reads; the
+> source is what we check it against. The starter says so, and so does the brief the button
+> seeds, so it is on the page whatever else you write.
+
+The `.Rmd` and `.qmd` stubs seed an `{r}` chunk; swap it for `{python}` if your course
+works in Python and nothing else changes.
+
+`format` picks the starter and nothing else. Grading reads whatever is actually in the
+repo, so a student who works in a notebook on a `py` assignment still grades, and `none`
+is the raw-repo option.
+
+### One notebook, not two: derive the starter
+
+Keeping the starter on `main` and the answer on `solution` by hand means writing the same
+notebook twice and keeping the two in step for the rest of the term. You don't have to.
+
+Write **one** notebook - the one you teach from - on the `solution` branch, in
+`solution/`, and fence the answers off in the vocabulary nbgrader and Otter already use:
+
+```python
+def fit(x, y):
+    ### BEGIN SOLUTION
+    return x @ y
+    ### END SOLUTION
+```
+
+Three ways to say it, and you can mix them in one file:
+
+| Fence | Where | What the student gets |
+|---|---|---|
+| `### BEGIN SOLUTION` … `### END SOLUTION` | anywhere in a code cell, script or Rmd | `pass  # YOUR CODE HERE`, at the same indent (`# YOUR CODE HERE` outside Python) |
+| a cell tagged `solution` | a whole notebook cell | the cell's heading, then `_YOUR ANSWER HERE_` - so `### Question 2 (3 points)` survives |
+| `solution=TRUE` | an Rmd/qmd chunk option | the chunk, its name and its other options, with `# YOUR CODE HERE` for a body |
+
+Then run **Derive student version** (course org → `.github` → Actions), pick the template,
+and untick `dry_run`. It reads `solution/` on the `solution` branch, strips the fences, and
+writes the result onto `main` - `solution/starter.ipynb` becomes `starter.ipynb`, which is
+what template-generate hands each student. It never writes to `solution`.
+
+Three things it refuses to do, because each one publishes the answer:
+
+- **a file with nothing fenced in it is not written at all** - the "starter" derived from it
+  would be your model answer, so the run names the file and goes red;
+- **an unbalanced fence is refused** - a `BEGIN` with no `END` is a typo the run will not
+  guess its way past;
+- **a stripped code cell loses its stored outputs** - a solution notebook is a *run*
+  notebook, and its outputs are the answers in print. Cells it did not change keep theirs,
+  so a worked example in the brief still shows its output.
+
+`dry_run` is on by default and prints the file list and the counts - never a line of the
+content, because that log is public. Only `.ipynb`, `.Rmd`, `.qmd`, `.py` and `.R` are
+derived; anything else under `solution/` stays where it is.
 
 ### Group vs individual assignments
 

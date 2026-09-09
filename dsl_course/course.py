@@ -45,6 +45,27 @@ SYLLABUS_SESSIONS_FILE = "SYLLABUS.sessions.md"
 FACULTY_ONLY_HEADING = "delete this section before releasing the README"
 # The branch an assignment template keeps its solution and grading_config.yml on.
 SOLUTION_BRANCH = "solution"
+# And the folder ON that branch holding the model answer. Two things read it and neither
+# owns it: `assign` pushes the folder into every student repo when the solution is
+# released, and `derive` reads the same folder to write `main`'s starter from it. One
+# spelling, here, or the two would disagree about where a faculty member puts the answer.
+SOLUTION_DIR = "solution"
+
+# The account every graded subprocess runs as - the students' notebooks, their `run.sh`,
+# the hidden tests that import their code, the reading-copy export.
+#
+# It exists because a UID is the boundary, not an environment: on Linux any process may read
+# `/proc/<pid>/environ` of another process running as the SAME user (Yama's ptrace_scope
+# gates ATTACH, not that read - it is what lets `ps e` show your own processes), and the
+# grading process holds the org-owner PAT for the whole leg. Stripping the token from the
+# child's environment and keeping every later step off the runner are both bypassed by one
+# `grep GH_TOKEN= /proc/*/environ`.
+#
+# Declared here, in the shared vocabulary, because two layers spell it and neither owns it:
+# `workflows_render` puts the `useradd` in the preamble of every job that grades, and
+# `collect` execs each graded command through `sudo -n -u` this name and kills whatever it
+# left behind afterwards. One spelling, or the sandbox is silently never used.
+SANDBOX_USER = "dsl-sandbox"
 
 # ------------------------------------------- the vocabulary an assignment is defined in
 
