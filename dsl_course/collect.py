@@ -2782,14 +2782,25 @@ def collect(
     # no tests written) is exactly the one that wants it, and each of those returns from
     # this function a few lines further down. It never changes the exit code: see
     # `export_grader_documents`.
-    # Whether student code may be run AT ALL, decided once and before anything clones a
-    # submission. Every stage below executes the students' own code, and on this runner
-    # that is only safe under a separate uid (see `sandbox_unusable`) - so a runner without
-    # one grades nothing rather than grading a cohort as the process holding the PAT. The
-    # reading-copy export is inside the fence too: it runs `python -m jupyter` from a
-    # directory the student wrote.
-    no_sandbox = sandbox_unusable()
-    if gspec.grader_pdf and not no_sandbox:
+    # Whether student code may be run AT ALL, asked once and before anything clones a
+    # submission. Every stage below executes the students' own code - the reading-copy
+    # export included, which runs `python -m jupyter` from a directory the student wrote -
+    # and on a runner that is only safe under a separate uid (see `sandbox_unusable`).
+    #
+    # RED, and nothing recorded. This is a fault of the RUNNER, not of the assignment: the
+    # sheet stays open, no `_skipped.json` is written, and the run goes non-zero so the
+    # unattended-failure issue and the maintainer's mail fire - which is the channel that
+    # reaches the one person who can fix it. Recording a skip instead would be permanent
+    # (`_skipped.json` is fire-once) and would retire an assignment over a condition that
+    # is transient by nature; the next quarter-hourly tick grades it normally once the
+    # runner is right. `_run_limited` refuses the same way, as the backstop.
+    if unusable := sandbox_unusable():
+        log_err(
+            f"{slug}: {unusable}. Nothing is recorded - this is a runner fault, so the "
+            f"next scheduled run grades the assignment normally once it is fixed."
+        )
+        return 1
+    if gspec.grader_pdf:
         export_grader_documents(cohort_org, slug, key, is_group, deadline, dry_run)
 
     def freeze_sheet(
@@ -2832,16 +2843,6 @@ def collect(
             f"next run seals it and then records"
         )
         return False
-
-    if no_sandbox:
-        # FAIL CLOSED. The sheet is still frozen - the deadline passed either way - and the
-        # skip is recorded like any other decision not to machine-mark, so the quarter-hour
-        # cron does not re-decide it and no target is ever executed. Fix the runner and
-        # delete `autograde/<slug>/` to grade it once.
-        log_err(f"  ! {no_sandbox}")
-        if not sealed():
-            return 1
-        return _record_skip(cohort_org, slug, no_sandbox, dry_run)
 
     with tempfile.TemporaryDirectory() as sd:
         soldir = Path(sd) / "sol"

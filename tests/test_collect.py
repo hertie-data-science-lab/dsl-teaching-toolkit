@@ -2130,11 +2130,14 @@ def test_a_runner_without_the_sandbox_runs_no_student_code_at_all(
         collect._run_limited(["/bin/true"], cwd=str(tmp_path), env={}, timeout=1)
 
 
-def test_a_runner_without_the_sandbox_records_the_skip_and_grades_nothing(
+def test_a_runner_without_the_sandbox_reds_the_run_and_records_nothing(
     monkeypatch, capsys
 ):
-    # ...and it is recorded, because a skip decided and not recorded is re-decided by the
-    # next quarter-hourly tick, for ever.
+    # RED, and nothing written. A runner without the sandbox account is an INFRASTRUCTURE
+    # fault, and `_skipped.json` is fire-once: recording one would retire the assignment
+    # for good over a condition that is transient by nature. A non-zero return is what
+    # files the unattended-failure issue and mails the maintainer, which is the channel
+    # that reaches the one person who can fix it - and the next tick grades it normally.
     _stub_collect(monkeypatch, None)
     _sandboxed(monkeypatch, sudo_works=False)
     monkeypatch.setattr(
@@ -2142,27 +2145,26 @@ def test_a_runner_without_the_sandbox_records_the_skip_and_grades_nothing(
         "_grade_target",
         lambda *a, **k: pytest.fail("a submission was graded without a sandbox"),
     )
-    marked: list[tuple[str, str]] = []
     monkeypatch.setattr(
         collect,
         "mark_not_autograded",
-        lambda org, slug, why: marked.append((slug, why)) or True,
+        lambda *a, **k: pytest.fail("retired an assignment over a runner fault"),
+    )
+    monkeypatch.setattr(
+        collect,
+        "sync_sheet",
+        lambda *a, **k: pytest.fail("sealed a sheet on a run that graded nothing"),
     )
 
-    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 0
+    assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
 
-    assert [slug for slug, _why in marked] == ["assignment-1"]
-    assert marked[0][1] == collect.SANDBOX_UNAVAILABLE
     assert collect.SANDBOX_USER in capsys.readouterr().err
 
 
 def test_off_a_runner_the_degraded_sandbox_says_so_out_loud(monkeypatch, capsys):
     # A maintainer's laptop has no account to drop to and no bot token in the environment
-    # either, so it runs as today - but never silently.
-    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
-    collect.sandbox_user.cache_clear()
-    collect.sandbox_unusable.cache_clear()
-
+    # either, so it runs as today - but never silently. (Not on a runner is the suite's
+    # default - see the `_not_on_a_runner` fixture - so nothing has to be undone here.)
     assert collect.sandbox_unusable() == ""
     assert collect.sandbox_user() == ""
     assert "running graded code as THIS user" in capsys.readouterr().err
