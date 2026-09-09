@@ -338,15 +338,29 @@ def test_a_course_org_is_tightened_like_a_cohort(monkeypatch):
     assert "members_can_create_repositories=false" in fields
 
 
-def test_an_org_lets_its_private_repos_be_forked(monkeypatch):
-    # The one setting here that loosens. Materials repos are private, and GitHub hides the
-    # Fork button on a private repo unless its org allows forks - so a cohort told to fork
-    # the labs and work in their own copy simply had no button. It grants nothing: a fork
-    # carries the reader's own access.
+def test_only_a_cohort_lets_its_private_repos_be_forked(monkeypatch):
+    # The one setting here that loosens, so only the org kind that needs it asks for it.
+    # A cohort's materials repo is private and GitHub hides the Fork button on a private
+    # repo unless its org allows forks, so a cohort told to fork the labs simply had no
+    # button; there it grants nothing, because a fork carries the reader's own access. A
+    # COURSE org holds the unreleased materials, the solutions and the hidden tests, and
+    # a private fork of those into somebody's personal account gains nobody anything.
     calls = _patched(monkeypatch)
-    assert gh_teams.converge_org_settings("Cohort-f2026") == 0
+    assert gh_teams.converge_org_settings("Cohort-f2026", private_forks=True) == 0
     fields = [f for call in calls for f in call]
     assert "members_can_fork_private_repositories=true" in fields
+
+    course = _patched(monkeypatch)
+    assert gh_teams.converge_org_settings("Course-Org") == 0
+    assert not [f for call in course for f in call if "fork" in f]
+
+
+def test_a_course_org_is_not_told_its_private_repos_are_forkable(monkeypatch, capsys):
+    # The summary line is read by whoever pressed the button; claiming a setting that was
+    # never sent is how an org's real configuration stops being knowable from the log.
+    _patched(monkeypatch)
+    gh_teams.converge_org_settings("Course-Org")
+    assert "forkable" not in capsys.readouterr().out
 
 
 def test_a_refused_forking_setting_reds_the_run_like_the_others(monkeypatch):
@@ -354,7 +368,7 @@ def test_a_refused_forking_setting_reds_the_run_like_the_others(monkeypatch):
     # is LOUD. (The 2FA field is the shape to move it to if that turns out to be a fact
     # about the plan rather than a misconfiguration - named and counted, never red.)
     _patched(monkeypatch, (1, "gh: HTTP 422"))
-    assert gh_teams.converge_org_settings("Cohort-f2026") == 1
+    assert gh_teams.converge_org_settings("Cohort-f2026", private_forks=True) == 1
 
 
 def test_a_failed_tighten_reds_the_run(monkeypatch):

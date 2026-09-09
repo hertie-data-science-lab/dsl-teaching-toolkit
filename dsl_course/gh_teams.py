@@ -115,7 +115,7 @@ def members_without_2fa(org: str) -> int | None:
     return len(out.split()) if code == 0 else None
 
 
-def converge_org_settings(org: str) -> int:
+def converge_org_settings(org: str, *, private_forks: bool = False) -> int:
     """Tighten one org: base permissions, member repo creation, and 2FA where possible.
 
     Idempotent, and run on every nightly refresh as well as at bootstrap. These were set
@@ -123,12 +123,16 @@ def converge_org_settings(org: str) -> int:
     tightening still handed each member `read` on the unreleased materials, the model
     solutions and the `solution` branches.
 
-    Forking is the third setting, and the odd one out: it LOOSENS. Every materials repo is
-    private, and GitHub refuses a fork of a private repo unless its org allows it - so the
-    Fork button students are told to press was simply absent, and the way a student keeps
-    their own copy of the labs is the way both of the real courses this toolkit grew out
-    of have always worked. It grants nothing: a fork carries the reader's own access, and
-    a student who can fork the materials could already read them.
+    `private_forks` is the third setting, and the odd one out: it LOOSENS - so it is
+    asked for, not assumed, and only a COHORT asks. A cohort's materials repo is
+    private, and GitHub refuses a fork of a private repo unless its org allows it, so
+    the Fork button students are told to press was simply absent; there it grants
+    nothing, because a fork carries the reader's own access and a student who can fork
+    the materials could already read them. A COURSE org is the opposite case: it holds
+    the unreleased materials, the model solutions and the hidden tests, its members are
+    faculty who already have push where they need it, and a private fork there is an
+    uncontrolled copy of the solutions in somebody's personal account, gaining nobody
+    anything.
 
     Base permissions matter in BOTH org kinds. A cohort holds students; a COURSE org holds
     the materials students must not see, and at GitHub's default of `read` every member of
@@ -142,23 +146,22 @@ def converge_org_settings(org: str) -> int:
     org every night for something no re-run can fix. It is named and counted in the log
     instead."""
     failures = 0
-    code, out = gh(
-        "api",
-        "--method",
-        "PATCH",
-        f"orgs/{org}",
+    # One PATCH either way - the fork field is appended to it rather than sent on its
+    # own, so the two org kinds cannot answer differently about the settings they share.
+    fields = [
         "--field",
         "default_repository_permission=none",
         "--field",
         "members_can_create_repositories=false",
-        "--field",
-        "members_can_fork_private_repositories=true",
-    )
+    ]
+    if private_forks:
+        fields += ["--field", "members_can_fork_private_repositories=true"]
+    code, out = gh("api", "--method", "PATCH", f"orgs/{org}", *fields)
     if code == 0:
-        log_ok(
-            f"{org} tightened (base permission none, no member repo creation, "
-            "private repos forkable)"
-        )
+        done = "base permission none, no member repo creation"
+        if private_forks:
+            done += ", private repos forkable"
+        log_ok(f"{org} tightened ({done})")
     else:
         failures += 1
         log_err(f"could not tighten {org}: {out[:120]}")
