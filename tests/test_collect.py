@@ -11,8 +11,10 @@ import hashlib
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime
@@ -2074,9 +2076,10 @@ def test_the_graded_tree_is_handed_over_and_taken_back_around_every_run(
     monkeypatch.setattr(collect.subprocess, "Popen", lambda argv, **kw: _Exits())
     work = tmp_path / "sub"
     work.mkdir()
+    (run_root := tmp_path / "run").mkdir()
 
     collect._run_limited(
-        ["/bin/true"], cwd=str(work), env={}, timeout=1, writable=(tmp_path / "run",)
+        ["/bin/true"], cwd=str(work), env={}, timeout=1, writable=(run_root,)
     )
 
     # The probe, then the two trees handed over, then the kill, then the two taken back.
@@ -2093,6 +2096,40 @@ def test_the_graded_tree_is_handed_over_and_taken_back_around_every_run(
         ["chown", "-R", mine, str(work)],
         ["chown", "-R", mine, str(tmp_path / "run")],
     ]
+
+
+def test_the_handed_over_root_is_left_traversable_by_the_runner(monkeypatch, tmp_path):
+    # `Popen` does its `chdir(cwd)` in the child but BEFORE the exec, so that chdir runs
+    # as the RUNNER's uid - and the root handed over is a `mkdtemp` one, mode 0700. So the
+    # chown locked the parent out of the tree it had just given away, and `Popen` raised
+    # `PermissionError: [Errno 13] Permission denied: '/tmp/tmpXXXX'` on the cwd before
+    # any student code ran - a traceback that took the whole cohort's leg with it.
+    ran = _sandboxed(monkeypatch, tmp_path)
+    root = Path(tempfile.mkdtemp(dir=tmp_path))
+    work = root / "sub"
+    work.mkdir()
+    # The premise: what is handed over is the 0700 mkdtemp root, not the checkout under it.
+    assert collect._sandbox_roots([work]) == [root]
+    assert not stat.S_IMODE(root.stat().st_mode) & stat.S_IXOTH
+
+    modes: list[int] = []
+
+    def sudo_reading_the_mode(*args: str) -> bool:
+        ran.append(list(args))
+        # Read it AT THE MOMENT of the hand-over: after it the root is someone else's, and
+        # widening it then is a chmod this process is no longer allowed to make.
+        if args[0] == "chown" and args[2] == collect.SANDBOX_USER:
+            modes.append(stat.S_IMODE(root.stat().st_mode))
+        return True
+
+    monkeypatch.setattr(collect, "_sudo", sudo_reading_the_mode)
+    monkeypatch.setattr(collect.subprocess, "Popen", lambda argv, **kw: _Exits())
+
+    assert collect._run_limited(["/bin/true"], cwd=str(work), env={}, timeout=1)
+
+    # Traversable by everyone, listable by nobody but its owner.
+    assert modes == [0o711]
+    assert modes[0] & stat.S_IXOTH
 
 
 def test_a_tree_that_could_not_be_taken_back_is_said_out_loud(
@@ -2731,6 +2768,45 @@ def test_the_notebook_is_executed_before_it_is_converted_to_a_script(
     assert result["completion"] == "ran-clean" and result["commit"] == SHA
     assert result["score"] == 1  # and the hidden tests still ran, on the script
     assert executed == _executed_bytes(False)
+
+
+def test_a_spawn_that_never_started_fails_only_its_own_target(
+    monkeypatch, tmp_path, capsys
+):
+    # How the first Linux run of the sandbox ended: `Popen` raised PermissionError on the
+    # cwd (see the 0o711 hand-over) and it came out of `_grade_target` as a traceback, so
+    # the FIRST target to hit it took the whole cohort's leg with it - nothing graded,
+    # nothing recorded, and the same fault waiting on the next tick. A run that could not
+    # be STARTED is one target's failure, on the same route a timed-out one takes.
+    ran = _sandboxed(monkeypatch, tmp_path)
+    monkeypatch.setattr(collect, "clone", _clone_writing_notebook())
+    monkeypatch.setattr(collect, "_pin_commit", lambda *a, **k: SHA)
+    tests = tmp_path / "hidden"
+    tests.mkdir()
+    (tests / "test_x.py").write_text("def test_solve(): pass\n")
+    spawned: list[list[str]] = []
+
+    def popen(argv, **kw):
+        spawned.append(argv)
+        if len(spawned) == 1:
+            raise PermissionError(13, "Permission denied", "/tmp/tmp9pu4nz5x")
+        if junit := next((a for a in argv if a.startswith("--junitxml=")), None):
+            Path(junit.split("=", 1)[1]).write_text(_JUNIT)
+        return _Exits()
+
+    monkeypatch.setattr(collect.subprocess, "Popen", popen)
+
+    first, _ = collect._grade_target("Cohort", "assignment-1-anna", tests, "2026-11-15")
+    second, _ = collect._grade_target("Cohort", "assignment-1-ben", tests, "2026-11-15")
+
+    assert first["note"] == collect.GRADE_FAILED_NOTE and first["score"] == 0
+    assert first["commit"] == SHA  # examined and recorded, not "never reached"
+    assert second["score"] == 1  # and the next target was graded normally
+    # The sandbox teardown still ran on the way out of the spawn that blew up.
+    assert ["pkill", "-9", "-u", collect.SANDBOX_USER] in ran
+    err = capsys.readouterr().err
+    assert "could not be started" in err
+    assert "anna" not in err  # this log is public: the tag stands in, never the handle
 
 
 def test_a_repo_with_nothing_pushed_reads_as_not_attempted(monkeypatch, tmp_path):
@@ -4983,6 +5059,49 @@ def test_a_runner_with_latex_gets_a_pdf_and_one_without_falls_back(monkeypatch, 
 
     assert tried == ["pdf"] and list(written) == ["autograde/a1/alice.pdf"]
     assert "1 pdf" in capsys.readouterr().out
+
+
+def test_an_export_that_never_started_costs_one_copy_not_the_whole_pass(
+    monkeypatch, capsys
+):
+    # This function's contract is that no ONE submission can red the cutoff pass - the
+    # freeze it runs beside is not re-runnable for free. An `OSError` out of
+    # `_run_limited`'s `Popen` broke it: an unenterable cwd (the 0700 hand-over), a
+    # missing interpreter, no fd left, and the traceback took every remaining submission
+    # with it. It is counted like any other copy nothing readable came back from.
+    _checkout(monkeypatch, {"submission.ipynb": _QUESTION_NB})
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda *a: [("a1-alice", "alice", ["alice"]), ("a1-ben", "ben", ["ben"])],
+    )
+    monkeypatch.setattr(
+        collect,
+        "load_snapshots",
+        lambda org, slug: {"a1-alice": "abc", "a1-ben": "abc"},
+    )
+    written = _capture_archive(monkeypatch)
+    monkeypatch.setattr(collect, "_pdf_engine_present", lambda: False)
+    spawned: list[list[str]] = []
+
+    def popen(argv, **kw):
+        spawned.append(argv)
+        if len(spawned) == 1:
+            raise PermissionError(13, "Permission denied", "/tmp/tmp9pu4nz5x")
+        Path(argv[-1]).with_suffix(".html").write_text("<html>Q1</html>")
+        return _Exits()
+
+    monkeypatch.setattr(collect.subprocess, "Popen", popen)
+
+    collect.export_grader_documents("Cohort", "a1", "a1", False, "2026-10-13", False)
+
+    # The second submission was still exported and archived.
+    assert list(written) == ["autograde/a1/ben.html"]
+    out, err = capsys.readouterr()
+    assert "1 html" in out and f"1 {collect.GRADER_UNREADABLE}" in out
+    # Not silent either: a runner fault counted only as `not readable` reads like a fault
+    # of the submission. Counts and the tag, never the handle.
+    assert "counting it unreadable" in err and "alice" not in err
 
 
 def test_a_runner_without_latex_never_tries_to_make_a_pdf(monkeypatch, capsys):

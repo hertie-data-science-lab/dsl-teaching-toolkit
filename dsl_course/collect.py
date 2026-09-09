@@ -1922,6 +1922,14 @@ def _run_limited(
     user = sandbox_user()
     roots = _sandbox_roots([cwd, *writable]) if user else []
     for root in roots:
+        # Traversable by others BEFORE it stops being ours. `Popen` does its `chdir(cwd)`
+        # in the child but BEFORE the exec, so that chdir runs as THIS process's uid - and
+        # a `mkdtemp` root is mode 0700, so the chown on the next line left the runner
+        # unable to enter a tree it had just given away: `PermissionError: [Errno 13]
+        # Permission denied: '/tmp/tmpXXXX'` out of `Popen`, before any student code ran.
+        # 0o711 is the whole of what is needed - traverse for everyone, listing for
+        # nobody, and the subdirectories the parent made under it are 0755 already.
+        os.chmod(root, 0o711)
         _sudo("chown", "-R", user, str(root))
     # `env -i` and not sudo's own env handling: sudo's policy decides what survives, and
     # what has to reach the child here is EXACTLY `_sanitised_env` - no more (the parent's
@@ -2590,7 +2598,21 @@ def _grader_document_for(
             return GRADER_NONE
         source, filtered = picked
         source.write_text(filtered.text)
-        exported = _export_document(source, env)
+        try:
+            exported = _export_document(source, env)
+        except OSError as exc:
+            # An export that never STARTED - `_run_limited`'s `Popen` raising on an
+            # unenterable cwd, a missing interpreter, no file descriptor left. Counted
+            # exactly like a clone that failed or a render that produced nothing, because
+            # this function's contract is that no ONE submission may red the cutoff pass:
+            # a traceback here aborted the whole freeze, and the pass is not re-runnable
+            # for free. Said out loud all the same - a runner fault that shows up only as
+            # a `not readable` count reads like a fault of the submission.
+            log_err(
+                f"  ! the grader copy for {target_ref(repo)} could not be started "
+                f"({exc}) - counting it unreadable"
+            )
+            return GRADER_UNREADABLE
         if exported is None:
             return GRADER_UNREADABLE
         verdict, content = exported
@@ -2722,14 +2744,29 @@ def _grade_target(
         _harden_checkout(wd)
         executed = None
         completion = ""
-        if starters is not None:
-            # BEFORE the tests: `_run_tests` converts every notebook in the checkout to a
-            # script, and the rule this verifies is about the notebook.
-            completion, executed = _check_completion(wd, starters, Path(work))
-        if tests_src is None:
-            result = {}
-        else:
-            result = _run_tests(wd, tests_src) or _zero_result(GRADE_FAILED_NOTE)
+        try:
+            if starters is not None:
+                # BEFORE the tests: `_run_tests` converts every notebook in the checkout
+                # to a script, and the rule this verifies is about the notebook.
+                completion, executed = _check_completion(wd, starters, Path(work))
+            if tests_src is None:
+                result = {}
+            else:
+                result = _run_tests(wd, tests_src) or _zero_result(GRADE_FAILED_NOTE)
+        except OSError as exc:
+            # A run that never STARTED, on the same route as one that timed out or wrote no
+            # report: this target's `GRADE_FAILED_NOTE` zero, and the leg carries on to the
+            # next one. `_run_limited`'s `Popen` is what raises here - an unenterable cwd
+            # (the 0700 hand-over above), a missing interpreter, no file descriptor left -
+            # and it used to come out of this function as a traceback, so the FIRST target
+            # to hit it un-graded the whole cohort. Nothing is lost by containing it: if it
+            # is every graded target then the fault is the runner's, and the systemic guard
+            # in `collect` reds the run and writes no sentinel just as it does for timeouts.
+            log_err(
+                f"  ! grading {target_ref(repo)} could not be started ({exc}) - "
+                f"scoring 0 and carrying on to the next submission"
+            )
+            result = _zero_result(GRADE_FAILED_NOTE)
         result["commit"] = sha
         if completion:
             result["completion"] = completion
