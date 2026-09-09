@@ -1922,6 +1922,14 @@ def _run_limited(
     user = sandbox_user()
     roots = _sandbox_roots([cwd, *writable]) if user else []
     for root in roots:
+        # Traversable by others BEFORE it stops being ours. `Popen` does its `chdir(cwd)`
+        # in the child but BEFORE the exec, so that chdir runs as THIS process's uid - and
+        # a `mkdtemp` root is mode 0700, so the chown on the next line left the runner
+        # unable to enter a tree it had just given away: `PermissionError: [Errno 13]
+        # Permission denied: '/tmp/tmpXXXX'` out of `Popen`, before any student code ran.
+        # 0o711 is the whole of what is needed - traverse for everyone, listing for
+        # nobody, and the subdirectories the parent made under it are 0755 already.
+        os.chmod(root, 0o711)
         _sudo("chown", "-R", user, str(root))
     # `env -i` and not sudo's own env handling: sudo's policy decides what survives, and
     # what has to reach the child here is EXACTLY `_sanitised_env` - no more (the parent's

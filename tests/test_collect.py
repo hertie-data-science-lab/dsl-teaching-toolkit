@@ -11,8 +11,10 @@ import hashlib
 import json
 import os
 import signal
+import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime
@@ -2074,9 +2076,10 @@ def test_the_graded_tree_is_handed_over_and_taken_back_around_every_run(
     monkeypatch.setattr(collect.subprocess, "Popen", lambda argv, **kw: _Exits())
     work = tmp_path / "sub"
     work.mkdir()
+    (run_root := tmp_path / "run").mkdir()
 
     collect._run_limited(
-        ["/bin/true"], cwd=str(work), env={}, timeout=1, writable=(tmp_path / "run",)
+        ["/bin/true"], cwd=str(work), env={}, timeout=1, writable=(run_root,)
     )
 
     # The probe, then the two trees handed over, then the kill, then the two taken back.
@@ -2093,6 +2096,40 @@ def test_the_graded_tree_is_handed_over_and_taken_back_around_every_run(
         ["chown", "-R", mine, str(work)],
         ["chown", "-R", mine, str(tmp_path / "run")],
     ]
+
+
+def test_the_handed_over_root_is_left_traversable_by_the_runner(monkeypatch, tmp_path):
+    # `Popen` does its `chdir(cwd)` in the child but BEFORE the exec, so that chdir runs
+    # as the RUNNER's uid - and the root handed over is a `mkdtemp` one, mode 0700. So the
+    # chown locked the parent out of the tree it had just given away, and `Popen` raised
+    # `PermissionError: [Errno 13] Permission denied: '/tmp/tmpXXXX'` on the cwd before
+    # any student code ran - a traceback that took the whole cohort's leg with it.
+    ran = _sandboxed(monkeypatch, tmp_path)
+    root = Path(tempfile.mkdtemp(dir=tmp_path))
+    work = root / "sub"
+    work.mkdir()
+    # The premise: what is handed over is the 0700 mkdtemp root, not the checkout under it.
+    assert collect._sandbox_roots([work]) == [root]
+    assert not stat.S_IMODE(root.stat().st_mode) & stat.S_IXOTH
+
+    modes: list[int] = []
+
+    def sudo_reading_the_mode(*args: str) -> bool:
+        ran.append(list(args))
+        # Read it AT THE MOMENT of the hand-over: after it the root is someone else's, and
+        # widening it then is a chmod this process is no longer allowed to make.
+        if args[0] == "chown" and args[2] == collect.SANDBOX_USER:
+            modes.append(stat.S_IMODE(root.stat().st_mode))
+        return True
+
+    monkeypatch.setattr(collect, "_sudo", sudo_reading_the_mode)
+    monkeypatch.setattr(collect.subprocess, "Popen", lambda argv, **kw: _Exits())
+
+    assert collect._run_limited(["/bin/true"], cwd=str(work), env={}, timeout=1)
+
+    # Traversable by everyone, listable by nobody but its owner.
+    assert modes == [0o711]
+    assert modes[0] & stat.S_IXOTH
 
 
 def test_a_tree_that_could_not_be_taken_back_is_said_out_loud(
