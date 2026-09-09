@@ -123,6 +123,13 @@ def converge_org_settings(org: str) -> int:
     tightening still handed each member `read` on the unreleased materials, the model
     solutions and the `solution` branches.
 
+    Forking is the third setting, and the odd one out: it LOOSENS. Every materials repo is
+    private, and GitHub refuses a fork of a private repo unless its org allows it - so the
+    Fork button students are told to press was simply absent, and the way a student keeps
+    their own copy of the labs is the way both of the real courses this toolkit grew out
+    of have always worked. It grants nothing: a fork carries the reader's own access, and
+    a student who can fork the materials could already read them.
+
     Base permissions matter in BOTH org kinds. A cohort holds students; a COURSE org holds
     the materials students must not see, and at GitHub's default of `read` every member of
     it (every TA, every visiting instructor, anyone ever added for one semester) could read
@@ -144,9 +151,14 @@ def converge_org_settings(org: str) -> int:
         "default_repository_permission=none",
         "--field",
         "members_can_create_repositories=false",
+        "--field",
+        "members_can_fork_private_repositories=true",
     )
     if code == 0:
-        log_ok(f"{org} tightened (base permission none, no member repo creation)")
+        log_ok(
+            f"{org} tightened (base permission none, no member repo creation, "
+            "private repos forkable)"
+        )
     else:
         failures += 1
         log_err(f"could not tighten {org}: {out[:120]}")

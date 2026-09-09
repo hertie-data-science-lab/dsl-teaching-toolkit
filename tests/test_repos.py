@@ -21,6 +21,29 @@ def test_repo_is_archived_reads_the_flag_and_assumes_live_when_it_cannot(monkeyp
     assert repos.repo_is_archived("Cohort-f2026", "classroom-config") is False
 
 
+def test_allow_forking_patches_the_repo_and_a_refusal_is_a_warning(monkeypatch, capsys):
+    # `create_repo`'s POST takes no forking field, so this is a PATCH of its own, run on
+    # every release. A refusal must not red the release that carries it: whether the
+    # setting exists at all depends on the org's plan.
+    calls = []
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: calls.append(a) or (0, ""))
+    assert repos.allow_forking("Cohort-f2026", "materials") is True
+    assert calls == [
+        (
+            "api",
+            "--method",
+            "PATCH",
+            "repos/Cohort-f2026/materials",
+            "--field",
+            "allow_forking=true",
+        )
+    ]
+    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 403"))
+    assert repos.allow_forking("Cohort-f2026", "materials") is False
+    out = capsys.readouterr().out
+    assert "[warn]" in out and "forkable" in out
+
+
 def test_one_repo_read_answers_every_question_about_it(monkeypatch):
     # Four questions about ONE object; a sweep asks several of them about the same repo,
     # and each used to be its own `GET repos/{org}/{name}`.

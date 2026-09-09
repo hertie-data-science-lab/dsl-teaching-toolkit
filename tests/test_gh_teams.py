@@ -338,6 +338,25 @@ def test_a_course_org_is_tightened_like_a_cohort(monkeypatch):
     assert "members_can_create_repositories=false" in fields
 
 
+def test_an_org_lets_its_private_repos_be_forked(monkeypatch):
+    # The one setting here that loosens. Materials repos are private, and GitHub hides the
+    # Fork button on a private repo unless its org allows forks - so a cohort told to fork
+    # the labs and work in their own copy simply had no button. It grants nothing: a fork
+    # carries the reader's own access.
+    calls = _patched(monkeypatch)
+    assert gh_teams.converge_org_settings("Cohort-f2026") == 0
+    fields = [f for call in calls for f in call]
+    assert "members_can_fork_private_repositories=true" in fields
+
+
+def test_a_refused_forking_setting_reds_the_run_like_the_others(monkeypatch):
+    # It rides in the tighten PATCH rather than one of its own, so a plan that refuses it
+    # is LOUD. (The 2FA field is the shape to move it to if that turns out to be a fact
+    # about the plan rather than a misconfiguration - named and counted, never red.)
+    _patched(monkeypatch, (1, "gh: HTTP 422"))
+    assert gh_teams.converge_org_settings("Cohort-f2026") == 1
+
+
 def test_a_failed_tighten_reds_the_run(monkeypatch):
     # An org left at GitHub's default (every member reads every repo) is a real
     # misconfiguration - it must red the caller, not just log and pass.

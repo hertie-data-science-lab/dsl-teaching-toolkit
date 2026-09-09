@@ -139,6 +139,32 @@ def archive_repo(org: str, name: str, *, person: bool = False) -> bool:
     return False
 
 
+def allow_forking(org: str, name: str) -> bool:
+    """Let a private repo be forked. Idempotent (a repo already forkable re-sets fine).
+
+    TWO settings stand between a student and the Fork button on a private repo, and both
+    are off by default: the org's (`gh_teams.converge_org_settings`) and this one, per
+    repo. `create_repo`'s POST takes no forking field, so it is a PATCH of its own, run on
+    every release rather than only at creation - a repo made before this existed has to
+    converge too, and the release is the only thing that visits one regularly.
+
+    A refusal is worth a line and NOT an error: on some plans the setting is not
+    available at all, and reddening a quarter-hourly release for a button is how a real
+    failure stops being noticed."""
+    code, out = gh(
+        "api",
+        "--method",
+        "PATCH",
+        f"repos/{org}/{name}",
+        "--field",
+        "allow_forking=true",
+    )
+    if code == 0:
+        return True
+    log(f"  [warn] {org}/{name} could not be made forkable: {out[:120]}")
+    return False
+
+
 def default_branch(org: str, name: str, *, fallback: str | None = None) -> str:
     """The repo's default branch.
 

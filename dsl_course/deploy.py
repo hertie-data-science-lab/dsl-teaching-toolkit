@@ -55,7 +55,7 @@ from .gh_contents import is_untouched_stub
 from .ghcli import GIT_ENV, clone, git
 from .log import log, log_err, log_ok, log_step, log_withheld
 from .releaseignore import RELEASEIGNORE, deny_for, excludes
-from .repos import create_repo, default_branch, is_never_material
+from .repos import allow_forking, create_repo, default_branch, is_never_material
 from .schedule import Deploy
 from .schedule_plan import deploy_dest
 
@@ -307,6 +307,11 @@ def deploy_many(
             # it. The floor (`access.faculty_floor`) stays at read: the sweep never
             # demotes, and this grant runs on every release, so the two agree.
             grant_faculty(cohort_org, repo, COURSE_TEAM_ACCESS, missing_is_note=True)
+            # Students are told to fork the materials and work in their own copy, and a
+            # PRIVATE repo is forkable only if BOTH its org and it say so. Converged on
+            # every release, not only at creation: the dests that predate this need it
+            # too, and a release is the only thing that visits one regularly.
+            allow_forking(cohort_org, repo)
             dd = root / "out" / repo
             if not clone(cohort_org, repo, dd):
                 log_err(f"could not clone dest {cohort_org}/{repo}")

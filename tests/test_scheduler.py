@@ -409,6 +409,7 @@ def test_deploy_many_clones_each_repo_once(monkeypatch):
     # everything else (add/commit/push) succeeds.
     monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
@@ -439,6 +440,7 @@ def test_deploy_many_missing_course_source_path_is_an_error_not_silent(monkeypat
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "git", lambda *a: (0, ""))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
@@ -470,6 +472,7 @@ def _no_io(monkeypatch, fake_gh):
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "git", lambda *a: (0, ""))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
@@ -490,6 +493,42 @@ def test_a_released_repo_grants_the_instructors_push(monkeypatch):
     )
     assert faculty == [("Cohort-Org", "materials", deploy.COURSE_TEAM_ACCESS)]
     assert deploy.COURSE_TEAM_ACCESS[access.INSTRUCTORS_TEAM] == "push"
+
+
+def test_a_released_repo_is_made_forkable(monkeypatch):
+    # Students are told to fork the materials and work in their own copy, and a private
+    # repo needs its OWN flag as well as the org's. Converged on every release, not only
+    # at creation, so a dest that predates the flag gets it too.
+    _no_io(monkeypatch, _clone_failing("Course-Org/cm"))
+    forkable = []
+    monkeypatch.setattr(deploy, "allow_forking", lambda *a: forkable.append(a) or True)
+    deploy.deploy_many(
+        "Course-Org",
+        "Cohort-Org",
+        [Deploy("cm", "lectures/00_x", "materials", None)],
+        sync=False,
+    )
+    assert forkable == [("Cohort-Org", "materials")]
+
+
+def test_a_dest_that_could_not_be_made_forkable_still_releases(monkeypatch):
+    # A missing Fork button is worth a line, not a red release: whether the setting can be
+    # set at all depends on the org's plan, and a quarter-hourly cron that is always red
+    # is how a real failure stops being noticed.
+    monkeypatch.setattr(ghcli, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
+    monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
+    monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "allow_forking", lambda *a: False)
+    monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
+    monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
+    monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
+
+    assert deploy.deploy_many(
+        "Course-Org",
+        "Cohort-Org",
+        [Deploy("cm", "lectures/00_x", "materials", None)],
+        sync=False,
+    ) == (0, True)
 
 
 def test_deploy_many_counts_a_doomed_deploy_once(monkeypatch):
@@ -638,6 +677,7 @@ def test_deploy_many_never_copies_a_dot_git_directory(monkeypatch):
     copied_rel: list[str] = []
     monkeypatch.setattr(deploy, "git", _git_spying_staged(copied_rel))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
@@ -757,6 +797,7 @@ def test_deploy_many_counts_a_real_commit_failure(monkeypatch, capsys):
     monkeypatch.setattr(ghcli, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
     monkeypatch.setattr(deploy, "git", _git_commit_failing)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
@@ -781,6 +822,7 @@ def test_deploy_many_reports_nothing_new_when_index_is_empty(monkeypatch, capsys
         deploy, "git", lambda *a: (0, "")
     )  # diff --cached: nothing staged
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
@@ -801,6 +843,7 @@ def test_deploy_many_counts_a_raised_site_sync(monkeypatch):
     monkeypatch.setattr(ghcli, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
     monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
@@ -2298,6 +2341,7 @@ def _run_release(monkeypatch, seed_source, deploys) -> tuple[int, set[str]]:
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "git", fake_git)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
@@ -2402,6 +2446,7 @@ def test_withholding_the_stub_never_deletes_the_cohorts_own_readme(monkeypatch):
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "git", fake_git)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
