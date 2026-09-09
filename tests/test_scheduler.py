@@ -1583,13 +1583,20 @@ def test_release_order_puts_undated_tbc_entries_last():
     assert sorted([tbc, dated], key=scheduler.release_order) == [dated, tbc]
 
 
-def test_run_survives_an_unparseable_schedule_but_goes_red(monkeypatch, capsys):
+def test_an_unparseable_plan_leaves_the_exit_code_alone_and_keeps_the_digest_open(
+    monkeypatch, capsys
+):
     # The original incident: an unparseable schedule.yml raised inside schedule.load and
     # killed the hourly tick for the cohort. It must still not RAISE - one cohort's typo
     # cannot be allowed to abort the others under --all-cohorts, which is why load falls
-    # back to an empty Schedule. But it must not be GREEN either: while the file stands,
-    # nothing is released, handed out, snapshotted or graded for this cohort, and an hourly
-    # green tick is precisely how that survives a term unnoticed.
+    # back to an empty Schedule.
+    #
+    # Nor may it red the run. A file faculty have to fix is a CONTENT fault: the exit code
+    # spent on it bought 4-8 red runs an hour and a `Scheduled release is failing` issue
+    # every six, mailing the maintainer about a bad indent only faculty can correct. The
+    # channel is the fault `load` files - which is also what has to keep schedule.yml's
+    # digest issue OPEN: an empty fault list closes it, and it used to say "every entry in
+    # schedule.yml is now usable" about a file that would not parse.
     from tests.test_schedule import MALFORMED_SCHEDULE
 
     _stub_snapshots(monkeypatch, existing=set())
@@ -1598,18 +1605,26 @@ def test_run_survives_an_unparseable_schedule_but_goes_red(monkeypatch, capsys):
         "get_file_content",
         lambda org, repo, path: MALFORMED_SCHEDULE,
     )
+    synced: dict = {}
+    monkeypatch.setattr(
+        scheduler.source_digest,
+        "sync",
+        lambda *a, **k: synced.update(faults=a[2]) or source_digest.DigestResult(),
+    )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
 
-    assert scheduler.run("Course-Org", "Cohort-Org", now) == 1
+    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
 
+    (fault,) = synced["faults"]
+    assert fault.file == "schedule.yml" and "not valid YAML" in fault.what
     captured = capsys.readouterr()
     assert "is NOT valid YAML" in captured.err
     assert "0/0 release(s) due" in captured.out
 
 
-def test_a_dry_run_reports_an_unparseable_schedule_too(monkeypatch):
-    # The manual dispatch defaults to dry-run, so this is the preview an operator looks at
-    # first; a green preview of a plan that cannot be read is the wrong answer there too.
+def test_a_dry_run_of_an_unparseable_plan_is_green_too(monkeypatch):
+    # The manual dispatch defaults to dry-run, and a preview writes nothing at all - so
+    # there is nothing for it to be red about either. What it PRINTS is the report.
     from tests.test_schedule import MALFORMED_SCHEDULE
 
     _stub_snapshots(monkeypatch, existing=set())
@@ -1619,7 +1634,7 @@ def test_a_dry_run_reports_an_unparseable_schedule_too(monkeypatch):
         lambda org, repo, path: MALFORMED_SCHEDULE,
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-Org", now, dry_run=True) == 1
+    assert scheduler.run("Course-Org", "Cohort-Org", now, dry_run=True) == 0
 
 
 def test_dropped_entries_alone_stay_advisory(monkeypatch):

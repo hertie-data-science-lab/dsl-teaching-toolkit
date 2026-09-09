@@ -99,6 +99,7 @@ from .gh_contents import (
     put_file,
     repo_tree,
     take_lines,
+    yaml_mark_line,
 )
 from .log import log, log_err, log_step
 from .releaseignore import RELEASEIGNORE, excluded_in_tree
@@ -382,10 +383,10 @@ class Schedule:
     # Set by `load` when the file could not be read AS A SCHEDULE at all: the YAML did not
     # parse, or its top level is not a mapping. Distinct from `dropped` (a file that parsed,
     # minus some entries) and from a cohort that simply has no schedule.yml. `load` still
-    # returns an empty Schedule so nothing downstream raises - but the hourly scheduler
-    # fails its run on this, because an unreadable plan means NOTHING is released, handed
-    # out, snapshotted or graded for the cohort, and an hourly green tick is how that goes
-    # unnoticed for a term.
+    # returns an empty Schedule so nothing downstream raises, and files the one fault that
+    # says so in `faults` - an unreadable plan means NOTHING is released, handed out,
+    # snapshotted or graded for the cohort, and the digest issue and the mail beside it are
+    # how the person who has to fix it hears about that.
     unparseable: bool = False
 
 
@@ -1203,6 +1204,25 @@ def _schedule_text(cohort_org: str) -> str | None:
     return get_file_content(cohort_org, CONFIG_REPO, SCHEDULE_PATH)
 
 
+def _unreadable_fault(what: str, lineno: int | None = None) -> ConfigFault:
+    """The whole FILE, unusable - what a human is asked to fix.
+
+    `where` is the file itself, because there is no entry to name: nothing in it was read,
+    so the fault is about its shape and every entry pays the same price. An IMMEDIATE
+    fault (no `fires`), like every other line the parser cannot read: waiting changes
+    nothing about it."""
+    return ConfigFault(
+        SCHEDULE_PATH,
+        what,
+        file=SCHEDULE_PATH,
+        field="schedule",
+        lineno=lineno,
+        fix_text=(
+            "fix the YAML on the line above; every entry is ignored until the file parses"
+        ),
+    )
+
+
 def load(cohort_org: str) -> Schedule:
     """Fetch + parse schedule.yml from the cohort's PRIVATE classroom-config repo. A
     pure loader: a missing file returns an empty Schedule silently (every field
@@ -1211,9 +1231,11 @@ def load(cohort_org: str) -> Schedule:
     A file that does not PARSE (faculty-editable YAML - an unclosed brace, a bad indent)
     is treated exactly as an absent one: the error is logged loudly, with the parser's own
     line/column, and an empty Schedule is returned. It must never raise: `load` sits under
-    the hourly scheduler AND the site sync, and one cohort's typo froze both."""
+    the hourly scheduler AND the site sync, and one cohort's typo froze both. It is also
+    a FAULT on the file - the one that costs the cohort everything - so the digest issue
+    and the mail carry it like any other (see `Schedule.faults`)."""
     content = _schedule_text(cohort_org)
-    unparseable = False
+    unparseable: list[ConfigFault] = []
     try:
         meta = load_yaml_lines(content) if content else {}
     except yaml.YAMLError as exc:
@@ -1229,7 +1251,13 @@ def load(cohort_org: str) -> Schedule:
             f"snapshots, no autograding) and the site builds without schedule data."
         )
         meta = {}
-        unparseable = True
+        unparseable.append(
+            _unreadable_fault(
+                "this file is not valid YAML, so the whole plan is ignored: nothing "
+                "releases, hands out, snapshots or grades",
+                lineno=yaml_mark_line(exc),
+            )
+        )
     if meta is not None and not isinstance(meta, dict):
         # Valid YAML, but not a schedule: a bare list, or a stray document separator that
         # left a string at the top level. Same consequence as a parse failure - nothing in
@@ -1239,9 +1267,16 @@ def load(cohort_org: str) -> Schedule:
             f"{type(meta).__name__}, not a mapping - the whole schedule is ignored. "
             f"Its top level must be keys like `releases:` / `assignments:`."
         )
-        unparseable = True
+        unparseable.append(
+            _unreadable_fault(
+                f"this file parses as {type(meta).__name__}, not a mapping of "
+                f"`releases:` / `assignments:` / `events:`, so the whole plan is "
+                f"ignored: nothing releases, hands out, snapshots or grades"
+            )
+        )
     sched = parse(meta if isinstance(meta, dict) else {})
-    sched.unparseable = unparseable
+    sched.unparseable = bool(unparseable)
+    sched.faults.extend(unparseable)
     if sched.dropped:
         # Loud, because this is the failure faculty cannot see: the file is valid YAML and
         # the run goes green, but an entry they wrote is not in the plan. Every caller

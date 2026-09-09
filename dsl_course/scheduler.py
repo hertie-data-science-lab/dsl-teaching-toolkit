@@ -976,13 +976,15 @@ def run(
     `verdict` is the cadence reading of the drivers, taken once per course by `main`. None
     (the default) means this invocation reports no lateness - see `main` for which ones."""
     sched = schedule.load(cohort_org)
-    # A plan that could not be read AS A PLAN is not an empty one. `load` deliberately
-    # falls back to an empty Schedule so one cohort's typo cannot freeze the cron - but
-    # while it stands, nothing is released, handed out, snapshotted or graded for this
-    # cohort, and a GREEN tick is exactly how that goes unnoticed. `load` has already
-    # logged what is wrong and where; this is what makes anyone look.
-    # (Individually DROPPED entries stay advisory, as before - the rest of the plan runs.)
-    errors = int(sched.unparseable)
+    # A plan that could not be read AS A PLAN is not an empty one: while it stands, nothing
+    # is released, handed out, snapshotted or graded for this cohort. `load` has logged what
+    # is wrong and where, and filed it as a fault on schedule.yml - which is what reaches
+    # the person who can fix it, through the digest issue and the mail beside it
+    # (`_preflight_sources`). It does NOT red this tick: the file is faculty's to fix, and
+    # spending the exit code on it meant up to eight red runs an hour, and a `Scheduled
+    # release is failing` issue every six, mailing the maintainer about a typo in a cohort's
+    # plan. (Individually DROPPED entries were always advisory - the rest of the plan runs.)
+    errors = 0
     if release:
         errors += _release_phase(course_org, cohort_org, sched, now, dry_run, verdict)
     if autograde:
@@ -992,9 +994,9 @@ def run(
         )
 
     if dry_run:
-        # A preview reports only what it could not READ: nothing was written, so the
-        # errors above are the state of the org, not of this run.
-        return int(sched.unparseable)
+        # A preview writes nothing, so it has nothing of its own to report: the errors
+        # above are the state of the org, not of this run.
+        return 0
     if errors:
         log_err(f"{errors} action(s) failed")
         return 1

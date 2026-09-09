@@ -763,8 +763,8 @@ def test_unparseable_schedule_loads_as_empty_and_says_so_loudly(monkeypatch, cap
     sched = S.load("Cohort-f2026")
 
     # same shape a missing schedule.yml yields - nothing scheduled, nothing raised - but
-    # flagged, so the hourly scheduler can fail its run instead of ticking green for ever
-    assert sched == Schedule(unparseable=True)
+    # flagged, and carrying the one fault that says so (see the test below)
+    assert sched.unparseable and not sched.releases and not sched.assignments
     err = capsys.readouterr().err
     # self-diagnosing: which cohort, which file, the parser's own line/column, what to do
     assert "Cohort-f2026/classroom-config/schedule.yml is NOT valid YAML" in err
@@ -805,8 +805,36 @@ def test_a_non_mapping_schedule_still_loads_as_empty(monkeypatch, capsys):
     monkeypatch.setattr(
         S, "get_file_content", lambda org, repo, path: "- just\n- a list\n"
     )
-    assert S.load("Cohort-f2026") == Schedule(unparseable=True)
+    sched = S.load("Cohort-f2026")
+    assert sched.unparseable and not sched.releases
+    (fault,) = sched.faults
+    assert fault.what.startswith("this file parses as list, not a mapping")
+    assert fault.lineno is None  # nothing in the file was read: no line to cite
     assert "not a mapping" in capsys.readouterr().err
+
+
+def test_an_unparseable_plan_is_one_fault_not_an_empty_plan(monkeypatch):
+    # A file nobody can parse is the commonest way faculty break this file, and the
+    # costliest: every entry is out of the plan. It used to reach nobody through the
+    # notification engine - the digest issue saw an empty fault list and CLOSED, while
+    # the hourly cron went red at a bot account. One immediate fault on the file itself,
+    # citing the line the parser stopped on.
+    from dsl_course import schedule as S
+
+    monkeypatch.setattr(
+        S, "get_file_content", lambda org, repo, path: MALFORMED_SCHEDULE
+    )
+
+    (fault,) = S.load("Cohort-f2026").faults
+
+    assert fault.where == fault.file == S.SCHEDULE_PATH
+    assert fault.field == "schedule"
+    assert fault.fires is None  # immediate: waiting changes nothing about it
+    # the line PyYAML stopped on, from the same helper every other reader cites
+    # (`gh_contents.yaml_mark_line`): the unclosed mapping runs to the end of the file
+    assert fault.lineno == 7 and fault.at == "schedule.yml:7"
+    assert "not valid YAML" in fault.what and "nothing releases" in fault.what
+    assert "every entry is ignored until the file parses" in fault.fix_text
 
 
 def test_a_comment_only_schedule_is_empty_not_unparseable(monkeypatch, capsys):
