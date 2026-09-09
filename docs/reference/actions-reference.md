@@ -79,8 +79,9 @@ again after a week - then the issue stands and says no more.
 
 **Who gets it.** Whoever git says edited that line, or pushed that CSV. A TA's email copies
 the cohort's instructors; if git can name nobody, the whole teaching team is emailed.
-Addresses come from `email:` in `classroom-config/people.yml`. A row or line and a column are
-named - never a cell value, never a student.
+Addresses come from `email:` in `classroom-config/people.yml`; if nobody there has one, it
+goes to the course admins, and to the toolkit maintainer if the course names none. A row or
+line and a column are named - never a cell value, never a student.
 
 **Check cohort setup** lists which of these are open right now.
 

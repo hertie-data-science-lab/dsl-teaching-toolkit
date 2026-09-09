@@ -556,9 +556,10 @@ file · tree · team · repo list`"]
   staged never touches an exit code, at any rung on its ladder (`schedule.Severity`): it is
   faculty's to fix, so it is delivered on the channel faculty watch - the cohort's source digest
   issue, plus an email to the people git names for that line (`notify.route`: the planner of the
-  line and the last committer of the repo, the whole teaching team as fallback). Spending the red
-  X on it instead meant up to eight failing runs an hour, each mailing the bot account about a
-  folder only faculty can write, and left the run's own health unreadable.
+  line and the last committer of the repo, the whole teaching team as fallback, and below that
+  the course admins and then the maintainer). Spending the red X on it instead meant up to eight
+  failing runs an hour, each mailing the bot account about a folder only faculty can write, and
+  left the run's own health unreadable.
 - **A notification is not worth a release.** `notify` and `source_digest` both count their own
   failures and return them; `_preflight_sources` logs the count and still returns 0, and wraps
   each in its own `except`. The mail is also **held between 22:00 and 07:00** in the cohort's

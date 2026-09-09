@@ -285,7 +285,7 @@ So the sources are checked against the course org in two places: **Validate sche
 | 6 hours or less | **critical** | it comments again, one rung louder, and the email copies the toolkit maintainer |
 | the moment has passed | **missed** | the copy did not ship. A last comment and a last email, and the fault stays listed until the source is staged |
 
-**Who is emailed.** Whoever git says can act: the person who last edited that line of `schedule.yml`, and whoever last committed to the materials or template repo it names. A TA's email copies the cohort's instructors. If git can name nobody in `people.yml` - the line was never edited by teaching staff, or the blame could not be read - the whole teaching team is emailed instead. Addresses come from the `email:` field on each entry in `classroom-config/people.yml`; the digest issue `cc`s the same people by handle.
+**Who is emailed.** Whoever git says can act: the person who last edited that line of `schedule.yml`, and whoever last committed to the materials or template repo it names. A TA's email copies the cohort's instructors. If git can name nobody in `people.yml` - the line was never edited by teaching staff, or the blame could not be read - the whole teaching team is emailed instead. Addresses come from the `email:` field on each entry in `classroom-config/people.yml`; the digest issue `cc`s the same people by handle. If nobody in `people.yml` has an `email:` at all, the course admins are emailed, and the toolkit maintainer if the course names none.
 
 **Nothing is emailed between 23:00 and 07:00** in the cohort's own timezone. The issue still updates and comments immediately; the email is held and sent on the first tick after 07:00, as one message at the loudest rung it reached overnight.
 
