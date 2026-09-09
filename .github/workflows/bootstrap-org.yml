@@ -101,6 +101,12 @@ jobs:
           # copies it onto the new org so its seeded workflows can mail a fault home.
           # Unset here just means the org falls back to the GRAPH_SENDER mailbox.
           DSL_MAINTAINER_EMAIL: ${{ vars.DSL_MAINTAINER_EMAIL }}
+          # The same arrangement for the course admins' addresses, which is who hears
+          # about a fault in the new org's OWN config (dsl-course.yml, the cohort
+          # registry). Comma-separated, and a variable rather than a secret so it can be
+          # read back and checked. Unset just means the digest issue's
+          # `cc @<org>/course-admin` is the only channel.
+          DSL_COURSE_ADMIN_EMAILS: ${{ vars.DSL_COURSE_ADMIN_EMAILS }}
         run: |
           # Recorded in the org's own dsl-course.yml, so the tier this run checked out is
           # the tier the org keeps running once the nightly refresh takes over.

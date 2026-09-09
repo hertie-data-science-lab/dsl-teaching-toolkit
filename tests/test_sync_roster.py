@@ -89,15 +89,25 @@ def test_sync_hands_the_prune_each_teams_own_github_ids(monkeypatch):
     assert seen == {sync_roster.TEAM: {"42"}, sync_roster.AUDITOR_TEAM: {"99"}}
 
 
-def test_sync_fails_on_a_missing_roster_but_not_an_empty_one(monkeypatch):
-    # Missing/unreadable students.csv (load -> None) is an error; a roster that
-    # exists but has no rows yet (a freshly bootstrapped cohort) is a valid state
-    # and must reconcile cleanly instead of failing every daily cron.
+def test_sync_reconciles_nothing_without_a_roster_and_reds_for_neither(monkeypatch):
+    # An absent students.csv (load -> None) reconciles NOTHING - acting on the empty
+    # roster it implies would revoke every student's access - but it does not red the
+    # run: it is a file faculty have to write, and it reaches them on the students.csv
+    # digest issue. A roster that exists but has no rows yet (a freshly bootstrapped
+    # cohort) is a valid state and reconciles cleanly. A read that FAILED raises out of
+    # `roster.load` and never gets here.
     monkeypatch.setattr(sync_roster, "reconcile_team_members", lambda *a, **kw: 0)
     monkeypatch.setattr(sync_roster, "list_org_repos", lambda org: [])
+    reconciled: list = []
+    monkeypatch.setattr(
+        sync_roster,
+        "set_org_membership",
+        lambda *a, **kw: reconciled.append(a) or True,
+    )
 
     monkeypatch.setattr(roster, "load", lambda org: None)
-    assert sync_roster.sync("some-cohort", prune=True) == 1
+    assert sync_roster.sync("some-cohort", prune=True) == 0
+    assert reconciled == []
 
     monkeypatch.setattr(roster, "load", lambda org: [])
     assert sync_roster.sync("some-cohort", prune=True) == 0

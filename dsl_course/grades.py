@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 import tempfile
 import textwrap
@@ -31,6 +32,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from functools import cache
 from pathlib import Path
+from typing import Self
 
 import yaml
 
@@ -61,6 +63,7 @@ from .discovery import (
     list_org_repos,
     org_meta,
 )
+from .faults import ConfigFault
 from .gh_contents import (
     blob_sha,
     dump_csv,
@@ -68,6 +71,8 @@ from .gh_contents import (
     put_file,
     put_files,
     read_csv,
+    yaml_mark_line,
+    yaml_problem,
 )
 from .ghcli import bot_login, clone, gh
 from .log import log, log_err, log_ok, log_person, log_step
@@ -408,10 +413,15 @@ def _no_duplicate_keys(loader: yaml.SafeLoader, node, deep: bool = False) -> dic
     for key_node, value_node in node.value:
         key = loader.construct_object(key_node, deep=deep)
         if key in mapping:
+            # The key is NOT named. In a grading sheet the key of a unit is a student
+            # handle (or a team name), and this message reaches a public run log, a
+            # public issue and an email - see the privacy rule in CLAUDE.md. The line
+            # the mark carries is what somebody needs anyway.
             raise yaml.constructor.ConstructorError(
                 "while reading a grading sheet",
                 node.start_mark,
-                f"the key `{key}` appears twice",
+                "the key on this line appears twice - the second copy would "
+                "silently replace the first",
                 key_node.start_mark,
             )
         mapping[key] = loader.construct_object(value_node, deep=deep)
@@ -423,18 +433,55 @@ _SheetLoader.add_constructor(
 )
 
 
-def parse_sheet(text: str) -> dict:
+def _unreadable(exc: yaml.YAMLError) -> str:
+    """`yaml_problem`, plus the line - what a reader with no other citation is told."""
+    problem, line = yaml_problem(exc), yaml_mark_line(exc)
+    if not problem:
+        return "the file is not valid YAML"
+    return f"{problem} (line {line})" if line else problem
+
+
+def parse_sheet(
+    text: str, faults: list[ConfigFault] | None = None, slug: str = ""
+) -> dict:
     """A grading sheet's YAML into a dict ({} when the file is empty).
 
     Raises `SheetUnreadable` rather than returning anything for a file that does not parse
     or is not a mapping. This is hand-typed YAML in a repo a grader edits in the browser,
     so a broken save is ordinary; what must never happen is the toolkit reading one as an
-    empty sheet and writing a blank file back over it."""
+    empty sheet and writing a blank file back over it.
+
+    A caller that passes `faults` gets the same thing RECORDED as well as raised - the
+    raise is what every reader already does the right thing about (leave the file alone),
+    and the fault is what reaches the grader who saved it. Recorded first, so the caller
+    catching the error still has it. `slug` names the sheet the fault is in."""
     try:
         data = yaml.load(text, Loader=_SheetLoader) or {}
     except yaml.YAMLError as exc:
-        raise SheetUnreadable(" ".join(str(exc).split())) from exc
+        if faults is not None:
+            problem = yaml_problem(exc)
+            faults.append(
+                _sheet_fault(
+                    slug,
+                    "this sheet is not valid YAML, so nothing on it is refreshed or "
+                    "sent" + (f": {problem}" if problem else ""),
+                    lineno=yaml_mark_line(exc),
+                    fix="fix the YAML on the line above; nothing on this sheet is "
+                    "refreshed or sent until it parses",
+                )
+            )
+        raise SheetUnreadable(_unreadable(exc)) from exc
     if not isinstance(data, dict):
+        if faults is not None:
+            faults.append(
+                _sheet_fault(
+                    slug,
+                    "this sheet is not a mapping of submission units, so it is left "
+                    "exactly as it is",
+                    fix="restore the sheet's shape - a `submissions:` (or `teams:`) "
+                    "block of one entry per submission unit",
+                )
+            )
         raise SheetUnreadable("the file is not a mapping")
     return data
 
@@ -817,6 +864,33 @@ def final_grade(
 # everything else in it exists to shape the grading sheet - which is this module's. The
 # names `collect` still spells are re-exported there, so no caller had to move.
 GRADING_FILE = "grading_config.yml"  # on the template's solution branch
+# The name it had before the rename. The engine stopped reading that one, so a template
+# still carrying it declares NOTHING - which looks exactly like an assignment nobody has
+# configured, and grades like one.
+LEGACY_GRADING_FILE = "grading.yml"
+
+
+class Dropped(str):
+    """One line the parse of an assignment's definition refused, and what it was about.
+
+    A `str`, because that is what `GradingSpec.dropped` has always been and what every
+    reader of it prints, logs and greps for. The key it names and the vocabulary it would
+    have accepted ride along, so the same line can also become the fault that cites the
+    line to edit and says what is allowed there; a second, parallel list of records would
+    be a second answer to "what did this parse refuse"."""
+
+    field: str
+    what: str
+    allowed: tuple[str, ...]
+
+    def __new__(
+        cls, where: str, field: str, what: str, allowed: tuple[str, ...] = ()
+    ) -> Self:
+        # `  ! <where>: ` is the run-log form, unchanged; `what` on its own is what a
+        # notification says, where the file is already named above it.
+        out = super().__new__(cls, f"  ! {where}: {what}")
+        out.field, out.what, out.allowed = field, what, allowed
+        return out
 
 
 def _one_of(
@@ -833,8 +907,12 @@ def _one_of(
     if text in allowed:
         return text
     dropped.append(
-        f"  ! {where}: `{field}: {value}` is not one of "
-        f"{'/'.join(allowed)} - using `{default}`"
+        Dropped(
+            where,
+            field,
+            f"`{field}: {value}` is not one of {'/'.join(allowed)} - using `{default}`",
+            allowed,
+        )
     )
     return default
 
@@ -851,7 +929,12 @@ def _boolean(value: object, field: str, where: str, dropped: list[str]) -> bool:
     if text in ("false", "no", "off", "0", ""):
         return False
     dropped.append(
-        f"  ! {where}: `{field}: {value}` is not true or false - using false"
+        Dropped(
+            where,
+            field,
+            f"`{field}: {value}` is not true or false - using false",
+            ("true", "false"),
+        )
     )
     return False
 
@@ -864,7 +947,11 @@ def _questions(value: object, where: str, dropped: list[str]) -> dict[str, str] 
     that is not a mapping is dropped with a warning rather than half-read."""
     if not isinstance(value, dict):
         dropped.append(
-            f"  ! {where}: `questions:` must be a mapping of name -> points - ignored"
+            Dropped(
+                where,
+                "questions",
+                "`questions:` must be a mapping of name -> points - ignored",
+            )
         )
         return None
     questions = {
@@ -881,8 +968,11 @@ def _whole_days(value: object, where: str, dropped: list[str]) -> int | None:
         return max(0, int(str(value).strip()))
     except (TypeError, ValueError):
         dropped.append(
-            f"  ! {where}: `late_window_days: {value}` is not a whole number of "
-            f"days - ignored"
+            Dropped(
+                where,
+                "late_window_days",
+                f"`late_window_days: {value}` is not a whole number of days - ignored",
+            )
         )
         return None
 
@@ -898,8 +988,11 @@ def _team_cap(value: object, where: str, dropped: list[str]) -> int | None:
     if cap > 0:
         return cap
     dropped.append(
-        f"  ! {where}: `max_team_size: {value}` is not a whole number of "
-        f"members - ignored"
+        Dropped(
+            where,
+            "max_team_size",
+            f"`max_team_size: {value}` is not a whole number of members - ignored",
+        )
     )
     return None
 
@@ -918,8 +1011,12 @@ def _penalty(value: object, where: str, dropped: list[str]) -> str | None:
     fault = penalty_fault(raw)
     if fault:
         dropped.append(
-            f"  ! {where}: `late_penalty_per_day: {value}` "
-            f"{_PENALTY_FAULTS[fault]}; no late penalty is applied"
+            Dropped(
+                where,
+                "late_penalty_per_day",
+                f"`late_penalty_per_day: {value}` {_PENALTY_FAULTS[fault]}; no late "
+                f"penalty is applied",
+            )
         )
         return None
     return raw
@@ -1040,7 +1137,11 @@ def _read_settings(
         name = str(key)
         if name not in allowed:
             dropped.append(
-                f"  ! {where}: `{name}:` is not a setting the toolkit reads - ignored"
+                Dropped(
+                    where,
+                    name,
+                    f"`{name}:` is not a setting the toolkit reads - ignored",
+                )
             )
             continue
         out[name] = _READERS[name](value, where, dropped)
@@ -1147,6 +1248,167 @@ def load_grading_spec(course_org: str, template: str) -> GradingSpec:
     the defaults rather than take the cohort down with it."""
     spec = declared_grading_spec(course_org, template)
     return spec if spec is not None else GradingSpec()
+
+
+# ------------------------------------ what an assignment's definition will not grade as
+#
+# TIME-BOUND, unlike everything else that reaches a digest. `submit_via: emial` is a typo
+# in a file, and until the assignment is graded it is a typo that costs nothing: the fix
+# is the same in August and on the morning of the deadline. So it keeps the SOURCE clock -
+# it climbs the ladder as the grading moment approaches - rather than shouting from the
+# day somebody saved it.
+
+
+def _spec_fault(
+    slug: str,
+    template: str,
+    course_org: str,
+    fires: datetime | None,
+    what: str,
+    field: str = "",
+    lineno: int | None = None,
+    fix: str = "",
+    file: str = GRADING_FILE,
+) -> ConfigFault:
+    """One value in one assignment's definition that will not grade as written.
+
+    The fault is in the COURSE org, on the template's `solution` branch, and the digest
+    that carries it is the COHORT's - the cohort is what the grading happens to, and the
+    people who can fix it are the ones in its people.yml. So the file's own address rides
+    on the fault (`in_org`, `in_repo`, `ref`), which is what the deep link and the blame
+    query both go by."""
+    return ConfigFault(
+        f"assignments.{slug}",
+        what,
+        fires=fires,
+        field=field,
+        lineno=lineno,
+        file=file,
+        in_repo=template,
+        in_org=course_org,
+        ref=SOLUTION_BRANCH,
+        fix_text=fix,
+    )
+
+
+def grading_spec_faults(
+    slug: str,
+    template: str,
+    course_org: str,
+    text: str,
+    fires: datetime | None,
+) -> list[ConfigFault]:
+    """Everything in ONE `grading_config.yml` the parse had to refuse, as faults.
+
+    The parse's own sentences, in the words it already logs them in: it is the one place
+    that knows the vocabulary each key accepts, and a fault that paraphrased it would be a
+    second, slightly different answer about what is allowed."""
+    try:
+        spec = parse_grading_spec(text)
+    except yaml.YAMLError as exc:
+        return [
+            _spec_fault(
+                slug,
+                template,
+                course_org,
+                fires,
+                "this file is not valid YAML, so none of it is read and the whole "
+                "assignment grades on the toolkit's defaults",
+                lineno=yaml_mark_line(exc),
+                fix="fix the YAML on the line above",
+            )
+        ]
+    lines = key_lines(text)
+    return [
+        _spec_fault(
+            slug,
+            template,
+            course_org,
+            fires,
+            dropped.what,
+            field=dropped.field,
+            lineno=lines.get((dropped.field,)),
+            fix=_spec_fix(dropped),
+        )
+        for dropped in spec.dropped
+        if isinstance(dropped, Dropped)
+    ]
+
+
+def _spec_fix(dropped: Dropped) -> str:
+    """What would put one refused line right: the vocabulary the key accepts, or - for a
+    key the toolkit has no reader for at all - the keys it does read.
+
+    "Correct the value" is not an instruction about a line whose KEY is the mistake: a
+    setting that moved here from schedule.yml, or a plain misspelling, has no value to
+    correct."""
+    if dropped.field not in SPEC_KEYS:
+        return f"remove the line above, or spell it as one of: {', '.join(SPEC_KEYS)}"
+    allowed = f" (allowed: {'/'.join(dropped.allowed)})" if dropped.allowed else ""
+    return f"correct the value on the line above{allowed}"
+
+
+def grading_config_faults(
+    course_org: str, cohort_org: str, sched, found: list[ConfigFault]
+) -> None:
+    """Every assignment this cohort's plan declares, and everything in its definition that
+    will not grade as written.
+
+    `fires` is the moment the value is USED: the assignment's `grading_datetime`, and its
+    due date where it declares none (which is what `cutoff_at` resolves the freeze to
+    anyway). An assignment with neither has no moment, and its faults simply sit in the
+    issue.
+
+    `cohort_org` is not read - the definition lives in the course org - and is taken all
+    the same, because every collector in `scheduler._config_faults` is asked the same
+    question and one that quietly dropped an argument would read as a different kind of
+    check. Nothing is appended until every template has been read: a read that failed is
+    "we could not look", and the digest closes what it is not handed."""
+    faults: list[ConfigFault] = []
+    for slug, entry in sorted(sched.assignments.items()):
+        template = entry.course_source_repo
+        if not template:
+            continue  # the plan itself is faulty; schedule.yml's own digest says so
+        fires = entry.grading_datetime or entry.due_datetime
+        text = _grading_text(course_org, template)
+        if text is None:
+            faults += _undeclared_faults(slug, template, course_org, fires)
+            continue
+        faults += grading_spec_faults(slug, template, course_org, text, fires)
+    found.extend(faults)
+
+
+def _undeclared_faults(
+    slug: str, template: str, course_org: str, fires: datetime | None
+) -> list[ConfigFault]:
+    """The one fault a template with NO `grading_config.yml` can still have: it is
+    carrying the file under the name the engine stopped reading.
+
+    An assignment that declares nothing is not a fault - it grades as an individual
+    hand-marked one, which is a real choice - so this asks the question only when there is
+    a file to find, and pays one API read for it only on a template that has no definition
+    at all."""
+    try:
+        legacy = get_file_content(
+            course_org, template, LEGACY_GRADING_FILE, ref=SOLUTION_BRANCH
+        )
+    except RuntimeError:
+        return []  # cannot say; `get_file_content` has already said why
+    if legacy is None:
+        return []
+    return [
+        _spec_fault(
+            slug,
+            template,
+            course_org,
+            fires,
+            f"this assignment is defined in `{LEGACY_GRADING_FILE}`, which nothing "
+            f"reads any more - it grades on the toolkit's defaults",
+            file=LEGACY_GRADING_FILE,
+            fix=f"rename `{LEGACY_GRADING_FILE}` to `{GRADING_FILE}` on the template's "
+            f"`{SOLUTION_BRANCH}` branch",
+        )
+    ]
 
 
 # --------------------------------------------------- the team-formation lock file
@@ -1869,7 +2131,13 @@ def _score_fault(spec: SheetSpec, score: object) -> str:
     return "score" if any(_is_typo(value) for value in score.values()) else ""
 
 
-def sheet_hold_reasons(spec: SheetSpec, sheet: dict) -> dict[str, str]:
+def sheet_hold_reasons(
+    spec: SheetSpec,
+    sheet: dict,
+    faults: list[ConfigFault] | None = None,
+    text: str = "",
+    slug: str = "",
+) -> dict[str, str]:
     """Every handle in this sheet whose mark a person still has to settle, and why.
 
     What a grader TYPED, checked before any of it is sent - as against
@@ -1879,9 +2147,39 @@ def sheet_hold_reasons(spec: SheetSpec, sheet: dict) -> dict[str, str]:
     penalty had been waived; a stray `Q5` was added to a total the assignment has no
     maximum for; and a handle in two teams took whichever team the loop reached last.
 
-    One reason per handle, the first found: this is a line in a log, not a diagnosis."""
+    One reason per handle, the first found: this is a line in a log, not a diagnosis.
+
+    A caller that passes `faults` gets the same list as `ConfigFault`s, so the grader who
+    typed it hears about it instead of a dry-run count nobody is watching. Each names its
+    LINE in `text` and never the unit it is in: a unit key is a student handle or a team
+    name, and a fault travels to a public issue and an email."""
     held: dict[str, str] = {}
     seen: set[str] = set()
+    lines = key_lines(text) if faults is not None else {}
+    # A group's mark is ONE line, so the four members it holds are one thing to fix. The
+    # hold above is still per handle - it is what stops each person's return - but four
+    # faults with one key printed the same bullet four times in the digest issue and made
+    # the run summary count four entries where a grader has one to correct.
+    recorded: set[str] = set()
+
+    def record(unit_key: str, handle: str, reason: str) -> None:
+        held[handle] = reason
+        if faults is None:
+            return
+        lineno = _hold_line(lines, spec, unit_key, handle, reason)
+        what, fix = _HOLD_FAULT[reason]
+        fault = _sheet_fault(
+            slug,
+            what,
+            lineno=lineno,
+            # No field for a duplicate: the key that repeats IS the handle.
+            field="" if reason == "duplicate" else _hold_field(spec, reason),
+            fix=fix.format(at=f"line {lineno}" if lineno else "that line"),
+        )
+        if fault.key not in recorded:
+            recorded.add(fault.key)
+            faults.append(fault)
+
     for unit_key, block in ((sheet or {}).get(spec.container_key) or {}).items():
         if not isinstance(block, dict):
             continue  # a unit mid-edit; the next run reads a whole block
@@ -1889,7 +2187,7 @@ def sheet_hold_reasons(spec: SheetSpec, sheet: dict) -> dict[str, str]:
         people = (block.get("members") or {}) if spec.is_group else {unit_key: block}
         for handle, person in people.items():
             if handle in seen:
-                held[handle] = "duplicate"
+                record(unit_key, handle, "duplicate")
                 continue
             seen.add(handle)
             person = person if isinstance(person, dict) else {}
@@ -1897,8 +2195,191 @@ def sheet_hold_reasons(spec: SheetSpec, sheet: dict) -> dict[str, str]:
                 "adjustment" if _is_typo(person.get("adjustment_individual")) else ""
             )
             if reason:
-                held[handle] = reason
+                record(unit_key, handle, reason)
     return held
+
+
+# ------------------------------------------- what the grader is told, and where it is
+
+# What each hold reason IS and what would put it right, in the words that reach a public
+# issue and an email. Every sentence names a LINE and never the unit it is in, because a
+# unit key is a student handle or a team name (see the privacy rule in CLAUDE.md) - which
+# is also why the sentences read "this line" rather than naming what is on it.
+_HOLD_FAULT = {
+    "score": (
+        "a mark on this line is not a number, so nothing for this unit is sent",
+        "correct the mark on {at} - a mark must be a number, or blank",
+    ),
+    "adjustment": (
+        (
+            "the adjustment on this line is not a number, so nothing for this person "
+            "is sent"
+        ),
+        "correct the adjustment on {at} - a word processor's minus sign is not one",
+    ),
+    "question": (
+        (
+            "this line marks a question the assignment does not declare, so nothing "
+            "for this unit is sent"
+        ),
+        (
+            "remove the question on {at}, or declare it in the assignment's "
+            "grading_config.yml"
+        ),
+    ),
+    "duplicate": (
+        "the handle on this line is also in another submission unit, so both are held",
+        "leave the handle on {at} in one submission unit only",
+    ),
+}
+
+
+def _hold_field(spec: SheetSpec, reason: str) -> str:
+    """The key a hold reason is about - the one thing in the fault's heading that is safe
+    to name, because it is the toolkit's own vocabulary rather than anything a grader
+    typed."""
+    return (
+        spec.score_key if reason in ("score", "question") else "adjustment_individual"
+    )
+
+
+def _hold_line(
+    lines: dict[tuple[str, ...], int],
+    spec: SheetSpec,
+    unit: str,
+    handle: str,
+    reason: str,
+) -> int | None:
+    """The line of the sheet a hold reason is written on, or None when the scan cannot
+    see it - a fault citing the file without a line still beats no fault."""
+    base = (spec.container_key, unit)
+    if reason in ("score", "question"):
+        path = base + (spec.score_key,)
+    elif reason == "adjustment":
+        path = base + (
+            ("members", handle, "adjustment_individual")
+            if spec.is_group
+            else ("adjustment_individual",)
+        )
+    else:
+        # The repeated handle itself: its own line in a group's `members:`, and the unit
+        # key in an individual sheet, where the unit IS the handle.
+        path = base + (("members", handle) if spec.is_group else ())
+    return lines.get(path) or lines.get(base) or lines.get((spec.container_key,))
+
+
+# A block key and the indent it sits at. A leading `- ` counts as indent, so a list item's
+# first key nests under the list rather than beside it; a `#` line is not a key at all.
+_BLOCK_KEY = re.compile(r"^(\s*(?:-\s+)?)(?![#\s])([^:#]+?):(?:\s|$)")
+
+
+def key_lines(text: str) -> dict[tuple[str, ...], int]:
+    """`{(key, sub-key, ...): the 1-based line it is written on}` for one YAML file.
+
+    A TEXT scan, and deliberately so. The grading sheet's loader hands back a plain dict -
+    stamping line numbers into it the way `gh_contents.LineLoader` does would put a
+    reserved key inside a mapping that gets written straight back into the grader's file -
+    and this is only ever asked WHERE a fault is, never what the file says. Indentation is
+    the whole of the nesting rule, which is all these files use; a key the scan cannot see
+    (a flow mapping, a folded block) simply leaves its fault citing the file with no line.
+
+    The FIRST occurrence of a path wins: the sheet's own parser refuses a duplicate key
+    long before anything asks this."""
+    out: dict[tuple[str, ...], int] = {}
+    stack: list[tuple[int, str]] = []
+    for lineno, line in enumerate(text.splitlines(), 1):
+        match = _BLOCK_KEY.match(line)
+        if not match:
+            continue
+        indent = len(match.group(1))
+        key = match.group(2).strip().strip("\"'")
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        out.setdefault(tuple(k for _indent, k in stack) + (key,), lineno)
+        stack.append((indent, key))
+    return out
+
+
+def _sheet_fault(
+    slug: str, what: str, lineno: int | None = None, field: str = "", fix: str = ""
+) -> ConfigFault:
+    """One thing in one grading sheet a grader has to settle.
+
+    `where` is the sheet and the LINE, never the unit: a unit key is a student handle or a
+    team name, and `where` is this fault's heading in the mail and its identity in the
+    digest's state. The slug is part of it because one digest issue carries every sheet in
+    the cohort, so two sheets' line 42 must not be one fault."""
+    return ConfigFault(
+        f"{slug} line {lineno}" if lineno else slug,
+        what,
+        field=field,
+        lineno=lineno,
+        # The SHEET's own path, not the digest's label for the folder: this is what the
+        # deep link and the blame query use, so each fault lands on the sheet it is in.
+        file=sheet_path(slug),
+        fix_text=fix,
+    )
+
+
+def sheet_faults(
+    slug: str, text: str, spec: SheetSpec | None = None
+) -> list[ConfigFault]:
+    """Everything in ONE grading sheet that a grader has to settle before anything can be
+    refreshed or sent: a file that does not parse, a container that is not a mapping of
+    units, and every mark the pipeline would otherwise hold.
+
+    Immediate faults, every one of them (`fires` is None): nothing about a mark nobody can
+    read improves by waiting, and the sheet is not refreshed or distributed while it
+    stands.
+
+    `spec` is the assignment's definition, for the question names a mark is checked
+    against; without one the sheet's own shape is read off it and the maxima are simply
+    unknown."""
+    faults: list[ConfigFault] = []
+    try:
+        sheet = parse_sheet(text, faults, slug)
+    except SheetUnreadable:
+        return faults  # `parse_sheet` recorded it; there is nothing else to read
+    spec = spec or _spec_from_sheet(slug, sheet)
+    container = sheet.get(spec.container_key)
+    if container is not None and not isinstance(container, dict):
+        return [
+            _sheet_fault(
+                slug,
+                f"`{spec.container_key}:` is not a mapping of submission units, so the "
+                f"sheet is left exactly as it is",
+                lineno=key_lines(text).get((spec.container_key,)),
+                field=spec.container_key,
+                fix=f"restore `{spec.container_key}:` to one indented entry per "
+                f"submission unit",
+            )
+        ]
+    sheet_hold_reasons(spec, sheet, faults, text, slug)
+    return faults
+
+
+def cohort_sheet_faults(
+    course_org: str, cohort_org: str, sched, found: list[ConfigFault]
+) -> None:
+    """Every grading sheet this cohort's plan declares, and everything in each of them a
+    grader has to settle.
+
+    Asked on the scheduled tick and NOWHERE else - no push fast path. A sheet is edited
+    all day while marking, so a notification per save would mail a grader about a file
+    they are still typing into; the tick catches it once it has been left that way.
+
+    Nothing is appended until every sheet has been READ. Half a list is worse than none:
+    the digest closes what it is not handed, so a rate limit part-way through would report
+    the sheets it never reached as repaired. A read that failed raises, and the caller
+    drops the sheets from this tick (see `scheduler._config_faults`)."""
+    specs = sheet_specs(course_org, sched)
+    faults: list[ConfigFault] = []
+    for name in sorted(specs):
+        text = get_file_content(cohort_org, CONFIG_REPO, sheet_path(name))
+        if text is None:
+            continue  # no sheet yet - the normal state before an assignment is due
+        faults += sheet_faults(name, text, specs[name])
+    found.extend(faults)
 
 
 def needs_hand_decision(view: dict) -> bool:

@@ -29,6 +29,8 @@ def _propagating_run(monkeypatch, published: list) -> None:
     org secret write recorded instead of made."""
     stub_bootstrap(monkeypatch)
     monkeypatch.setenv("DSL_BOT_TOKEN", "s3cret")
+    # Whatever happens to be exported around the test run is not this test's subject.
+    monkeypatch.delenv(mailer.COURSE_ADMIN_ENV, raising=False)
     monkeypatch.setattr(bc, "set_org_secret", lambda *a: published.append(a) or True)
     monkeypatch.setattr(
         "sys.argv", ["bootstrap_course", "--org", "Course-Org", "--propagate-secret"]
@@ -135,3 +137,85 @@ def test_the_maintainer_address_never_reaches_the_log(monkeypatch, capsys):
     captured = capsys.readouterr()
     assert ADDRESS not in captured.out + captured.err
     assert mailer.MAINTAINER_ENV in captured.out
+
+
+# ------------------------------------------- who hears about the course's OWN config
+#
+# `DSL_COURSE_ADMIN_EMAILS` travels exactly as the maintainer address does, and for the
+# same two reasons: an address is not a credential, so centrally it is a repository
+# variable; a seeded workflow can only read one out of `secrets.`, so on the org it is a
+# secret. It is a list rather than an `email:` in dsl-course.yml because that file is
+# public - and is itself one of the files these mails are about.
+
+ADMINS = "lonny@example.org,luis@example.org"
+
+
+def test_a_course_bootstrap_publishes_the_course_admin_addresses(monkeypatch):
+    published: list = []
+    _propagating_run(monkeypatch, published)
+    monkeypatch.setenv(mailer.MAINTAINER_ENV, ADDRESS)
+    monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, ADMINS)
+
+    assert bc.main() == 0
+    assert published[-1] == ("Course-Org", mailer.COURSE_ADMIN_ENV, ADMINS)
+
+
+def test_a_cohort_bootstrap_publishes_nothing_of_the_kind(monkeypatch):
+    # Every course-level mail is sent from the COURSE org's own `.github`, and no workflow
+    # seeded into a cohort may wire the mail env at all - so an address list on a cohort
+    # would be personal data published to an org with no step that reads it.
+    published: list = []
+    _propagating_run(monkeypatch, published)
+    monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, ADMINS)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "bootstrap_course",
+            "--org",
+            "Cohort-f2026",
+            "--cohort",
+            "--course",
+            "Course-Org",
+            "--propagate-secret",
+        ],
+    )
+
+    assert bc.main() == 0
+    assert all(name != mailer.COURSE_ADMIN_ENV for _org, name, _value in published)
+
+
+def test_an_org_with_no_admin_addresses_still_bootstraps_green(monkeypatch, capsys):
+    published: list = []
+    _propagating_run(monkeypatch, published)
+
+    assert bc.main() == 0
+    assert all(name != mailer.COURSE_ADMIN_ENV for _org, name, _value in published)
+    out = capsys.readouterr().out
+    assert f"[skip] {mailer.COURSE_ADMIN_ENV} not in this run's env" in out
+    assert "through the digest issue only" in out
+
+
+def test_a_failed_admin_address_write_reds_the_bootstrap(monkeypatch):
+    stub_bootstrap(monkeypatch)
+    monkeypatch.setenv("DSL_BOT_TOKEN", "s3cret")
+    monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, ADMINS)
+    monkeypatch.setattr(
+        bc, "set_org_secret", lambda org, name, value: name != mailer.COURSE_ADMIN_ENV
+    )
+    monkeypatch.setattr(
+        "sys.argv", ["bootstrap_course", "--org", "Course-Org", "--propagate-secret"]
+    )
+
+    assert bc.main() == 1
+
+
+def test_no_course_admin_address_ever_reaches_the_log(monkeypatch, capsys):
+    monkeypatch.setenv(mailer.COURSE_ADMIN_ENV, ADMINS)
+    monkeypatch.setattr(bc, "repo_exists", lambda org, r: r == ".github")
+    monkeypatch.setattr(bc, "repo_is_private", lambda org, r: False)
+    monkeypatch.setattr(bc, "gh", lambda *a, **k: (0, ""))
+
+    assert bc.propagate_course_admin_emails("Course-Org") == 0
+    captured = capsys.readouterr()
+    assert "lonny@example.org" not in captured.out + captured.err
+    assert mailer.COURSE_ADMIN_ENV in captured.out

@@ -4,6 +4,8 @@ student on the wrong team's repo. No network.
 
 from __future__ import annotations
 
+import pytest
+
 from dsl_course import teams
 
 
@@ -91,3 +93,60 @@ def test_one_account_typed_two_ways_is_one_member():
         "project,team-x,bob\n"
     )
     assert per["project"]["team-x"] == ["alice", "bob"]
+
+
+# ------------------------------------------------------------- faults a human must fix
+#
+# teams.csv is written by STUDENTS, through a public issue form, so a fault about it may
+# name a row and a column and never a handle or a team name.
+
+
+def _faults(text: str, known: set[str] | None = None) -> list:
+    found = []
+    teams.parse(text, found, known)
+    return found
+
+
+def test_an_unreadable_header_is_recorded_as_well_as_raised():
+    found = []
+    with pytest.raises(RuntimeError, match="semicolon"):
+        teams.parse("assignment;team;github_handle\na1;t;ada\n", found)
+    assert found[0].file == "teams.csv" and found[0].lineno == 1
+
+
+def test_a_row_naming_a_faculty_team_is_a_fault():
+    (fault,) = _faults("assignment,team,github_handle\ncourse,admin,ada\n")
+    assert fault.lineno == 2 and fault.field == "team"
+    assert "FACULTY team" in fault.what
+
+
+def test_one_student_in_two_teams_of_one_assignment_is_a_fault():
+    text = "assignment,team,github_handle\na4,team-x,ada\na4,team-y,ada\n"
+    (fault,) = _faults(text)
+    assert fault.lineno == 3 and "row 2" in fault.what
+    assert "two teams cannot claim one student" in fault.what
+
+
+def test_a_duplicated_row_is_a_fault_rather_than_a_silent_drop():
+    text = "assignment,team,github_handle\na4,team-x,ada\na4,team-x,ada\n"
+    (fault,) = _faults(text)
+    assert fault.lineno == 3 and fault.field == "github_handle"
+
+
+def test_a_handle_that_is_not_on_the_roster_is_a_fault_only_when_the_roster_is_known():
+    text = "assignment,team,github_handle\na4,team-x,stranger\n"
+    assert _faults(text) == []  # roster unreadable: not checked, not accused
+    (fault,) = _faults(text, known={"ada"})
+    assert fault.lineno == 2 and "onboarded roster handle" in fault.what
+
+
+def test_a_teams_fault_never_carries_a_handle_or_a_team_name():
+    text = "assignment,team,github_handle\nproject,wizards,anna-adams\n"
+    (fault,) = _faults(text, known=set())
+    for private in ("anna-adams", "wizards"):
+        assert private not in fault.what and private not in fault.fix()
+
+
+def test_a_clean_teams_csv_has_no_faults():
+    text = "assignment,team,github_handle\na4,team-x,ada\na4,team-x,eve\n"
+    assert _faults(text, known={"ada", "eve"}) == []

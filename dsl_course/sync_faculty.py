@@ -42,10 +42,14 @@ from datetime import date
 from functools import cache
 from typing import NamedTuple
 
+import yaml
+
 from .access import grant_team_repo_access
+from .central import MissingCentralRef, resolve_central_ref
 from .course import (
     CONFIG_REPO,
     COURSE_ADMIN_TEAM,
+    COURSE_CONFIG,
     INSTRUCTORS_TEAM,
     active_today,
     term_tag,
@@ -55,7 +59,8 @@ from .discovery import (
     discover_cohorts,
     discover_content_repos,
 )
-from .gh_contents import load_yaml_config
+from .faults import ConfigFault, Unusable
+from .gh_contents import line_of, load_yaml_config, take_lines
 from .gh_teams import create_team, is_valid_github_username, reconcile_team_members
 from .log import log, log_err, log_ok, log_step
 
@@ -84,29 +89,113 @@ def valid_email(value: object) -> str | None:
     return text if local and domain else None
 
 
-def parse_faculty_from_meta(meta: dict) -> dict[str, list[dict]]:
+def _people_fault(
+    role: str,
+    index: int,
+    field: str,
+    what: str,
+    lines: dict[str, int],
+    file: str,
+    repo: str,
+) -> ConfigFault:
+    """One entry of a people block that the sync cannot use as written.
+
+    The entry is named by its ROLE and its position, not by its handle: `where` is this
+    fault's identity in the digest's state and its heading in the mail, and an entry
+    somebody renames is not a new fault. The line is what sends anybody to it - and
+    `repo`, with `file`, is what makes that line a place: the same block is a cohort's
+    `classroom-config/people.yml` and a course org's `.github/dsl-course.yml`."""
+    return ConfigFault(
+        f"people.{role}[{index}]",
+        what,
+        file=file,
+        field=field,
+        in_repo=repo,
+        lineno=line_of(lines, field),
+    )
+
+
+def parse_faculty_from_meta(
+    meta: dict,
+    faults: list[ConfigFault] | None = None,
+    file: str = COHORT_PEOPLE_PATH,
+    repo: str = CONFIG_REPO,
+) -> dict[str, list[dict]]:
     """Parse an already-loaded config mapping's `people:` block (course org's
     dsl-course.yml, or a cohort's people.yml - same schema) for the roles in ROLE_TEAM.
     Only entries with a `github_handle` grant access; a named entry without one is a
     legitimate display-only card (noted, not an error), anything else is junk (flagged).
 
     An instructor/TA entry with no usable `email:` is an error line naming the role and
-    the handle - the entry still grants access, it just cannot be notified."""
+    the handle - the entry still grants access, it just cannot be notified.
+
+    `faults` collects the same three things for the notifier: an entry with no handle to
+    grant anything to, a handle that cannot be a GitHub username (adding it to a team
+    would INVITE it, so the sync skips it), and a teaching entry no notification can
+    reach. `file` and `repo` name where they are - the same schema is a cohort's
+    `classroom-config/people.yml` and a course org's `.github/dsl-course.yml`, and a fault
+    that cited the wrong one would link a reader at a file that does not exist.
+
+    The line stamps (`take_lines`) are consumed here whether or not anybody asked for
+    faults, so no consumer downstream can ever render the loader's reserved key."""
     people = meta.get("people")
     if not isinstance(people, dict):
         return {}
+    take_lines(people)
     faculty: dict[str, list[dict]] = {}
     for role in ROLE_TEAM:
         entries = []
-        for p in people.get(role) or []:
+        for index, p in enumerate(people.get(role) or []):
+            lines = take_lines(p) if isinstance(p, dict) else {}
             if isinstance(p, dict) and p.get("github_handle"):
                 entries.append(p)
-                if role in TEACHING_ROLES and valid_email(p.get("email")) is None:
+                # Not logged here: `desired_team_members` says it, in the place that
+                # acts on it. This is the same fact on the channel that reaches somebody
+                # who is not reading a cron's log.
+                if faults is not None and not is_valid_github_username(
+                    str(p["github_handle"])
+                ):
+                    faults.append(
+                        _people_fault(
+                            role,
+                            index,
+                            "github_handle",
+                            "this is not a valid GitHub username - the entry is "
+                            "skipped, so it grants no access (adding it to a team "
+                            "would invite an arbitrary account to the org)",
+                            lines,
+                            file,
+                            repo,
+                        )
+                    )
+                # A COHORT's file only. `email:` is what a notification is addressed to,
+                # and only a cohort declares people who are notified through their entry:
+                # a course org's dsl-course.yml holds course_admins (mailed through the
+                # `DSL_COURSE_ADMIN_EMAILS` org secret, never from a public file) and
+                # display-only website cards, neither of which carries one.
+                if (
+                    role in TEACHING_ROLES
+                    and file == COHORT_PEOPLE_PATH
+                    and valid_email(p.get("email")) is None
+                ):
                     log_err(
                         f"  ! {role} entry {p['github_handle']} has no usable `email:` "
                         f"- it is required (access still granted, but this person is "
                         f"not notified): see {COHORT_PEOPLE_PATH}"
                     )
+                    if faults is not None:
+                        faults.append(
+                            _people_fault(
+                                role,
+                                index,
+                                "email",
+                                "no usable `email:` - access is still granted, but no "
+                                "notification reaches this person",
+                                lines,
+                                file,
+                                repo,
+                            )
+                        )
             elif isinstance(p, dict) and p.get("name"):
                 log(
                     f"  ({role} entry '{p['name']}' has no github_handle - "
@@ -114,6 +203,19 @@ def parse_faculty_from_meta(meta: dict) -> dict[str, list[dict]]:
                 )
             else:
                 log_err(f"  ! skipping {role} entry with no github_handle: {p!r}")
+                if faults is not None:
+                    faults.append(
+                        _people_fault(
+                            role,
+                            index,
+                            "github_handle",
+                            "this entry has no `github_handle:` - it grants no access "
+                            "and appears nowhere",
+                            lines,
+                            file,
+                            repo,
+                        )
+                    )
         faculty[role] = entries
     return faculty
 
@@ -276,6 +378,154 @@ def load_cohort_faculty(cohort_org: str) -> dict[str, list[dict]] | None:
     return _cohort_roles_only(parse_faculty_from_meta(meta))
 
 
+def read_cohort_people(
+    cohort_org: str, faults: list[ConfigFault]
+) -> dict[str, list[dict]] | None:
+    """This cohort's people.yml, parsed, with everything a human must fix collected.
+
+    The fault-collecting twin of `load_cohort_faculty`, and deliberately NOT memoised: it
+    reads the file with line stamps (which the cached loader must not hand to the site
+    renderer) and it is asked once per tick.
+
+    A file that is ABSENT or that does not parse is a fault of its own rather than an
+    exception, because both mean the same thing to a cohort - nobody is granted access and
+    nobody is notified - and neither is anything a release run should stop for. A read
+    that FAILED (a rate limit, a token that lost its scope) still raises: "we could not
+    look" must never be reported to faculty as "your file is broken"."""
+    try:
+        meta = load_yaml_config(cohort_org, CONFIG_REPO, COHORT_PEOPLE_PATH, lines=True)
+    except yaml.YAMLError:
+        faults.append(_file_fault("this file is not valid YAML, so none of it is read"))
+        return None
+    except Unusable:
+        # `Unusable` and NOT `RuntimeError`: `load_yaml_config` raises the first for a top
+        # level that is not a mapping, and `get_file_content` under it raises the second
+        # for any read that was not a 404 - a rate limit, a token that lost its scope. Read
+        # as the same thing, a rate limit came back as ONE fault saying people.yml is
+        # broken, which closes every real fault in that issue as cleared and mails the
+        # teaching team about it. That is the line this whole function exists to draw.
+        faults.append(
+            _file_fault("this file is not a YAML mapping, so none of it is read")
+        )
+        return None
+    if meta is None:
+        faults.append(
+            _file_fault(
+                "this file is missing, so the cohort has no declared teaching team"
+            )
+        )
+        return None
+    return _cohort_roles_only(parse_faculty_from_meta(meta, faults))
+
+
+def _file_fault(what: str) -> ConfigFault:
+    """people.yml as a whole, unusable - no entry to name and no line to point at."""
+    return ConfigFault(
+        COHORT_PEOPLE_PATH,
+        f"{what} - no instructor or TA is granted access or notified",
+        file=COHORT_PEOPLE_PATH,
+        field="people",
+        fix_text=(
+            f"restore {COHORT_PEOPLE_PATH} from the template and declare the cohort's "
+            f"instructors and teaching assistants in it"
+        ),
+    )
+
+
+# What to do about a `dsl-course.yml` that is missing, is not YAML, or is not a mapping.
+# The file's own fallback sentence (`faults.FIX`) says "correct the line above", which is
+# the right instruction for the one fault here that HAS a line (`central_ref:`) and no
+# instruction at all for the three that do not - there is no line above, and the citation
+# beside it is a bare filename with nothing to link to.
+_COURSE_FILE_FIX = (
+    f"restore {COURSE_CONFIG} in the course org's `.github` from the template and "
+    f"declare the course's admins and its `central_ref:` in it"
+)
+
+
+def _course_fault(what: str, field: str = "", lineno: int | None = None) -> ConfigFault:
+    """One thing in the COURSE org's identity file the sync cannot use.
+
+    `in_repo` is the course org's public `.github`, which is what puts the citation, the
+    deep link and the blame query on the file somebody has to edit. `where` is the file
+    for a fault about the whole of it and the file plus the key for a fault about one
+    line, so the two can never collide in the digest's state."""
+    return ConfigFault(
+        COURSE_CONFIG,
+        what,
+        file=COURSE_CONFIG,
+        field=field,
+        in_repo=".github",
+        lineno=lineno,
+        fix_text="" if lineno else _COURSE_FILE_FIX,
+    )
+
+
+def read_course_config(
+    course_org: str, faults: list[ConfigFault]
+) -> dict[str, list[dict]] | None:
+    """The COURSE org's `.github/dsl-course.yml`, parsed, with everything a human must fix
+    collected. None when the file could not be used at all.
+
+    The fault-collecting twin of `load_faculty`, and deliberately not memoised for the
+    same reason `read_cohort_people` is not: it reads the file with line stamps and it is
+    asked once per tick.
+
+    Three things in this file stop the whole course being reconciled, and all three come
+    back as faults rather than as exceptions - an absent or unparseable file, an admin
+    handle no team can be given, and a `central_ref:` no workflow can be pinned to. A read
+    that FAILED still raises, because "we could not look" must never be reported to a
+    course admin as "your file is broken"."""
+    # `load_yaml_config` draws all three lines this function needs, and says which file
+    # and what it got as it does: None for an absent file, `yaml.YAMLError` for one that
+    # does not parse, `Unusable` for a top level that is not a mapping - and a read that
+    # FAILED still comes out as a bare RuntimeError, which is the distinction this whole
+    # function is about. `read_cohort_people` reads its file exactly this way.
+    try:
+        meta = load_yaml_config(course_org, ".github", COURSE_CONFIG, lines=True)
+    except yaml.YAMLError:
+        faults.append(
+            _course_fault("this file is not valid YAML, so none of it is read")
+        )
+        return None
+    except Unusable:
+        faults.append(
+            _course_fault("this file is not a YAML mapping, so none of it is read")
+        )
+        return None
+    if meta is None:
+        faults.append(
+            _course_fault(
+                "this file is missing, so the course declares no admins and no tier"
+            )
+        )
+        return None
+    # Taken before the people block is parsed, so the top-level keys' lines are in hand
+    # for `central_ref:` - and so the loader's reserved key cannot survive into anything
+    # that renders this mapping.
+    lines = take_lines(meta)
+    faculty = parse_faculty_from_meta(meta, faults, file=COURSE_CONFIG, repo=".github")
+    try:
+        resolve_central_ref(
+            meta.get("central_ref"), source=f"{course_org}/.github/{COURSE_CONFIG}"
+        )
+    except MissingCentralRef:
+        # Not the exception's own message: it is written for a run log and names the file
+        # again, which every surface here has already done. What a reader needs is what it
+        # COSTS - `pin_central_ref` refuses the render, so the org keeps whatever workflows
+        # it last had and takes no fix or improvement until this line is corrected.
+        faults.append(
+            _course_fault(
+                "`central_ref:` is not `main`, `release` or a full 40-character commit "
+                "SHA - every workflow this course seeds stays at its previous rendering "
+                "until it is corrected",
+                field="central_ref",
+                lineno=line_of(lines, "central_ref"),
+            )
+        )
+    return faculty
+
+
 def sync_course_admins(
     course_org: str, cohorts: list[str], dry_run: bool = False
 ) -> int:
@@ -316,13 +566,19 @@ def sync_cohort_instructors(
     faculty = load_cohort_faculty(cohort_org)
     if faculty is None:
         # ABSENT people.yml: reconciling an empty desired set with prune=True would strip
-        # this cohort's instructors team (and its course-org tag team). Refuse to prune.
+        # this cohort's instructors team (and its course-org tag team). Refuse to prune -
+        # and stay GREEN, because a file faculty have to write is a CONTENT fault. It is
+        # already on the people.yml digest issue in this cohort's classroom-config
+        # (`read_cohort_people`), with a mail beside it to the people who can act on it; a
+        # red X here opens "Sync membership is failing" in the COURSE org and mails a
+        # maintainer who cannot write another org's teaching team. A read that FAILED
+        # still raises out of the loader and still reds the run.
         log_err(
             f"cohort people config {cohort_org}/{CONFIG_REPO}/"
             f"{COHORT_PEOPLE_PATH} is absent - refusing to reconcile instructors (an "
             f"absent config would prune every instructor); skipping"
         )
-        return 1
+        return 0
     desired = _desired_for(faculty, INSTRUCTORS_TEAM, date.today().isoformat())
     errors = reconcile_team_members(
         cohort_org, INSTRUCTORS_TEAM, desired, prune=True, dry_run=dry_run

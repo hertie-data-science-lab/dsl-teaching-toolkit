@@ -10,7 +10,9 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from dsl_course import roster
+import pytest
+
+from dsl_course import faults, roster
 from tests.conftest import ROSTER_HEADER
 
 HEADER = ROSTER_HEADER
@@ -92,8 +94,6 @@ def test_a_semicolon_delimited_roster_is_refused_not_read_as_empty():
     # German-locale Excel saves `;`-CSV. DictReader then sees one header column and every
     # field reads "" - no error, an empty roster, and enrol_codes once wrote it back mangled
     # with exit 0. A header that cannot name the required columns is a hard error.
-    import pytest
-
     text = "hertie_email;name;github_handle;github_id;enrol_code;role\na@x;A;ada;1;;\n"
     with pytest.raises(RuntimeError, match="semicolon"):
         roster.parse(text)
@@ -114,3 +114,97 @@ def test_the_roster_columns_run_instructor_filled_then_system_filled():
         "enrol_code",
         "code_sent_at",
     )
+
+
+# ------------------------------------------------------------- faults a human must fix
+#
+# The roster's faults reach faculty through a digest issue and an email, and every cell of
+# this file is personal data - a name, an address, a handle, an enrolment code. So the two
+# properties asserted below are that the fault is FOUND, and that what it says is a row
+# number and a column name and nothing else.
+
+
+def _faults(text: str) -> list:
+    found = []
+    roster.parse(text, found)
+    return found
+
+
+def test_an_unreadable_header_is_recorded_as_well_as_raised():
+    text = "hertie_email;name;github_handle\na@x;A;ada\n"
+    found = []
+    with pytest.raises(RuntimeError, match="semicolon"):
+        roster.parse(text, found)
+    (fault,) = found
+    assert fault.file == "students.csv"
+    assert fault.lineno == 1 and fault.where == "header"
+    assert "hertie_email" in fault.field and "github_handle" in fault.field
+    assert fault.fix() == faults.CSV_HEADER_FIX
+
+
+def test_the_header_fault_never_names_what_it_found():
+    """A students.csv whose header row was deleted has a NAME and an ADDRESS where the
+    column names should be, and this text goes to an email and an issue."""
+    text = "ada@uni.edu,Ada Lovelace,ada-l\n"
+    found = []
+    with pytest.raises(RuntimeError):
+        roster.parse(text, found)
+    assert "ada@uni.edu" not in found[0].what and "Ada" not in found[0].what
+
+
+def test_an_unrecognised_role_is_a_fault_on_its_own_row():
+    (fault,) = _faults(f"{HEADER}\nada@uni.edu,Ada,audit,ada-l,42,,\n")
+    assert fault.where == "row 2" and fault.field == "role"
+    assert fault.lineno == 2
+    assert fault.fix() == "fix row 2 of students.csv"
+    assert "audit" not in fault.what.replace("auditor", "")
+
+
+def test_a_duplicate_handle_and_a_duplicate_address_are_both_found():
+    text = (
+        f"{HEADER}\n"
+        "ada@uni.edu,Ada,,ada-l,42,,\n"
+        "eve@uni.edu,Eve,,ADA-L,43,,\n"
+        "ada@uni.edu,Ada Again,,zoe-z,44,,\n"
+    )
+    found = _faults(text)
+    assert [(f.lineno, f.field) for f in found] == [
+        (3, "github_handle"),
+        (4, "hertie_email"),
+    ]
+    assert all("row 2" in f.what for f in found)
+
+
+def test_a_row_fault_never_carries_a_cell():
+    text = f"{HEADER}\nada@uni.edu,Ada Lovelace,audit,ada-l,42,dsl-secret,\n"
+    (fault,) = _faults(text)
+    for private in ("ada@uni.edu", "Ada Lovelace", "ada-l", "dsl-secret"):
+        assert private not in fault.what
+        assert private not in fault.fix()
+
+
+def test_a_clean_roster_has_no_faults():
+    assert _faults(f"{HEADER}\nada@uni.edu,Ada,,ada-l,42,,\n") == []
+
+
+def test_a_caller_that_asks_for_nothing_gets_exactly_what_it_always_got():
+    (student,) = roster.parse(f"{HEADER}\nada@uni.edu,Ada,audit,ada-l,42,,\n")
+    assert student.role == roster.ROLE_ENROLLED
+
+
+def test_an_absent_roster_is_recorded_as_a_fault_not_just_logged(monkeypatch):
+    # `load` returning None used to be a fact only the caller knew, and the caller either
+    # reddened its run or shrugged. The digest that reports students.csv reads the fault
+    # list, and an EMPTY one is how it says "this file is fine" - so an absent roster with
+    # nothing recorded closes the issue on a cohort that enrols nobody.
+    monkeypatch.setattr(roster, "_roster_text", lambda org: None)
+    found: list = []
+    assert roster.load("Cohort-f2026", found) is None
+    (fault,) = found
+    assert fault.file == roster.ROSTER_PATH and fault.lineno is None
+    assert "missing" in fault.what and "no student is enrolled" in fault.what
+
+
+def test_a_caller_that_wants_no_faults_still_just_gets_none(monkeypatch):
+    monkeypatch.setattr(roster, "_roster_text", lambda org: None)
+    assert roster.load("Cohort-f2026") is None

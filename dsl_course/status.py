@@ -27,13 +27,23 @@ from datetime import date
 
 import yaml
 
-from . import grades, mailer, roster, schedule, sync_faculty, teams
+from . import (
+    config_digest,
+    grades,
+    mailer,
+    roster,
+    schedule,
+    source_digest,
+    sync_faculty,
+    teams,
+)
 from .central import CENTRAL_REF, MissingCentralRef, resolve_central_ref
 from .discovery import org_meta
+from .issues import open_titles
 from .log import log_err
 from .repos import default_branch
 
-ITEMS = ("B1", "B6", "B7", "B8", "C2", "C3", "C4", "C5", "C6", "C7")
+ITEMS = ("B1", "B6", "B7", "B8", "C2", "C3", "C4", "C5", "C6", "C7", "C8", "C9")
 # Rows whose input is marked `[required]` in docs/DEPLOYMENT-CHECKLIST.md;
 # everything else is optional
 # (synthesised/skipped when absent), so an absent optional item is "optional", not
@@ -73,6 +83,35 @@ def _row(
         "status": status,
         "detail": detail,
         "edit_url": edit_url or _edit_url(org, repo, path, branch, present),
+    }
+
+
+# The verdict for a row that is not about an input at all but about a fault the toolkit is
+# already reporting. Neither "missing" (nothing is unset) nor "optional" (nobody chose
+# this) says it, and a standing digest issue read as either would be a table calling a
+# cohort healthy while its roster enrols nobody.
+ATTENTION = "attention"
+
+
+def _fault_row(
+    label: str, org: str, repo: str, standing: list[str], detail: str
+) -> dict:
+    """One row about the fault issues a cohort has open, rather than about a file.
+
+    The link is the repo's ISSUE LIST, in both states: with something standing it is where
+    the reader is going anyway, and with nothing standing there is no file to point at -
+    these rows are about several files at once. Nothing here names a fault's contents;
+    this table is appended to the step summary of a PUBLIC repo and the issue titles name
+    files, never people."""
+    return {
+        "label": label,
+        "org": org,
+        "repo": repo,
+        "path": "issues",
+        "status": ATTENTION if standing else "ok",
+        "detail": detail,
+        "edit_url": f"https://github.com/{org}/{repo}/issues",
+        "link_text": "open" if standing else "issues",
     }
 
 
@@ -125,7 +164,12 @@ def _transport_detail() -> tuple[bool, str]:
 def render_markdown(course_org: str, cohort_org: str, data: dict[str, dict]) -> str:
     """One markdown table, in `docs/DEPLOYMENT-CHECKLIST.md`'s B/C order, each
     row linking straight to the file to fix if something's missing."""
-    icon = {"ok": "OK", "missing": "MISSING", "optional": "not set (optional)"}
+    icon = {
+        "ok": "OK",
+        "missing": "MISSING",
+        "optional": "not set (optional)",
+        ATTENTION: "ATTENTION",
+    }
     lines = [
         f"## Status: {cohort_org} (course: {course_org})",
         "",
@@ -134,7 +178,7 @@ def render_markdown(course_org: str, cohort_org: str, data: dict[str, dict]) -> 
     ]
     for item_id in ITEMS:
         row = data[item_id]
-        link_text = "edit" if row["status"] == "ok" else "add"
+        link_text = row.get("link_text") or ("edit" if row["status"] == "ok" else "add")
         lines.append(
             f"| {row['label']} | {icon[row['status']]} | {row['detail'] or '-'} "
             f"| [{link_text}]({row['edit_url']}) |"
@@ -258,10 +302,10 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
     sheets = grades.sheet_slugs(cohort_org)
     data["C3"] = _row(
         "C3",
-        "Grades",
+        f"Grading sheets ({grades.SHEETS_DIR}/)",
         cohort_org,
         grades.CONFIG_REPO,
-        grades.SHEETS_DIR,
+        f"{grades.SHEETS_DIR}/",
         cohort_branch,
         bool(sheets),
         f"{len(sheets)} assignment(s)" if sheets else "",
@@ -349,6 +393,38 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
             for p in (f"{n_instructors} active" if n_instructors else "", no_email)
             if p
         ),
+    )
+
+    # One listing of classroom-config's open issues, read by both fault rows below. The
+    # digests are what the unattended runs have ALREADY told somebody about; a status
+    # table that did not show them would be the one place a reader looks that disagrees
+    # with the mail in their inbox. It raises rather than guessing, like every other read
+    # here: "we could not list" is not "nothing is open".
+    standing = open_titles(f"{cohort_org}/{schedule.CONFIG_REPO}")
+
+    sources_open = [source_digest.TITLE] if source_digest.TITLE in standing else []
+    data["C8"] = _fault_row(
+        "Source faults (release plan)",
+        cohort_org,
+        schedule.CONFIG_REPO,
+        sources_open,
+        "the release plan cites sources nobody has staged"
+        if sources_open
+        else "no source-fault issue open",
+    )
+
+    # Every hand-edited file in this cohort EXCEPT schedule.yml, whose faults are C8's.
+    # The FILES, not a count of faults: a title names the file to go and fix, which is
+    # what a reader does next, and the issue itself lists the rows.
+    broken = [d.file for d in config_digest.COHORT_DIGESTS if d.title in standing]
+    data["C9"] = _fault_row(
+        "Config faults (hand-edited files)",
+        cohort_org,
+        schedule.CONFIG_REPO,
+        broken,
+        f"config faults: {len(broken)} open - {', '.join(broken)}"
+        if broken
+        else "config faults: 0 open",
     )
 
     return data

@@ -188,8 +188,20 @@ def revoke_offboarded_access(
 
 def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
     students = roster.load(cohort_org)
-    if students is None:  # missing/unreadable roster - load() already logged why
-        return 1
+    if students is None:
+        # An ABSENT students.csv, which `load` has already logged. A file faculty have to
+        # write is a CONTENT fault: it is recorded on the roster's own digest issue and
+        # mailed to whoever should have pushed it, and reddening this run on top of that
+        # only tells a maintainer that something is wrong in an org they cannot fix it in.
+        # Nothing is reconciled - an empty roster is not the same as no roster, and acting
+        # on one would revoke every student's access. A read that FAILED never reaches
+        # here: `get_file_content` returns None only for a 404 and raises otherwise, so an
+        # expired token or a rate limit still reds the run.
+        log_err(
+            f"no roster to reconcile in {cohort_org} - skipping (reported on the "
+            f"students.csv digest issue in {roster.CONFIG_REPO})"
+        )
+        return 0
     # An empty roster (header only - a freshly bootstrapped cohort) is a valid state,
     # not an error: reconcile both role teams to empty like any other edit.
     wanted = desired_members(students)

@@ -62,6 +62,7 @@ Usage (the workflow's two jobs are the first two lines; --now is for testing):
     python3 -m dsl_course.scheduler --course-org COURSE --all-cohorts --skip-autograde
     python3 -m dsl_course.scheduler --course-org COURSE --cohort-org COHORT --autograde-only
     python3 -m dsl_course.scheduler --course-org COURSE --list-cohorts
+    python3 -m dsl_course.scheduler --course-org COURSE --check-course-config
     python3 -m dsl_course.scheduler --course-org COURSE --all-cohorts
     python3 -m dsl_course.scheduler --course-org COURSE --cohort-org COHORT --dry-run
     python3 -m dsl_course.scheduler --course-org COURSE --cohort-org COHORT --now 2026-09-15T14:00
@@ -73,9 +74,22 @@ import argparse
 import contextlib
 import json
 import sys
-from datetime import datetime, timezone
+from collections.abc import Callable
+from datetime import date, datetime, timezone
 
-from . import cadence, notify, schedule, site, source_digest
+from . import (
+    cadence,
+    config_digest,
+    discovery,
+    notify,
+    roster,
+    schedule,
+    site,
+    source_digest,
+    sync_faculty,
+    sync_teams,
+    teams,
+)
 from .assign import provision_all, solution_released
 from .collect import (
     SnapshotResult,
@@ -86,8 +100,16 @@ from .collect import (
     snapshot_path,
     sync_sheet,
 )
+from .course import COURSE_ADMIN_TEAM
 from .deploy import deploy_many
-from .grades import cutoff_at, load_grading_spec, sheet_path
+from .faults import Unusable
+from .grades import (
+    cohort_sheet_faults,
+    cutoff_at,
+    grading_config_faults,
+    load_grading_spec,
+    sheet_path,
+)
 from .log import log, log_err, log_ok, log_step
 from .schedule import Release
 from .schedule_plan import deploy_dest
@@ -472,15 +494,27 @@ def _preflight_sources(
     faculty can write. The signature keeps its int so the caller's `errors +=` reads the
     same as every other phase."""
     try:
-        faults = schedule.source_faults(sched, course_org)
+        sources = schedule.source_faults(sched, course_org)
     except Exception as exc:
         log_err(f"could not check {cohort_org}'s sources ({type(exc).__name__}): {exc}")
-        return 0
-    worst = schedule.worst_severity(faults, now)
-    if faults:
+        sources = []
+    # ONE issue for schedule.yml, carrying both of the ways it goes wrong: a source that
+    # is not staged yet (counting down to its release) and an entry the parser could not
+    # read at all (already out of the plan). A reader asked to fix this file finds
+    # everything wrong with it in one place, and each fault is still filed - and notified -
+    # on its own clock (`ConfigFault.fires`).
+    # NOT short-circuited when empty: an empty list is what CLOSES the issue, and the
+    # tick after the last fault is fixed is the one that has to say so.
+    faults = sources + list(sched.faults)
+    if sources:
         log_step(
-            f"{len(faults)} source(s) in {cohort_org}'s plan not staged in "
-            f"{course_org} (worst: {worst})"
+            f"{len(sources)} source(s) in {cohort_org}'s plan not staged in "
+            f"{course_org} (worst: {schedule.worst_severity(sources, now)})"
+        )
+    if sched.faults:
+        log_step(
+            f"{len(sched.faults)} entr(y/ies) in {cohort_org}'s "
+            f"{schedule.SCHEDULE_PATH} the scheduler cannot read"
         )
     # Local, because everything downstream speaks about time to a human: the deadline
     # faculty wrote, and the overnight window where a notification is held rather than
@@ -528,15 +562,261 @@ def _preflight_sources(
         unsent = notify.notify_source_transitions(
             cohort_org, course_org, digest, local, routing, dry_run=dry_run
         )
+        # The same issue's other half, in its own letter: an entry nobody can read names
+        # the file and what it costs, not a deadline it does not have.
+        unreadable = notify.notify_config_faults(
+            source_digest.SCHEDULE,
+            cohort_org,
+            course_org,
+            digest,
+            local,
+            routing,
+            dry_run=dry_run,
+        )
+        unsent = notify.Unsent(
+            unsent.addressees + unreadable.addressees, unsent.keys + unreadable.keys
+        )
         # A mail that did not go out is un-RECORDED rather than lost. The digest has
         # already written the new rung, so without this the notification was owed once,
         # failed once and was never owed again - and the log line saying so was the only
         # trace. Putting the previous rung back makes the next tick recompute the very
         # same crossing and say it once (`source_digest.hold`).
         if unsent.keys and not dry_run:
-            source_digest.hold(cohort_org, {k: digest.was.get(k) for k in unsent.keys})
+            source_digest.hold(
+                cohort_org,
+                {k: digest.was.get(k) for k in unsent.keys},
+                digest.reminder_was,
+            )
     except Exception as exc:
         log_err(f"could not mail {cohort_org}'s source faults: {exc}")
+    return 0
+
+
+def _config_faults(course_org: str, cohort_org: str, sched: schedule.Schedule) -> dict:
+    """Every hand-edited file in this cohort's classroom-config EXCEPT schedule.yml, and
+    what is wrong with each. `{digest: faults}`, and a file left OUT of it is one this tick
+    could not read.
+
+    schedule.yml is not here because it is already parsed - the plan this tick is running
+    IS the parse - and because everything wrong with it belongs in the one issue the
+    source pre-flight keeps (see `_preflight_sources`).
+
+    Absent from the map is not the same as no faults: syncing a digest with an empty list
+    closes its issue and tells the cohort the file is fine, and "we could not look" is not
+    that. A rate limit on students.csv must not report the roster as repaired - so a read
+    that failed drops that file from this tick and leaves its issue exactly as it was.
+
+    A content fault is not a read failure, though, and the roster and teams readers RAISE
+    on an unreadable header (every consumer depends on that). Recording the fault first is
+    what lets this tell the two apart: faults in hand means the file was read and is
+    broken."""
+    out: dict = {}
+
+    def collect(spec, load) -> None:
+        found: list = []
+        try:
+            load(found)
+        except Exception as exc:
+            if not found:
+                log_err(
+                    f"could not read {cohort_org}'s {spec.file} "
+                    f"({type(exc).__name__}): {exc}"
+                )
+                return
+        out[spec] = found
+
+    collect(
+        config_digest.PEOPLE,
+        lambda found: sync_faculty.read_cohort_people(cohort_org, found),
+    )
+    students: list[roster.Student] | None = None
+
+    def read_roster(found: list) -> None:
+        nonlocal students
+        students = roster.load(cohort_org, found)
+
+    collect(config_digest.ROSTER, read_roster)
+    # The roster is the allowlist teams.csv is vetted against, and only where it was
+    # actually read: an empty one would report every member as a stranger. `None` is a
+    # roster that is ABSENT as well as one whose read failed - a cohort with no
+    # students.csv already has that fault in its own digest, and vetting against the
+    # empty set it implies would file one more teams.csv fault per row on top of it.
+    known = sync_teams.known_handles(students) if students is not None else None
+    collect(config_digest.TEAMS, lambda found: teams.load(cohort_org, found, known))
+    # The grading sheets, on this tick and no other: they have no push fast path, because a
+    # sheet is edited all day while somebody marks and a mail per save would be a mail
+    # about a file still being typed into.
+    collect(
+        config_digest.GRADING_SHEETS,
+        lambda found: cohort_sheet_faults(course_org, cohort_org, sched, found),
+    )
+    # The one file here that is not in this cohort's classroom-config at all: the
+    # assignment's own definition, in the course org. Its faults keep the SOURCE clock -
+    # they bite when the assignment is graded - so the engine files them under the rungs
+    # and holds them overnight without knowing anything about this file in particular.
+    collect(
+        config_digest.GRADING_CONFIG,
+        lambda found: grading_config_faults(course_org, cohort_org, sched, found),
+    )
+    return out
+
+
+def _sync_config_digest(
+    spec: config_digest.Digest,
+    course_org: str,
+    cohort_org: str,
+    faults: list,
+    local: datetime,
+    dry_run: bool,
+    route: Callable[[], notify.Routing] | None = None,
+) -> None:
+    """One file's digest issue and the mail beside it. Swallows everything.
+
+    The same shape as `_preflight_sources`, and for the same reason: a notification that
+    could not be delivered must not take a release cron down with it, and one file's
+    unreadable digest must not stop the next file's from being written.
+
+    `route` is who to tell, for a digest that answers that differently: the COURSE-level
+    one is addressed to the course admins out of an org secret rather than to a cohort's
+    teaching team out of its people.yml. Everything else about the two is identical, which
+    is why it is one function and one parameter."""
+    routing = notify.Routing()
+    ask = route or (lambda: notify.route(cohort_org, course_org, faults, local))
+
+    def whom() -> list[str]:
+        nonlocal routing
+        try:
+            routing = ask()
+        except Exception as exc:
+            log_err(f"could not work out who to tell about {spec.file}: {exc}")
+        return routing.logins
+
+    try:
+        digest = config_digest.sync(
+            spec,
+            cohort_org,
+            course_org,
+            faults,
+            local,
+            dry_run=dry_run,
+            resolve_mention=whom,
+        )
+    except Exception as exc:
+        log_err(f"could not update {cohort_org}'s {spec.file} digest: {exc}")
+        return
+    if digest.errors:
+        log_step(f"{cohort_org}'s {spec.file} digest: {digest.errors} error(s)")
+    try:
+        unsent = notify.notify_config_faults(
+            spec, cohort_org, course_org, digest, local, routing, dry_run=dry_run
+        )
+        # A mail that did not go out is un-RECORDED rather than lost - see
+        # `config_digest.hold`.
+        if unsent.keys and not dry_run:
+            config_digest.hold(
+                spec,
+                cohort_org,
+                {k: digest.was.get(k) for k in unsent.keys},
+                digest.reminder_was,
+            )
+    except Exception as exc:
+        log_err(f"could not mail {cohort_org}'s {spec.file} faults: {exc}")
+
+
+def _preflight_configs(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule,
+    now: datetime,
+    dry_run: bool,
+) -> int:
+    """Check every hand-edited file in this cohort's classroom-config and keep one digest
+    issue per file in step. Always returns 0.
+
+    The hourly floor under the push fast path. An edit that leaves students.csv unreadable
+    fires the dispatcher and is mailed within the minute; this is what catches the one
+    that was pushed before any of this existed, the one whose dispatch failed, and the
+    people.yml entry whose `end:` date lapsed while nobody was pushing anything.
+
+    Nothing here fails the run, at any rung, for the reason `_preflight_sources` does not:
+    a file faculty have to fix is a CONTENT fault, and the exit code belongs to the run
+    itself. The signature keeps its int so the caller's `errors +=` reads the same as
+    every other phase."""
+    local = schedule.in_cohort_zone(sched, now)
+    for spec, faults in _config_faults(course_org, cohort_org, sched).items():
+        if faults:
+            log_step(
+                f"{len(faults)} entr(y/ies) in {cohort_org}/{spec.file} the toolkit "
+                f"cannot use"
+            )
+        _sync_config_digest(spec, course_org, cohort_org, faults, local, dry_run)
+    return 0
+
+
+def _course_faults(course_org: str) -> tuple[list | None, set[str]]:
+    """`(what is wrong with the COURSE org's own two hand-edited files, the admin handles
+    it declares)`, or `(None, ...)` when either file could not be READ.
+
+    None is not "no faults", for the reason `_config_faults` gives: syncing the digest with
+    an empty list closes its issue and tells the course its config is fine, and a rate
+    limit on dsl-course.yml is not that. A file that is MISSING or MALFORMED is a fault and
+    comes back in the list - both readers draw that line themselves.
+
+    The handles ride along because the degraded-mode log line counts them (see
+    `notify.route_course`), and this tick has already parsed them - a second read to print
+    a number would be an API call spent on a log line."""
+    faults: list = []
+    admins: set[str] = set()
+    try:
+        faculty = sync_faculty.read_course_config(course_org, faults)
+        if faculty:
+            admins = sync_faculty.desired_team_members(
+                faculty, date.today().isoformat()
+            ).get(COURSE_ADMIN_TEAM, set())
+        discovery.read_cohort_registry(course_org, faults)
+    except Exception as exc:
+        log_err(
+            f"could not read {course_org}'s course config ({type(exc).__name__}): {exc}"
+        )
+        return None, admins
+    return faults, admins
+
+
+def _preflight_course(course_org: str, now: datetime, dry_run: bool) -> int:
+    """Check the COURSE org's own hand-edited config and keep its digest issue in step.
+    Always returns 0.
+
+    ONCE PER RUN, not once per cohort: `dsl-course.yml` and the cohort registry belong to
+    the course, and a course admin asked to fix one of them wants one issue, not one per
+    cohort saying the same thing.
+
+    Nothing here fails the run, for the reason `_preflight_configs` does not: a file
+    faculty have to fix is a CONTENT fault and the exit code belongs to the run itself.
+    Nor does the cohort listing that follows - a registry nobody can parse lists no
+    cohorts and releases nothing (`_registered_cohorts`) - which is why this runs BEFORE
+    that listing: reported here or not at all.
+
+    `now` is UTC and stays UTC. The cohort zone that dates a cohort's notifications is a
+    cohort's own `schedule.yml` setting, and a course has no single one; every fault here
+    is immediate, so nothing is held for the morning and no deadline is being counted
+    down."""
+    faults, admins = _course_faults(course_org)
+    if faults is None:
+        return 0
+    if faults:
+        log_step(
+            f"{len(faults)} entr(y/ies) in {course_org}'s own config the toolkit "
+            f"cannot use"
+        )
+    _sync_config_digest(
+        config_digest.COURSE,
+        course_org,
+        course_org,
+        faults,
+        now,
+        dry_run,
+        route=lambda: notify.route_course(course_org, faults, now, admins),
+    )
     return 0
 
 
@@ -656,6 +936,11 @@ def _release_phase(
     # needs catching. Never fatal to the run, at any rung: the fault is faculty's to fix
     # and the digest issue is how they hear about it (see _preflight_sources).
     errors += _preflight_sources(course_org, cohort_org, sched, now, dry_run)
+    # The same treatment for every other file faculty edit by hand: a roster nobody can be
+    # enrolled from, a people.yml entry that grants nothing, a teams.csv row that will not
+    # materialise. Each has its own digest issue and its own mail, and none of them can
+    # red this run either.
+    errors += _preflight_configs(course_org, cohort_org, sched, now, dry_run)
 
     if dry_run:
         for release in due:
@@ -692,13 +977,15 @@ def run(
     `verdict` is the cadence reading of the drivers, taken once per course by `main`. None
     (the default) means this invocation reports no lateness - see `main` for which ones."""
     sched = schedule.load(cohort_org)
-    # A plan that could not be read AS A PLAN is not an empty one. `load` deliberately
-    # falls back to an empty Schedule so one cohort's typo cannot freeze the cron - but
-    # while it stands, nothing is released, handed out, snapshotted or graded for this
-    # cohort, and a GREEN tick is exactly how that goes unnoticed. `load` has already
-    # logged what is wrong and where; this is what makes anyone look.
-    # (Individually DROPPED entries stay advisory, as before - the rest of the plan runs.)
-    errors = int(sched.unparseable)
+    # A plan that could not be read AS A PLAN is not an empty one: while it stands, nothing
+    # is released, handed out, snapshotted or graded for this cohort. `load` has logged what
+    # is wrong and where, and filed it as a fault on schedule.yml - which is what reaches
+    # the person who can fix it, through the digest issue and the mail beside it
+    # (`_preflight_sources`). It does NOT red this tick: the file is faculty's to fix, and
+    # spending the exit code on it meant up to eight red runs an hour, and a `Scheduled
+    # release is failing` issue every six, mailing the maintainer about a typo in a cohort's
+    # plan. (Individually DROPPED entries were always advisory - the rest of the plan runs.)
+    errors = 0
     if release:
         errors += _release_phase(course_org, cohort_org, sched, now, dry_run, verdict)
     if autograde:
@@ -708,9 +995,9 @@ def run(
         )
 
     if dry_run:
-        # A preview reports only what it could not READ: nothing was written, so the
-        # errors above are the state of the org, not of this run.
-        return int(sched.unparseable)
+        # A preview writes nothing, so it has nothing of its own to report: the errors
+        # above are the state of the org, not of this run.
+        return 0
     if errors:
         log_err(f"{errors} action(s) failed")
         return 1
@@ -731,9 +1018,18 @@ def _parse_now(raw: str | None) -> datetime:
 def _registered_cohorts(course_org: str) -> list[str] | None:
     """The course org's registered cohorts, or None once it has said why it could not read
     them. The listing is one API read at the very top of every tick; a fault there must
-    end the run with an `[err]` line a faculty member can act on, not a raw traceback."""
+    end the run with an `[err]` line a faculty member can act on, not a raw traceback.
+
+    A registry that is MALFORMED is not a failed read: it is a hand-edited file a course
+    admin has to fix, already reported to them by `_preflight_course` (which runs first,
+    for exactly this reason), so it lists no cohorts and leaves the tick green. Anything
+    else - a rate limit, a token that lost its scope - is a read that failed, and the run
+    is owed its red X for it."""
     try:
         return discover_cohorts(course_org)
+    except Unusable as exc:
+        log_err(f"{exc} - nothing to release until it is fixed; this run stays green.")
+        return []
     except Exception as exc:
         log_err(f"could not list cohorts for {course_org}: {exc}")
         return None
@@ -768,6 +1064,13 @@ def main() -> int:
         help="Print the course org's registered cohorts as a JSON list, and exit.",
     )
     parser.add_argument(
+        "--check-course-config",
+        action="store_true",
+        help="Pre-flight the COURSE org's own dsl-course.yml and cohort registry, keep "
+        "its digest issue in step, and exit 0. What Sync membership runs on a push to "
+        "either file - the fast path under this cron's own hourly floor.",
+    )
+    parser.add_argument(
         "--now", default=None, help="Override 'now' (ISO date/datetime) - for testing."
     )
     parser.add_argument("--dry-run", action="store_true")
@@ -779,6 +1082,11 @@ def main() -> int:
             "--skip-autograde and --autograde-only ask for opposite halves of a run."
         )
         return 1
+
+    if args.check_course_config:
+        # Always 0: a config faculty have to fix is a CONTENT fault, and Sync membership -
+        # which is what runs this - must not go red for one (see FINAL DECISIONS).
+        return _preflight_course(args.course_org, now, args.dry_run)
 
     if args.list_cohorts:
         # The grading job's matrix, and the ONLY thing that may reach stdout: the workflow
@@ -801,6 +1109,13 @@ def main() -> int:
     }
 
     if args.all_cohorts:
+        # The COURSE org's own config FIRST, and before the listing below rather than
+        # beside the cohorts: a registry nobody can parse is one of the faults this
+        # reports, and it is also what makes that listing raise - so reported here, or
+        # never. Once per tick, on a real release pass only; the grading matrix's
+        # per-cohort legs and a laptop's single-cohort run are not the course's tick.
+        if phases["release"]:
+            _preflight_course(args.course_org, now, args.dry_run)
         cohorts = _registered_cohorts(args.course_org)
         if cohorts is None:
             # A listing that could not be READ is not "no cohorts": go red so the failure

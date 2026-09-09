@@ -16,7 +16,8 @@ from zoneinfo import ZoneInfo
 import pytest
 from conftest import source_fault
 
-from dsl_course import course, schedule
+from dsl_course import course, gh_contents, schedule
+from dsl_course import faults as faults_module
 from dsl_course.schedule import (
     AssignmentEntry,
     Deploy,
@@ -762,8 +763,8 @@ def test_unparseable_schedule_loads_as_empty_and_says_so_loudly(monkeypatch, cap
     sched = S.load("Cohort-f2026")
 
     # same shape a missing schedule.yml yields - nothing scheduled, nothing raised - but
-    # flagged, so the hourly scheduler can fail its run instead of ticking green for ever
-    assert sched == Schedule(unparseable=True)
+    # flagged, and carrying the one fault that says so (see the test below)
+    assert sched.unparseable and not sched.releases and not sched.assignments
     err = capsys.readouterr().err
     # self-diagnosing: which cohort, which file, the parser's own line/column, what to do
     assert "Cohort-f2026/classroom-config/schedule.yml is NOT valid YAML" in err
@@ -804,8 +805,36 @@ def test_a_non_mapping_schedule_still_loads_as_empty(monkeypatch, capsys):
     monkeypatch.setattr(
         S, "get_file_content", lambda org, repo, path: "- just\n- a list\n"
     )
-    assert S.load("Cohort-f2026") == Schedule(unparseable=True)
+    sched = S.load("Cohort-f2026")
+    assert sched.unparseable and not sched.releases
+    (fault,) = sched.faults
+    assert fault.what.startswith("this file parses as list, not a mapping")
+    assert fault.lineno is None  # nothing in the file was read: no line to cite
     assert "not a mapping" in capsys.readouterr().err
+
+
+def test_an_unparseable_plan_is_one_fault_not_an_empty_plan(monkeypatch):
+    # A file nobody can parse is the commonest way faculty break this file, and the
+    # costliest: every entry is out of the plan. It used to reach nobody through the
+    # notification engine - the digest issue saw an empty fault list and CLOSED, while
+    # the hourly cron went red at a bot account. One immediate fault on the file itself,
+    # citing the line the parser stopped on.
+    from dsl_course import schedule as S
+
+    monkeypatch.setattr(
+        S, "get_file_content", lambda org, repo, path: MALFORMED_SCHEDULE
+    )
+
+    (fault,) = S.load("Cohort-f2026").faults
+
+    assert fault.where == fault.file == S.SCHEDULE_PATH
+    assert fault.field == "schedule"
+    assert fault.fires is None  # immediate: waiting changes nothing about it
+    # the line PyYAML stopped on, from the same helper every other reader cites
+    # (`gh_contents.yaml_mark_line`): the unclosed mapping runs to the end of the file
+    assert fault.lineno == 7 and fault.at == "schedule.yml:7"
+    assert "not valid YAML" in fault.what and "nothing releases" in fault.what
+    assert "every entry is ignored until the file parses" in fault.fix_text
 
 
 def test_a_comment_only_schedule_is_empty_not_unparseable(monkeypatch, capsys):
@@ -1424,6 +1453,24 @@ def test_record_handout_never_reverts_an_edit_made_while_it_ran(monkeypatch):
     assert "handout_datetime: 2026-09-22T14:05" in final
 
 
+def test_validate_is_invalid_for_a_cohort_plan_that_does_not_parse(monkeypatch, capsys):
+    # `--file` returned 1 for a file that does not parse while `--cohort-org` printed "OK:
+    # nothing dropped" and exited 0 - because `load` hands back an empty Schedule so the
+    # hourly cron cannot be frozen by one cohort's typo, and the validator read the
+    # fallback as a verdict. The two forms answer the same question and must agree.
+    monkeypatch.setattr(
+        schedule, "get_file_content", lambda org, repo, path: MALFORMED_SCHEDULE
+    )
+    monkeypatch.setattr(
+        "sys.argv", ["schedule", "--cohort-org", "Cohort-f2026", "--validate"]
+    )
+    assert schedule.main() == 1
+    out = capsys.readouterr()
+    assert "INVALID: Cohort-f2026/schedule.yml could not be parsed" in out.out
+    assert "OK: nothing dropped" not in out.out
+    assert "is NOT valid YAML" in out.err  # what load already said, not said again
+
+
 def test_validate_cli_reports_an_unreadable_cohort_schedule(monkeypatch, capsys):
     # An absent schedule.yml is an empty Schedule (valid: nothing planned yet), but a read
     # that failed outright now raises - the CLI turns that into a line and a red run,
@@ -1714,8 +1761,8 @@ def test_every_deploy_field_knows_the_line_it_is_written_on(tmp_path):
     sched = _parsed(tmp_path)
     assert [
         (
-            schedule._line_of(d.lines, "course_source_repo"),
-            schedule._line_of(d.lines, "course_source_path"),
+            schedule.line_of(d.lines, "course_source_repo"),
+            schedule.line_of(d.lines, "course_source_path"),
         )
         for r in sched.releases
         for d in r.deploy
@@ -1724,7 +1771,7 @@ def test_every_deploy_field_knows_the_line_it_is_written_on(tmp_path):
 
 def test_an_assignment_field_knows_the_line_it_is_written_on(tmp_path):
     entry = _parsed(tmp_path).assignments["assignment-2"]
-    assert schedule._line_of(entry.lines, "course_source_repo") == 21
+    assert schedule.line_of(entry.lines, "course_source_repo") == 21
 
 
 def test_the_field_is_cited_wherever_it_sits_in_its_entry(tmp_path):
@@ -1742,11 +1789,11 @@ def test_the_field_is_cited_wherever_it_sits_in_its_entry(tmp_path):
         "        course_source_repo: cm\n",
     )
     (deploy,) = sched.releases[0].deploy
-    assert schedule._line_of(deploy.lines, "course_source_path") == 7
-    assert schedule._line_of(deploy.lines, "course_source_repo") == 8
+    assert schedule.line_of(deploy.lines, "course_source_path") == 7
+    assert schedule.line_of(deploy.lines, "course_source_repo") == 8
     # A field the entry does not carry falls back to the line the entry opens on: a
     # citation pointing at the right block beats no citation, and beats a link to line 1.
-    assert schedule._line_of(deploy.lines, "nonesuch") == 5
+    assert schedule.line_of(deploy.lines, "nonesuch") == 5
 
 
 def test_a_dict_built_by_hand_has_no_line_and_says_so(tmp_path):
@@ -1764,7 +1811,7 @@ def test_a_dict_built_by_hand_has_no_line_and_says_so(tmp_path):
     )
     deploy = sched.releases[0].deploy[0]
     assert deploy.lines == {}
-    assert schedule._line_of(deploy.lines, "course_source_path") is None
+    assert schedule.line_of(deploy.lines, "course_source_path") is None
 
 
 def test_the_line_stamp_never_reaches_the_parsed_plan(tmp_path):
@@ -2204,3 +2251,73 @@ def test_two_cohort_dest_repos_that_match_each_other_are_refused():
     sched = parse(meta)
     assert set(sched.assignments) == {"week-3"}
     assert any("cohort-side name of assignments.week-3" in d for d in sched.dropped)
+
+
+# ------------------------------------------- what was dropped, as the notifier sees it
+#
+# `dropped` is the report faculty read; `faults` is the same leftovers as ConfigFaults,
+# which is what the digest issue lists and the mail names. They are built together, so the
+# thing asserted here is that they cannot disagree - and that a fault knows the line.
+
+
+def _from_text(text: str):
+    """Parse schedule.yml TEXT with line stamps, as `load` and the validator do."""
+    return schedule.parse(gh_contents.load_yaml_lines(text))
+
+
+UNREADABLE = """timezone: Nowhere/Nothing
+releases:
+  lecture_02:
+    event_datetime: not-a-date
+  lecture_03:
+    event_datetime: 2026-09-15T10:00
+    titel: typo
+assignments:
+  a1:
+    due_datetime: 2026-10-01
+    course_source_repo: a1-f2026
+    solution_datetime: 2026-09-01
+"""
+
+
+def test_every_dropped_line_has_a_fault_beside_it():
+    sched = _from_text(UNREADABLE)
+    assert len(sched.faults) == len(sched.dropped) == 4
+    # Every report line ENDS with what its fault says, so the run summary and the mail
+    # cannot describe the same entry differently.
+    assert all(
+        line.endswith(fault.what)
+        for line, fault in zip(sched.dropped, sched.faults, strict=True)
+    )
+
+
+def test_a_dropped_entry_cites_the_line_it_is_written_on():
+    faults = {f.key: f for f in _from_text(UNREADABLE).faults}
+    assert faults["releases.lecture_02.event_datetime"].lineno == 4
+    assert faults["releases.lecture_03.titel"].lineno == 7
+    assert faults["assignments.a1.solution_datetime"].lineno == 12
+    assert faults["timezone"].lineno == 1
+
+
+def test_a_dropped_entry_is_an_immediate_fault():
+    # No `fires`: the entry is already out of the plan, so there is no moment it is about
+    # to bite at - it is at the notify bar now.
+    (fault, *_) = _from_text(UNREADABLE).faults
+    assert fault.fires is None
+    assert fault.severity(datetime(2026, 9, 7, tzinfo=ZoneInfo("Europe/Berlin"))) is (
+        schedule.Severity.WARNING
+    )
+    assert fault.file == "schedule.yml"
+    assert fault.fix() == faults_module.FIX["schedule.yml"]
+
+
+def test_a_whole_block_written_as_a_list_names_the_block():
+    sched = _from_text("releases:\n  - lecture_02\n")
+    (fault,) = sched.faults
+    assert fault.where == "releases" and fault.field == "releases"
+    assert fault.lineno == 1
+
+
+def test_a_clean_plan_has_no_faults():
+    sched = _from_text("releases:\n  l1:\n    event_datetime: 2026-09-15T10:00\n")
+    assert sched.faults == [] and sched.dropped == []

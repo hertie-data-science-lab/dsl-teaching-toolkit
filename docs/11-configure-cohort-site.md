@@ -23,8 +23,12 @@ You never edit what the site shows - you edit the file it reads, and it re-syncs
 
 ## What never to touch
 
-These are rewritten on every sync. A hand edit is lost - the sync then opens an issue in the site
-repo linking the overwritten commit and naming the file to edit instead.
+These are rewritten on every sync. A hand edit is lost - the sync then opens (or updates) one
+issue in the site repo linking the overwritten commit and naming the file to edit instead, and
+**emails whoever made the edit**. Nothing is actually lost: the linked commit still holds the
+change, so it can be copied back out and made at the source. The email matters because an issue
+notifies only the accounts it @mentions, and a commit whose git email is linked to no GitHub
+account cannot be mentioned at all - which is how the first one of these went unnoticed.
 
 | In the site repo | What happens |
 |---|---|

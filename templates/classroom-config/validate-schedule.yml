@@ -8,11 +8,18 @@ name: Validate schedule
 # a workflow in the course org.
 #
 # It CANNOT block the commit: workflows run after the push has landed, and branch
-# protection needs a paid plan on a private repo. So it does the two things it can:
-#   1. fails, which puts a red X against the offending commit;
-#   2. opens an issue assigned to whoever pushed, which actually notifies them - a red X
-#      only works if someone looks. The issue is closed automatically by the next commit
-#      that parses clean, so it tracks the current state rather than accumulating.
+# protection needs a paid plan on a private repo. So it does the two things it can: it
+# FAILS, which puts a red X against the offending commit, and it annotates the lines that
+# could not be read, in the commit's own diff.
+#
+# A red X only works if somebody looks, so the thing that actually notifies is the
+# scheduler's own digest issue for the entries it could not read, plus the email beside it
+# addressed to whoever wrote the line (dsl_course.config_digest). This
+# workflow used to open that issue itself, in a block of shell that searched by title and
+# assigned the pusher; the engine now owns it, and adopts the open issue by the same
+# title. Which means: nothing here writes an issue, and a run that fails to parse still
+# reports itself twice - the red X here, within seconds, and the record + mail from the
+# course org's next tick, within the minute (the dispatcher fires on this push).
 #
 # Validation runs the SAME parser the scheduler uses (dsl_course.schedule), checked
 # out from the public central repo. A second implementation - a JSON schema, a hand-rolled
@@ -27,12 +34,12 @@ name: Validate schedule
 # propagates them down here, and a mail step wired to secrets an org does not have sends to
 # nobody while reading as a channel that works.
 #
-# The red X and the issue above are the DROPPED-ENTRY channel and nothing else. The run
-# also checks whether the plan's sources exist in the course org, but that answer changes
-# week to week (a lecture nobody has written yet is normal in August), so it never touches
-# the exit code. Escalating one of those to a failure is the scheduler's job, which files
-# its own, separately-titled digest issue - routing it through here would name the fault
-# "entries the scheduler cannot read" and close it on the next clean parse, staged or not.
+# The red X above is the DROPPED-ENTRY channel here and nothing else. The run also checks
+# whether the plan's sources exist in the course org, but that answer changes week to week
+# (a lecture nobody has written yet is normal in August), so it never touches the exit
+# code. Those have a digest issue of their own, under a separate title, for the same
+# reason: routed through here they would be named "entries the scheduler cannot read" and
+# closed on the next clean parse, staged or not.
 #
 # What a source fault DOES get here is a commit comment, and only when the release is
 # close enough that somebody is meant to hear about it. That is the one moment this
@@ -55,13 +62,12 @@ on:
 
 # contents: write covers both things this job does to the repo it runs in: checking it
 # out, and leaving a comment on the pushed commit (a commit comment is under the Contents
-# permission, not Issues - the endpoint is repos/.../commits/<sha>/comments).
-# issues: write is the escalation path this workflow exists for (see the header). Every
-# write below actually runs on DSL_BOT_TOKEN, so this block is the declared intent rather
-# than the token in use, and it stays at the two scopes rather than the default all.
+# permission, not Issues - the endpoint is repos/.../commits/<sha>/comments). Nothing here
+# writes an ISSUE any more - the engine's digest does - so that scope is gone. The write
+# actually runs on DSL_BOT_TOKEN, so this block is the declared intent rather than the
+# token in use, and it stays at the one scope rather than the default all.
 permissions:
   contents: write
-  issues: write
 
 jobs:
   validate:
@@ -154,15 +160,6 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           cat report.txt
-          # Carry the report to the issue step, which only runs when this one fails.
-          # The delimiter has a random suffix on purpose: report.txt is derived from a
-          # faculty-authored schedule.yml, and a line equal to the delimiter would end the
-          # heredoc early and let the rest of the file inject arbitrary step outputs.
-          {
-            echo "report<<REPORT_EOF_ba31d7c94f68"
-            cat report.txt
-            echo "REPORT_EOF_ba31d7c94f68"
-          } >> "$GITHUB_OUTPUT"
           exit 0
 
       # The push that planned it is the cheapest moment to say so: the person who wrote
@@ -195,38 +192,6 @@ jobs:
           body=$(printf '%s\nThe generated GitHub record issue is %s.\n' \
             "$(cat comment.txt)" "$url")
           gh api "repos/$REPO/commits/$SHA/comments" -f body="$body" >/dev/null
-
-      - name: Open an issue naming what was dropped
-        if: steps.validate.outputs.rc != '0' && github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
-          REPO: ${{ github.repository }}
-          ACTOR: ${{ github.actor }}
-          SHA: ${{ github.sha }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          REPORT: ${{ steps.validate.outputs.report }}
-        run: |
-          title="schedule.yml has entries the scheduler cannot read"
-          existing=$(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number --jq '.[0].number')
-          body=$(printf '%s\n\n```\n%s\n```\n\nCommit: %s\nRun: %s\n\nA dropped entry is silently absent from the term plan - no release, or no deadline, snapshot or autograding. Fix `schedule.yml` on `main` and this issue closes itself.\n\nField reference: https://github.com/%s/blob/__CENTRAL_REF__/docs/07-schedule-releases.md' \
-            "Validation of \`schedule.yml\` failed." "$REPORT" "$SHA" "$RUN_URL" "__CENTRAL__")
-          if [ -n "$existing" ]; then
-            gh issue comment "$existing" --repo "$REPO" --body "$body"
-          else
-            gh issue create --repo "$REPO" --title "$title" --body "$body" --assignee "$ACTOR" || \
-              gh issue create --repo "$REPO" --title "$title" --body "$body"
-          fi
-
-      - name: Close the issue once the schedule parses clean
-        if: steps.validate.outputs.rc == '0' && github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
-          REPO: ${{ github.repository }}
-        run: |
-          title="schedule.yml has entries the scheduler cannot read"
-          for n in $(gh issue list --repo "$REPO" --state open --search "$title in:title" --json number --jq '.[].number'); do
-            gh issue close "$n" --repo "$REPO" --comment "schedule.yml now parses with nothing dropped."
-          done
 
       - name: Fail the run so the commit carries a red X
         if: steps.validate.outputs.rc != '0'

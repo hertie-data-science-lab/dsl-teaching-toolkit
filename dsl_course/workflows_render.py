@@ -269,10 +269,19 @@ def _run_preamble(minutes: int = _TIMEOUT_DEFAULT, *, sandbox: bool = False) -> 
 # multi-line secret; there is no GRAPH_CLIENT_SECRET. DSL_MAINTAINER_EMAIL is an ADDRESS
 # and is held centrally as a repository variable, but it travels to an org as an org
 # secret (bootstrap_course propagates it), so it is read from `secrets.` like the rest.
-_MAIL_ENV = "\n".join(
-    f"          {name}: ${{{{ secrets.{name} }}}}"
-    for name in (*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV)
-)
+def _secret_env(*names: str) -> str:
+    """`NAME: ${{ secrets.NAME }}` lines, indented for a step's `env:` block."""
+    return "\n".join(f"          {name}: ${{{{ secrets.{name} }}}}" for name in names)
+
+
+_MAIL_ENV = _secret_env(*mailer.GRAPH_ENV, mailer.MAINTAINER_ENV)
+# Who hears about a fault in the COURSE org's OWN config - dsl-course.yml and the cohort
+# registry, the two files that decide whether the course is synced at all. Separate from
+# _MAIL_ENV because only two steps in the estate check those files (the scheduler's release
+# pass and Sync membership's automatic job, both of which run in the course org), and an
+# address list has no business in the env of a workflow that never reads it. Never in a
+# cohort-seeded workflow: see maintainers.md.
+_COURSE_ADMIN_ENV = _secret_env(mailer.COURSE_ADMIN_ENV)
 
 # Fail CLOSED: only an explicit `false` acts. Any other value - "True", "1", a blank from a
 # renamed input - previews. Shared by the buttons whose `dry_run` DEFAULTS TO TRUE, which is
@@ -893,6 +902,10 @@ on:
     branches: [main]
     paths:
       - dsl-course.yml
+      # The registry is the other half of the course's own config, and its digest issue is
+      # the same one - so an edit to either is checked and mailed within the minute rather
+      # than waiting for the scheduler's next tick.
+      - cohort-courses-pages.yml
   repository_dispatch:
     types: [sync-membership]
   schedule:
@@ -922,7 +935,17 @@ on:
           COURSE: ${{{{ github.repository_owner }}}}
           EVENT: ${{{{ github.event_name }}}}
           DISPATCH_COHORT: ${{{{ github.event.client_payload.cohort_org }}}}
+# A fault in the course org's own config is emailed to its admins from this step (see
+# dsl_course.notify.route_course), so the automatic job carries the transport and the
+# address list alongside the token. The manual button does not: somebody is standing at
+# that run and reads its log.
+{_MAIL_ENV}
+{_COURSE_ADMIN_ENV}
         run: |
+          # First, and never fatal: a push to either of the course's own config files is
+          # what this job is here for, and the reconcile below is what SKIPS the course
+          # when one of them cannot be read. Its own digest issue and mail are the report.
+          python3 -m dsl_course.scheduler --course-org "$COURSE" --check-course-config
           args=(--course-org "$COURSE")
           case "$EVENT" in
             schedule) args+=(--all-cohorts) ;;
@@ -1056,6 +1079,14 @@ def render_send_codes() -> str:
     It carries `--dispatched-by`, which refuses a cohort this course org does not own: a
     `client_payload` is written by whoever holds a cohort's bot token, a lower trust tier
     than the course org (see enrol_codes.refuse_unregistered).
+
+    And it reports itself like the crons do. Nobody watches a send either - there is no
+    button and no actor - so a run that broke reached nobody at all: GitHub's own failure
+    email goes to whoever last committed this file, which is the bot. The same three steps
+    every cron carries file the issue, mail the maintainer the failed step's log and close
+    the issue on the next good send. A ROSTER fault does not come through here: that run
+    is green by design (see `enrol_codes.reds_the_run`) and the students.csv digest tells
+    faculty about it.
     """
     return f"""name: Send enrolment codes
 
@@ -1092,8 +1123,8 @@ on:
           # the payload comes from a cohort's bot token, so the cohort it names is
           # untrusted input.
           python3 -m dsl_course.enrol_codes --cohort-org "$DISPATCH_COHORT" \\
-            --dispatched-by "$COURSE"
-"""
+            --dispatched-by "$COURSE"{_TEE_RUN_LOG}
+{_CRON_NOTICE}"""
 
 
 def render_bootstrap_cohort() -> str:
@@ -1200,8 +1231,11 @@ on:
 # A source the plan cites and the org has not got is emailed to the people git names for
 # it, from this step (see dsl_course.notify) - so the release pass carries the transport
 # alongside the token. Without it the digest issue's @mention is the only channel, which
-# reaches whoever happens to read GitHub notifications that week.
+# reaches whoever happens to read GitHub notifications that week. This pass also pre-flights
+# the COURSE org's own dsl-course.yml and cohort registry, whose mail goes to the course
+# admins instead - a second address list, read only here and by Sync membership.
 {_MAIL_ENV}
+{_COURSE_ADMIN_ENV}
         run: |
           gh auth setup-git
           # Which driver delivered this tick. The run history is the only record of that,

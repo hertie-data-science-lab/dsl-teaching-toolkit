@@ -53,6 +53,8 @@ This is setup once per course - it serves every future cohort. Per-semester setu
 
    NB: TAs and co-instructors are **not** granted access here; each cohort declares its own in `classroom-config/people.yml` when you [bootstrap that cohort](04-new-cohort-org.md).
 
+   > **If an edit here breaks the file**, nothing goes quiet. `dsl-course.yml` and `cohort-courses-pages.yml` (the cohort registry, written for you by **Bootstrap cohort**) are the two files that decide whether this course is synced at all, so a line the toolkit cannot use - a handle that is not a GitHub username, a `central_ref:` that is neither `main`, `release` nor a full 40-character commit SHA, a registry that is not a list of org names - opens **one** issue in this repo, *dsl-course.yml / cohort registry has entries the sync cannot use*, listing every such line with a link to it. Fix the line and the issue closes itself. The admins are emailed at the same time, and again if it is still unfixed after two days and after a week. Nothing here reds a run.
+
 ## Next
 
 - [Add materials](02-add-materials-to-course.md) and [Add assignment](03-add-assignment-to-course.md) to the course org.

@@ -6,8 +6,10 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# Virtualenvs
-.venv/
+# Virtualenvs. No trailing slash on .venv: an agent's worktree symlinks it at a
+# shared interpreter, and `.venv/` does not match a symlink - which is how one got
+# committed, absolute path and all.
+.venv
 venv/
 
 # uv writes this on `uv run`, but this project resolves deps from

@@ -72,8 +72,7 @@ import os
 import re
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime, time, timedelta, timezone
-from enum import Enum, IntEnum
+from datetime import date, datetime, time, timezone
 from functools import cache
 from pathlib import Path
 from typing import NamedTuple
@@ -82,12 +81,38 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import yaml
 
 from .course import CONFIG_REPO, assignment_slug, coerce_date, is_repo_root
-from .gh_contents import get_file_content, get_file_with_sha, put_file, repo_tree
+from .faults import (
+    NOTIFY_FROM,
+    SOURCE_CRITICAL_WINDOW,
+    SOURCE_URGENT_WINDOW,
+    SOURCE_WARN_WINDOW,
+    ConfigFault,
+    FaultKind,
+    Severity,
+    hours,
+)
+from .gh_contents import (
+    get_file_content,
+    get_file_with_sha,
+    line_of,
+    load_yaml_lines,
+    put_file,
+    repo_tree,
+    take_lines,
+    yaml_mark_line,
+)
 from .log import log, log_err, log_step
 from .releaseignore import RELEASEIGNORE, excluded_in_tree
 from .repos import default_branch, repo_missing
 
 SCHEDULE_PATH = "schedule.yml"
+
+# What a fault in schedule.yml has always been called here, and still is: `ConfigFault`
+# with a `kind` set. One type rather than two, so the digest, the mail and the ladder are
+# the same code for a source the plan cites and for an entry the parser had to drop -
+# see `faults`. Every Part I call site (and its `isinstance`) reads unchanged.
+SourceFault = ConfigFault
+
 DEFAULT_TZ = "Europe/Berlin"
 
 # What a release SYNTHESISED from `assignments.<slug>.handout_datetime` is labelled:
@@ -350,84 +375,91 @@ class Schedule:
     # quietly: `load` logs each line, `--validate` exits non-zero on them, and Check cohort
     # setup counts them.
     dropped: list[str] = field(default_factory=list)
+    # The same leftovers as `ConfigFault`s - what the digest issue lists and the mail
+    # names, one per line of `dropped`. Two shapes of one fact, built together: see
+    # `Drops`. A dropped entry is an IMMEDIATE fault (no `fires`), because the entry is
+    # already not in the plan - there is no moment it is about to bite at.
+    faults: list[ConfigFault] = field(default_factory=list)
     # Set by `load` when the file could not be read AS A SCHEDULE at all: the YAML did not
     # parse, or its top level is not a mapping. Distinct from `dropped` (a file that parsed,
     # minus some entries) and from a cohort that simply has no schedule.yml. `load` still
-    # returns an empty Schedule so nothing downstream raises - but the hourly scheduler
-    # fails its run on this, because an unreadable plan means NOTHING is released, handed
-    # out, snapshotted or graded for the cohort, and an hourly green tick is how that goes
-    # unnoticed for a term.
+    # returns an empty Schedule so nothing downstream raises, and files the one fault that
+    # says so in `faults` - an unreadable plan means NOTHING is released, handed out,
+    # snapshotted or graded for the cohort, and the digest issue and the mail beside it are
+    # how the person who has to fix it hears about that.
     unparseable: bool = False
 
 
-# `yaml.safe_load` drops positions, and a fault that cannot name the LINE to edit leaves
-# faculty scrolling a file they wrote in August. So the loader stamps every mapping with
-# the line it starts on and the parse hands that to the entry it builds: one pass, and the
-# answer comes from the parser that read the file rather than from a scan of the text
-# afterwards - which was a second opinion about what the file says, and gave two deploys
-# under one entry the same line.
-_LINES = "__lines__"
+@dataclass
+class Drops:
+    """Everything one parse could not use, in the two shapes it has to take.
+
+    `report` is the human-readable line the run summary prints, `--validate` fails on and
+    Check cohort setup counts - unchanged, because faculty read it and three surfaces
+    quote it. `faults` is the same fact as a `ConfigFault`, which is what the digest issue
+    and the mail carry: a dropped entry used to reach people only through a red X and a
+    hand-rolled issue on the push, so an entry dropped by an hourly tick reached nobody.
+
+    Built together, from one call, because a fault the report does not mention (or the
+    other way round) is the two channels disagreeing about what the file says.
+
+    `top` is the top-level key lines, for a fault about a whole BLOCK (`releases:` written
+    as a list): the block's own entries carry their lines, and the block itself does
+    not."""
+
+    report: list[str] = field(default_factory=list)
+    faults: list[ConfigFault] = field(default_factory=list)
+    top: dict[str, int] = field(default_factory=dict)
+
+    def _add(
+        self,
+        report: str,
+        where: str,
+        field_name: str,
+        what: str,
+        lines: dict[str, int] | None,
+    ) -> None:
+        self.report.append(report)
+        self.faults.append(
+            ConfigFault(
+                where,
+                what,
+                file=SCHEDULE_PATH,
+                field=field_name,
+                lineno=line_of(lines if lines is not None else self.top, field_name),
+            )
+        )
+
+    def note(
+        self,
+        where: str,
+        field_name: str,
+        what: str,
+        lines: dict[str, int] | None = None,
+    ) -> None:
+        """A fault with its own wording - a key that MOVED to another file, a timezone
+        that is not a zone. The two below are the shapes every other fault takes."""
+        loc = f"{where}.{field_name}" if where else field_name
+        self._add(f"{loc}: {what}", where, field_name, what, lines)
 
 
-class _LineLoader(yaml.SafeLoader):
-    """SafeLoader that records, under `__lines__`, the 1-based line every key of a mapping
-    is written on - plus `""` for the line the mapping itself opens on.
-
-    Per KEY, because that is the granularity a fault cites: `releases.lecture_02 ->
-    course_source_path` sends faculty to the `course_source_path:` line, and the copy's
-    `course_source_repo:` is a different line of the same block. A reserved key rather
-    than a parallel index of YAML paths, because the parse walks the mappings and not the
-    paths: every entry meets its own lines where it is built. `_take_lines` removes the
-    stamp as the parse consumes it, so no key check and no label loop downstream ever
-    sees it."""
-
-    def construct_mapping(self, node, deep=False):
-        mapping = super().construct_mapping(node, deep=deep)
-        # `node.value` has been flattened by now, so a merged (`<<:`) key is here too,
-        # at the line it was written on in the block it came from.
-        lines = {
-            str(k.value): k.start_mark.line + 1
-            for k, _v in node.value
-            if isinstance(k, yaml.ScalarNode)
-        }
-        lines[""] = node.start_mark.line + 1
-        mapping[_LINES] = lines
-        return mapping
-
-
-def _load_yaml(text: str) -> object:
-    """`yaml.safe_load` plus the line stamps `parse` reads. Same failure modes exactly -
-    `yaml.YAMLError` on a file that does not parse, any object for one that does."""
-    return yaml.load(text, _LineLoader)
-
-
-def _take_lines(mapping: dict) -> dict[str, int]:
-    """This mapping's key lines, REMOVING the loader's stamp. `{}` for a mapping this
-    module did not load - a dict built by hand in a test, or a caller that parsed the YAML
-    itself - which every consumer already treats as "the line is not known"."""
-    lines = mapping.pop(_LINES, None)
-    return lines if isinstance(lines, dict) else {}
-
-
-def _line_of(lines: dict[str, int], key: str) -> int | None:
-    """The line to cite for a fault about `key`: that key's own line, else the line the
-    entry opens on, else None.
-
-    The fallback is for a field the entry does not carry at all. Every fault this module
-    reports names a key the entry must have declared to have parsed - but a citation
-    pointing at the right BLOCK beats no citation, and beats a link to line 1."""
-    return lines.get(key) or lines.get("")
-
-
-def _drop(drops: list[str], where: str, why: str, cost: str) -> None:
+def _drop(
+    drops: Drops,
+    where: str,
+    why: str,
+    cost: str,
+    lines: dict[str, int] | None = None,
+    field_name: str = "",
+) -> None:
     """Record a thrown-away entry: where it is in the YAML, what is wrong, and what the
     cohort loses by it. The cost is the point - "entry dropped" alone tells faculty
     nothing about whether their term still runs."""
-    drops.append(f"{where}: {why} - entry dropped, so {cost}")
+    what = f"{why} - entry dropped, so {cost}"
+    drops._add(f"{where}: {what}", where, field_name, what, lines)
 
 
 def _require_mapping(
-    raw: object, drops: list[str], block: str, noun: str, cost: str
+    raw: object, drops: Drops, block: str, noun: str, cost: str
 ) -> dict | None:
     """A top-level `releases:`/`assignments:`/`events:` block must be a `label -> entry`
     mapping. Returns it, or None when it is absent (nothing to parse) or authored as a
@@ -442,11 +474,12 @@ def _require_mapping(
             block,
             f"not a mapping (it must be {noun} -> entry, not a list or value)",
             cost,
+            field_name=block,
         )
         return None
     # The block's own lines interest nobody; taking them keeps the stamp out of the label
     # loop that follows, which would otherwise read `__lines__` as an entry.
-    _take_lines(raw)
+    take_lines(raw)
     return raw
 
 
@@ -523,7 +556,12 @@ KNOWN_EVENT = frozenset({"type", "title", "event_datetime", "tbc"})
 
 
 def _flag_unknown_keys(
-    drops: list[str], entry: dict, known: frozenset[str], where: str, cost: str
+    drops: Drops,
+    entry: dict,
+    known: frozenset[str],
+    where: str,
+    cost: str,
+    lines: dict[str, int] | None = None,
 ) -> None:
     """Record every key of `entry` not in `known`. Unlike `_drop`, the entry itself is
     KEPT (only the stray key is ignored) - a typo'd or legacy key otherwise passes
@@ -531,12 +569,16 @@ def _flag_unknown_keys(
     parse; a dropped entry already gets its own line."""
     for key in entry:
         if str(key) not in known:
-            loc = f"{where}.{key}" if where else str(key)
-            drops.append(f"{loc}: unrecognised key - ignored, so {cost}")
+            drops.note(where, str(key), f"unrecognised key - ignored, so {cost}", lines)
 
 
 def _flag_bad_value(
-    drops: list[str], where: str, key: str, value: object, cost: str
+    drops: Drops,
+    where: str,
+    key: str,
+    value: object,
+    cost: str,
+    lines: dict[str, int] | None = None,
 ) -> None:
     """Record a key whose value is PRESENT but unusable - a date that doesn't parse, a cap
     that isn't a number, a `type:` that isn't one of the known ones.
@@ -546,17 +588,17 @@ def _flag_bad_value(
     `handout_datetime: 2026-13-01` reads as a scheduled handout and provisions nothing;
     `grading_datetime: nxt week` silently grades at the due date. Both leave a green run
     and a plan that is not the one faculty wrote, so both belong in `dropped`."""
-    loc = f"{where}.{key}" if where else str(key)
-    drops.append(f"{loc}: unusable value {value!r} - ignored, so {cost}")
+    drops.note(where, str(key), f"unusable value {value!r} - ignored, so {cost}", lines)
 
 
 def _flagged_datetime(
     entry: dict,
     key: str,
     tz: ZoneInfo,
-    drops: list[str],
+    drops: Drops,
     where: str,
     cost: str,
+    lines: dict[str, int] | None = None,
     *,
     end_of_day: bool = False,
 ) -> datetime | None:
@@ -568,12 +610,12 @@ def _flagged_datetime(
     raw = entry.get(key)
     when = _coerce_datetime(raw, tz, end_of_day=end_of_day)
     if when is None and raw is not None:
-        _flag_bad_value(drops, where, key, raw, cost)
+        _flag_bad_value(drops, where, key, raw, cost, lines)
     return when
 
 
 def _flagged_date(
-    entry: dict, key: str, drops: list[str], where: str, cost: str
+    entry: dict, key: str, drops: Drops, where: str, cost: str
 ) -> date | None:
     """`entry[key]` as a whole-day date, flagging a value that is there but does not
     parse. The date-only twin of `_flagged_datetime`, with the same absent-vs-unreadable
@@ -585,9 +627,7 @@ def _flagged_date(
     return when
 
 
-def _parse_deploy(
-    raw: object, tz: ZoneInfo, drops: list[str], label: str
-) -> list[Deploy]:
+def _parse_deploy(raw: object, tz: ZoneInfo, drops: Drops, label: str) -> list[Deploy]:
     """Parse a release's `deploy:` - a list (or a single mapping) of source->dest copies.
     Entries missing course_source_repo/course_source_path are skipped (nothing to copy).
     A malformed `deploy_datetime` parses to None - the copy ships at the entry's
@@ -599,7 +639,7 @@ def _parse_deploy(
         if not isinstance(d, dict):
             _drop(drops, where, "not a mapping", "this copy never ships")
             continue
-        lines = _take_lines(d)
+        lines = take_lines(d)
         src_repo, src_path = d.get("course_source_repo"), d.get("course_source_path")
         if not src_repo or not src_path:
             _drop(
@@ -607,11 +647,18 @@ def _parse_deploy(
                 where,
                 "missing `course_source_repo` and/or `course_source_path`",
                 "this copy never ships",
+                lines,
+                "course_source_path",
             )
             continue
         dest_path = d.get("cohort_dest_path")
         _flag_unknown_keys(
-            drops, d, KNOWN_DEPLOY, where, "that setting is ignored for this copy"
+            drops,
+            d,
+            KNOWN_DEPLOY,
+            where,
+            "that setting is ignored for this copy",
+            lines,
         )
         out.append(
             Deploy(
@@ -627,6 +674,7 @@ def _parse_deploy(
                     where,
                     "this copy ships at the entry's `event_datetime` instead of the "
                     "time written here",
+                    lines,
                 ),
                 lines=lines,
             )
@@ -638,7 +686,7 @@ def _is_tbc(value: object) -> bool:
     return isinstance(value, str) and value.strip().lower() == "tbc"
 
 
-def _parse_releases(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Release]:
+def _parse_releases(raw: object, tz: ZoneInfo, drops: Drops) -> list[Release]:
     """Parse `releases:` (label -> {event_datetime + deploys}) into Releases sorted by
     their event_datetime.
 
@@ -659,7 +707,7 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Release
                 drops, where, "not a mapping", "nothing deploys and no site row appears"
             )
             continue
-        _take_lines(entry)
+        lines = take_lines(entry)
         raw_when = entry.get("event_datetime")
         when = _coerce_datetime(raw_when, tz)
         tbc = _is_tbc(raw_when) or entry.get("tbc") is True
@@ -669,10 +717,12 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Release
                 where,
                 "no valid `event_datetime` (use `tbc` if the date is not settled)",
                 "nothing deploys and no site row appears",
+                lines,
+                "event_datetime",
             )
             continue
         _flag_unknown_keys(
-            drops, entry, KNOWN_RELEASE, where, "that setting is ignored"
+            drops, entry, KNOWN_RELEASE, where, "that setting is ignored", lines
         )
         # `deploy:` written with nothing under it. YAML reads that as None, which is
         # indistinguishable from the key being ABSENT once it reaches _parse_deploy - and
@@ -691,6 +741,7 @@ def _parse_releases(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Release
                 entry["deploy"],
                 "this entry ships NOTHING and is a display-only row - fill the deploy "
                 "in, or delete the key to say that is what you meant",
+                lines,
             )
         assignment = entry.get("assignment")
         out.append(
@@ -734,7 +785,7 @@ def _shared_sources(mapping: dict) -> set[str]:
 
 
 def _parse_assignments(
-    raw: object, tz: ZoneInfo, drops: list[str]
+    raw: object, tz: ZoneInfo, drops: Drops
 ) -> dict[str, AssignmentEntry]:
     # Only the nested {due_datetime, ...} form is accepted - matching the one schema
     # documented everywhere - rather than also silently accepting a bare due-date scalar.
@@ -761,14 +812,21 @@ def _parse_assignments(
                 drops, where, "not a mapping (it needs a nested `due_datetime:`)", cost
             )
             continue
-        lines = _take_lines(entry)
+        lines = take_lines(entry)
         due = _coerce_datetime(entry.get("due_datetime"), tz, end_of_day=True)
         if due is None:
-            _drop(drops, where, "no valid `due_datetime`", cost)
+            _drop(drops, where, "no valid `due_datetime`", cost, lines, "due_datetime")
             continue
         source_repo = str(entry.get("course_source_repo") or "").strip()
         if not source_repo:
-            _drop(drops, where, "no `course_source_repo`", cost)
+            _drop(
+                drops,
+                where,
+                "no `course_source_repo`",
+                cost,
+                lines,
+                "course_source_repo",
+            )
             continue
         if source_repo in sources and source_repo not in shared:
             # A copy-paste (Maths f2026 had assignments 3 and 4 both citing assignment-2's
@@ -783,6 +841,8 @@ def _parse_assignments(
                 f"the same repo when EVERY one of them sets its own `cohort_dest_repo` "
                 f"(a copy-paste?)",
                 cost,
+                lines,
+                "course_source_repo",
             )
             continue
         dest = str(entry.get("cohort_dest_repo") or "").strip()
@@ -803,15 +863,20 @@ def _parse_assignments(
                 f"snapshot and grading sheet all key on it; set a distinct "
                 f"`cohort_dest_repo`)",
                 cost,
+                lines,
+                "cohort_dest_repo",
             )
             continue
         sources[source_repo] = str(slug)
         names[name] = str(slug)
         for moved, moved_cost in MOVED_ASSIGNMENT_KEYS.items():
             if moved in entry:
-                drops.append(
-                    f"{where}.{moved}: moved to `{moved}:` {_GRADING_CONFIG_HOME} - "
-                    f"ignored here, so {moved_cost}"
+                drops.note(
+                    where,
+                    moved,
+                    f"moved to `{moved}:` {_GRADING_CONFIG_HOME} - ignored here, so "
+                    f"{moved_cost}",
+                    lines,
                 )
         _flag_unknown_keys(
             drops,
@@ -819,6 +884,7 @@ def _parse_assignments(
             KNOWN_ASSIGNMENT | frozenset(MOVED_ASSIGNMENT_KEYS),
             where,
             "that setting is ignored",
+            lines,
         )
         handout = _flagged_datetime(
             entry,
@@ -828,6 +894,7 @@ def _parse_assignments(
             where,
             "the handout NEVER fires - no student or team repos are provisioned "
             "from it, and nobody gets the assignment",
+            lines,
         )
         solution = _flagged_datetime(
             entry,
@@ -837,6 +904,7 @@ def _parse_assignments(
             where,
             "the model solution NEVER ships automatically - it stays on the "
             "template's solution branch until someone ticks include_solution by hand",
+            lines,
         )
         # The solution rides on the handout release, so these two dates are only meaningful
         # relative to each other - and both ways of getting that wrong are silent, which is
@@ -855,6 +923,7 @@ def _parse_assignments(
                 entry.get("solution_datetime"),
                 "the model solution NEVER ships automatically - the schedule can only push "
                 "it into repos it provisioned, which needs `handout_datetime` set too",
+                lines,
             )
             solution = None
         elif solution is not None and handout is not None and solution <= handout:
@@ -866,6 +935,7 @@ def _parse_assignments(
                 "it is not AFTER handout_datetime, which would ship the model solution "
                 "together with the assignment on the very first release - refused, so the "
                 "solution now waits for a human",
+                lines,
             )
             solution = None
         out[str(slug)] = AssignmentEntry(
@@ -883,6 +953,7 @@ def _parse_assignments(
                 "the template's `late_window_days`, and the due date itself when it "
                 "declares none. The submission snapshot freezes and the autograder fires "
                 "then, not when this says",
+                lines,
                 end_of_day=True,
             ),
             handout_datetime=handout,
@@ -892,7 +963,7 @@ def _parse_assignments(
     return out
 
 
-def _parse_events(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Event]:
+def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
     """Parse `events:` (label -> {type, title, event_datetime}) into display-only rows,
     in calendar order.
 
@@ -912,7 +983,7 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Event]:
         if not isinstance(entry, dict):
             _drop(drops, where, "not a mapping", "the row never appears on the site")
             continue
-        _take_lines(entry)
+        lines = take_lines(entry)
         raw_when = entry.get("event_datetime")
         when = _coerce_date_or_datetime(raw_when, tz)
         tbc = _is_tbc(raw_when) or entry.get("tbc") is True
@@ -922,9 +993,13 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Event]:
                 where,
                 "no valid `event_datetime` (use `tbc` if the date is not settled)",
                 "the row never appears on the site",
+                lines,
+                "event_datetime",
             )
             continue
-        _flag_unknown_keys(drops, entry, KNOWN_EVENT, where, "that setting is ignored")
+        _flag_unknown_keys(
+            drops, entry, KNOWN_EVENT, where, "that setting is ignored", lines
+        )
         kind = str(entry.get("type") or "").strip().lower()
         if kind and kind not in ("exam", "special_event"):
             # A typo'd `type` (e.g. `exma`) still shows the row, but as a plain special
@@ -936,6 +1011,7 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: list[str]) -> list[Event]:
                 kind,
                 "the row is shown as a plain special event, not an exam "
                 "(expected 'exam' or 'special_event')",
+                lines,
             )
         out.append(
             Event(
@@ -969,8 +1045,7 @@ def parse(meta: dict) -> Schedule:
     than recorded as a drop, because a drop reds `--validate` and every live cohort still
     carries the block (see KNOWN_TOP_LEVEL)."""
     meta = meta if isinstance(meta, dict) else {}
-    _take_lines(meta)
-    drops: list[str] = []
+    drops = Drops(top=take_lines(meta))
     # A whole plan under an unknown top-level key (`materials_releases:` instead of
     # `releases:`) otherwise validates as "OK: nothing dropped" with zero releases - the
     # worst kind of silent failure, since the file looks full. Flag it here.
@@ -980,9 +1055,11 @@ def parse(meta: dict) -> Schedule:
     tz_name = meta.get("timezone")
     tz = _tz(tz_name)
     if tz_name and str(tz_name).strip() != str(tz):
-        drops.append(
-            f"timezone: `{tz_name}` is not a known zone - falling back to {DEFAULT_TZ}, "
-            f"so every naive time below is read in {DEFAULT_TZ}"
+        drops.note(
+            "",
+            "timezone",
+            f"`{tz_name}` is not a known zone - falling back to {DEFAULT_TZ}, so every "
+            f"naive time below is read in {DEFAULT_TZ}",
         )
     if meta.get("enrolment") is not None:
         log_step(
@@ -1001,7 +1078,8 @@ def parse(meta: dict) -> Schedule:
         semester_end=_flagged_date(meta, "semester_end", drops, "", term_cost),
         assignments=_parse_assignments(meta.get("assignments"), tz, drops),
         events=_parse_events(meta.get("events"), tz, drops),
-        dropped=drops,
+        dropped=drops.report,
+        faults=drops.faults,
     )
 
 
@@ -1126,6 +1204,25 @@ def _schedule_text(cohort_org: str) -> str | None:
     return get_file_content(cohort_org, CONFIG_REPO, SCHEDULE_PATH)
 
 
+def _unreadable_fault(what: str, lineno: int | None = None) -> ConfigFault:
+    """The whole FILE, unusable - what a human is asked to fix.
+
+    `where` is the file itself, because there is no entry to name: nothing in it was read,
+    so the fault is about its shape and every entry pays the same price. An IMMEDIATE
+    fault (no `fires`), like every other line the parser cannot read: waiting changes
+    nothing about it."""
+    return ConfigFault(
+        SCHEDULE_PATH,
+        what,
+        file=SCHEDULE_PATH,
+        field="schedule",
+        lineno=lineno,
+        fix_text=(
+            "fix the YAML on the line above; every entry is ignored until the file parses"
+        ),
+    )
+
+
 def load(cohort_org: str) -> Schedule:
     """Fetch + parse schedule.yml from the cohort's PRIVATE classroom-config repo. A
     pure loader: a missing file returns an empty Schedule silently (every field
@@ -1134,11 +1231,13 @@ def load(cohort_org: str) -> Schedule:
     A file that does not PARSE (faculty-editable YAML - an unclosed brace, a bad indent)
     is treated exactly as an absent one: the error is logged loudly, with the parser's own
     line/column, and an empty Schedule is returned. It must never raise: `load` sits under
-    the hourly scheduler AND the site sync, and one cohort's typo froze both."""
+    the hourly scheduler AND the site sync, and one cohort's typo froze both. It is also
+    a FAULT on the file - the one that costs the cohort everything - so the digest issue
+    and the mail carry it like any other (see `Schedule.faults`)."""
     content = _schedule_text(cohort_org)
-    unparseable = False
+    unparseable: list[ConfigFault] = []
     try:
-        meta = _load_yaml(content) if content else {}
+        meta = load_yaml_lines(content) if content else {}
     except yaml.YAMLError as exc:
         log_err(
             f"{cohort_org}/{CONFIG_REPO}/{SCHEDULE_PATH} is NOT valid YAML - the whole "
@@ -1152,7 +1251,13 @@ def load(cohort_org: str) -> Schedule:
             f"snapshots, no autograding) and the site builds without schedule data."
         )
         meta = {}
-        unparseable = True
+        unparseable.append(
+            _unreadable_fault(
+                "this file is not valid YAML, so the whole plan is ignored: nothing "
+                "releases, hands out, snapshots or grades",
+                lineno=yaml_mark_line(exc),
+            )
+        )
     if meta is not None and not isinstance(meta, dict):
         # Valid YAML, but not a schedule: a bare list, or a stray document separator that
         # left a string at the top level. Same consequence as a parse failure - nothing in
@@ -1162,9 +1267,16 @@ def load(cohort_org: str) -> Schedule:
             f"{type(meta).__name__}, not a mapping - the whole schedule is ignored. "
             f"Its top level must be keys like `releases:` / `assignments:`."
         )
-        unparseable = True
+        unparseable.append(
+            _unreadable_fault(
+                f"this file parses as {type(meta).__name__}, not a mapping of "
+                f"`releases:` / `assignments:` / `events:`, so the whole plan is "
+                f"ignored: nothing releases, hands out, snapshots or grades"
+            )
+        )
     sched = parse(meta if isinstance(meta, dict) else {})
-    sched.unparseable = unparseable
+    sched.unparseable = bool(unparseable)
+    sched.faults.extend(unparseable)
     if sched.dropped:
         # Loud, because this is the failure faculty cannot see: the file is valid YAML and
         # the run goes green, but an entry they wrote is not in the plan. Every caller
@@ -1194,7 +1306,7 @@ def load_file(path: str) -> tuple[Schedule | None, str | None]:
     except OSError as exc:
         return None, f"cannot read {path}: {exc}"
     try:
-        meta = _load_yaml(text) or {}
+        meta = load_yaml_lines(text) or {}
     except yaml.YAMLError as exc:
         # the parser's own message carries the line/column and the offending snippet
         return None, f"{path} is not valid YAML:\n{exc}"
@@ -1243,50 +1355,6 @@ def source_repo_paths(course_org: str, repo: str) -> set[str] | None:
     return _repo_paths(course_org, repo)
 
 
-# How close a missing source has to be to its fire time before it stops being "not
-# written yet" and starts being a fault. A term planned up front names paths nobody has
-# authored, which is why distance is what separates the normal state from the broken one.
-# Three windows rather than one, because how loudly it is said changes as the moment
-# approaches: the first rung opens the digest issue and mails the people git names, the
-# second says how little time is left, and the maintainer joins at the third. They
-# are deliberately tight - a day, half a day, a quarter of a day - because a source is
-# staged in minutes once somebody knows, and a week of warnings is a week of ignoring them.
-SOURCE_WARN_WINDOW = timedelta(hours=24)
-SOURCE_URGENT_WINDOW = timedelta(hours=12)
-SOURCE_CRITICAL_WINDOW = timedelta(hours=6)
-
-
-class Severity(IntEnum):
-    """How loud a source fault is. ORDERED, and that is the point: every consumer wants to
-    compare (worst of a run, has this escalated, is it past the notify bar), and as bare
-    strings each of those had to spell the ladder out again through a lookup table."""
-
-    ADVISORY = 0
-    WARNING = 1
-    URGENT = 2
-    CRITICAL = 3
-    MISSED = 4
-
-    def __str__(self) -> str:
-        return self.name.lower()
-
-
-# The rung at which anything is said at all - the digest issue opens, its comment goes out
-# and the mail beside it is addressed. Below it the fault is real and listed, but a session
-# nobody has written yet is the normal state of a term planned months ahead, so it earns no
-# notification. Here rather than in either notifier because both answer to it and they must
-# answer to the SAME one.
-NOTIFY_FROM = Severity.WARNING
-
-
-def hours(window: timedelta) -> int:
-    """A window in whole hours. Public because every surface that names one - a rung
-    heading, a subject suffix, a prose blurb, the commit comment - formats it from the
-    constant rather than typing the number, so moving a rung cannot leave a stale 24h in
-    somebody's inbox."""
-    return int(window.total_seconds() // 3600)
-
-
 def _window_blurb() -> str:
     """The ladder in one sentence, formatted from the windows themselves so changing one
     cannot leave three hand-written prose copies claiming the old numbers."""
@@ -1306,222 +1374,6 @@ def in_cohort_zone(sched: Schedule, when: datetime) -> datetime:
     return when.astimezone(_tz(sched.timezone))
 
 
-def zone_name(when: datetime) -> str:
-    """The zone as faculty wrote it in schedule.yml (`Europe/Berlin`), not the abbreviation
-    in force that week.
-
-    A notification that says 08:00 without saying whose 08:00 is a notification about
-    nothing, and `%Z` answers `CEST` - which is not a string anybody can look up against
-    the `timezone:` line they typed."""
-    return getattr(when.tzinfo, "key", "") or when.strftime("%Z")
-
-
-class FaultKind(Enum):
-    """What is WRONG with a source, as against which key to go and edit.
-
-    The field cannot carry this: a path that is absent and a path a `.releaseignore`
-    withholds are both `course_source_path`, and they want opposite instructions - push
-    the files, or stop holding back the ones already there. Sniffed off the field name and
-    a bool flag, each surface grew its own copy of the guess."""
-
-    MISSING_REPO = "missing repo"
-    MISSING_PATH = "missing path"
-    WITHHELD = "withheld"
-
-
-_CREATE_REPO = (
-    "create the repo named on {at} in {course_org} and push its files, or correct the "
-    "line above."
-)
-_CREATE_TEMPLATE = (
-    "create the assignment template repo named on {at} in {course_org} and push the "
-    "starter files to it, or correct the line above."
-)
-# The one sentence that would put each fault right, keyed on the three things it actually
-# depends on: the KIND, whether the entry hands out an assignment template (a repo to
-# create, not a folder to fill), and whether the moment has already passed - once a
-# release has fired, "fix it by Wednesday" is no longer the instruction. A table rather
-# than a chain of `if`s, so a fourth kind cannot quietly inherit a sentence meant for
-# another. Combinations the check cannot produce are absent: only a deploy names a path,
-# and a withheld path caps at WARNING and so never fires.
-_FIX: dict[tuple[FaultKind, bool, bool], str] = {
-    (FaultKind.WITHHELD, False, False): "remove the pattern, or change {field}.",
-    (FaultKind.MISSING_REPO, False, False): _CREATE_REPO,
-    (FaultKind.MISSING_REPO, False, True): _CREATE_REPO,
-    (FaultKind.MISSING_REPO, True, False): _CREATE_TEMPLATE,
-    (FaultKind.MISSING_REPO, True, True): _CREATE_TEMPLATE,
-    (FaultKind.MISSING_PATH, False, False): (
-        "push the materials to that folder in {course_org}/{repo}, or correct the path "
-        "on the line above."
-    ),
-    (FaultKind.MISSING_PATH, False, True): (
-        "push the materials to that folder now - the next 15-minute tick releases them. "
-        "Nothing else is needed."
-    ),
-}
-
-
-@dataclass
-class SourceFault:
-    """One source in the plan that is not in the course org, and when it is needed.
-
-    `fires` is what makes it actionable: the same missing folder is a note in August and a
-    failure the day before the lecture. None = nothing pins it to a moment (an undated
-    `tbc` entry, or an assignment handed out by hand), so it can never escalate."""
-
-    where: str  # the YAML path, e.g. "releases.lecture-2"
-    what: str  # what is missing, e.g. "`cm/lectures/02_b` does not exist yet"
-    fires: datetime | None
-    # The key to go and edit - `course_source_path` or `course_source_repo`. Naming the
-    # field is what turns "something is wrong with lecture-2" into an instruction. No
-    # default: it is part of `key`, so a caller that forgot it would not fail, it would
-    # quietly give this fault someone else's identity in the digest's state.
-    field: str
-    # Which of the three things went wrong - see `FaultKind`. No default for the same
-    # reason: the remedy hangs off it, and a wrong guess reads as a real instruction.
-    kind: FaultKind
-    # The loudest this fault may ever get. A MISSING source climbs the whole ladder,
-    # because the copy will not ship and nobody meant that. A source a `.releaseignore`
-    # withholds is a decision faculty already made, so it caps at WARNING: it is listed,
-    # and it never earns anyone an email at 24h or a "this did not ship" once its moment
-    # has passed.
-    ceiling: Severity = Severity.MISSED
-    # The line of schedule.yml the entry is written on, as the parser saw it (see
-    # `_LineLoader`). Every surface turns it into `schedule.yml:36` and a deep link,
-    # because the entry name alone still leaves faculty scrolling a file they wrote in
-    # August.
-    lineno: int | None = None
-    # The source repo the entry names (`course-materials-f2026`). `what` spells it inside
-    # a `<org>/<repo>/<path>` phrase, which reads well and parses badly - the fault mail
-    # has to name `<course_org>/<repo>` as the place to go and stage the thing.
-    repo: str = ""
-    # The path inside that repo, where the entry names one (an assignment names only the
-    # repo). Carried rather than re-read out of `what`, so a link into the repo is built
-    # from the value the check used and not from parsing a sentence.
-    path: str = ""
-
-    @property
-    def is_assignment(self) -> bool:
-        """Whether the entry hands out an assignment template rather than deploying a
-        folder. Asked once here: two surfaces sniffed `where` for the prefix themselves,
-        which is a parse of a display string in the middle of deciding what to tell
-        somebody."""
-        return self.where.startswith("assignments.")
-
-    @property
-    def key(self) -> str:
-        """A stable identity for this fault across runs, so a digest can tell a fault that
-        ESCALATED from one that is merely still there. Deliberately excludes `fires`: an
-        entry whose date faculty push back is the same fault, at a new distance.
-
-        The PATH is part of it, because two deploys under one entry are two faults: keyed
-        on the entry alone the second inherited the first's recorded rung, so neither
-        could appear, escalate or clear on its own."""
-        if not self.path:
-            return f"{self.where}.{self.field}"
-        return f"{self.where}[{self.path}].{self.field}"
-
-    @property
-    def at(self) -> str:
-        """`schedule.yml:36`, or a bare `schedule.yml` when the line is not known.
-
-        The citation every surface shows - the mail, the digest body and comment, the CLI
-        report, the fix sentence - so all of them cite the file the same way."""
-        return f"{SCHEDULE_PATH}:{self.lineno}" if self.lineno else SCHEDULE_PATH
-
-    def cite(self, cohort_org: str = "") -> str:
-        """`at` for a MARKDOWN surface: a link to the exact line where the line and the
-        cohort are both known, plain code where either is not.
-
-        Every markdown surface - the digest body, its transition comment, the commit
-        comment on the push - cites the file through this, so the fix is one click from
-        wherever somebody first hears about it rather than a scroll through a file they
-        wrote in August."""
-        url = deep_link(cohort_org, self)
-        return f"[`{self.at}`]({url})" if url else f"`{self.at}`"
-
-    @property
-    def due(self) -> str:
-        """The moment this fault bites, zone and all - see `zone_name`."""
-        if self.fires is None:
-            return "no date (tbc)"
-        return f"{self.fires:%a %d %b %Y, %H:%M} {zone_name(self.fires)}"
-
-    @property
-    def due_short(self) -> str:
-        """`due` without the year - the subject-line form, where every character is paid
-        for by the sender's name beside it."""
-        if self.fires is None:
-            return "no date (tbc)"
-        return (
-            f"{self.fires:%a} {self.fires.day} {self.fires:%b} "
-            f"{self.fires:%H:%M} {zone_name(self.fires)}"
-        )
-
-    @property
-    def moment(self) -> str:
-        """What the date IS: a release ships, an assignment is handed out."""
-        return "handout" if self.is_assignment else "release"
-
-    def severity(self, now: datetime) -> Severity:
-        """How loud this should be at `now` - see the SOURCE_*_WINDOW constants.
-
-        A fault whose moment has already PASSED is MISSED and stays there: the copy did
-        not ship, and going quiet once the lecture is over is the one thing that must not
-        happen. The rungs decide who is TOLD (source_digest, and the mail beside it); none
-        of them touches an exit code, because a source nobody has written yet is a content
-        fault and the red X belongs to the run itself."""
-        if self.fires is None:
-            return Severity.ADVISORY
-        left = self.fires - now
-        if left <= timedelta(0):
-            rung = Severity.MISSED
-        elif left <= SOURCE_CRITICAL_WINDOW:
-            rung = Severity.CRITICAL
-        elif left <= SOURCE_URGENT_WINDOW:
-            rung = Severity.URGENT
-        elif left <= SOURCE_WARN_WINDOW:
-            rung = Severity.WARNING
-        else:
-            rung = Severity.ADVISORY
-        return min(rung, self.ceiling)
-
-    def fix(self, course_org: str, rung: Severity) -> str:
-        """What would put this right, in one sentence, lower-case and unpunctuated at the
-        front so a caller can prefix it with `fix:`.
-
-        Here rather than in the notifier because BOTH channels say it - the digest issue
-        body and the mail - and a fault whose issue and whose email disagree about the
-        remedy is worse than either on its own."""
-        fired = rung is Severity.MISSED
-        # Falls back to the not-yet-fired sentence for a (kind, entry, rung) triple the
-        # table does not list. Unreachable today; a KeyError inside a release cron is not
-        # the way to find out that stopped being true.
-        template = (
-            _FIX.get((self.kind, self.is_assignment, fired))
-            or _FIX[self.kind, False, False]
-        )
-        return template.format(
-            at=self.at, course_org=course_org, repo=self.repo, field=self.field
-        )
-
-    def line(self, cite: str | None = None) -> str:
-        """The one-line form, everywhere: the entry, the field, the line, what is wrong and
-        when it bites.
-
-        It names the FIELD as well as the entry, because "something is wrong with
-        lecture-2" is not an instruction. Dash-separated, in this order, because the
-        commit-time validator lists these lines verbatim (see `source_comment`).
-
-        `cite` replaces the plain `schedule.yml:36` with the caller's own rendering of it -
-        the markdown deep link, on the surfaces that are markdown. The rest of the line is
-        the same line, because a reader comparing the commit comment with the run summary
-        is reading about the same fault."""
-        at = f" - {cite or self.at}" if self.lineno else ""
-        when = f"fires {self.due}" if self.fires else self.due
-        return f"{self.where} -> {self.field}{at} - {self.what} - {when}"
-
-
 class _Wanted(NamedTuple):
     """One source the plan names: the path inside the repo (empty for an assignment, whose
     repo IS the source), where it is cited, when it is needed, and the line each of its
@@ -1536,7 +1388,7 @@ class _Wanted(NamedTuple):
     lines: dict[str, int]
 
     def lineno(self, field: str) -> int | None:
-        return _line_of(self.lines, field)
+        return line_of(self.lines, field)
 
 
 def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
@@ -1597,6 +1449,7 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                     w.fires,
                     field="course_source_repo",
                     kind=FaultKind.MISSING_REPO,
+                    file=SCHEDULE_PATH,
                     lineno=w.lineno("course_source_repo"),
                     repo=repo,
                     path=w.path,
@@ -1642,6 +1495,7 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                         w.fires,
                         field="course_source_path",
                         kind=FaultKind.WITHHELD,
+                        file=SCHEDULE_PATH,
                         ceiling=Severity.WARNING,
                         lineno=w.lineno("course_source_path"),
                         repo=repo,
@@ -1658,26 +1512,13 @@ def source_faults(sched: Schedule, course_org: str) -> list[SourceFault]:
                     w.fires,
                     field="course_source_path",
                     kind=FaultKind.MISSING_PATH,
+                    file=SCHEDULE_PATH,
                     lineno=w.lineno("course_source_path"),
                     repo=repo,
                     path=clean,
                 )
             )
     return out
-
-
-def deep_link(cohort_org: str, fault: SourceFault) -> str | None:
-    """The GitHub URL of the exact line to edit, or None when the line - or the cohort it
-    is in - is not known.
-
-    `main` is hard-coded because that is the only branch anything reads schedule.yml from,
-    the cohort's own workflows included."""
-    if not cohort_org or not fault.lineno:
-        return None
-    return (
-        f"https://github.com/{cohort_org}/{CONFIG_REPO}/blob/main/{SCHEDULE_PATH}"
-        f"#L{fault.lineno}"
-    )
 
 
 def source_report(faults: list[SourceFault], now: datetime, course_org: str) -> str:
@@ -2065,11 +1906,24 @@ def main() -> int:
         source_name = f"{args.cohort_org}/{SCHEDULE_PATH}"
 
     if not args.validate:
-        print(json.dumps(asdict(sched), indent=2, default=str))
+        parsed = asdict(sched)
+        # `dropped` says the same thing in the shape this dump has always had; `faults` is
+        # the notifier's copy of it, and a dump of the plan is not where anybody reads it.
+        parsed.pop("faults", None)
+        print(json.dumps(parsed, indent=2, default=str))
         return 0
     # Report what was UNDERSTOOD as well as what was dropped: validation cannot catch a
     # well-formed entry with the wrong date, but a count that is one short is visible.
     print(_validate_report(sched, source_name))
+    if sched.unparseable:
+        # The same verdict the --file form gives, in the same words: `load` returns an
+        # empty Schedule for a file that does not parse (so the hourly cron cannot be
+        # frozen by one), and a validator that read that as "nothing dropped" was the one
+        # caller for which the fallback is the wrong answer. Nothing in the file was read,
+        # so there are no sources to check either. `load` has already logged the parser's
+        # own line and what the cohort loses until it is fixed.
+        print(f"\nINVALID: {source_name} could not be parsed")
+        return 1
     # The source check is a separate question from the parse. `--validate` on its own
     # stays a pure offline read of the file it was given - deterministic, green or red for
     # reasons entirely inside that file. This half asks the org whether the plan's sources

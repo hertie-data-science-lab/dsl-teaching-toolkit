@@ -6,6 +6,9 @@ Two mails, each about a fault whose own channel reaches nobody in time:
   cites crosses a rung of the ladder. The digest issue (`source_digest`) is the durable
   record; the mail is what reaches somebody who is not reading GitHub notifications that
   week. One mail per tick per recipient set, covering every transition of that tick.
+- `notify_overwritten_edits` mails whoever hand-edited a generated file in a site repo
+  that the sync has just rebuilt over. The issue the sync files there is the record; the
+  mail is what tells a person their work is in a commit and not on the site.
 - `notify_run_failed` mails the MAINTAINER when an unattended run genuinely broke. The
   `<workflow> is failing` issue every cron files is the record; GitHub's own
   scheduled-failure email goes to whoever last committed the workflow file, which is
@@ -15,6 +18,11 @@ WHO IS TOLD is decided by git, not by a mailing list (`route`): the planner of t
 schedule.yml line and the last committer of the materials repo it names are the two people
 who can act, and telling the whole teaching team about every entry is how a notification
 stops being read. The whole team is the FALLBACK, for a line nobody can be named for.
+
+A fault in the COURSE org's own config is the one exception (`route_course`). Its
+addressees are the course admins, out of an org SECRET rather than out of the public file
+half these faults are IN - so there is no handle to address one of them by, and git's
+answer is spent on the digest's @mention instead of on the To line.
 
 Neither mail ever fails a run. A notification that could not be delivered must not take a
 release cron down with it - the same contract the digest has.
@@ -35,29 +43,28 @@ from __future__ import annotations
 import argparse
 import html
 import sys
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import NamedTuple
 
-from . import ghcli, mailer, sync_faculty
+from . import faults, ghcli, mailer, sync_faculty
+from .config_digest import Digest, DigestResult
 from .course import term_tag
 from .discovery import course_name_of
-from .gh_contents import blame_logins, last_committer
-from .log import log, log_err, log_ok, log_person
-from .schedule import (
+from .faults import (
     NOTIFY_FROM,
-    SCHEDULE_PATH,
     SOURCE_CRITICAL_WINDOW,
     SOURCE_URGENT_WINDOW,
     SOURCE_WARN_WINDOW,
+    ConfigFault,
     FaultKind,
     Severity,
-    SourceFault,
-    deep_link,
     hours,
 )
-from .source_digest import DigestResult
+from .gh_contents import blame_logins, last_committer, path_committers, read_error
+from .log import log, log_err, log_ok, log_person
+from .schedule import SourceFault
 
 # How much of the deadline is left, in the subject. Formatted from the windows themselves,
 # so moving a rung cannot leave a hand-typed number of hours in somebody's inbox.
@@ -135,19 +142,79 @@ def _addresses(emails: Iterable[str]) -> tuple[str, ...]:
     return tuple(out.values())
 
 
-def _blame(cohort_org: str) -> dict[int, str]:
-    """Who wrote each line of this cohort's schedule.yml. `{}` when it cannot be read.
+def _blame(org: str, repo: str, path: str, ref: str = "main") -> dict[int, str]:
+    """Who wrote each line of one config file. `{}` when it cannot be read.
 
     A blame that failed must not read as "nobody wrote this": absence here degrades to
-    mailing the whole teaching team, which is noisier but never wrong."""
+    mailing the whole teaching team, which is noisier but never wrong.
+
+    `org` and `ref` because not every file a cohort's digest carries is in the cohort org
+    on `main`: an assignment's `grading_config.yml` is in the course org, on the
+    template's `solution` branch, and blaming the cohort for it would name nobody."""
     try:
-        return blame_logins(cohort_org, sync_faculty.CONFIG_REPO, SCHEDULE_PATH)
+        return blame_logins(org, repo, path, f"refs/heads/{ref}")
     except Exception as exc:
         log(
-            f"  [skip] could not read who wrote {SCHEDULE_PATH} in {cohort_org} "
+            f"  [skip] could not read who wrote {path} in {org} "
             f"({type(exc).__name__}) - notifying the whole teaching team"
         )
         return {}
+
+
+def _pushed(cohort_org: str, repo: str, path: str) -> tuple[str, ...]:
+    """Who last pushed one file, newest first. `()` when it cannot be read.
+
+    For a CSV, where blame is the wrong question: the bot writes two columns of
+    students.csv back into rows faculty typed, so half the roster blames to an account
+    that cannot fix anything - see `gh_contents.path_committers`."""
+    try:
+        return path_committers(cohort_org, repo, path)
+    except Exception as exc:
+        log(
+            f"  [skip] could not read who last pushed {path} in {cohort_org} "
+            f"({type(exc).__name__}) - notifying the whole teaching team"
+        )
+        return ()
+
+
+def _wrote_it(cohort_org: str, fault: ConfigFault, bot: str) -> str | None:
+    """The one login git holds responsible for this fault's line, or None.
+
+    A CSV is asked who PUSHED it and a YAML who wrote the LINE, because a CSV's rows are
+    written by a form and rewritten by the bot while a YAML's are typed by a person. The
+    bot is skipped either way: it is the last committer of every file it maintains, and
+    mailing it is mailing nobody. On the BLAME side that matters as much - the bot writes
+    `central_ref:` into every dsl-course.yml and `handout_datetime:` into schedule.yml, so
+    it is the honest blame answer for lines nobody at the school has ever typed - and
+    None here is what lets `route_course` fall through to whoever pushed the file."""
+    if not fault.file:
+        return None
+    if fault.file.endswith(".csv"):
+        return _last_pusher(cohort_org, fault, bot)
+    if not fault.lineno:
+        return None
+    wrote = _blame(
+        fault.in_org or cohort_org, fault.in_repo, fault.file, fault.ref
+    ).get(fault.lineno)
+    return wrote if wrote and wrote.lower() != bot else None
+
+
+def _last_pusher(org: str, fault: ConfigFault, bot: str) -> str | None:
+    """Who last pushed the FILE this fault is in, skipping the bot, or None.
+
+    The answer for a fault about the whole of a file rather than one line of it. `_wrote_it`
+    asks git blame, and blame needs a line - a file that is missing, unparseable or the
+    wrong shape has none, and those are precisely the faults somebody has just pushed."""
+    if not fault.file:
+        return None
+    return next(
+        (
+            login
+            for login in _pushed(org, fault.in_repo, fault.file)
+            if login.lower() != bot
+        ),
+        None,
+    )
 
 
 def _last_committer(course_org: str, repo: str) -> str | None:
@@ -193,25 +260,26 @@ def route(
     try:
         faculty = sync_faculty.load_cohort_faculty(cohort_org) or {}
     except Exception as exc:
-        log_err(f"could not read {cohort_org}'s people.yml ({exc})")
+        log_err(f"could not read {cohort_org}'s people.yml ({read_error(exc)})")
         faculty = {}
     contacts = sync_faculty.teaching_contacts(faculty, now.date().isoformat())
     by_handle = {c.handle.lower(): c for c in contacts}
     everyone = _addresses(c.email for c in contacts)
     instructors = _addresses(c.email for c in contacts if not c.is_ta)
 
-    blame = _blame(cohort_org)
     bot = _bot()
     committers: dict[str, str | None] = {}
     routed: dict[str, Routed] = {}
     mention: list[str] = []
     unaddressable: set[str] = set()
     for f in loud:
+        # Only a SOURCE fault has a second person to tell: whoever is writing the
+        # materials repo the entry points at, as against whoever wrote the entry.
         if f.repo and f.repo not in committers:
             committers[f.repo] = _last_committer(course_org, f.repo)
         named: list[str] = []
         for login in (
-            blame.get(f.lineno) if f.lineno else None,
+            _wrote_it(cohort_org, f, bot),
             committers.get(f.repo),
         ):
             if login and login.lower() != bot and login not in named:
@@ -242,6 +310,49 @@ def route(
     return Routing(routed, sorted(dict.fromkeys(mention)))
 
 
+def route_course(
+    course_org: str,
+    faults: list[ConfigFault],
+    now: datetime,
+    admins: Iterable[str] = (),
+) -> Routing:
+    """Who hears about a fault in the COURSE org's own config. `route`'s course-level twin.
+
+    Two things differ, and both follow from the file being the course's rather than a
+    cohort's. The addresses are the course ADMINS' and they come from an org SECRET
+    (`mailer.course_admin_addresses`), never from the public `dsl-course.yml` that half
+    these faults are IN - so there is no handle-to-address map here, and therefore no way
+    to write to one admin rather than another. And the person git names is @mentioned on
+    the issue rather than addressed: the issue is where the line is, and the mail goes to
+    the people who own the course.
+
+    `admins` is the handles the course declares, for the degraded-mode count alone - the
+    caller has already parsed them, and a second read to print a number would be an API
+    call spent on a log line."""
+    loud = [f for f in faults if f.severity(now) >= NOTIFY_FROM]
+    if not loud:
+        return Routing()
+    to = _addresses(mailer.course_admin_addresses())
+    if not to:
+        # A COUNT and the variable's NAME, never an address and never who is missing one:
+        # this runs in the course org's public `.github`. `_deliver` then says that the
+        # digest @mention is the only channel left.
+        log(
+            f"  [skip] {len(list(admins))} addressee(s) without email - "
+            f"{mailer.COURSE_ADMIN_ENV} is not set on {course_org}"
+        )
+    bot = _bot()
+    mention: list[str] = []
+    for f in loud:
+        # Blame first, then whoever last pushed the file: a fault about the whole of a
+        # file (missing, unparseable, the wrong shape) has no line to blame, and that is
+        # the commonest way this config breaks.
+        login = _wrote_it(course_org, f, bot) or _last_pusher(course_org, f, bot)
+        if login and login not in mention:
+            mention.append(login)
+    return Routing({f.key: Routed(to, ()) for f in loud}, sorted(mention))
+
+
 # ---------------------------------------------------------------------- the mail
 
 
@@ -259,6 +370,10 @@ def _place_link(course_org: str, fault: SourceFault) -> tuple[str, str] | None:
 
     `main` because every repo this toolkit creates has one, and a branch lookup per fault
     would be an API call to decorate an email."""
+    if not fault.is_source:
+        # An immediate fault is fixed in the file it is in, which the `error line:` row
+        # above already links at the line. There is nowhere else to send anybody.
+        return None
     org_url = f"https://github.com/{course_org}"
     if fault.kind is FaultKind.MISSING_REPO or not fault.repo:
         return course_org, org_url
@@ -317,31 +432,54 @@ def _block(
     and the date has still gone by, so "fix by: release fires <yesterday>" is not an
     instruction anybody can follow."""
     fired = fault.fires is not None and fault.fires <= now
-    line_url = deep_link(cohort_org, fault)
-    where = html.escape(f" - {fault.where} -> {fault.field}")
+    line_url = fault.link(cohort_org)
+    where = html.escape(f" - {fault.label}")
     at = _anchor(line_url, fault.at) if line_url else html.escape(fault.at)
     fix = fault.fix(course_org, rung)
     place = _place_link(course_org, fault)
     rows = [
         ("error line:", at + where),
         ("error content:", _content(fault)),
-        (
-            "fired:" if fired else "fix by date:",
-            html.escape(fault.due if fired else f"{fault.moment} fires {fault.due}"),
-        ),
-        ("to fix:", _linked(fix, *place) if place else html.escape(fix)),
     ]
+    # No date row for a fault with no moment: an unreadable line is not going to happen at
+    # a time, and "fix by date: no date (tbc)" is a row that says nothing twice.
+    if fault.fires:
+        rows.append(
+            (
+                "fired:" if fired else "fix by date:",
+                html.escape(
+                    fault.due if fired else f"{fault.moment} fires {fault.due}"
+                ),
+            )
+        )
+    rows.append(("to fix:", _linked(fix, *place) if place else html.escape(fix)))
     if issue_url:
         rows.append(("GH issue record:", _anchor(issue_url, issue_url)))
     return _rows(rows)
+
+
+def _course_name(course_org: str) -> str:
+    """The course's display name, or its org slug when nothing names it.
+
+    Guarded, because `course_name_of` reads the course org's `dsl-course.yml` - which is
+    one of the files this module mails ABOUT. A malformed one raises out of the YAML
+    loader, and letting that through would mean the single fault that most needs an email
+    is the one fault that sends none."""
+    try:
+        return course_name_of(course_org) or course_org
+    except Exception:
+        return course_org
 
 
 def _course_label(course_org: str, cohort_org: str) -> str:
     """`Deep Learning (Demo) f2026`: the course's display name and the cohort's term tag,
     which is how a reader tells two cohorts of one course apart in a subject line. The
     org slug stands in for a course that declares no name."""
-    name = course_name_of(course_org) or course_org
-    tag = term_tag(cohort_org)
+    name = _course_name(course_org)
+    # A COURSE-level fault is the course org's own, so there is no cohort and no term to
+    # name - and a course org whose slug happens to carry one would otherwise put a
+    # cohort's tag on a subject line that is not about that cohort.
+    tag = None if cohort_org == course_org else term_tag(cohort_org)
     return f"{name} {tag}" if tag else name
 
 
@@ -381,7 +519,7 @@ def _mail(
     that ends on the issue holding the history."""
     label = _course_label(course_org, cohort_org)
     org_url = f"https://github.com/{course_org}"
-    sender = html.escape(course_name_of(course_org) or course_org)
+    sender = html.escape(_course_name(course_org))
     parts = [
         f"<p>This is an automated email sent on behalf of {sender}.</p>",
         f"<p>{_linked(_INTRO[loudest], 'course org', org_url)}</p>",
@@ -394,6 +532,104 @@ def _mail(
             )
         )
     return _subject(label, faults, loudest, now), "\n".join(parts) + "\n"
+
+
+def _deliver(
+    cohort_org: str,
+    groups: dict[Routed, list[str]],
+    message: Callable[[Routed, list[str]], tuple[str, str]],
+    copy_maintainer: Callable[[list[str]], bool],
+    what: str,
+    dry_run: bool,
+) -> Unsent:
+    """Send one message per recipient SET and report what did NOT go out.
+
+    The one delivery path for both kinds of fault, because the accounting is the subtle
+    part and two copies of it would drift: a group is one Graph POST for one message, so
+    its recipients are all in or all out, and the keys that message carried are exactly
+    what has to be owed again (see `Unsent`). What differs between the two callers is only
+    the text and who is copied, so those arrive as functions.
+
+    Never raises: a notification that could not be delivered must not take a release cron
+    down with it."""
+    events = [k for keys in groups.values() for k in keys]
+    maintainer = mailer.maintainer_address()
+    # Neither of these is HELD: an org with no addresses and an org with no transport
+    # are standing states, and holding the crossing would make every tick for the rest
+    # of the term recompute a notification that cannot be delivered - and comment on
+    # it again each time.
+    if not any(g.to for g in groups):
+        log(
+            f"  [skip] no notification address for {cohort_org} - the digest "
+            f"@mention is the only channel"
+        )
+        return Unsent()
+    if not dry_run and mailer.graph_config_from_env() is None:
+        log("  [skip] mail not configured - issue @mention only")
+        return Unsent()
+    messages: list[mailer.Message] = []
+    addressed = 0
+    for routed, keys in groups.items():
+        if not routed.to:
+            continue
+        subject, body = message(routed, keys)
+        copies = list(routed.cc)
+        if maintainer and copy_maintainer(keys):
+            copies.append(maintainer)
+        if dry_run:
+            log(f"  [dry-run] would mail {len(routed.to)} recipient(s): {subject}")
+            for to in routed.to:
+                log_person(f"    would mail {mailer.mask_email(to)}")
+            continue
+        # One message for the whole group: the text is identical for everybody on the
+        # line, and a copy per recipient pays the rate limiter's slot for each.
+        messages.append(mailer.Message(routed.to, subject, body, tuple(copies)))
+        addressed += len(routed.to)
+    if not messages:
+        return Unsent()
+    # One batch, so the Graph token is minted once however many groups this tick has.
+    sent = mailer.send_bulk(messages, html=True)
+    delivered = set(sent)
+    held: list[str] = []
+    unmailed = 0
+    for routed, keys in groups.items():
+        if not routed.to or delivered.issuperset(routed.to):
+            continue
+        held += keys
+        unmailed += len(routed.to)
+    if held:
+        log_err(
+            f"mailed {len(sent)} of {addressed} recipient(s); {unmailed} on "
+            f"{len(held)} {what} were not reached - held for the next tick"
+        )
+        return Unsent(unmailed, tuple(held))
+    log_ok(
+        f"mailed {len(sent)} recipient(s) in {len(messages)} message(s) about "
+        f"{len(events)} {what}"
+    )
+    return Unsent()
+
+
+def _groups(
+    digest: DigestResult, routing: Routing, source: bool
+) -> dict[Routed, list[str]]:
+    """This tick's owed mails of ONE kind, gathered by recipient set: two entries the same
+    person wrote are one conversation, not two messages.
+
+    `source` splits them, because schedule.yml's issue carries both and they are two
+    different letters: a source that is about to ship nothing names the entry and its
+    deadline, an entry nobody can read names the file and what it costs. One tick can owe
+    both, to the same person, and they are still two letters.
+
+    A key the digest owes a mail for but could not hand over a fault (or an addressee)
+    for has nothing to say. Not expected; not worth a KeyError inside a release run."""
+    groups: dict[Routed, list[str]] = {}
+    for key in digest.mail:
+        fault = digest.faults_by_key.get(key)
+        if fault is None or fault.is_source is not source or key not in routing.by_key:
+            continue
+        groups.setdefault(routing.by_key[key], []).append(key)
+    return groups
 
 
 def notify_source_transitions(
@@ -419,82 +655,28 @@ def notify_source_transitions(
     hold a rung below MISSED while the date has gone by all the same."""
     events: list[str] = []
     try:
-        # The mail IS the fault's own lines, so a key the digest owes a mail for but could
-        # not hand over has nothing to say. Not expected; not worth a KeyError inside a
-        # release run.
-        events = [
-            k for k in digest.mail if k in digest.faults_by_key and k in routing.by_key
-        ]
+        groups = _groups(digest, routing, source=True)
+        events = [k for keys in groups.values() for k in keys]
         if not events:
             return Unsent()
-        maintainer = mailer.maintainer_address()
-        # One message per recipient SET, not per fault: two entries the same person
-        # planned are one conversation.
-        groups: dict[Routed, list[str]] = {}
-        for key in events:
-            groups.setdefault(routing.by_key[key], []).append(key)
-        # Neither of these is HELD: an org with no addresses and an org with no transport
-        # are standing states, and holding the crossing would make every tick for the rest
-        # of the term recompute a notification that cannot be delivered - and comment on
-        # it again each time.
-        if not any(g.to for g in groups):
-            log(
-                f"  [skip] no notification address for {cohort_org} - the digest "
-                f"@mention is the only channel"
-            )
-            return Unsent()
-        if not dry_run and mailer.graph_config_from_env() is None:
-            log("  [skip] mail not configured - issue @mention only")
-            return Unsent()
-        messages: list[mailer.Message] = []
-        addressed = 0
-        for routed, keys in groups.items():
-            if not routed.to:
-                continue
+
+        def message(_routed: Routed, keys: list[str]) -> tuple[str, str]:
             keys.sort(key=lambda k: (-digest.mail[k], k))
-            loudest = digest.mail[keys[0]]
-            subject, body = _mail(cohort_org, course_org, digest, keys, loudest, now)
+            return _mail(
+                cohort_org, course_org, digest, keys, digest.mail[keys[0]], now
+            )
+
+        return _deliver(
+            cohort_org,
+            groups,
+            message,
             # The maintainer is copied at the two rungs where a release is about to ship
             # nothing, or already has. Not at the quieter two: those are still faculty's
             # own day, and a maintainer copied on every one of them stops reading them.
-            copies = list(routed.cc)
-            if maintainer and loudest >= Severity.CRITICAL:
-                copies.append(maintainer)
-            if dry_run:
-                log(f"  [dry-run] would mail {len(routed.to)} recipient(s): {subject}")
-                for to in routed.to:
-                    log_person(f"    would mail {mailer.mask_email(to)}")
-                continue
-            # One message for the whole group: the text is identical for everybody on the
-            # line, and a copy per recipient pays the rate limiter's slot for each.
-            messages.append(mailer.Message(routed.to, subject, body, tuple(copies)))
-            addressed += len(routed.to)
-        if not messages:
-            return Unsent()
-        # One batch, so the Graph token is minted once however many groups this tick has.
-        sent = mailer.send_bulk(messages, html=True)
-        # Which GROUPS did not land, not just how many addresses: a group is one Graph
-        # POST for one message, so its recipients are all in or all out, and the keys that
-        # message carried are exactly what has to be owed again.
-        delivered = set(sent)
-        held: list[str] = []
-        unmailed = 0
-        for routed, keys in groups.items():
-            if not routed.to or delivered.issuperset(routed.to):
-                continue
-            held += keys
-            unmailed += len(routed.to)
-        if held:
-            log_err(
-                f"mailed {len(sent)} of {addressed} recipient(s); {unmailed} on "
-                f"{len(held)} source fault(s) were not reached - held for the next tick"
-            )
-            return Unsent(unmailed, tuple(held))
-        log_ok(
-            f"mailed {len(sent)} recipient(s) in {len(messages)} message(s) about "
-            f"{len(events)} source fault(s)"
+            lambda keys: max(digest.mail[k] for k in keys) >= Severity.CRITICAL,
+            "source fault(s)",
+            dry_run,
         )
-        return Unsent()
     except Exception as exc:
         # Inside a release cron. Whatever went wrong - an unreadable people.yml, a
         # credential Graph refused - the release itself is the job. Nothing went out, so
@@ -503,6 +685,284 @@ def notify_source_transitions(
             f"could not mail {cohort_org}'s source faults ({type(exc).__name__}): {exc}"
         )
         return Unsent(1, tuple(events))
+
+
+# ------------------------------------------------- a file the toolkit cannot read
+
+
+def _plural(n: int) -> str:
+    """`entry` / `entries`, spelled once: the subject line and the first line of the body
+    both count the same faults, and a message whose subject says 1 and whose body says
+    are is a message somebody wrote by hand."""
+    return "entry" if n == 1 else "entries"
+
+
+def _immediate_intro(
+    spec: Digest, count: int, reminder: str | None, dated: bool = False
+) -> str:
+    """The first line, which is the only part a reminder changes.
+
+    It leads with the CONSEQUENCE, because "students.csv has 1 entry the toolkit cannot
+    use" says nothing about whether anybody's term is affected - and the answer differs
+    sharply per file (see `faults.CONSEQUENCE`).
+
+    `dated` is whether these faults carry a MOMENT. An assignment's `grading_config.yml`
+    is the one file here that does: its faults are held back until the grading pass that
+    reads them is close, so the letter typically goes out months after the line was
+    written and "a recent edit" names the wrong week - under a table whose own row says
+    when it bites."""
+    what = f"{count} {_plural(count)} the toolkit cannot use"
+    file = f"<code>{html.escape(spec.file)}</code>"
+    if reminder:
+        opening = f"Still unfixed after {reminder}: {file} has {what}."
+    elif dated:
+        opening = f"{file} has {what} by the time it is read."
+    else:
+        opening = f"A recent edit to {file} left {what}."
+    consequence = faults.CONSEQUENCE.get(spec.file, "")
+    tail = f" Until they are fixed: {html.escape(consequence)}." if consequence else ""
+    return f"<p>{opening}{tail}</p>"
+
+
+def notify_config_faults(
+    spec: Digest,
+    cohort_org: str,
+    course_org: str,
+    digest: DigestResult,
+    now: datetime,
+    routing: Routing,
+    *,
+    dry_run: bool,
+) -> Unsent:
+    """Mail the people git names about a file the toolkit cannot read. Never raises.
+
+    The immediate ladder, in three lines: a fault that APPEARS is mailed to whoever left
+    it there; the same list goes out again at 48 hours and at 7 days with the maintainer
+    copied (`digest.reminder`); after that the issue stays open and the inbox goes quiet.
+    There is no rung to climb - nothing about an unreadable line changes with time - so
+    what escalates is only how long it has stood."""
+    events: list[str] = []
+    try:
+        groups = _groups(digest, routing, source=False)
+        events = [k for keys in groups.values() for k in keys]
+        if not events:
+            return Unsent()
+        # Both read the course org's identity file, so they are taken ONCE and not once
+        # per recipient group - `message` is called per group by `_deliver`.
+        label = _course_label(course_org, cohort_org)
+        sender = html.escape(_course_name(course_org))
+
+        def message(_routed: Routed, keys: list[str]) -> tuple[str, str]:
+            keys.sort()
+            faults_in = [digest.faults_by_key[k] for k in keys]
+            parts = [
+                f"<p>This is an automated email sent on behalf of {sender}.</p>",
+                _immediate_intro(
+                    spec,
+                    len(faults_in),
+                    digest.reminder,
+                    any(f.fires for f in faults_in),
+                ),
+            ]
+            parts += [
+                _block(cohort_org, course_org, f, digest.mail[k], digest.issue_url, now)
+                for k, f in zip(keys, faults_in, strict=True)
+            ]
+            subject = (
+                f"[{label}] {spec.file} has {len(faults_in)} "
+                f"{_plural(len(faults_in))} the toolkit cannot use"
+            )
+            return subject, "\n".join(parts) + "\n"
+
+        return _deliver(
+            cohort_org,
+            groups,
+            message,
+            # The maintainer joins once the file has been unusable for two days: by then
+            # it is not a slip somebody is about to fix, and somebody outside the cohort
+            # has to know its enrolment (or its teams, or its plan) is not running. On a
+            # COURSE-level digest they are on it from the first mail (`cc_maintainer`):
+            # the course admins it goes to are the same small group who may have written
+            # the line, so there is nobody else outside it to notice.
+            lambda _keys: spec.cc_maintainer or bool(digest.reminder),
+            f"{spec.file} fault(s)",
+            dry_run,
+        )
+    except Exception as exc:
+        log_err(
+            f"could not mail {cohort_org}'s {spec.file} faults "
+            f"({type(exc).__name__}): {exc}"
+        )
+        return Unsent(1, tuple(events))
+
+
+# --------------------------------------------- an edit the site sync rebuilt over
+
+
+# What the person who made the edit has lost, and where to make it again. Verbatim in the
+# mail's first line and in every fault's fix sentence, because the issue the sync files in
+# the site repo says the same two things - and a notice whose email and whose issue
+# disagree about the remedy is worse than either on its own.
+OVERWRITTEN_CONSEQUENCE = (
+    "generated files are rebuilt every run, so the change is not on the site"
+)
+OVERWRITTEN_FIX = "move the change to the file the docs name as yours"
+
+
+def overwritten_fault(site: str, path: str, sha: str) -> ConfigFault:
+    """One generated file whose hand edit the sync at HEAD replaced.
+
+    A `ConfigFault` so it reads and routes like every other thing a human has to put
+    right, and an IMMEDIATE one (`fires` is None) because nothing about it happens at a
+    moment. It carries no LINE: the file was rebuilt whole, so no line in it is anybody's
+    edit any more - which is also why this is not a digest (see
+    `notify_overwritten_edits`). `where` is the path, so two files lost in one commit are
+    two faults and not one."""
+    return ConfigFault(
+        path,
+        f"this file is generated by the site sync, which has just rebuilt it over the "
+        f"edit committed in {sha[:7]}",
+        file=path,
+        in_repo=site,
+        fix_text=OVERWRITTEN_FIX,
+    )
+
+
+def _overwritten_block(
+    fault: ConfigFault, org: str, sha: str, issue_url: str | None
+) -> str:
+    """One overwritten file, as the labelled table the appendix specifies - the same rows
+    an immediate config fault gets, minus the two it cannot fill.
+
+    Not `_block`: there is no line to deep-link and no deadline, and the fault's `where`
+    IS its file, so `_block`'s first row would print the path twice. The links that matter
+    here are different ones - the file as the sync has rebuilt it, and the COMMIT the edit
+    is still recoverable from."""
+    site_url = f"https://github.com/{org}/{fault.in_repo}"
+    rows = [
+        ("error line:", _anchor(f"{site_url}/blob/main/{fault.file}", fault.at)),
+        (
+            "error content:",
+            _linked(fault.what, sha[:7], f"{site_url}/commit/{sha}"),
+        ),
+        ("to fix:", html.escape(fault.fix())),
+    ]
+    if issue_url:
+        rows.append(("GH issue record:", _anchor(issue_url, issue_url)))
+    return _rows(rows)
+
+
+def notify_overwritten_edits(
+    site_org: str,
+    site: str,
+    course_org: str,
+    by_login: dict[str, list[tuple[str, str]]],
+    issue_url: str | None,
+    now: datetime,
+    *,
+    dry_run: bool = False,
+) -> Unsent:
+    """Mail each person whose edit to a generated file the site sync just rebuilt over.
+    Never raises.
+
+    NOT a digest, deliberately. Everything the digest engine does is about a fault that
+    STANDS: a body rewritten each tick from the state of the file, an issue that closes
+    itself once the file parses, a rung that climbs as a deadline nears. An overwritten
+    edit is the opposite shape - an EVENT, already over by the time anyone hears about it,
+    with nothing in the repo left to observe. Synced as a digest it would close its own
+    issue on the very next run and delete the only record of what was lost. So the site
+    repo keeps its one issue (`site_repo.OVERWRITE_ISSUE_TITLE`, upserted on an exact
+    title like every other) and this is the letter beside it.
+
+    `by_login` is `{committer login: [(path, commit sha)]}`, keyed "" for a commit whose
+    git email is linked to no GitHub account - those fall back to the whole teaching team,
+    which is the same fallback a blame nobody could read gets. `site_org` is a cohort org
+    for a cohort site and the course org itself for the public one; the latter declares no
+    people.yml, so nobody is addressable there and the issue's cc is the only channel."""
+    shas: dict[str, str] = {}
+    faults_by_key: dict[str, ConfigFault] = {}
+    groups: dict[Routed, list[str]] = {}
+    try:
+        faculty = sync_faculty.load_cohort_faculty(site_org) or {}
+    except Exception as exc:
+        log_err(f"could not read {site_org}'s people.yml ({read_error(exc)})")
+        faculty = {}
+    contacts = sync_faculty.teaching_contacts(faculty, now.date().isoformat())
+    by_handle = {c.handle.lower(): c for c in contacts}
+    everyone = _addresses(c.email for c in contacts)
+    instructors = _addresses(c.email for c in contacts if not c.is_ta)
+    for login, edits in by_login.items():
+        who = by_handle.get(login.lower()) if login else None
+        if who:
+            # The instructors are copied when a TA is addressed, for the reason the config
+            # faults copy them: a TA editing the site is doing it on somebody's behalf.
+            to = _addresses([who.email])
+            cc = tuple(a for a in instructors if a not in to) if who.is_ta else ()
+        else:
+            # Git named nobody in people.yml - the team is the fallback, and everybody is
+            # already in `to`, so there is nobody in particular to copy.
+            to, cc = everyone, ()
+        for path, sha in edits:
+            fault = overwritten_fault(site, path, sha)
+            shas[fault.key] = sha
+            faults_by_key[fault.key] = fault
+            groups.setdefault(Routed(to, cc), []).append(fault.key)
+    if not groups:
+        return Unsent()
+
+    try:
+        # Inside the guard with the delivery: both of these read the course org's identity
+        # file, and a rate limit on it must cost the mail rather than the sync's report.
+        label = _course_label(course_org, site_org)
+        sender = html.escape(_course_name(course_org))
+    except Exception as exc:
+        log_err(
+            f"could not mail {site_org}'s overwritten edits "
+            f"({type(exc).__name__}): {exc}"
+        )
+        return Unsent(1, tuple(faults_by_key))
+
+    def message(_routed: Routed, keys: list[str]) -> tuple[str, str]:
+        keys.sort()
+        found = [faults_by_key[k] for k in keys]
+        one = html.escape(found[0].file)
+        opening = (
+            f"Your edit to <code>{one}</code> was overwritten by the sync"
+            if len(found) == 1
+            else f"{len(found)} files you edited were overwritten by the sync"
+        )
+        parts = [
+            f"<p>This is an automated email sent on behalf of {sender}.</p>",
+            f"<p>{opening} - {OVERWRITTEN_CONSEQUENCE}.</p>",
+        ]
+        parts += [
+            _overwritten_block(f, site_org, shas[k], issue_url)
+            for k, f in zip(keys, found, strict=True)
+        ]
+        subject = (
+            f"[{label}] Your edit to {found[0].file} was overwritten by the site sync"
+            if len(found) == 1
+            else f"[{label}] {len(found)} of your edits were overwritten by the site sync"
+        )
+        return subject, "\n".join(parts) + "\n"
+
+    try:
+        return _deliver(
+            site_org,
+            groups,
+            message,
+            # Never the maintainer: a hand edit to a generated file is a habit to correct,
+            # not a run that broke.
+            lambda _keys: False,
+            "overwritten edit(s)",
+            dry_run,
+        )
+    except Exception as exc:
+        log_err(
+            f"could not mail {site_org}'s overwritten edits "
+            f"({type(exc).__name__}): {exc}"
+        )
+        return Unsent(1, tuple(faults_by_key))
 
 
 # ------------------------------------------------------------------ a failed run

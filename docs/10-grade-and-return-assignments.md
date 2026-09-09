@@ -62,6 +62,25 @@ edit them **there**, never in the sheet. The toolkit writes the file only when t
 that header really moved, so your quoting and spacing survive the quarter-hourly tick; YAML
 comments you add do not survive a rewrite when one happens.
 
+### When a sheet has something nobody can act on
+
+The quarter-hourly tick reads every sheet. Anything it cannot use - a save that does not
+parse, a key written twice, a mark or an adjustment that is not a number, a question
+`grading_config.yml` does not declare, a handle in two submission units - opens **one**
+issue in `classroom-config` (*grading sheets have entries the grader cannot read*) listing
+each by file and line, and emails whoever committed that line. Nothing is refreshed or sent
+for that unit until it is settled. The issue rewrites itself on every tick and closes when
+the last one goes.
+
+Neither the issue nor the email ever names the student or the team: a unit key is a person,
+and both are public. They cite the line.
+
+The assignment's own `grading_config.yml` is checked the same way, in its own issue
+(*assignment grading_config.yml has values that will not grade as written*) - a value that
+will not grade as it reads is reported against the moment it is used, so it reaches you
+before the marking does, not after. For the whole set of these, see
+[Why did I get this email?](reference/actions-reference.md#why-did-i-get-this-email).
+
 ### Where `info.submitted` comes from
 
 A git committer date is written by the student's own client, so a submission dated before

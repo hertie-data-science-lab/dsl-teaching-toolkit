@@ -37,6 +37,7 @@ from datetime import UTC, datetime
 
 from . import mailer, roster
 from .discovery import COHORTS_PATH, course_name_for_cohort, discover_cohorts
+from .faults import Unusable
 from .gh_contents import get_file_with_sha, put_file, read_csv
 from .log import log_err, log_ok, log_person, log_step
 
@@ -221,6 +222,10 @@ class Outcome(enum.Enum):
     SENT = "the codes were emailed"
     NOTHING_TO_SEND = "every student who needs a code already has one"
     NO_ROSTER = "students.csv could not be read"
+    # The one outcome that is none of those and still leaves the run green: the file IS
+    # there and says something no parser can use. See `reds_the_run`.
+    UNUSABLE_ROSTER = "students.csv cannot be read as written"
+    # A roster with nothing but its header - a cohort bootstrapped and not yet enrolled.
     EMPTY_ROSTER = "students.csv has no rows yet"
     NO_TRANSPORT = "no mail transport is configured (the GRAPH_* secrets)"
     FAILED = "the send failed"
@@ -239,7 +244,15 @@ def run(cohort_org: str) -> Outcome:
     # The sha is kept so the write below can be refused if anything else commits to the
     # roster while this run is generating and mailing codes (see write_codes).
     raw, raw_sha = read
-    students = roster.parse(raw)
+    try:
+        students = roster.parse(raw)
+    except Unusable as exc:
+        # A `;`-delimited Excel export, or a header row somebody deleted. Nothing here can
+        # act on it - and nothing here should red for it either: the roster is faculty's
+        # to fix, and the same push that fired this send fires the scheduler's dispatcher,
+        # which opens the students.csv digest issue and mails whoever pushed it.
+        log_err(f"{exc} No codes generated or sent.")
+        return Outcome.UNUSABLE_ROSTER
     if not students:
         log_err(f"roster in {cohort_org} has no rows yet - no codes to generate.")
         return Outcome.EMPTY_ROSTER
@@ -437,13 +450,27 @@ def _release_unsent(cohort_org: str, unsent: list[str], stamp: str) -> None:
         log_person(f"  not emailed, still claimed: {to}")
 
 
-def reds_the_run(outcome: Outcome) -> bool:
-    """Whether **Send enrolment codes** should exit non-zero on this outcome.
+# The outcomes that leave **Send enrolment codes** green. Three mean nothing is
+# outstanding - a roster with nothing but its header is the normal state of a freshly
+# bootstrapped cohort, not a failure. The fourth is a CONTENT fault: a roster nobody can
+# parse is faculty's to fix, it is already reported to them by name through the
+# students.csv digest issue, and reddening this run instead files `Send enrolment codes is
+# failing` in the course org and mails the maintainer a CSV they cannot correct.
+# Everything else - a roster that is not there, a mail transport that is not configured, a
+# write GitHub refused - is a real failure, and the run that a roster push just fired is
+# owed its red X for it.
+_GREEN = (
+    Outcome.SENT,
+    Outcome.NOTHING_TO_SEND,
+    Outcome.EMPTY_ROSTER,
+    Outcome.UNUSABLE_ROSTER,
+)
 
-    Everything except the two that mean nothing is outstanding: the run was fired by a
-    roster edit somebody had just made, and they are owed a red X for any reason no email
-    went out - a missing roster and unset secrets included."""
-    return outcome not in (Outcome.SENT, Outcome.NOTHING_TO_SEND)
+
+def reds_the_run(outcome: Outcome) -> bool:
+    """Whether **Send enrolment codes** should exit non-zero on this outcome - see
+    `_GREEN` for which do not and why."""
+    return outcome not in _GREEN
 
 
 def refuse_unregistered(cohort_org: str, course_org: str) -> bool:

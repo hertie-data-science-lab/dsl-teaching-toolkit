@@ -26,30 +26,13 @@ import argparse
 import sys
 
 from . import roster, teams
-from .course import INSTRUCTORS_TEAM, ROLE_TEAMS
 from .gh_teams import create_team, reconcile_team_members
 from .log import log_err, log_ok, log_person, log_step
 
-
-def team_slug(assignment: str, team: str) -> str:
-    """The GitHub Team name/slug materialised for one (assignment, team) pair.
-
-    Assignment-prefixed so a team name reused across assignments (e.g. `wizards` in two
-    projects) maps to distinct org-unique teams. Lower-cased to match the slug GitHub
-    derives from the team name."""
-    return f"{assignment}-{team}".lower()
-
-
-# Team slugs students may never materialise. teams.csv is STUDENT-written (the public
-# Join-team issue form), and `team_slug("course", "admin")` is `course-admin` - the faculty
-# team that holds admin on every repo in the cohort. Reconciling that slug from teams.csv
-# would add the student to it and prune the real admins. The workflow refuses these at the
-# form; this is the backstop for a row that reached the CSV any other way.
-RESERVED_TEAM_SLUGS = ROLE_TEAMS
-
-
-def is_reserved_slug(slug: str) -> bool:
-    return slug in RESERVED_TEAM_SLUGS or slug.startswith(f"{INSTRUCTORS_TEAM}-")
+# The naming rules live with the file's parser, which is the only thing that can refuse a
+# row for breaking them. Imported for this module's own reconcile below, not re-exported:
+# everything else asks `teams` for them.
+from .teams import is_reserved_slug, team_slug
 
 
 def desired_teams(per: dict[str, dict[str, list[str]]]) -> dict[str, set[str]]:
@@ -144,16 +127,18 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
         return 0
     students = roster.load(cohort_org)
     if students is None:
-        # The roster is UNREADABLE (absent, or a transient read failure) - distinct from a
-        # present-but-empty one. Building the allowlist from None gives an empty set, so a
-        # pruning reconcile would then EVICT every member from every project team. Refuse to
-        # touch anything, mirroring sync_roster's abort on the same signal, rather than
-        # mass-evicting and reporting red. (roster.load has already logged the cause.)
+        # The roster is ABSENT - distinct from a present-but-empty one. Building the
+        # allowlist from None gives an empty set, so a pruning reconcile would then EVICT
+        # every member from every project team. Refuse to touch anything, mirroring
+        # sync_roster's skip on the same signal. GREEN, for the same reason it is: a file
+        # faculty have to write is reported on the roster's own digest issue and mailed to
+        # them, and a red X here reaches only a maintainer who cannot fix it. A read that
+        # FAILED still raises out of `roster.load` and still reds the run.
         log_err(
-            f"roster unreadable in {cohort_org} - refusing to reconcile project teams "
-            f"(an empty allowlist would evict every team member)"
+            f"no roster to vet teams.csv against in {cohort_org} - skipping (reported on "
+            f"the students.csv digest issue in {teams.CONFIG_REPO})"
         )
-        return 1
+        return 0
     log_step(f"Materialising {len(wanted)} project team(s) in {cohort_org}")
     errors = 0
     for slug, accepted, rejected in vet_groups(
@@ -168,7 +153,12 @@ def sync(cohort_org: str, prune: bool = False, dry_run: bool = False) -> int:
                 f"not adding to {slug} (would invite an arbitrary GitHub account)"
             )
         if rejected:
-            errors += len(rejected)
+            # NOT an error. A handle faculty typed that is not on the roster is a CONTENT
+            # fault of teams.csv: `teams.parse` records it, the teams.csv digest issue
+            # lists the row, and the mail beside it goes to whoever pushed the line. The
+            # row is skipped either way - adding it would invite an arbitrary GitHub
+            # account into a private org - and counting it here as well only reddened the
+            # nightly cron for a typo nobody reading that red X can correct.
             log_err(
                 f"{len(rejected)} handle(s) in teams.csv are not onboarded roster handles "
                 f"- not added to {slug} (they would invite arbitrary GitHub accounts). "

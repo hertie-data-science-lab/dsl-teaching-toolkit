@@ -275,6 +275,33 @@ def test_load_yaml_config_distinguishes_absent_empty_and_malformed(monkeypatch):
         gh_contents.load_yaml_config("Org", ".github", "dsl-course.yml")
 
 
+def test_a_malformed_config_is_logged_by_its_problem_not_by_its_contents(
+    monkeypatch, capsys
+):
+    # These log lines land in a PUBLIC course-org Actions log, and the line that breaks a
+    # people.yml is as often as not the one carrying somebody's address - which is what
+    # PyYAML renders into `str(exc)`.
+    import yaml
+
+    monkeypatch.setattr(
+        gh_contents,
+        "get_file_content",
+        lambda *a, **k: "people:\n  - email: jan@x.edu: typo\n",
+    )
+    with pytest.raises(yaml.YAMLError):
+        gh_contents.load_yaml_config("Org", "classroom-config", "people.yml")
+    err = capsys.readouterr().err
+    assert "jan@x.edu" not in err
+    assert "malformed YAML in Org/classroom-config/people.yml: " in err
+    assert "ScannerError: mapping values are not allowed here (line 2)" in err
+
+
+def test_a_failure_that_is_not_a_parse_error_prints_as_it_stands():
+    # `read_error` redacts a PARSE error, which is the one that quotes the file. Nothing
+    # else: the message on a read that failed is the toolkit's own.
+    assert gh_contents.read_error(RuntimeError("HTTP 403")) == "RuntimeError: HTTP 403"
+
+
 def test_load_yaml_config_propagates_a_non_404_read_error(monkeypatch):
     # get_file_content raises on any non-404 failure; load_yaml_config must not swallow it
     # into None/{}, or a transient error reads as "not configured".

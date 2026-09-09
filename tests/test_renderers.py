@@ -91,6 +91,12 @@ UNGATED = {"scheduler", "refresh", "send_codes"}
 # whoever last committed the cron file - the bot - so each has to report itself.
 CRONS = {"sync_membership", "sync_site", "refresh", "publish_site", "scheduler"}
 
+# Everything that runs with nobody watching: the crons, plus the codes send, which has no
+# button and no actor at all - a push to a cohort's students.csv fires it. The failure
+# contract is the same for all of them and the reason is the same, so it is asserted over
+# the whole set rather than over the ones that happen to declare a `schedule:`.
+UNATTENDED = CRONS | {"send_codes"}
+
 # Every renderer whose run ends in `seed refresh` - and the subset that may join a shared
 # concurrency group. See test_only_the_nightly_refresh_joins_the_seed_refresh_group.
 SEED_REFRESH = {"refresh", "new_materials", "new_assignment", "bootstrap_cohort"}
@@ -686,14 +692,22 @@ def test_classroom_config_site_dispatcher_fires_on_schedule_or_people_change():
 def test_classroom_config_scheduler_dispatcher_fires_on_a_schedule_change():
     # GitHub delivers only a fraction of `schedule:` cron fires, so the promise that a
     # schedule.yml edit takes effect within minutes holds only if the edit itself starts a
-    # run. schedule.yml alone: no other file in classroom-config moves a release moment.
+    # run. The other three are the hand-edited files the same run checks: a push that
+    # leaves one of them unreadable is mailed within the minute rather than at the hour.
+    # Grading sheets are deliberately absent - a grader saves one all day.
     tmpl = (
         ROOT / "templates" / "classroom-config" / "dispatch-scheduled-release.yml"
     ).read_text()
     doc = yaml.safe_load(tmpl)
     trigger = doc.get("on", doc.get(True))
     assert set(trigger) == {"push"}
-    assert trigger["push"]["paths"] == ["schedule.yml"]
+    assert trigger["push"]["paths"] == [
+        "schedule.yml",
+        "people.yml",
+        "students.csv",
+        "teams.csv",
+    ]
+    assert not any("grading_sheets" in p for p in trigger["push"]["paths"])
     assert trigger["push"]["branches"] == ["main"]
     # DSL_BOT_TOKEN does every call here, so the ambient token gets no scopes at all.
     assert doc["permissions"] == {}
@@ -715,7 +729,12 @@ def test_send_codes_only_ever_runs_off_a_roster_push():
     jobs = doc["jobs"]
     assert set(jobs) == {"send-codes"}
     assert "check-team" not in str(jobs["send-codes"].get("needs", ""))
-    step = jobs["send-codes"]["steps"][-1]
+    # The failure-notice steps trail this job too now, so address the work step by name.
+    step = next(
+        s
+        for s in jobs["send-codes"]["steps"]
+        if s.get("name", "").startswith("Send enrolment codes")
+    )
     assert step["env"]["DISPATCH_COHORT"] == (
         "${{ github.event.client_payload.cohort_org }}"
     )
@@ -849,8 +868,9 @@ def test_validate_schedule_workflow_is_seeded_with_the_central_repo_pinned():
     assert "--file ../cohort/schedule.yml --validate" in run
     assert "$GITHUB_STEP_SUMMARY" in run
 
-    # the run must end red so the commit is marked, and needs issues:write to escalate
-    assert doc["permissions"]["issues"] == "write"
+    # The run must end red so the commit is marked. Nothing here writes an ISSUE - the
+    # engine's digest does - so that scope is gone; the commit comment needs contents.
+    assert doc["permissions"] == {"contents": "write"}
     assert any("exit 1" in s.get("run", "") for s in steps)
 
 
@@ -1398,8 +1418,8 @@ def test_a_failure_files_its_own_issue_rather_than_commenting_on_a_sibling(tmp_p
     assert _run_issue_step(opener, tmp_path / "y", _OPEN_ISSUES) == ["comment 11"]
 
 
-@pytest.mark.parametrize("name", sorted(CRONS))
-def test_every_cron_files_and_closes_its_own_failure_issue(name):
+@pytest.mark.parametrize("name", sorted(UNATTENDED))
+def test_every_unattended_run_files_and_closes_its_own_failure_issue(name):
     doc = yaml.safe_load(ALL_RENDERED[name])
     reporting = [
         (n, j)
@@ -1763,7 +1783,7 @@ MAIL_SENDERS = ("send_codes", "distribute_grades")
 # fiction an unattended codes send leans on when it says a person will read the row.
 # ...plus the scheduler, which mails a cohort about a source it has not staged, and
 # every cron, whose failure step mails the maintainer the log (asserted per cron in
-# test_every_cron_files_and_closes_its_own_failure_issue).
+# test_every_unattended_run_files_and_closes_its_own_failure_issue).
 MAIL_ENV_CARRIERS = MAIL_SENDERS + ("status", "scheduler")
 
 
@@ -1831,6 +1851,61 @@ def test_the_release_pass_itself_carries_the_transport():
     step = next(s for s in steps if "--all-cohorts" in str(s.get("run", "")))
     assert set(mailer.GRAPH_ENV) <= set(step["env"])
     assert step["env"][mailer.MAINTAINER_ENV] == _secret_ref(mailer.MAINTAINER_ENV)
+
+
+# Where a fault in a COURSE org's OWN config is emailed: the two steps that check
+# dsl-course.yml and the cohort registry, and nowhere else. An address list has no business
+# in the env of a workflow that never reads it.
+COURSE_ADMIN_CARRIERS = ("scheduler", "sync_membership")
+
+
+@pytest.mark.parametrize(
+    ("name", "command"),
+    [
+        ("scheduler", "--all-cohorts --skip-autograde"),
+        ("sync_membership", "--check-course-config"),
+    ],
+)
+def test_the_course_config_check_carries_the_admin_addresses(name, command):
+    steps = [
+        s for job in workflow_jobs(ALL_RENDERED[name]).values() for s in job["steps"]
+    ]
+    step = next(s for s in steps if command in str(s.get("run", "")))
+    # The transport AND the list: a step carrying one and not the other can mail, and has
+    # nobody to tell.
+    assert set(mailer.GRAPH_ENV) <= set(step["env"])
+    assert step["env"][mailer.COURSE_ADMIN_ENV] == _secret_ref(mailer.COURSE_ADMIN_ENV)
+
+
+def test_no_other_workflow_is_handed_the_admin_addresses():
+    for name, rendered in ALL_RENDERED.items():
+        if name in COURSE_ADMIN_CARRIERS:
+            continue
+        assert mailer.COURSE_ADMIN_ENV not in rendered, name
+
+
+def test_a_push_to_either_course_config_file_checks_it_within_the_minute():
+    # The registry is the other half of the course's own config and shares its digest
+    # issue, so an edit to either has to reach the same check.
+    rendered = ALL_RENDERED["sync_membership"]
+    doc = yaml.safe_load(rendered)
+    paths = doc.get("on", doc.get(True))["push"]["paths"]
+    assert paths == ["dsl-course.yml", "cohort-courses-pages.yml"]
+    auto = workflow_jobs(rendered)["sync-auto"]["steps"]
+    step = next(
+        s for s in auto if "dsl_course.sync_membership" in str(s.get("run", ""))
+    )
+    # Before the reconcile, which is the pass that SKIPS a course it cannot read - so the
+    # digest and the mail are written whatever that then does.
+    run = step["run"]
+    assert run.index("--check-course-config") < run.index("dsl_course.sync_membership")
+
+
+def test_the_manual_sync_button_is_not_given_the_addresses():
+    # Somebody is standing at that run and reads its log; the automatic job is the one
+    # with nobody watching.
+    steps = workflow_jobs(ALL_RENDERED["sync_membership"])["sync-dispatch"]["steps"]
+    assert all(mailer.COURSE_ADMIN_ENV not in (s.get("env") or {}) for s in steps)
 
 
 def test_a_cohort_bootstrap_forwards_the_maintainer_address_to_the_new_org():

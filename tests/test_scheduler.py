@@ -18,7 +18,17 @@ import yaml
 from conftest import source_fault
 
 from dsl_course import collect as collect_mod
-from dsl_course import course, deploy, ghcli, notify, scheduler, seed, source_digest
+from dsl_course import (
+    config_digest,
+    course,
+    deploy,
+    ghcli,
+    notify,
+    scheduler,
+    seed,
+    source_digest,
+)
+from dsl_course.faults import ConfigFault, Unusable
 from dsl_course.grades import GradingSpec
 from dsl_course.schedule import (
     AssignmentEntry,
@@ -1573,13 +1583,20 @@ def test_release_order_puts_undated_tbc_entries_last():
     assert sorted([tbc, dated], key=scheduler.release_order) == [dated, tbc]
 
 
-def test_run_survives_an_unparseable_schedule_but_goes_red(monkeypatch, capsys):
+def test_an_unparseable_plan_leaves_the_exit_code_alone_and_keeps_the_digest_open(
+    monkeypatch, capsys
+):
     # The original incident: an unparseable schedule.yml raised inside schedule.load and
     # killed the hourly tick for the cohort. It must still not RAISE - one cohort's typo
     # cannot be allowed to abort the others under --all-cohorts, which is why load falls
-    # back to an empty Schedule. But it must not be GREEN either: while the file stands,
-    # nothing is released, handed out, snapshotted or graded for this cohort, and an hourly
-    # green tick is precisely how that survives a term unnoticed.
+    # back to an empty Schedule.
+    #
+    # Nor may it red the run. A file faculty have to fix is a CONTENT fault: the exit code
+    # spent on it bought 4-8 red runs an hour and a `Scheduled release is failing` issue
+    # every six, mailing the maintainer about a bad indent only faculty can correct. The
+    # channel is the fault `load` files - which is also what has to keep schedule.yml's
+    # digest issue OPEN: an empty fault list closes it, and it used to say "every entry in
+    # schedule.yml is now usable" about a file that would not parse.
     from tests.test_schedule import MALFORMED_SCHEDULE
 
     _stub_snapshots(monkeypatch, existing=set())
@@ -1588,18 +1605,26 @@ def test_run_survives_an_unparseable_schedule_but_goes_red(monkeypatch, capsys):
         "get_file_content",
         lambda org, repo, path: MALFORMED_SCHEDULE,
     )
+    synced: dict = {}
+    monkeypatch.setattr(
+        scheduler.source_digest,
+        "sync",
+        lambda *a, **k: synced.update(faults=a[2]) or source_digest.DigestResult(),
+    )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
 
-    assert scheduler.run("Course-Org", "Cohort-Org", now) == 1
+    assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
 
+    (fault,) = synced["faults"]
+    assert fault.file == "schedule.yml" and "not valid YAML" in fault.what
     captured = capsys.readouterr()
     assert "is NOT valid YAML" in captured.err
     assert "0/0 release(s) due" in captured.out
 
 
-def test_a_dry_run_reports_an_unparseable_schedule_too(monkeypatch):
-    # The manual dispatch defaults to dry-run, so this is the preview an operator looks at
-    # first; a green preview of a plan that cannot be read is the wrong answer there too.
+def test_a_dry_run_of_an_unparseable_plan_is_green_too(monkeypatch):
+    # The manual dispatch defaults to dry-run, and a preview writes nothing at all - so
+    # there is nothing for it to be red about either. What it PRINTS is the report.
     from tests.test_schedule import MALFORMED_SCHEDULE
 
     _stub_snapshots(monkeypatch, existing=set())
@@ -1609,7 +1634,7 @@ def test_a_dry_run_reports_an_unparseable_schedule_too(monkeypatch):
         lambda org, repo, path: MALFORMED_SCHEDULE,
     )
     now = datetime(2026, 10, 14, tzinfo=timezone.utc)
-    assert scheduler.run("Course-Org", "Cohort-Org", now, dry_run=True) == 1
+    assert scheduler.run("Course-Org", "Cohort-Org", now, dry_run=True) == 0
 
 
 def test_dropped_entries_alone_stay_advisory(monkeypatch):
@@ -1688,6 +1713,9 @@ def _phase_spies(monkeypatch, sched: Schedule):
     monkeypatch.setattr(
         scheduler, "_preflight_sources", lambda *a: calls.append("preflight") or 0
     )
+    # Not a phase these tests are about, and it reads four files over the API: stubbed
+    # silently rather than spied, so the sequence they assert stays the release sequence.
+    monkeypatch.setattr(scheduler, "_preflight_configs", lambda *a: 0)
     monkeypatch.setattr(
         scheduler, "_run_releases", lambda *a: calls.append("release") or 0
     )
@@ -2020,6 +2048,31 @@ def test_a_cohort_listing_that_cannot_be_read_says_so_and_goes_red(
     assert out.out == ""  # never a half-written cohort matrix on stdout
 
 
+@pytest.mark.parametrize("flag", ["--all-cohorts", "--list-cohorts"])
+def test_a_registry_nobody_can_parse_releases_nothing_and_stays_green(
+    monkeypatch, capsys, flag
+):
+    # A malformed registry is a hand-edited file a course admin has to fix, and it was the
+    # one content fault still spending an exit code: `Scheduled release is failing` in the
+    # course org and a maintainer mail every six hours, about a file the maintainer cannot
+    # edit. `_preflight_course` has already put it on the course digest and mailed the
+    # admins, so the listing lists nothing and the tick is green.
+    def boom(org):
+        raise Unusable("malformed cohort registry in Course-Org/.github")
+
+    monkeypatch.setattr(scheduler, "discover_cohorts", boom)
+    monkeypatch.setattr(scheduler, "_preflight_course", lambda *a: 0)
+    monkeypatch.setattr(sys, "argv", ["scheduler", "--course-org", "Course-Org", flag])
+    assert scheduler.main() == 0
+    out = capsys.readouterr()
+    assert "malformed cohort registry" in out.err
+    assert "this run stays green" in out.err
+    if flag == "--list-cohorts":
+        assert out.out == "[]\n"  # an empty grading matrix, never a half-written one
+    else:
+        assert "nothing to release" in out.out
+
+
 # ----------------------------------------------------- source pre-flight (unattended)
 
 
@@ -2091,7 +2144,7 @@ def test_a_mail_that_did_not_go_out_puts_the_digests_record_back(monkeypatch):
     monkeypatch.setattr(
         scheduler.source_digest,
         "hold",
-        lambda org, keys: held.update(org=org, keys=keys) or 0,
+        lambda org, keys, clock=None: held.update(org=org, keys=keys, clock=clock) or 0,
     )
     assert (
         scheduler._preflight_sources(
@@ -2099,7 +2152,7 @@ def test_a_mail_that_did_not_go_out_puts_the_digests_record_back(monkeypatch):
         )
         == 0
     )
-    assert held == {"org": "Cohort-Org", "keys": {fault.key: "warning"}}
+    assert held == {"org": "Cohort-Org", "keys": {fault.key: "warning"}, "clock": None}
 
 
 def test_a_dry_run_holds_nothing(monkeypatch):
@@ -2528,3 +2581,332 @@ def test_a_routing_that_raised_still_lets_the_digest_speak(monkeypatch, capsys):
     )
     assert seen["kw"]["resolve_mention"]() == []
     assert "could not work out who to tell" in capsys.readouterr().err
+
+
+# ------------------------------------------------ config pre-flight (unattended)
+#
+# The hourly floor under the push fast path: every hand-edited file in classroom-config,
+# one digest issue each. What matters is that it cannot red the run, that one unreadable
+# file does not stop the next, and that "we could not look" never reports a file as fixed.
+
+
+def _config_preflight(
+    monkeypatch,
+    *,
+    roster_faults=None,
+    roster_raises=None,
+    roster_absent=False,
+    sheet_faults=None,
+    spec_faults=None,
+    vetted_against=None,
+):
+    """Drive `_preflight_configs` with every reader stubbed, capturing what each digest
+    was handed.
+
+    `vetted_against` is an out-parameter: a one-item list that ends up holding the
+    allowlist teams.csv was vetted against, which is how the roster's own state reaches
+    the teams check."""
+    synced: dict = {}
+    mailed: list = []
+
+    def _roster(cohort, found=None):
+        if found is not None:
+            found.extend(roster_faults or [])
+            # What the real loader records for an absent file, so the digest sees the
+            # fault AND the caller sees the None that says "there was no allowlist".
+            if roster_absent:
+                found.append(
+                    ConfigFault(
+                        "students.csv", "this file is missing", file="students.csv"
+                    )
+                )
+        if roster_raises:
+            raise roster_raises
+        return None if roster_absent else []
+
+    def _teams(cohort, found=None, known=None):
+        if vetted_against is not None:
+            vetted_against.append(known)
+        return {}
+
+    monkeypatch.setattr(scheduler.roster, "load", _roster)
+    monkeypatch.setattr(
+        scheduler.sync_faculty, "read_cohort_people", lambda cohort, found: {}
+    )
+    monkeypatch.setattr(scheduler.teams, "load", _teams)
+    monkeypatch.setattr(
+        scheduler,
+        "cohort_sheet_faults",
+        lambda course, cohort, sched, found: found.extend(sheet_faults or []),
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "grading_config_faults",
+        lambda course, cohort, sched, found: found.extend(spec_faults or []),
+    )
+    monkeypatch.setattr(
+        scheduler.config_digest,
+        "sync",
+        lambda spec, *a, **k: (
+            synced.update({spec.file: a[2]}) or config_digest.DigestResult()
+        ),
+    )
+    monkeypatch.setattr(
+        scheduler.notify,
+        "notify_config_faults",
+        lambda spec, *a, **k: mailed.append(spec.file) or notify.Unsent(),
+    )
+    rc = scheduler._preflight_configs(
+        "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+    )
+    return rc, synced, mailed
+
+
+def _csv_fault():
+    return ConfigFault(
+        "row 4", "unrecognised role", file="students.csv", field="role", lineno=4
+    )
+
+
+def test_the_config_preflight_checks_every_hand_edited_file(monkeypatch):
+    # schedule.yml is not here: everything wrong with it belongs in the one issue the
+    # source pre-flight keeps, and the plan this tick is running is already parsed.
+    rc, synced, mailed = _config_preflight(monkeypatch)
+    assert rc == 0
+    everything = {
+        "people.yml",
+        "students.csv",
+        "teams.csv",
+        "grading_sheets/",
+        "grading_config.yml",
+    }
+    assert set(synced) == everything
+    assert sorted(mailed) == sorted(everything)
+
+
+def test_a_content_fault_reaches_that_files_digest_and_nobody_elses(monkeypatch):
+    fault = _csv_fault()
+    _rc, synced, _mailed = _config_preflight(monkeypatch, roster_faults=[fault])
+    assert synced["students.csv"] == [fault]
+    assert synced["teams.csv"] == []
+
+
+def test_a_file_that_could_not_be_read_is_left_exactly_as_it_was(monkeypatch):
+    # Syncing an empty list CLOSES the issue and tells the cohort the file is fine. A rate
+    # limit is not that, so the file drops out of the tick.
+    _rc, synced, mailed = _config_preflight(
+        monkeypatch, roster_raises=RuntimeError("rate limited")
+    )
+    assert "students.csv" not in synced and "students.csv" not in mailed
+    assert "people.yml" in synced  # the others are still checked
+
+
+def test_an_unreadable_header_is_a_content_fault_not_a_read_failure(monkeypatch):
+    # `roster.parse` records the fault and then raises, because every consumer skips the
+    # file on that. Faults in hand mean the file WAS read.
+    fault = ConfigFault(
+        "header", "header lacks hertie_email", file="students.csv", lineno=1
+    )
+    _rc, synced, _mailed = _config_preflight(
+        monkeypatch, roster_faults=[fault], roster_raises=RuntimeError("header")
+    )
+    assert synced["students.csv"] == [fault]
+
+
+def test_an_absent_roster_is_a_fault_of_its_own_not_a_healthy_empty_one(monkeypatch):
+    # An empty fault list CLOSES the digest issue and tells the cohort students.csv is
+    # fine. A cohort with no students.csv at all enrols nobody, which is the loudest thing
+    # this file can be wrong about.
+    _rc, synced, _mailed = _config_preflight(monkeypatch, roster_absent=True)
+    (fault,) = synced["students.csv"]
+    assert fault.file == "students.csv" and "missing" in fault.what
+
+
+def test_an_absent_roster_does_not_report_every_teams_row_as_a_stranger(monkeypatch):
+    # The roster is the allowlist teams.csv is vetted against. Absent, it implies the
+    # EMPTY allowlist - and vetting against that files one "not an onboarded handle"
+    # fault per row, on top of the one fault that is actually true.
+    seen: list = []
+    _config_preflight(monkeypatch, roster_absent=True, vetted_against=seen)
+    assert seen == [None]
+
+
+def test_a_roster_that_was_read_still_vets_teams_against_it(monkeypatch):
+    seen: list = []
+    _config_preflight(monkeypatch, vetted_against=seen)
+    assert seen == [set()]
+
+
+def test_a_digest_that_cannot_be_written_never_touches_the_exit_code(monkeypatch):
+    # A release is the job. An unreachable issue tracker is not a reason to stop shipping
+    # one, and the whole point of this pre-flight is that a content fault never reds a run.
+    def boom(*a, **k):
+        raise RuntimeError("the digest is unreachable")
+
+    monkeypatch.setattr(
+        scheduler, "_config_faults", lambda *a: {config_digest.ROSTER: [_csv_fault()]}
+    )
+    monkeypatch.setattr(scheduler.config_digest, "sync", boom)
+    rc = scheduler._preflight_configs(
+        "Course-Org", "Cohort-Org", Schedule(), WHEN, False
+    )
+    assert rc == 0
+
+
+# ---------------------------------------------- the COURSE org's own config (unattended)
+#
+# dsl-course.yml and the cohort registry belong to the course, not to a cohort: one issue
+# for the whole course, once per tick, addressed to the admins rather than to a teaching
+# team. What matters is that it never reds the tick, that it is reported BEFORE the cohort
+# listing a malformed registry makes raise, and that "we could not look" leaves the issue
+# alone.
+
+
+def _course_preflight(
+    monkeypatch, *, config_faults=None, registry_faults=None, raises=None
+):
+    """Drive `_preflight_course` with both readers stubbed, capturing what the digest and
+    the mail were handed."""
+    seen: dict = {}
+
+    def _config(org, found):
+        if raises:
+            raise raises
+        found.extend(config_faults or [])
+        return {"course_admins": [{"github_handle": "jan-g"}]}
+
+    monkeypatch.setattr(scheduler.sync_faculty, "read_course_config", _config)
+    monkeypatch.setattr(
+        scheduler.discovery,
+        "read_cohort_registry",
+        lambda org, found: found.extend(registry_faults or []) or [],
+    )
+    monkeypatch.setattr(
+        scheduler.config_digest,
+        "sync",
+        lambda spec, *a, **k: (
+            seen.update(spec=spec, faults=a[2], mention=k["resolve_mention"]())
+            or config_digest.DigestResult()
+        ),
+    )
+    monkeypatch.setattr(
+        scheduler.notify,
+        "notify_config_faults",
+        lambda spec, *a, **k: seen.update(mailed=spec) or notify.Unsent(),
+    )
+    monkeypatch.setattr(
+        scheduler.notify, "route_course", lambda *a: notify.Routing({}, ["JanG"])
+    )
+    rc = scheduler._preflight_course("Course-Org", WHEN, False)
+    return rc, seen
+
+
+def _course_fault(file: str = "dsl-course.yml"):
+    return ConfigFault(
+        file, "this file is not valid YAML", file=file, field="", in_repo=".github"
+    )
+
+
+def test_both_course_files_reach_the_one_course_digest(monkeypatch):
+    registry = _course_fault("cohort-courses-pages.yml")
+    config = _course_fault()
+    rc, seen = _course_preflight(
+        monkeypatch, config_faults=[config], registry_faults=[registry]
+    )
+    assert rc == 0
+    assert seen["spec"] is config_digest.COURSE
+    assert seen["faults"] == [config, registry]
+    assert seen["mailed"] is config_digest.COURSE
+    # Course admins, not a cohort's teaching team - and git's answer on the @mention.
+    assert seen["mention"] == ["JanG"]
+
+
+def test_a_clean_course_config_still_syncs_so_the_issue_can_close(monkeypatch):
+    _rc, seen = _course_preflight(monkeypatch)
+    assert seen["faults"] == []
+
+
+def test_a_course_config_that_could_not_be_read_is_left_exactly_as_it_was(
+    monkeypatch, capsys
+):
+    # Syncing an empty list CLOSES the issue and tells the course its config is fine. A
+    # rate limit is not that.
+    rc, seen = _course_preflight(monkeypatch, raises=RuntimeError("rate limited"))
+    assert rc == 0 and "spec" not in seen
+    assert "could not read Course-Org's course config" in capsys.readouterr().err
+
+
+def test_the_course_preflight_never_touches_the_exit_code(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("the digest is unreachable")
+
+    monkeypatch.setattr(
+        scheduler, "_course_faults", lambda org: ([_course_fault()], set())
+    )
+    monkeypatch.setattr(scheduler.config_digest, "sync", boom)
+    assert scheduler._preflight_course("Course-Org", WHEN, False) == 0
+
+
+def test_the_course_config_is_checked_before_the_cohort_listing(monkeypatch):
+    # A registry nobody can parse is one of the faults this reports AND what makes the
+    # listing raise. Reported first, or never.
+    order: list[str] = []
+    monkeypatch.setattr(
+        scheduler, "_preflight_course", lambda *a: order.append("preflight") or 0
+    )
+
+    # None is what an unreadable listing looks like, which is exactly this case.
+    monkeypatch.setattr(
+        scheduler, "_registered_cohorts", lambda org: order.append("listing")
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "scheduler",
+            "--course-org",
+            "Course-Org",
+            "--all-cohorts",
+            "--skip-autograde",
+        ],
+    )
+    assert scheduler.main() == 1
+    assert order == ["preflight", "listing"]
+
+
+def test_the_grading_matrix_leg_is_not_the_courses_own_tick(monkeypatch):
+    # One issue per COURSE per tick. The autograde job runs once per cohort, and each leg
+    # opening (or commenting on) the course's digest would be one notification per cohort
+    # about one file.
+    called: list = []
+    monkeypatch.setattr(
+        scheduler, "_preflight_course", lambda *a: called.append(a) or 0
+    )
+    monkeypatch.setattr(scheduler, "_registered_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(scheduler, "run", lambda *a, **k: 0)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "scheduler",
+            "--course-org",
+            "Course-Org",
+            "--all-cohorts",
+            "--autograde-only",
+        ],
+    )
+    assert scheduler.main() == 0
+    assert called == []
+
+
+def test_the_sync_membership_fast_path_checks_and_exits_green(monkeypatch):
+    # What a push to dsl-course.yml or the registry runs. Never red: a config faculty have
+    # to fix is a content fault, and Sync membership must not go red for one.
+    called: list = []
+    monkeypatch.setattr(
+        scheduler, "_preflight_course", lambda *a: called.append(a) or 0
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        ["scheduler", "--course-org", "Course-Org", "--check-course-config"],
+    )
+    assert scheduler.main() == 0
+    assert [a[0] for a in called] == ["Course-Org"]

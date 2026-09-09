@@ -634,6 +634,65 @@ def test_two_roster_rows_sharing_an_email_get_one_code_email(monkeypatch):
     assert [to for to, _s, _b in sent] == ["ada@uni.edu"]
 
 
+def test_a_semicolon_roster_sends_nothing_and_leaves_the_run_green(monkeypatch, capsys):
+    # A German-locale Excel export. Every cell reads blank through DictReader, so the send
+    # used to write a mangled roster back and exit 0 - then the header check made it a red
+    # X instead, which files `Send enrolment codes is failing` in the course org and mails
+    # the maintainer about a CSV in a cohort org. It is faculty's file: nothing is written,
+    # nothing is sent, the run is green, and the same push opens the students.csv digest.
+    semicolons = ROSTER_HEADER.replace(",", ";") + "\nada@uni.edu;Ada;enrolled;;;;\n"
+    outcome, sent, written = _run_with(monkeypatch, semicolons)
+    assert outcome is enrol_codes.Outcome.UNUSABLE_ROSTER
+    assert not enrol_codes.reds_the_run(outcome)
+    assert sent == [] and written == []  # nothing mailed, and the file left as it is
+    err = capsys.readouterr().err
+    assert "header lacks hertie_email, github_handle" in err
+    assert "ada@uni.edu" not in err  # the log is public
+
+
+def test_a_roster_with_no_header_row_names_no_cell_in_the_public_log(
+    monkeypatch, capsys
+):
+    # The other way a header goes missing: somebody deletes the row. DictReader then reads
+    # the FIRST STUDENT as the header, so the columns it "found" are a name, an address
+    # and a handle - and this message is logged verbatim by a workflow running in a public
+    # repo. It says which columns are MISSING (the toolkit's own vocabulary) and never
+    # which it found.
+    headerless = "ada@uni.edu,Ada,enrolled,ada-l,42,\nbob@uni.edu,Bob,enrolled,,,\n"
+    outcome, sent, written = _run_with(monkeypatch, headerless)
+    assert outcome is enrol_codes.Outcome.UNUSABLE_ROSTER
+    assert sent == [] and written == []
+    err = capsys.readouterr().err
+    assert "header lacks" in err
+    for cell in ("ada@uni.edu", "Ada", "ada-l"):
+        assert cell not in err
+
+
+def test_an_absent_roster_and_a_missing_transport_still_red(monkeypatch):
+    # The line the green outcome must not cross. A roster that is not there and a mail
+    # transport that is not configured are the toolkit's own problem, not a file somebody
+    # can go and correct, and the push that fired this run is owed the red X.
+    reds = set(enrol_codes.Outcome) - set(enrol_codes._GREEN)
+    assert reds == {
+        enrol_codes.Outcome.NO_ROSTER,
+        enrol_codes.Outcome.NO_TRANSPORT,
+        enrol_codes.Outcome.FAILED,
+    }
+    assert all(enrol_codes.reds_the_run(o) for o in reds)
+
+
+def test_a_roster_with_only_a_header_is_green(monkeypatch, capsys):
+    # A cohort is bootstrapped with the roster template and enrolled days later, and every
+    # push to the file fires this send. Nothing is outstanding, so there is nothing to be
+    # red about - it used to file `Send enrolment codes is failing` and mail the maintainer
+    # about a brand-new cohort.
+    outcome, sent, written = _run_with(monkeypatch, HEADER)
+    assert outcome is enrol_codes.Outcome.EMPTY_ROSTER
+    assert not enrol_codes.reds_the_run(outcome)
+    assert sent == [] and written == []
+    assert "no rows yet" in capsys.readouterr().err
+
+
 def test_run_reds_when_the_roster_is_missing(monkeypatch, capsys):
     monkeypatch.setattr(enrol_codes, "get_file_with_sha", lambda org, repo, path: None)
     outcome = enrol_codes.run("COHORT")

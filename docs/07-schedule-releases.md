@@ -266,9 +266,9 @@ Everything else is **cumulative**: material deploys, assignment handouts, the si
 
 ## Verifying your schedule
 
-**It checks itself.** Every commit touching `schedule.yml` runs **Validate schedule** in `classroom-config`. A commit that parses clean gets a green tick; one the scheduler cannot fully read gets a **red X**, and an issue naming the bad entry is opened and assigned to you, closing itself when a later commit parses clean.
+**It checks itself.** Every commit touching `schedule.yml` runs **Validate schedule** in `classroom-config`. A commit that parses clean gets a green tick; one the scheduler cannot fully read gets a **red X** and a run summary naming what it dropped. That run emails nobody: the fault joins the standing *schedule.yml* [digest issue](#the-digest-issue) in `classroom-config` instead, on the next tick - within the minute, since this push fires one - and that is what emails whoever wrote the line.
 
-> The run happens *after* the push, not before it: GitHub Actions cannot gate a commit, and branch protection needs a paid plan on a private repo. So the red X and the issue are how a fault reaches you, rather than the commit being refused.
+> The run happens *after* the push, not before it: GitHub Actions cannot gate a commit, and branch protection needs a paid plan on a private repo. So the red X and the digest issue are how a fault reaches you, rather than the commit being refused.
 
 The run summary shows what the parser *understood*, not just what it rejected - counts one short of what you wrote is how you catch a mistake that is valid YAML:
 
@@ -310,17 +310,19 @@ So the sources are checked against the course org in two places: **Validate sche
 
 ### The digest issue
 
-One issue per cohort, titled **"schedule.yml: planned releases cite sources not staged in the course org"**, kept current by the scheduler:
+One issue per cohort, titled **"schedule.yml: planned releases cite sources not staged in the course org"**, kept current by the scheduler. It carries everything wrong with this file - a source nobody has staged, an entry the parser had to drop, a file that does not parse at all:
 
 - its **body** is rewritten every run and always lists everything currently missing, grouped by severity, each line naming the exact field to edit (`releases.lecture_02` → `course_source_path`), the one sentence that would fix it, and a link at its line in your `schedule.yml`. Editing a body doesn't email anyone, so this is free to happen on every tick.
 - it **comments** only when something crosses a rung - a fault appears at warning, escalates, or clears - and `cc`s the same people the email is addressed to.
-- it **closes itself** when the last missing source is staged.
+- it **closes itself** when nothing in the file is left to fix.
 
 Appears, escalates, clears - three notifications over the life of a problem, however many ticks happen in between. A term written months ahead sits entirely at *advisory* and opens no issue at all.
 
 Don't close it by hand. Closing changes nothing in the file, and the next tick reopens it; it does remember what it had already told you, so reopening does not email everybody again.
 
 A source that cannot be *read* (a rate limit, a permissions blip) is never reported as missing - that would turn every entry in the plan into a phantom typo.
+
+This is one of seven such issues, one per file you edit by hand, all of them working the same way: [Why did I get this email?](reference/actions-reference.md#why-did-i-get-this-email).
 
 By hand: add `--check-sources <course-org>` to either `--validate` form above. Every line names the field to go and edit, not just the entry it sits in:
 

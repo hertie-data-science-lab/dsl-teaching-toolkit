@@ -29,6 +29,7 @@ from .course import (
     GRADEBOOK_PREFIX,
     session_dirs,
 )
+from .faults import ConfigFault, Unusable
 from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
 from .ghcli import gh
 from .log import log_err, log_ok
@@ -172,7 +173,33 @@ def list_org_repos(org: str) -> list[dict]:
         raise RuntimeError(f"unparseable repo listing for {org}: {out[:200]}") from exc
 
 
-def _read_cohorts(course_org: str) -> list[str]:
+def _registry_fault(what: str) -> ConfigFault:
+    """The cohort registry, unusable - what a human is asked to fix.
+
+    `where` is the file itself, because there is no entry to name: the registry is a flat
+    list of org names, so what goes wrong with it is its SHAPE, and the whole course pays
+    the same price either way (see `faults.CONSEQUENCE`). `in_repo` is the COURSE org's
+    public `.github`, which is what makes the citation and the digest's deep link point at
+    the file somebody has to edit rather than at a cohort's classroom-config."""
+    return ConfigFault(
+        COHORTS_PATH,
+        what,
+        file=COHORTS_PATH,
+        field="cohorts",
+        in_repo=".github",
+        # Its own sentence, because every fault this builds is about the whole file and
+        # the file's fallback (`faults.FIX`) says "correct the line above" - which names a
+        # line that does not exist, under a citation with nothing to link to.
+        fix_text=(
+            f"restore {COHORTS_PATH} in the course org's `.github` as a `cohorts:` list "
+            f"of this course's cohort org names, one per line"
+        ),
+    )
+
+
+def _read_cohorts(
+    course_org: str, faults: list[ConfigFault] | None = None
+) -> list[str]:
     """Read the course org's standalone .github/cohort-courses-pages.yml registry.
 
     A genuinely absent or empty registry is [] (a valid brand-new course org). The
@@ -180,7 +207,14 @@ def _read_cohorts(course_org: str) -> list[str]:
     and a bare top-level list has always been accepted too. Anything else - YAML that does
     not parse, a scalar, or a cohort list that isn't all strings - is malformed, logged and
     raised, never silently flattened to [] (which downstream renders every dropdown as
-    "(none-yet)" and lets a whole-course sync go quietly green)."""
+    "(none-yet)" and lets a whole-course sync go quietly green).
+
+    `faults` collects the same two verdicts for the notifier INSTEAD of raising them: a
+    caller that passes one is asking what is wrong with the file so it can tell somebody,
+    not asking for a list of cohorts it is about to act on. Everything else still raises,
+    because a registry nobody can read is a registry nothing may be pruned against - as
+    `faults.Unusable`, which says this is a file faculty must fix rather than a read that
+    failed, so an unattended run can skip it and stay green."""
     content = get_file_content(course_org, ".github", COHORTS_PATH)
     if not content:
         return []
@@ -192,7 +226,14 @@ def _read_cohorts(course_org: str) -> list[str]:
         # happened to be read, naming a "<unicode string>" rather than the file.
         msg = f"malformed cohort registry in {course_org}/.github/{COHORTS_PATH}: {exc}"
         log_err(msg)
-        raise RuntimeError(msg) from exc
+        if faults is None:
+            raise Unusable(msg) from exc
+        faults.append(
+            _registry_fault(
+                "this file is not valid YAML, so no cohort under this course is synced"
+            )
+        )
+        return []
     cohorts = data.get("cohorts", []) if isinstance(data, dict) else data
     if not isinstance(cohorts, list) or not all(isinstance(c, str) for c in cohorts):
         msg = (
@@ -200,8 +241,28 @@ def _read_cohorts(course_org: str) -> list[str]:
             f"expected a list of cohort org names (bare, or under a 'cohorts:' key)"
         )
         log_err(msg)
-        raise RuntimeError(msg)
+        if faults is None:
+            raise Unusable(msg)
+        faults.append(
+            _registry_fault(
+                "this is not a list of cohort org names (bare, or under a `cohorts:` "
+                "key), so no cohort under this course is synced"
+            )
+        )
+        return []
     return [c for c in cohorts if c]
+
+
+def read_cohort_registry(course_org: str, faults: list[ConfigFault]) -> list[str]:
+    """This course's registered cohorts, with what a human must fix collected rather than
+    raised.
+
+    The fault-collecting twin of `discover_cohorts`, and it draws the same line
+    `sync_faculty.read_cohort_people` draws: a file that is MALFORMED is a fault, because
+    every cohort under this course stops being reconciled and that is something a course
+    admin has to fix; a read that FAILED still raises, because "we could not look" must
+    never be reported to faculty as "your file is broken"."""
+    return _read_cohorts(course_org, faults)
 
 
 def org_meta(org: str) -> dict:
