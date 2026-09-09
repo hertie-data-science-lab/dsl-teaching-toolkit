@@ -2095,6 +2095,57 @@ def test_the_graded_tree_is_handed_over_and_taken_back_around_every_run(
     ]
 
 
+def test_a_tree_that_could_not_be_taken_back_is_said_out_loud(
+    monkeypatch, tmp_path, capsys
+):
+    # A `mkdtemp` root is mode 0700 and, until the chown-back, owned by someone else - so a
+    # chown-back that failed leaves files this process can neither read nor delete. Nobody
+    # was told, and the first sign of it was a traceback out of the `TemporaryDirectory`
+    # around it on a run that had graded the submission perfectly well.
+    _sandboxed(monkeypatch, tmp_path)
+    mine = f"{os.getuid()}:{os.getgid()}"
+
+    def sudo_that_cannot_chown_back(*args: str) -> bool:
+        return not (args[0] == "chown" and args[2] == mine)
+
+    monkeypatch.setattr(collect, "_sudo", sudo_that_cannot_chown_back)
+    monkeypatch.setattr(collect.subprocess, "Popen", lambda argv, **kw: _Exits())
+    work = tmp_path / "sub"
+    work.mkdir()
+
+    # The RUN still succeeded - this is a cleanup fault, not a grading one.
+    assert collect._run_limited(["/bin/true"], cwd=str(work), env={}, timeout=1)
+    assert f"could not take {work} back" in capsys.readouterr().err
+
+
+def test_the_graded_runspace_tolerates_a_cleanup_it_cannot_finish(
+    monkeypatch, tmp_path
+):
+    # The other half of it: a tree the chown-back could not take back is a tree this process
+    # cannot remove either (mode 0700 and owned by someone else - and `TemporaryDirectory`'s
+    # own permission retry does not help when it is the OWNER that is wrong), so its cleanup
+    # would raise out of the `with` and red a run that scored the submission. Only root can
+    # really produce that condition, so what is pinned here is that the runspace handed to
+    # the sandbox user is made tolerant of it.
+    real = collect.tempfile.TemporaryDirectory
+    made: list[dict] = []
+
+    def recording(**kwargs):
+        made.append(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(collect.tempfile, "TemporaryDirectory", recording)
+    work, tests = _sandbox(tmp_path, "def solve(x):\n    return 0\n")
+    monkeypatch.setattr(
+        collect,
+        "_run_limited",
+        _wrote_the_report('<testsuite><testcase name="test_one"/></testsuite>'),
+    )
+
+    assert collect._run_tests(work, tests)["score"] == 1
+    assert made == [{"ignore_cleanup_errors": True}]
+
+
 def test_every_survivor_is_killed_even_when_the_run_blew_up(monkeypatch, tmp_path):
     # A `fork(); setsid(); fork()` daemon escapes the process GROUP by definition, and the
     # grading leg walks every submission serially in one process - so a survivor of student

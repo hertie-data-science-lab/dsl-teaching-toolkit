@@ -168,7 +168,8 @@ spawned. What it guarantees, and what it does not:
   under a size cap with `O_NOFOLLOW`/`O_NONBLOCK` (`collect._result_bytes`); anything else
   counts as "the run produced no result", because a FIFO at the report path would otherwise
   block that read until the six-hour job ceiling and a symlink would score whatever it
-  pointed at.
+  pointed at. A chown-back that fails costs a log line and a temp tree left behind for the
+  length of the job, not a traceback out of the parent's own cleanup.
 - **Best-effort, and only that: the network.** The proxy variables point at a dead port, so
   every well-behaved client fails - but there is no network namespace here, and a
   determined socket still opens. docs/10 tells faculty to commit the data rather than rely

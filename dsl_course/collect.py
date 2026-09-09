@@ -1979,7 +1979,18 @@ def _run_limited(
         if user:
             _sudo("pkill", "-9", "-u", user)
             for root in roots:
-                _sudo("chown", "-R", f"{os.getuid()}:{os.getgid()}", str(root))
+                if _sudo("chown", "-R", f"{os.getuid()}:{os.getgid()}", str(root)):
+                    continue
+                # Said out loud, because a tree we could not take back is a tree this
+                # process cannot delete either: a `mkdtemp` root is mode 0700 and now owned
+                # by someone else, so the `TemporaryDirectory` around it cannot remove it.
+                # Its cleanup is tolerant of exactly that (see `_run_tests`), so the cost
+                # is this line plus a directory under the runner's temp dir - not a
+                # traceback out of a context manager on a run that otherwise worked.
+                log_err(
+                    f"  ! could not take {root} back from {user} - it stays behind for "
+                    f"the length of this job (the run itself is unaffected)"
+                )
 
 
 # The ceiling on ONE parent-side read of something a graded run left behind. Looser than
@@ -2364,7 +2375,12 @@ def _run_tests(workdir: Path, tests_src: Path) -> dict | None:
             log(
                 "    (a notebook declares no python file_extension - renamed the stray output)"
             )
-    with tempfile.TemporaryDirectory() as run:
+    # `ignore_cleanup_errors`: this runspace is handed to the sandbox user and taken back
+    # in `_run_limited`'s `finally`, and a chown-back that failed leaves files here that
+    # this process cannot delete. A leftover directory under the runner's temp dir costs a
+    # log line (there) and nothing else; raising out of the `with` would red a run that
+    # graded the submission perfectly well.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as run:
         tests_dir = Path(run) / "tests"
         copy_tree(tests_src, tests_dir)
         # Make the submission importable by the hidden tests WITHOUT letting a student
@@ -2555,7 +2571,9 @@ def _grader_document_for(
     env: dict,
 ) -> str:
     """Archive one submission's grader copy. Returns one of the GRADER_* verdicts."""
-    with tempfile.TemporaryDirectory() as work:
+    # Tolerant cleanup for the same reason `_run_tests`' runspace has it: the exporter runs
+    # in this tree as the sandbox user, and a failed chown-back leaves it undeletable.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as work:
         wd = Path(work) / "sub"
         if not clone(cohort_org, repo, wd):
             return GRADER_UNREADABLE
@@ -2673,7 +2691,9 @@ def _grade_target(
     `tests_src` None = this assignment is hand-marked and only the completion check runs;
     `starters` None = no completion check (else the blob shas of the handed-out starters,
     which is how an untouched notebook is recognised)."""
-    with tempfile.TemporaryDirectory() as work:
+    # Tolerant cleanup: the checkout below is handed to the sandbox user by both the
+    # completion check and the hidden tests, and a failed chown-back leaves it undeletable.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as work:
         wd = Path(work) / "sub"
         if not clone(cohort_org, repo, wd):
             if repo_missing(cohort_org, repo):
