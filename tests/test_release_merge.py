@@ -145,6 +145,31 @@ def test_a_release_lands_on_upstream_and_the_read_branch_follows_it(world):
     assert world.sha("main") == world.sha("upstream")
     assert world.read("main", "lectures/01/lab.md") == "week one"
     assert world.read("main", "README.md") == "the cohort"
+    # And `upstream` was cut from what the cohort already had, so a dest released into
+    # before any of this existed does not start life conflicting with every file in it.
+    assert world.read("upstream", "README.md") == "the cohort"
+
+
+def test_both_branches_are_pushed_in_one_atomic_push(world, monkeypatch):
+    # Half a pair is the failure mode: `upstream` alone leaves the next run merging a
+    # branch that never arrived, and the branch students read alone loses the record of
+    # what was released. One push, all or nothing.
+    real = deploy.git
+    pushes: list[tuple[str, ...]] = []
+
+    def recording(*args, **kwargs):
+        if "push" in args:
+            pushes.append(args)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(deploy, "git", recording)
+    world.commit("cm", {"lectures/01/lab.md": "week one"})
+    world.commit("materials", {"README.md": "the cohort"})
+
+    assert world.release("lectures/01") == (0, True)
+    (push,) = pushes
+    assert "--atomic" in push
+    assert push[-2:] == (deploy.UPSTREAM_BRANCH, "main")
 
 
 def test_a_second_release_with_nothing_new_moves_nothing(world, capsys):
@@ -201,12 +226,14 @@ def test_a_conflict_asks_the_instructors_to_decide(world):
     assert call["reviewer"] == "Cohort-Org/instructors"
 
 
-def test_the_pull_request_body_carries_paths_and_nothing_about_people(world):
-    # This repo is readable by the whole cohort. The diff says who changed what, in the
-    # one place GitHub already shows it; the body says which paths are in the branch.
+def test_the_pull_request_body_names_branches_and_nothing_else(world):
+    # This repo is readable by the whole cohort, so nothing about WHO edited what belongs
+    # in the body - and no file list either: the pull request's own Files tab is that
+    # list, and GitHub keeps it current as later releases add to the branch.
     _conflict(world)
     body = world.pulls.calls[0]["body"]
-    assert "lectures/01" in body
+    assert deploy.UPSTREAM_BRANCH in body and "`main`" in body
+    assert "lectures/01" not in body
     assert "@" not in body
 
 
@@ -234,18 +261,6 @@ def test_resolving_the_conflict_by_hand_ends_the_holding_pattern(world):
 
 
 # ------------------------------------------------- dests that have not seen this before
-
-
-def test_a_dest_released_into_before_upstream_existed_gets_one_cut_from_it(world):
-    world.commit("cm", {"lectures/01/lab.md": "week one"})
-    world.commit("materials", {"README.md": "released last term"})
-    assert world.branches() == ["main"]
-
-    assert world.release("lectures/01") == (0, True)
-    assert world.branches() == ["main", "upstream"]
-    # Cut from what the cohort already had, so the first merge is a fast-forward of just
-    # this release rather than a conflict against every file already there.
-    assert world.read("upstream", "README.md") == "released last term"
 
 
 def test_an_empty_dest_gets_both_branches(world):
