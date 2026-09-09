@@ -22,6 +22,7 @@ from dsl_course import (
     mailer,
     profile_readme,
     seed,
+    welcome,
     workflows_place,
     workflows_render,
 )
@@ -377,6 +378,20 @@ def test_sync_membership_is_a_consolidated_reconcile():
         "schedule",
         "workflow_dispatch",
     }
+
+
+def test_the_two_student_landing_pages_invite_a_pull_request():
+    # Students cannot push to the materials; forking and opening a pull request is how
+    # they fix a typo, and it has to be said where they actually land. Both files are
+    # instructor-owned and seeded ONCE, so this text only ever reaches a cohort
+    # bootstrapped after it shipped - docs/08 says to paste it into the older ones.
+    invitation = "open a pull request"
+    page = profile_readme.render_profile_readme(
+        "My-Course-f2026", "My-Course-f2026", "My Course", [], True, central_ref="main"
+    )
+    assert invitation in page
+    assert "fork" in page.lower()
+    assert invitation in welcome.template("welcome/README.md")
 
 
 def test_dotgithub_readme_orients_faculty():

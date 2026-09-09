@@ -102,7 +102,7 @@ Worked example: [`example-course/cohort-org/people.yml`](../example-course/cohor
 `instructors-<tag>` gets:
 1. **push** on the course org's **`.github`** - which is what makes the workflows (Release materials, Release assignment, Refresh actions, Check cohort setup…) visible and runnable for them
 2. every course-org repo whose **name ends their associated `-<tag>`** (`course-materials-f2026`, `assignment-1-f2026`, `lecture-code-f2026`).
-3. Cohort-side they also get write on `classroom-config` and `welcome`, so they can edit the roster, schedule and team lists - and **read** on everything else in the cohort: released materials, every student's submission repo, every gradebook. Full table: [`access-reference.md`](reference/access-reference.md#what-faculty-hold-on-each-repo).
+3. Cohort-side they also get write on `classroom-config`, `welcome` and the **released materials**, so they can edit the roster, schedule and team lists, and fix a broken lab in place during class - a release merges rather than overwrites, so the fix stays ([08](08-release-materials-to-cohort.md#fixing-something-you-have-already-released)). **Read** on everything else in the cohort: every student's submission repo, every gradebook. Full table: [`access-reference.md`](reference/access-reference.md#what-faculty-hold-on-each-repo).
 
 So a TA on f2026 can `git push` labs into the course org level `course-materials-f2026` ([02](02-add-materials-to-course.md)) and then release them to the cohort org ([08](08-release-materials-to-cohort.md)) themselves.
 

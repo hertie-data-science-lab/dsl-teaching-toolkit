@@ -109,6 +109,30 @@ Things whose *literal spelling* is depended on from outside Python:
   marked file would still read as untouched and be rewritten by the nightly refresh -
   faculty's patterns gone, and whatever they withheld shipping again on a green run. The
   price is that its wording cannot be improved in a repo that already has it.
+- **`deploy.UPSTREAM_BRANCH`** (`upstream`) is the toolkit's branch in every release dest,
+  and the dest's DEFAULT branch is what students, the website and `propagate` read. The
+  release commits onto `upstream` and merges it into the default one; a conflict aborts the
+  merge, pushes `upstream` and leaves one pull request open. Two things follow. Making
+  `upstream` the default branch turns every release into a copy over the cohort's own work
+  again, silently. And nothing in the package may start listing branches to find released
+  content: every reader resolves `repos.default_branch`, which is exactly what keeps
+  `upstream` invisible to the site, discovery and status.
+
+## The two modules that keep one record open
+
+`issues` and `pulls` each own an idempotency rule that their callers - unattended crons,
+re-deriving the world every quarter of an hour - cannot be trusted to re-implement:
+
+- an ISSUE is found by its **exact title**, because `--search` is full text and a human
+  quoting the title would otherwise have their issue rewritten;
+- a PULL REQUEST is found by its **head branch**, because a title is prose somebody may
+  edit and the branch is the thing the caller controls.
+
+In both, a listing that could not be READ raises rather than answering "there is none" -
+inventing that answer opens a duplicate on every tick, for as long as the outage lasts.
+`propagate` is the second consumer of `pulls`, with `refresh_body=True` (its body is a
+running summary of what its branch now holds); the release's conflict PR is written once
+and left alone.
 
 ## The grading sandbox's two outward contracts
 
