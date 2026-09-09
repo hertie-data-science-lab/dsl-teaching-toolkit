@@ -361,11 +361,24 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
 
 
 def _git_with_staged_changes(*args):
-    """A git fake that reports staged changes: `git diff --cached --quiet` exits 1 (there
-    IS something to commit - what a real copytree leaves behind), so the deploy commits and
-    pushes; every other git call (add/commit/push) succeeds."""
+    """A git fake that answers the two questions deploy_many asks about a dest off what
+    the copy actually left in the clone, so a release that copied NOTHING cannot report a
+    commit it could not have made:
+
+    - `git diff --cached --quiet` exits 1 while there are files there (staged changes to
+      commit on `upstream`), 0 when the clone is empty;
+    - `git merge-base --is-ancestor upstream <base>` exits 1 after such a commit (there is
+      a merge to make into the branch students read), 0 otherwise.
+
+    Every other call (add/commit/checkout/merge/push) succeeds. The end-to-end shape of
+    all this - against real repositories rather than a stub with an opinion - is
+    tests/test_release_merge.py."""
+    dd = Path(args[args.index("-C") + 1]) if "-C" in args else None
+    copied = bool(dd and any(p.is_file() for p in dd.rglob("*")))
     if "diff" in args and "--cached" in args:
-        return (1, "")  # non-zero = staged changes present
+        return (1, "") if copied else (0, "")
+    if "merge-base" in args:
+        return (1, "") if copied else (0, "")
     return (0, "")
 
 
@@ -395,6 +408,7 @@ def test_deploy_many_clones_each_repo_once(monkeypatch):
     # everything else (add/commit/push) succeeds.
     monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
@@ -424,6 +438,7 @@ def test_deploy_many_missing_course_source_path_is_an_error_not_silent(monkeypat
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "git", lambda *a: (0, ""))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
@@ -454,6 +469,7 @@ def _no_io(monkeypatch, fake_gh):
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "git", lambda *a: (0, ""))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
@@ -620,6 +636,7 @@ def test_deploy_many_never_copies_a_dot_git_directory(monkeypatch):
     copied_rel: list[str] = []
     monkeypatch.setattr(deploy, "git", _git_spying_staged(copied_rel))
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
@@ -738,6 +755,7 @@ def test_deploy_many_counts_a_real_commit_failure(monkeypatch, capsys):
     monkeypatch.setattr(ghcli, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
     monkeypatch.setattr(deploy, "git", _git_commit_failing)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
@@ -761,6 +779,7 @@ def test_deploy_many_reports_nothing_new_when_index_is_empty(monkeypatch, capsys
         deploy, "git", lambda *a: (0, "")
     )  # diff --cached: nothing staged
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
@@ -780,6 +799,7 @@ def test_deploy_many_counts_a_raised_site_sync(monkeypatch):
     monkeypatch.setattr(ghcli, "gh", _clone_with_tree({"lectures/00_x/f.txt": "x"}))
     monkeypatch.setattr(deploy, "git", _git_with_staged_changes)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
 
@@ -2276,6 +2296,7 @@ def _run_release(monkeypatch, seed_source, deploys) -> tuple[int, set[str]]:
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "git", fake_git)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
     errors, _changed = deploy.deploy_many(
@@ -2379,6 +2400,7 @@ def test_withholding_the_stub_never_deletes_the_cohorts_own_readme(monkeypatch):
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(deploy, "git", fake_git)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
+    monkeypatch.setattr(deploy, "default_branch", lambda *a, **k: "main")
     monkeypatch.setattr(deploy, "grant_read_teams", lambda *a, **k: None)
     monkeypatch.setattr(deploy, "grant_faculty", lambda *a, **k: None)
     errors, _changed = deploy.deploy_many(
