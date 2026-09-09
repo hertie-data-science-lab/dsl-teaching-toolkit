@@ -1,6 +1,6 @@
 """The two subprocess wrappers everything GitHub-facing runs through - `gh` and `git` -
-with their timeouts, the retry ladder (rate limits, and a transient GitHub fault on a
-read), and the shared 404 test.
+with their timeouts, the retry ladder (rate limits, and - on a read - a transient GitHub
+fault or a connection that never got the request there), and the shared 404 test.
 """
 
 from __future__ import annotations
@@ -24,17 +24,32 @@ RATE_LIMIT_MARKERS = (
     "abuse detection",
 )
 
-# A GitHub-side fault on ONE call, in gh's own words: the 5xx family (`gh: Internal Server
-# Error (HTTP 500)`, `HTTP 502: Bad Gateway`) and the body that ended mid-JSON. The same
-# call a moment later almost always succeeds - so without this a single bad read reddens a
-# tick, files a public "is failing" issue and mails course-admin. The scheduler ticks 96
-# times a day, which is far too often for that to stay noise anyone reads.
+# A fault on ONE call that the same call a moment later almost always gets past, in gh's
+# own words. Two families:
+#
+#   - GitHub answered badly: the 5xx family (`gh: Internal Server Error (HTTP 500)`,
+#     `HTTP 502: Bad Gateway`) and the body that ended mid-JSON.
+#   - The request never got there: the connection failed client-side, in Go's net/http
+#     wording, which is what `gh` prints (`net/http: TLS handshake timeout`,
+#     `dial tcp 140.82.121.6:443: connect: connection refused`). A read that never reached
+#     GitHub cannot have had an effect, so repeating it is free.
+#
+# Without this a single bad read reddens a tick, files a public "is failing" issue and
+# mails course-admin. The scheduler ticks 96 times a day, which is far too often for that
+# to stay noise anyone reads.
 TRANSIENT_MARKERS = (
     "http 500",
     "http 502",
     "http 503",
     "http 504",
     "unexpected end of json input",
+    "tls handshake timeout",
+    "connection reset by peer",
+    "connection refused",
+    "i/o timeout",
+    "dial tcp",
+    "unexpected eof",
+    "no such host",
 )
 
 # Per-call ceiling for a single `gh` subprocess. A hung TLS connection would otherwise
@@ -90,8 +105,10 @@ def _run_gh(
         if any(m in lower for m in RATE_LIMIT_MARKERS):
             why = "rate-limited"
         elif not _is_mutating(args):
-            # Only a READ repeats a 5xx: a mutating call that came back with one may still
-            # have applied the write, and repeating it would apply it twice.
+            # Only a READ repeats one of these: a mutating call that failed this way may
+            # still have applied the write - a 5xx is answered after the fact, and a
+            # connection lost mid-flight says nothing about what the far end did with the
+            # request - so repeating it would apply it twice.
             marker = next((m for m in TRANSIENT_MARKERS if m in lower), None)
             if marker:
                 why = f"transient {marker}"

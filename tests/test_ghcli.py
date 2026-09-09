@@ -289,6 +289,31 @@ def test_a_rate_limit_is_still_retried(monkeypatch, capsys):
     assert "[wait] rate-limited, retry 1/3" in capsys.readouterr().out
 
 
+def test_a_read_whose_connection_failed_is_retried(monkeypatch, capsys):
+    # A live end-to-end walk died on one of these: the request never reached GitHub, so
+    # the read had no effect and repeating it is free - but the ladder only knew about
+    # answers GitHub had sent back, and one handshake timeout ended the whole run.
+    calls = _canned_gh(
+        monkeypatch,
+        _Canned(1, "", "net/http: TLS handshake timeout"),
+        _Canned(0, "{}", ""),
+    )
+    assert ghcli.gh("api", "repos/O/R/contents/f") == (0, "{}")
+    assert len(calls) == 2
+    assert (
+        "[wait] transient tls handshake timeout, retry 1/3" in capsys.readouterr().out
+    )
+
+
+def test_a_write_whose_connection_failed_is_never_retried(monkeypatch):
+    # The same rule as a 5xx, for the same reason: a lost connection says nothing about
+    # what GitHub did with the request, so a repeat could apply the write twice.
+    calls = _canned_gh(monkeypatch, _Canned(1, "", "net/http: TLS handshake timeout"))
+    code, _, err = ghcli._run_gh(("api", "--method", "POST", "orgs/O/repos"), None, 3)
+    assert code == 1 and "TLS handshake timeout" in err
+    assert len(calls) == 1
+
+
 def test_an_ordinary_failure_is_not_retried(monkeypatch):
     # The markers must stay narrow: a 404 or a 403 is the answer, not a fault to sit out.
     calls = _canned_gh(monkeypatch, _Canned(1, "", "gh: Not Found (HTTP 404)"))
