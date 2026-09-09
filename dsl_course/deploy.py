@@ -203,8 +203,15 @@ def _copy_ignore(
     return ignore
 
 
-def _checkout_upstream(cohort_org: str, repo: str, dd: Path) -> str:
+def _checkout_upstream(cohort_org: str, repo: str, dd: Path) -> str | None:
     """Put a dest clone on `UPSTREAM_BRANCH` and return the branch the release merges INTO.
+
+    None when the checkout itself failed, which the caller treats exactly like a dest
+    that would not clone: the copies for that dest are impossible, and it is dropped
+    here rather than left to fail later. The return codes used to be discarded, so a
+    refused checkout left the clone on its BASE branch - the release then copied onto
+    the branch students read, and the merge phase reported two errors about a branch
+    that was never cut.
 
     The base is read off the clone's own HEAD - `clone` checks out whatever the repo calls
     its default - rather than assumed to be `main`: a dest created by hand may call it
@@ -226,9 +233,17 @@ def _checkout_upstream(cohort_org: str, repo: str, dd: Path) -> str:
     )
     remote = f"origin/{UPSTREAM_BRANCH}"
     if git("-C", str(dd), "rev-parse", "--verify", "--quiet", remote)[0] == 0:
-        git("-C", str(dd), *GIT_ENV, "checkout", "-B", UPSTREAM_BRANCH, remote)
+        code, out = git(
+            "-C", str(dd), *GIT_ENV, "checkout", "-B", UPSTREAM_BRANCH, remote
+        )
     else:
-        git("-C", str(dd), *GIT_ENV, "checkout", "-b", UPSTREAM_BRANCH)
+        code, out = git("-C", str(dd), *GIT_ENV, "checkout", "-b", UPSTREAM_BRANCH)
+    if code != 0:
+        log_err(
+            f"  {cohort_org}/{repo}: could not check out `{UPSTREAM_BRANCH}` - "
+            f"{out[:200]}"
+        )
+        return None
     return base
 
 
@@ -332,12 +347,19 @@ def deploy_many(
             dd = root / "out" / repo
             if not clone(cohort_org, repo, dd):
                 log_err(f"could not clone dest {cohort_org}/{repo}")
-            else:
-                dest_dirs[repo] = dd
-                bases[repo] = _checkout_upstream(cohort_org, repo, dd)
+                continue
+            # A dest that would not go onto `upstream` is as unusable as one that
+            # would not clone: releasing onto the base branch instead is exactly what
+            # the merge exists to stop.
+            base = _checkout_upstream(cohort_org, repo, dd)
+            if base is None:
+                continue
+            dest_dirs[repo] = dd
+            bases[repo] = base
 
-        # A deploy whose source or dest failed to clone is one impossible copy - count it
-        # ONCE, per deploy, not once per failed clone (both failing is still one copy lost).
+        # A deploy whose source or dest could not be prepared - the clone, or the dest's
+        # `upstream` checkout - is one impossible copy. Count it ONCE, per deploy, not
+        # once per failure (both ends failing is still one copy lost).
         # A deploy into an ARCHIVED dest is not a failure at all: it was skipped on
         # purpose, and counting it would red every run of a course that has closed one of
         # its cohorts.

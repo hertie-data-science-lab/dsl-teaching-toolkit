@@ -660,3 +660,31 @@ def test_one_unusable_path_is_one_counted_error_and_the_rest_still_ship(monkeypa
     assert errors == 1  # not an exception out of deploy_many
     assert snaps["materials"]["good/notes.md"] == "good"
     assert "bad/notes.md" not in snaps["materials"]
+
+
+def test_a_dest_that_cannot_reach_upstream_is_dropped_like_a_failed_clone(
+    monkeypatch, capsys
+):
+    # `_checkout_upstream` used to discard both checkout return codes, so a refused
+    # checkout left the clone on the branch students read - the release copied straight
+    # onto it, undoing whatever the cohort had edited, and the merge phase then reported
+    # two errors about a branch that had never been cut. A dest that cannot go onto
+    # `upstream` is as unusable as one that would not clone, and is dropped the same way.
+    snaps = _stub_deploy_many(monkeypatch, _one_file)
+    stubbed = deploy.git
+
+    def refuses_the_checkout(*args, **kwargs):
+        if "checkout" in args:
+            return 1, "fatal: cannot lock ref 'refs/heads/upstream'"
+        return stubbed(*args, **kwargs)
+
+    monkeypatch.setattr(deploy, "git", refuses_the_checkout)
+    errors, changed = deploy.deploy_many(
+        "COURSE", "COHORT", [_deploy("sec")], sync=False
+    )
+
+    assert (errors, changed) == (1, False)  # one impossible copy, counted once
+    assert snaps == {}  # nothing was staged onto the base branch
+    err = capsys.readouterr().err
+    assert "COHORT/materials" in err
+    assert deploy.UPSTREAM_BRANCH in err
