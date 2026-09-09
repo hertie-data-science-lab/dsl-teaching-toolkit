@@ -96,13 +96,13 @@ open one always means "still broken". Don't close it by hand; fix the cause and 
 action. A file **faculty** have to fix never opens one of these - a file that is missing, one
 saved in the wrong format, a row naming somebody who is not on the roster: Sync membership
 skips that cohort and Send enrolment codes sends nothing, both stay green, and the fault is
-reported in that cohort's own digest issue and emailed to whoever left it there - see below.
+reported in that cohort's own digest issue and emailed to whoever left it there - see above.
 
 On the same throttle, the **toolkit maintainer is emailed** the run's URL and the last 30
-lines of the step that failed. A broken run is infrastructure rather than teaching, so the
-issue says so too: nothing here is for teaching staff to do. The two channels fire together
-or not at all - an email always has an issue behind it, and a thread being kept quiet for
-six hours sends no email either.
+lines of the step that failed. A broken run is infrastructure rather than teaching, and the
+issue says so: nothing here is for teaching staff to do. The two channels fire together or
+not at all - an email always has an issue behind it, and a thread being kept quiet for six
+hours sends no email either.
 
 **Scheduled release** reports per job, because it releases and grades separately: the release
 pass keeps *"Scheduled release is failing"*, and a cohort whose autograding fails gets its own

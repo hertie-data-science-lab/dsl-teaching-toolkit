@@ -9,8 +9,6 @@ reconciled; nothing here is clicked.
 
 ## Two separate populations
 
-They are not the same gate and do not overlap.
-
 | | Who | Granted by | May do |
 |---|---|---|---|
 | **Provisioning** | DSL-wide | `faculty` / `instructors` / `admin` team in **`hertie-data-science-lab`** | run **Bootstrap Course Org** in the central repo. **Nothing else** - it grants no access inside any course. |
