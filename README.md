@@ -36,7 +36,7 @@ Two org tiers:
 
 ```mermaid
 flowchart TB
-  subgraph COURSE["COURSE org — e.g. hertie-dsl-demo-course-e1234 (persistent)"]
+  subgraph COURSE["COURSE org, e.g. hertie-dsl-demo-course-e1234 (persistent)"]
     mat["`**course-materials-f/s202X**
 
 lectures/01_.../ + readings/01_.../ + labs/01_.../
@@ -56,7 +56,7 @@ profile (auto)
 + cohort registry`"]
   end
 
-  subgraph COHORT["COHORT org — e.g. hertie-dsl-demo-f/s202X (per-year)"]
+  subgraph COHORT["COHORT org, e.g. hertie-dsl-demo-f/s202X (per-year)"]
     cgh["`**.github**
 
 cohort config pointer + auto-generated student-facing org page`"]
