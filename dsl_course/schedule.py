@@ -1915,6 +1915,15 @@ def main() -> int:
     # Report what was UNDERSTOOD as well as what was dropped: validation cannot catch a
     # well-formed entry with the wrong date, but a count that is one short is visible.
     print(_validate_report(sched, source_name))
+    if sched.unparseable:
+        # The same verdict the --file form gives, in the same words: `load` returns an
+        # empty Schedule for a file that does not parse (so the hourly cron cannot be
+        # frozen by one), and a validator that read that as "nothing dropped" was the one
+        # caller for which the fallback is the wrong answer. Nothing in the file was read,
+        # so there are no sources to check either. `load` has already logged the parser's
+        # own line and what the cohort loses until it is fixed.
+        print(f"\nINVALID: {source_name} could not be parsed")
+        return 1
     # The source check is a separate question from the parse. `--validate` on its own
     # stays a pure offline read of the file it was given - deterministic, green or red for
     # reasons entirely inside that file. This half asks the org whether the plan's sources

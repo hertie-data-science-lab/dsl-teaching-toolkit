@@ -1453,6 +1453,24 @@ def test_record_handout_never_reverts_an_edit_made_while_it_ran(monkeypatch):
     assert "handout_datetime: 2026-09-22T14:05" in final
 
 
+def test_validate_is_invalid_for_a_cohort_plan_that_does_not_parse(monkeypatch, capsys):
+    # `--file` returned 1 for a file that does not parse while `--cohort-org` printed "OK:
+    # nothing dropped" and exited 0 - because `load` hands back an empty Schedule so the
+    # hourly cron cannot be frozen by one cohort's typo, and the validator read the
+    # fallback as a verdict. The two forms answer the same question and must agree.
+    monkeypatch.setattr(
+        schedule, "get_file_content", lambda org, repo, path: MALFORMED_SCHEDULE
+    )
+    monkeypatch.setattr(
+        "sys.argv", ["schedule", "--cohort-org", "Cohort-f2026", "--validate"]
+    )
+    assert schedule.main() == 1
+    out = capsys.readouterr()
+    assert "INVALID: Cohort-f2026/schedule.yml could not be parsed" in out.out
+    assert "OK: nothing dropped" not in out.out
+    assert "is NOT valid YAML" in out.err  # what load already said, not said again
+
+
 def test_validate_cli_reports_an_unreadable_cohort_schedule(monkeypatch, capsys):
     # An absent schedule.yml is an empty Schedule (valid: nothing planned yet), but a read
     # that failed outright now raises - the CLI turns that into a line and a red run,
