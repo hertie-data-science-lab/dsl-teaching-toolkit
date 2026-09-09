@@ -73,8 +73,6 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
 - The **Sync membership** workflow then creates a GitHub team per group.
 - A **Release assignment** run with `group` ticked then grants each team its shared repo.
 
-> TODO: later add ability to join groups after group assignment released.
-
 ## Next
 
 - [Release an assignment](09-release-assignment-to-cohort.md) once students have onboarded - or
