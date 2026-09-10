@@ -53,7 +53,11 @@ from .readings import READING_OVERLAY_FILE
 from .releaseignore import RELEASEIGNORE
 from .repos import create_repo, repo_exists, set_repo_topics
 from .welcome import TEMPLATES, example_course_file
-from .workflows_place import RELEASE_WORKFLOWS, push_content_workflows
+from .workflows_place import (
+    RELEASE_WORKFLOWS,
+    TEMPLATE_WORKFLOWS,
+    push_content_workflows,
+)
 
 # The site repo's Pages build, seeded as its FIRST commit. `create_repo` does not auto-init,
 # and Pages cannot be enabled - nor the first deploy dispatched - on a repo with no branch.
@@ -1151,6 +1155,20 @@ def scaffold_assignment(
             "  ! the starter files could not be written - the assignment template is "
             "incomplete"
         )
+        return 1
+    # Equip the hand-out button, as scaffold_materials equips the release ones: faculty
+    # run Release assignment from this repo's own Actions tab. Only that one - Release
+    # materials from a template would name a source with no session folders in it - and
+    # `assign.withhold_from_template` strips it off the cohort copy, so no student repo
+    # generated from this template inherits it.
+    if push_content_workflows(
+        org,
+        repo,
+        discover_cohorts(org),
+        discover_assignments(org),
+        central_ref_for(org),
+        workflows=TEMPLATE_WORKFLOWS,
+    ):
         return 1
     log_ok(f"assignment template ready: {org}/{repo} (main + solution)")
     return 0

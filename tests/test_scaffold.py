@@ -15,7 +15,15 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import derive, gh_contents, ghcli, grades, releaseignore, scaffold
+from dsl_course import (
+    derive,
+    gh_contents,
+    ghcli,
+    grades,
+    releaseignore,
+    scaffold,
+    workflows_place,
+)
 
 
 class FakeRepo:
@@ -219,6 +227,35 @@ def test_fresh_assignment_seeds_the_starter(fake, monkeypatch):
     _clone_ok(monkeypatch, _git_ok)
     assert scaffold.scaffold_assignment("Org", "1", "f2026") == 0
     assert {"README.md", "starter.py"} <= fake.written("assignment-1-f2026")
+
+
+def test_a_fresh_assignment_gets_the_hand_out_button_and_nothing_else(
+    fake, monkeypatch
+):
+    # The seeded actions table tells faculty New assignment bootstraps the release
+    # workflows with the template. Just the one, though: Release materials from a template
+    # would name a source with no session folders in it.
+    asked: list[tuple[str, tuple[str, ...]]] = []
+    monkeypatch.setattr(
+        scaffold,
+        "push_content_workflows",
+        lambda org, repo, cohorts, assignments, ref, *, workflows: (
+            asked.append((repo, workflows)) or 0
+        ),
+    )
+    _clone_ok(monkeypatch, _git_ok)
+
+    assert scaffold.scaffold_assignment("Org", "1", "f2026") == 0
+    assert asked == [("assignment-1-f2026", workflows_place.TEMPLATE_WORKFLOWS)]
+
+
+def test_a_template_without_its_button_is_not_reported_ready(fake, monkeypatch):
+    # Same rule as a materials repo with no Release workflows: the scaffold's exit code is
+    # what the New assignment run goes red on, so a half-equipped template must not pass.
+    monkeypatch.setattr(scaffold, "push_content_workflows", lambda *a, **k: 1)
+    _clone_ok(monkeypatch, _git_ok)
+
+    assert scaffold.scaffold_assignment("Org", "1", "f2026") == 1
 
 
 def test_the_markup_starters_are_valid_documents_of_their_own_format(fake, monkeypatch):

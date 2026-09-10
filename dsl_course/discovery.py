@@ -508,11 +508,15 @@ def handed_out_assignments(repos: list[dict]) -> frozenset[str]:
 
 
 def discover_content_repos(course_org: str) -> list[str]:
-    """Repos that should HOST the release workflows: the materials repo(s), not the infra
+    """Repos a materials release can come OUT of: the materials repo(s), not the infra
     repos (_is_infra_repo - notably NOT the public `<org>.github.io` site repo, which
     would otherwise be handed the org-admin token as a repo secret) and not the
-    assignment-* template repos (those are generate sources - equipping them would copy
-    the faculty & instructors workflows into every student repo)."""
+    assignment-* template repos, which hold a brief and a starter rather than the session
+    folders a release copies.
+
+    So this is the Release materials SOURCE dropdown, and the repos that host that button.
+    It is NOT "every repo with a run-from-repo workflow": an assignment template hosts
+    Release assignment, and `discover_assignments` is the list of those."""
     return sorted(
         r["name"]
         for r in list_org_repos(course_org)
