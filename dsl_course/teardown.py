@@ -39,9 +39,11 @@ NOTHING IS EVER DELETED. The bot holds no `delete_repo` scope, and every step he
 reversible by hand: un-archiving a repo from its own Settings page brings it back exactly
 as it was.
 
-`--dry-run` is the default and prints counts only. A real run refuses until the cohort's
-`archive.date` has arrived; `--force` is a person saying it in as many words, which is what
-an early close-out - and a cohort that never asked to be archived - needs.
+`--dry-run` is the default and prints counts only - always, whatever the date, because
+the counts are how somebody decides whether to ask for a close-out. Only a REAL run
+refuses until the cohort's `archive.date` has arrived; `--force` is a person saying it in
+as many words, which is what an early close-out - and a cohort that never asked to be
+archived - needs.
 
 Usage:
     python3 -m dsl_course.teardown --cohort-org hertie-dsl-demo-f2026
@@ -418,12 +420,21 @@ def close_out(
             else "names no archive date - it has no `archive:` block, or none with a "
             "date anything can be derived from"
         )
-        log_err(
+        not_due = (
             f"{cohort_org} is not due to be archived: {CONFIG_REPO}/"
-            f"{schedule.SCHEDULE_PATH} {declared}. Wait for that date, change it, or "
-            f"re-run with --force to close the cohort out now."
+            f"{schedule.SCHEDULE_PATH} {declared}."
         )
-        return 1
+        if not dry_run:
+            log_err(
+                f"{not_due} Wait for that date, change it, or re-run with --force to "
+                f"close the cohort out now."
+            )
+            return 1
+        # A dry run freezes nothing, and printing the counts is how somebody decides
+        # whether to ask for a close-out at all - so refusing to print them until the
+        # date has passed answers the question only once it no longer needs asking.
+        # It goes on, and says what the real run would need.
+        log(f"  {not_due} A real run would need --force.")
 
     registrar = registrar_summary(cohort_org)
     log(f"  registrar export: {registrar}")
