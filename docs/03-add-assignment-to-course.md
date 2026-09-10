@@ -85,6 +85,12 @@ knits, a `.qmd` that renders, a `.tex` that compiles, a notebook that runs. Name
 > **The graded artefact is the built one** - a grader reads the rendered document and
 > checks it against the source. The starter and the seeded brief both say so.
 
+Two starters can want the same filename, and the second one wins. `rmd` and `qmd` both
+build `starter.html`; and with `autograde` on, the cutoff converts a submitted
+`starter.ipynb` to `starter.py` before the hidden tests import it, so on `ipynb,py` the
+notebook is what gets marked. Combine formats that build different things, or say in the
+brief which one is marked.
+
 The `.Rmd` and `.qmd` stubs seed an `{r}` chunk; swap it for `{python}` if your course
 works in Python and nothing else changes.
 
