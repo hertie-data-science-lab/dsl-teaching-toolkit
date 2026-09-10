@@ -216,9 +216,9 @@ def _execute_nondeploy(
     errors = 0
     changed = False
     if release.assignment:
-        # provision_all's default (group=None) resolves group-vs-individual from the
-        # cohort schedule / the template's grading_config.yml - so a scheduled group handout
-        # provisions per TEAM, not one repo per student.
+        # Individual or group is the template's own grading_config.yml, read by
+        # provision_all - so a scheduled group handout provisions per TEAM, not one repo
+        # per student, and the cron cannot disagree with the button about it.
         failed, changed = provision_all(
             course_org,
             release.assignment,

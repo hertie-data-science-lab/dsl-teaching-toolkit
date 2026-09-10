@@ -218,7 +218,7 @@ exist and then mirrors it as a repo secret onto the private ones, because on Git
 
 | Value | Held centrally as | Reaches an org via |
 |---|---|---|
-| `DSL_BOT_TOKEN` | a secret on this repo | Bootstrap with `set_secret: true`; `seed refresh` also mirrors it onto each content repo |
+| `DSL_BOT_TOKEN` | a secret on this repo | Bootstrap with `set_secret: true`; `seed refresh` also mirrors it onto each content repo and assignment template |
 | `DSL_MAINTAINER_EMAIL` | a repository **variable** on this repo | Bootstrap with `set_secret: true`, and Bootstrap cohort forwards it to a cohort |
 | `DSL_COURSE_ADMIN_EMAILS` | a repository **variable** on this repo | Bootstrap with `set_secret: true`. COURSE orgs only - Bootstrap cohort does NOT forward it |
 
@@ -348,11 +348,15 @@ Add a name to the layer that owns the subject, not to whichever module already i
 Four places, in order - miss the last and every org keeps two buttons for one job:
 
 1. a renderer in `workflows_render.py`;
-2. its path in `seed.seed_github_workflows`'s `files` dict (or `workflows_place.WORKFLOWS`
-   for a run-from-repo one);
+2. its path in `seed.seed_github_workflows`'s `files` dict (or `workflows_place.RELEASE_WORKFLOWS`
+   for a run-from-repo one, plus `TEMPLATE_WORKFLOWS` if an assignment template hosts it
+   too - and `workflows_place.NEVER_IN_STUDENT_REPOS`, which `assign.withhold_from_template`
+   strips off a cohort template and `patch_released` refuses to push, is derived from both);
 3. `tests/test_renderers.py`'s `ALL_RENDERED` - a completeness test fails otherwise;
 4. when *retiring* a path, add it to that call's `delete=` tuple (or
    `workflows_place.RETIRED_WORKFLOWS`), so orgs seeded before the change drop the old file.
+   `RETIRED_WORKFLOWS` is in `NEVER_IN_STUDENT_REPOS` too, so a button retired today is
+   still stripped off a template whose refresh has not reached it yet.
 
 ## The clean break in `schedule.yml`
 

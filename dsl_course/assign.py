@@ -13,7 +13,7 @@ Idempotent: existing repos are left alone.
     cohort/<slug>-<handle>   (private; student = collaborator)
     where <slug> is the template name minus a trailing -fYYYY / -sYYYY.
 
-With --type group it instead makes ONE repo per team, `cohort/<slug>-<team>`, and grants the
+For a `type: group` assignment it instead makes ONE repo per team, `cohort/<slug>-<team>`, and grants the
 GitHub Team materialised from classroom-config/teams.csv (see dsl_course.sync_teams) - so
 membership changes propagate to access. Grades are never written here; they go to each
 student's private gradebook repo (see dsl_course.grades), so a possibly-public team repo
@@ -82,6 +82,7 @@ from .repos import (
     set_repo_topics,
     topic_name,
 )
+from .workflows_place import NEVER_IN_STUDENT_REPOS
 
 # Fire-once sentinel for the SCHEDULED solution push, in classroom-config. Needed because
 # `due_releases` is cumulative by design - a handout release re-fires every tick so a late
@@ -177,7 +178,8 @@ def _tag_submission(cohort_org: str, repo: str, slug: str, have: set[str]) -> No
 
 
 def withhold_from_template(cohort_org: str, template: str) -> bool:
-    """Delete whatever the template's own `.releaseignore` withholds. True on success.
+    """Delete what a student repo must not carry: whatever the template's own
+    `.releaseignore` withholds, and this toolkit's own release buttons. True on success.
 
     The one outbound copy with no clone to filter: `generate_from_template` is a server-side
     GitHub copy of the whole default branch, so there is no `copytree` and no ignore hook to
@@ -193,7 +195,15 @@ def withhold_from_template(cohort_org: str, template: str) -> bool:
     thing being withheld is the kind of thing that must not reach students by accident, and
     "could not tell" is not "nothing to withhold". A handout blocked by a transient API
     failure is re-run by the next hourly tick or the next click; answers published to a
-    cohort cannot be taken back."""
+    cohort cannot be taken back.
+
+    `NEVER_IN_STUDENT_REPOS` goes with no pattern needed and no way to opt back in - the
+    rule `.releaseignore` already applies to ITSELF (`releaseignore._SELF_EXCLUDED`), for
+    the same reason. A course-org assignment template hosts **Release assignment** so
+    faculty can hand it out from the repo they are editing, and template-generate copies
+    the whole default branch - so without this the button, and the org-admin token it
+    reads, would land in every student repo. Matched by exact PATH, so the autograder
+    workflow beside it - and anything else under `.github/workflows/` - is untouched."""
     branch = default_branch(cohort_org, template, fallback="main")
     try:
         # Blobs only: `put_files` can delete nothing else, and `from_tree` derives the
@@ -222,18 +232,22 @@ def withhold_from_template(cohort_org: str, template: str) -> bool:
             f"withholds. Re-run it: {exc}"
         )
         return False
+    # Whatever the file names, plus the buttons that are never a student's to press.
+    # Sorted, so the delete list is stable however the two sets overlap.
+    withheld = tuple(sorted(set(withheld) | (set(paths) & set(NEVER_IN_STUDENT_REPOS))))
     if not withheld:
         return True
     if not put_files(
         cohort_org,
         template,
         {},
-        f"chore: withhold {len(withheld)} path(s) named in {RELEASEIGNORE}",
+        f"chore: withhold {len(withheld)} path(s) from the student repos",
         delete=withheld,
     ):
         log_err(
-            f"  ! could not withhold {len(withheld)} path(s) a `{RELEASEIGNORE}` names in "
-            f"{cohort_org}/{template} - handout stopped"
+            f"  ! could not withhold {len(withheld)} path(s) - what a `{RELEASEIGNORE}` "
+            f"names in {cohort_org}/{template}, or a faculty release button - handout "
+            f"stopped"
         )
         return False
     log_ok(f"withheld {len(withheld)} path(s) from {cohort_org}/{template}")
@@ -599,12 +613,40 @@ def patch_released(
         f"{' (dry run)' if dry_run else ''}"
     )
     corrected = template_files(master_org, template, path)
-    if not corrected:
-        log_err(
-            f"`{path}` is not on {master_org}/{template}'s default branch - nothing to "
-            f"patch. Commit the correction to the template first; this button only "
-            f"distributes what is already there."
+    # The second outbound copy from a course template, and the one with no
+    # `generate_from_template` in it. `path` is free text naming a file OR A FOLDER, so
+    # `.github` or `.github/workflows` sweeps up the Release assignment button the
+    # template now hosts - into every submission repo, and onto the cohort template every
+    # later onboarder generates from, undoing `withhold_from_template` after the fact.
+    # Same set, same exact-path rule, same absence of a way to opt back in.
+    #
+    # ONLY that set. A `.releaseignore` in the course template is not read here, so a
+    # folder `path` can still carry a rubric it withholds - the tree this reads is the
+    # COURSE template's, where those paths are still present, and whether faculty may
+    # patch one out deliberately is a question this filter does not answer. That gap
+    # pre-dates the buttons and is its own change.
+    unpatchable = sorted(set(corrected) & set(NEVER_IN_STUDENT_REPOS))
+    if unpatchable:
+        corrected = {p: b for p, b in corrected.items() if p not in unpatchable}
+        log(
+            f"  withheld from the patch: {', '.join(unpatchable)} - a faculty release "
+            f"button is never a student's to hold"
         )
+    if not corrected:
+        if unpatchable:
+            # Not "there is no such path" - there is, and every file under it is one a
+            # student's repo may never hold. Saying the other thing sends faculty looking
+            # for a file that is sitting on the branch in front of them.
+            log_err(
+                f"`{path}` on {master_org}/{template} holds nothing but faculty release "
+                f"buttons, which are never a student's to press - nothing to patch."
+            )
+        else:
+            log_err(
+                f"`{path}` is not on {master_org}/{template}'s default branch - nothing "
+                f"to patch. Commit the correction to the template first; this button "
+                f"only distributes what is already there."
+            )
         return 1
     try:
         handout = repo_blob_shas(
@@ -892,15 +934,6 @@ def main() -> int:
         help="Also push the solution (template's `solution` branch) into each student repo",
     )
     parser.add_argument(
-        "--type",
-        dest="kind",
-        choices=["auto", "individual", "group"],
-        default="auto",
-        help="individual = one repo per student; group = one per team (from "
-        "classroom-config/teams.csv); auto = whatever the template's "
-        "grading_config.yml declares (default: individual).",
-    )
-    parser.add_argument(
         "--slug",
         default="",
         help="Which assignment in the cohort's schedule.yml this is, when two of them hand out from the same template (each with its own cohort_dest_repo). Leave empty otherwise.",
@@ -929,7 +962,6 @@ def main() -> int:
         "--dry-run", action=argparse.BooleanOptionalAction, default=None
     )
     args = parser.parse_args()
-    kind = args.kind
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
@@ -949,7 +981,6 @@ def main() -> int:
             args.cohort_org,
             roster_path=args.roster,
             solution=args.solution,
-            group={"auto": None, "individual": False, "group": True}[kind],
             dry_run=bool(args.dry_run),
             slug=args.slug,
         )
@@ -1006,7 +1037,6 @@ def provision_all(
     cohort_org: str,
     roster_path: str | None = None,
     solution: bool = False,
-    group: bool | None = None,
     dry_run: bool = False,
     touch_existing: bool = True,
     scheduled: bool = False,
@@ -1022,18 +1052,20 @@ def provision_all(
     `changed` is the same predicate this function's own site sync uses: at least one unit
     was not `skipped`.
 
-    Callable directly (e.g. by the scheduler) as well as from the CLI. `group=None`
-    (the default) reads the assignment's own declaration - `type: group` in the
-    grading_config.yml on the template's solution branch; pass True to force per-team for
-    a template that doesn't declare it.
+    Callable directly (e.g. by the scheduler) as well as from the CLI. Individual or
+    group is the assignment's own declaration - `type:` in the grading_config.yml on the
+    template's solution branch - and there is no override: the sheet, the Join-team form
+    and the teams themselves are all keyed on that file, so a handout free to disagree
+    with it puts a cohort's work in repos nothing else is looking for.
 
     `scheduled` marks the hourly cron: a group assignment with no teams yet is then a
     green wait, not the error a button press gets.
 
-    `slug` names WHICH schedule entry to hand out when two of them hand out from this one
-    template (each with its own `cohort_dest_repo`). Left empty with two in the plan, this
-    refuses rather than picking: the two make different repos for different students and
-    keep separate grades, and guessing is a whole cohort's work in the wrong place."""
+    `slug` names WHICH schedule entry is being handed out, and only the scheduler can
+    answer it: it knows which release it is firing. The button asks nobody - a template
+    two entries hand out from is refused below, because they make different repos for
+    different students and keep separate grades, and guessing is a whole cohort's work in
+    the wrong place."""
     if master_org == cohort_org:
         log_err("master-org and cohort-org must differ.")
         return 1, False
@@ -1043,11 +1075,10 @@ def provision_all(
     # answer to be spelt, which is how a handout came to provision a shape the sheet did
     # not expect.
     gspec = load_grading_spec(master_org, template)
-    if group is None:
-        # The assignment's own grading_config.yml is the only declaration there is.
-        group = gspec.is_group
-        if group:
-            log("  (declared `type: group` - provisioning per team)")
+    # The assignment's own grading_config.yml is the only declaration there is.
+    group = gspec.is_group
+    if group:
+        log("  (declared `type: group` - provisioning per team)")
 
     students = roster.load_path(roster_path) if roster_path else roster.load(cohort_org)
     if students is None:  # missing/unreadable roster - load() already logged why
@@ -1073,13 +1104,25 @@ def provision_all(
     sched = schedule.load(cohort_org)
     # The parameter is consumed HERE and nowhere else: from the next line on, `slug` means
     # the cohort-side name, exactly as it does everywhere else in this file.
-    target = schedule.resolve_target(sched, template, slug)
+    #
+    # Two entries handing out from one template is legitimate - a resit off the same
+    # brief - and `resolve_target` refuses to choose between them. The REMEDY is this
+    # caller's to name: the button cannot answer, because it is one press and the answer
+    # decides which half of the cohort gets repos, so it is sent to the schedule, which
+    # fires each entry on its own datetime and therefore knows which one it is.
+    target = schedule.resolve_target(
+        sched,
+        template,
+        slug,
+        remedy="hand this one out from the schedule (each entry fires on its own "
+        "handout_datetime) rather than from this button",
+    )
     if isinstance(target, str):
         log_err(target)
         return 1, False
     key, slug = target
     # The sheet's header and the Feedback issue's body, off the definition read above.
-    spec = sheet_spec(sched, key, slug, gspec, bool(group))
+    spec = sheet_spec(sched, key, slug, gspec, group)
     feedback_bodies: dict[str, str] = {}
 
     # A provisioning unit is (repo_name, [member handles], team slug). Individual = one per
@@ -1091,8 +1134,7 @@ def provision_all(
             # need different words: telling a course whose teams the teaching team
             # allocates to wait for students to self-select points them at a form that
             # refuses every request (see templates/welcome/team-formation.yml).
-            # The RAW declaration, not `team_formation_resolved`: `--group` can force a
-            # per-team handout of a template that declares nothing, and a template that
+            # The RAW declaration, not `team_formation_resolved`: a template that
             # declares nothing self-selects.
             self_select = gspec.team_formation != ASSIGNED
             if scheduled:
@@ -1276,7 +1318,7 @@ def provision_all(
         key,
         slug,
         template,
-        is_group=bool(group),
+        is_group=group,
         now=datetime.now(timezone.utc),
         units=sheet_units,
     ):

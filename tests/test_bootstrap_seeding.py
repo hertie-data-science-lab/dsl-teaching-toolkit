@@ -49,6 +49,7 @@ from dsl_course import (
     sync_faculty,
     teams,
     welcome,
+    workflows_place,
 )
 from dsl_course import bootstrap_course as bc
 from dsl_course.central import CENTRAL
@@ -908,7 +909,7 @@ def _stub_refresh(
         seed, "discover_cohorts", lambda org: ["Cohort-f2026", "Cohort-s2027"]
     )
     monkeypatch.setattr(seed, "discover_content_repos", lambda org: [])
-    monkeypatch.setattr(seed, "discover_assignments", lambda org: [])
+    monkeypatch.setattr(seed, "discover_assignment_repos", lambda org: [])
     monkeypatch.setattr(seed, "_propagate_repo_secret", lambda org, repos: 0)
     monkeypatch.setattr(seed, "list_org_repos", lambda org: [])
     monkeypatch.setattr(seed, "converge_org_settings", lambda org, **k: 0)
@@ -940,6 +941,77 @@ def _stub_refresh(
         ),
     )
     return store
+
+
+def test_refresh_gives_every_assignment_template_the_hand_out_button(monkeypatch):
+    # docs/09 sends faculty to the template's own Actions tab for Release assignment, and
+    # the seeded actions table promises New assignment bootstraps it. Only the nightly
+    # refresh reaches a template scaffolded before that promise - or one whose seed
+    # failed - so it has to place the button, and mirror the token that button reads (on
+    # GitHub Free an org secret is never delivered to a private repo).
+    _stub_refresh(monkeypatch)
+    monkeypatch.setattr(
+        seed, "discover_content_repos", lambda org: ["course-materials-f2026"]
+    )
+    monkeypatch.setattr(
+        seed, "discover_assignment_repos", lambda org: [{"name": "assignment-1-f2026"}]
+    )
+    monkeypatch.setattr(seed.scaffold, "refresh_materials_system_files", lambda o, r: 0)
+    placed: list[tuple[str, tuple[str, ...]]] = []
+    monkeypatch.setattr(
+        seed,
+        "push_content_workflows",
+        lambda org, repo, cohorts, assignments, ref, *, workflows: (
+            placed.append((repo, workflows)) or 0
+        ),
+    )
+    secreted: list[list[str]] = []
+    monkeypatch.setattr(
+        seed, "_propagate_repo_secret", lambda org, repos: secreted.append(repos) or 0
+    )
+
+    assert seed.refresh("Course-Org") == 0
+    # Which SET reaches which repo; what is in that set is pinned beside the renderer
+    # (test_an_assignment_template_hosts_only_the_hand_out_button).
+    assert placed == [
+        ("course-materials-f2026", workflows_place.RELEASE_WORKFLOWS),
+        ("assignment-1-f2026", workflows_place.TEMPLATE_WORKFLOWS),
+    ]
+    assert secreted == [["course-materials-f2026", "assignment-1-f2026"]]
+
+
+def test_refresh_leaves_an_archived_assignment_template_alone(monkeypatch):
+    # An archived repo is read-only, so both writes 403 - and a template a faculty member
+    # archived on purpose would red this org's nightly cron from then on, for a repo nobody
+    # will release from again. The dropdown is the exception: copying next year's
+    # assignment forward from a finished one is a READ, so every template stays on offer.
+    _stub_refresh(monkeypatch)
+    monkeypatch.setattr(
+        seed,
+        "discover_assignment_repos",
+        lambda org: [
+            {"name": "assignment-1-f2025", "archived": True},
+            {"name": "assignment-2-f2026", "archived": False},
+        ],
+    )
+    placed: list[str] = []
+    offered: list[list[str]] = []
+    monkeypatch.setattr(
+        seed,
+        "push_content_workflows",
+        lambda org, repo, cohorts, assignments, ref, *, workflows: (
+            placed.append(repo) or offered.append(assignments) or 0
+        ),
+    )
+    secreted: list[list[str]] = []
+    monkeypatch.setattr(
+        seed, "_propagate_repo_secret", lambda org, repos: secreted.append(repos) or 0
+    )
+
+    assert seed.refresh("Course-Org") == 0
+    assert placed == ["assignment-2-f2026"]
+    assert secreted == [["assignment-2-f2026"]]
+    assert offered == [["assignment-1-f2025", "assignment-2-f2026"]]
 
 
 @pytest.mark.parametrize(
