@@ -114,5 +114,5 @@
 archive:
   date:                       # optional (default: semester_end + 60 days)
   show_on_site: true          # a "Cohort archived" row on the site's Schedule tab, notice 14 days out
-  description: >-             # optional, `{{date}}` is filled in with the date above
+  description: >-             # optional, `{{date}}` is filled in automatically
     This cohort is archived on {{date}}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.
