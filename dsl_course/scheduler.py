@@ -948,9 +948,8 @@ def _archive_notice_body(cohort_org: str, when: date, mailed: bool) -> str:
         f"still can; nobody can change anything. Un-archiving a repository from its own "
         f"Settings page brings it back exactly as it was.\n\n"
         f"Anything you still need to change in this cohort, change before then. To move "
-        f"the date, edit the `archive:` block in `{schedule.SCHEDULE_PATH}` in this repo: "
-        f"its own `date:` overrides the default, which is sixty days after "
-        f"`semester_end`. Delete the block and nothing archives this cohort at all.\n\n"
+        f"this archiving date or remove it altogether, edit `{schedule.SCHEDULE_PATH}` "
+        f"in this repo.\n\n"
         f"{told}"
     )
 

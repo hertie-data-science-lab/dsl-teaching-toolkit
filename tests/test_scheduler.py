@@ -3304,6 +3304,16 @@ def test_a_block_no_date_can_be_derived_from_says_that_instead(monkeypatch):
     assert fault.severity(WHEN) < faults_mod.NOTIFY_FROM
 
 
+def test_both_notice_surfaces_end_on_the_same_instruction(monkeypatch):
+    # Moving or removing the date is the only thing a reader can DO about the notice, so
+    # the issue and the mail beside it say it in the same words - and say only that,
+    # rather than teaching the block's defaults to somebody holding a date.
+    body = scheduler._archive_notice_body("Cohort-Org", date(2027, 2, 16), True)
+    assert body.count("To move this archiving date or remove it altogether, edit ") == 1
+    assert "`schedule.yml` in this repo." in body
+    assert "sixty days" not in body
+
+
 def test_a_notice_is_closed_when_the_archive_is_called_off(monkeypatch):
     # The `archive:` block was taken away after the notice went out. Nothing will freeze
     # this cohort now, and nothing else would ever close the issue: a cohort that is never
