@@ -230,7 +230,7 @@ When this cohort is frozen read-only: every repository in the org archived, noth
 |---|---|---|---|
 | `date` | no | `semester_end` + 60 days | the day the whole cohort org is archived |
 | `show_on_site` | no | `true` | a "Cohort archived" row on the deployed schedule, and a notice in the site's Updates box for the fortnight before |
-| `description` | no | *none* | the sentence that row and that notice say - all of it |
+| `description` | no | *none* | the sentence that row and that notice say - all of it; `{date}` in it is filled in with the archive date |
 
 ```yaml
 semester_end: 2026-12-18

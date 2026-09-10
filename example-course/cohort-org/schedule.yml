@@ -158,8 +158,7 @@ events:
     title: Guest lecture (industry speaker)
     event_datetime: tbc
 
-# LAST, because it is the end of the term: writing this block is what archives the cohort
-# at all - without it, nothing ever freezes.
+# archive the org (freezes in place): removes all write permissions, retains all read permissions
 archive:
   date: 2027-02-16            # optional (default: semester_end + 60 days)
   show_on_site: true          # a "Cohort archived" row on the site's Schedule tab, notice 14 days out
