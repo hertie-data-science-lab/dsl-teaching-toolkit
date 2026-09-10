@@ -100,8 +100,9 @@ NO_TEAMS = "none"
 # otherwise. Here because three places have to agree on it: the `grading_config.yml` the
 # New assignment button writes, the lock file the form reads, and the form itself.
 DEFAULT_MAX_TEAM_SIZE = 5
-# Which starter stub `New assignment` seeds, and nothing else: grading reads whatever is
-# in the repo, and a student may commit anything. `none` is the raw-repo option.
+# Which starter stubs `New assignment` seeds, and nothing else: grading reads whatever
+# is in the repo, and a student may commit anything. The button takes any number of them,
+# comma-separated; `none` is the raw-repo answer and the one that stands alone.
 FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", "none")
 
 

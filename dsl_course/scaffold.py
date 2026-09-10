@@ -9,9 +9,10 @@ code, so a new repo is always laid out the way the Release actions expect.
 Materials repos get `lectures/`, `readings/` and `labs/` `01_session-1/` skeletons (any
 top-level directory with an ordinal-prefixed subdirectory is a releasable section - add
 more, e.g. `datasets/`, freely; delete `labs/` if unused) and the run-from-repo Release
-workflows. Assignment repos get a starter on `main` (no tests - grading is faculty-side)
-and a `solution` branch carrying the model solution, `grading_config.yml`, and the HIDDEN
-tests, so generate never ships any of them to students.
+workflows. Assignment repos get a starter on `main` for each format asked for (no tests -
+grading is faculty-side) and a `solution` branch carrying the model solution,
+`grading_config.yml`, and the HIDDEN tests, so generate never ships any of them to
+students.
 
 Either kind can start from last year's instead of from the stubs: `--copy-from <repo>`
 copies every branch of it, history and all, and rewrites only the SYSTEM-owned files.
@@ -63,6 +64,11 @@ from .workflows_place import (
 # and Pages cannot be enabled - nor the first deploy dispatched - on a repo with no branch.
 # Everything else a site holds arrives with the first `site sync`.
 SITE_DEPLOY_WORKFLOW = ".github/workflows/deploy.yml"
+
+# The `--format` answer that means no starter at all, and the only one that may not share
+# the box: `none` beside a real format is a contradiction, not a default (see
+# `parse_formats`).
+NO_STARTER = "none"
 
 
 _SYLLABUS_STUB = """\
@@ -226,7 +232,7 @@ def _grading_config(
     kind: str,
     team_formation: str,
     submit_via: str,
-    fmt: str,
+    formats: list[str],
     autograde: bool,
     defaults: dict,
 ) -> str:
@@ -256,9 +262,13 @@ def _grading_config(
         _setting(
             "submit_via", submit_via, "github | external (Moodle, Kaggle, in class...)"
         ),
+        # ONE format, because `grades` reads one: the key is the vocabulary this file
+        # teaches and the default behind `completion_check`, which is written out
+        # explicitly below either way. A template seeded with several starters records
+        # the one it was named first by.
         _setting(
             "format",
-            fmt,
+            formats[0] if formats else NO_STARTER,
             "ipynb | py | rmd | qmd | latex | none - chooses the starter stub only; "
             "grading reads whatever is in the repo",
         ),
@@ -285,7 +295,7 @@ def _grading_config(
         ),
         _setting(
             "completion_check",
-            "true" if fmt == "ipynb" else "false",
+            "true" if "ipynb" in formats else "false",
             "true: execute the notebook at the cutoff, record whether it runs clean",
         ),
         _setting(
@@ -527,15 +537,16 @@ _CONTRIBUTIONS_STUB = """\
 """
 
 
-def _brief_stub(title: str, defaults: dict, fmt: str) -> str:
+def _brief_stub(title: str, defaults: dict, formats: list[str]) -> str:
     """`README.md` on `main` - the page students read, and the only one only faculty can
     write. A STUB, unmistakably: seeding a plausible-looking brief invites shipping it
     unedited. The late-work line repeats what the course already declared, so the two
     cannot disagree on the page a student actually opens.
 
-    `fmt` adds the one line the stub is NOT free to leave to its author: what counts as
-    handing this format in (`_ARTEFACT_NOTE`). A brief that never says the knitted HTML
-    has to come with the `.Rmd` is a brief that collects `.Rmd` files nobody can mark."""
+    `formats` add the one line the stub is NOT free to leave to its author: what counts
+    as handing each of them in (`_ARTEFACT_NOTE`), one per format. A brief that never says
+    the knitted HTML has to come with the `.Rmd` is a brief that collects `.Rmd` files
+    nobody can mark."""
     window = defaults.get("late_window_days")
     penalty = defaults.get("late_penalty_per_day")
     if not window:
@@ -544,14 +555,14 @@ def _brief_stub(title: str, defaults: dict, fmt: str) -> str:
         late = f"{penalty} per day, up to {window} days"
     else:
         late = f"accepted up to {window} days late"
-    artefact = _hand_in(fmt)
+    artefacts = [sentence for fmt in formats if (sentence := _hand_in(fmt))]
     return (
         f"# {title}\n\n"
         f"**Points:** __ · **Due:** see the course schedule · **Late work:** {late}\n\n"
         "## Task\n\n"
         "_Write the assignment here (dsl-stub: replace this whole file)._\n\n"
         "## What to submit\n\n"
-        + (f"{artefact}\n\n" if artefact else "")
+        + "".join(f"{sentence}\n\n" for sentence in artefacts)
         + "_Say which files you expect back, and in what shape._\n"
     )
 
@@ -982,11 +993,51 @@ def _seed_template_workflows(org: str, repo: str) -> int:
     )
 
 
+def parse_formats(answer: str) -> list[str]:
+    """The `--format` answer as the starters to seed, in the order they were named.
+
+    The system edge: one comma-separated box, typed by hand, becomes the list the rest of
+    the module works in. Duplicates collapse - a starter is seeded once - and `none`
+    stands alone, because guessing which half of `ipynb,none` was meant is how a template
+    ends up with a file its brief never mentions.
+
+    Raises ValueError, which the CLI prints as one line before the repo is created, so a
+    mistyped format costs a re-run and nothing else."""
+    named = list(
+        dict.fromkeys(
+            cleaned for token in answer.split(",") if (cleaned := token.strip().lower())
+        )
+    )
+    if not named:
+        raise _not_a_format("no starter named")
+    unknown = [token for token in named if token not in FORMATS]
+    if unknown:
+        raise _not_a_format(f"{unknown[0]} is not a starter")
+    if NO_STARTER in named:
+        if len(named) > 1:
+            raise _not_a_format(
+                f"{NO_STARTER} means no starter at all, so it cannot be asked for "
+                "beside one"
+            )
+        return []
+    return named
+
+
+def _not_a_format(problem: str) -> ValueError:
+    """Every refusal of a `--format` answer, in the one line that names what may be
+    typed - the box takes free text, so the answer to a bad one is the vocabulary."""
+    listed = ", ".join(fmt for fmt in FORMATS if fmt != NO_STARTER)
+    return ValueError(
+        f"--format: {problem} - name any of {listed}, comma-separated, or "
+        f"{NO_STARTER} on its own"
+    )
+
+
 def scaffold_assignment(
     org: str,
     number: str,
     tag: str,
-    fmt: str = "py",
+    formats: list[str],
     kind: str = "individual",
     *,
     name: str = "",
@@ -997,35 +1048,46 @@ def scaffold_assignment(
 ) -> int:
     """Create `assignment-<number>-<tag>` and write the assignment's own definition into it.
 
-    Every argument but `fmt` lands verbatim in the solution branch's `grading_config.yml`,
-    which is what the handout, the grading sheet and the Join-team form all read - so the
-    answers given on the button are the ones the rest of the term obeys, and nothing has to
-    be hand-edited in afterwards. What the button does NOT ask - the team cap, the late
-    window, the penalty - comes from the course's own `assignment_defaults`.
+    Every argument but `formats` lands verbatim in the solution branch's
+    `grading_config.yml`, which is what the handout, the grading sheet and the Join-team
+    form all read - so the answers given on the button are the ones the rest of the term
+    obeys, and nothing has to be hand-edited in afterwards. What the button does NOT ask -
+    the team cap, the late window, the penalty - comes from the course's own
+    `assignment_defaults`.
 
-    `fmt` is the exception: it picks which starter stub is seeded on `main` and nothing
-    else. The grader reads whatever is in the repo, so a student who works in a notebook on
-    a `py` assignment still grades; `none` seeds no starter at all.
+    `formats` is the exception: it picks which starter stubs are seeded on `main`, one
+    each with its model answer on `solution`, and nothing else. The grader reads whatever
+    is in the repo, so a student who works in a notebook on a `py` assignment still
+    grades; an empty list seeds no starter at all.
 
-    `copy_from` overrides all of them: last year's template arrives whole, both branches,
-    and the `grading_config.yml` that came with it is the assignment's definition. Writing
-    the button's answers over it would silently re-declare an assignment the course has
-    already run."""
+    `copy_from` overrides all but the name and the number: last year's template arrives
+    whole, both branches, and the `grading_config.yml` that came with it is the
+    assignment's definition. Writing the button's answers over it would silently
+    re-declare an assignment the course has already run."""
     repo = f"assignment-{number}-{tag}"
+    named = name.strip()
+    starters = ", ".join(formats) or NO_STARTER
     log_step(
         f"Scaffolding {org}/{repo} "
         + (
             f"(copied from {copy_from})"
             if copy_from
-            else f"({kind}, {fmt}; template + solution branch)"
+            else f"({kind}, {starters}; template + solution branch)"
         )
     )
+    # The name is the one answer both paths keep: it is this repo's description on the
+    # org's landing page, which is the only place a copied template says which assignment
+    # it is without opening its grading_config.yml.
     if not create_repo(
         org,
         repo,
         private=True,
         is_template=True,
-        description=f"Assignment {number} template",
+        description=(
+            f"Assignment {number}: {named}"
+            if named
+            else f"Assignment {number} template"
+        ),
     ):
         return 1
     grant_faculty(org, repo, COURSE_TEAM_ACCESS)
@@ -1039,25 +1101,26 @@ def scaffold_assignment(
         if not _copy_branches(org, copy_from, repo, needs=SOLUTION_BRANCH):
             return 1
         log(
-            "  (name, format, type, team_formation, submit_via and autograde were "
-            "ignored - only the number and the tag name the repo; the copied definition "
-            f"governs the rest: https://github.com/{org}/{repo}/blob/"
+            "  (boxes 5-9 - format, type, team_formation, submit_via and autograde - "
+            "were ignored: the number and the tag name the repo, the name describes it, "
+            "and the copied definition governs the rest: "
+            f"https://github.com/{org}/{repo}/blob/"
             f"{SOLUTION_BRANCH}/grading_config.yml)"
         )
         if _seed_template_workflows(org, repo):
             return 1
         log_ok(f"assignment template ready: {org}/{repo} (copied from {copy_from})")
         return 0
-    title = name.strip() or f"Assignment {number}"
+    title = named or f"Assignment {number}"
     defaults = course_assignment_defaults(org)
-    # main: the brief, one starter stub, and (for a group assignment) CONTRIBUTIONS.md -
+    # main: the brief, a starter stub per format, and (group only) CONTRIBUTIONS.md -
     # what students receive on generate. No tests, no autograder - grading runs
     # faculty-side from the solution branch. ONE commit, create-only, exactly as
     # scaffold_materials seeds its skeleton: a re-run against a repo whose starter faculty
     # have since authored leaves it alone and logs the skip, and the repo they then author
     # by hand opens on one `init:` line rather than three identical ones.
-    seeds = {"README.md": _brief_stub(title, defaults, fmt)}
-    if fmt in _STARTERS:
+    seeds = {"README.md": _brief_stub(title, defaults, formats)}
+    for fmt in formats:
         seeds[starter_name(fmt)] = _STARTERS[fmt][1](title)
     if kind == "group":
         seeds["CONTRIBUTIONS.md"] = _CONTRIBUTIONS_STUB
@@ -1116,9 +1179,10 @@ def scaffold_assignment(
         # model answer called `solution.ipynb` derives a SECOND notebook beside the
         # untouched starter instead of becoming it. The stem AND the suffix are the same
         # contract on both branches (see `_model_answer` and `_STARTERS`).
-        model = _model_answer(number, fmt)
-        if model is not None:
-            (sol / starter_name(fmt)).write_text(model)
+        for fmt in formats:
+            model = _model_answer(number, fmt)
+            if model is not None:
+                (sol / starter_name(fmt)).write_text(model)
         (sol / "README.md").write_text(
             f"# Assignment {number} - model solution\n\n"
             "Goes out to students after the deadline, two ways:\n\n"
@@ -1141,7 +1205,7 @@ def scaffold_assignment(
                 kind=kind,
                 team_formation=team_formation,
                 submit_via=submit_via,
-                fmt=fmt,
+                formats=formats,
                 autograde=autograde,
                 defaults=defaults,
             )
@@ -1154,7 +1218,7 @@ def scaffold_assignment(
             tests = wd / "tests"
             tests.mkdir()
             (tests / "test_solution.py").write_text(
-                _HIDDEN_TEST_NOTEBOOK if fmt == "ipynb" else _HIDDEN_TEST_PY
+                _HIDDEN_TEST_NOTEBOOK if "ipynb" in formats else _HIDDEN_TEST_PY
             )
         git("-C", str(wd), *GIT_ENV, "add", "-A")
         git(
@@ -1378,11 +1442,11 @@ def main() -> int:
     )
     pa.add_argument(
         "--format",
-        dest="fmt",
-        choices=list(FORMATS),
+        dest="formats",
         default="py",
-        help="Which starter stub to seed on main, and nothing else; `none` seeds no "
-        "starter at all (grading reads whatever is in the repo either way)",
+        help="Which starter stubs to seed on main, and nothing else: a comma-separated "
+        f"list of {', '.join(FORMATS)}, with `none` on its own for no starter at all "
+        "(grading reads whatever is in the repo either way)",
     )
     pa.add_argument(
         "--type",
@@ -1426,8 +1490,9 @@ def main() -> int:
     ps.add_argument("--org", required=True)
     args = parser.parse_args()
     # scaffold_materials equips the new repo's Release workflows, which reads the cohort
-    # registry + assignment list; a read helper that couldn't reach the API raises, and in
-    # an Actions log a one-line error beats a traceback.
+    # registry + assignment list; a read helper that couldn't reach the API raises, and a
+    # `--format` box nobody can act on refuses here, before the repo exists. In an Actions
+    # log a one-line error beats a traceback either way.
     try:
         if args.cmd == "materials":
             return scaffold_materials(args.org, args.tag, args.copy_from)
@@ -1437,7 +1502,7 @@ def main() -> int:
             args.org,
             args.number,
             args.tag,
-            args.fmt,
+            parse_formats(args.formats),
             args.kind,
             name=args.name,
             team_formation=args.team_formation,
@@ -1445,7 +1510,7 @@ def main() -> int:
             autograde=args.autograde == "true",
             copy_from=args.copy_from,
         )
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:
         log_err(str(exc))
         return 1
 

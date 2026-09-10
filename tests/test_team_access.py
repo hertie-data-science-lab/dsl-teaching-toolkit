@@ -71,7 +71,7 @@ def test_a_scaffolded_materials_repo_is_granted_to_the_faculty_teams(scaffold_gr
 
 
 def test_a_scaffolded_assignment_repo_is_granted_to_the_faculty_teams(scaffold_grants):
-    scaffold.scaffold_assignment("Org", "1", "f2026")
+    scaffold.scaffold_assignment("Org", "1", "f2026", ["py"])
     repo = "assignment-1-f2026"
     for team, perm in access.COURSE_TEAM_ACCESS.items():
         assert (team, repo, perm) in scaffold_grants

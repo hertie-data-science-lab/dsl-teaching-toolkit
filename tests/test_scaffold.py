@@ -10,6 +10,7 @@ Release buttons (or the solution branch) must report non-zero, not a green "read
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -224,10 +225,74 @@ def _solution_files(monkeypatch) -> dict[str, str]:
     return written
 
 
+def _descriptions(monkeypatch) -> dict[str, str]:
+    """The description each repo was CREATED with - the only moment GitHub takes one."""
+    made: dict[str, str] = {}
+    creating = scaffold.create_repo
+
+    def create(org, repo, **kwargs):
+        made[repo] = kwargs.get("description", "")
+        return creating(org, repo, **kwargs)
+
+    monkeypatch.setattr(scaffold, "create_repo", create)
+    return made
+
+
 def test_fresh_assignment_seeds_the_starter(fake, monkeypatch):
     _clone_ok(monkeypatch, _git_ok)
-    assert scaffold.scaffold_assignment("Org", "1", "f2026") == 0
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 0
     assert {"README.md", "starter.py"} <= fake.written("assignment-1-f2026")
+
+
+def test_several_starters_are_seeded_side_by_side(fake, monkeypatch):
+    # One assignment, two languages - the case that used to need two templates, or a
+    # second starter written by hand after the button had run. Each format seeds its own
+    # starter on `main` and its own model answer on `solution`, under the same names it
+    # would have had on its own.
+    written = _solution_files(monkeypatch)
+
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["ipynb", "py"]) == 0
+
+    assert fake.written("assignment-1-f2026") == {
+        "README.md",
+        "starter.ipynb",
+        "starter.py",
+    }
+    assert {"solution/starter.ipynb", "solution/starter.py"} <= set(written)
+
+
+def test_a_notebook_among_the_starters_decides_the_notebook_machinery(
+    fake, monkeypatch
+):
+    # Two things keyed on the notebook, and both follow the LIST rather than one answer:
+    # the hidden-test stub, which is written for a submission `collect` has converted to
+    # `starter.py`, and the completion check, which is the rule only a notebook states.
+    written = _solution_files(monkeypatch)
+
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", ["py", "ipynb"], autograde=True
+        )
+        == 0
+    )
+
+    assert "The submitted notebook is nbconvert'd" in written["tests/test_solution.py"]
+    assert "completion_check: true" in written["grading_config.yml"]
+
+
+def test_the_definition_records_the_starter_it_was_named_first_by(fake, monkeypatch):
+    # `grading_config.yml`'s `format:` is one word, because `grades` reads one - it is
+    # the vocabulary the file teaches, and the switch it stands behind is written out
+    # beside it either way. So several starters record the first, not a list no reader
+    # could use.
+    written = _solution_files(monkeypatch)
+
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["rmd", "ipynb"]) == 0
+
+    spec = grades.parse_grading_spec(written["grading_config.yml"])
+    assert spec.dropped == ()
+    assert spec.format == "rmd"
+    assert spec.runs_completion_check  # the notebook in the list, said explicitly
 
 
 def test_a_fresh_assignment_gets_the_hand_out_button_and_nothing_else(
@@ -246,7 +311,7 @@ def test_a_fresh_assignment_gets_the_hand_out_button_and_nothing_else(
     )
     _clone_ok(monkeypatch, _git_ok)
 
-    assert scaffold.scaffold_assignment("Org", "1", "f2026") == 0
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 0
     assert asked == [("assignment-1-f2026", workflows_place.TEMPLATE_WORKFLOWS)]
 
 
@@ -256,7 +321,7 @@ def test_a_template_without_its_button_is_not_reported_ready(fake, monkeypatch):
     monkeypatch.setattr(scaffold, "push_content_workflows", lambda *a, **k: 1)
     _clone_ok(monkeypatch, _git_ok)
 
-    assert scaffold.scaffold_assignment("Org", "1", "f2026") == 1
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 1
 
 
 def test_the_markup_starters_are_valid_documents_of_their_own_format(fake, monkeypatch):
@@ -265,7 +330,7 @@ def test_the_markup_starters_are_valid_documents_of_their_own_format(fake, monke
     _clone_ok(monkeypatch, _git_ok)
     for number, fmt in (("1", "latex"), ("2", "rmd"), ("3", "qmd")):
         assert (
-            scaffold.scaffold_assignment("Org", number, "f2026", fmt, name="Backprop")
+            scaffold.scaffold_assignment("Org", number, "f2026", [fmt], name="Backprop")
             == 0
         )
 
@@ -298,7 +363,7 @@ def test_a_title_that_is_tex_syntax_still_compiles(fake, monkeypatch):
     _clone_ok(monkeypatch, _git_ok)
     assert (
         scaffold.scaffold_assignment(
-            "Org", "1", "f2026", "latex", name="R&D: 100% train_test_split"
+            "Org", "1", "f2026", ["latex"], name="R&D: 100% train_test_split"
         )
         == 0
     )
@@ -311,7 +376,7 @@ def test_a_title_with_a_colon_or_a_quote_stays_one_yaml_scalar(fake, monkeypatch
     # and knitr reads no title at all, and a bare `"` inside a quoted scalar ends it.
     _clone_ok(monkeypatch, _git_ok)
     title = 'Lab 3: the "hello world" of k-means'
-    assert scaffold.scaffold_assignment("Org", "2", "f2026", "rmd", name=title) == 0
+    assert scaffold.scaffold_assignment("Org", "2", "f2026", ["rmd"], name=title) == 0
     doc = fake.files[("assignment-2-f2026", "starter.Rmd")]
     assert yaml.safe_load(doc.split("---\n")[1])["title"] == title
 
@@ -324,7 +389,7 @@ def test_the_notebook_starter_runs_carries_the_rule_and_names_its_language(
     # `language_info.file_extension` is `.py` so the grader's nbconvert names its script
     # starter.py (see collect._stray_conversion).
     _clone_ok(monkeypatch, _git_ok)
-    assert scaffold.scaffold_assignment("Org", "1", "f2026", "ipynb", name="MLP") == 0
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["ipynb"], name="MLP") == 0
     nb = json.loads(fake.files[("assignment-1-f2026", "starter.ipynb")])
     assert nb["nbformat"] == 4
     assert nb["metadata"]["language_info"]["file_extension"] == ".py"
@@ -342,7 +407,7 @@ def test_the_python_starter_survives_a_title_a_docstring_could_not_hold(
     _clone_ok(monkeypatch, _git_ok)
     assert (
         scaffold.scaffold_assignment(
-            "Org", "1", "f2026", "py", name='The """quoted""" one"'
+            "Org", "1", "f2026", ["py"], name='The """quoted""" one"'
         )
         == 0
     )
@@ -367,17 +432,33 @@ def test_the_brief_names_the_artefact_this_format_hands_in(
     # artefact is what a grader reads. Left to the author, a brief collects .Rmd files
     # nobody can mark - so the stub says it, whatever else the author writes.
     _clone_ok(monkeypatch, _git_ok)
-    assert scaffold.scaffold_assignment("Org", "1", "f2026", fmt, name="A") == 0
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", [fmt], name="A") == 0
     brief = fake.files[("assignment-1-f2026", "README.md")]
     assert says in brief
     assert "_Say which files you expect back" in brief  # still a stub
+
+
+def test_the_brief_names_the_artefact_of_every_starter(fake, monkeypatch):
+    # One line per starter, because a student handing in the `.Rmd` and a student handing
+    # in the notebook are told different things - and a brief that names only the first
+    # is a brief that collects half its submissions in a shape nobody can mark.
+    _clone_ok(monkeypatch, _git_ok)
+
+    assert (
+        scaffold.scaffold_assignment("Org", "1", "f2026", ["rmd", "ipynb"], name="A")
+        == 0
+    )
+
+    brief = fake.files[("assignment-1-f2026", "README.md")]
+    assert scaffold._hand_in("rmd") in brief
+    assert scaffold._hand_in("ipynb") in brief
 
 
 def test_a_raw_repo_brief_claims_no_artefact(fake, monkeypatch):
     # `none` seeds no starter, so there is no `starter.*` to name - and a sentence about
     # committing one would be a rule the repo cannot keep.
     _clone_ok(monkeypatch, _git_ok)
-    assert scaffold.scaffold_assignment("Org", "1", "f2026", "none") == 0
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", []) == 0
     brief = fake.files[("assignment-1-f2026", "README.md")]
     assert "starter" not in brief
     assert "## What to submit\n\n_Say which files you expect back" in brief
@@ -389,7 +470,7 @@ def test_the_brief_stub_has_the_two_headings_and_no_more(fake, monkeypatch):
     _clone_ok(monkeypatch, _git_ok)
     assert (
         scaffold.scaffold_assignment(
-            "Org", "1", "f2026", name="Neural networks from scratch"
+            "Org", "1", "f2026", ["py"], name="Neural networks from scratch"
         )
         == 0
     )
@@ -403,7 +484,7 @@ def test_a_format_of_none_seeds_the_brief_and_nothing_else(fake, monkeypatch):
     # The raw-repo option: grading reads whatever is in the repo, so an assignment that
     # wants no starter gets none rather than a stub its students must delete.
     _clone_ok(monkeypatch, _git_ok)
-    assert scaffold.scaffold_assignment("Org", "1", "f2026", "none") == 0
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", []) == 0
     assert fake.written("assignment-1-f2026") == {"README.md"}
 
 
@@ -413,10 +494,10 @@ def test_a_group_assignment_seeds_contributions_and_an_individual_one_does_not(
     # CONTRIBUTIONS.md is read at the pin into the grading sheet, and carries the stub
     # mark so a team that never wrote it reads as "(not filled in)" rather than blank.
     _clone_ok(monkeypatch, _git_ok)
-    assert scaffold.scaffold_assignment("Org", "4", "f2026", "none", "group") == 0
+    assert scaffold.scaffold_assignment("Org", "4", "f2026", [], "group") == 0
     seeded = fake.files[("assignment-4-f2026", "CONTRIBUTIONS.md")]
     assert gh_contents.is_untouched_stub(seeded)
-    assert scaffold.scaffold_assignment("Org", "5", "f2026", "none") == 0
+    assert scaffold.scaffold_assignment("Org", "5", "f2026", []) == 0
     assert "CONTRIBUTIONS.md" not in fake.written("assignment-5-f2026")
 
 
@@ -426,10 +507,42 @@ def test_hidden_tests_are_seeded_only_when_the_assignment_asked_to_be_autograded
     # `tests/` beside a hand-marked assignment reads as work the course owes, and
     # `autograde: true` over a directory of placeholders is a machine score nobody meant.
     written = _solution_files(monkeypatch)
-    assert scaffold.scaffold_assignment("Org", "1", "f2026") == 0
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 0
     assert not [f for f in written if f.startswith("tests/")]
-    assert scaffold.scaffold_assignment("Org", "2", "f2026", autograde=True) == 0
+    assert (
+        scaffold.scaffold_assignment("Org", "2", "f2026", ["py"], autograde=True) == 0
+    )
     assert "tests/test_solution.py" in written
+
+
+def test_the_template_is_described_by_the_assignment_it_holds(fake, monkeypatch):
+    # `assignment-1-f2026` names a slot, not an assignment. The name faculty type is the
+    # only place the org listing says which one it is, and a description is set at
+    # creation or never - so the button spends it there.
+    made = _descriptions(monkeypatch)
+    _clone_ok(monkeypatch, _git_ok)
+
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", ["py"], name="Neural networks from scratch"
+        )
+        == 0
+    )
+
+    assert made["assignment-1-f2026"] == "Assignment 1: Neural networks from scratch"
+
+
+def test_a_template_scaffolded_with_no_name_keeps_the_plain_description(
+    fake, monkeypatch
+):
+    # The button requires a name; the CLI does not. "Assignment 1: " with nothing after
+    # it reads as a description somebody abandoned half way through.
+    made = _descriptions(monkeypatch)
+    _clone_ok(monkeypatch, _git_ok)
+
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 0
+
+    assert made["assignment-1-f2026"] == "Assignment 1 template"
 
 
 def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
@@ -452,7 +565,7 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
             "Org",
             "1",
             "f2026",
-            "ipynb",
+            ["ipynb"],
             "group",
             name="Neural networks: from scratch",
             team_formation="assigned",
@@ -482,10 +595,10 @@ def test_the_model_answer_is_seeded_where_derive_reads_it(fake, monkeypatch):
     # `starter.ipynb` - two files, the derived one named "solution", and the hidden tests
     # still importing the stub. One stem on both branches.
     written = _solution_files(monkeypatch)
-    assert scaffold.scaffold_assignment("Org", "1", "f2026", "ipynb") == 0
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["ipynb"]) == 0
     assert "solution/starter.ipynb" in written
     assert derive.student_path("solution/starter.ipynb") == "starter.ipynb"
-    assert scaffold.scaffold_assignment("Org", "2", "f2026", "py") == 0
+    assert scaffold.scaffold_assignment("Org", "2", "f2026", ["py"]) == 0
     assert "solution/starter.py" in written
     # ...and it is FENCED, so pressing the button on a fresh template derives a starter
     # rather than refusing one: an unfenced seed would derive the model answer itself.
@@ -501,7 +614,7 @@ def test_the_model_answer_is_seeded_in_the_format_the_template_uses(
     # Rmd template wrote a `starter.py` onto `main` BESIDE the untouched `starter.Rmd`
     # rather than becoming it. Same stem and same suffix on both branches.
     written = _solution_files(monkeypatch)
-    assert scaffold.scaffold_assignment("Org", "1", "f2026", fmt) == 0
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", [fmt]) == 0
 
     assert f"solution/{name}" in written
     assert "solution/starter.py" not in written
@@ -511,12 +624,14 @@ def test_the_model_answer_is_seeded_in_the_format_the_template_uses(
     assert seeded.replaced == 1 and "42" not in seeded.text
 
 
-@pytest.mark.parametrize("fmt", ["latex", "none"])
-def test_a_format_derive_cannot_read_is_seeded_no_model_answer(fake, monkeypatch, fmt):
-    # `.tex` is not derivable and `none` has no starter to become, so a stub either way
-    # could only ever be a file the button refuses.
+@pytest.mark.parametrize("formats", [["latex"], []], ids=["latex", "no-starter"])
+def test_a_format_derive_cannot_read_is_seeded_no_model_answer(
+    fake, monkeypatch, formats
+):
+    # `.tex` is not derivable and a template with no starter has nothing to become, so a
+    # stub either way could only ever be a file the button refuses.
     written = _solution_files(monkeypatch)
-    assert scaffold.scaffold_assignment("Org", "1", "f2026", fmt) == 0
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", formats) == 0
 
     assert [path for path in written if path.startswith("solution/")] == [
         "solution/README.md"
@@ -530,7 +645,7 @@ def test_the_cutoff_switches_are_written_out_with_their_defaults(fake, monkeypat
     # `format:`; `grader_pdf` is off for everything until someone fences the questions.
     written = _solution_files(monkeypatch)
     for fmt, notebook in (("ipynb", True), ("py", False)):
-        assert scaffold.scaffold_assignment("Org", "1", "f2026", fmt) == 0
+        assert scaffold.scaffold_assignment("Org", "1", "f2026", [fmt]) == 0
         text = written["grading_config.yml"]
         spec = grades.parse_grading_spec(text)
         assert spec.dropped == ()
@@ -544,11 +659,58 @@ def test_a_course_with_no_defaults_gets_the_settings_commented_out(fake, monkeyp
     # and a late window nobody declared stays a comment rather than becoming a policy.
     written = _solution_files(monkeypatch)
     monkeypatch.setattr(scaffold, "course_assignment_defaults", lambda org: {})
-    assert scaffold.scaffold_assignment("Org", "1", "f2026") == 0
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 0
     spec = grades.parse_grading_spec(written["grading_config.yml"])
     assert (spec.late_window_days, spec.late_penalty_per_day) == (None, None)
     assert spec.max_team_size is None
     assert "# late_window_days:" in written["grading_config.yml"]
+
+
+@pytest.mark.parametrize(
+    "answer, starters",
+    [
+        ("ipynb", ["ipynb"]),
+        (" IPYNB , py ,ipynb ", ["ipynb", "py"]),
+        ("none", []),
+    ],
+)
+def test_the_format_box_is_read_as_the_list_of_starters(answer, starters):
+    # A free-text box filled in by hand: the spacing, the case and the repeat are the
+    # instructor's, and none of them is a different answer. `none` is the raw-repo one.
+    assert scaffold.parse_formats(answer) == starters
+
+
+@pytest.mark.parametrize("answer", ["", "ipynb,tex", "none,ipynb"])
+def test_a_format_box_the_scaffold_cannot_act_on_creates_no_repo(
+    fake, monkeypatch, capsys, answer
+):
+    # Refused at the edge: nothing named, a format that does not exist, or `none` beside
+    # a real one - which asks for a starter and for no starter at once. The refusal comes
+    # BEFORE the repo, so the fix is re-running the button rather than deleting a template
+    # whose solution branch a re-run then refuses to rebuild.
+    made = _descriptions(monkeypatch)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "scaffold",
+            "assignment",
+            "--org",
+            "Org",
+            "--number",
+            "1",
+            "--tag",
+            "f2026",
+            "--format",
+            answer,
+        ],
+    )
+
+    assert scaffold.main() == 1
+
+    assert made == {} and fake.writes == []
+    (line,) = capsys.readouterr().err.splitlines()
+    assert "ipynb, py, rmd, qmd, latex" in line and "none on its own" in line
 
 
 def test_rerun_never_overwrites_an_authored_assignment_starter(fake, monkeypatch):
@@ -556,7 +718,7 @@ def test_rerun_never_overwrites_an_authored_assignment_starter(fake, monkeypatch
     authored = '"""Assignment 1."""\n\n\ndef solve():\n    return real_work()\n'
     fake.files[("assignment-1-f2026", "starter.py")] = authored
 
-    assert scaffold.scaffold_assignment("Org", "1", "f2026") == 0
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 0
     assert fake.files[("assignment-1-f2026", "starter.py")] == authored
     assert "starter.py" not in fake.written("assignment-1-f2026")
     assert "assignment-1-f2026/starter.py" in fake.skips
@@ -568,7 +730,7 @@ def test_assignment_reds_when_a_starter_seed_fails(fake, monkeypatch):
     # a green "ready".
     _clone_ok(monkeypatch, _git_ok)
     monkeypatch.setattr(scaffold, "put_files", lambda *a, **k: False)  # USER seeds fail
-    assert scaffold.scaffold_assignment("Org", "1", "f2026") == 1
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 1
 
 
 def test_assignment_reports_a_failed_solution_branch_checkout(
@@ -582,7 +744,7 @@ def test_assignment_reports_a_failed_solution_branch_checkout(
         return (1, "") if "checkout" in args else (0, "")
 
     _clone_ok(monkeypatch, git_fake)
-    assert scaffold.scaffold_assignment("Org", "1", "f2026") == 1
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 1
     assert "solution branch" in capsys.readouterr().err
 
 
@@ -603,7 +765,7 @@ def test_assignment_refuses_to_rebuild_an_existing_solution_branch(
         return (0, "")
 
     _clone_ok(monkeypatch, git_fake)
-    assert scaffold.scaffold_assignment("Org", "1", "f2026") == 1
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 1
     assert "already exists" in capsys.readouterr().err
     assert pushed == []
 
@@ -624,7 +786,7 @@ def test_an_unrelated_feature_solution_branch_does_not_block_the_scaffold(
         return (0, "")
 
     _clone_ok(monkeypatch, git_fake)
-    assert scaffold.scaffold_assignment("Org", "1", "f2026") == 0
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 0
 
 
 # ------------------------------------------------------------------- copy_from
@@ -803,7 +965,7 @@ def test_a_copied_assignment_brings_both_branches(origins, fake):
 
     assert (
         scaffold.scaffold_assignment(
-            "Org", "1", "f2026", "ipynb", copy_from="assignment-1-f2025"
+            "Org", "1", "f2026", ["ipynb"], copy_from="assignment-1-f2025"
         )
         == 0
     )
@@ -839,7 +1001,7 @@ def test_a_copy_leaves_the_toolkit_owned_branches_behind(origins):
 
     assert (
         scaffold.scaffold_assignment(
-            "Org", "1", "f2026", "ipynb", copy_from="assignment-1-f2025"
+            "Org", "1", "f2026", ["ipynb"], copy_from="assignment-1-f2025"
         )
         == 0
     )
@@ -892,7 +1054,7 @@ def test_a_copied_assignment_gets_a_button_aimed_at_itself(origins, monkeypatch)
 
     assert (
         scaffold.scaffold_assignment(
-            "Org", "1", "f2026", copy_from="assignment-1-f2025"
+            "Org", "1", "f2026", ["py"], copy_from="assignment-1-f2025"
         )
         == 0
     )
@@ -906,12 +1068,13 @@ def test_a_copied_assignment_gets_a_button_aimed_at_itself(origins, monkeypatch)
     )
 
 
-def test_a_copied_assignment_says_which_boxes_it_ignored(origins, capsys):
+def test_a_copied_assignment_says_which_boxes_it_ignored(origins, monkeypatch, capsys):
     # `format`, `type` and the rest describe an assignment this one already is. Saying so
     # once, with the file that does govern it, is the difference between an instructor
-    # editing that file and one wondering why `individual` came out `group`. The NAME is
-    # in that list too: box 1 is required, so every copy is typed a title that the copied
-    # grading_config.yml then overrides in the sheet, the handout and the site.
+    # editing that file and one wondering why `individual` came out `group`. The name is
+    # NOT in that list: the copied definition governs the title, but the name still
+    # describes the repo in the org listing, which the copy brings nothing for.
+    made = _descriptions(monkeypatch)
     origins.commit("assignment-1-f2025", {"README.md": "# The brief\n"})
     origins.commit(
         "assignment-1-f2025", {"grading_config.yml": "title: Regression\n"}, "solution"
@@ -922,7 +1085,7 @@ def test_a_copied_assignment_says_which_boxes_it_ignored(origins, capsys):
             "Org",
             "1",
             "f2026",
-            "ipynb",
+            ["ipynb"],
             "individual",
             name="Neural networks from scratch",
             copy_from="assignment-1-f2025",
@@ -934,15 +1097,10 @@ def test_a_copied_assignment_says_which_boxes_it_ignored(origins, capsys):
         origins.read("assignment-1-f2026", "grading_config.yml", "solution")
         == "title: Regression"
     )
+    assert made["assignment-1-f2026"] == "Assignment 1: Neural networks from scratch"
     (line,) = [l for l in capsys.readouterr().out.splitlines() if "were ignored" in l]
-    for field in (
-        "name",
-        "format",
-        "type",
-        "team_formation",
-        "submit_via",
-        "autograde",
-    ):
+    assert "boxes 5-9" in line
+    for field in ("format", "type", "team_formation", "submit_via", "autograde"):
         assert field in line
     assert (
         "https://github.com/Org/assignment-1-f2026/blob/solution/grading_config.yml"
@@ -958,7 +1116,7 @@ def test_a_copied_assignment_needs_a_solution_branch(origins, capsys):
 
     assert (
         scaffold.scaffold_assignment(
-            "Org", "1", "f2026", copy_from="assignment-1-f2025"
+            "Org", "1", "f2026", ["py"], copy_from="assignment-1-f2025"
         )
         == 1
     )
@@ -980,7 +1138,7 @@ def test_a_copy_into_a_repo_that_already_has_content_lands_no_branch(origins, ca
 
     assert (
         scaffold.scaffold_assignment(
-            "Org", "1", "f2026", copy_from="assignment-1-f2025"
+            "Org", "1", "f2026", ["py"], copy_from="assignment-1-f2025"
         )
         == 1
     )
