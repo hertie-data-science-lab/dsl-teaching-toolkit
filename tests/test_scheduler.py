@@ -1552,7 +1552,7 @@ def test_main_all_cohorts_with_none_registered_is_a_noop(monkeypatch):
     # A freshly bootstrapped course org runs the hourly cron before any cohort is
     # registered - that gap must be a quiet no-op, not a red run (and a failure
     # email to the bot owner) every hour.
-    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(scheduler.discovery, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(
         sys, "argv", ["scheduler", "--course-org", "Course-Org", "--all-cohorts"]
     )
@@ -1819,9 +1819,10 @@ def test_run_releases_counts_a_raised_site_sync(monkeypatch):
 def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsys):
     # The lesson PR #151/#146 applied to the nightly refresh: one cohort's raised failure
     # (unreachable API, a blown-up site sync) must not abort the remaining cohorts' work.
-    # main() imports discover_cohorts from .seed at call time, so patch it at the source.
+    # `_registered_cohorts` filters the registry through `discovery.live_cohorts`, so
+    # the registry read itself is what a test replaces.
     monkeypatch.setattr(
-        scheduler, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
     )
     seen: list[str] = []
 
@@ -1882,7 +1883,9 @@ def test_skip_autograde_releases_without_grading(monkeypatch):
     # The release job's invocation. Grading is the slow half (two hours, a clone per
     # submission); leaving it in this job is what made a queued release wait on it.
     calls = _phase_spies(monkeypatch, _DUE_RELEASE)
-    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
     monkeypatch.setattr(
         sys,
         "argv",
@@ -2003,7 +2006,7 @@ def test_the_cadence_is_read_once_per_course_not_once_per_cohort(
     # one workflow per course org however many cohorts it serves.
     _phase_spies(monkeypatch, _DUE_RELEASE)
     monkeypatch.setattr(
-        scheduler, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
     )
     _all_cohorts_argv(monkeypatch)
     assert scheduler.main() == 0
@@ -2018,7 +2021,9 @@ def test_a_dry_run_never_reads_or_writes_the_cadence(monkeypatch, cadence_calls)
     # The manual dispatch button defaults to dry-run, so a curious click must not close a
     # live alarm, arm a disarmed org, or comment on anything.
     _phase_spies(monkeypatch, _DUE_RELEASE)
-    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
     _all_cohorts_argv(monkeypatch, "--dry-run")
     assert scheduler.main() == 0
     assert cadence_calls["fetch_runs"] == []
@@ -2078,7 +2083,9 @@ def test_lateness_is_asked_about_the_whole_plan_not_just_what_is_due(
     # `late_items` is left real here on purpose: the wiring has to hand it the MERGED plan
     # (`releases:` entries plus the synthesised handouts) and the verdict's previous tick.
     _phase_spies(monkeypatch, _DUE_RELEASE)
-    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
     late = _verdict(now=WHEN + timedelta(hours=3), prev=WHEN - timedelta(hours=1))
     monkeypatch.setattr(scheduler.cadence, "evaluate", lambda *a: late)
     # An hour of queue between GitHub accepting this run and the runner starting it: the
@@ -2098,7 +2105,9 @@ def test_a_cadence_read_that_fails_reddens_the_run_and_releases_anyway(
     # worth nothing more: every cohort's release still fires, and nothing is reported off a
     # reading that was never taken.
     calls = _phase_spies(monkeypatch, _DUE_RELEASE)
-    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
 
     def boom(org):
         raise RuntimeError("gh: HTTP 502")
@@ -2117,7 +2126,9 @@ def test_a_lateness_check_that_raises_reddens_the_run_and_releases_anyway(
     # try - as an argument to the reporter - so a raise there escaped the release phase and
     # cost the cohort its releases, which is the one thing the cadence check may never do.
     calls = _phase_spies(monkeypatch, _DUE_RELEASE)
-    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
 
     def boom(*a):
         raise RuntimeError("a plan this reader cannot walk")
@@ -2133,7 +2144,9 @@ def test_a_cadence_report_that_fails_reddens_the_run_and_releases_anyway(
     monkeypatch, cadence_calls
 ):
     calls = _phase_spies(monkeypatch, _DUE_RELEASE)
-    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
     monkeypatch.setattr(scheduler.cadence, "report_cohort", lambda *a: 1)
     monkeypatch.setattr(scheduler.cadence, "report_course", lambda *a: 1)
     _all_cohorts_argv(monkeypatch)
@@ -2145,7 +2158,7 @@ def test_list_cohorts_prints_json_and_nothing_else(monkeypatch, capsys):
     # It IS the grading matrix: the workflow captures stdout and hands it to fromJSON, so
     # one stray log line on stdout would take grading out for the whole course.
     monkeypatch.setattr(
-        scheduler, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
     )
     monkeypatch.setattr(
         sys,
@@ -2165,7 +2178,7 @@ def test_list_cohorts_keeps_a_retry_notice_off_stdout(monkeypatch, capsys):
         print("  [wait] rate-limited, retry 1/3 in 30s")
         return ["Cohort-A"]
 
-    monkeypatch.setattr(scheduler, "discover_cohorts", noisy)
+    monkeypatch.setattr(scheduler.discovery, "discover_cohorts", noisy)
     monkeypatch.setattr(
         sys, "argv", ["scheduler", "--course-org", "Course-Org", "--list-cohorts"]
     )
@@ -2185,7 +2198,7 @@ def test_a_cohort_listing_that_cannot_be_read_says_so_and_goes_red(
     def boom(org):
         raise RuntimeError("gh: Internal Server Error (HTTP 500)")
 
-    monkeypatch.setattr(scheduler, "discover_cohorts", boom)
+    monkeypatch.setattr(scheduler.discovery, "discover_cohorts", boom)
     monkeypatch.setattr(sys, "argv", ["scheduler", "--course-org", "Course-Org", flag])
     assert scheduler.main() == 1
     out = capsys.readouterr()
@@ -2206,7 +2219,7 @@ def test_a_registry_nobody_can_parse_releases_nothing_and_stays_green(
     def boom(org):
         raise Unusable("malformed cohort registry in Course-Org/.github")
 
-    monkeypatch.setattr(scheduler, "discover_cohorts", boom)
+    monkeypatch.setattr(scheduler.discovery, "discover_cohorts", boom)
     monkeypatch.setattr(scheduler, "_preflight_course", lambda *a: 0)
     monkeypatch.setattr(sys, "argv", ["scheduler", "--course-org", "Course-Org", flag])
     assert scheduler.main() == 0
@@ -3062,3 +3075,44 @@ def test_the_sync_membership_fast_path_checks_and_exits_green(monkeypatch):
     )
     assert scheduler.main() == 0
     assert [a[0] for a in called] == ["Course-Org"]
+
+
+# ------------------------------------------------------ a cohort that is closed out
+
+
+def test_a_closed_out_cohort_is_not_released_into(monkeypatch, capsys):
+    # Its whole org is read-only, so every release, snapshot and digest write this tick
+    # would 403 - four times an hour, for the rest of the course's life. The live cohort
+    # beside it still ticks.
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+    )
+    monkeypatch.setattr(
+        scheduler.discovery, "repo_is_archived", lambda org, name: org == "Cohort-A"
+    )
+    seen: list[str] = []
+    monkeypatch.setattr(
+        scheduler, "run", lambda course, cohort, now, **k: seen.append(cohort) or 0
+    )
+    monkeypatch.setattr(
+        "sys.argv", ["scheduler", "--course-org", "Course-Org", "--all-cohorts"]
+    )
+    assert scheduler.main() == 0
+    assert seen == ["Cohort-B"]
+    assert "archived cohort - left frozen" in capsys.readouterr().out
+
+
+def test_the_break_glass_single_cohort_run_skips_a_closed_out_cohort(monkeypatch):
+    # `--cohort-org` is the by-hand path, and it takes the same answer as the loop: a
+    # frozen cohort has nothing to release and the tick would be spent on 403s.
+    monkeypatch.setattr(scheduler.discovery, "repo_is_archived", lambda org, name: True)
+
+    def boom(*a, **k):
+        raise AssertionError("a frozen cohort must not be run")
+
+    monkeypatch.setattr(scheduler, "run", boom)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["scheduler", "--course-org", "Course-Org", "--cohort-org", "Cohort-A"],
+    )
+    assert scheduler.main() == 0

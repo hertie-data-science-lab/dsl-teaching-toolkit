@@ -113,7 +113,6 @@ from .grades import (
 from .log import log, log_err, log_ok, log_step
 from .schedule import Release
 from .schedule_plan import deploy_dest
-from .seed import discover_cohorts
 
 # --------------------------------------------------------------------------- pure core
 
@@ -1016,9 +1015,13 @@ def _parse_now(raw: str | None) -> datetime:
 
 
 def _registered_cohorts(course_org: str) -> list[str] | None:
-    """The course org's registered cohorts, or None once it has said why it could not read
+    """The cohorts this tick releases into, or None once it has said why it could not read
     them. The listing is one API read at the very top of every tick; a fault there must
     end the run with an `[err]` line a faculty member can act on, not a raw traceback.
+
+    LIVE cohorts (`discovery.live_cohorts`): a cohort that has been closed out is frozen,
+    and every release, snapshot and digest write this tick would make on it 403s - four
+    times an hour, for the rest of the course's life.
 
     A registry that is MALFORMED is not a failed read: it is a hand-edited file a course
     admin has to fix, already reported to them by `_preflight_course` (which runs first,
@@ -1026,7 +1029,7 @@ def _registered_cohorts(course_org: str) -> list[str] | None:
     else - a rate limit, a token that lost its scope - is a read that failed, and the run
     is owed its red X for it."""
     try:
-        return discover_cohorts(course_org)
+        return discovery.live_cohorts(course_org)
     except Unusable as exc:
         log_err(f"{exc} - nothing to release until it is fixed; this run stays green.")
         return []
@@ -1172,6 +1175,10 @@ def main() -> int:
     if not args.cohort_org:
         log_err("pass --cohort-org or --all-cohorts.")
         return 1
+    # The break-glass path takes the same answer as the loop above: a cohort that has been
+    # closed out is frozen, and running it by hand would only spend a tick on 403s.
+    if not discovery.cohort_is_live(args.cohort_org):
+        return 0
     return run(args.course_org, args.cohort_org, now, dry_run=args.dry_run, **phases)
 
 

@@ -44,11 +44,13 @@ from .course import (
 from .discovery import (
     COHORTS_PATH,
     cohort_content_repos,
+    cohort_is_live,
     discover_assignments,
     discover_cohorts,
     discover_release_sources,
     handed_out_assignments,
     list_org_repos,
+    live_cohorts,
 )
 from .gh_contents import get_file_content, repo_tree
 from .grades import load_grading_spec
@@ -1261,7 +1263,7 @@ def main() -> int:
             )
         if args.all_cohorts:
             rc = 0
-            for cohort in discover_cohorts(args.course_org):
+            for cohort in live_cohorts(args.course_org):
                 # One cohort's raised failure (an unreachable API, a people.yml that
                 # doesn't parse) must not skip every LATER cohort's site on the 06:00
                 # cron - log it, mark the batch failed, and carry on. The same per-cohort
@@ -1294,6 +1296,10 @@ def main() -> int:
                 f"({COHORTS_PATH} lists {listed}) - refusing to sync its site."
             )
             return 1
+        # Registered but closed out: the site repo is frozen with the rest of the cohort
+        # and its last sync was the one teardown ran before freezing it.
+        if not cohort_is_live(args.cohort_org):
+            return 0
         return sync_site(args.course_org, args.cohort_org)
     except (RuntimeError, yaml.YAMLError) as exc:
         log_err(str(exc))

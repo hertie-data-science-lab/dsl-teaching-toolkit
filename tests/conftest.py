@@ -19,6 +19,7 @@ from dsl_course import (
     bootstrap_course,
     central,
     collect,
+    discovery,
     gh_contents,
     ghcli,
     grades,
@@ -105,6 +106,17 @@ def _the_central_ref_is_present(monkeypatch):
     `identical` is what the SHA path reads off `compare/main...{sha}`; the branch path
     only looks at the exit code."""
     monkeypatch.setattr(central, "gh", lambda *a, **k: (0, "identical"))
+
+
+@pytest.fixture(autouse=True)
+def _no_cohort_is_closed_out(monkeypatch):
+    """Answer `discovery.cohort_is_live`'s probe with "still running" by default.
+
+    Every course-side sweep now asks whether a cohort's `classroom-config` is archived
+    before writing into it, which is a live `gh api repos/<org>/classroom-config`. A
+    running cohort is the uninteresting answer for every test but the ones about the skip
+    itself, which set their own after this fixture and win."""
+    monkeypatch.setattr(discovery, "repo_is_archived", lambda org, name: False)
 
 
 @pytest.fixture(autouse=True)

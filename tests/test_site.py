@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
-from dsl_course import gh_contents, grades, schedule_plan, site, site_repo
+from dsl_course import discovery, gh_contents, grades, schedule_plan, site, site_repo
 from dsl_course import schedule as schedule_mod
 from dsl_course.schedule import (
     AssignmentEntry,
@@ -1198,9 +1198,9 @@ def test_main_matches_a_registered_cohort_case_insensitively(monkeypatch):
 def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsys):
     # The lesson PR #151/#146 applied to the nightly refresh: the single try used to wrap
     # the whole loop, so one cohort's raise skipped every LATER cohort's site on the 06:00
-    # cron. main() imports discover_cohorts from .seed at call time - patch it at source.
+    # cron. The loop iterates the LIVE cohorts, which is what a test replaces here.
 
-    monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"])
+    monkeypatch.setattr(site, "live_cohorts", lambda org: ["Cohort-A", "Cohort-B"])
     seen: list[str] = []
 
     def fake_sync(course, cohort):
@@ -1454,3 +1454,40 @@ def test_a_config_without_the_template_header_line_is_left_alone():
         site_repo._stamp_config("course_name: x\n", ["course_name"])
         == "course_name: x\n"
     )
+
+
+def test_a_closed_out_cohorts_site_is_left_as_teardown_left_it(monkeypatch):
+    # The site repo is frozen with the rest of the cohort, and its last sync was the one
+    # teardown ran before freezing it. The live cohort beside it still rebuilds.
+    monkeypatch.setattr(
+        discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+    )
+    monkeypatch.setattr(
+        discovery, "repo_is_archived", lambda org, name: org == "Cohort-A"
+    )
+    seen: list[str] = []
+    monkeypatch.setattr(
+        site, "sync_site", lambda course, cohort: seen.append(cohort) or 0
+    )
+    monkeypatch.setattr(
+        "sys.argv", ["site", "sync", "--course-org", "Course", "--all-cohorts"]
+    )
+    assert site.main() == 0
+    assert seen == ["Cohort-B"]
+
+
+def test_a_dispatch_naming_a_closed_out_cohort_syncs_nothing(monkeypatch):
+    # Still REGISTERED, so it is not the trust-boundary refusal above - just nothing left
+    # to do, and a write that would 403.
+    monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(site, "cohort_is_live", lambda org: False)
+
+    def boom(*a, **k):
+        raise AssertionError("a frozen cohort's site must not be rebuilt")
+
+    monkeypatch.setattr(site, "sync_site", boom)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["site", "sync", "--course-org", "Course", "--cohort-org", "Cohort-A"],
+    )
+    assert site.main() == 0
