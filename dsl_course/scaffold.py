@@ -259,14 +259,17 @@ def _grading_config(
             "submit_via", submit_via, "github | external (Moodle, Kaggle, in class...)"
         ),
         # ONE format, because `grades` reads one: the key is the vocabulary this file
-        # teaches and the default behind `completion_check`, which is written out
-        # explicitly below either way. A template seeded with several starters records
-        # the one it was named first by.
+        # teaches, and the only thing it drives - the `completion_check` default - is
+        # written out explicitly below either way. A template seeded with several starters
+        # records the one it was named first by, and the comment NAMES THE REST: a grader
+        # reading `format: py` beside `completion_check: true` would otherwise take the
+        # switch for a hand-made override rather than the notebook that is also in the repo.
         _setting(
             "format",
             formats[0] if formats else NO_STARTER,
             "ipynb | py | rmd | qmd | latex | none - chooses the starter stub only; "
-            "grading reads whatever is in the repo",
+            "grading reads whatever is in the repo"
+            + (f" (also seeded: {', '.join(formats[1:])})" if len(formats) > 1 else ""),
         ),
         "",
         _QUESTIONS_STUB.rstrip(),

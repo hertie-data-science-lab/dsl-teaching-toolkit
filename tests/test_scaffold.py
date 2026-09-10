@@ -293,6 +293,12 @@ def test_the_definition_records_the_starter_it_was_named_first_by(fake, monkeypa
     assert spec.dropped == ()
     assert spec.format == "rmd"
     assert spec.runs_completion_check  # the notebook in the list, said explicitly
+    # ...and the line SAYS the notebook is there, so `completion_check: true` beside
+    # `format: rmd` reads as the repo it describes rather than a hand-made override.
+    (line,) = [
+        l for l in written["grading_config.yml"].splitlines() if l.startswith("format:")
+    ]
+    assert "also seeded: ipynb" in line
 
 
 def test_a_fresh_assignment_gets_the_hand_out_button_and_nothing_else(
