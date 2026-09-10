@@ -466,6 +466,52 @@ def test_a_template_with_no_releaseignore_is_left_alone(monkeypatch):
     assert deleted == []
 
 
+def test_the_faculty_release_buttons_never_reach_a_student_repo(monkeypatch):
+    # A course-org assignment template hosts Release assignment in its own Actions tab,
+    # and template-generate copies the whole default branch - so the button, and the
+    # org-admin token it reads, would land in every student repo. Withheld by exact PATH,
+    # with no `.releaseignore` needed and no way to opt back in.
+    deleted = _template_tree(
+        monkeypatch,
+        {
+            ".github/workflows/release-assignment.yml": "name: Release assignment",
+            ".github/workflows/release-materials.yml": "name: Release materials",
+            ".github/workflows/autograde.yml": "name: Autograde",
+            "starter.py": "",
+        },
+    )
+    assert assign.withhold_from_template("COHORT", "a1")
+    # The autograder is the student repo's OWN workflow and stays, as does everything
+    # else under .github/workflows/ - only the two named paths go.
+    assert deleted == [
+        (
+            ".github/workflows/release-assignment.yml",
+            ".github/workflows/release-materials.yml",
+        )
+    ]
+
+
+def test_the_release_buttons_and_the_ignore_list_are_withheld_together(monkeypatch):
+    # One delete, one commit: the always-withheld set and whatever faculty named are the
+    # same act of filtering.
+    deleted = _template_tree(
+        monkeypatch,
+        {
+            ".releaseignore": "rubric-draft.md\n",
+            ".github/workflows/release-assignment.yml": "name: Release assignment",
+            "rubric-draft.md": "not for students",
+        },
+    )
+    assert assign.withhold_from_template("COHORT", "a1")
+    assert deleted == [
+        (
+            ".github/workflows/release-assignment.yml",
+            ".releaseignore",
+            "rubric-draft.md",
+        )
+    ]
+
+
 def test_an_empty_template_tree_stops_the_handout(monkeypatch, capsys):
     # The likeliest failure, and it used to fail OPEN: `default_branch` GUESSES `main` when
     # it cannot read the repo, `repo_tree` answers () for a 404 rather than raising, so a

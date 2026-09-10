@@ -82,6 +82,7 @@ from .repos import (
     set_repo_topics,
     topic_name,
 )
+from .workflows_place import RELEASE_WORKFLOWS
 
 # Fire-once sentinel for the SCHEDULED solution push, in classroom-config. Needed because
 # `due_releases` is cumulative by design - a handout release re-fires every tick so a late
@@ -177,7 +178,8 @@ def _tag_submission(cohort_org: str, repo: str, slug: str, have: set[str]) -> No
 
 
 def withhold_from_template(cohort_org: str, template: str) -> bool:
-    """Delete whatever the template's own `.releaseignore` withholds. True on success.
+    """Delete what a student repo must not carry: whatever the template's own
+    `.releaseignore` withholds, and this toolkit's own release buttons. True on success.
 
     The one outbound copy with no clone to filter: `generate_from_template` is a server-side
     GitHub copy of the whole default branch, so there is no `copytree` and no ignore hook to
@@ -193,7 +195,15 @@ def withhold_from_template(cohort_org: str, template: str) -> bool:
     thing being withheld is the kind of thing that must not reach students by accident, and
     "could not tell" is not "nothing to withhold". A handout blocked by a transient API
     failure is re-run by the next hourly tick or the next click; answers published to a
-    cohort cannot be taken back."""
+    cohort cannot be taken back.
+
+    The `RELEASE_WORKFLOWS` go with no pattern needed and no way to opt back in - the rule
+    `.releaseignore` already applies to ITSELF (`releaseignore._SELF_EXCLUDED`), for the
+    same reason. A course-org assignment template hosts **Release assignment** so faculty
+    can hand it out from the repo they are editing, and template-generate copies the whole
+    default branch - so without this the button, and the org-admin token it reads, would
+    land in every student repo. Matched by exact PATH, so the autograder workflow beside
+    it - and anything else under `.github/workflows/` - is untouched."""
     branch = default_branch(cohort_org, template, fallback="main")
     try:
         # Blobs only: `put_files` can delete nothing else, and `from_tree` derives the
@@ -222,18 +232,22 @@ def withhold_from_template(cohort_org: str, template: str) -> bool:
             f"withholds. Re-run it: {exc}"
         )
         return False
+    # Whatever the file names, plus the buttons that are never a student's to press.
+    # Sorted, so the delete list is stable however the two sets overlap.
+    withheld = tuple(sorted(set(withheld) | (set(paths) & set(RELEASE_WORKFLOWS))))
     if not withheld:
         return True
     if not put_files(
         cohort_org,
         template,
         {},
-        f"chore: withhold {len(withheld)} path(s) named in {RELEASEIGNORE}",
+        f"chore: withhold {len(withheld)} path(s) from the student repos",
         delete=withheld,
     ):
         log_err(
-            f"  ! could not withhold {len(withheld)} path(s) a `{RELEASEIGNORE}` names in "
-            f"{cohort_org}/{template} - handout stopped"
+            f"  ! could not withhold {len(withheld)} path(s) - what a `{RELEASEIGNORE}` "
+            f"names in {cohort_org}/{template}, or a faculty release button - handout "
+            f"stopped"
         )
         return False
     log_ok(f"withheld {len(withheld)} path(s) from {cohort_org}/{template}")

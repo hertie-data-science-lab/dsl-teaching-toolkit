@@ -11,11 +11,13 @@ from .gh_contents import put_files
 from .log import log_err, log_ok
 from .workflows_render import for_placement, render_provision, render_release
 
-# The run-from-repo workflows push_content_workflows places in every content repo.
-WORKFLOWS = (
-    ".github/workflows/release-materials.yml",
-    ".github/workflows/release-assignment.yml",
-)
+RELEASE_MATERIALS = ".github/workflows/release-materials.yml"
+RELEASE_ASSIGNMENT = ".github/workflows/release-assignment.yml"
+
+# The run-from-repo workflows push_content_workflows places in every content repo - and
+# the set `assign.withhold_from_template` strips off a cohort template, so that no student
+# repo generated from one inherits a faculty button.
+RELEASE_WORKFLOWS = (RELEASE_MATERIALS, RELEASE_ASSIGNMENT)
 
 # Retired in favour of the consolidated Release materials workflow (whose course_source_path
 # takes any folder or file, which is all Release code ever did) - removed from content repos
@@ -49,10 +51,10 @@ def push_content_workflows(
         org,
         repo,
         {
-            WORKFLOWS[0]: for_placement(
+            RELEASE_MATERIALS: for_placement(
                 render_release(cohort_orgs, repo), central_ref
             ).encode(),
-            WORKFLOWS[1]: for_placement(
+            RELEASE_ASSIGNMENT: for_placement(
                 render_provision(cohort_orgs, assignments), central_ref
             ).encode(),
         },

@@ -590,7 +590,7 @@ def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
     pushed = {path: content.decode() for path, content in files.items()}
     assert (
         set(pushed)
-        == set(workflows_place.WORKFLOWS)
+        == set(workflows_place.RELEASE_WORKFLOWS)
         == {
             ".github/workflows/release-materials.yml",
             ".github/workflows/release-assignment.yml",
