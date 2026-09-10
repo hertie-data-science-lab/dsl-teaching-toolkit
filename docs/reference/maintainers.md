@@ -218,7 +218,7 @@ exist and then mirrors it as a repo secret onto the private ones, because on Git
 
 | Value | Held centrally as | Reaches an org via |
 |---|---|---|
-| `DSL_BOT_TOKEN` | a secret on this repo | Bootstrap with `set_secret: true`; `seed refresh` also mirrors it onto each content repo |
+| `DSL_BOT_TOKEN` | a secret on this repo | Bootstrap with `set_secret: true`; `seed refresh` also mirrors it onto each content repo and assignment template |
 | `DSL_MAINTAINER_EMAIL` | a repository **variable** on this repo | Bootstrap with `set_secret: true`, and Bootstrap cohort forwards it to a cohort |
 | `DSL_COURSE_ADMIN_EMAILS` | a repository **variable** on this repo | Bootstrap with `set_secret: true`. COURSE orgs only - Bootstrap cohort does NOT forward it |
 
@@ -349,7 +349,8 @@ Four places, in order - miss the last and every org keeps two buttons for one jo
 
 1. a renderer in `workflows_render.py`;
 2. its path in `seed.seed_github_workflows`'s `files` dict (or `workflows_place.RELEASE_WORKFLOWS`
-   for a run-from-repo one);
+   for a run-from-repo one, plus `TEMPLATE_WORKFLOWS` if an assignment template hosts it
+   too - and `assign.withhold_from_template` then keeps it out of the student repos);
 3. `tests/test_renderers.py`'s `ALL_RENDERED` - a completeness test fails otherwise;
 4. when *retiring* a path, add it to that call's `delete=` tuple (or
    `workflows_place.RETIRED_WORKFLOWS`), so orgs seeded before the change drop the old file.
