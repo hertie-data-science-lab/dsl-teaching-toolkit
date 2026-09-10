@@ -542,7 +542,9 @@ _CONTRIBUTIONS_STUB = """\
 """
 
 
-def _brief_stub(title: str, defaults: dict, formats: list[str]) -> str:
+def _brief_stub(
+    title: str, defaults: dict, formats: list[str], submit_via: str = "github"
+) -> str:
     """`README.md` on `main` - the page students read, and the only one only faculty can
     write. A STUB, unmistakably: seeding a plausible-looking brief invites shipping it
     unedited. The late-work line repeats what the course already declared, so the two
@@ -551,7 +553,13 @@ def _brief_stub(title: str, defaults: dict, formats: list[str]) -> str:
     `formats` add the one line the stub is NOT free to leave to its author: what counts
     as handing each of them in (`_ARTEFACT_NOTE`), one per format. A brief that never says
     the knitted HTML has to come with the `.Rmd` is a brief that collects `.Rmd` files
-    nobody can mark."""
+    nobody can mark.
+
+    `submit_via` decides what "What to submit" asks for. On an `external` assignment the
+    repo collects nothing, and the Feedback issue students open says the hand-in is
+    "outside GitHub (see the brief)" - so the brief is the one place that can say WHERE,
+    and asking its author for the files they expect back pointed them at the wrong
+    question."""
     window = defaults.get("late_window_days")
     penalty = defaults.get("late_penalty_per_day")
     if not window:
@@ -568,7 +576,12 @@ def _brief_stub(title: str, defaults: dict, formats: list[str]) -> str:
         "_Write the assignment here (dsl-stub: replace this whole file)._\n\n"
         "## What to submit\n\n"
         + "".join(f"{sentence}\n\n" for sentence in artefacts)
-        + "_Say which files you expect back, and in what shape._\n"
+        + (
+            "_Say where and how students hand in (Moodle, Kaggle, in class) - nothing is "
+            "collected from this repo._\n"
+            if submit_via == "external"
+            else "_Say which files you expect back, and in what shape._\n"
+        )
     )
 
 
@@ -1223,7 +1236,7 @@ def scaffold_assignment(
     # scaffold_materials seeds its skeleton: a re-run against a repo whose starter faculty
     # have since authored leaves it alone and logs the skip, and the repo they then author
     # by hand opens on one `init:` line rather than three identical ones.
-    seeds = {"README.md": _brief_stub(title, defaults, formats)}
+    seeds = {"README.md": _brief_stub(title, defaults, formats, submit_via)}
     for fmt in formats:
         seeds[starter_name(fmt)] = _STARTERS[fmt][1](title)
     if kind == "group":

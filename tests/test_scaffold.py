@@ -513,6 +513,25 @@ def test_a_raw_repo_brief_claims_no_artefact(fake, monkeypatch):
     assert "## What to submit\n\n_Say which files you expect back" in brief
 
 
+def test_an_external_hand_in_asks_the_brief_where_it_goes(fake, monkeypatch):
+    # Nothing is ever collected from an `external` assignment's repo, and the Feedback
+    # issue students open sends them to the brief for the hand-in - so a brief still
+    # asking its author which files they expect back is the one page that cannot answer
+    # the only question it was left to answer.
+    _clone_ok(monkeypatch, _git_ok)
+
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", [], name="A", submit_via="external"
+        )
+        == 0
+    )
+
+    brief = fake.files[("assignment-1-f2026", "README.md")]
+    assert "_Say where and how students hand in" in brief
+    assert "_Say which files you expect back" not in brief
+
+
 def test_the_brief_stub_has_the_two_headings_and_no_more(fake, monkeypatch):
     # The page students read. Two headings, both empty: seeding a plausible-looking brief
     # is how a placeholder ships as the assignment.

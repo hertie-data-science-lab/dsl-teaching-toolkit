@@ -400,6 +400,71 @@ def test_a_group_assignment_names_the_team_repo_shape(monkeypatch):
     assert 'repo_name: "assignment-3-<your-team>"' in out
 
 
+def test_an_assignment_handed_in_off_github_says_so(monkeypatch):
+    # `submit_via: external` means Moodle, Kaggle or in class: nothing is ever collected
+    # from the repo, which carries the brief. The page and the due row said "push to
+    # `main`" for these too, because the theme printed that off `repo_url` alone. At BOTH
+    # levels, since the due row is a sub-hash that cannot see its parent's fields.
+    monkeypatch.setattr(
+        site, "get_file_content", lambda *a, **k: "# Moodle essay\nThe brief."
+    )
+    monkeypatch.setattr(
+        site,
+        "load_grading_spec",
+        lambda *a: grades.parse_grading_spec("submit_via: external\n"),
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        handed_out=frozenset({"assignment-1"}),
+    )
+    assert out.count("submit_external: true") == 2
+    # the repo is still named and still linked - the brief is in it
+    assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
+    assert out.count("repo_url:") == 2
+
+
+def test_an_assignment_handed_in_on_github_carries_no_such_flag(monkeypatch):
+    # The default, and the wording the theme has always printed: the repo IS the
+    # submission, so nothing about the page changes.
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "# A1\nThe brief.")
+    monkeypatch.setattr(
+        site,
+        "load_grading_spec",
+        lambda *a: grades.parse_grading_spec("submit_via: github\n"),
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        handed_out=frozenset({"assignment-1"}),
+    )
+    assert "submit_external" not in out
+
+
+def test_a_definition_that_cannot_be_read_leaves_the_github_wording(monkeypatch):
+    # The read goes to the course org over the network and the whole site sync sits under
+    # a cron, so a template with no `solution` branch must leave the page exactly as it
+    # was rather than flip it to "handed in outside GitHub".
+    monkeypatch.setattr(site, "get_file_content", lambda *a, **k: "# A1\nThe brief.")
+    monkeypatch.setattr(site, "load_grading_spec", grades.load_grading_spec)
+    monkeypatch.setattr(
+        grades, "_grading_text", lambda *a: (_ for _ in ()).throw(RuntimeError("404"))
+    )
+    out = site._assignment_entry(
+        "Course",
+        "Cohort-f2026",
+        "assignment-1-f2026",
+        datetime(2026, 10, 13, 23, 59, 59, tzinfo=BERLIN),
+        handed_out=frozenset({"assignment-1"}),
+    )
+    assert "submit_external" not in out
+    assert out.count('repo_name: "assignment-1-<your-handle>"') == 2
+
+
 def test_a_pending_assignment_links_no_repo(monkeypatch):
     # Nothing exists at the other end of the link yet, so the placeholder names the shape
     # to expect and stops there.
