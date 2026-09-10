@@ -582,6 +582,7 @@ def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
             ["Cohort-f2026"],
             ["assignment-1-f2026"],
             "release",
+            workflows=workflows_place.RELEASE_WORKFLOWS,
         )
         == 0
     )
@@ -603,6 +604,35 @@ def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
     inputs = trigger["workflow_dispatch"]["inputs"]
     assert list(inputs) == RELEASE_INPUTS
     assert inputs["course_source_repo"]["default"] == "course-materials-f2026"
+
+
+def test_an_assignment_template_hosts_only_the_hand_out_button(monkeypatch):
+    # Release materials from a template would name a source holding no session folders,
+    # so a template hosts Release assignment alone - and it opens on ITSELF, the way the
+    # materials button in a content repo pre-fills that repo's own name.
+    commits = []
+
+    def fake_put_files(org, repo, files, message, *, delete=()):
+        commits.append(files)
+        return True
+
+    monkeypatch.setattr(workflows_place, "put_files", fake_put_files)
+    assert (
+        workflows_place.push_content_workflows(
+            "Course",
+            "assignment-2-f2026",
+            ["Cohort-f2026"],
+            ["assignment-1-f2026", "assignment-2-f2026"],
+            "release",
+            workflows=workflows_place.TEMPLATE_WORKFLOWS,
+        )
+        == 0
+    )
+    assert len(commits) == 1
+    pushed = {path: content.decode() for path, content in commits[0].items()}
+    assert set(pushed) == {".github/workflows/release-assignment.yml"}
+    inputs = workflow_inputs(pushed[".github/workflows/release-assignment.yml"])
+    assert inputs["course_source_repo"]["default"] == "assignment-2-f2026"
 
 
 def test_the_org_level_buttons_land_as_one_commit(monkeypatch):

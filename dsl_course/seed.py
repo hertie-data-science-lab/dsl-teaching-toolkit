@@ -65,7 +65,7 @@ from .welcome import (
     refresh_cohort_pointer,
     refresh_welcome_workflows,
 )
-from .workflows_place import push_content_workflows
+from .workflows_place import RELEASE_WORKFLOWS, push_content_workflows
 from .workflows_render import (
     for_placement,
     render_archive_cohort,
@@ -504,7 +504,12 @@ def refresh(course_org: str) -> int:
     for repo in sorted(targets):
         failures += render(
             lambda repo=repo: push_content_workflows(
-                course_org, repo, cohorts, assignments, central_ref
+                course_org,
+                repo,
+                cohorts,
+                assignments,
+                central_ref,
+                workflows=RELEASE_WORKFLOWS,
             )
         )
         # A no-op on the code and dataset repos this sweep also returns; the gate is

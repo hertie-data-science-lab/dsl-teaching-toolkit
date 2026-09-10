@@ -53,7 +53,7 @@ from .readings import READING_OVERLAY_FILE
 from .releaseignore import RELEASEIGNORE
 from .repos import create_repo, repo_exists, set_repo_topics
 from .welcome import TEMPLATES, example_course_file
-from .workflows_place import push_content_workflows
+from .workflows_place import RELEASE_WORKFLOWS, push_content_workflows
 
 # The site repo's Pages build, seeded as its FIRST commit. `create_repo` does not auto-init,
 # and Pages cannot be enabled - nor the first deploy dispatched - on a repo with no branch.
@@ -944,7 +944,12 @@ def scaffold_materials(org: str, tag: str, copy_from: str = "") -> int:
     # 1 - a materials repo with no Release workflows must not report success.
     cohorts = discover_cohorts(org)
     failures += push_content_workflows(
-        org, repo, cohorts, discover_assignments(org), central_ref_for(org)
+        org,
+        repo,
+        cohorts,
+        discover_assignments(org),
+        central_ref_for(org),
+        workflows=RELEASE_WORKFLOWS,
     )
     if failures:
         return 1

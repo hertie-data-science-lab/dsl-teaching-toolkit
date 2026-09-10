@@ -151,7 +151,12 @@ def test_the_run_from_repo_buttons_are_pinned_too(monkeypatch):
 
     assert (
         workflows_place.push_content_workflows(
-            "Course", "course-materials-f2026", ["Cohort-f2026"], [], "main"
+            "Course",
+            "course-materials-f2026",
+            ["Cohort-f2026"],
+            [],
+            "main",
+            workflows=workflows_place.RELEASE_WORKFLOWS,
         )
         == 0
     )
@@ -245,7 +250,7 @@ def _refresh_against(monkeypatch, ref_exists: bool) -> tuple[int, list[str]]:
         """A renderer double that pins the ref exactly as the real one does - through the
         one chokepoint that refuses a ref the central repo does not have."""
 
-        def step(*args) -> int:
+        def step(*args, **kwargs) -> int:
             central.pin_central_ref("", args[-1])
             rendered.append(name)
             return 0
