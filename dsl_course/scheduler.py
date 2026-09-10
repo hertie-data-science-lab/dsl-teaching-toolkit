@@ -908,10 +908,15 @@ _MAILED_MARK = "<!-- dsl-archive-notice: mailed -->"
 def _archive_notice_body(cohort_org: str, when: date, mailed: bool) -> str:
     """The notice issue's body. Rewritten on every tick, which GitHub does not email
     about - the one mail is sent beside it, once."""
+    # The mark goes in ONLY when a mail actually went. It is the whole of this issue's
+    # state, so stamping it on a tick that sent nothing - no address in people.yml, no
+    # mail transport wired up - would record a mail that never happened and every later
+    # tick would read it and stay quiet. Unstamped, the fortnight goes on offering it, and
+    # the tick after somebody fixes the transport sends it.
     told = (
-        "The teaching team has been emailed this once.\n\n"
+        f"The teaching team has been emailed this once.\n\n{_MAILED_MARK}\n"
         if mailed
-        else "No email went with this notice - see the run log.\n\n"
+        else "No email went with this notice - see the run log.\n"
     )
     return (
         f"On **{when}** every repository in `{cohort_org}` is archived: students' work, "
@@ -924,7 +929,6 @@ def _archive_notice_body(cohort_org: str, when: date, mailed: bool) -> str:
         f"`archive:` block with its own `date:` overrides the default, which is sixty "
         f"days after `semester_end`.\n\n"
         f"{told}"
-        f"{_MAILED_MARK}\n"
     )
 
 
@@ -950,9 +954,14 @@ def _archive_notice(
     mailed = found is not None and _MAILED_MARK in found.body
     if not mailed:
         mailed = notify.notify_cohort_archiving(cohort_org, course_org, when, now)
-    return issues.upsert_issue(
-        repo, title, _archive_notice_body(cohort_org, when, mailed), existing=found
-    ).errors
+    body = _archive_notice_body(cohort_org, when, mailed)
+    if found is not None and found.body == body:
+        # `upsert_issue` edits unconditionally, and this body changes exactly once in the
+        # fortnight - when the mail goes. Four ticks an hour for fourteen days is about
+        # 1,300 identical edits per cohort otherwise, each one a write against the API
+        # budget and a line in the repo's own activity.
+        return 0
+    return issues.upsert_issue(repo, title, body, existing=found).errors
 
 
 def _archive_phase(

@@ -3131,7 +3131,7 @@ def test_the_break_glass_single_cohort_run_skips_a_closed_out_cohort(monkeypatch
 # --------------------------------------------------------------- the archive phase
 
 
-def _archive(monkeypatch, archive_date, now, dry_run=False, existing=None):
+def _archive(monkeypatch, archive_date, now, dry_run=False, existing=None, mails=True):
     """Drive `_archive_phase` alone, recording the close-out, the issue and the mail."""
     seen: dict = {"closed": [], "issues": [], "mailed": []}
     monkeypatch.setattr(
@@ -3150,7 +3150,7 @@ def _archive(monkeypatch, archive_date, now, dry_run=False, existing=None):
     monkeypatch.setattr(
         scheduler.notify,
         "notify_cohort_archiving",
-        lambda cohort, course, when, at: seen["mailed"].append(cohort) or True,
+        lambda cohort, course, when, at: seen["mailed"].append(cohort) or mails,
     )
     rc = scheduler._archive_phase(
         "Course-Org",
@@ -3213,7 +3213,37 @@ def test_the_mail_goes_once_however_many_ticks_the_fortnight_has(monkeypatch):
         existing=issues_mod.Issue(7, scheduler._MAILED_MARK),
     )
     assert seen["mailed"] == []
-    assert len(seen["issues"]) == 1  # the body is still rewritten, silently
+
+
+def test_a_notice_whose_mail_never_went_offers_it_again(monkeypatch):
+    # An org with no address in people.yml, or with no mail transport wired up, gets a
+    # `False` - and that must NOT be recorded as "mailed", or the tick after somebody
+    # fixes the transport would read the mark and stay quiet for the rest of the
+    # fortnight. The issue is filed either way; only the mark waits for a real send.
+    when = date(2027, 2, 16)
+    _, seen = _archive(
+        monkeypatch,
+        when,
+        datetime(2027, 2, 5, 9, tzinfo=timezone.utc),
+        mails=False,
+    )
+    ((_, body),) = seen["issues"]
+    assert scheduler._MAILED_MARK not in body
+    assert "No email went with this notice" in body
+
+
+def test_an_unchanged_notice_is_not_rewritten_every_tick(monkeypatch):
+    # `upsert_issue` edits unconditionally, and this body changes exactly once in the
+    # fortnight. Four ticks an hour for a fortnight is ~1,300 identical edits otherwise.
+    when = date(2027, 2, 16)
+    standing = scheduler._archive_notice_body("Cohort-Org", when, True)
+    _, seen = _archive(
+        monkeypatch,
+        when,
+        datetime(2027, 2, 5, 9, tzinfo=timezone.utc),
+        existing=issues_mod.Issue(7, standing),
+    )
+    assert (seen["issues"], seen["mailed"]) == ([], [])
 
 
 def test_a_dry_run_neither_freezes_nor_notifies(monkeypatch):
