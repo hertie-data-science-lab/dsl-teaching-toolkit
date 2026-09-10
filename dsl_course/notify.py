@@ -269,6 +269,22 @@ def _fallback_to() -> tuple[str, ...]:
     return ()
 
 
+def _teaching_contacts(cohort_org: str, now: datetime) -> list[sync_faculty.Contact]:
+    """This cohort's instructors and TAs active `now`, or none when people.yml is
+    unreadable.
+
+    Guarded, because `load_cohort_faculty` raises on a file it cannot parse - and every
+    caller here is about to TELL somebody something. An empty list falls through to
+    `_fallback_to`, which is a worse address than the right one and a great deal better
+    than a traceback out of the notifier."""
+    try:
+        faculty = sync_faculty.load_cohort_faculty(cohort_org) or {}
+    except Exception as exc:
+        log_err(f"could not read {cohort_org}'s people.yml ({read_error(exc)})")
+        faculty = {}
+    return sync_faculty.teaching_contacts(faculty, now.date().isoformat())
+
+
 def route(
     cohort_org: str, course_org: str, faults: list[SourceFault], now: datetime
 ) -> Routing:
@@ -289,12 +305,7 @@ def route(
     loud = [f for f in faults if f.severity(now) >= NOTIFY_FROM]
     if not loud:
         return Routing()
-    try:
-        faculty = sync_faculty.load_cohort_faculty(cohort_org) or {}
-    except Exception as exc:
-        log_err(f"could not read {cohort_org}'s people.yml ({read_error(exc)})")
-        faculty = {}
-    contacts = sync_faculty.teaching_contacts(faculty, now.date().isoformat())
+    contacts = _teaching_contacts(cohort_org, now)
     by_handle = {c.handle.lower(): c for c in contacts}
     everyone = _addresses(c.email for c in contacts)
     instructors = _addresses(c.email for c in contacts if not c.is_ta)
@@ -1053,16 +1064,8 @@ def notify_cohort_archiving(
     A `False` from an org with no address or no mail transport is the honest answer and
     the self-healing one: the issue is still filed, and a tick after somebody wires the
     transport up sends the mail rather than deciding it was already sent."""
-    try:
-        faculty = sync_faculty.load_cohort_faculty(cohort_org) or {}
-    except Exception as exc:
-        log_err(f"could not read {cohort_org}'s people.yml ({read_error(exc)})")
-        faculty = {}
     to = (
-        _addresses(
-            c.email
-            for c in sync_faculty.teaching_contacts(faculty, now.date().isoformat())
-        )
+        _addresses(c.email for c in _teaching_contacts(cohort_org, now))
         or _fallback_to()
     )
     if not to:
