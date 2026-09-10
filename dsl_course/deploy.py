@@ -342,6 +342,23 @@ def _conflict_body(base: str) -> str:
     )
 
 
+def _merge_conflicted(dd: Path, out: str) -> bool:
+    """Whether a failed `git merge` failed on CONTENT - the release and the cohort having
+    changed the same lines - rather than never having started.
+
+    Two tests, because either can be the one that answers: git announces every content
+    clash with a `CONFLICT` line, and the index it leaves behind names the unmerged paths.
+    Anything else (`refusing to merge unrelated histories`, a dirty tree, a ref that is not
+    there) is a merge git REFUSED, and reading that as a conflict is how a dest stops being
+    released to: the release is pushed to `upstream`, a pull request is opened about a
+    disagreement nobody has, no error is counted, and the run goes green again every
+    quarter of an hour for ever with nothing landing on the branch students read."""
+    if "CONFLICT" in out:
+        return True
+    code, unmerged = git("-C", str(dd), "diff", "--name-only", "--diff-filter=U")
+    return code == 0 and bool(unmerged.strip())
+
+
 def _merge_and_push(
     cohort_org: str,
     repo: str,
@@ -395,6 +412,17 @@ def _merge_and_push(
             f"release: merge {UPSTREAM_BRANCH} into {dest.base}",
             UPSTREAM_BRANCH,
         )
+        if code != 0 and not _merge_conflicted(dd, out):
+            # git refused the merge rather than failing to resolve it. `--abort` in case
+            # one is half-started, and then say so: there is no decision to put to the
+            # instructors here, and the conflict path would report success for ever.
+            git("-C", str(dd), *GIT_ENV, "merge", "--abort")
+            first = out.splitlines()[0] if out.strip() else "git said nothing"
+            log_err(
+                f"  {repo}: could not merge `{UPSTREAM_BRANCH}` into `{dest.base}` - "
+                f"{first[:200]}"
+            )
+            return 1, False
         if code != 0:
             # The cohort has edited what this release also changed. Leave `base` exactly
             # as students last read it, ship the release to `upstream` anyway so nothing

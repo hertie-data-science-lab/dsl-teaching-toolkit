@@ -197,6 +197,44 @@ def test_resolving_the_conflict_by_hand_ends_the_holding_pattern(world):
     assert len(world.pulls.calls) == 1  # no second conflict, no second pull request
 
 
+def test_a_real_conflict_is_still_told_apart_from_a_refused_merge(world, capsys):
+    # The boundary the check draws, from the other side: a merge that failed on CONTENT
+    # still holds the release at ONE pull request and counts no error.
+    assert _conflict(world) == (0, False)
+    assert len(world.pulls.calls) == 1
+    assert "could not merge" not in capsys.readouterr().err
+
+
+def _orphan_upstream(world) -> None:
+    """An `upstream` sharing no history with the branch students read - what a dest that
+    was deleted and re-created leaves behind."""
+    work = world.root / "scratch" / "orphan"
+    git_ok("clone", "-q", str(world.bare("materials")), str(work))
+    git_ok("-C", str(work), *ghcli.GIT_ENV, "checkout", "-q", "--orphan", "upstream")
+    (work / "OLD.md").write_text("released before the repo was re-made\n")
+    git_ok("-C", str(work), "add", "-A")
+    git_ok("-C", str(work), *ghcli.GIT_ENV, "commit", "-q", "--no-verify", "-m", "old")
+    git_ok("-C", str(work), "push", "-q", "origin", "upstream")
+
+
+def test_a_merge_git_refused_is_an_error_not_a_conflict(world, capsys):
+    # Every non-zero `git merge` was read as a content conflict: abort, push `upstream`,
+    # open the pull request, count nothing. A merge git REFUSED OUTRIGHT then reported
+    # itself as held for review - so a dest whose `upstream` shares no history with the
+    # branch students read went green every quarter of an hour, for ever, with nothing
+    # landing and a pull request standing about a disagreement nobody had.
+    world.commit("cm", {"lectures/01/lab.md": "week one"})
+    world.commit("materials", {"README.md": "the cohort"})
+    _orphan_upstream(world)
+
+    assert world.release("lectures/01") == (1, False)
+    assert world.pulls.calls == []
+    assert world.files("main") == ["README.md"]
+    assert "lectures/01/lab.md" not in world.files("upstream")
+    err = capsys.readouterr().err
+    assert "could not merge" in err and "unrelated histories" in err
+
+
 # ------------------------------------------------- dests that have not seen this before
 
 
