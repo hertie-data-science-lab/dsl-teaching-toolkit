@@ -69,16 +69,20 @@ def grant_team_repo_access(
 # owner hand-granting each new repo.
 COURSE_TEAM_ACCESS = {INSTRUCTORS_TEAM: "push", COURSE_ADMIN_TEAM: "admin"}
 
-# Faculty access to a repo whose source of truth is ELSEWHERE - a released copy of
-# materials, a submission repo, a gradebook. An edit made there is not durable and looks
-# like one that stuck; the grant sites say where each one's truth actually lives.
+# Faculty access to a repo a cohort RECEIVES per person - a submission repo, a gradebook.
+# An edit made there is not durable and looks like one that stuck (a gradebook is rewritten
+# from `classroom-config/grading_sheets/`), so the grant sites say where each one's truth
+# actually lives. Released materials used to be in this list and no longer are: a release
+# merges rather than copies over, so an edit there survives (see `deploy._merge_and_push`).
 # `course-admin` stays admin throughout: it is the org's owner of last resort, and read
 # access cannot fix a broken repo.
 FACULTY_READ_ACCESS = {INSTRUCTORS_TEAM: "pull", COURSE_ADMIN_TEAM: "admin"}
 
-# The cohort repos faculty AUTHOR in - the only cohort repos that get write. Everything else
-# in a cohort org has its source of truth elsewhere and takes FACULTY_READ_ACCESS. `.github`
-# is here because GitHub requires write on a repo to trigger a workflow_dispatch at all.
+# The cohort repos faculty AUTHOR in - the only cohort repos this FLOOR gives write.
+# Everything else in a cohort org has its source of truth elsewhere and takes
+# FACULTY_READ_ACCESS. `.github` is here because GitHub requires write on a repo to trigger
+# a workflow_dispatch at all. A release DEST also ends up at push, granted by every release
+# rather than by this floor: the two agree because the sweep only ever raises.
 COHORT_WRITE_REPOS = frozenset({".github", "welcome", "classroom-config"})
 
 # GitHub's repo permissions, weakest first, in the vocabulary a PUT takes (`permission=`).
