@@ -18,10 +18,11 @@ HEAD = "upstream"
 CREATED_URL = "https://github.com/Cohort-f2026/materials/pull/7"
 
 
-def _row(number: int, head: str, fork: bool = False) -> dict:
+def _row(number: int, head: str, fork: bool = False, base: str = "main") -> dict:
     return {
         "number": number,
         "url": f"https://github.com/{REPO}/pull/{number}",
+        "baseRefName": base,
         "headRefName": head,
         "isCrossRepository": fork,
     }
@@ -114,6 +115,28 @@ def test_the_lookup_asks_for_the_field_that_tells_a_fork_apart(gh_pr):
     assert pulls.find_pr(REPO, HEAD) is None
     (args,) = fake.did("pr", "list")
     assert "isCrossRepository" in args[args.index("--json") + 1].split(",")
+
+
+def test_a_pr_someone_retargeted_is_left_exactly_as_they_left_it(gh_pr, capsys):
+    # Same head branch, another base: a human pointed this pull request somewhere else,
+    # and adopting it would edit their pull request and merge the release into a branch
+    # nobody asked for. Nothing new is opened either - a second open pull request from one
+    # head branch is what GitHub refuses anyway - so the run names it and moves on.
+    fake = gh_pr([_row(4, HEAD, base="release")])
+    assert _upsert(refresh_body=True) == pulls.Upserted(
+        0, f"https://github.com/{REPO}/pull/4"
+    )
+    assert fake.did("pr", "create") == []
+    assert fake.did("pr", "edit") == []
+    warned = capsys.readouterr().out
+    assert "#4" in warned and "`release`" in warned
+
+
+def test_the_lookup_asks_for_the_base_the_pr_proposes(gh_pr):
+    fake = gh_pr([])
+    assert pulls.find_pr(REPO, HEAD) is None
+    (args,) = fake.did("pr", "list")
+    assert "baseRefName" in args[args.index("--json") + 1].split(",")
 
 
 def test_the_lowest_numbered_open_pr_wins(gh_pr):
