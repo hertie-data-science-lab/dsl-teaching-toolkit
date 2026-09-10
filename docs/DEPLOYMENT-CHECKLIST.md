@@ -385,6 +385,21 @@ events:
     event_datetime: 2026-11-17T10:00
 ```
 
+**`archive`** - when this cohort is frozen read-only. Optional at both ends.
+
+| Field | Required | Default | Meaning |
+|---|---|---|---|
+| `date` | no | `semester_end` + 60 days | the day every repository in the cohort org is archived |
+| `show_on_site` | no | `true` | a "Cohort archived" row on the site's schedule, and a notice in its Updates box for the fortnight before |
+
+```yaml
+archive:
+  date: 2027-02-16        # optional - without it, 60 days after semester_end
+  show_on_site: true      # optional - false keeps it off the site
+```
+
+A cohort with no `semester_end` and no `archive.date` is never archived automatically.
+
 #### Schedule row types
 
 The cohort site renders one merged, date-sorted schedule table; each row is colour-coded by
@@ -398,6 +413,7 @@ type, and the type is never a field you set - it follows from where the row came
 | exam | an `events:` entry with `type: exam` |
 | special_event | an `events:` entry with no `type` (clinic, guest lecture, revision session) |
 | term_date | the `semester_start` / `semester_end` scalars |
+| special_event | the `archive` block's date - the "Cohort archived" row |
 
 So lecture vs lab is decided by the deployed section folder, not by the entry label, and a
 week with both a lecture and a lab renders two rows.
