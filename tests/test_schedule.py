@@ -1122,6 +1122,18 @@ def test_shipped_schedules_parse_with_nothing_dropped(path):
     assert sched.dropped == [], f"{path} drops entries:\n" + "\n".join(sched.dropped)
 
 
+def test_the_worked_example_shows_the_archive_block():
+    # The sample is what faculty copy; a field only the skeleton mentions is a field nobody
+    # sets. Its date is the default spelled out, so the example and the rule agree.
+    full = (
+        Path(__file__).resolve().parents[1] / "example-course/cohort-org/schedule.yml"
+    )
+    sched, _ = schedule.load_file(str(full))
+    assert sched.archive_date == date(2027, 2, 16)
+    assert sched.archive_date == sched.semester_end + schedule.ARCHIVE_GRACE
+    assert sched.archive_show_on_site is True
+
+
 # ------------------------------------- a block authored as a list (never-raise contract)
 # `parse` iterates `.items()` over each block; a block written as a YAML LIST or scalar (a
 # common mistake - `deploy:` right below IS a list) would raise `AttributeError` and break

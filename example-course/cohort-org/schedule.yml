@@ -10,6 +10,10 @@ timezone: Europe/Berlin
 semester_start: 2026-09-07
 semester_end: 2026-12-18
 
+archive:                      # the cohort goes read-only on this date (default: semester_end + 60 days)
+  date: 2027-02-16
+  show_on_site: true          # a "Cohort archived" row on the site's Schedule tab, notice 14 days out
+
 releases:
   course-intro:
     event_datetime: 2026-08-31T09:00
