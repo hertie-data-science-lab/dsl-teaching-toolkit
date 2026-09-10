@@ -18,11 +18,12 @@ HEAD = "upstream"
 CREATED_URL = "https://github.com/Cohort-f2026/materials/pull/7"
 
 
-def _row(number: int, head: str) -> dict:
+def _row(number: int, head: str, fork: bool = False) -> dict:
     return {
         "number": number,
         "url": f"https://github.com/{REPO}/pull/{number}",
         "headRefName": head,
+        "isCrossRepository": fork,
     }
 
 
@@ -96,6 +97,23 @@ def test_a_pr_from_a_different_branch_is_not_adopted(gh_pr):
     fake = gh_pr([_row(4, "student-fix"), _row(5, "upstream-notes")])
     assert _upsert().url == CREATED_URL
     assert len(fake.did("pr", "create")) == 1
+
+
+def test_a_pr_from_a_fork_is_not_adopted_however_its_branch_is_named(gh_pr):
+    # `headRefName` carries no owner, and this toolkit tells every student to fork the
+    # materials repo - so a fork's branch of the same name is in the listing too.
+    # Adopting one would edit a student's PR and leave the release's own question unasked.
+    fake = gh_pr([_row(4, HEAD, fork=True)])
+    assert pulls.find_pr(REPO, HEAD) is None
+    assert _upsert().url == CREATED_URL
+    assert len(fake.did("pr", "create")) == 1
+
+
+def test_the_lookup_asks_for_the_field_that_tells_a_fork_apart(gh_pr):
+    fake = gh_pr([])
+    assert pulls.find_pr(REPO, HEAD) is None
+    (args,) = fake.did("pr", "list")
+    assert "isCrossRepository" in args[args.index("--json") + 1].split(",")
 
 
 def test_the_lowest_numbered_open_pr_wins(gh_pr):

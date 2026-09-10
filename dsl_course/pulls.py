@@ -8,9 +8,12 @@ PR is addressed by its HEAD BRANCH, not by its title: the branch is what the cal
 controls, a title is prose someone may edit, and two PRs proposing the same branch is the
 one outcome that turns a release conflict into a wall of notifications.
 
-`gh pr list --head` filters server-side, and the exact `headRefName` match here is what
-makes the answer trustworthy anyway - the listing also answers for a fork whose branch
-happens to be named the same, and adopting one of those would edit a student's PR.
+`gh pr list --head` filters server-side, and the two client-side tests here are what make
+the answer trustworthy anyway: `headRefName` must match exactly, and the PR must not be
+CROSS-REPOSITORY. `headRefName` carries no owner, so a fork's branch of the same name is
+in that listing too - and this toolkit tells every student to fork the materials repo,
+which is where such a branch would come from. Adopting one would edit a student's PR and
+leave the release's own question unasked.
 
 Failures are logged and returned as a count, never raised at the caller: this runs inside
 a release cron where an unopened PR must not stop the release. `find_pr` is the exception,
@@ -53,8 +56,12 @@ class Upserted(NamedTuple):
 
 
 def find_pr(repo: str, head: str) -> PullRequest | None:
-    """The open PR in `repo` proposing branch `head`, or None. Lowest number first, so a
-    duplicate opened during an outage does not change which one gets adopted.
+    """The open PR in `repo` proposing branch `head` FROM `repo` ITSELF, or None. Lowest
+    number first, so a duplicate opened during an outage does not change which one gets
+    adopted.
+
+    A cross-repository PR is never it, however its branch is named: the caller owns a
+    branch in this repo, not in somebody's fork of it (see the module docstring).
 
     Raises when the listing could not be read: absence has to be a real answer.
 
@@ -74,14 +81,14 @@ def find_pr(repo: str, head: str) -> PullRequest | None:
             "--limit",
             _LIST_LIMIT,
             "--json",
-            "number,url,headRefName",
+            "number,url,headRefName,isCrossRepository",
         )
     except (RuntimeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"could not list pull requests in {repo}: {exc}") from exc
     found = [
         PullRequest(r["number"], r.get("url") or "")
         for r in sorted(rows, key=lambda r: r["number"])
-        if r.get("headRefName") == head
+        if r.get("headRefName") == head and not r.get("isCrossRepository")
     ]
     return found[0] if found else None
 
