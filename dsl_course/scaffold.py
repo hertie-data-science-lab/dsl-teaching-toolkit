@@ -835,18 +835,11 @@ def _source_branches(wd: Path) -> list[str]:
     return [b for b in out.split() if b != "HEAD"] if code == 0 else []
 
 
-def _copy_branches(
-    org: str, source: str, repo: str, *, needs: tuple[str, ...] = ()
-) -> bool:
+def _copy_branches(org: str, source: str, repo: str, *, needs: str = "") -> bool:
     """Copy every branch of `org/source`, history and all, into the just-created
     `org/repo`. False (having said why) if any of it failed.
 
-    This is what `copy_from` means: next year's repo starts as this year's, so a course
-    is revised rather than re-typed. Only the SYSTEM-owned files are written over the
-    copy afterwards; every INSTRUCTOR-owned file arrives exactly as its author left it,
-    with the history that explains it.
-
-    `needs` names the branches the copy would be worthless without - an assignment whose
+    `needs` names a branch the copy would be worthless without - an assignment whose
     source has no `solution` branch would arrive with no model answer and no
     `grading_config.yml`, and grade on the defaults, so the run refuses instead."""
     with tempfile.TemporaryDirectory() as work:
@@ -858,11 +851,10 @@ def _copy_branches(
         if not branches:
             log_err(f"  ! {org}/{source} has no branches to copy")
             return False
-        missing = [b for b in needs if b not in branches]
-        if missing:
+        if needs and needs not in branches:
             log_err(
-                f"  ! {org}/{source} has no {' or '.join(missing)} branch - copy from a "
-                "repo that has one, or leave copy_from empty for a fresh starter"
+                f"  ! {org}/{source} has no {needs} branch - copy from a repo that has "
+                "one, or leave copy_from empty for a fresh starter"
             )
             return False
         if not clone(org, repo, new):
@@ -897,9 +889,8 @@ def scaffold_materials(org: str, tag: str, copy_from: str = "") -> int:
     failures = 0
     # Copying comes FIRST, before a single API write: `_copy_branches` pushes whole
     # branches, and a `main` the Contents API had already opened would make that push a
-    # non-fast-forward. The SYSTEM-owned files are then written over the copy (last
-    # year's are a year old), and the skeleton is not written at all - a copied repo
-    # already holds a README, a syllabus and its sections, authored.
+    # non-fast-forward. The skeleton is then not written at all - a copied repo already
+    # holds a README, a syllabus and its sections, authored.
     if copy_from and not _copy_branches(org, copy_from, repo):
         return 1
     failures += refresh_materials_system_files(org, repo)
@@ -971,9 +962,14 @@ def scaffold_assignment(
     the button's answers over it would silently re-declare an assignment the course has
     already run."""
     repo = f"assignment-{number}-{tag}"
-    title = name.strip() or f"Assignment {number}"
-    defaults = course_assignment_defaults(org)
-    log_step(f"Scaffolding {org}/{repo} ({kind}, {fmt}; template + solution branch)")
+    log_step(
+        f"Scaffolding {org}/{repo} "
+        + (
+            f"(copied from {copy_from})"
+            if copy_from
+            else f"({kind}, {fmt}; template + solution branch)"
+        )
+    )
     if not create_repo(
         org,
         repo,
@@ -987,10 +983,8 @@ def scaffold_assignment(
     set_repo_topics(org, repo, [f"assignment-{number}", "assignment"])
     if copy_from:
         # Nothing else to do: both branches, every stub's grown-up version and the
-        # definition itself came with the copy. `solution` is required rather than
-        # optional, because a template without one hands out a starter nobody can mark
-        # against and grades on the toolkit's defaults.
-        if not _copy_branches(org, copy_from, repo, needs=(SOLUTION_BRANCH,)):
+        # definition itself came with the copy.
+        if not _copy_branches(org, copy_from, repo, needs=SOLUTION_BRANCH):
             return 1
         log(
             "  (format, type, team_formation, submit_via and autograde were ignored - "
@@ -999,6 +993,8 @@ def scaffold_assignment(
         )
         log_ok(f"assignment template ready: {org}/{repo} (copied from {copy_from})")
         return 0
+    title = name.strip() or f"Assignment {number}"
+    defaults = course_assignment_defaults(org)
     # main: the brief, one starter stub, and (for a group assignment) CONTRIBUTIONS.md -
     # what students receive on generate. No tests, no autograder - grading runs
     # faculty-side from the solution branch. ONE commit, create-only, exactly as
