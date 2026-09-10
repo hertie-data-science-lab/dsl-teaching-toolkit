@@ -805,8 +805,10 @@ def _assignment_entry(
     # handout does not create. It costs the template's grading_config.yml, memoised per
     # template per process; the cohort's schedule.yml, which the site used to read it
     # from for free, no longer has a say.
-    group = load_grading_spec(course_org, repo).is_group
-    repo_name = submission_repo(slug, "<your-team>" if group else "<your-handle>")
+    spec = load_grading_spec(course_org, repo)
+    repo_name = submission_repo(
+        slug, "<your-team>" if spec.is_group else "<your-handle>"
+    )
     # The slug's own name: the row's IDENTIFIER, bold beside its name, and the one half
     # that must not change at hand-out. It used to be overwritten by the README heading, so
     # a row published as "Assignment 2" became "Assignment 1 - linear regression from
@@ -822,6 +824,13 @@ def _assignment_entry(
     # the flag for state and the URL only for "have I somewhere to link", rather than
     # inferring one from the other.
     repo_lines = [f'repo_name: "{q(repo_name)}"']
+    # The same spec, again: `submit_via: external` means the work is handed in off GitHub
+    # (Moodle, Kaggle, in class) and the repo carries only the brief. Off the flag the
+    # theme says so; without it both the page and the due row told a Moodle cohort to
+    # submit by pushing to `main`. Written whatever the handout state, because the shape
+    # it describes - like `repo_name` - is the spec's and is known before anything ships.
+    if spec.submit_external:
+        repo_lines.append("submit_external: true")
     if out:
         repo_lines.insert(
             0,
