@@ -202,8 +202,8 @@ def withhold_from_template(cohort_org: str, template: str) -> bool:
     the same reason. A course-org assignment template hosts **Release assignment** so
     faculty can hand it out from the repo they are editing, and template-generate copies
     the whole default branch - so without this the button, and the org-admin token it
-    reads, would land in every student repo. Matched by exact PATH, so the autograder workflow beside
-    it - and anything else under `.github/workflows/` - is untouched."""
+    reads, would land in every student repo. Matched by exact PATH, so the autograder
+    workflow beside it - and anything else under `.github/workflows/` - is untouched."""
     branch = default_branch(cohort_org, template, fallback="main")
     try:
         # Blobs only: `put_files` can delete nothing else, and `from_tree` derives the
@@ -619,6 +619,12 @@ def patch_released(
     # template now hosts - into every submission repo, and onto the cohort template every
     # later onboarder generates from, undoing `withhold_from_template` after the fact.
     # Same set, same exact-path rule, same absence of a way to opt back in.
+    #
+    # ONLY that set. A `.releaseignore` in the course template is not read here, so a
+    # folder `path` can still carry a rubric it withholds - the tree this reads is the
+    # COURSE template's, where those paths are still present, and whether faculty may
+    # patch one out deliberately is a question this filter does not answer. That gap
+    # pre-dates the buttons and is its own change.
     unpatchable = sorted(set(corrected) & set(NEVER_IN_STUDENT_REPOS))
     if unpatchable:
         corrected = {p: b for p, b in corrected.items() if p not in unpatchable}
@@ -627,11 +633,20 @@ def patch_released(
             f"button is never a student's to hold"
         )
     if not corrected:
-        log_err(
-            f"`{path}` is not on {master_org}/{template}'s default branch - nothing to "
-            f"patch. Commit the correction to the template first; this button only "
-            f"distributes what is already there."
-        )
+        if unpatchable:
+            # Not "there is no such path" - there is, and every file under it is one a
+            # student's repo may never hold. Saying the other thing sends faculty looking
+            # for a file that is sitting on the branch in front of them.
+            log_err(
+                f"`{path}` on {master_org}/{template} holds nothing but faculty release "
+                f"buttons, which are never a student's to press - nothing to patch."
+            )
+        else:
+            log_err(
+                f"`{path}` is not on {master_org}/{template}'s default branch - nothing "
+                f"to patch. Commit the correction to the template first; this button "
+                f"only distributes what is already there."
+            )
         return 1
     try:
         handout = repo_blob_shas(

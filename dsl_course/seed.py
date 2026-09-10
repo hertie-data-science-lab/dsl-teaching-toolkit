@@ -339,9 +339,10 @@ def _propagate_repo_secret(course_org: str, repos: list[str]) -> int:
     repo secret on each repo that hosts a run-from-repo workflow - the content repos and
     the assignment templates - from the token this run already holds, letting those
     workflows authenticate. Same exposure either way: instructors hold push on both.
-    Returns the number of repos the secret could NOT be set on: a repo left with an empty DSL_BOT_TOKEN runs its Release workflows
-    with no auth and fails weeks later when faculty run them, so a failure here must
-    count into refresh's exit code rather than pass silently.
+    Returns the number of repos the secret could NOT be set on: a repo left with an empty
+    DSL_BOT_TOKEN runs its Release workflows with no auth and fails weeks later when
+    faculty run them, so a failure here must count into refresh's exit code rather than
+    pass silently.
 
     `ghcli.bot_token` owns the "never a personal GH_TOKEN" refusal; its failure counts
     every repo as unpropagated rather than passing green, because until the nightly
@@ -452,8 +453,8 @@ def _converge_org(
 def refresh(course_org: str) -> int:
     """Refresh both layers: the run-from-repo actions in every content repo and
     assignment template, AND the central org-level workflows in .github; converge each
-    materials repo's SYSTEM-owned files (maintainer guide, syllabus example) and its seeded stubs;
-    repopulate dropdowns; converge each org's repo descriptions, faculty-team
+    materials repo's SYSTEM-owned files (maintainer guide, syllabus example) and its
+    seeded stubs; repopulate dropdowns; converge each org's repo descriptions, faculty-team
     access and machinery topics (_converge_org_metadata) and rebuild its profile README
     off the same listing; re-push every registered cohort's welcome workflows, its
     classroom-config SYSTEM-owned files (README contract, dispatch-sync*.yml,

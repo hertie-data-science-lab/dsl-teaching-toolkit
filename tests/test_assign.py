@@ -2061,9 +2061,9 @@ def test_a_release_button_cannot_be_patched_into_the_student_repos(monkeypatch):
 
 
 def test_a_patch_of_nothing_but_release_buttons_writes_nothing(monkeypatch, capsys):
-    # And with the buttons dropped there is no correction left, so the run stops where a
-    # patch of a path that is not on the template stops, rather than committing nothing
-    # to every repo in the cohort.
+    # And with the buttons dropped there is no correction left, so the run stops rather
+    # than committing nothing to every repo in the cohort - saying which reason, because
+    # "no such path" would send faculty looking for a file sitting in front of them.
     commits = _cohort(
         monkeypatch,
         {"assignment-1": {"starter.py": AS_HANDED_OUT}},
@@ -2071,7 +2071,10 @@ def test_a_patch_of_nothing_but_release_buttons_writes_nothing(monkeypatch, caps
     )
     assert _run(dry_run=False) == 1
     assert commits == []
-    assert workflows_place.RELEASE_ASSIGNMENT in capsys.readouterr().out
+    out, err = capsys.readouterr()
+    assert workflows_place.RELEASE_ASSIGNMENT in out
+    assert "holds nothing but faculty release buttons" in err
+    assert "is not on" not in err
 
 
 def test_a_file_the_student_has_changed_is_kept_unless_overwrite_says_otherwise(
