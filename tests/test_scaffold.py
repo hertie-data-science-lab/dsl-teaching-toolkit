@@ -23,6 +23,7 @@ from dsl_course import (
     releaseignore,
     scaffold,
     workflows_place,
+    workflows_render,
 )
 
 
@@ -844,6 +845,65 @@ def test_a_copy_leaves_the_toolkit_owned_branches_behind(origins):
     )
 
     assert origins.branches("assignment-1-f2026") == ["main", "solution"]
+
+
+def _hand_out_default(text: str) -> str:
+    """Which template the rendered Release assignment button opens on."""
+    loaded = yaml.safe_load(text)
+    trigger = loaded.get("on", loaded.get(True))
+    return trigger["workflow_dispatch"]["inputs"]["course_source_repo"]["default"]
+
+
+def test_a_copied_assignment_gets_a_button_aimed_at_itself(origins, monkeypatch):
+    # The copy brings the SOURCE template's release-assignment.yml with it, pre-selected on
+    # last year's assignment - so until something re-renders it, this year's template hands
+    # out last year's by default from its own Actions tab. The copy path re-renders it, the
+    # way the fresh path seeds it, rather than leaving the repo wrong until a later refresh
+    # that may be refused or may fail.
+    stale = workflows_render.render_provision(
+        ["Cohort-f2026"],
+        ["assignment-1-f2025", "assignment-1-f2026"],
+        "assignment-1-f2025",
+    )
+    assert _hand_out_default(stale) == "assignment-1-f2025"
+    origins.commit(
+        "assignment-1-f2025",
+        {"README.md": "# The brief\n", workflows_place.RELEASE_ASSIGNMENT: stale},
+    )
+    origins.commit(
+        "assignment-1-f2025", {"grading_config.yml": "type: group\n"}, "solution"
+    )
+    pushed: dict[str, bytes] = {}
+    monkeypatch.setattr(
+        scaffold, "push_content_workflows", workflows_place.push_content_workflows
+    )
+    monkeypatch.setattr(scaffold, "discover_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(
+        scaffold,
+        "discover_assignments",
+        lambda org: ["assignment-1-f2025", "assignment-1-f2026"],
+    )
+    monkeypatch.setattr(scaffold, "central_ref_for", lambda org: "release")
+    monkeypatch.setattr(
+        workflows_place,
+        "put_files",
+        lambda org, repo, files, message, **k: pushed.update(files) or True,
+    )
+
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", copy_from="assignment-1-f2025"
+        )
+        == 0
+    )
+
+    # The stale button did arrive - and was written over with one that opens on this repo.
+    assert workflows_place.RELEASE_ASSIGNMENT in origins.files("assignment-1-f2026")
+    assert set(pushed) == set(workflows_place.TEMPLATE_WORKFLOWS)
+    assert (
+        _hand_out_default(pushed[workflows_place.RELEASE_ASSIGNMENT].decode())
+        == "assignment-1-f2026"
+    )
 
 
 def test_a_copied_assignment_says_which_boxes_it_ignored(origins, capsys):

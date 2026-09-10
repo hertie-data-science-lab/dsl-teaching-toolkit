@@ -961,6 +961,27 @@ def scaffold_materials(org: str, tag: str, copy_from: str = "") -> int:
     return 0
 
 
+def _seed_template_workflows(org: str, repo: str) -> int:
+    """Equip the hand-out button, as scaffold_materials equips the release ones: faculty
+    run Release assignment from this repo's own Actions tab, and it opens on THIS
+    template. Which buttons a template hosts, and why, is `TEMPLATE_WORKFLOWS`;
+    `assign.withhold_from_template` is what strips them off the cohort copy, so no student
+    repo generated from this template inherits one.
+
+    Every path that makes a template calls it, the copied one included: a copy arrives
+    carrying the SOURCE template's button, pre-selected on last year's assignment, and
+    until something re-renders it the new template's own button hands out the wrong
+    assignment by default."""
+    return push_content_workflows(
+        org,
+        repo,
+        discover_cohorts(org),
+        discover_assignments(org),
+        central_ref_for(org),
+        workflows=TEMPLATE_WORKFLOWS,
+    )
+
+
 def scaffold_assignment(
     org: str,
     number: str,
@@ -1011,8 +1032,10 @@ def scaffold_assignment(
     grant_tagged_team_access(org, repo, tag)
     set_repo_topics(org, repo, [f"assignment-{number}", "assignment"])
     if copy_from:
-        # Nothing else to do: both branches, every stub's grown-up version and the
-        # definition itself came with the copy.
+        # Nothing to SEED: both branches, every stub's grown-up version and the definition
+        # itself came with the copy. The button is the exception - the copy brought the
+        # source's, aimed at the source - so it is re-rendered for this repo, as on the
+        # fresh path.
         if not _copy_branches(org, copy_from, repo, needs=SOLUTION_BRANCH):
             return 1
         log(
@@ -1021,6 +1044,8 @@ def scaffold_assignment(
             f"governs the rest: https://github.com/{org}/{repo}/blob/"
             f"{SOLUTION_BRANCH}/grading_config.yml)"
         )
+        if _seed_template_workflows(org, repo):
+            return 1
         log_ok(f"assignment template ready: {org}/{repo} (copied from {copy_from})")
         return 0
     title = name.strip() or f"Assignment {number}"
@@ -1156,19 +1181,7 @@ def scaffold_assignment(
             "incomplete"
         )
         return 1
-    # Equip the hand-out button, as scaffold_materials equips the release ones: faculty
-    # run Release assignment from this repo's own Actions tab. Which buttons a template
-    # hosts, and why, is `TEMPLATE_WORKFLOWS`; `assign.withhold_from_template` is what
-    # strips them off the cohort copy, so no student repo generated from this template
-    # inherits one.
-    if push_content_workflows(
-        org,
-        repo,
-        discover_cohorts(org),
-        discover_assignments(org),
-        central_ref_for(org),
-        workflows=TEMPLATE_WORKFLOWS,
-    ):
+    if _seed_template_workflows(org, repo):
         return 1
     log_ok(f"assignment template ready: {org}/{repo} (main + solution)")
     return 0
