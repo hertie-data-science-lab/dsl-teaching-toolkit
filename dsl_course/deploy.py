@@ -332,16 +332,22 @@ def _conflict_body(base: str) -> str:
 
     Branch names only. This repo is readable by the whole cohort, so nothing about WHO
     edited what belongs here - and no file list either: this pull request's own Files tab
-    is that list, and GitHub keeps it current as later releases add to the branch."""
+    is that list, and GitHub keeps it current as later releases add to the branch.
+
+    It says to MERGE rather than offering a close, because a close does not settle
+    anything: `pulls.find_pr` looks for an OPEN pull request, so the next release finds
+    none, and the conflict it is still holding opens a second one. Merging is what ends
+    the hold - whichever version the resolution keeps."""
     return (
         f"This release could not be merged into `{base}`: the released copy and this "
         f"repo have both changed the same lines.\n\n"
         f"`{UPSTREAM_BRANCH}` holds everything the course org has released so far, and "
         f"grows with every release.\n\n"
         f"`{base}` is untouched, so the cohort still reads what it read before. Resolve "
-        f"the conflict here and merge, or close this pull request to keep this repo's "
-        f"version. Either way the next release adds to `{UPSTREAM_BRANCH}`, and this "
-        f"pull request follows it rather than a second one being opened.\n"
+        f"the conflict here and merge - keeping this repo's version, the released one, "
+        f"or a mix of the two. Merging is what settles it: further releases add to "
+        f"`{UPSTREAM_BRANCH}` and re-use this pull request, and closing it unresolved "
+        f"only means the next release opens the same question again.\n"
     )
 
 

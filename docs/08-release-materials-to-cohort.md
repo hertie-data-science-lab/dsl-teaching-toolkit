@@ -68,8 +68,10 @@ If the same lines changed on both sides, the merge cannot be made automatically.
 then leaves the branch students read exactly as it was and opens **one pull request**,
 `upstream` into that branch, with the `instructors` team asked to review. Nothing is lost -
 the released version is on `upstream` - and nothing has moved for students until somebody
-decides. Merge it, or close it to keep the cohort's version. Further releases keep adding to
-`upstream` and update that same pull request rather than opening a second one.
+decides. Resolve it and **merge**, keeping the cohort's version, the released one, or a mix.
+Further releases keep adding to `upstream` and re-use that same pull request; closing it
+unresolved does not settle anything, because the conflict is still there and the next
+release opens the question again.
 
 `upstream` is the toolkit's branch. Do not work on it and do not make it the default: the
 default branch is what students read, what the website reads, and what a release merges
