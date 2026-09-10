@@ -17,6 +17,7 @@ import pytest
 import yaml
 
 from dsl_course import (
+    course,
     derive,
     gh_contents,
     ghcli,
@@ -242,6 +243,16 @@ def test_fresh_assignment_seeds_the_starter(fake, monkeypatch):
     _clone_ok(monkeypatch, _git_ok)
     assert scaffold.scaffold_assignment("Org", "1", "f2026", ["py"]) == 0
     assert {"README.md", "starter.py"} <= fake.written("assignment-1-f2026")
+
+
+def test_every_format_an_instructor_may_name_has_a_starter_to_seed():
+    # The seeding loop indexes `_STARTERS` by every format the box accepted, with no
+    # membership guard: a format added to the vocabulary without a stub beside it would
+    # KeyError halfway through the scaffold - AFTER `create_repo`, so the fix is deleting
+    # a half-built template rather than re-running the button. The two lists agree here
+    # instead, where a new format costs one failing test at the moment it is added.
+    assert set(course.STARTER_FORMATS) == set(scaffold._STARTERS)
+    assert course.NO_STARTER not in scaffold._STARTERS
 
 
 def test_several_starters_are_seeded_side_by_side(fake, monkeypatch):
