@@ -109,6 +109,31 @@ Things whose *literal spelling* is depended on from outside Python:
   marked file would still read as untouched and be rewritten by the nightly refresh -
   faculty's patterns gone, and whatever they withheld shipping again on a green run. The
   price is that its wording cannot be improved in a repo that already has it.
+- **`deploy.UPSTREAM_BRANCH`** (`upstream`) is the toolkit's branch in every release dest,
+  and the dest's DEFAULT branch is what students, the website and `propagate` read. The
+  release commits onto `upstream` and merges it into the default one; a conflict aborts the
+  merge, pushes `upstream` and leaves one pull request open. Two things follow. Making
+  `upstream` the default branch would collapse both ends of that merge into one branch, so
+  the release refuses such a dest outright rather than release nothing to it for ever. And
+  nothing in the package may start listing branches to find released
+  content: every reader resolves `repos.default_branch`, which is exactly what keeps
+  `upstream` invisible to the site, discovery and status.
+
+## The two modules that keep one record open
+
+`issues` and `pulls` each own an idempotency rule that their callers - unattended crons,
+re-deriving the world every quarter of an hour - cannot be trusted to re-implement:
+
+- an ISSUE is found by its **exact title**, because `--search` is full text and a human
+  quoting the title would otherwise have their issue rewritten;
+- a PULL REQUEST is found by its **head branch**, because a title is prose somebody may
+  edit and the branch is the thing the caller controls.
+
+In both, a listing that could not be READ raises rather than answering "there is none" -
+inventing that answer opens a duplicate on every tick, for as long as the outage lasts.
+`propagate` is the second consumer of `pulls`, with `refresh_body=True` (its body is a
+running summary of what its branch now holds); the release's conflict PR is written once
+and left alone.
 
 ## The grading sandbox's two outward contracts
 
@@ -302,7 +327,7 @@ layers above its own:
 |---|---|
 | 0, nothing | `log`, `course` (the course vocabulary: config repo, term tag, session-folder rule, syllabus filenames, org topics), `readings`, `fs`, `releaseignore` (the `.releaseignore` rule) |
 | 1, the shell | `ghcli` (`gh`/`git`, timeouts, the 404 test) |
-| 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title) |
+| 2 | `central` (which ref an org runs), `repos` (existence, creation, topics, descriptions, the publication denylist), `gh_teams` (an org's settings and its teams), `issues` (one self-updating issue, found by its EXACT title), `pulls` (one pull request per HEAD BRANCH, created or adopted) |
 | 3 | `gh_contents` (file reads and writes, seeded stubs), `workflows_render` |
 | 4 | `discovery`, `roster`/`teams`/`schedule`, `workflows_place` |
 | 5 and up | `access` (team permissions and the faculty floor), `schedule_plan` (the session rows a plan declares), `cadence` (the scheduler's driver-health and late-delivery alarms, read off its own run history), `welcome`, `profile_readme`, `scaffold`, `site_repo` (the Jekyll site repo both websites publish into), `site`, then the CLIs |

@@ -139,6 +139,49 @@ def archive_repo(org: str, name: str, *, person: bool = False) -> bool:
     return False
 
 
+def allow_forking(org: str, name: str) -> bool:
+    """Let a private repo be forked. Idempotent, and a NO-OP unless there is work to do.
+
+    TWO settings stand between a student and the Fork button on a private repo, and both
+    are off by default: the org's (`gh_teams.converge_org_settings`) and this one, per
+    repo. `create_repo`'s POST takes no forking field, so it is a PATCH of its own, run on
+    every release rather than only at creation - a repo made before this existed has to
+    converge too, and the release is the only thing that visits one regularly.
+
+    Which is why it READS before it writes. The release runs every quarter of an hour, so
+    an unconditional PATCH is 96 writes a day per dest for a flag that changes once; and
+    GitHub REFUSES the field on a public repo ("Allow forks setting can only be changed on
+    org-owned private repositories", HTTP 422), so a cohort whose materials repo is public
+    logged a warning on every tick, for ever, about a repo that anyone can already fork.
+    The read costs nothing: `repo_is_archived` has fetched this same repo object earlier
+    in the same run and `_repo` is cached per process.
+
+    Fail-open: a repo that cannot be read is PATCHed as before, and a refusal is worth a
+    line and NOT an error - on some plans the setting is not available at all, and
+    reddening a quarter-hourly release for a button is how a real failure stops being
+    noticed."""
+    try:
+        repo = _repo(org, name)
+    except _RepoReadFailed:
+        pass
+    else:
+        # Public: forkable by nature, and the PATCH would 422. Already true: nothing to do.
+        if not repo.get("private", True) or repo.get("allow_forking"):
+            return True
+    code, out = gh(
+        "api",
+        "--method",
+        "PATCH",
+        f"repos/{org}/{name}",
+        "--field",
+        "allow_forking=true",
+    )
+    if code == 0:
+        return True
+    log(f"  [warn] {org}/{name} could not be made forkable: {out[:120]}")
+    return False
+
+
 def default_branch(org: str, name: str, *, fallback: str | None = None) -> str:
     """The repo's default branch.
 

@@ -215,6 +215,16 @@ org; updates on every release.
 2. Once you're enrolled, course **materials** open up here session by session, and your
    own assignment repositories appear in this org.
 
+## Working with the materials
+
+Materials are read-only for you. Fork to work in your own copy and to propose a fix by
+pull request; a pull request's diff is visible to the whole cohort, so keep your answers
+out of it. Copy a notebook before working in it. To keep your work if you ever leave the
+org, push it to a repo of your own.
+
+If you find a mistake or a typo in the materials, open a pull request; if something needs
+clarifying, open an issue.
+
 ## Where things are
 
 {_repo_table_block(repos)}

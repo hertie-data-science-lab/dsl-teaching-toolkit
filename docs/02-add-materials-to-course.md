@@ -55,6 +55,8 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
 
    *NB: material with no `NN_` session folder (a root `SYLLABUS.md`, a flat `datasets/`) still releases, and appears on the cohort site's **All Materials** tab.*
 
+   *NB: this repo stays the source of truth, but a release is now a MERGE - so a fix typed into the cohort's copy survives, and **Propagate cohort edits** offers it back here as a pull request ([08](08-release-materials-to-cohort.md#carrying-cohort-edits-back)).*
+
 3. **Run Refresh actions** in the course org's `.github` Actions tab - only after creating a
    *new repo*, not after pushing content into one.
    - What it repopulates is the repo dropdowns - `course_source_repo`, the assignment list,

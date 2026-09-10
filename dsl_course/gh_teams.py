@@ -115,7 +115,21 @@ def members_without_2fa(org: str) -> int | None:
     return len(out.split()) if code == 0 else None
 
 
-def converge_org_settings(org: str) -> int:
+# What it looks like when GitHub ANSWERED and the answer was no: a policy above the org,
+# or a plan without the setting. Only these two, and only from GitHub's own wording - a
+# 5xx, a connection that never got there and an expired token are all failures to report,
+# not settings somebody has to go and change.
+_REFUSED = ("http 403", "http 422")
+
+
+def _is_refusal(out: str) -> bool:
+    """Whether a failed `gh api` output is GitHub declining the change rather than the
+    call not getting through."""
+    lower = out.lower()
+    return any(marker in lower for marker in _REFUSED)
+
+
+def converge_org_settings(org: str, *, private_forks: bool = False) -> int:
     """Tighten one org: base permissions, member repo creation, and 2FA where possible.
 
     Idempotent, and run on every nightly refresh as well as at bootstrap. These were set
@@ -123,17 +137,32 @@ def converge_org_settings(org: str) -> int:
     tightening still handed each member `read` on the unreleased materials, the model
     solutions and the `solution` branches.
 
+    `private_forks` is the third setting, and the odd one out: it LOOSENS - so it is
+    asked for, not assumed, sent in a PATCH of its own (see below), and only a COHORT
+    asks. A cohort's materials repo is
+    private, and GitHub refuses a fork of a private repo unless its org allows it, so
+    the Fork button students are told to press was simply absent; there it grants
+    nothing, because a fork carries the reader's own access and a student who can fork
+    the materials could already read them. A COURSE org is the opposite case: it holds
+    the unreleased materials, the model solutions and the hidden tests, its members are
+    faculty who already have push where they need it, and a private fork there is an
+    uncontrolled copy of the solutions in somebody's personal account, gaining nobody
+    anything.
+
     Base permissions matter in BOTH org kinds. A cohort holds students; a COURSE org holds
     the materials students must not see, and at GitHub's default of `read` every member of
     it (every TA, every visiting instructor, anyone ever added for one semester) could read
     all of it. Faculty access comes from the team grants (access.converge_faculty_access),
     not from being a member, so nobody who should have access loses it.
 
-    Returns the number of PATCHes that FAILED - the 2FA one excluded. GitHub refuses
-    `two_factor_requirement_enabled` while any member still has 2FA off, which is a fact
-    about people rather than a broken convergence: counting it would red this cron in every
-    org every night for something no re-run can fix. It is named and counted in the log
-    instead."""
+    Returns the number of PATCHes that FAILED - the two GitHub can REFUSE excluded, each
+    named in the log instead. It refuses `two_factor_requirement_enabled` while any member
+    still has 2FA off, and `members_can_fork_private_repositories` wherever an enterprise
+    policy above the org forbids private forks or the plan does not carry the setting.
+    Both are facts about the account rather than broken convergences: counting them would
+    red this cron in every such org every night for something no re-run can fix. A fork
+    PATCH that failed any OTHER way - the request never got there, the token lost its
+    scope - is still a failure."""
     failures = 0
     code, out = gh(
         "api",
@@ -150,6 +179,36 @@ def converge_org_settings(org: str) -> int:
     else:
         failures += 1
         log_err(f"could not tighten {org}: {out[:120]}")
+
+    # Its OWN patch, not a third field on the one above. GitHub validates a PATCH body as
+    # a unit, so a refused fork field - an enterprise policy above the org forbids private
+    # forks, a plan does not carry the setting - would take the two tightening fields down
+    # with it, and the org would sit at GitHub's default of `read` for every member on
+    # every repo behind a log line about forking.
+    if private_forks:
+        code, out = gh(
+            "api",
+            "--method",
+            "PATCH",
+            f"orgs/{org}",
+            "--field",
+            "members_can_fork_private_repositories=true",
+        )
+        if code == 0:
+            log_ok(f"{org}: private repos forkable")
+        elif _is_refusal(out):
+            # Like 2FA below: GitHub answered, and the answer is no. Nothing in this org
+            # can change that, so counting it would leave every nightly refresh red for
+            # ever - and the button students are told to press is missing either way,
+            # which is what the line has to say.
+            log(
+                f"  [warn] {org}: private repos not forkable - GitHub refused it "
+                f"({out[:80]}). Students cannot fork the materials until an owner "
+                f"allows private forks."
+            )
+        else:
+            failures += 1
+            log_err(f"could not let {org} fork its private repos: {out[:120]}")
 
     code, out = gh(
         "api",

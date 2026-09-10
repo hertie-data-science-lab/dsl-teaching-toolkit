@@ -807,6 +807,36 @@ def test_cohort_bootstrap_runs_one_initial_site_sync(monkeypatch):
     assert synced == [("Course-Org", "Cohort-f2026")]
 
 
+@pytest.mark.parametrize("cohort", [True, False], ids=["cohort", "course"])
+def test_only_a_cohort_bootstrap_asks_for_private_forks(monkeypatch, cohort):
+    # One converge call for both org kinds, so the org kind has to be told to it: a course
+    # org's private repos hold the unreleased materials, the model solutions and the hidden
+    # tests, and forking those into a personal account gains nobody anything.
+    asked: list[bool] = []
+    stub_bootstrap(monkeypatch)
+    monkeypatch.setattr(
+        bc,
+        "converge_org_settings",
+        lambda org, *, private_forks=False: asked.append(private_forks) or 0,
+    )
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "bootstrap_course",
+            "--org",
+            "Cohort-f2026",
+            "--cohort",
+            "--course",
+            "Course-Org",
+        ]
+        if cohort
+        else ["bootstrap_course", "--org", "Course-Org"],
+    )
+
+    assert bc.main() == 0
+    assert asked == [cohort]
+
+
 def _raises(c, o):
     raise RuntimeError("pages 404")
 
@@ -881,7 +911,7 @@ def _stub_refresh(
     monkeypatch.setattr(seed, "discover_assignments", lambda org: [])
     monkeypatch.setattr(seed, "_propagate_repo_secret", lambda org, repos: 0)
     monkeypatch.setattr(seed, "list_org_repos", lambda org: [])
-    monkeypatch.setattr(seed, "converge_org_settings", lambda org: 0)
+    monkeypatch.setattr(seed, "converge_org_settings", lambda org, **k: 0)
     monkeypatch.setattr(seed, "create_role_teams", lambda org, teams: 0)
     monkeypatch.setattr(seed, "_converge_org_metadata", lambda org, repos: 0)
     monkeypatch.setattr(seed, "seed_github_workflows", lambda org, ref: seed_failures)
@@ -1625,7 +1655,7 @@ def test_the_summary_names_the_step_that_failed(monkeypatch, capsys):
     # The closing block used to assert every line whatever happened, so an operator read
     # a configured org off a run that configured nothing.
     stub_bootstrap(monkeypatch)
-    monkeypatch.setattr(bc, "converge_org_settings", lambda org: 1)
+    monkeypatch.setattr(bc, "converge_org_settings", lambda org, **k: 1)
     monkeypatch.setattr("sys.argv", ["bootstrap_course", "--org", "Course-Org"])
 
     assert bc.main() == 1
@@ -1734,7 +1764,9 @@ def test_refresh_sweeps_every_org_off_one_listing(monkeypatch):
     rendered: list[tuple[str, int]] = []
     _stub_refresh(monkeypatch)
     monkeypatch.setattr(
-        seed, "converge_org_settings", lambda org: tightened.append(org) or 0
+        seed,
+        "converge_org_settings",
+        lambda org, *, private_forks=False: tightened.append((org, private_forks)) or 0,
     )
     monkeypatch.setattr(
         seed, "list_org_repos", lambda org: listings.append(org) or [_r(".github")]
@@ -1753,6 +1785,10 @@ def test_refresh_sweeps_every_org_off_one_listing(monkeypatch):
     # The org's own settings converge on the same sweep. They were written only at
     # bootstrap, so every org tightened after its own bootstrap kept GitHub's default of
     # `read` for every member on every repo.
-    assert tightened == swept
+    assert [org for org, _ in tightened] == swept
+    # Private forks are a COHORT setting and travel with `is_cohort`: a course org holds
+    # the unreleased materials, the solutions and the hidden tests, and a private fork of
+    # those into a personal account gains nobody anything.
+    assert [forks for _, forks in tightened] == [False, True, True]
     assert listings == swept
     assert rendered == [("Course-Org", 1), ("Cohort-f2026", 1), ("Cohort-s2027", 1)]

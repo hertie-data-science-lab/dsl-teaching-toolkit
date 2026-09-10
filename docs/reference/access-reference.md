@@ -94,10 +94,17 @@ Two teams carry every faculty grant: `instructors` (this org's teaching team) an
 |---|---|---|
 | course org - **every** repo, `.github` included | push | admin |
 | cohort `.github`, `welcome`, `classroom-config` | push | admin |
-| cohort released content, submission repos, `grades-<handle>` | **read** | admin |
+| cohort released materials | push | admin |
+| cohort submission repos, `grades-<handle>` | **read** | admin |
 
-Read on everything a cohort *receives*: a re-release overwrites released material, and marks
-live in `classroom-config/grading_sheets/<slug>.yml` (**Distribute grades** rewrites gradebooks from it),
+Push on released materials, because a release now lands on the repo's `upstream` branch and is
+**merged** into the branch students read - so a correction typed into the cohort's copy survives
+the next release instead of being overwritten by it. The course org is still the source of truth:
+carry the fix back with **Propagate cohort edits**, or next year's cohort starts from the
+uncorrected version.
+
+Read on what a cohort *receives* per person: marks live in
+`classroom-config/grading_sheets/<slug>.yml` (**Distribute grades** rewrites gradebooks from it),
 so an edit in the received copy would silently vanish. `.github` keeps push because GitHub
 requires write to trigger a `workflow_dispatch`.
 
