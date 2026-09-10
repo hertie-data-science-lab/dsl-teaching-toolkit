@@ -673,7 +673,7 @@ def _actions_table(org: str) -> str:
         "repo per student (or per team). |\n"
         "| **New materials repo** | Scaffold a correctly structured materials repo; the "
         "release workflows come bootstrapped with it. |\n"
-        "| **New assignment** | Scaffold an assignment template (brief + starter; the "
+        "| **New assignment** | Scaffold an assignment template (brief + starter(s); the "
         "`solution` branch holds the model answer and `grading_config.yml`); the release "
         "workflows come bootstrapped with it. |\n"
         "| **Refresh actions** | Re-seed the run-from-repo workflows and repopulate dropdowns "
