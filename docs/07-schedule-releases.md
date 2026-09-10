@@ -224,18 +224,28 @@ events:
 
 When this cohort is frozen read-only: every repository in the org archived, nothing deleted, nobody removed. See [Closing the cohort out](10-grade-and-return-assignments.md#closing-the-cohort-out).
 
-**The block is the switch.** Write it and the cohort is archived automatically; leave it out and nothing ever is. Both fields inside it are optional.
+**The block is the switch.** Write it and the cohort is archived automatically; leave it out and nothing ever is. Every field inside it is optional.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `date` | no | `semester_end` + 60 days | the day the whole cohort org is archived |
 | `show_on_site` | no | `true` | a "Cohort archived" row on the deployed schedule, and a notice in the site's Updates box for the fortnight before |
+| `description` | no | *none* | the sentence that row and that notice say - all of it |
 
 ```yaml
 semester_end: 2026-12-18
 archive:
   date: 2027-02-16        # optional - without it, 60 days after semester_end
+  description: >-         # optional - what students are told, in your own words
+    This cohort is archived on 2027-02-16: every repository in it becomes read-only.
+    You keep read access.
 ```
+
+`description:` is where the sentence comes from, and the only place: there is no wording
+of the toolkit's own behind it, because what a freeze means for your students is yours to
+say. Write none and the row still shows - "Cohort archived", with its date - and says
+nothing under it. The skeleton in a new cohort's `schedule.yml` carries a suggested
+sentence ready to uncomment.
 
 `archive:` on its own means "yes, on the default date". With no block, or a block with
 neither a `date` nor a `semester_end` to count from, nothing is archived automatically and

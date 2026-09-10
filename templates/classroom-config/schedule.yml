@@ -29,10 +29,6 @@
 # semester_start:                   # OPTIONAL - default: inferred from the cohort tag (f2026 -> 1 Sep 2026)
 # semester_end:                     # OPTIONAL - default: 15 weeks after the start
 
-# archive:                          # OPTIONAL - writing this block is what turns archiving ON: the whole cohort goes READ-ONLY on its date. No block, nothing ever freezes
-#   date:                           # OPTIONAL - default: semester_end + 60 days
-#   show_on_site: true              # OPTIONAL - default: true. false = no "Cohort archived" row on the deployed site's Schedule tab
-
 # releases:                         
 #   seed-syllabus:                  # week 0: the course opens before teaching starts. 
 #     event_datetime:               # REQUIRED - ships the syllabus and anything else students need up front
@@ -113,3 +109,8 @@
 #   clinic-drop-in:                 # no type -> a special_event row
 #     title: "Clinic drop-in"
 #     event_datetime:               # REQUIRED
+
+# archive:                          # OPTIONAL, and LAST because it is the end of the term: writing this block is what turns archiving ON: the whole cohort goes READ-ONLY on its date. No block, nothing ever freezes
+#   date:                           # OPTIONAL - default: semester_end + 60 days
+#   show_on_site: true              # OPTIONAL - default: true. false = no "Cohort archived" row on the deployed site's Schedule tab
+#   description:                    # OPTIONAL, but ALL that row and the site's Updates box SAY - there is no default, so with none they say nothing. Suggested wording: "This cohort is archived on <date>: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account."

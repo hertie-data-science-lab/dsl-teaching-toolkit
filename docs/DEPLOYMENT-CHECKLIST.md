@@ -392,11 +392,14 @@ the cohort is archived automatically; left out, it never is.
 |---|---|---|---|
 | `date` | no | `semester_end` + 60 days | the day every repository in the cohort org is archived |
 | `show_on_site` | no | `true` | a "Cohort archived" row on the site's schedule, and a notice in its Updates box for the fortnight before |
+| `description` | no | *none* | the sentence that row and that notice say - all of it; with none they say nothing |
 
 ```yaml
 archive:
   date: 2027-02-16        # optional - without it, 60 days after semester_end
   show_on_site: true      # optional - false keeps it off the site
+  description: >-         # optional - what students are told, in your own words
+    This cohort is archived on 2027-02-16: every repository in it becomes read-only.
 ```
 
 `archive:` with nothing under it means "yes, on the default date". With no block at all, or
