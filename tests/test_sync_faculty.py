@@ -577,3 +577,25 @@ def test_a_clean_course_config_has_no_faults(monkeypatch):
     )
     assert [p["github_handle"] for p in faculty["course_admins"]] == ["jan-g"]
     assert found == []
+
+
+def test_the_faculty_sweep_leaves_a_closed_out_cohort_alone(monkeypatch):
+    # Every grant it makes is a write into a read-only org. The live cohort beside it is
+    # still reconciled, so a course does not stop syncing because one term ended.
+    monkeypatch.setattr(sync_faculty, "live_cohorts", lambda org: ["Cohort-B"])
+    monkeypatch.setattr(sync_faculty, "discover_content_repos", lambda org: [])
+    monkeypatch.setattr(sync_faculty, "discover_assignments", lambda org: [])
+    admins: list[list[str]] = []
+    monkeypatch.setattr(
+        sync_faculty,
+        "sync_course_admins",
+        lambda course, cohorts, **k: admins.append(list(cohorts)) or 0,
+    )
+    seen: list[str] = []
+    monkeypatch.setattr(
+        sync_faculty,
+        "sync_cohort_instructors",
+        lambda course, cohort, *a, **k: seen.append(cohort) or 0,
+    )
+    assert sync_faculty.sync("Course") == 0
+    assert (seen, admins) == (["Cohort-B"], [["Cohort-B"]])

@@ -59,7 +59,7 @@ Things whose *literal spelling* is depended on from outside Python:
 
 - **CLI module names.** Seeded workflows and templates invoke `python3 -m dsl_course.<x>`:
   `assign`, `bootstrap_course`, `collect`, `deploy`, `derive`, `enrol_codes`, `grades`,
-  `list_orgs`, `notify`, `scaffold`, `schedule`, `scheduler`, `seed`, `site`,
+  `list_orgs`, `notify`, `propagate`, `scaffold`, `schedule`, `scheduler`, `seed`, `site`,
   `source_digest`, `status`, `syllabus`, `sync_faculty`, `sync_membership`, `sync_roster`,
   `sync_teams`, `teardown`.
   A rename strands every org until it refreshes. `assign` carries TWO modes on one flat
@@ -91,9 +91,10 @@ Things whose *literal spelling* is depended on from outside Python:
 - **Repo topics** are machinery markers: `dsl-course-hub`, `dsl-cohort`, `submission`, `gradebook`,
   `assignment-template`. Discovery reads them; renaming one is a discovery outage.
 - **An ARCHIVED `classroom-config`** is a cohort's "finished" marker. `teardown` archives it
-  last, after everything else it freezes; `seed.refresh`'s per-cohort loop reads it off the
-  org listing and skips that cohort whole, and `grades.write_team_lock` reads it so the
-  membership sync does not write into a sealed repo. So archiving one closes a cohort whether the person doing it meant
+  last, after everything else it freezes; `discovery.cohort_is_live` is what every
+  course-side sweep that WRITES asks (the scheduler, the faculty and membership syncs, the
+  enrolment codes, the site build), and `seed.refresh` and `grades.write_team_lock` read the
+  same flag for themselves off listings they already hold. So archiving one closes a cohort whether the person doing it meant
   that or not, and anything that freezes a cohort must do it in that order - the archived
   repo is read-only, and a marker set early strands whatever had not happened yet.
 - **`.github/cohort-courses-pages.yml`** is the cohort registry every dropdown reads, and

@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
-from dsl_course import gh_contents, grades, schedule_plan, site, site_repo
+from dsl_course import discovery, gh_contents, grades, schedule_plan, site, site_repo
 from dsl_course import schedule as schedule_mod
 from dsl_course.schedule import (
     AssignmentEntry,
@@ -159,6 +159,24 @@ def test_tbc_rows_render_with_theme_flags():
         Event("mid-term", "MidTerm Exam", date(2026, 11, 3), "exam", True), END_OF_TERM
     )
     assert "tbc: true" in out and "dateless" not in out
+
+
+def test_the_archive_row_is_a_special_event_that_says_what_freezes():
+    out = site._archive_entry(date(2027, 2, 16), date(2026, 12, 20))
+    assert "type: special_event" in out
+    assert 'description: "Cohort archived"' in out
+    assert "date: 2027-02-16T09:00:00" in out
+    assert "hide_time: true" in out  # a whole day, not a 09:00 appointment
+    assert "read-only" in out and "take a copy" in out
+
+
+def test_the_archive_row_only_reaches_the_updates_box_inside_its_window():
+    # The box is where a student would actually notice it, and two weeks is long enough
+    # to act on. Outside the window the row is still on the schedule, silently.
+    when = date(2027, 2, 16)
+    edge = when - schedule_mod.ARCHIVE_NOTICE
+    assert "announce: true" in site._archive_entry(when, edge)
+    assert "announce" not in site._archive_entry(when, edge - timedelta(days=1))
 
 
 def test_term_date_entry_hides_the_placeholder_time():
@@ -876,6 +894,36 @@ def test_synthesised_exams_appear_when_the_schedule_names_none(monkeypatch, tmp_
     assert "type: special_event" in events["01-project-clinic.md"]
 
 
+def test_the_archive_row_ships_with_the_rest_of_the_schedule(monkeypatch, tmp_path):
+    plan = _plan(
+        monkeypatch,
+        tmp_path,
+        Schedule(semester_end=date(2026, 12, 18), archive_date=date(2027, 2, 16)),
+    )
+    assert (
+        'description: "Cohort archived"'
+        in plan.collections["_events"]["cohort-archived.md"]
+    )
+
+
+def test_a_cohort_can_keep_its_archive_date_off_the_site(monkeypatch, tmp_path):
+    plan = _plan(
+        monkeypatch,
+        tmp_path,
+        Schedule(
+            semester_end=date(2026, 12, 18),
+            archive_date=date(2027, 2, 16),
+            archive_show_on_site=False,
+        ),
+    )
+    assert "cohort-archived.md" not in plan.collections["_events"]
+
+
+def test_a_cohort_with_no_archive_date_gets_no_row(monkeypatch, tmp_path):
+    plan = _plan(monkeypatch, tmp_path, Schedule(semester_start=date(2026, 9, 7)))
+    assert "cohort-archived.md" not in plan.collections["_events"]
+
+
 def test_term_date_rows_only_when_the_schedule_pins_the_bounds(monkeypatch, tmp_path):
     plan = _plan(
         monkeypatch,
@@ -1198,9 +1246,9 @@ def test_main_matches_a_registered_cohort_case_insensitively(monkeypatch):
 def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsys):
     # The lesson PR #151/#146 applied to the nightly refresh: the single try used to wrap
     # the whole loop, so one cohort's raise skipped every LATER cohort's site on the 06:00
-    # cron. main() imports discover_cohorts from .seed at call time - patch it at source.
+    # cron. The loop iterates the LIVE cohorts, which is what a test replaces here.
 
-    monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"])
+    monkeypatch.setattr(site, "live_cohorts", lambda org: ["Cohort-A", "Cohort-B"])
     seen: list[str] = []
 
     def fake_sync(course, cohort):
@@ -1454,3 +1502,40 @@ def test_a_config_without_the_template_header_line_is_left_alone():
         site_repo._stamp_config("course_name: x\n", ["course_name"])
         == "course_name: x\n"
     )
+
+
+def test_a_closed_out_cohorts_site_is_left_as_teardown_left_it(monkeypatch):
+    # The site repo is frozen with the rest of the cohort, and its last sync was the one
+    # teardown ran before freezing it. The live cohort beside it still rebuilds.
+    monkeypatch.setattr(
+        discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+    )
+    monkeypatch.setattr(
+        discovery, "repo_is_archived", lambda org, name: org == "Cohort-A"
+    )
+    seen: list[str] = []
+    monkeypatch.setattr(
+        site, "sync_site", lambda course, cohort: seen.append(cohort) or 0
+    )
+    monkeypatch.setattr(
+        "sys.argv", ["site", "sync", "--course-org", "Course", "--all-cohorts"]
+    )
+    assert site.main() == 0
+    assert seen == ["Cohort-B"]
+
+
+def test_a_dispatch_naming_a_closed_out_cohort_syncs_nothing(monkeypatch):
+    # Still REGISTERED, so it is not the trust-boundary refusal above - just nothing left
+    # to do, and a write that would 403.
+    monkeypatch.setattr(site, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(site, "cohort_is_live", lambda org: False)
+
+    def boom(*a, **k):
+        raise AssertionError("a frozen cohort's site must not be rebuilt")
+
+    monkeypatch.setattr(site, "sync_site", boom)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["site", "sync", "--course-org", "Course", "--cohort-org", "Cohort-A"],
+    )
+    assert site.main() == 0

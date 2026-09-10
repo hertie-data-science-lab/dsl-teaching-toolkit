@@ -2321,3 +2321,67 @@ def test_a_whole_block_written_as_a_list_names_the_block():
 def test_a_clean_plan_has_no_faults():
     sched = _from_text("releases:\n  l1:\n    event_datetime: 2026-09-15T10:00\n")
     assert sched.faults == [] and sched.dropped == []
+
+
+# ------------------------------------------------------------------ archive:
+
+
+def test_the_archive_date_defaults_to_sixty_days_after_the_term_ends():
+    # The grace is the point: the real courses this was measured against went on being
+    # pushed to for about three weeks past their last class.
+    sched = parse({"semester_end": "2026-12-18"})
+    assert sched.archive_date == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
+    assert sched.archive_show_on_site is True
+    assert sched.dropped == []
+
+
+def test_a_declared_archive_date_wins_over_the_default():
+    sched = parse({"semester_end": "2026-12-18", "archive": {"date": "2027-01-15"}})
+    assert sched.archive_date == date(2027, 1, 15)
+
+
+def test_a_cohort_with_no_term_end_has_no_archive_date():
+    # Nothing may freeze a whole cohort off a guess: with no semester_end there is no
+    # clock to freeze it against, so it never archives by itself.
+    assert parse({}).archive_date is None
+    assert parse({"archive": {"show_on_site": False}}).archive_date is None
+
+
+def test_a_cohort_with_no_term_end_can_still_name_its_own_archive_date():
+    assert parse({"archive": {"date": "2027-01-15"}}).archive_date == date(2027, 1, 15)
+
+
+def test_show_on_site_is_only_switched_off_by_a_real_false():
+    assert parse({"archive": {"show_on_site": False}}).archive_show_on_site is False
+    assert parse({"archive": {}}).archive_show_on_site is True
+
+
+def test_an_unreadable_archive_date_falls_back_and_is_flagged():
+    # A date nobody can read must not freeze the cohort on a day they did not choose, and
+    # must not crash the tick that reads the file either: it falls back to the default and
+    # is reported through the digest issue like any other unusable value.
+    sched = parse({"semester_end": "2026-12-18", "archive": {"date": "16/02/2027"}})
+    assert sched.archive_date == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
+    assert len(sched.dropped) == 1
+    assert sched.dropped[0].startswith("archive.date: unusable value")
+    assert "freezes at its default date" in sched.dropped[0]
+
+
+def test_an_archive_block_that_is_not_a_mapping_is_dropped_not_raised():
+    sched = parse({"semester_end": "2026-12-18", "archive": "2027-02-16"})
+    assert sched.archive_date == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
+    assert len(sched.dropped) == 1
+    assert "not a mapping" in sched.dropped[0]
+
+
+def test_a_stray_key_under_archive_is_flagged_and_ignored():
+    sched = parse({"semester_end": "2026-12-18", "archive": {"when": "2027-02-16"}})
+    assert sched.archive_date == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
+    assert len(sched.dropped) == 1
+    assert "archive.when" in sched.dropped[0]
+
+
+def test_archive_is_a_known_top_level_key():
+    # Not in KNOWN_TOP_LEVEL, the whole block reads as a typo and every cohort that writes
+    # one gets a red `Validate schedule` run for a key the parser now understands.
+    assert parse({"archive": {"date": "2027-02-16"}}).dropped == []

@@ -762,3 +762,27 @@ def test_a_hand_run_without_dispatched_by_never_consults_the_registry(monkeypatc
     )
     monkeypatch.setattr("sys.argv", ["enrol_codes", "--cohort-org", "Cohort-f2026"])
     assert (enrol_codes.main(), ran) == (0, ["Cohort-f2026"])
+
+
+def test_a_closed_out_cohort_is_sent_no_codes(monkeypatch):
+    # Registered, so the trust-boundary check passes - but its classroom-config is
+    # read-only, so the `code_sent_at` write-back could not land, and nobody is being
+    # enrolled into a term that is over.
+    monkeypatch.setattr(enrol_codes, "cohort_is_live", lambda org: False)
+
+    def boom(org):
+        raise AssertionError("a frozen cohort must not be sent enrolment codes")
+
+    monkeypatch.setattr(enrol_codes, "discover_cohorts", lambda org: ["Cohort-f2026"])
+    monkeypatch.setattr(enrol_codes, "run", boom)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "enrol_codes",
+            "--cohort-org",
+            "Cohort-f2026",
+            "--dispatched-by",
+            "Course-Org",
+        ],
+    )
+    assert enrol_codes.main() == 0

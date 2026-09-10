@@ -24,6 +24,7 @@ import yaml
 from .central import resolve_central_ref
 from .course import (
     COHORT_TOPIC,
+    CONFIG_REPO,
     COURSE_CONFIG,
     COURSE_HUB_TOPIC,
     GRADEBOOK_PREFIX,
@@ -32,8 +33,8 @@ from .course import (
 from .faults import ConfigFault, Unusable
 from .gh_contents import get_file_content, load_yaml_config, put_file, repo_tree
 from .ghcli import gh
-from .log import log_err, log_ok
-from .repos import default_branch
+from .log import log, log_err, log_ok
+from .repos import default_branch, repo_is_archived
 
 COHORTS_PATH = (
     "cohort-courses-pages.yml"  # standalone registry in the course org's .github repo
@@ -337,6 +338,36 @@ def discover_cohorts(course_org: str) -> list[str]:
     """Cohort orgs are listed explicitly in the course's .github/cohort-courses-pages.yml
     (naming-independent). `bootstrap --cohort --course X` appends; faculty & instructors can edit it."""
     return sorted(_read_cohorts(course_org))
+
+
+def cohort_is_live(cohort_org: str) -> bool:
+    """Whether `cohort_org` is still running, rather than closed out and left frozen.
+
+    An archived `classroom-config` IS the "this cohort is finished" marker - it is the last
+    thing `teardown` freezes, for exactly that reason - and everything a course-side sweep
+    would do to a finished cohort is a write into a read-only org: every one of them 403s,
+    every night, for the rest of the course's life. A finished term is a state somebody
+    chose, so it is a line rather than an error.
+
+    Says so once, here, so the six sweeps that skip such a cohort cannot word it six ways.
+    `repos.repo_is_archived` fails OPEN, so "could not tell" reads as LIVE: guessing that
+    way costs one failed write that says so out loud, and guessing the other way silently
+    stops syncing a cohort mid-term."""
+    if not repo_is_archived(cohort_org, CONFIG_REPO):
+        return True
+    log(f"  [skip] {cohort_org} (archived cohort - left frozen)")
+    return False
+
+
+def live_cohorts(course_org: str) -> list[str]:
+    """This course's registered cohorts, minus the ones that have been closed out.
+
+    What every course-side sweep that WRITES into its cohorts iterates - the scheduler,
+    the faculty and membership syncs, the site build. `discover_cohorts` stays the answer
+    to "which cohorts does this course own?", which is a question about the registry and
+    not about whether a term is over: a finished cohort is still registered, still on the
+    course profile page, and still refuses a dispatch that names somebody else's org."""
+    return [c for c in discover_cohorts(course_org) if cohort_is_live(c)]
 
 
 def register_cohort(course_org: str, cohort_org: str) -> bool:

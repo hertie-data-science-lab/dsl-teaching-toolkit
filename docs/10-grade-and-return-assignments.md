@@ -244,31 +244,48 @@ freeze carries on.
 
 ## Closing the cohort out
 
-Once the last grades have gone out, run **Archive cohort** on that cohort. It is what stops
-a finished cohort quietly keeping every student's write access to their repos for ever.
+**This happens on its own.** Sixty days after your `semester_end`, the scheduler archives
+the whole cohort org. You do not have to remember it, and nobody has to be around for it.
 
-It does five things, in this order:
+Set your own date, or turn the default off, in `schedule.yml`:
 
-1. revokes each student's direct access to the submission repos and gradebooks named after
-   them, and cancels any repo invitation they never accepted;
-2. archives those repos - GitHub's read-only freeze;
-3. archives `welcome`, so nobody can still Join a term that is over;
-4. writes `archive/teardown.md` into `classroom-config`, recording what was frozen;
-5. archives `classroom-config` itself, which is also what tells the nightly refresh this
-   cohort is finished and to leave it alone.
+```yaml
+archive:
+  date: 2027-02-16       # optional - default: semester_end + 60 days
+  show_on_site: true     # optional - default: true. A "Cohort archived" row on the site
+```
 
-**Nothing is deleted, ever.** Archiving is reversible: un-archive a repo from its own
-Settings page and it is back exactly as it was, and `students.csv` is what re-grants a
-student their access if you have to reopen one - a grade appeal, a late submission.
+A cohort that declares neither `semester_end` nor `archive.date` is **never** archived
+automatically. Its `schedule.yml` notice issue will say so, term after term.
 
-`dry_run` is on by default and prints the counts. The real run **refuses** unless your
-`schedule.yml` declares a `semester_end` that has passed; tick `force` to close out a cohort
-whose term dates were never filled in. Run it again if it fails part-way - it picks up where
-it stopped, and only the last step seals the record.
+**A fortnight before**, the cohort gets one issue in `classroom-config` and one email to
+the teaching team saying what is about to happen. That is the moment to move the date if
+you need longer. Students see it too, in the site's Updates box and on its schedule.
 
-What it does **not** touch: org membership, and the project teams that grant access to
-group repos. Those follow `students.csv` and `teams.csv` through Sync membership, so empty
-those files if you want the students out of the org as well.
+**On the day**, in this order:
+
+1. the cohort's edits to released material are offered back to the course org as a pull
+   request (see [Carrying cohort edits back](08-release-materials-to-cohort.md#carrying-cohort-edits-back));
+2. the toolkit's own open notices in `classroom-config` are closed;
+3. the website is synced one last time, so it ships the archived state;
+4. **every repository in the org is archived** - students' work, the released materials,
+   `welcome` (so nobody can still Join a term that is over), the website, `.github`;
+5. `archive/teardown.md` is written into `classroom-config`, recording what was frozen;
+6. `classroom-config` is archived last, which is what tells every nightly sync this cohort
+   is finished and to leave it alone.
+
+**Nobody is removed and nothing is deleted.** An archived repository is read-only for
+everyone, so students keep read access to their own work, to the materials and to their
+grades - indefinitely - and nobody, students or faculty, can change any of it. Org
+membership and the project teams are untouched.
+
+To reopen anything - a grade appeal, a late submission - un-archive that repo from its own
+Settings page. It comes back exactly as it was, write access included.
+
+**Archive cohort** is the button for closing a cohort out early. `dry_run` is on by default
+and prints the counts; the real run **refuses** until the archive date has arrived, and
+`force` overrides that. Run it again if it fails part-way - it picks up where it stopped,
+and only the last step seals the record.
 
 `classroom-config` is now the cohort's whole record of assessment - roster, teams, schedule,
 grading sheets, autograde detail, what was sent to whom, and `cohort-gradebook.csv`. Delete

@@ -36,7 +36,12 @@ import sys
 from datetime import UTC, datetime
 
 from . import mailer, roster
-from .discovery import COHORTS_PATH, course_name_for_cohort, discover_cohorts
+from .discovery import (
+    COHORTS_PATH,
+    cohort_is_live,
+    course_name_for_cohort,
+    discover_cohorts,
+)
 from .faults import Unusable
 from .gh_contents import get_file_with_sha, put_file, read_csv
 from .log import log_err, log_ok, log_person, log_step
@@ -525,6 +530,11 @@ def main() -> int:
             args.cohort_org, args.dispatched_by
         ):
             return 1
+        # A closed-out cohort's classroom-config is read-only, so the `code_sent_at` stamp
+        # this write-back depends on could not land - and nobody is being enrolled into a
+        # term that is over anyway.
+        if not cohort_is_live(args.cohort_org):
+            return 0
         return int(reds_the_run(run(args.cohort_org)))
     except RuntimeError as exc:
         log_err(str(exc))

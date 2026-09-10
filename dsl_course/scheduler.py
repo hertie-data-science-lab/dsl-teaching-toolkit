@@ -81,6 +81,7 @@ from . import (
     cadence,
     config_digest,
     discovery,
+    issues,
     notify,
     roster,
     schedule,
@@ -89,6 +90,7 @@ from . import (
     sync_faculty,
     sync_teams,
     teams,
+    teardown,
 )
 from .assign import provision_all, solution_released
 from .collect import (
@@ -102,7 +104,7 @@ from .collect import (
 )
 from .course import COURSE_ADMIN_TEAM
 from .deploy import deploy_many
-from .faults import Unusable
+from .faults import ConfigFault, Severity, Unusable
 from .grades import (
     cohort_sheet_faults,
     cutoff_at,
@@ -113,7 +115,6 @@ from .grades import (
 from .log import log, log_err, log_ok, log_step
 from .schedule import Release
 from .schedule_plan import deploy_dest
-from .seed import discover_cohorts
 
 # --------------------------------------------------------------------------- pure core
 
@@ -505,7 +506,7 @@ def _preflight_sources(
     # on its own clock (`ConfigFault.fires`).
     # NOT short-circuited when empty: an empty list is what CLOSES the issue, and the
     # tick after the last fault is fixed is the one that has to say so.
-    faults = sources + list(sched.faults)
+    faults = sources + list(sched.faults) + _no_archive_date(sched)
     if sources:
         log_step(
             f"{len(sources)} source(s) in {cohort_org}'s plan not staged in "
@@ -872,6 +873,136 @@ def _refresh_sheets(
     return errors
 
 
+def _no_archive_date(sched: schedule.Schedule) -> list[ConfigFault]:
+    """The advisory a cohort earns by having no date on which it is ever closed out.
+
+    A fault with no `fires`, because there is no moment it bites at - that is exactly
+    what is wrong with it. Raised here rather than by the parser, because a term with no
+    dates yet is a perfectly ordinary August and must not fail `Validate schedule`; it is
+    the unattended tick, term after term, that has standing to point out that this cohort
+    will still be live and joinable years from now.
+
+    Capped at ADVISORY, which is what keeps it a line in the digest issue rather than
+    email. An undated fault otherwise sits at WARNING - the notify bar itself
+    (`faults.NOTIFY_FROM`) - so this would be routed, mailed to the teaching team, and
+    then re-mailed by the digest's age ladder every term for ever, about a cohort whose
+    only sin is that nobody has typed a term end yet. The `.releaseignore` case caps
+    itself for the same reason: listed, never anybody's inbox."""
+    if sched.archive_date is not None:
+        return []
+    return [
+        ConfigFault(
+            "",
+            "this cohort declares neither `semester_end` nor `archive.date`, so nothing "
+            "will ever archive it - it stays live, writable and joinable after the term "
+            "ends",
+            field="semester_end",
+            file=schedule.SCHEDULE_PATH,
+            ceiling=Severity.ADVISORY,
+            fix_text=(
+                "add a `semester_end:`, which archives the cohort 60 days later, or an "
+                "`archive:` block with a `date:` of its own"
+            ),
+        )
+    ]
+
+
+# What the notice issue's body records once the mail beside it has gone out. Body-as-state,
+# like every other self-updating issue here (see `issues`): the tick that sends the mail
+# writes this, and every tick after it reads it and says nothing more.
+_MAILED_MARK = "<!-- dsl-archive-notice: mailed -->"
+
+
+def _archive_notice_body(cohort_org: str, when: date, mailed: bool) -> str:
+    """The notice issue's body. Rewritten on every tick, which GitHub does not email
+    about - the one mail is sent beside it, once."""
+    # The mark goes in ONLY when a mail actually went. It is the whole of this issue's
+    # state, so stamping it on a tick that sent nothing - no address in people.yml, no
+    # mail transport wired up - would record a mail that never happened and every later
+    # tick would read it and stay quiet. Unstamped, the fortnight goes on offering it, and
+    # the tick after somebody fixes the transport sends it.
+    told = (
+        f"The teaching team has been emailed this once.\n\n{_MAILED_MARK}\n"
+        if mailed
+        else "No email went with this notice - see the run log.\n"
+    )
+    return (
+        f"On **{when}** every repository in `{cohort_org}` is archived: students' work, "
+        f"the released materials, the enrolment repo and this one.\n\n"
+        f"Nothing is deleted and nobody is removed. Everyone who can read this cohort "
+        f"still can; nobody can change anything. Un-archiving a repository from its own "
+        f"Settings page brings it back exactly as it was.\n\n"
+        f"Anything you still need to change in this cohort, change before then. To move "
+        f"the date or take it away, edit `{schedule.SCHEDULE_PATH}` in this repo: an "
+        f"`archive:` block with its own `date:` overrides the default, which is sixty "
+        f"days after `semester_end`.\n\n"
+        f"{told}"
+    )
+
+
+def _archive_notice(
+    course_org: str, cohort_org: str, when: date, now: datetime, dry_run: bool
+) -> int:
+    """Keep ONE "Cohort archives on <date>" issue open in `classroom-config`, and mail the
+    teaching team once beside it. Returns the error count.
+
+    The mail is the half that reaches anybody: this fires in the weeks after a term ends,
+    when nobody is reading a cohort's GitHub notifications. It is sent once and the issue
+    body records that it went, so the fortnight of ticks after it says nothing more."""
+    repo = f"{cohort_org}/{schedule.CONFIG_REPO}"
+    title = teardown.archive_notice_title(when)
+    if dry_run:
+        log(f"    DRY-RUN  open `{title}` in {repo} and mail the teaching team")
+        return 0
+    try:
+        found = issues.find_issue(repo, title)
+    except RuntimeError as exc:
+        log_err(str(exc))
+        return 1
+    mailed = found is not None and _MAILED_MARK in found.body
+    if not mailed:
+        mailed = notify.notify_cohort_archiving(cohort_org, course_org, when, now)
+    body = _archive_notice_body(cohort_org, when, mailed)
+    if found is not None and found.body == body:
+        # `upsert_issue` edits unconditionally, and this body changes exactly once in the
+        # fortnight - when the mail goes. Four ticks an hour for fourteen days is about
+        # 1,300 identical edits per cohort otherwise, each one a write against the API
+        # budget and a line in the repo's own activity.
+        return 0
+    return issues.upsert_issue(repo, title, body, existing=found).errors
+
+
+def _archive_phase(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule,
+    now: datetime,
+    dry_run: bool,
+) -> int:
+    """Close the cohort out on its own `archive.date`, and give a fortnight's notice
+    first. Returns the error count.
+
+    AFTER the releases, so a copy due on the archive date still ships before the freeze;
+    and only ever for a cohort that named a date, because freezing a whole org off a
+    synthesised term end is the worst possible use of a guess.
+
+    `teardown.close_out` is idempotent and re-entrant, so a run that died half way is
+    simply picked up by the next tick - which is why this needs no fire-once marker of its
+    own. The tick after a successful one never reaches here at all: the sealed
+    `classroom-config` takes the cohort out of `discovery.live_cohorts`."""
+    if sched.archive_date is None:
+        return 0
+    today = now.date()
+    if today >= sched.archive_date:
+        if dry_run:
+            log(f"    DRY-RUN  archive {cohort_org} (due {sched.archive_date})")
+            return 0
+        return teardown.close_out(course_org, cohort_org, dry_run=False)
+    if sched.archive_date - today > schedule.ARCHIVE_NOTICE:
+        return 0
+    return _archive_notice(course_org, cohort_org, sched.archive_date, now, dry_run)
+
+
 def _release_phase(
     course_org: str,
     cohort_org: str,
@@ -988,6 +1119,9 @@ def run(
     errors = 0
     if release:
         errors += _release_phase(course_org, cohort_org, sched, now, dry_run, verdict)
+        # Last of the release pass: the cohort's own end. A release due today ships
+        # first, and then - on the day - the whole org is frozen behind it.
+        errors += _archive_phase(course_org, cohort_org, sched, now, dry_run)
     if autograde:
         log_step(f"Autograde {course_org} -> {cohort_org} as of {now.isoformat()}")
         errors += _autograde_passed_deadlines(
@@ -1016,9 +1150,13 @@ def _parse_now(raw: str | None) -> datetime:
 
 
 def _registered_cohorts(course_org: str) -> list[str] | None:
-    """The course org's registered cohorts, or None once it has said why it could not read
+    """The cohorts this tick releases into, or None once it has said why it could not read
     them. The listing is one API read at the very top of every tick; a fault there must
     end the run with an `[err]` line a faculty member can act on, not a raw traceback.
+
+    LIVE cohorts (`discovery.live_cohorts`): a cohort that has been closed out is frozen,
+    and every release, snapshot and digest write this tick would make on it 403s - four
+    times an hour, for the rest of the course's life.
 
     A registry that is MALFORMED is not a failed read: it is a hand-edited file a course
     admin has to fix, already reported to them by `_preflight_course` (which runs first,
@@ -1026,7 +1164,7 @@ def _registered_cohorts(course_org: str) -> list[str] | None:
     else - a rate limit, a token that lost its scope - is a read that failed, and the run
     is owed its red X for it."""
     try:
-        return discover_cohorts(course_org)
+        return discovery.live_cohorts(course_org)
     except Unusable as exc:
         log_err(f"{exc} - nothing to release until it is fixed; this run stays green.")
         return []
@@ -1172,6 +1310,10 @@ def main() -> int:
     if not args.cohort_org:
         log_err("pass --cohort-org or --all-cohorts.")
         return 1
+    # The break-glass path takes the same answer as the loop above: a cohort that has been
+    # closed out is frozen, and running it by hand would only spend a tick on 403s.
+    if not discovery.cohort_is_live(args.cohort_org):
+        return 0
     return run(args.course_org, args.cohort_org, now, dry_run=args.dry_run, **phases)
 
 

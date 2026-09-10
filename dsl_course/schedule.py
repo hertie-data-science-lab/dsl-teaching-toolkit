@@ -36,6 +36,9 @@ lifecycle, `events` are display-only calendar rows.
         event_datetime: 2026-10-14T10:00
     semester_start: 2026-09-07
     semester_end: 2026-12-18
+    archive:                         # OPTIONAL - when this cohort is frozen read-only.
+      date: 2027-02-16               # default: semester_end + 60 days
+      show_on_site: true             # default true: a row on the site's Schedule tab
 
 Every field is optional - a cohort with no schedule.yml (or a blank one) behaves exactly
 as before everywhere that reads it (releases are skipped, dates synthesised).
@@ -72,7 +75,7 @@ import os
 import re
 import sys
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from functools import cache
 from pathlib import Path
 from typing import NamedTuple
@@ -106,6 +109,21 @@ from .releaseignore import RELEASEIGNORE, excluded_in_tree
 from .repos import default_branch, repo_missing
 
 SCHEDULE_PATH = "schedule.yml"
+
+# How long after the declared term end a cohort is left running before it is frozen
+# read-only (see `dsl_course.teardown`). Sixty days, because the real courses this toolkit
+# was measured against went on being pushed to for about three weeks past their last class,
+# and a cohort that freezes while somebody is still finishing their marking is worse than
+# one that freezes late. A cohort that wants another date says so in `archive.date`.
+ARCHIVE_GRACE = timedelta(days=60)
+
+# How long before that date a cohort is TOLD. Two weeks is long enough to move the date,
+# to finish a late piece of marking or to pull a copy of anything somebody wants to keep,
+# and short enough that the notice is still about something imminent. Spelled once here
+# because two surfaces count back from the same date - the site's Updates box and the
+# notice issue-and-mail the scheduler files - and a fortnight on one and ten days on the
+# other would be the site and the inbox disagreeing about when a term ends.
+ARCHIVE_NOTICE = timedelta(days=14)
 
 # What a fault in schedule.yml has always been called here, and still is: `ConfigFault`
 # with a `kind` set. One type rather than two, so the digest, the mail and the ladder are
@@ -368,6 +386,12 @@ class Schedule:
     semester_end: date | None = None
     assignments: dict[str, AssignmentEntry] = field(default_factory=dict)
     events: list[Event] = field(default_factory=list)
+    # When this cohort is frozen read-only, and whether the site says so. Resolved by
+    # `parse`, never re-derived downstream: `archive.date` if the cohort declared one,
+    # else `semester_end + ARCHIVE_GRACE`, and None for a cohort that declares no
+    # `semester_end` - which is what stops a term with no dates freezing off a guess.
+    archive_date: date | None = None
+    archive_show_on_site: bool = True
     # Everything this parse could not use, one human-readable line each, naming the YAML
     # path and what it costs the cohort: entries thrown away outright (`_drop` - no date,
     # no source), and entries KEPT but not as written (`_flag_unknown_keys` for a stray
@@ -495,6 +519,7 @@ KNOWN_TOP_LEVEL = frozenset(
         "semester_end",
         "assignments",
         "events",
+        "archive",
         # DEPRECATED and ignored: enrolment codes are mailed on a push to students.csv,
         # not on a window. Still RECOGNISED, because live cohorts carry the block until it
         # is swept out of their schedule.yml by hand, and flagging it as an unknown key
@@ -615,7 +640,12 @@ def _flagged_datetime(
 
 
 def _flagged_date(
-    entry: dict, key: str, drops: Drops, where: str, cost: str
+    entry: dict,
+    key: str,
+    drops: Drops,
+    where: str,
+    cost: str,
+    lines: dict[str, int] | None = None,
 ) -> date | None:
     """`entry[key]` as a whole-day date, flagging a value that is there but does not
     parse. The date-only twin of `_flagged_datetime`, with the same absent-vs-unreadable
@@ -623,7 +653,7 @@ def _flagged_date(
     raw = entry.get(key)
     when = _coerce_date(raw)
     if when is None and raw is not None:
-        _flag_bad_value(drops, where, key, raw, cost)
+        _flag_bad_value(drops, where, key, raw, cost, lines)
     return when
 
 
@@ -1035,6 +1065,50 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
     return out
 
 
+KNOWN_ARCHIVE = frozenset({"date", "show_on_site"})
+
+
+def _parse_archive(
+    raw: object, semester_end: date | None, drops: Drops
+) -> tuple[date | None, bool]:
+    """The optional `archive:` block - `(when this cohort freezes, whether the site says
+    so)`.
+
+    Both halves have a default and neither is ever a crash, because this file is edited by
+    hand and the block decides when a whole cohort goes read-only: a date nobody can read
+    falls back to `semester_end + ARCHIVE_GRACE` and is FLAGGED, so it reaches the person
+    who wrote it through the digest issue rather than by freezing the cohort on a day they
+    did not choose. A block that is not a mapping at all is dropped the same way.
+
+    A cohort with no `semester_end` and no `archive.date` resolves to None: nothing
+    freezes it automatically, because there is no clock to freeze it against."""
+    default = semester_end + ARCHIVE_GRACE if semester_end else None
+    cost = (
+        f"this cohort freezes at its default date instead ({default})"
+        if default
+        else "nothing freezes this cohort automatically"
+    )
+    if raw is None:
+        return default, True
+    if not isinstance(raw, dict):
+        _drop(
+            drops,
+            "archive",
+            "not a mapping (it must be `date:` and/or `show_on_site:` under it)",
+            cost,
+            field_name="archive",
+        )
+        return default, True
+    lines = take_lines(raw)
+    _flag_unknown_keys(
+        drops, raw, KNOWN_ARCHIVE, "archive", "that setting is ignored", lines
+    )
+    return (
+        _flagged_date(raw, "date", drops, "archive", cost, lines) or default,
+        raw.get("show_on_site") is not False,
+    )
+
+
 def parse(meta: dict) -> Schedule:
     """Parse a loaded schedule.yml dict into a Schedule. Tolerant of missing/blank fields
     (a cohort with no schedule.yml behaves exactly as before). Anything it has to throw
@@ -1068,6 +1142,10 @@ def parse(meta: dict) -> Schedule:
         )
     term_cost = "the site synthesises term dates, shifting every session row"
     semester_start = _flagged_date(meta, "semester_start", drops, "", term_cost)
+    semester_end = _flagged_date(meta, "semester_end", drops, "", term_cost)
+    archive_date, archive_show_on_site = _parse_archive(
+        meta.get("archive"), semester_end, drops
+    )
     return Schedule(
         timezone=str(tz_name or DEFAULT_TZ),
         releases=_parse_releases(meta.get("releases"), tz, drops),
@@ -1075,9 +1153,11 @@ def parse(meta: dict) -> Schedule:
         # SYNTHESISES term dates from what it does know - so a bad separator quietly
         # shifts every weekly session row. Flag it.
         semester_start=semester_start,
-        semester_end=_flagged_date(meta, "semester_end", drops, "", term_cost),
+        semester_end=semester_end,
         assignments=_parse_assignments(meta.get("assignments"), tz, drops),
         events=_parse_events(meta.get("events"), tz, drops),
+        archive_date=archive_date,
+        archive_show_on_site=archive_show_on_site,
         dropped=drops.report,
         faults=drops.faults,
     )
