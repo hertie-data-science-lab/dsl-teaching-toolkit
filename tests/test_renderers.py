@@ -63,6 +63,7 @@ ALL_RENDERED = {
     "sync_membership": workflows_render.render_sync_membership(["Cohort-f2026"]),
     "send_codes": workflows_render.render_send_codes(),
     "distribute_grades": workflows_render.render_distribute_grades(["Cohort-f2026"]),
+    "propagate_cohort": workflows_render.render_propagate_cohort(["Cohort-f2026"]),
     "archive_cohort": workflows_render.render_archive_cohort(["Cohort-f2026"]),
     "bootstrap_cohort": workflows_render.render_bootstrap_cohort(),
     "refresh": workflows_render.render_refresh(),
@@ -115,9 +116,13 @@ JOB_TIMEOUTS = {
     "collect_submissions": 120,
     "distribute_grades": 120,
     "bootstrap_cohort": 60,
-    # Archive cohort revokes and freezes every submission repo and gradebook in a cohort,
-    # in series - the same "many repos, one at a time" shape as a handout.
+    # Archive cohort freezes every repo in a cohort org, in series - the same "many
+    # repos, one at a time" shape as a handout - and propagates first, which clones every
+    # source repo the cohort has been released from.
     "archive_cohort": 60,
+    # Propagate cohort edits clones every cohort dest and every course source the plan
+    # names, then pushes and opens a pull request per source.
+    "propagate_cohort": 60,
     # Patch released assignment reads and commits into every submission repo of one
     # assignment, in series - the same shape as a handout.
     "patch_assignment": 60,
@@ -156,6 +161,7 @@ DATED_RENDERED = {
     ),
     "sync_membership": workflows_render.render_sync_membership(COHORTS_2),
     "distribute_grades": workflows_render.render_distribute_grades(COHORTS_2),
+    "propagate_cohort": workflows_render.render_propagate_cohort(COHORTS_2),
     "archive_cohort": workflows_render.render_archive_cohort(COHORTS_2),
     "sync_site": workflows_render.render_sync_site(COHORTS_2),
     "publish_site": workflows_render.render_publish_site(REPOS_2),
@@ -354,6 +360,22 @@ def test_archive_cohort_previews_by_default_and_never_deletes():
     # Faculty read the header before they click a button whose name sounds final: it has
     # to say there, in the file, that this freezes and never destroys.
     assert "NOTHING IS DELETED" in rendered
+
+
+def test_propagate_cohort_previews_by_default():
+    # It force-pushes a branch and opens pull requests in the course org, so it fails
+    # closed like the other cross-org buttons: only an explicit `false` reaches the CLI
+    # as --no-dry-run. The course org is the repo this runs in.
+    rendered = workflows_render.render_propagate_cohort(["Cohort-f2026"])
+    inp = workflow_inputs(rendered)
+    assert set(inp) == {"cohort_org", "dry_run"}
+    assert inp["dry_run"]["default"] is True
+    assert workflows_render._DRY_RUN_GATE in rendered
+    assert "python3 -m dsl_course.propagate" in rendered
+    assert "COURSE_ORG: ${{ github.repository_owner }}" in rendered
+    # Faculty read the header before they press it: it has to say there that a deletion
+    # made in the cohort is not carried back.
+    assert "DELETIONS ARE NOT PROPAGATED" in rendered
 
 
 def test_sync_membership_is_a_consolidated_reconcile():
@@ -607,7 +629,9 @@ def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
     assert len(commits) == 1
     repo, files, deleted = commits[0]
     assert repo == ".github"
-    assert len(files) == 18  # three grading buttons became two, plus Archive cohort
+    assert (
+        len(files) == 19
+    )  # three grading buttons became two, plus the two end-of-term ones
     assert all(path.startswith(".github/workflows/") for path in files)
     assert deleted == [
         ".github/workflows/sync-enrolment.yml",
@@ -1583,6 +1607,7 @@ SERIALISED_WRITERS = {
     # third arrival cancels the second).
     "send_codes": "send-codes-${{ github.event.client_payload.cohort_org }}",
     "sync_membership": "sync-membership",
+    "propagate_cohort": "propagate-cohort",
     "archive_cohort": "archive-cohort",
     "sync_site": "sync-site",
     "publish_site": "publish-course-website",

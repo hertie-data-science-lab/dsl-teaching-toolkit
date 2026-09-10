@@ -44,6 +44,7 @@ Full flow: [Grade and return assignments](../10-grade-and-return-assignments.md)
 
 | Action | Effect |
 | --- | --- |
+| **Propagate cohort edits** | Carry the cohort's edits to released material back into the course org. For every path already released to it, what the cohort has now is copied over the course org's copy on a branch `from-<cohort-org>`, one commit per path, and one pull request per source repo asks faculty to merge, cherry-pick or close. **Deletions are not propagated** - a file the cohort dropped is named in the pull request and left where it is. The branch is cut fresh and force-pushed on every run, so each run proposes what the cohort has then. **`dry_run` defaults to `true`**. Archive cohort runs it first. See [08](../08-release-materials-to-cohort.md#carrying-cohort-edits-back). |
 | **Archive cohort** | Close a finished cohort out: revoke each student's direct access to the submission repos and gradebooks named after them, archive those repos, archive `welcome` so a finished term cannot still be joined, record what was frozen in `classroom-config/archive/teardown.md`, and archive `classroom-config` last - which also tells the nightly refresh to leave the cohort alone. **Nothing is deleted** and archiving is reversible from each repo's Settings. **`dry_run` defaults to `true`**; a real run refuses unless `schedule.yml`'s `semester_end` has passed, and `force` overrides that. Safe to re-run - it resumes. See [10](../10-grade-and-return-assignments.md#closing-the-cohort-out). |
 
 ## Optional: public course website

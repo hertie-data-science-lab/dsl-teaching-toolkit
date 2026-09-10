@@ -367,10 +367,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--course-org", required=True, help="Course org (the target)")
     parser.add_argument("--cohort-org", required=True, help="Cohort org (the source)")
+    # Default ON, like every other button whose real run reaches into another org:
+    # the rendered workflow passes --dry-run / --no-dry-run explicitly, so a bare local
+    # invocation cannot force-push a branch and open pull requests by accident.
     parser.add_argument(
         "--dry-run",
-        action="store_true",
-        help="Print the cohort -> course path pairs and exit, cloning nothing.",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Print the cohort -> course path pairs and exit, cloning nothing (default).",
     )
     args = parser.parse_args()
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
