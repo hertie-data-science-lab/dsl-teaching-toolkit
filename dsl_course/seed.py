@@ -338,8 +338,8 @@ def _propagate_repo_secret(course_org: str, repos: list[str]) -> int:
     """On GitHub Free, org secrets don't reach PRIVATE repos - so set DSL_BOT_TOKEN as a
     repo secret on each repo that hosts a run-from-repo workflow - the content repos and
     the assignment templates - from the token this run already holds, letting those
-    workflows authenticate. Same exposure either way: instructors hold push on both. Returns the number of repos the secret
-    could NOT be set on: a repo left with an empty DSL_BOT_TOKEN runs its Release workflows
+    workflows authenticate. Same exposure either way: instructors hold push on both.
+    Returns the number of repos the secret could NOT be set on: a repo left with an empty DSL_BOT_TOKEN runs its Release workflows
     with no auth and fails weeks later when faculty run them, so a failure here must
     count into refresh's exit code rather than pass silently.
 
@@ -451,8 +451,8 @@ def _converge_org(
 
 def refresh(course_org: str) -> int:
     """Refresh both layers: the run-from-repo actions in every content repo and
-    assignment template, AND the central org-level workflows in .github; converge each materials repo's
-    SYSTEM-owned files (maintainer guide, syllabus example) and its seeded stubs;
+    assignment template, AND the central org-level workflows in .github; converge each
+    materials repo's SYSTEM-owned files (maintainer guide, syllabus example) and its seeded stubs;
     repopulate dropdowns; converge each org's repo descriptions, faculty-team
     access and machinery topics (_converge_org_metadata) and rebuild its profile README
     off the same listing; re-push every registered cohort's welcome workflows, its
@@ -507,35 +507,28 @@ def refresh(course_org: str) -> int:
             log_err(f"{exc} {course_org}'s workflows are NOT being re-rendered.")
             return 1
 
-    for repo in sorted(targets):
-        failures += render(
-            lambda repo=repo: push_content_workflows(
-                course_org,
-                repo,
-                cohorts,
-                assignments,
-                central_ref,
-                workflows=RELEASE_WORKFLOWS,
+    def place(repo: str, workflows: tuple[str, ...]) -> int:
+        """One repo's run-from-repo buttons, re-rendered at this org's ref. Two sweeps
+        below place different sets into different repos, and every argument but those two
+        is the same in both - written once so an added argument is added once."""
+        return render(
+            lambda: push_content_workflows(
+                course_org, repo, cohorts, assignments, central_ref, workflows=workflows
             )
         )
+
+    for repo in sorted(targets):
+        failures += place(repo, RELEASE_WORKFLOWS)
         # A no-op on the code and dataset repos this sweep also returns; the gate is
         # inside, so no caller can forget it.
         failures += scaffold.refresh_materials_system_files(course_org, repo)
-    # An assignment template hosts the hand-out button and nothing else, so faculty can
-    # release the assignment they are editing without leaving its Actions tab. Here as
-    # well as at New assignment, so a template scaffolded before this - or one whose seed
-    # failed - gets the button on the next nightly run rather than never.
+    # An assignment template hosts the hand-out button and nothing else (see
+    # `TEMPLATE_WORKFLOWS`), so faculty can release the assignment they are editing
+    # without leaving its Actions tab. Here as well as at New assignment, so a template
+    # scaffolded before this - or one whose seed failed - gets the button on the next
+    # nightly run rather than never.
     for repo in assignments:
-        failures += render(
-            lambda repo=repo: push_content_workflows(
-                course_org,
-                repo,
-                cohorts,
-                assignments,
-                central_ref,
-                workflows=TEMPLATE_WORKFLOWS,
-            )
-        )
+        failures += place(repo, TEMPLATE_WORKFLOWS)
     failures += _propagate_repo_secret(course_org, targets + assignments)
     failures += render(lambda: seed_github_workflows(course_org, central_ref))
     failures += _write_heartbeat(course_org)

@@ -1157,10 +1157,10 @@ def scaffold_assignment(
         )
         return 1
     # Equip the hand-out button, as scaffold_materials equips the release ones: faculty
-    # run Release assignment from this repo's own Actions tab. Only that one - Release
-    # materials from a template would name a source with no session folders in it - and
-    # `assign.withhold_from_template` strips it off the cohort copy, so no student repo
-    # generated from this template inherits it.
+    # run Release assignment from this repo's own Actions tab. Which buttons a template
+    # hosts, and why, is `TEMPLATE_WORKFLOWS`; `assign.withhold_from_template` is what
+    # strips them off the cohort copy, so no student repo generated from this template
+    # inherits one.
     if push_content_workflows(
         org,
         repo,

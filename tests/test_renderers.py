@@ -611,12 +611,11 @@ def test_an_assignment_template_hosts_only_the_hand_out_button(monkeypatch):
     # so a template hosts Release assignment alone - and it opens on ITSELF, the way the
     # materials button in a content repo pre-fills that repo's own name.
     commits = []
-
-    def fake_put_files(org, repo, files, message, *, delete=()):
-        commits.append(files)
-        return True
-
-    monkeypatch.setattr(workflows_place, "put_files", fake_put_files)
+    monkeypatch.setattr(
+        workflows_place,
+        "put_files",
+        lambda org, repo, files, message, **k: commits.append(files) or True,
+    )
     assert (
         workflows_place.push_content_workflows(
             "Course",

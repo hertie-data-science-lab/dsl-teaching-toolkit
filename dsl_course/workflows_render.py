@@ -778,11 +778,17 @@ def _assignment_input(
     `description` is for the buttons that do not hand anything out (deriving a starter,
     patching a released one), where "hand out from" would be a lie about what the run does.
 
-    `default` pre-selects one template; empty leaves `_choice_input`'s newest-term pick.
+    `default` pre-selects one template. A name that is not among them is dropped rather
+    than emitted, and dropped HERE rather than at the call site, because the option list
+    is what this function holds: GitHub will not load a choice input whose `default:` is
+    off its own `options:`. Dropped or empty, `_choice_input`'s newest-term pick stands.
     """
     if assignments:
         return _choice_input(
-            "course_source_repo", description, assignments, default or None
+            "course_source_repo",
+            description,
+            assignments,
+            default if default in assignments else None,
         )
     return (
         f'      course_source_repo:\n        description: "{description} (e.g. assignment-1-f2026)"\n'
@@ -800,7 +806,6 @@ def render_provision(
     `render_release` pre-fills `course_source_repo` with the repo it is seeded into. The
     org `.github` copy, and a materials repo, name no template of their own and get the
     ordinary newest-term pick."""
-    options = assignments or []
     return f"""name: Release assignment
 
 # Generates one private repo per onboarded student from the chosen assignment template
@@ -811,7 +816,7 @@ on:
   workflow_dispatch:
     inputs:
 {_choice_input("cohort_org", "Target cohort org", cohort_orgs)}
-{_assignment_input(options, default=source_repo if source_repo in options else "")}
+{_assignment_input(assignments or [], default=source_repo)}
       include_solution:
         description: "Also push the solution (from the template's solution branch) into each student repo"
         type: boolean
