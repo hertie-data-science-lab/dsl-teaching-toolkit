@@ -876,6 +876,10 @@ def _refresh_sheets(
 def _no_archive_date(sched: schedule.Schedule) -> list[ConfigFault]:
     """The advisory a cohort earns by having no date on which it is ever closed out.
 
+    Two ways to earn it, and they need different sentences: writing no `archive:` block at
+    all, which is a decision - archiving is opt-in - and writing one no date can be
+    derived from, which is a mistake. `archive_date` is None for both.
+
     A fault with no `fires`, because there is no moment it bites at - that is exactly
     what is wrong with it. Raised here rather than by the parser, because a term with no
     dates yet is a perfectly ordinary August and must not fail `Validate schedule`; it is
@@ -890,19 +894,30 @@ def _no_archive_date(sched: schedule.Schedule) -> list[ConfigFault]:
     itself for the same reason: listed, never anybody's inbox."""
     if sched.archive_date is not None:
         return []
+    if sched.archive_declared:
+        what = (
+            "this cohort's `archive:` block names no `date:` and the cohort no "
+            "`semester_end`, so its archive date cannot be derived - nothing will ever "
+            "archive it"
+        )
+        fix_text = "give the `archive:` block a `date:`, or add a `semester_end:`"
+    else:
+        what = (
+            "this cohort writes no `archive:` block, so nothing will ever archive it - "
+            "it stays live, writable and joinable after the term ends"
+        )
+        fix_text = (
+            "add an `archive:` block; empty, it archives the cohort 60 days after "
+            "`semester_end`"
+        )
     return [
         ConfigFault(
             "",
-            "this cohort declares neither `semester_end` nor `archive.date`, so nothing "
-            "will ever archive it - it stays live, writable and joinable after the term "
-            "ends",
-            field="semester_end",
+            what,
+            field="archive",
             file=schedule.SCHEDULE_PATH,
             ceiling=Severity.ADVISORY,
-            fix_text=(
-                "add a `semester_end:`, which archives the cohort 60 days later, or an "
-                "`archive:` block with a `date:` of its own"
-            ),
+            fix_text=fix_text,
         )
     ]
 
@@ -933,9 +948,9 @@ def _archive_notice_body(cohort_org: str, when: date, mailed: bool) -> str:
         f"still can; nobody can change anything. Un-archiving a repository from its own "
         f"Settings page brings it back exactly as it was.\n\n"
         f"Anything you still need to change in this cohort, change before then. To move "
-        f"the date or take it away, edit `{schedule.SCHEDULE_PATH}` in this repo: an "
-        f"`archive:` block with its own `date:` overrides the default, which is sixty "
-        f"days after `semester_end`.\n\n"
+        f"the date, edit the `archive:` block in `{schedule.SCHEDULE_PATH}` in this repo: "
+        f"its own `date:` overrides the default, which is sixty days after "
+        f"`semester_end`. Delete the block and nothing archives this cohort at all.\n\n"
         f"{told}"
     )
 
@@ -983,8 +998,8 @@ def _archive_phase(
     first. Returns the error count.
 
     AFTER the releases, so a copy due on the archive date still ships before the freeze;
-    and only ever for a cohort that named a date, because freezing a whole org off a
-    synthesised term end is the worst possible use of a guess.
+    and only ever for a cohort whose `archive:` block asked for it, because freezing a
+    whole org nobody asked to freeze is the worst possible use of a default.
 
     `teardown.close_out` is idempotent and re-entrant, so a run that died half way is
     simply picked up by the next tick - which is why this needs no fire-once marker of its

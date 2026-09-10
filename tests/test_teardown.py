@@ -140,6 +140,8 @@ def test_a_passed_semester_end_no_longer_opens_the_gate(org, monkeypatch):
 
 
 def test_force_closes_a_cohort_that_has_no_archive_date_at_all(org, monkeypatch):
+    # Which is every cohort that writes no `archive:` block - archiving is opt-in, and
+    # closing one of those out is a person's decision, taken with the button's `force`.
     monkeypatch.setattr(teardown.schedule, "load", lambda o: _sched(None, None))
     assert teardown.close_out(COURSE, COHORT, dry_run=False) == 1
     assert org == []

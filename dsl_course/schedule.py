@@ -36,8 +36,8 @@ lifecycle, `events` are display-only calendar rows.
         event_datetime: 2026-10-14T10:00
     semester_start: 2026-09-07
     semester_end: 2026-12-18
-    archive:                         # OPTIONAL - when this cohort is frozen read-only.
-      date: 2027-02-16               # default: semester_end + 60 days
+    archive:                         # OPTIONAL - and the SWITCH: with no block, nothing
+      date: 2027-02-16               # ever freezes this cohort. default: semester_end + 60
       show_on_site: true             # default true: a row on the site's Schedule tab
 
 Every field is optional - a cohort with no schedule.yml (or a blank one) behaves exactly
@@ -114,7 +114,8 @@ SCHEDULE_PATH = "schedule.yml"
 # read-only (see `dsl_course.teardown`). Sixty days, because the real courses this toolkit
 # was measured against went on being pushed to for about three weeks past their last class,
 # and a cohort that freezes while somebody is still finishing their marking is worse than
-# one that freezes late. A cohort that wants another date says so in `archive.date`.
+# one that freezes late. A cohort that wants another date says so in `archive.date`, and
+# only a cohort that writes the block at all is ever archived off this (`_parse_archive`).
 ARCHIVE_GRACE = timedelta(days=60)
 
 # How long before that date a cohort is TOLD. Two weeks is long enough to move the date,
@@ -387,11 +388,15 @@ class Schedule:
     assignments: dict[str, AssignmentEntry] = field(default_factory=dict)
     events: list[Event] = field(default_factory=list)
     # When this cohort is frozen read-only, and whether the site says so. Resolved by
-    # `parse`, never re-derived downstream: `archive.date` if the cohort declared one,
-    # else `semester_end + ARCHIVE_GRACE`, and None for a cohort that declares no
-    # `semester_end` - which is what stops a term with no dates freezing off a guess.
+    # `parse`, never re-derived downstream: None unless the cohort writes an `archive:`
+    # block at all, then `archive.date` if that block names one, else `semester_end +
+    # ARCHIVE_GRACE` - which is what stops a term with no dates freezing off a guess.
     archive_date: date | None = None
     archive_show_on_site: bool = True
+    # Whether the cohort wrote an `archive:` block at all. Only `scheduler._no_archive_date`
+    # reads it, to tell "nobody asked for archiving" from "asked, but no date can be
+    # derived" - two different things to say, and `archive_date` is None for both.
+    archive_declared: bool = False
     # Everything this parse could not use, one human-readable line each, naming the YAML
     # path and what it costs the cohort: entries thrown away outright (`_drop` - no date,
     # no source), and entries KEPT but not as written (`_flag_unknown_keys` for a stray
@@ -1069,19 +1074,29 @@ KNOWN_ARCHIVE = frozenset({"date", "show_on_site"})
 
 
 def _parse_archive(
-    raw: object, semester_end: date | None, drops: Drops
-) -> tuple[date | None, bool]:
+    meta: dict, semester_end: date | None, drops: Drops
+) -> tuple[date | None, bool, bool]:
     """The optional `archive:` block - `(when this cohort freezes, whether the site says
-    so)`.
+    so, whether it asked to freeze at all)`.
 
-    Both halves have a default and neither is ever a crash, because this file is edited by
-    hand and the block decides when a whole cohort goes read-only: a date nobody can read
-    falls back to `semester_end + ARCHIVE_GRACE` and is FLAGGED, so it reaches the person
-    who wrote it through the digest issue rather than by freezing the cohort on a day they
-    did not choose. A block that is not a mapping at all is dropped the same way.
+    The block IS the switch. A cohort that writes none is never frozen automatically:
+    every repository in an org going read-only is far too large a thing to happen off a
+    date nobody typed, and the site row announcing it is worse still - it tells students a
+    term ends on a day their own schedule.yml never mentions. Writing the block, empty or
+    not, is what turns archiving on; sixty days after `semester_end` by default.
 
-    A cohort with no `semester_end` and no `archive.date` resolves to None: nothing
-    freezes it automatically, because there is no clock to freeze it against."""
+    Inside the block neither half is ever a crash, because this file is edited by hand: a
+    date nobody can read falls back to `semester_end + ARCHIVE_GRACE` and is FLAGGED, so
+    it reaches the person who wrote it through the digest issue rather than by freezing
+    the cohort on a day they did not choose. A block that is not a mapping at all is
+    dropped the same way.
+
+    A block with neither `date:` nor a `semester_end` to count from resolves to None: it
+    asked, but there is no clock to freeze it against, which `scheduler._no_archive_date`
+    says out loud."""
+    if "archive" not in meta:
+        return None, True, False
+    raw = meta["archive"]
     default = semester_end + ARCHIVE_GRACE if semester_end else None
     cost = (
         f"this cohort freezes at its default date instead ({default})"
@@ -1089,7 +1104,7 @@ def _parse_archive(
         else "nothing freezes this cohort automatically"
     )
     if raw is None:
-        return default, True
+        return default, True, True
     if not isinstance(raw, dict):
         _drop(
             drops,
@@ -1098,7 +1113,7 @@ def _parse_archive(
             cost,
             field_name="archive",
         )
-        return default, True
+        return default, True, True
     lines = take_lines(raw)
     _flag_unknown_keys(
         drops, raw, KNOWN_ARCHIVE, "archive", "that setting is ignored", lines
@@ -1106,6 +1121,7 @@ def _parse_archive(
     return (
         _flagged_date(raw, "date", drops, "archive", cost, lines) or default,
         raw.get("show_on_site") is not False,
+        True,
     )
 
 
@@ -1143,8 +1159,8 @@ def parse(meta: dict) -> Schedule:
     term_cost = "the site synthesises term dates, shifting every session row"
     semester_start = _flagged_date(meta, "semester_start", drops, "", term_cost)
     semester_end = _flagged_date(meta, "semester_end", drops, "", term_cost)
-    archive_date, archive_show_on_site = _parse_archive(
-        meta.get("archive"), semester_end, drops
+    archive_date, archive_show_on_site, archive_declared = _parse_archive(
+        meta, semester_end, drops
     )
     return Schedule(
         timezone=str(tz_name or DEFAULT_TZ),
@@ -1158,6 +1174,7 @@ def parse(meta: dict) -> Schedule:
         events=_parse_events(meta.get("events"), tz, drops),
         archive_date=archive_date,
         archive_show_on_site=archive_show_on_site,
+        archive_declared=archive_declared,
         dropped=drops.report,
         faults=drops.faults,
     )

@@ -146,11 +146,11 @@ class Closed(NamedTuple):
 def archive_due(sched: schedule.Schedule, today: date) -> bool:
     """Whether this cohort's archive date has arrived.
 
-    `semester_end` alone is deliberately NOT enough any more: the sixty-day grace after it
-    is the whole point (`schedule.ARCHIVE_GRACE`), because a term goes on being pushed to
-    for weeks after its last class. A cohort with no `archive.date` at all - no
-    `semester_end` and no override - is never due, and needs `--force`, which is a person
-    taking the decision instead."""
+    A cohort that writes no `archive:` block has no such date and is never due: archiving
+    is opt-in, so closing it out is `--force`, which is a person taking the decision
+    instead. Where the block is written, the sixty-day grace after `semester_end` is the
+    whole point (`schedule.ARCHIVE_GRACE`), because a term goes on being pushed to for
+    weeks after its last class."""
     return sched.archive_date is not None and sched.archive_date <= today
 
 
@@ -413,7 +413,8 @@ def close_out(
         declared = (
             f"archives on {sched.archive_date}"
             if sched.archive_date
-            else "declares no archive date and no semester_end to derive one from"
+            else "names no archive date - it has no `archive:` block, or none with a "
+            "date anything can be derived from"
         )
         log_err(
             f"{cohort_org} is not due to be archived: {CONFIG_REPO}/"

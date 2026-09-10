@@ -3259,6 +3259,7 @@ def test_a_cohort_with_no_archive_date_earns_an_advisory_in_its_own_digest(monke
     # A fault with no clock: there is no moment it bites at, which is exactly what is
     # wrong with it. Not a parser drop, so `Validate schedule` stays green in August.
     (fault,) = scheduler._no_archive_date(Schedule())
+    assert "writes no `archive:` block" in fault.what
     assert "ever archive it" in fault.what
     assert fault.fires is None and fault.file == "schedule.yml"
     # And it stays a LINE. An undated fault sits at the notify bar by default, so without
@@ -3266,3 +3267,11 @@ def test_a_cohort_with_no_archive_date_earns_an_advisory_in_its_own_digest(monke
     # ladder every term, about a cohort whose term end nobody has typed yet.
     assert fault.severity(WHEN) < faults_mod.NOTIFY_FROM
     assert scheduler._no_archive_date(Schedule(archive_date=ARCHIVES)) == []
+
+
+def test_a_block_no_date_can_be_derived_from_says_that_instead(monkeypatch):
+    # Not writing the block is a decision; writing one nothing can date is a mistake, and
+    # telling a cohort to write a block it already wrote helps nobody.
+    (fault,) = scheduler._no_archive_date(Schedule(archive_declared=True))
+    assert "archive date cannot be derived" in fault.what
+    assert fault.severity(WHEN) < faults_mod.NOTIFY_FROM
