@@ -971,8 +971,8 @@ def test_refresh_gives_every_assignment_template_the_hand_out_button(monkeypatch
     )
 
     assert seed.refresh("Course-Org") == 0
-    # A template hosts the hand-out button ALONE: Release materials from it would name a
-    # source holding no session folders.
+    # Which SET reaches which repo; what is in that set is pinned beside the renderer
+    # (test_an_assignment_template_hosts_only_the_hand_out_button).
     assert placed == [
         ("course-materials-f2026", workflows_place.RELEASE_WORKFLOWS),
         ("assignment-1-f2026", workflows_place.TEMPLATE_WORKFLOWS),

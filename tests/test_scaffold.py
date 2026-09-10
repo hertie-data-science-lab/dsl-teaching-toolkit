@@ -233,8 +233,8 @@ def test_a_fresh_assignment_gets_the_hand_out_button_and_nothing_else(
     fake, monkeypatch
 ):
     # The seeded actions table tells faculty New assignment bootstraps the release
-    # workflows with the template. Just the one, though: Release materials from a template
-    # would name a source with no session folders in it.
+    # workflows with the template. Just the one, though - which set that is gets pinned
+    # beside the renderer; what this holds is that the scaffold asks for the template one.
     asked: list[tuple[str, tuple[str, ...]]] = []
     monkeypatch.setattr(
         scaffold,
