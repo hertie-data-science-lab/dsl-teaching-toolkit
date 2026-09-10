@@ -117,10 +117,11 @@ def _is_infra_repo(repo: dict) -> bool:
 
     The single exclusion list behind BOTH discovery functions, so a repo type added on
     one side can't leak into the other: a generated `<org>.github.io` site repo (public!)
-    must never be treated as a content repo - discover_content_repos' repos HOST the
-    faculty workflows and get the org-admin DSL_BOT_TOKEN set as a repo secret - and a
-    private `grades-<handle>` gradebook must never show up as a release target or get
-    tree-scanned for sessions.
+    must never be treated as a content repo - a repo this returns False for HOSTS faculty
+    workflows and gets the org-admin DSL_BOT_TOKEN set as a repo secret - and a private
+    `grades-<handle>` gradebook must never show up as a release target or get tree-scanned
+    for sessions. It is not the only route to that token any more: an assignment template
+    is excluded here and is equipped, and mirrored, by `discover_assignments` instead.
     """
     name = repo["name"]
     if name in INFRA_REPOS or name.endswith(".github.io"):
@@ -508,11 +509,17 @@ def handed_out_assignments(repos: list[dict]) -> frozenset[str]:
 
 
 def discover_content_repos(course_org: str) -> list[str]:
-    """Repos that should HOST the release workflows: the materials repo(s), not the infra
+    """Repos a materials release can come OUT of: the materials repo(s), not the infra
     repos (_is_infra_repo - notably NOT the public `<org>.github.io` site repo, which
     would otherwise be handed the org-admin token as a repo secret) and not the
-    assignment-* template repos (those are generate sources - equipping them would copy
-    the faculty & instructors workflows into every student repo)."""
+    assignment-* template repos, which hold a brief and a starter rather than the session
+    folders a release copies - and which every student repo is GENERATED FROM, so what one
+    of them hosts has to be stripped off the cohort copy first
+    (`assign.withhold_from_template`) rather than placed and forgotten.
+
+    So this is the Release materials SOURCE dropdown, and the repos that host that button.
+    It is NOT "every repo with a run-from-repo workflow": an assignment template hosts
+    Release assignment, and `discover_assignments` is the list of those."""
     return sorted(
         r["name"]
         for r in list_org_repos(course_org)

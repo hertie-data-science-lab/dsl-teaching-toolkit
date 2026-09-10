@@ -112,9 +112,9 @@ So a TA on f2026 can `git push` labs into the course org level `course-materials
 
 ## Only staff in these teams
 
-`DSL_BOT_TOKEN` is mirrored as a repo secret onto every course-org content repo (GitHub Free
-does not deliver org secrets to private repos), and a repo secret is readable by anyone with
-write on the repo. **Write on a content repo is the bot token** - `instructors` and
+`DSL_BOT_TOKEN` is mirrored as a repo secret onto every course-org content repo and assignment
+template (GitHub Free does not deliver org secrets to private repos), and a repo secret is
+readable by anyone with write on the repo. **Write on either is the bot token** - `instructors` and
 `instructors-<tag>` hold it, so put only teaching staff in them; a guest who needs to read
 materials gets read on that one repo, by hand. This is rotation between trusted colleagues,
 not a security boundary.

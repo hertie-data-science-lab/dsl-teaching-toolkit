@@ -582,6 +582,7 @@ def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
             ["Cohort-f2026"],
             ["assignment-1-f2026"],
             "release",
+            workflows=workflows_place.RELEASE_WORKFLOWS,
         )
         == 0
     )
@@ -590,7 +591,7 @@ def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
     pushed = {path: content.decode() for path, content in files.items()}
     assert (
         set(pushed)
-        == set(workflows_place.WORKFLOWS)
+        == set(workflows_place.RELEASE_WORKFLOWS)
         == {
             ".github/workflows/release-materials.yml",
             ".github/workflows/release-assignment.yml",
@@ -603,6 +604,43 @@ def test_content_repos_get_both_buttons_and_lose_the_retired_one(monkeypatch):
     inputs = trigger["workflow_dispatch"]["inputs"]
     assert list(inputs) == RELEASE_INPUTS
     assert inputs["course_source_repo"]["default"] == "course-materials-f2026"
+
+
+def test_an_assignment_template_hosts_only_the_hand_out_button(monkeypatch):
+    # Release materials from a template would name a source holding no session folders,
+    # so a template hosts Release assignment alone - and it opens on ITSELF, the way the
+    # materials button in a content repo pre-fills that repo's own name.
+    commits = []
+    monkeypatch.setattr(
+        workflows_place,
+        "put_files",
+        lambda org, repo, files, message, **k: commits.append(files) or True,
+    )
+    assert (
+        workflows_place.push_content_workflows(
+            "Course",
+            # NOT the one `_newest` would pre-select out of these two, or the assertion
+            # below would hold just as well with the pre-selection taken out again.
+            "assignment-1-f2026",
+            ["Cohort-f2026"],
+            ["assignment-1-f2026", "assignment-2-f2026"],
+            "release",
+            workflows=workflows_place.TEMPLATE_WORKFLOWS,
+        )
+        == 0
+    )
+    assert len(commits) == 1
+    pushed = {path: content.decode() for path, content in commits[0].items()}
+    assert set(pushed) == {".github/workflows/release-assignment.yml"}
+    inputs = workflow_inputs(pushed[".github/workflows/release-assignment.yml"])
+    assert inputs["course_source_repo"]["default"] == "assignment-1-f2026"
+    # ...and a repo that names no template of its own still gets the newest-term pick.
+    other = workflows_render.render_provision(
+        ["Cohort-f2026"], ["assignment-1-f2026", "assignment-2-f2026"]
+    )
+    assert workflow_inputs(other)["course_source_repo"]["default"] == (
+        "assignment-2-f2026"
+    )
 
 
 def test_the_org_level_buttons_land_as_one_commit(monkeypatch):
