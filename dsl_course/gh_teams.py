@@ -124,7 +124,8 @@ def converge_org_settings(org: str, *, private_forks: bool = False) -> int:
     solutions and the `solution` branches.
 
     `private_forks` is the third setting, and the odd one out: it LOOSENS - so it is
-    asked for, not assumed, and only a COHORT asks. A cohort's materials repo is
+    asked for, not assumed, sent in a PATCH of its own (see below), and only a COHORT
+    asks. A cohort's materials repo is
     private, and GitHub refuses a fork of a private repo unless its org allows it, so
     the Fork button students are told to press was simply absent; there it grants
     nothing, because a fork carries the reader's own access and a student who can fork
@@ -146,25 +147,42 @@ def converge_org_settings(org: str, *, private_forks: bool = False) -> int:
     org every night for something no re-run can fix. It is named and counted in the log
     instead."""
     failures = 0
-    # One PATCH either way - the fork field is appended to it rather than sent on its
-    # own, so the two org kinds cannot answer differently about the settings they share.
-    fields = [
+    code, out = gh(
+        "api",
+        "--method",
+        "PATCH",
+        f"orgs/{org}",
         "--field",
         "default_repository_permission=none",
         "--field",
         "members_can_create_repositories=false",
-    ]
-    if private_forks:
-        fields += ["--field", "members_can_fork_private_repositories=true"]
-    code, out = gh("api", "--method", "PATCH", f"orgs/{org}", *fields)
+    )
     if code == 0:
-        done = "base permission none, no member repo creation"
-        if private_forks:
-            done += ", private repos forkable"
-        log_ok(f"{org} tightened ({done})")
+        log_ok(f"{org} tightened (base permission none, no member repo creation)")
     else:
         failures += 1
         log_err(f"could not tighten {org}: {out[:120]}")
+
+    # Its OWN patch, not a third field on the one above. GitHub validates a PATCH body as
+    # a unit, so a refused fork field - an enterprise policy above the org forbids private
+    # forks, a plan does not carry the setting - would take the two tightening fields down
+    # with it, and the org would sit at GitHub's default of `read` for every member on
+    # every repo behind a log line about forking. Still counted, unlike 2FA: a refusal
+    # here is a misconfiguration until the demo run says otherwise.
+    if private_forks:
+        code, out = gh(
+            "api",
+            "--method",
+            "PATCH",
+            f"orgs/{org}",
+            "--field",
+            "members_can_fork_private_repositories=true",
+        )
+        if code == 0:
+            log_ok(f"{org}: private repos forkable")
+        else:
+            failures += 1
+            log_err(f"could not let {org} fork its private repos: {out[:120]}")
 
     code, out = gh(
         "api",

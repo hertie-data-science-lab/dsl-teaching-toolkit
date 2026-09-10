@@ -363,12 +363,22 @@ def test_a_course_org_is_not_told_its_private_repos_are_forkable(monkeypatch, ca
     assert "forkable" not in capsys.readouterr().out
 
 
-def test_a_refused_forking_setting_reds_the_run_like_the_others(monkeypatch):
-    # It rides in the tighten PATCH rather than one of its own, so a plan that refuses it
-    # is LOUD. (The 2FA field is the shape to move it to if that turns out to be a fact
-    # about the plan rather than a misconfiguration - named and counted, never red.)
-    _patched(monkeypatch, (1, "gh: HTTP 422"))
+def test_a_refused_forking_setting_never_takes_the_tightening_with_it(monkeypatch):
+    # GitHub validates a PATCH body as a UNIT, so the loosening field rides in a call of
+    # its own: bundled, a refusal (an enterprise policy above the org, a plan without the
+    # setting) would drop `default_repository_permission=none` too and leave every member
+    # reading every repo behind a log line about forking. Counted, so it is still LOUD.
+    calls: list[tuple[str, ...]] = []
+
+    def refuses_the_fork_field(*a, **k):
+        calls.append(a)
+        return (1, "gh: HTTP 422") if any("fork" in arg for arg in a) else (0, "")
+
+    monkeypatch.setattr(gh_teams, "gh", refuses_the_fork_field)
     assert gh_teams.converge_org_settings("Cohort-f2026", private_forks=True) == 1
+    fields = [f for call in calls for f in call]
+    assert "default_repository_permission=none" in fields
+    assert "members_can_create_repositories=false" in fields
 
 
 def test_a_failed_tighten_reds_the_run(monkeypatch):
