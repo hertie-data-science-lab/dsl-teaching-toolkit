@@ -39,7 +39,7 @@ lifecycle, `events` are display-only calendar rows.
     archive:                         # OPTIONAL - and the SWITCH: with no block, nothing
       date: 2027-02-16               # ever freezes this cohort. default: semester_end + 60
       show_on_site: true             # default true: a row on the site's Schedule tab
-      description: We freeze here.   # optional: what that row and the Updates box say
+      description: We freeze here.   # optional: ALL that row and the Updates box say
 
 Every field is optional - a cohort with no schedule.yml (or a blank one) behaves exactly
 as before everywhere that reads it (releases are skipped, dates synthesised).
@@ -394,10 +394,10 @@ class Schedule:
     # ARCHIVE_GRACE` - which is what stops a term with no dates freezing off a guess.
     archive_date: date | None = None
     archive_show_on_site: bool = True
-    # What the site's archive row and its Updates box SAY, when the cohort would rather
-    # say it in its own words. None is the ordinary case and leaves `site._archive_entry`
-    # to print its default sentence - which is the one the seeded skeleton quotes, so
-    # faculty can see what they are replacing before they replace it.
+    # What the site's archive row and its Updates box SAY - the whole of it, because the
+    # toolkit writes no sentence of its own here. None leaves the row as its label and
+    # date and the Updates bullet unwritten (`site._archive_entry`); the seeded skeleton
+    # carries a sentence ready to uncomment.
     archive_description: str | None = None
     # Whether the cohort wrote an `archive:` block at all. Only `scheduler._no_archive_date`
     # reads it, to tell "nobody asked for archiving" from "asked, but no date can be
@@ -1135,11 +1135,11 @@ def _parse_archive(
 def _archive_description(raw: dict, drops: Drops, lines: dict[str, int]) -> str | None:
     """The block's optional `description:` - what the site's archive row SAYS.
 
-    Anything that is not a usable sentence falls back to the default one and is FLAGGED,
-    never raised and never printed: a list or a mapping here would otherwise reach the
-    deployed site as `['a', 'b']`, and a blank string would leave students an archive row
-    with no sentence under it at all. Both are a hand edit that did not take, which is
-    what `dropped` is for."""
+    Anything that is not a usable sentence is FLAGGED and dropped, never raised and never
+    printed: a list or a mapping here would otherwise reach the deployed site as
+    `['a', 'b']`. The row then reads as it does for a cohort that wrote no `description:`
+    at all - its label and its date - which is a hand edit that visibly did not take, and
+    that is what `dropped` is for."""
     said = raw.get("description")
     if said is None:
         return None
@@ -1150,7 +1150,7 @@ def _archive_description(raw: dict, drops: Drops, lines: dict[str, int]) -> str 
         "archive",
         "description",
         said,
-        "the site's archive row says the default sentence instead",
+        "the site's archive row carries no sentence at all",
         lines,
     )
     return None

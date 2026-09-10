@@ -980,17 +980,6 @@ def _event_entry(event: schedule.Event, fallback: date) -> str:
     )
 
 
-# What the archive row and the Updates box say when the cohort's `archive:` block names
-# no `description:` of its own. A constant because the seeded skeleton quotes it verbatim
-# beside the commented-out key, so faculty read the sentence they are overriding rather
-# than guessing at it. `{when}` is the archive date.
-ARCHIVE_SENTENCE = (
-    "This cohort is archived on {when}: every repository in it becomes read-only. You "
-    "keep read access, so you can still fork or clone anything you want to keep working "
-    "on into your own account."
-)
-
-
 def _archive_entry(when: date, today: date, description: str | None = None) -> str:
     """The "Cohort archived" row: when this cohort is frozen read-only.
 
@@ -998,10 +987,13 @@ def _archive_entry(when: date, today: date, description: str | None = None) -> s
     that happens to the cohort and releases nothing - and the theme already colours that
     row. Inventing a fourth row type would mean shipping a theme change for one line.
 
-    `description` is the cohort's own sentence for both surfaces (`archive.description`
-    in schedule.yml); without one the default below stands, which is what almost every
-    cohort wants and what the seeded skeleton quotes so faculty can see what they would
-    be replacing.
+    `description` is `archive.description` from schedule.yml and is the WHOLE of what
+    either surface says - there is no default sentence, because the toolkit does not know
+    what a freeze means for a given cohort's students and a wrong reassurance is worse
+    than none. Without one the row still renders as its "Cohort archived" label and date,
+    and the Updates bullet is simply not emitted: the theme strips the body and skips an
+    empty bullet (`templates/site/_includes/announcements.html`). The seeded skeleton
+    carries a sentence ready to uncomment.
 
     `announce` opts the row into the home page's Updates box for the last
     `schedule.ARCHIVE_NOTICE` before the date, and the body is the sentence that box
@@ -1012,7 +1004,7 @@ def _archive_entry(when: date, today: date, description: str | None = None) -> s
     # `q` rather than the raw string: this is faculty-written text going into the body of
     # a Jekyll document, and a value that folded onto several lines could write a `---`
     # of its own and split the front matter off the page.
-    said = q(said) if (said := description) else ARCHIVE_SENTENCE.format(when=when)
+    said = f"{q(description)}\n" if description else ""
     return (
         f"---\n"
         f"type: special_event\n"
@@ -1021,7 +1013,7 @@ def _archive_entry(when: date, today: date, description: str | None = None) -> s
         f"{soon}"
         f'description: "Cohort archived"\n'
         f"---\n"
-        f"{said}\n"
+        f"{said}"
     )
 
 
