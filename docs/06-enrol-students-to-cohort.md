@@ -71,7 +71,7 @@ and no marks. A **Join team** issue from an auditor is refused and labelled `nee
   template is created.
 - Team names are lower-cased; a GitHub handle or a faculty team name (`course-admin`) is refused.
 - The **Sync membership** workflow then creates a GitHub team per group.
-- A **Release assignment** run with `group` ticked then grants each team its shared repo.
+- A **Release assignment** run then grants each team its shared repo (the template declares `type: group`).
 
 ## Next
 

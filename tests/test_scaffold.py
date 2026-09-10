@@ -548,7 +548,7 @@ def test_a_template_scaffolded_with_no_name_keeps_the_plain_description(
 def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
     fake, monkeypatch
 ):
-    # The whole point of the eight boxes: what the button was asked lands in the file the
+    # The whole point of the boxes: what the button was asked lands in the file the
     # handout, the sheet and the Join-team form all read, over the course's own defaults.
     written = _solution_files(monkeypatch)
     monkeypatch.setattr(

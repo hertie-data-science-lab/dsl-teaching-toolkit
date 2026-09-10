@@ -1552,8 +1552,7 @@ def render_new_assignment(assignments: list[str] | None = None) -> str:
     `copy_from` is the box that asks for none of it: last year's template arrives whole,
     and the `grading_config.yml` that comes with it is the definition, so boxes 5-9 are
     ignored. It is box 4 for that reason - GitHub renders these top to bottom and the
-    answer that voids the rest belongs above them, not after eight boxes filled in for
-    nothing. The name and the number are asked for either way: they name the repo and
+    answer that voids the rest belongs above them, not after the five boxes it voids. The name and the number are asked for either way: they name the repo and
     describe it.
 
     GitHub caps a workflow_dispatch at 10 inputs, and there is deliberately no tenth: an
