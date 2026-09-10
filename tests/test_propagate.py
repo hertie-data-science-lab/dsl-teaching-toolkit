@@ -164,6 +164,29 @@ def test_a_deletion_is_named_in_the_body_and_never_made(world):
     assert "`lectures/01/notes.md`" in call["body"]
 
 
+def test_a_whole_repo_carry_leaves_the_root_excluded_paths_alone(world):
+    # The root-only half of the release filter, run in reverse. A cohort repo's `.github`
+    # is the toolkit's own rendered workflows, so carrying it back would push a cohort's
+    # workflows over the COURSE org's - and the course's own root files would be reported
+    # as paths the cohort had deleted. The comparison that decides "is this the whole
+    # repo?" is between resolved paths, so a temp dir behind a symlink must not break it.
+    world.commit(
+        "cm",
+        {".github/workflows/release.yml": "course", "MAINTAINING.md": "the course org"},
+    )
+    world.commit(
+        "materials",
+        {".github/workflows/release.yml": "cohort", "lectures/01/lab.md": "corrected"},
+    )
+    world.plan(_release("everything", FIRED, Deploy("cm", "/", "materials")))
+
+    assert world.run().errors == 0
+    assert world.read(".github/workflows/release.yml") == "course"
+    assert world.read("lectures/01/lab.md") == "corrected"
+    (call,) = world.pulls.calls
+    assert ".github" not in call["body"] and "MAINTAINING.md" not in call["body"]
+
+
 def test_the_body_names_paths_and_says_the_branch_is_regenerated(world):
     world.commit("cm", {"lectures/01/lab.md": "week one"})
     world.commit("materials", {"lectures/01/lab.md": "corrected"})

@@ -300,7 +300,14 @@ def propagate(
     errors = 0
     urls: list[str] = []
     with tempfile.TemporaryDirectory() as work:
-        root = Path(work)
+        # RESOLVED, exactly as `deploy` resolves its own clone root: `_resolve_within`
+        # returns a resolved path, and `_deny` decides "is this the whole repo?" by
+        # comparing the two. A temporary directory that sits behind a symlink - every
+        # macOS `/var/folders/...` does - makes that comparison false for a whole-repo
+        # copy, and the root-only exclusions then do not apply: the cohort's `.github`
+        # would be carried over the COURSE org's own workflows, and every path a release
+        # withholds at the root would be reported as something the cohort had deleted.
+        root = Path(work).resolve()
         dests: dict[str, Path] = {}
         for repo in sorted({d.cohort_dest_repo for d in deploys}):
             dd = root / "cohort" / repo
