@@ -1042,10 +1042,11 @@ def _archive_message(cohort_org: str, course_org: str, when: date) -> tuple[str,
         f"everyone who can read the cohort still can, and nobody can change "
         f"anything.</p>\n"
         f"<p>Anything you still need to change in this cohort, change before then. To "
-        f"move the date or take it away, edit "
-        f"{_anchor(edit_at, f'{cohort_org}/{CONFIG_REPO}/{SCHEDULE_PATH}')} - an "
-        f"<code>archive:</code> block with its own <code>date:</code> overrides the "
-        f"default, which is sixty days after <code>semester_end</code>.</p>\n"
+        f"move the date, edit "
+        f"{_anchor(edit_at, f'{cohort_org}/{CONFIG_REPO}/{SCHEDULE_PATH}')} - the "
+        f"<code>archive:</code> block's own <code>date:</code> overrides the default, "
+        f"which is sixty days after <code>semester_end</code>. Delete the block and "
+        f"nothing archives this cohort at all.</p>\n"
     )
     return f"[{label}] {cohort_org} is archived on {when}", body
 
