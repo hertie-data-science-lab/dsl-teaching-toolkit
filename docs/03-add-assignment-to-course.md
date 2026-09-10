@@ -28,9 +28,11 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
       - `autograde` (off by default; on seeds a `tests/` stub and runs it at the cutoff)
       - `copy_from` (optional): an existing `assignment-*` template to start from instead -
         `main` and `solution` arrive whole, history included, and nothing is written over
-        them. `format`, `type`, `team_formation`, `submit_via` and `autograde` are then
-        ignored: the copied `grading_config.yml` is this assignment's definition, and the
-        run says so with a link to it. A source with no `solution` branch is refused.
+        them. Only the number and the tag are used after that - they name the repo; the
+        name, `format`, `type`, `team_formation`, `submit_via` and `autograde` are
+        ignored, because the copied `grading_config.yml` is this assignment's definition,
+        and the run says so with a link to it. A source with no `solution` branch is
+        refused.
    - Everything else - the team cap, the late window, the penalty - comes from
      `assignment_defaults:` in the course org's `.github/dsl-course.yml` and is written
      into the assignment's own `grading_config.yml`, where you can revise it per assignment.

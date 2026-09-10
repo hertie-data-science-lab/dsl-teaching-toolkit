@@ -995,8 +995,9 @@ def scaffold_assignment(
         if not _copy_branches(org, copy_from, repo, needs=SOLUTION_BRANCH):
             return 1
         log(
-            "  (format, type, team_formation, submit_via and autograde were ignored - "
-            f"the copied definition governs: https://github.com/{org}/{repo}/blob/"
+            "  (name, format, type, team_formation, submit_via and autograde were "
+            "ignored - only the number and the tag name the repo; the copied definition "
+            f"governs the rest: https://github.com/{org}/{repo}/blob/"
             f"{SOLUTION_BRANCH}/grading_config.yml)"
         )
         log_ok(f"assignment template ready: {org}/{repo} (copied from {copy_from})")

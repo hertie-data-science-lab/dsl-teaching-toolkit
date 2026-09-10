@@ -770,21 +770,40 @@ def test_a_copied_assignment_brings_both_branches(origins, fake):
 def test_a_copied_assignment_says_which_boxes_it_ignored(origins, capsys):
     # `format`, `type` and the rest describe an assignment this one already is. Saying so
     # once, with the file that does govern it, is the difference between an instructor
-    # editing that file and one wondering why `individual` came out `group`.
+    # editing that file and one wondering why `individual` came out `group`. The NAME is
+    # in that list too: box 1 is required, so every copy is typed a title that the copied
+    # grading_config.yml then overrides in the sheet, the handout and the site.
     origins.commit("assignment-1-f2025", {"README.md": "# The brief\n"})
     origins.commit(
-        "assignment-1-f2025", {"grading_config.yml": "type: group\n"}, "solution"
+        "assignment-1-f2025", {"grading_config.yml": "title: Regression\n"}, "solution"
     )
 
     assert (
         scaffold.scaffold_assignment(
-            "Org", "1", "f2026", "ipynb", "individual", copy_from="assignment-1-f2025"
+            "Org",
+            "1",
+            "f2026",
+            "ipynb",
+            "individual",
+            name="Neural networks from scratch",
+            copy_from="assignment-1-f2025",
         )
         == 0
     )
 
+    assert (
+        origins.read("assignment-1-f2026", "grading_config.yml", "solution")
+        == "title: Regression"
+    )
     (line,) = [l for l in capsys.readouterr().out.splitlines() if "were ignored" in l]
-    for field in ("format", "type", "team_formation", "submit_via", "autograde"):
+    for field in (
+        "name",
+        "format",
+        "type",
+        "team_formation",
+        "submit_via",
+        "autograde",
+    ):
         assert field in line
     assert (
         "https://github.com/Org/assignment-1-f2026/blob/solution/grading_config.yml"

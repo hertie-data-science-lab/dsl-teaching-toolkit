@@ -1510,7 +1510,7 @@ def render_new_assignment(assignments: list[str] | None = None) -> str:
 
     The ninth, `copy_from`, is the one that asks for none of it: last year's template
     arrives whole, and the `grading_config.yml` that comes with it is the definition, so
-    boxes 4-8 are ignored. GitHub caps a workflow_dispatch at 10 inputs, and there is
+    boxes 1 and 4-8 are ignored. GitHub caps a workflow_dispatch at 10 inputs, and there is
     deliberately no tenth: an assignment's remaining settings belong in a file the
     instructor can revise, not in a form filled in once, before the brief has even been
     written."""
@@ -1536,7 +1536,7 @@ on:
         description: "8. Run the template's tests/ at the cutoff. The count is shown to graders, never to a student"
         type: boolean
         default: false
-{_copy_from_input("9. Copy an existing template forward instead - both branches, whole history. Boxes 4-8 are then ignored", assignments or [])}
+{_copy_from_input("9. Copy an existing template forward instead - both branches, whole history. Boxes 1 and 4-8 are then ignored", assignments or [])}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
