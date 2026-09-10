@@ -620,20 +620,13 @@ class Origins:
         return path
 
     def commit(self, name: str, files: dict[str, str], branch: str = "main") -> None:
-        """One commit on `branch` of a bare repo, through a throwaway clone - the only way
-        to write into a repo with no working tree. A branch that does not exist yet is cut
-        from what the clone checked out, which is how a `solution` starts life."""
+        """The FIRST commit on `branch` of a bare repo, through a throwaway clone - the
+        only way to write into a repo with no working tree. A branch beyond the first is
+        cut from what the clone checked out, which is how a `solution` starts life."""
         self._scratch += 1
         work = self.root / "scratch" / f"{name}{self._scratch}"
         _git("clone", "-q", str(self.bare(name)), str(work))
-        if (
-            ghcli.git(
-                "-C", str(work), "rev-parse", "--verify", "-q", f"origin/{branch}"
-            )[0]
-            == 0
-        ):
-            _git("-C", str(work), "checkout", "-q", branch)
-        elif ghcli.git("-C", str(work), "rev-parse", "--verify", "-q", "HEAD")[0] == 0:
+        if ghcli.git("-C", str(work), "rev-parse", "--verify", "-q", "HEAD")[0] == 0:
             _git("-C", str(work), "checkout", "-q", "-b", branch)
         for rel, text in files.items():
             path = work / rel
@@ -683,14 +676,13 @@ def origins(fake, tmp_path, monkeypatch) -> Origins:
         return 0, ""
 
     monkeypatch.setattr(ghcli, "gh", clone_only)
-    monkeypatch.setattr(scaffold, "gh", clone_only)
     monkeypatch.setattr(
         scaffold, "create_repo", lambda org, repo, **k: bool(world.bare(repo))
     )
     return world
 
 
-def test_a_copied_materials_repo_arrives_whole_and_keeps_its_history(origins, fake):
+def test_a_copied_materials_repo_arrives_whole_and_keeps_its_history(origins):
     # What copy_from is for: next year starts as this year, so the instructor edits the
     # lecture rather than re-typing it - and the file arrives byte for byte, with the
     # commit that explains it.
@@ -740,7 +732,7 @@ def test_a_materials_copy_that_could_not_be_cloned_reds_the_scaffold(
     assert "nothing was copied" in capsys.readouterr().err
 
 
-def test_a_copied_assignment_brings_both_branches(origins, fake, capsys):
+def test_a_copied_assignment_brings_both_branches(origins, fake):
     origins.commit(
         "assignment-1-f2025", {"README.md": "# The brief\n", "starter.py": "pass\n"}
     )
@@ -775,7 +767,7 @@ def test_a_copied_assignment_brings_both_branches(origins, fake, capsys):
     assert fake.written("assignment-1-f2026") == set()
 
 
-def test_a_copied_assignment_says_which_boxes_it_ignored(origins, fake, capsys):
+def test_a_copied_assignment_says_which_boxes_it_ignored(origins, capsys):
     # `format`, `type` and the rest describe an assignment this one already is. Saying so
     # once, with the file that does govern it, is the difference between an instructor
     # editing that file and one wondering why `individual` came out `group`.
@@ -800,7 +792,7 @@ def test_a_copied_assignment_says_which_boxes_it_ignored(origins, fake, capsys):
     )
 
 
-def test_a_copied_assignment_needs_a_solution_branch(origins, fake, capsys):
+def test_a_copied_assignment_needs_a_solution_branch(origins, capsys):
     # A template with no solution branch has no model answer and no grading_config.yml:
     # copied forward it would hand out a starter nobody can mark against, and grade on the
     # toolkit's defaults. Refused, rather than half a template reported ready.
