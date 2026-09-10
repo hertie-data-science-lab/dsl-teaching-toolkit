@@ -156,8 +156,6 @@ DATED_RENDERED = {
     "derive_student_version": workflows_render.render_derive_student_version(
         ASSIGNMENTS_2
     ),
-    "new_materials": workflows_render.render_new_materials(REPOS_2),
-    "new_assignment": workflows_render.render_new_assignment(ASSIGNMENTS_2),
     "patch_assignment": workflows_render.render_patch_assignment(
         COHORTS_2, ASSIGNMENTS_2
     ),
@@ -189,11 +187,6 @@ def test_every_org_repo_dropdown_pre_selects_the_newest(name):
         options = spec.get("options", [])
         if not any("2026" in o for o in options):
             continue  # a fixed vocabulary (reading-list / individual / group / ...)
-        if field == "copy_from":
-            # The deliberate exception, asserted for itself below: copying a whole repo
-            # forward is a choice, so the blank first option is what an untouched form
-            # submits and there is no `default:` to arrive at it by accident.
-            continue
         default = spec.get("default")
         # Sync enrolment's cohort_org is the one exception: it stays pinned to the
         # faculty-only sentinel, because touching a cohort must be opted into.

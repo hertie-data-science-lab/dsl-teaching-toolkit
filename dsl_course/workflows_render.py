@@ -627,7 +627,7 @@ def _choice_input(
     )
 
 
-def _copy_from_input(options: list[str], description: str) -> str:
+def _copy_from_input(description: str, options: list[str]) -> str:
     """The `copy_from` dropdown: an existing repo of this kind to start the new one from,
     or the BLANK first option - the fresh starter - which is what an untouched form
     submits.
@@ -635,7 +635,7 @@ def _copy_from_input(options: list[str], description: str) -> str:
     No `default:`, unlike every other dropdown here (`_choice_input` pre-selects the
     newest term): copying a whole repo forward is a choice to make deliberately, and a
     form arriving with last year's already filled in would make it the accident."""
-    listed = "\n".join(f"          - {o}" for o in ['""', *options])
+    listed = _choice(['""', *options])
     return (
         f'      copy_from:\n        description: "{description}"\n'
         f"        required: false\n        type: choice\n        options:\n{listed}"
@@ -1478,7 +1478,7 @@ on:
       tag:
         description: "Year tag, e.g. f2026 or s2026 - creates course-materials-<tag>"
         required: true
-{_copy_from_input(materials, "Materials repo to copy forward - blank starts from the empty skeleton")}
+{_copy_from_input("Materials repo to copy forward - blank starts from the empty skeleton", materials)}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
@@ -1536,7 +1536,7 @@ on:
         description: "8. Run the template's tests/ at the cutoff. The count is shown to graders, never to a student"
         type: boolean
         default: false
-{_copy_from_input(assignments or [], "9. Copy an existing template forward instead - both branches, whole history. Boxes 4-8 are then ignored")}
+{_copy_from_input("9. Copy an existing template forward instead - both branches, whole history. Boxes 4-8 are then ignored", assignments or [])}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
