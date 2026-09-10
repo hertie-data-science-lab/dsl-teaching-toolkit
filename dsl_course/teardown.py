@@ -123,8 +123,13 @@ def archive_notice_title(when: date) -> str:
     return f"{ARCHIVE_NOTICE_PREFIX}{when}"
 
 
-def _is_archive_notice(title: str) -> bool:
+def is_archive_notice(title: str) -> bool:
     """Whether an open issue's title is one of this toolkit's archive notices.
+
+    Public, and beside `archive_notice_title` for the same reason: two ends have to agree
+    about it. This one closes every dated notice at the seal, and the scheduler closes a
+    notice whose date has been moved or taken away while the cohort is still live
+    (`scheduler._stale_archive_notices`).
 
     The prefix AND a date that parses, rather than the prefix alone: `issues` matches by
     exact title precisely so that an issue a human filed quoting one is never adopted, and
@@ -321,7 +326,7 @@ def _close_notices(cohort_org: str, dry_run: bool) -> int:
         return 0
     errors = 0
     try:
-        titles += sorted(t for t in open_titles(repo) if _is_archive_notice(t))
+        titles += sorted(t for t in open_titles(repo) if is_archive_notice(t))
     except RuntimeError as exc:
         # A listing that could not be read is not "no notice is open", and the rest of
         # them are still worth closing while the repo takes writes.

@@ -100,6 +100,16 @@ def _grading_spec_defaults(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_open_notices(monkeypatch):
+    """Every tick asks the cohort's `classroom-config` which archive notices are open, so
+    it can close one whose date has moved or been taken away
+    (`scheduler._stale_archive_notices`) - real gh I/O, on a path these tests are not
+    about. Answered with "none open", which is the ordinary case; the tests that ARE
+    about it stub it themselves."""
+    monkeypatch.setattr(scheduler.issues, "open_titles", lambda repo: set())
+
+
+@pytest.fixture(autouse=True)
 def _no_source_preflight(monkeypatch):
     """`run` also pre-flights the plan's sources against the course org, which is real gh
     I/O. These tests are about the release/snapshot/autograde phases, so it is stubbed to
@@ -3132,9 +3142,26 @@ def test_the_break_glass_single_cohort_run_skips_a_closed_out_cohort(monkeypatch
 # --------------------------------------------------------------- the archive phase
 
 
-def _archive(monkeypatch, archive_date, now, dry_run=False, existing=None, mails=True):
-    """Drive `_archive_phase` alone, recording the close-out, the issue and the mail."""
-    seen: dict = {"closed": [], "issues": [], "mailed": []}
+def _archive(
+    monkeypatch,
+    archive_date,
+    now,
+    dry_run=False,
+    existing=None,
+    mails=True,
+    open_notices=(),
+):
+    """Drive `_archive_phase` alone, recording the close-out, the issue, the mail and any
+    stale notice it closed."""
+    seen: dict = {"closed": [], "issues": [], "mailed": [], "notices_closed": []}
+    monkeypatch.setattr(scheduler.issues, "open_titles", lambda repo: set(open_notices))
+    monkeypatch.setattr(
+        scheduler.issues,
+        "close_issues_titled",
+        lambda repo, title, comment=None: (
+            seen["notices_closed"].append((title, comment)) or 0
+        ),
+    )
     monkeypatch.setattr(
         scheduler.teardown,
         "close_out",
@@ -3275,3 +3302,57 @@ def test_a_block_no_date_can_be_derived_from_says_that_instead(monkeypatch):
     (fault,) = scheduler._no_archive_date(Schedule(archive_declared=True))
     assert "archive date cannot be derived" in fault.what
     assert fault.severity(WHEN) < faults_mod.NOTIFY_FROM
+
+
+def test_a_notice_is_closed_when_the_archive_is_called_off(monkeypatch):
+    # The `archive:` block was taken away after the notice went out. Nothing will freeze
+    # this cohort now, and nothing else would ever close the issue: a cohort that is never
+    # archived is never sealed, so `teardown._close_notices` never runs on it. Until this
+    # swept, it stood open all term naming a date on which nothing would happen.
+    stale = "Cohort archives on 2027-02-16"
+    rc, seen = _archive(
+        monkeypatch,
+        None,
+        datetime(2027, 2, 2, 9, tzinfo=timezone.utc),
+        open_notices=(stale, "Roster digest"),
+    )
+    assert rc == 0
+    ((title, comment),) = seen["notices_closed"]
+    # Closed with a comment: closing it silently would read as "this happened".
+    assert title == stale
+    assert "taken away" in comment and "Nothing was frozen" in comment
+    # And nothing was frozen, mailed or re-opened on the way.
+    assert (seen["closed"], seen["issues"], seen["mailed"]) == ([], [], [])
+    # Idempotent: the tick after it finds nothing open and writes nothing.
+    _, again = _archive(monkeypatch, None, datetime(2027, 2, 3, 9, tzinfo=timezone.utc))
+    assert again["notices_closed"] == []
+
+
+def test_a_notice_that_is_still_due_is_left_alone(monkeypatch):
+    # The one notice the schedule still names is the one that must survive the sweep,
+    # every tick of the fortnight.
+    when = date(2027, 2, 16)
+    due = scheduler.teardown.archive_notice_title(when)
+    _, seen = _archive(
+        monkeypatch,
+        when,
+        datetime(2027, 2, 2, 9, tzinfo=timezone.utc),
+        open_notices=(due,),
+    )
+    assert seen["notices_closed"] == []
+    assert [title for title, _ in seen["issues"]] == [due]
+
+
+def test_a_notice_whose_date_moved_out_of_the_window_goes_with_it(monkeypatch):
+    # Pushed the date back a month: the notice for the old one is a false date, and the
+    # phase now returns before ever opening a new one.
+    _, seen = _archive(
+        monkeypatch,
+        date(2027, 3, 16),
+        datetime(2027, 2, 2, 9, tzinfo=timezone.utc),
+        open_notices=("Cohort archives on 2027-02-16",),
+    )
+    assert [title for title, _ in seen["notices_closed"]] == [
+        "Cohort archives on 2027-02-16"
+    ]
+    assert seen["issues"] == []
