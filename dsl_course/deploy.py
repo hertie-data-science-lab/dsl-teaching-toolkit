@@ -219,7 +219,8 @@ def _has_ref(dd: Path, ref: str) -> bool:
 def _checkout_upstream(cohort_org: str, repo: str, dd: Path) -> Dest | None:
     """Put a dest clone on `UPSTREAM_BRANCH` and describe it (see `Dest`).
 
-    None when the checkout itself failed, which the caller treats exactly like a dest
+    None when the checkout itself failed, or when the dest's default branch IS
+    `UPSTREAM_BRANCH`, which the caller treats exactly like a dest
     that would not clone: the copies for that dest are impossible, and it is dropped
     here rather than left to fail later. The return codes used to be discarded, so a
     refused checkout left the clone on its BASE branch - the release then copied onto
@@ -246,6 +247,19 @@ def _checkout_upstream(cohort_org: str, repo: str, dd: Path) -> Dest | None:
         if code == 0 and out.strip()
         else default_branch(cohort_org, repo, fallback="main")
     )
+    if base == UPSTREAM_BRANCH:
+        # `upstream` as the DEFAULT branch collapses the two ends of the merge into one,
+        # and every check below then reads as "already merged": the copy would be
+        # committed, `merge-base --is-ancestor upstream upstream` would pass, and the
+        # release would report "nothing new to release" having pushed nothing at all.
+        # Refused out loud, because silently releasing nothing for ever is the one
+        # outcome worse than a red run (maintainers.md names this branch toolkit-owned).
+        log_err(
+            f"  {cohort_org}/{repo}: `{UPSTREAM_BRANCH}` is this repo's DEFAULT branch. "
+            f"It is the toolkit's own branch - make something else the default, and "
+            f"releases can be merged into it again."
+        )
+        return None
     remote = f"origin/{UPSTREAM_BRANCH}"
     if _has_ref(dd, remote):
         code, out = git(

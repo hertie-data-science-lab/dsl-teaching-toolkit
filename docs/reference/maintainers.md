@@ -113,8 +113,9 @@ Things whose *literal spelling* is depended on from outside Python:
   and the dest's DEFAULT branch is what students, the website and `propagate` read. The
   release commits onto `upstream` and merges it into the default one; a conflict aborts the
   merge, pushes `upstream` and leaves one pull request open. Two things follow. Making
-  `upstream` the default branch turns every release into a copy over the cohort's own work
-  again, silently. And nothing in the package may start listing branches to find released
+  `upstream` the default branch would collapse both ends of that merge into one branch, so
+  the release refuses such a dest outright rather than release nothing to it for ever. And
+  nothing in the package may start listing branches to find released
   content: every reader resolves `repos.default_branch`, which is exactly what keeps
   `upstream` invisible to the site, discovery and status.
 

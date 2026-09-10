@@ -263,6 +263,21 @@ def test_resolving_the_conflict_by_hand_ends_the_holding_pattern(world):
 # ------------------------------------------------- dests that have not seen this before
 
 
+def test_a_dest_that_calls_its_default_branch_upstream_is_refused(world, capsys):
+    # Both ends of the merge would be the same branch, and every check would then read as
+    # "already merged": the copy commits, `merge-base --is-ancestor upstream upstream`
+    # passes, and the release says "nothing new to release" having pushed nothing at all.
+    # Silently releasing nothing for ever is worse than a red run.
+    world.commit("cm", {"lectures/01/lab.md": "week one"})
+    world.commit("materials", {"README.md": "the cohort"})
+    _git("--git-dir", str(world.bare("materials")), "branch", "-m", "main", "upstream")
+
+    assert world.release("lectures/01") == (1, False)
+    assert world.branches() == ["upstream"]
+    assert world.files("upstream") == ["README.md"]  # nothing was released onto it
+    assert "default branch" in capsys.readouterr().err.lower()
+
+
 def test_an_empty_dest_gets_both_branches(world):
     # The repo `create_repo` just made: no commits, no branches, no HEAD to read.
     world.commit("cm", {"lectures/01/lab.md": "week one"})
