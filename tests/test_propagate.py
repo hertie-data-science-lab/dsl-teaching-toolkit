@@ -9,12 +9,12 @@ cohort's parsed schedule.
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pytest
 
-from dsl_course import ghcli, propagate, pulls
+from dsl_course import ghcli, propagate
 from dsl_course.schedule import Deploy, Release, Schedule
+from tests.conftest import BareOrigins, PullsFake
 
 COURSE = "Course-Org"
 COHORT = "Cohort-Org"
@@ -25,63 +25,18 @@ FIRED = datetime(2026, 9, 15, 10, 0, tzinfo=timezone.utc)
 LATER = datetime(2026, 12, 1, 10, 0, tzinfo=timezone.utc)
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)
 
-_ID = ghcli.GIT_ENV
 
+class World(BareOrigins):
+    """A course org and a cohort org as bare repositories on disk, plus the plan the
+    cohort is running. Everything under it - the origins, the throwaway-clone commits (a
+    `None` value deletes a path, which is the state this module deliberately does not
+    carry), the reads afterwards - is `conftest.BareOrigins`, shared with
+    `test_release_merge`."""
 
-def _git(*args: str) -> str:
-    code, out = ghcli.git(*args)
-    assert code == 0, f"`git {' '.join(args)}` failed: {out}"
-    return out
-
-
-class PullsFake:
-    """`pulls` as propagate sees it, recording what it was asked to upsert. Idempotence by
-    head branch is `test_pulls`' subject; what this records is WHAT is proposed, and how
-    often."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict] = []
-
-    def upsert_pr(self, repo: str, **kwargs) -> pulls.Upserted:
-        self.calls.append({"repo": repo, **kwargs})
-        return pulls.Upserted(0, PR_URL)
-
-
-class World:
-    """A course org and a cohort org as bare repositories on disk."""
-
-    def __init__(self, root: Path, fake: PullsFake) -> None:
-        self.root = root
-        self.origins = root / "origins"
-        self.origins.mkdir(parents=True, exist_ok=True)
+    def __init__(self, root, fake: PullsFake) -> None:
+        super().__init__(root)
         self.pulls = fake
         self.releases: list[Release] = []
-        self._scratch = 0
-
-    def bare(self, name: str) -> Path:
-        path = self.origins / f"{name}.git"
-        if not path.exists():
-            _git("init", "-q", "--bare", "-b", "main", str(path))
-        return path
-
-    def commit(
-        self, name: str, files: dict[str, str | None], message: str = "edit"
-    ) -> None:
-        """One commit on `main` of a bare repo, through a throwaway clone. A `None` value
-        DELETES the path - which is the state this module deliberately does not carry."""
-        self._scratch += 1
-        work = self.root / "scratch" / f"{name}{self._scratch}"
-        _git("clone", "-q", str(self.bare(name)), str(work))
-        for rel, text in files.items():
-            path = work / rel
-            if text is None:
-                path.unlink()
-                continue
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
-        _git("-C", str(work), "add", "-A")
-        _git("-C", str(work), *_ID, "commit", "-q", "--no-verify", "-m", message)
-        _git("-C", str(work), "push", "-q", "origin", "HEAD:refs/heads/main")
 
     def plan(self, *releases: Release) -> None:
         self.releases = list(releases)
@@ -90,49 +45,25 @@ class World:
         return propagate.propagate(COURSE, COHORT, now, dry_run=dry_run)
 
     def branches(self, name: str) -> list[str]:
-        listed = _git(
-            "--git-dir",
-            str(self.bare(name)),
-            "for-each-ref",
-            "--format=%(refname:short)",
-            "refs/heads",
-        )
-        return sorted(listed.split())
+        return self.refs(name)
 
-    def subjects(self, name: str = "cm", branch: str = BRANCH) -> list[str]:
+    def proposed(self, name: str = "cm", branch: str = BRANCH) -> list[str]:
         """The commit subjects this branch adds on top of `main`, oldest first."""
-        listed = _git(
-            "--git-dir",
-            str(self.bare(name)),
-            "log",
-            "--format=%s",
-            "--reverse",
-            f"main..{branch}",
-        )
-        return listed.splitlines()
+        return self.subjects(name, f"main..{branch}")
 
     def read(self, path: str, name: str = "cm", branch: str = BRANCH) -> str:
-        return _git("--git-dir", str(self.bare(name)), "show", f"{branch}:{path}")
+        return self.show(name, branch, path)
 
     def files(self, name: str = "cm", branch: str = BRANCH) -> list[str]:
-        listed = _git(
-            "--git-dir", str(self.bare(name)), "ls-tree", "-r", "--name-only", branch
-        )
-        return sorted(listed.split())
+        return self.tree(name, branch)
 
 
 @pytest.fixture
 def world(tmp_path, monkeypatch) -> World:
-    fake = PullsFake()
+    fake = PullsFake(PR_URL)
     built = World(tmp_path, fake)
 
-    def clone_only(*args, **kwargs):
-        if args[:2] == ("repo", "clone"):
-            name = args[2].split("/", 1)[1]
-            return ghcli.git("clone", "-q", str(built.bare(name)), str(args[3]))
-        return 0, ""
-
-    monkeypatch.setattr(ghcli, "gh", clone_only)
+    monkeypatch.setattr(ghcli, "gh", built.clone_only)
     monkeypatch.setattr(propagate, "pulls", fake)
     monkeypatch.setattr(
         propagate.schedule, "load", lambda org: Schedule(releases=built.releases)
@@ -155,7 +86,7 @@ def test_a_cohort_edit_is_proposed_back_as_one_commit_and_one_pull_request(world
     done = world.run()
     assert (done.errors, done.urls) == (0, (PR_URL,))
     assert world.read("lectures/01/lab.md") == "week one, corrected"
-    assert world.subjects() == ["propagate: lectures/01 from Cohort-Org"]
+    assert world.proposed() == ["propagate: lectures/01 from Cohort-Org"]
     (call,) = world.pulls.calls
     assert call["repo"] == "Course-Org/cm"
     assert (call["head"], call["base"]) == (BRANCH, "main")
@@ -175,7 +106,7 @@ def test_a_second_run_regenerates_the_branch_and_reuses_the_pull_request(world):
     assert world.run().errors == 0
     # One commit, not two: the branch is cut fresh from main every run, so it proposes
     # what the cohort has NOW rather than accumulating every version of it.
-    assert world.subjects() == ["propagate: lectures/01 from Cohort-Org"]
+    assert world.proposed() == ["propagate: lectures/01 from Cohort-Org"]
     assert world.read("lectures/01/lab.md") == "corrected again"
     assert len(world.pulls.calls) == 2  # the same head branch - `upsert_pr` adopts it
 
@@ -300,7 +231,7 @@ def test_one_commit_per_released_path_in_session_order(world):
     assert world.run().errors == 0
     # The plan's own order, entry by entry and deploy by deploy inside an entry - so the
     # branch reads the way the term ran rather than alphabetically.
-    assert world.subjects() == [
+    assert world.proposed() == [
         "propagate: lectures/03 from Cohort-Org",
         "propagate: lectures/01 from Cohort-Org",
         "propagate: lectures/02 from Cohort-Org",
