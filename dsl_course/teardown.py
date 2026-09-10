@@ -9,9 +9,10 @@ in this order, and the order is the whole design:
    the cohort - after step 4 every repo in it is read-only - and it is the last chance to
    carry a correction home. It never blocks the seal: a cohort is closed whether or not
    faculty ever wanted its edits.
-1. close the toolkit's own open notices in `classroom-config` - the digest issues and the
-   "archives on <date>" notice - saying the cohort is now archived, since nothing will
-   ever close them afterwards and an archived repo takes no issue write;
+1. close the toolkit's own open notices in `classroom-config` - the digest issues, the
+   cadence alarm and the "archives on <date>" notice - saying the cohort is now archived,
+   since nothing will ever close them afterwards and an archived repo takes no issue
+   write;
 2. one last website sync, so the deployed site shows the archived state rather than the
    state of the term's last release;
 3. ARCHIVE every repo in the org - students' work first, then `welcome` (the way IN, so a
@@ -52,7 +53,7 @@ import sys
 from datetime import date, datetime, timezone
 from typing import NamedTuple
 
-from . import config_digest, propagate, schedule, site, source_digest
+from . import cadence, config_digest, propagate, schedule, site, source_digest
 from .course import CONFIG_REPO, pages_repo
 from .discovery import (
     ASSIGNMENT_TEMPLATE_TOPIC,
@@ -268,8 +269,17 @@ def _close_notices(cohort_org: str, sched: schedule.Schedule, dry_run: bool) -> 
     Every one of them asks somebody to go and fix a file in a repo that is about to be
     read-only, and nothing will ever close them afterwards - an archived repo takes no
     issue write either, so this is the last moment. Closed with a comment, because closing
-    them silently would read as "fixed"."""
-    titles = [d.title for d in config_digest.COHORT_DIGESTS] + [source_digest.TITLE]
+    them silently would read as "fixed".
+
+    EVERY title the toolkit can leave open in this repo, which is the six hand-edited-file
+    digests, the schedule's own source digest, the cadence alarm and the archive notice -
+    those, and nothing else, are what write here (`cadence.report_cohort` is the one that
+    is not a digest). A title missed here stands open inside a frozen repo for ever, since
+    the sweep that would have closed it never runs on a closed-out cohort again."""
+    titles = [d.title for d in config_digest.COHORT_DIGESTS] + [
+        source_digest.TITLE,
+        cadence.LATE_TITLE,
+    ]
     if sched.archive_date:
         titles.append(archive_notice_title(sched.archive_date))
     if dry_run:

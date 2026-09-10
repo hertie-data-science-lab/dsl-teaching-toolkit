@@ -13,7 +13,14 @@ from datetime import date
 
 import pytest
 
-from dsl_course import config_digest, propagate, schedule, source_digest, teardown
+from dsl_course import (
+    cadence,
+    config_digest,
+    propagate,
+    schedule,
+    source_digest,
+    teardown,
+)
 from tests.conftest import repo_row
 
 COHORT = "hertie-dsl-demo-f2026"
@@ -216,6 +223,9 @@ def test_every_notice_the_toolkit_can_have_open_is_closed(org):
     assert {d.title for d in config_digest.COHORT_DIGESTS} <= closed
     assert source_digest.TITLE in closed
     assert teardown.archive_notice_title(DUE) in closed
+    # The cadence alarm is the one writer here that is not a digest, and the sweep that
+    # would have closed it never runs on a closed-out cohort again.
+    assert cadence.LATE_TITLE in closed
 
 
 def test_a_notice_that_will_not_close_still_lets_the_cohort_seal(org, monkeypatch):
