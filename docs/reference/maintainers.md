@@ -350,10 +350,13 @@ Four places, in order - miss the last and every org keeps two buttons for one jo
 1. a renderer in `workflows_render.py`;
 2. its path in `seed.seed_github_workflows`'s `files` dict (or `workflows_place.RELEASE_WORKFLOWS`
    for a run-from-repo one, plus `TEMPLATE_WORKFLOWS` if an assignment template hosts it
-   too - and `assign.withhold_from_template` then keeps it out of the student repos);
+   too - and `workflows_place.NEVER_IN_STUDENT_REPOS`, which `assign.withhold_from_template`
+   strips off a cohort template and `patch_released` refuses to push, is derived from both);
 3. `tests/test_renderers.py`'s `ALL_RENDERED` - a completeness test fails otherwise;
 4. when *retiring* a path, add it to that call's `delete=` tuple (or
    `workflows_place.RETIRED_WORKFLOWS`), so orgs seeded before the change drop the old file.
+   `RETIRED_WORKFLOWS` is in `NEVER_IN_STUDENT_REPOS` too, so a button retired today is
+   still stripped off a template whose refresh has not reached it yet.
 
 ## The clean break in `schedule.yml`
 

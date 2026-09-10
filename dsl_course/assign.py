@@ -199,10 +199,10 @@ def withhold_from_template(cohort_org: str, template: str) -> bool:
 
     `NEVER_IN_STUDENT_REPOS` goes with no pattern needed and no way to opt back in - the
     rule `.releaseignore` already applies to ITSELF (`releaseignore._SELF_EXCLUDED`), for
-    the same reason. A course-org assignment template hosts **Release assignment** so faculty
-    can hand it out from the repo they are editing, and template-generate copies the whole
-    default branch - so without this the button, and the org-admin token it reads, would
-    land in every student repo. Matched by exact PATH, so the autograder workflow beside
+    the same reason. A course-org assignment template hosts **Release assignment** so
+    faculty can hand it out from the repo they are editing, and template-generate copies
+    the whole default branch - so without this the button, and the org-admin token it
+    reads, would land in every student repo. Matched by exact PATH, so the autograder workflow beside
     it - and anything else under `.github/workflows/` - is untouched."""
     branch = default_branch(cohort_org, template, fallback="main")
     try:
@@ -620,9 +620,8 @@ def patch_released(
     # later onboarder generates from, undoing `withhold_from_template` after the fact.
     # Same set, same exact-path rule, same absence of a way to opt back in.
     unpatchable = sorted(set(corrected) & set(NEVER_IN_STUDENT_REPOS))
-    for withheld in unpatchable:
-        del corrected[withheld]
     if unpatchable:
+        corrected = {p: b for p, b in corrected.items() if p not in unpatchable}
         log(
             f"  withheld from the patch: {', '.join(unpatchable)} - a faculty release "
             f"button is never a student's to hold"
