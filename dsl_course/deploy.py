@@ -6,6 +6,9 @@ repo, additively + idempotently:
             v
     cohort/<cohort_dest_repo>/<cohort_dest_path>       (private + students read; accumulates over time)
 
+The copy lands on the dest's `upstream` branch and is MERGED into the branch students
+read (see `UPSTREAM_BRANCH`).
+
 `deploy_many` is the batch core AND the single executor of every release in the system:
 it clones each unique source repo and each unique dest repo ONCE per run and applies every
 copy against those working trees, so a scheduler run releasing 27 paths from one source
@@ -31,11 +34,13 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from typing import NamedTuple
 
-from . import site
-from .access import FACULTY_READ_ACCESS, grant_faculty, grant_read_teams
+from . import pulls, site
+from .access import COURSE_TEAM_ACCESS, grant_faculty, grant_read_teams
 from .course import (
     FACULTY_ONLY_HEADING,
+    INSTRUCTORS_TEAM,
     SYLLABUS_SAMPLE_FILE,
     SYLLABUS_SESSIONS_FILE,
     is_repo_root,
@@ -45,7 +50,13 @@ from .gh_contents import is_untouched_stub
 from .ghcli import GIT_ENV, clone, git
 from .log import log, log_err, log_ok, log_step, log_withheld
 from .releaseignore import RELEASEIGNORE, deny_for, excludes
-from .repos import create_repo, is_never_material
+from .repos import (
+    allow_forking,
+    create_repo,
+    default_branch,
+    is_never_material,
+    repo_is_archived,
+)
 from .schedule import Deploy
 from .schedule_plan import deploy_dest
 
@@ -77,6 +88,16 @@ ROOT_RELEASE_EXCLUDED = frozenset(
 WITHHELD_ROOT_STUBS = ("README.md", "SYLLABUS.md")
 
 UNEDITED_README_MARKERS = ("**Replace this placeholder.**", FACULTY_ONLY_HEADING)
+
+# The branch a release actually lands on. What students read is the dest's DEFAULT branch,
+# which the release then `git merge`s this into - so an edit made in the cohort repo is
+# merged with the next release instead of copied over, which is what made every cohort-side
+# fix vanish within the quarter hour. A copy that cannot be merged cleanly stops at a pull
+# request and leaves the default branch exactly as students last saw it.
+#
+# Toolkit-owned and invisible to everything else: `deploy_many` is the only writer, and
+# every reader in the package (site, discovery, status) resolves the default branch.
+UPSTREAM_BRANCH = "upstream"
 
 
 def _warn_withheld_stub(source_org: str, repo: str, path: str) -> None:
@@ -177,6 +198,241 @@ def _copy_ignore(
     return ignore
 
 
+class Dest(NamedTuple):
+    """One prepared release destination: the clone every copy for it lands in, the branch
+    students read, and whether the repo had NO COMMITS when it was cloned.
+
+    `unborn` is carried rather than re-probed because it answers both of the questions the
+    merge phase would otherwise ask git again: an empty clone has no HEAD until this run
+    commits one, and no local `base` branch at all."""
+
+    dir: Path
+    base: str
+    unborn: bool
+
+
+def _has_ref(dd: Path, ref: str) -> bool:
+    """Whether `ref` resolves in a dest clone."""
+    return git("-C", str(dd), "rev-parse", "--verify", "--quiet", ref)[0] == 0
+
+
+def _checkout_upstream(cohort_org: str, repo: str, dd: Path) -> Dest | None:
+    """Put a dest clone on `UPSTREAM_BRANCH` and describe it (see `Dest`).
+
+    None when the checkout itself failed, or when the dest's default branch IS
+    `UPSTREAM_BRANCH`, which the caller treats exactly like a dest
+    that would not clone: the copies for that dest are impossible, and it is dropped
+    here rather than left to fail later. The return codes used to be discarded, so a
+    refused checkout left the clone on its BASE branch - the release then copied onto
+    the branch students read, and the merge phase reported two errors about a branch
+    that was never cut.
+
+    The base is read off the clone's own HEAD - `clone` checks out whatever the repo calls
+    its default - rather than assumed to be `main`: a dest created by hand may call it
+    anything, and releasing onto a branch nobody reads is silent. A clone with NO COMMITS
+    is the exception: its HEAD names whatever the local git would have called a first
+    branch, which has nothing to do with what the repo says, so the repo is asked instead
+    and `main` is the last resort - guessing wrong there only names the branch this first
+    release creates. One probe answers both halves: `--abbrev-ref` prints the branch, and
+    an unborn HEAD is what fails `--verify`.
+
+    A cohort released into before any of this existed gets an `upstream` holding exactly
+    what it was last released."""
+    code, out = git(
+        "-C", str(dd), "rev-parse", "--abbrev-ref", "--verify", "--quiet", "HEAD"
+    )
+    unborn = code != 0
+    base = (
+        out.strip()
+        if code == 0 and out.strip()
+        else default_branch(cohort_org, repo, fallback="main")
+    )
+    if base == UPSTREAM_BRANCH:
+        # `upstream` as the DEFAULT branch collapses the two ends of the merge into one,
+        # and every check below then reads as "already merged": the copy would be
+        # committed, `merge-base --is-ancestor upstream upstream` would pass, and the
+        # release would report "nothing new to release" having pushed nothing at all.
+        # Refused out loud, because silently releasing nothing for ever is the one
+        # outcome worse than a red run (maintainers.md names this branch toolkit-owned).
+        log_err(
+            f"  {cohort_org}/{repo}: `{UPSTREAM_BRANCH}` is this repo's DEFAULT branch. "
+            f"It is the toolkit's own branch - make something else the default, and "
+            f"releases can be merged into it again."
+        )
+        return None
+    remote = f"origin/{UPSTREAM_BRANCH}"
+    if _has_ref(dd, remote):
+        code, out = git(
+            "-C", str(dd), *GIT_ENV, "checkout", "-B", UPSTREAM_BRANCH, remote
+        )
+    else:
+        code, out = git("-C", str(dd), *GIT_ENV, "checkout", "-b", UPSTREAM_BRANCH)
+    if code != 0:
+        log_err(
+            f"  {cohort_org}/{repo}: could not check out `{UPSTREAM_BRANCH}` - "
+            f"{out[:200]}"
+        )
+        return None
+    return Dest(dd, base, unborn)
+
+
+def _prepare_dest(cohort_org: str, repo: str, root: Path) -> Dest | None:
+    """Create, grant, clone and put ONE dest repo on `UPSTREAM_BRANCH`. None when it could
+    not be prepared - the copies for that dest are impossible either way, and each failure
+    has already said so once.
+
+    The grants are here rather than at creation because they CONVERGE: a dest made before
+    one of them existed has to get it too, and the release is the only thing that visits a
+    dest regularly."""
+    create_repo(
+        cohort_org,
+        repo,
+        private=True,
+        description="Released lectures, labs, readings, & other materials",
+    )
+    grant_read_teams(cohort_org, repo)
+    # Write, because an edit made here is now DURABLE: the release lands on `upstream`
+    # and is merged in, so a correction typed into the cohort repo survives the next tick
+    # instead of being copied over. It was read for exactly as long as it was not.
+    #
+    # The course org is still the source of truth - a fix made here reaches next term
+    # only when somebody carries it back. The floor (`access.faculty_floor`) stays at
+    # read: the sweep never demotes, and this grant runs on every release, so the two
+    # agree.
+    grant_faculty(cohort_org, repo, COURSE_TEAM_ACCESS, missing_is_note=True)
+    # Students are told to fork the materials and work in their own copy, and a PRIVATE
+    # repo is forkable only if BOTH its org and it say so. Converged on every release,
+    # not only at creation: the dests that predate this need it too.
+    allow_forking(cohort_org, repo)
+    dd = root / "out" / repo
+    if not clone(cohort_org, repo, dd):
+        log_err(f"could not clone dest {cohort_org}/{repo}")
+        return None
+    # A dest that would not go onto `upstream` is as unusable as one that would not
+    # clone: releasing onto the base branch instead is exactly what the merge exists to
+    # stop.
+    return _checkout_upstream(cohort_org, repo, dd)
+
+
+def _push(dd: Path, *branches: str) -> int:
+    """Push branches of a dest clone by NAME, not `HEAD`: a release moves two of them and
+    which one is checked out changes with the path taken.
+
+    `--atomic`, so a release never lands half a pair: `upstream` without the branch
+    students read leaves the next run merging a branch that never arrived, and the branch
+    students read without `upstream` loses the record of what was released."""
+    code, _ = git(
+        "-C", str(dd), *GIT_ENV, "push", "-q", "--atomic", "origin", *branches
+    )
+    return code
+
+
+def _conflict_body(base: str) -> str:
+    """The body of the pull request a release opens when its merge conflicts.
+
+    Branch names only. This repo is readable by the whole cohort, so nothing about WHO
+    edited what belongs here - and no file list either: this pull request's own Files tab
+    is that list, and GitHub keeps it current as later releases add to the branch.
+
+    It says to MERGE rather than offering a close, because a close does not settle
+    anything: `pulls.find_pr` looks for an OPEN pull request, so the next release finds
+    none, and the conflict it is still holding opens a second one. Merging is what ends
+    the hold - whichever version the resolution keeps."""
+    return (
+        f"This release could not be merged into `{base}`: the released copy and this "
+        f"repo have both changed the same lines.\n\n"
+        f"`{UPSTREAM_BRANCH}` holds everything the course org has released so far, and "
+        f"grows with every release.\n\n"
+        f"`{base}` is untouched, so the cohort still reads what it read before. Resolve "
+        f"the conflict here and merge - keeping this repo's version, the released one, "
+        f"or a mix of the two. Merging is what settles it: further releases add to "
+        f"`{UPSTREAM_BRANCH}` and re-use this pull request, and closing it unresolved "
+        f"only means the next release opens the same question again.\n"
+    )
+
+
+def _merge_and_push(
+    cohort_org: str,
+    repo: str,
+    dest: Dest,
+    touched: set[str],
+    *,
+    committed: bool,
+) -> tuple[int, bool]:
+    """Merge one dest's `UPSTREAM_BRANCH` into the branch students read and push both.
+
+    `(errors, base_moved)` - `base_moved` only when the branch students read actually
+    moved, so a release held at a pull request does not report itself as a change.
+
+    `committed` is whether the caller's commit-on-`upstream` ran this time. With
+    `dest.unborn` it answers both of the questions a `rev-parse` used to: a clone that was
+    empty and stayed empty has no HEAD to merge from, and one that was empty has no local
+    `base` branch to merge into."""
+    dd = dest.dir
+    if dest.unborn and not committed:
+        return 0, False  # an empty dest nothing could be copied into
+    if dest.unborn:
+        # A dest this run created: there is nothing to merge into, so the branch students
+        # read simply starts where the released copy now is. No `-f`: `base` cannot exist
+        # here, and a git that says otherwise is a fact to fail on rather than to
+        # overwrite the branch students read with.
+        if git("-C", str(dd), *GIT_ENV, "branch", dest.base, UPSTREAM_BRANCH)[0] != 0:
+            log_err(f"  {repo}: could not start `{dest.base}`")
+            return 1, False
+    elif (
+        git("-C", str(dd), "merge-base", "--is-ancestor", UPSTREAM_BRANCH, dest.base)[0]
+        == 0
+    ):
+        # Everything released is already in the branch students read - the idempotent
+        # no-op, and the only reason to say so is that somebody pressed the button and is
+        # watching for a line about this repo.
+        if repo in touched:
+            log_ok(f"  {repo}: nothing new to release")
+        return 0, False
+    else:
+        code, out = git("-C", str(dd), *GIT_ENV, "checkout", dest.base)
+        if code != 0:
+            log_err(f"  {repo}: could not check out `{dest.base}` - {out[:200]}")
+            return 1, False
+        code, out = git(
+            "-C",
+            str(dd),
+            *GIT_ENV,
+            "merge",
+            "--no-edit",
+            "-m",
+            f"release: merge {UPSTREAM_BRANCH} into {dest.base}",
+            UPSTREAM_BRANCH,
+        )
+        if code != 0:
+            # The cohort has edited what this release also changed. Leave `base` exactly
+            # as students last read it, ship the release to `upstream` anyway so nothing
+            # is lost, and put the decision in front of the instructors as ONE standing
+            # pull request.
+            git("-C", str(dd), *GIT_ENV, "merge", "--abort")
+            # Only when this run added to `upstream`: a re-offered merge has nothing new
+            # on it, so the local branch is already what the remote holds.
+            if committed and _push(dd, UPSTREAM_BRANCH) != 0:
+                log_err(f"  {repo}: push failed")
+                return 1, False
+            opened = pulls.upsert_pr(
+                f"{cohort_org}/{repo}",
+                head=UPSTREAM_BRANCH,
+                base=dest.base,
+                title=f"Release: merge `{UPSTREAM_BRANCH}` into `{dest.base}`",
+                body=_conflict_body(dest.base),
+                reviewer=f"{cohort_org}/{INSTRUCTORS_TEAM}",
+            )
+            if opened.url:
+                log(f"  {repo}: held for review - {opened.url}")
+            return opened.errors, False
+    if _push(dd, UPSTREAM_BRANCH, dest.base) != 0:
+        log_err(f"  {repo}: push failed")
+        return 1, False
+    log_ok(f"  {repo}: released")
+    return 0, True
+
+
 def deploy_many(
     source_org: str,
     cohort_org: str,
@@ -187,10 +443,11 @@ def deploy_many(
 
     Every deploy's `course_source_path` is copied from its (course-org) `course_source_repo`
     into its (cohort-org) `cohort_dest_repo` at `cohort_dest_path` (default: mirror
-    `course_source_path`). Each touched
-    dest repo gets a single commit+push covering all its copies; a dest with no net change
-    is left alone (idempotent). Returns `(errors, changed)` - `errors` counts copies that
-    could not be applied, `changed` is True if anything was actually pushed. `sync` runs a
+    `course_source_path`). Each touched dest repo gets a single commit on `UPSTREAM_BRANCH`
+    covering all its copies, which is then merged into the branch students read; a dest with
+    no net change is left alone (idempotent). Returns `(errors, changed)` - `errors` counts
+    copies that could not be applied, `changed` is True if the branch students read moved
+    (a release held at a pull request has NOT changed it). `sync` runs a
     single website sync at the end when `changed` (callers batching several release kinds
     pass sync=False and sync once themselves)."""
     deploys = [d for d in deploys if d]
@@ -212,41 +469,41 @@ def deploy_many(
                 src_dirs[repo] = sd
 
         # 2. clone (create if needed) each unique dest repo once (cohort org)
-        dest_dirs: dict[str, Path] = {}
+        dests: dict[str, Dest] = {}
+        archived: set[str] = set()
         for repo in sorted({d.cohort_dest_repo for d in deploys}):
-            create_repo(
-                cohort_org,
-                repo,
-                private=True,
-                description="Released lectures, labs, readings, & other materials",
-            )
-            grant_read_teams(cohort_org, repo)
-            # Read, not write: this is the RELEASED copy, and a re-release copies over it
-            # (`copytree(dirs_exist_ok=True)`), so an edit made here would vanish. A
-            # correction belongs in the course org's materials repo, then re-release.
-            grant_faculty(cohort_org, repo, FACULTY_READ_ACCESS, missing_is_note=True)
-            dd = root / "out" / repo
-            if not clone(cohort_org, repo, dd):
-                log_err(f"could not clone dest {cohort_org}/{repo}")
-            else:
-                dest_dirs[repo] = dd
+            if repo_is_archived(cohort_org, repo):
+                # A closed cohort. Everything below - the grants, the commit, the push -
+                # 403s on an archived repo, so a schedule that still names one would red
+                # this cron for the rest of time. Being finished is a state somebody
+                # chose, so it is a line, not an error. (`repo_is_archived` fails open, so
+                # a flag that could not be read releases as usual and the write itself is
+                # the alarm.)
+                log(f"  [skip] {cohort_org}/{repo} is archived")
+                archived.add(repo)
+                continue
+            dest = _prepare_dest(cohort_org, repo, root)
+            if dest is not None:
+                dests[repo] = dest
 
-        # A deploy whose source or dest failed to clone is one impossible copy - count it
-        # ONCE, per deploy, not once per failed clone (both failing is still one copy lost).
+        # A deploy into an ARCHIVED dest is not a failure and not a copy: it was skipped
+        # on purpose, and counting it would red every run of a course that has closed one
+        # of its cohorts. Dropping it here leaves everything below counting failures.
+        deploys = [d for d in deploys if d.cohort_dest_repo not in archived]
+
+        # A deploy whose source or dest could not be prepared - the clone, or the dest's
+        # `upstream` checkout - is one impossible copy. Count it ONCE, per deploy, not
+        # once per failure (both ends failing is still one copy lost).
         errors += sum(
             1
             for d in deploys
-            if d.course_source_repo not in src_dirs
-            or d.cohort_dest_repo not in dest_dirs
+            if d.course_source_repo not in src_dirs or d.cohort_dest_repo not in dests
         )
 
         # 3. apply every copy against the already-cloned trees
         touched: set[str] = set()
         for d in deploys:
-            if (
-                d.course_source_repo not in src_dirs
-                or d.cohort_dest_repo not in dest_dirs
-            ):
+            if d.course_source_repo not in src_dirs or d.cohort_dest_repo not in dests:
                 continue  # its source/dest failed to clone (already counted)
             # A root cohort_dest_path means the dest repo's root, exactly as a root
             # course_source_path means the source repo's - no mirror-the-source fallback.
@@ -263,7 +520,7 @@ def deploy_many(
                 )
                 errors += 1
                 continue
-            destp = _resolve_within(dest_dirs[d.cohort_dest_repo], dest_rel)
+            destp = _resolve_within(dests[d.cohort_dest_repo].dir, dest_rel)
             if destp is None:
                 log_err(
                     f"unsafe cohort_dest_path `{dest_rel}` for "
@@ -345,9 +602,14 @@ def deploy_many(
             log_ok(f"+ {d.cohort_dest_repo}/{dest_rel or '(repo root)'}")
             touched.add(d.cohort_dest_repo)
 
-        # 4. one commit + push per touched dest (skip if it has no net change)
-        for repo in sorted(touched):
-            dd = dest_dirs[repo]
+        # 4. one commit on `upstream` per dest, then merge it into the branch students
+        # read. Every CLONED dest, not just the ones this run copied into: a run whose
+        # merge conflicted leaves `upstream` ahead with a pull request standing, and the
+        # next run has to re-offer that merge (and re-find the same pull request) even
+        # when it had nothing new of its own to add.
+        for repo in sorted(dests):
+            dest = dests[repo]
+            dd = dest.dir
             # -f: what was copied IS the release. A whole-repo release brings the source's
             # own `.gitignore` along, and without -f `git add` would then silently drop any
             # file the source force-added past it (lecture PDFs under a `*.pdf` rule are the
@@ -357,29 +619,28 @@ def deploy_many(
             # idempotent no-op) from a real commit failure (disk, lock, hook): git commit
             # exits non-zero for BOTH, so a failed commit would otherwise be reported as
             # "nothing new to release" and silently lost.
-            if git("-C", str(dd), "diff", "--cached", "--quiet")[0] == 0:
-                log_ok(f"  {repo}: nothing new to release")
-                continue
-            code, out = git(
-                "-C",
-                str(dd),
-                *GIT_ENV,
-                "commit",
-                "-q",
-                "--no-verify",
-                "-m",
-                f"release: sync materials into {repo}",
+            committed = False
+            if git("-C", str(dd), "diff", "--cached", "--quiet")[0] != 0:
+                code, out = git(
+                    "-C",
+                    str(dd),
+                    *GIT_ENV,
+                    "commit",
+                    "-q",
+                    "--no-verify",
+                    "-m",
+                    f"release: sync materials into {repo}",
+                )
+                if code != 0:
+                    log_err(f"  {repo}: commit failed - {out[:200]}")
+                    errors += 1
+                    continue
+                committed = True
+            merge_errors, base_moved = _merge_and_push(
+                cohort_org, repo, dest, touched, committed=committed
             )
-            if code != 0:
-                log_err(f"  {repo}: commit failed - {out[:200]}")
-                errors += 1
-                continue
-            if git("-C", str(dd), *GIT_ENV, "push", "-q", "origin", "HEAD")[0] != 0:
-                log_err(f"  {repo}: push failed")
-                errors += 1
-                continue
-            log_ok(f"  {repo}: released")
-            changed = True
+            errors += merge_errors
+            changed = changed or base_moved
 
     if sync and changed:
         # site.sync_site RAISES on a genuine tree/team read failure - one cohort's

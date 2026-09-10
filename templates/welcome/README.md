@@ -11,3 +11,7 @@ Your course materials and your own assignment repositories then appear in this o
 
 If this course has group assignments, use this repo to open a **Join team** issue the same
 way once you've joined.
+
+The materials are read-only for you: fork them to work in your own copy. If you find a
+mistake or a typo in the materials, open a pull request; if something needs clarifying,
+open an issue.

@@ -52,12 +52,60 @@ The same workflow releases **code**, because code is just another path. Keep a g
 
 ## Fixing something you have already released
 
-Edit it in the **course org** and release again. A release overwrites the file at that path,
-so the correction lands; a copy is only additive in that it never *deletes* anything.
+Two routes, and both stick.
 
-Do not edit the cohort's released copy directly - instructors have read on it for that
-reason. An edit there survives only until the next release of that path, then vanishes with
-no warning.
+**In the course org**, then release again - the right one for anything next year's cohort
+should also get. A release overwrites the file at that path, so the correction lands; a copy
+is only additive in that it never *deletes* anything.
+
+**In the cohort's copy**, straight into the released repo - the right one when a lab is
+broken during class. Instructors have push there, and the edit survives: a release lands on
+the repo's `upstream` branch and is **merged** into the branch students read, so the two
+changes are combined rather than one overwriting the other. Carry it back to the course org
+afterwards, or next year starts from the uncorrected version (below).
+
+If the same lines changed on both sides, the merge cannot be made automatically. The release
+then leaves the branch students read exactly as it was and opens **one pull request**,
+`upstream` into that branch, with the `instructors` team asked to review. Nothing is lost -
+the released version is on `upstream` - and nothing has moved for students until somebody
+decides. Resolve it and **merge**, keeping the cohort's version, the released one, or a mix.
+Further releases keep adding to `upstream` and re-use that same pull request; closing it
+unresolved does not settle anything, because the conflict is still there and the next
+release opens the question again.
+
+`upstream` is the toolkit's branch. Do not work on it and do not make it the default: the
+default branch is what students read, what the website reads, and what a release merges
+into.
+
+## Carrying cohort edits back
+
+A fix typed into the cohort's copy is not in the course org, so it is not in next term's.
+**Propagate cohort edits** (course org → Actions) copies each released path back from the
+cohort repo over its source in the course org, on a branch named for the cohort, and opens
+one pull request per source repo for faculty to merge, cherry-pick or close. Run it with
+`dry_run` first to see the pairs.
+
+What it does and does not carry:
+
+- only paths that have actually been released - it walks the cohort's `deploy:` entries;
+- **deletions are not propagated**: a file you removed from the cohort's copy stays in the
+  course org, and the pull request says so;
+- the branch is regenerated on every run, so re-running after more edits refreshes the same
+  pull request rather than stacking on it.
+
+Closing a cohort runs it first, so the term's corrections are offered back before the repos
+are frozen.
+
+## Students propose fixes by pull request
+
+Students read the materials repo and cannot push to it. They can fork it and open a pull
+request - which is how they report a typo in a lab, and how both of the courses this toolkit
+grew out of have always worked. A pull request lands on the branch students read like any
+other, so a merged one is live immediately and survives the next release.
+
+The invitation is in the cohort's home page and in `welcome`. It reaches only cohorts
+bootstrapped after it shipped: both files are instructor-owned and seeded once, so an
+existing cohort needs the paragraph pasted in by hand.
 
 ## Withholding files with `.releaseignore`
 

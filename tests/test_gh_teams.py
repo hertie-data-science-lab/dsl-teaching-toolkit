@@ -338,6 +338,49 @@ def test_a_course_org_is_tightened_like_a_cohort(monkeypatch):
     assert "members_can_create_repositories=false" in fields
 
 
+def test_only_a_cohort_lets_its_private_repos_be_forked(monkeypatch):
+    # The one setting here that loosens, so only the org kind that needs it asks for it.
+    # A cohort's materials repo is private and GitHub hides the Fork button on a private
+    # repo unless its org allows forks, so a cohort told to fork the labs simply had no
+    # button; there it grants nothing, because a fork carries the reader's own access. A
+    # COURSE org holds the unreleased materials, the solutions and the hidden tests, and
+    # a private fork of those into somebody's personal account gains nobody anything.
+    calls = _patched(monkeypatch)
+    assert gh_teams.converge_org_settings("Cohort-f2026", private_forks=True) == 0
+    fields = [f for call in calls for f in call]
+    assert "members_can_fork_private_repositories=true" in fields
+
+    course = _patched(monkeypatch)
+    assert gh_teams.converge_org_settings("Course-Org") == 0
+    assert not [f for call in course for f in call if "fork" in f]
+
+
+def test_a_course_org_is_not_told_its_private_repos_are_forkable(monkeypatch, capsys):
+    # The summary line is read by whoever pressed the button; claiming a setting that was
+    # never sent is how an org's real configuration stops being knowable from the log.
+    _patched(monkeypatch)
+    gh_teams.converge_org_settings("Course-Org")
+    assert "forkable" not in capsys.readouterr().out
+
+
+def test_a_refused_forking_setting_never_takes_the_tightening_with_it(monkeypatch):
+    # GitHub validates a PATCH body as a UNIT, so the loosening field rides in a call of
+    # its own: bundled, a refusal (an enterprise policy above the org, a plan without the
+    # setting) would drop `default_repository_permission=none` too and leave every member
+    # reading every repo behind a log line about forking. Counted, so it is still LOUD.
+    calls: list[tuple[str, ...]] = []
+
+    def refuses_the_fork_field(*a, **k):
+        calls.append(a)
+        return (1, "gh: HTTP 422") if any("fork" in arg for arg in a) else (0, "")
+
+    monkeypatch.setattr(gh_teams, "gh", refuses_the_fork_field)
+    assert gh_teams.converge_org_settings("Cohort-f2026", private_forks=True) == 1
+    fields = [f for call in calls for f in call]
+    assert "default_repository_permission=none" in fields
+    assert "members_can_create_repositories=false" in fields
+
+
 def test_a_failed_tighten_reds_the_run(monkeypatch):
     # An org left at GitHub's default (every member reads every repo) is a real
     # misconfiguration - it must red the caller, not just log and pass.

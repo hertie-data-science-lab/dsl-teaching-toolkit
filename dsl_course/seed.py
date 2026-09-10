@@ -423,7 +423,10 @@ def _converge_org(
     used to be written only at bootstrap, so every org tightened after its own bootstrap
     kept GitHub's default of `read` for every member on every repo.
 
-    `is_cohort` says this org is a cohort, which additionally converges the four role teams'
+    `is_cohort` says this org is a cohort. It lets the org's private repos be forked
+    (converge_org_settings' `private_forks`) - students are told to fork the labs, while
+    a private fork in a COURSE org would be an uncontrolled copy of the solutions in a
+    personal account - and it additionally converges the four role teams'
     PRIVACY (course.FACULTY_TEAMS + COHORT_TEAMS). Their privacy was asserted only by the
     team-creating call at bootstrap, so `students` and `auditors` stayed `closed` - their
     membership browsable by every student in the org - on every cohort created before they
@@ -432,7 +435,7 @@ def _converge_org(
     if listing is None:
         listing = list_org_repos(org)
     return (
-        converge_org_settings(org)
+        converge_org_settings(org, private_forks=is_cohort)
         + (create_role_teams(org, (*FACULTY_TEAMS, *COHORT_TEAMS)) if is_cohort else 0)
         + _converge_org_metadata(org, listing)
         + update_profile_readme(org, central_ref=central_ref, repos=listing)

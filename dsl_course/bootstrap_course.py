@@ -836,7 +836,7 @@ def _run(args: argparse.Namespace) -> int:
     log_step("Configuring org settings")
     steps.append(
         (
-            converge_org_settings(args.org),
+            converge_org_settings(args.org, private_forks=args.cohort),
             "Org settings: base permission none, no member repo creation",
         )
     )

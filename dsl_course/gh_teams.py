@@ -115,13 +115,25 @@ def members_without_2fa(org: str) -> int | None:
     return len(out.split()) if code == 0 else None
 
 
-def converge_org_settings(org: str) -> int:
+def converge_org_settings(org: str, *, private_forks: bool = False) -> int:
     """Tighten one org: base permissions, member repo creation, and 2FA where possible.
 
     Idempotent, and run on every nightly refresh as well as at bootstrap. These were set
     once, at bootstrap, and never revisited, so every org bootstrapped before the
     tightening still handed each member `read` on the unreleased materials, the model
     solutions and the `solution` branches.
+
+    `private_forks` is the third setting, and the odd one out: it LOOSENS - so it is
+    asked for, not assumed, sent in a PATCH of its own (see below), and only a COHORT
+    asks. A cohort's materials repo is
+    private, and GitHub refuses a fork of a private repo unless its org allows it, so
+    the Fork button students are told to press was simply absent; there it grants
+    nothing, because a fork carries the reader's own access and a student who can fork
+    the materials could already read them. A COURSE org is the opposite case: it holds
+    the unreleased materials, the model solutions and the hidden tests, its members are
+    faculty who already have push where they need it, and a private fork there is an
+    uncontrolled copy of the solutions in somebody's personal account, gaining nobody
+    anything.
 
     Base permissions matter in BOTH org kinds. A cohort holds students; a COURSE org holds
     the materials students must not see, and at GitHub's default of `read` every member of
@@ -150,6 +162,27 @@ def converge_org_settings(org: str) -> int:
     else:
         failures += 1
         log_err(f"could not tighten {org}: {out[:120]}")
+
+    # Its OWN patch, not a third field on the one above. GitHub validates a PATCH body as
+    # a unit, so a refused fork field - an enterprise policy above the org forbids private
+    # forks, a plan does not carry the setting - would take the two tightening fields down
+    # with it, and the org would sit at GitHub's default of `read` for every member on
+    # every repo behind a log line about forking. Still counted, unlike 2FA: a refusal
+    # here is a misconfiguration until the demo run says otherwise.
+    if private_forks:
+        code, out = gh(
+            "api",
+            "--method",
+            "PATCH",
+            f"orgs/{org}",
+            "--field",
+            "members_can_fork_private_repositories=true",
+        )
+        if code == 0:
+            log_ok(f"{org}: private repos forkable")
+        else:
+            failures += 1
+            log_err(f"could not let {org} fork its private repos: {out[:120]}")
 
     code, out = gh(
         "api",
