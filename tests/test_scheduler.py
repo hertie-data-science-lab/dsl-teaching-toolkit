@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -30,6 +30,7 @@ from dsl_course import (
     source_digest,
 )
 from dsl_course import collect as collect_mod
+from dsl_course import issues as issues_mod
 from dsl_course.faults import ConfigFault, Unusable
 from dsl_course.grades import GradingSpec
 from dsl_course.schedule import (
@@ -1761,8 +1762,11 @@ def test_an_unparseable_plan_leaves_the_exit_code_alone_and_keeps_the_digest_ope
 
     assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
 
-    (fault,) = synced["faults"]
-    assert fault.file == "schedule.yml" and "not valid YAML" in fault.what
+    unreadable, no_archive = synced["faults"]
+    assert unreadable.file == "schedule.yml" and "not valid YAML" in unreadable.what
+    # A file nobody can parse declares no archive date either, so it earns that advisory
+    # in the same digest.
+    assert "ever archive it" in no_archive.what
     captured = capsys.readouterr()
     assert "is NOT valid YAML" in captured.err
     assert "0/0 release(s) due" in captured.out
@@ -2235,6 +2239,10 @@ def test_a_registry_nobody_can_parse_releases_nothing_and_stays_green(
 # ----------------------------------------------------- source pre-flight (unattended)
 
 
+# A cohort's archive date, far enough out that the notice window is not open.
+ARCHIVES = date(2027, 2, 16)
+
+
 def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None):
     """Drive _preflight_sources with a fixed fault list, capturing every call it makes.
 
@@ -2262,8 +2270,10 @@ def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None):
         "notify_source_transitions",
         lambda *a, **k: seen.update(mailed=a, mail_kw=k) or notify.Unsent(),
     )
+    # A cohort that names no archive date earns an advisory of its own, which is not
+    # what any of these tests is about - see the archive-phase section.
     rc = scheduler._preflight_sources(
-        "Course-Org", "Cohort-Org", Schedule(), now, dry_run
+        "Course-Org", "Cohort-Org", Schedule(archive_date=ARCHIVES), now, dry_run
     )
     return rc, seen
 
@@ -3116,3 +3126,108 @@ def test_the_break_glass_single_cohort_run_skips_a_closed_out_cohort(monkeypatch
         ["scheduler", "--course-org", "Course-Org", "--cohort-org", "Cohort-A"],
     )
     assert scheduler.main() == 0
+
+
+# --------------------------------------------------------------- the archive phase
+
+
+def _archive(monkeypatch, archive_date, now, dry_run=False, existing=None):
+    """Drive `_archive_phase` alone, recording the close-out, the issue and the mail."""
+    seen: dict = {"closed": [], "issues": [], "mailed": []}
+    monkeypatch.setattr(
+        scheduler.teardown,
+        "close_out",
+        lambda course, cohort, dry_run=True: seen["closed"].append(cohort) or 0,
+    )
+    monkeypatch.setattr(scheduler.issues, "find_issue", lambda repo, title: existing)
+    monkeypatch.setattr(
+        scheduler.issues,
+        "upsert_issue",
+        lambda repo, title, body, **k: (
+            seen["issues"].append((title, body)) or issues_mod.Upserted(0)
+        ),
+    )
+    monkeypatch.setattr(
+        scheduler.notify,
+        "notify_cohort_archiving",
+        lambda cohort, course, when, at: seen["mailed"].append(cohort) or True,
+    )
+    rc = scheduler._archive_phase(
+        "Course-Org",
+        "Cohort-Org",
+        Schedule(archive_date=archive_date),
+        now,
+        dry_run,
+    )
+    return rc, seen
+
+
+def test_a_cohort_is_closed_out_on_its_archive_date(monkeypatch):
+    when = date(2027, 2, 16)
+    _, seen = _archive(monkeypatch, when, datetime(2027, 2, 16, 6, tzinfo=timezone.utc))
+    assert seen["closed"] == ["Cohort-Org"]
+
+
+def test_a_cohort_is_not_closed_out_the_day_before(monkeypatch):
+    when = date(2027, 2, 16)
+    _, seen = _archive(
+        monkeypatch, when, datetime(2027, 2, 15, 23, tzinfo=timezone.utc)
+    )
+    assert seen["closed"] == []
+
+
+def test_a_cohort_with_no_archive_date_is_never_closed_out(monkeypatch):
+    # Freezing a whole org off a synthesised term end is the worst possible use of a
+    # guess: such a cohort is closed out by hand, with --force.
+    _, seen = _archive(monkeypatch, None, datetime(2099, 1, 1, tzinfo=timezone.utc))
+    assert (seen["closed"], seen["issues"], seen["mailed"]) == ([], [], [])
+
+
+def test_a_fortnight_out_the_cohort_is_told_once(monkeypatch):
+    when = date(2027, 2, 16)
+    edge = datetime(2027, 2, 2, 9, tzinfo=timezone.utc)  # exactly 14 days
+    rc, seen = _archive(monkeypatch, when, edge)
+    assert rc == 0
+    assert seen["mailed"] == ["Cohort-Org"]
+    ((title, body),) = seen["issues"]
+    assert title == "Cohort archives on 2027-02-16"
+    assert scheduler._MAILED_MARK in body
+    assert "read-only" not in title  # the date is the whole identity of this issue
+    assert seen["closed"] == []
+
+
+def test_the_notice_is_quiet_the_day_before_its_window_opens(monkeypatch):
+    when = date(2027, 2, 16)
+    _, seen = _archive(monkeypatch, when, datetime(2027, 2, 1, 9, tzinfo=timezone.utc))
+    assert (seen["issues"], seen["mailed"]) == ([], [])
+
+
+def test_the_mail_goes_once_however_many_ticks_the_fortnight_has(monkeypatch):
+    # Four ticks an hour for a fortnight is about 1,300 chances to say it again. The issue
+    # body is what records that it went.
+    when = date(2027, 2, 16)
+    _, seen = _archive(
+        monkeypatch,
+        when,
+        datetime(2027, 2, 5, 9, tzinfo=timezone.utc),
+        existing=issues_mod.Issue(7, scheduler._MAILED_MARK),
+    )
+    assert seen["mailed"] == []
+    assert len(seen["issues"]) == 1  # the body is still rewritten, silently
+
+
+def test_a_dry_run_neither_freezes_nor_notifies(monkeypatch):
+    when = date(2027, 2, 16)
+    _, seen = _archive(
+        monkeypatch, when, datetime(2027, 2, 16, tzinfo=timezone.utc), dry_run=True
+    )
+    assert (seen["closed"], seen["issues"], seen["mailed"]) == ([], [], [])
+
+
+def test_a_cohort_with_no_archive_date_earns_an_advisory_in_its_own_digest(monkeypatch):
+    # A fault with no clock: there is no moment it bites at, which is exactly what is
+    # wrong with it. Not a parser drop, so `Validate schedule` stays green in August.
+    (fault,) = scheduler._no_archive_date(Schedule())
+    assert "ever archive it" in fault.what
+    assert fault.fires is None and fault.file == "schedule.yml"
+    assert scheduler._no_archive_date(Schedule(archive_date=ARCHIVES)) == []

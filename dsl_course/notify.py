@@ -9,6 +9,10 @@ Two mails, each about a fault whose own channel reaches nobody in time:
 - `notify_overwritten_edits` mails whoever hand-edited a generated file in a site repo
   that the sync has just rebuilt over. The issue the sync files there is the record; the
   mail is what tells a person their work is in a commit and not on the site.
+- `notify_cohort_archiving` mails the cohort's teaching team the fortnight before the
+  whole cohort org is frozen read-only. The notice issue in `classroom-config` is the
+  record; the mail is what reaches somebody who is not reading GitHub notifications in the
+  weeks after a term ends, which is exactly when this fires.
 - `notify_run_failed` mails the MAINTAINER when an unattended run genuinely broke. The
   `<workflow> is failing` issue every cron files is the record; GitHub's own
   scheduled-failure email goes to whoever last committed the workflow file, which is
@@ -47,12 +51,12 @@ import html
 import sys
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from typing import NamedTuple
 
 from . import faults, ghcli, mailer, sync_faculty
 from .config_digest import Digest, DigestResult
-from .course import term_tag
+from .course import CONFIG_REPO, term_tag
 from .discovery import course_name_of
 from .faults import (
     NOTIFY_FROM,
@@ -66,7 +70,7 @@ from .faults import (
 )
 from .gh_contents import blame_logins, last_committer, path_committers, read_error
 from .log import log, log_err, log_ok, log_person
-from .schedule import SourceFault
+from .schedule import SCHEDULE_PATH, SourceFault
 
 # How much of the deadline is left, in the subject. Formatted from the windows themselves,
 # so moving a rung cannot leave a hand-typed number of hours in somebody's inbox.
@@ -1006,6 +1010,82 @@ def notify_overwritten_edits(
             f"({type(exc).__name__}): {exc}"
         )
         return Unsent(1, tuple(faults_by_key))
+
+
+# --------------------------------------------------- a cohort about to be frozen
+
+
+def _archive_message(cohort_org: str, course_org: str, when: date) -> tuple[str, str]:
+    """The (subject, HTML body) of the archive notice.
+
+    It links `schedule.yml`, not the notice issue: the only thing a reader might want to
+    DO about this is move or remove the date, and that is an edit to that file."""
+    label = _course_label(course_org, cohort_org)
+    edit_at = f"https://github.com/{cohort_org}/{CONFIG_REPO}/edit/main/{SCHEDULE_PATH}"
+    body = (
+        f"<p>This is an automated email sent on behalf of "
+        f"{html.escape(_course_name(course_org))}.</p>\n"
+        f"<p>On <b>{when}</b> every repository in <code>{html.escape(cohort_org)}</code> "
+        f"is archived: students' work, the released materials, the enrolment repo and "
+        f"the cohort's own configuration. Nothing is deleted and nobody is removed - "
+        f"everyone who can read the cohort still can, and nobody can change "
+        f"anything.</p>\n"
+        f"<p>Anything you still need to change in this cohort, change before then. To "
+        f"move the date or take it away, edit "
+        f"{_anchor(edit_at, f'{cohort_org}/{CONFIG_REPO}/{SCHEDULE_PATH}')} - an "
+        f"<code>archive:</code> block with its own <code>date:</code> overrides the "
+        f"default, which is sixty days after <code>semester_end</code>.</p>\n"
+    )
+    return f"[{label}] {cohort_org} is archived on {when}", body
+
+
+def notify_cohort_archiving(
+    cohort_org: str, course_org: str, when: date, now: datetime
+) -> bool:
+    """Mail this cohort's teaching team that the whole org freezes on `when`. True only
+    when a message actually went out.
+
+    Its own small sender rather than `_deliver`'s: this is not a fault, so it has no
+    ladder, no keys to hold and nobody to escalate to - and the caller needs a straight
+    yes or no, because a yes is what it writes into the notice issue so that the next tick
+    does not say it all again.
+
+    A `False` from an org with no address or no mail transport is the honest answer and
+    the self-healing one: the issue is still filed, and a tick after somebody wires the
+    transport up sends the mail rather than deciding it was already sent."""
+    try:
+        faculty = sync_faculty.load_cohort_faculty(cohort_org) or {}
+    except Exception as exc:
+        log_err(f"could not read {cohort_org}'s people.yml ({read_error(exc)})")
+        faculty = {}
+    to = (
+        _addresses(
+            c.email
+            for c in sync_faculty.teaching_contacts(faculty, now.date().isoformat())
+        )
+        or _fallback_to()
+    )
+    if not to:
+        log(
+            f"  [skip] no notification address for {cohort_org} - the notice issue is "
+            f"the only channel"
+        )
+        return False
+    if mailer.graph_config_from_env() is None:
+        log("  [skip] mail not configured - the notice issue is the only channel")
+        return False
+    subject, body = _archive_message(cohort_org, course_org, when)
+    sent = mailer.send_bulk([mailer.Message(to, subject, body)], html=True)
+    if len(sent) < len(to):
+        # Un-recorded rather than lost: the issue body is not stamped, so the next tick
+        # offers the mail again.
+        log_err(
+            f"the archive notice reached {len(sent)} of {len(to)} recipient(s) - the "
+            f"next tick will offer it again"
+        )
+        return False
+    log_ok(f"mailed {len(sent)} recipient(s) that {cohort_org} archives on {when}")
+    return True
 
 
 # ------------------------------------------------------------------ a failed run
