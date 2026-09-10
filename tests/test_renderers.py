@@ -912,6 +912,22 @@ NEW_ASSIGNMENT_INPUTS = [
 ]
 
 
+def test_the_boxes_a_copy_ignores_are_not_marked_required():
+    # GitHub renders an asterisk beside every `required: true` label, so boxes 5-9 were
+    # demanding an answer on the same form where box 4 says it ignores them. They all
+    # carry a `default:`, and a choice/string with a default and a boolean are submitted
+    # whether or not anyone touches the form - so the run step still gets all nine.
+    inputs = workflow_inputs(
+        workflows_render.render_new_assignment(["assignment-1-f2025"])
+    )
+    for name in NEW_ASSIGNMENT_INPUTS[:3]:
+        assert inputs[name]["required"] is True  # the three that name the repo
+    assert inputs["copy_from"]["required"] is False
+    for name in NEW_ASSIGNMENT_INPUTS[4:]:
+        assert "required" not in inputs[name], name
+        assert "default" in inputs[name], name
+
+
 def test_new_assignment_button_asks_for_the_whole_assignment():
     # Every one of these but `format` lands verbatim in grading_config.yml, so the answers
     # given here are the ones the handout, the sheet and the Join-team form later obey -

@@ -614,15 +614,26 @@ def _newest_materials(options: list[str]) -> str | None:
 
 
 def _choice_input(
-    name: str, description: str, options: list[str], default: str | None = None
+    name: str,
+    description: str,
+    options: list[str],
+    default: str | None = None,
+    required: bool = True,
 ) -> str:
-    """A required dropdown input. Pre-selected on `default` if given, otherwise on the
-    latest term year (see _newest) - every org/repo dropdown in every workflow, so a faculty
-    member never has to scroll past last year's cohort to reach this year's."""
+    """A dropdown input, required by default. Pre-selected on `default` if given, otherwise
+    on the latest term year (see _newest) - every org/repo dropdown in every workflow, so a
+    faculty member never has to scroll past last year's cohort to reach this year's.
+
+    `required=False` drops the asterisk GitHub renders beside the label. It is for a box
+    that always arrives answered anyway - a dropdown carrying a `default:` is submitted
+    with it whether or not anyone touches the form - and that some OTHER answer may make
+    irrelevant. Marking such a box required tells a faculty member the form needs
+    something from them that it does not."""
     default = default or _newest(options)
     return (
         f'      {name}:\n        description: "{description}"\n'
-        "        required: true\n        type: choice\n"
+        + ("        required: true\n" if required else "")
+        + "        type: choice\n"
         + (f'        default: "{default}"\n' if default else "")
         + f"        options:\n{_choice(options)}"
     )
@@ -1539,8 +1550,7 @@ on:
 _STARTER_FORMATS_INPUT = f"""\
       format:
         description: "5. Starter file(s) to seed, comma-separated: {", ".join(STARTER_FORMATS)} - or {NO_STARTER} for the README.md only"
-        default: "ipynb"
-        required: true"""
+        default: "ipynb\""""
 
 
 def render_new_assignment(assignments: list[str] | None = None) -> str:
@@ -1578,9 +1588,9 @@ on:
         required: true
 {_copy_from_input("4. Copy an existing template forward instead - both branches, whole history. Boxes 5-9 are then ignored", assignments or [])}
 {_STARTER_FORMATS_INPUT}
-{_choice_input("type", "6. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual")}
-{_choice_input("team_formation", "7. Group only: self_select = students use the Join team form; assigned = you write teams.csv", list(TEAM_FORMATIONS), "self_select")}
-{_choice_input("submit_via", "8. Where students hand in. github = they push to their repo and the cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class), so the repo only carries the brief and nothing is collected", list(SUBMIT_VIA), "github")}
+{_choice_input("type", "6. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual", required=False)}
+{_choice_input("team_formation", "7. Group only: self_select = students use the Join team form; assigned = you write teams.csv", list(TEAM_FORMATIONS), "self_select", required=False)}
+{_choice_input("submit_via", "8. Where students hand in. github = they push to their repo and the cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class), so the repo only carries the brief and nothing is collected", list(SUBMIT_VIA), "github", required=False)}
       autograde:
         description: "9. Also run hidden tests at the cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
         type: boolean
