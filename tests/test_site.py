@@ -161,6 +161,24 @@ def test_tbc_rows_render_with_theme_flags():
     assert "tbc: true" in out and "dateless" not in out
 
 
+def test_the_archive_row_is_a_special_event_that_says_what_freezes():
+    out = site._archive_entry(date(2027, 2, 16), date(2026, 12, 20))
+    assert "type: special_event" in out
+    assert 'description: "Cohort archived"' in out
+    assert "date: 2027-02-16T09:00:00" in out
+    assert "hide_time: true" in out  # a whole day, not a 09:00 appointment
+    assert "read-only" in out and "take a copy" in out
+
+
+def test_the_archive_row_only_reaches_the_updates_box_inside_its_window():
+    # The box is where a student would actually notice it, and two weeks is long enough
+    # to act on. Outside the window the row is still on the schedule, silently.
+    when = date(2027, 2, 16)
+    edge = when - schedule_mod.ARCHIVE_NOTICE
+    assert "announce: true" in site._archive_entry(when, edge)
+    assert "announce" not in site._archive_entry(when, edge - timedelta(days=1))
+
+
 def test_term_date_entry_hides_the_placeholder_time():
     out = site._term_date_entry("Term starts", date(2026, 9, 7))
     assert "type: term_date" in out
@@ -874,6 +892,36 @@ def test_synthesised_exams_appear_when_the_schedule_names_none(monkeypatch, tmp_
     assert 'description: "MidTerm Exam"' in events["midterm.md"]
     assert 'description: "Final Exam"' in events["final.md"]
     assert "type: special_event" in events["01-project-clinic.md"]
+
+
+def test_the_archive_row_ships_with_the_rest_of_the_schedule(monkeypatch, tmp_path):
+    plan = _plan(
+        monkeypatch,
+        tmp_path,
+        Schedule(semester_end=date(2026, 12, 18), archive_date=date(2027, 2, 16)),
+    )
+    assert (
+        'description: "Cohort archived"'
+        in plan.collections["_events"]["cohort-archived.md"]
+    )
+
+
+def test_a_cohort_can_keep_its_archive_date_off_the_site(monkeypatch, tmp_path):
+    plan = _plan(
+        monkeypatch,
+        tmp_path,
+        Schedule(
+            semester_end=date(2026, 12, 18),
+            archive_date=date(2027, 2, 16),
+            archive_show_on_site=False,
+        ),
+    )
+    assert "cohort-archived.md" not in plan.collections["_events"]
+
+
+def test_a_cohort_with_no_archive_date_gets_no_row(monkeypatch, tmp_path):
+    plan = _plan(monkeypatch, tmp_path, Schedule(semester_start=date(2026, 9, 7)))
+    assert "cohort-archived.md" not in plan.collections["_events"]
 
 
 def test_term_date_rows_only_when_the_schedule_pins_the_bounds(monkeypatch, tmp_path):

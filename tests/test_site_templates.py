@@ -379,6 +379,7 @@ def test_every_data_file_a_template_reads_is_one_the_site_has(rel, site_data):
         "tbc",
         "dateless",
         "hide_time",
+        "announce",
         "repo_url",
         "repo_name",
         "due_event",

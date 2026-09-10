@@ -117,6 +117,14 @@ SCHEDULE_PATH = "schedule.yml"
 # one that freezes late. A cohort that wants another date says so in `archive.date`.
 ARCHIVE_GRACE = timedelta(days=60)
 
+# How long before that date a cohort is TOLD. Two weeks is long enough to move the date,
+# to finish a late piece of marking or to pull a copy of anything somebody wants to keep,
+# and short enough that the notice is still about something imminent. Spelled once here
+# because two surfaces count back from the same date - the site's Updates box and the
+# notice issue-and-mail the scheduler files - and a fortnight on one and ten days on the
+# other would be the site and the inbox disagreeing about when a term ends.
+ARCHIVE_NOTICE = timedelta(days=14)
+
 # What a fault in schedule.yml has always been called here, and still is: `ConfigFault`
 # with a `kind` set. One type rather than two, so the digest, the mail and the ladder are
 # the same code for a source the plan cites and for an entry the parser had to drop -
