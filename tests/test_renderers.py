@@ -336,26 +336,30 @@ def test_collect_submissions_refreshes_the_sheet_and_freezes_nothing():
     assert "--deadline" not in rendered
 
 
-@pytest.mark.parametrize(
-    "rendered",
-    [
-        workflows_render.render_provision(["Cohort-f2026"], ["assignment-1-f2026"]),
-        workflows_render.render_collect_submissions(
-            ["Cohort-f2026"], ["assignment-1-f2026"]
-        ),
-    ],
-    ids=["release-assignment", "collect-submissions"],
-)
-def test_the_two_per_assignment_buttons_can_name_which_schedule_entry(rendered):
+def test_a_read_only_button_can_name_which_schedule_entry():
     # Two schedule entries may hand out from one template when each names its own
-    # `cohort_dest_repo`. Both buttons start from the TEMPLATE, so both need a way to say
-    # which of the two - and neither may guess: they make different repos and keep
-    # different marks. Empty (the normal case) passes no flag at all.
+    # `cohort_dest_repo`, and Collect submissions starts from the TEMPLATE - so it needs a
+    # way to say which of the two sheets to refresh. It may say it because refreshing the
+    # wrong sheet costs a re-run; the HANDOUT may not, and has no such box.
+    rendered = workflows_render.render_collect_submissions(
+        ["Cohort-f2026"], ["assignment-1-f2026"]
+    )
     inp = workflow_inputs(rendered)
     assert inp["slug"]["required"] is False and inp["slug"]["default"] == ""
     assert len(inp) <= GITHUB_MAX_DISPATCH_INPUTS
     assert "SLUG: ${{ inputs.slug }}" in rendered
     assert '[ -n "$SLUG" ] && args+=(--slug "$SLUG")' in rendered
+
+
+def test_the_hand_out_button_never_picks_between_two_schedule_entries():
+    # It was a box, and one press of it decided which half of a cohort got repos. The
+    # schedule fires each entry on its own datetime and knows which is which, so an
+    # ambiguous template is refused by the run instead.
+    rendered = workflows_render.render_provision(
+        ["Cohort-f2026"], ["assignment-1-f2026"]
+    )
+    assert "slug" not in workflow_inputs(rendered)
+    assert "--slug" not in rendered
 
 
 def test_archive_cohort_previews_by_default_and_never_deletes():

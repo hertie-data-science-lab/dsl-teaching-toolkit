@@ -1236,7 +1236,8 @@ def test_a_handout_refuses_to_choose_between_two_entries_on_one_template(
 ):
     # Both entries are real assignments with their own repos and their own marks. Picking
     # the first would hand the resit's brief to the whole cohort under the wrong name, and
-    # a handout is not a thing you can take back.
+    # a handout is not a thing you can take back. There is no box to say which any more, so
+    # the refusal names the template, both keys, and the schedule it should go out from.
     _two_on_one_template(monkeypatch)
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     rc, changed = assign.provision_all(
@@ -1244,12 +1245,15 @@ def test_a_handout_refuses_to_choose_between_two_entries_on_one_template(
     )
     assert (rc, changed) == (1, False)
     err = capsys.readouterr().err
-    assert "assignment-2-resit" in err and "say which" in err
+    assert "assignment-2-f2026" in err and "assignment-2-resit" in err
+    assert "from the schedule" in err
 
 
 def test_a_handout_told_which_entry_names_that_entrys_repos(
     tmp_path, capsys, monkeypatch
 ):
+    # The scheduler is the one caller that can answer, and it does: each release it fires
+    # carries the key of the entry it was synthesised from.
     _two_on_one_template(monkeypatch)
     monkeypatch.setenv("DSL_VERBOSE", "1")
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")

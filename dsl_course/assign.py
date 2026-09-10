@@ -1061,10 +1061,11 @@ def provision_all(
     `scheduled` marks the hourly cron: a group assignment with no teams yet is then a
     green wait, not the error a button press gets.
 
-    `slug` names WHICH schedule entry to hand out when two of them hand out from this one
-    template (each with its own `cohort_dest_repo`). Left empty with two in the plan, this
-    refuses rather than picking: the two make different repos for different students and
-    keep separate grades, and guessing is a whole cohort's work in the wrong place."""
+    `slug` names WHICH schedule entry is being handed out, and only the scheduler can
+    answer it: it knows which release it is firing. The button asks nobody - a template
+    two entries hand out from is refused below, because they make different repos for
+    different students and keep separate grades, and guessing is a whole cohort's work in
+    the wrong place."""
     if master_org == cohort_org:
         log_err("master-org and cohort-org must differ.")
         return 1, False
@@ -1101,6 +1102,20 @@ def provision_all(
     # on the name then meant no teams found at all, or a team granted on the repo under a
     # slug that Sync membership reconciles a DIFFERENT team for.
     sched = schedule.load(cohort_org)
+    # Two entries handing out from one template is legitimate - a resit off the same
+    # brief - and the button cannot choose between them: it is one press, and the answer
+    # decides which half of the cohort gets repos. The SCHEDULE knows (each entry fires on
+    # its own datetime), so that is where this handout is sent, named, rather than picking.
+    scheduled_from = schedule.entries_for_repo(sched, template)
+    if not slug and len(scheduled_from) > 1:
+        log_err(
+            f"{template} is handed out by {len(scheduled_from)} assignments in "
+            f"{cohort_org}'s schedule.yml "
+            f"({', '.join(key for key, _ in scheduled_from)}) - they make different "
+            "repos and keep different grades, so hand this one out from the schedule "
+            "(each entry fires on its own handout_datetime) rather than from this button"
+        )
+        return 1, False
     # The parameter is consumed HERE and nowhere else: from the next line on, `slug` means
     # the cohort-side name, exactly as it does everywhere else in this file.
     target = schedule.resolve_target(sched, template, slug)

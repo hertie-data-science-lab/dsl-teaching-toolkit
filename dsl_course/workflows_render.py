@@ -805,6 +805,11 @@ def render_provision(
     same file the grading sheet and the Join-team form read, so a dispatch cannot hand out
     a shape the rest of the term does not expect.
 
+    Nor which schedule entry, on the rare template two of them hand out from: the run
+    refuses that template and names them, because the SCHEDULE is what knows which is
+    firing and a box asking a faculty member to pick between two keys is a coin toss over
+    which half of a cohort gets its repos.
+
     `source_repo` is the repo this copy is being placed in: when
     that repo is ITSELF one of the templates, the dropdown opens on its own name, the way
     `render_release` pre-fills `course_source_repo` with the repo it is seeded into. The
@@ -825,10 +830,6 @@ on:
         description: "Also push the solution (from the template's solution branch) into each student repo"
         type: boolean
         default: false
-      slug:
-        description: "Only if TWO schedule.yml assignments hand out from this template: which one (the schedule key). Leave empty otherwise"
-        required: false
-        default: ""
       dry_run:
         description: "Preview only - list the repos that WOULD be created, don't create them"
         type: boolean
@@ -844,13 +845,11 @@ on:
           COHORT_ORG: ${{{{ inputs.cohort_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
           INC_SOL: ${{{{ inputs.include_solution }}}}
-          SLUG: ${{{{ inputs.slug }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
         run: |
           gh auth setup-git
           args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG")
           [ "$INC_SOL" = "true" ] && args+=(--solution)
-          [ -n "$SLUG" ] && args+=(--slug "$SLUG")
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
           python3 -m dsl_course.assign "${{args[@]}}"
 """
