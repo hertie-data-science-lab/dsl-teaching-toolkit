@@ -99,6 +99,24 @@ CRONS = {"sync_membership", "sync_site", "refresh", "publish_site", "scheduler"}
 # the whole set rather than over the ones that happen to declare a `schedule:`.
 UNATTENDED = CRONS | {"send_codes"}
 
+# The CLI entrypoints that drive `git` against a REMOTE - clone over HTTPS, commit, push -
+# rather than only the REST API. Named here rather than per-renderer so a new button
+# cannot ship a pushing step without the credential helper: see
+# test_every_step_that_drives_git_authenticates_it.
+GIT_PUSHERS = (
+    "dsl_course.assign",
+    "dsl_course.deploy",
+    "dsl_course.propagate",
+    "dsl_course.teardown",
+    "dsl_course.scaffold",
+    "dsl_course.site",
+    "dsl_course.scheduler",
+)
+# The two scheduler sub-commands that only READ: one lists the cohorts, the other
+# validates the course's own config. Neither clones anything, so neither needs git.
+GIT_READ_ONLY = ("--list-cohorts", "--check-course-config")
+
+
 # Every renderer whose run ends in `seed refresh` - and the subset that may join a shared
 # concurrency group. See test_only_the_nightly_refresh_joins_the_seed_refresh_group.
 SEED_REFRESH = {"refresh", "new_materials", "new_assignment", "bootstrap_cohort"}
@@ -2090,3 +2108,41 @@ def test_a_cohort_bootstrap_forwards_the_maintainer_address_to_the_new_org():
     steps = workflow_jobs(ALL_RENDERED["bootstrap_cohort"])["bootstrap-cohort"]["steps"]
     step = next(s for s in steps if "--propagate-secret" in str(s.get("run", "")))
     assert step["env"][mailer.MAINTAINER_ENV] == _secret_ref(mailer.MAINTAINER_ENV)
+
+
+@pytest.mark.parametrize("name", sorted(ALL_RENDERED))
+def test_every_step_that_drives_git_authenticates_it(name):
+    # `GH_TOKEN` in the env is what `gh` reads; git reads a credential helper, and only
+    # `gh auth setup-git` writes one. A pushing step without it dies on the first remote
+    # with `fatal: could not read Username for 'https://github.com'` - which is how a
+    # Propagate run died in a real course org, and how Archive cohort would have died at
+    # its step 0, which IS a propagate.
+    for job, spec in workflow_jobs(ALL_RENDERED[name]).items():
+        for step in spec.get("steps", []):
+            run = str(step.get("run", ""))
+            if not any(entry in run for entry in GIT_PUSHERS):
+                continue
+            if any(flag in run for flag in GIT_READ_ONLY):
+                continue
+            assert "gh auth setup-git" in run, f"{name}:{job} -> {step.get('name')}"
+
+
+def test_the_git_authentication_sweep_sees_the_pushing_buttons():
+    # A typo in an entrypoint name would make the sweep above vacuous, and it is the one
+    # test standing between a new pushing button and a run that dies on its first clone.
+    pushing = {
+        name
+        for name, rendered in ALL_RENDERED.items()
+        if "gh auth setup-git" in rendered
+    }
+    assert {
+        "release",
+        "provision",
+        "propagate_cohort",
+        "archive_cohort",
+        "new_materials",
+        "new_assignment",
+        "sync_site",
+        "publish_site",
+        "scheduler",
+    } <= pushing

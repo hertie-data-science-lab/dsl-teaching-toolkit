@@ -1027,25 +1027,28 @@ def notify_overwritten_edits(
 
 
 def _archive_message(cohort_org: str, course_org: str, when: date) -> tuple[str, str]:
-    """The (subject, HTML body) of the archive notice.
+    """The (subject, HTML body) of the archive notice, in the teaching team's own words.
 
-    It links `schedule.yml`, not the notice issue: the only thing a reader might want to
-    DO about this is move or remove the date, and that is an edit to that file."""
+    It links the cohort org and `schedule.yml`, and not the notice issue: the two things
+    a reader might want to DO about this are look over what is about to freeze and move
+    or remove the date, and the second is an edit to that file - which is the one
+    sentence it ends on, in the same words as the notice issue beside it
+    (`scheduler._archive_notice_body`). The two must not offer two different recipes for
+    one edit; only the repo is named differently, because the mail is read outside the
+    repo the issue sits in."""
     label = _course_label(course_org, cohort_org)
+    org_at = f"https://github.com/{cohort_org}"
     edit_at = f"https://github.com/{cohort_org}/{CONFIG_REPO}/edit/main/{SCHEDULE_PATH}"
     body = (
         f"<p>This is an automated email sent on behalf of "
         f"{html.escape(_course_name(course_org))}.</p>\n"
-        f"<p>On <b>{when}</b> every repository in <code>{html.escape(cohort_org)}</code> "
-        f"is archived: students' work, the released materials, the enrolment repo and "
-        f"the cohort's own configuration. Nothing is deleted and nobody is removed - "
-        f"everyone who can read the cohort still can, and nobody can change "
-        f"anything.</p>\n"
-        f"<p>Anything you still need to change in this cohort, change before then. To "
-        f"move the date or take it away, edit "
-        f"{_anchor(edit_at, f'{cohort_org}/{CONFIG_REPO}/{SCHEDULE_PATH}')} - an "
-        f"<code>archive:</code> block with its own <code>date:</code> overrides the "
-        f"default, which is sixty days after <code>semester_end</code>.</p>\n"
+        f"<p>On <b>{when}</b> all the repositories in {_anchor(org_at, cohort_org)} will "
+        f"be archived. Nothing is deleted and all read access permissions remain as they "
+        f"are, write accesses are revoked and the org is frozen in place.</p>\n"
+        f"<p>If there is anything you would like to make changes to, please make those "
+        f"before then. To move this archiving date or remove it altogether, edit "
+        f"{_anchor(edit_at, SCHEDULE_PATH)} in the "
+        f"<code>{CONFIG_REPO}</code> repo.</p>\n"
     )
     return f"[{label}] {cohort_org} is archived on {when}", body
 

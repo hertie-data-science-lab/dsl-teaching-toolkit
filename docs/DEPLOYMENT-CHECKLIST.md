@@ -386,20 +386,27 @@ events:
     event_datetime: 2026-11-17T10:00
 ```
 
-**`archive`** - when this cohort is frozen read-only. Optional at both ends.
+**`archive`** - when this cohort is frozen read-only. Optional, and the switch: written,
+the cohort is archived automatically; left out, it never is.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
 | `date` | no | `semester_end` + 60 days | the day every repository in the cohort org is archived |
 | `show_on_site` | no | `true` | a "Cohort archived" row on the site's schedule, and a notice in its Updates box for the fortnight before |
+| `description` | no | *none* | the sentence that row and that notice say - all of it; with none they say nothing, and `{date}` in it is filled in with the archive date |
 
 ```yaml
 archive:
   date: 2027-02-16        # optional - without it, 60 days after semester_end
   show_on_site: true      # optional - false keeps it off the site
+  description: >-         # optional - what students are told, in your own words
+    This cohort is archived on 2027-02-16: every repository in it becomes read-only.
 ```
 
-A cohort with no `semester_end` and no `archive.date` is never archived automatically.
+`archive:` with nothing under it means "yes, on the default date". With no block at all, or
+no `semester_end` to count from, nothing is archived automatically. A new cohort's seeded
+`schedule.yml` already carries the block, so filling in `semester_end` arms a freeze sixty
+days later; delete the block to opt out.
 
 #### Schedule row types
 

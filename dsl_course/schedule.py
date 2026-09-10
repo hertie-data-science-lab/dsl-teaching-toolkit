@@ -36,9 +36,10 @@ lifecycle, `events` are display-only calendar rows.
         event_datetime: 2026-10-14T10:00
     semester_start: 2026-09-07
     semester_end: 2026-12-18
-    archive:                         # OPTIONAL - when this cohort is frozen read-only.
-      date: 2027-02-16               # default: semester_end + 60 days
+    archive:                         # OPTIONAL - and the SWITCH: with no block, nothing
+      date: 2027-02-16               # ever freezes this cohort. default: semester_end + 60
       show_on_site: true             # default true: a row on the site's Schedule tab
+      description: We freeze here.   # optional: ALL that row and the Updates box say
 
 Every field is optional - a cohort with no schedule.yml (or a blank one) behaves exactly
 as before everywhere that reads it (releases are skipped, dates synthesised).
@@ -114,7 +115,8 @@ SCHEDULE_PATH = "schedule.yml"
 # read-only (see `dsl_course.teardown`). Sixty days, because the real courses this toolkit
 # was measured against went on being pushed to for about three weeks past their last class,
 # and a cohort that freezes while somebody is still finishing their marking is worse than
-# one that freezes late. A cohort that wants another date says so in `archive.date`.
+# one that freezes late. A cohort that wants another date says so in `archive.date`, and
+# only a cohort that writes the block at all is ever archived off this (`_parse_archive`).
 ARCHIVE_GRACE = timedelta(days=60)
 
 # How long before that date a cohort is TOLD. Two weeks is long enough to move the date,
@@ -387,11 +389,20 @@ class Schedule:
     assignments: dict[str, AssignmentEntry] = field(default_factory=dict)
     events: list[Event] = field(default_factory=list)
     # When this cohort is frozen read-only, and whether the site says so. Resolved by
-    # `parse`, never re-derived downstream: `archive.date` if the cohort declared one,
-    # else `semester_end + ARCHIVE_GRACE`, and None for a cohort that declares no
-    # `semester_end` - which is what stops a term with no dates freezing off a guess.
+    # `parse`, never re-derived downstream: None unless the cohort writes an `archive:`
+    # block at all, then `archive.date` if that block names one, else `semester_end +
+    # ARCHIVE_GRACE` - which is what stops a term with no dates freezing off a guess.
     archive_date: date | None = None
     archive_show_on_site: bool = True
+    # What the site's archive row and its Updates box SAY - the whole of it, because the
+    # toolkit writes no sentence of its own here. None leaves the row as its label and
+    # date and the Updates bullet unwritten (`site._archive_entry`); the seeded skeleton
+    # carries a sentence ready to uncomment.
+    archive_description: str | None = None
+    # Whether the cohort wrote an `archive:` block at all. Only `scheduler._no_archive_date`
+    # reads it, to tell "nobody asked for archiving" from "asked, but no date can be
+    # derived" - two different things to say, and `archive_date` is None for both.
+    archive_declared: bool = False
     # Everything this parse could not use, one human-readable line each, naming the YAML
     # path and what it costs the cohort: entries thrown away outright (`_drop` - no date,
     # no source), and entries KEPT but not as written (`_flag_unknown_keys` for a stray
@@ -1065,23 +1076,33 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
     return out
 
 
-KNOWN_ARCHIVE = frozenset({"date", "show_on_site"})
+KNOWN_ARCHIVE = frozenset({"date", "description", "show_on_site"})
 
 
 def _parse_archive(
-    raw: object, semester_end: date | None, drops: Drops
-) -> tuple[date | None, bool]:
+    meta: dict, semester_end: date | None, drops: Drops
+) -> tuple[date | None, bool, bool, str | None]:
     """The optional `archive:` block - `(when this cohort freezes, whether the site says
-    so)`.
+    so, whether it asked to freeze at all, what the site says about it)`.
 
-    Both halves have a default and neither is ever a crash, because this file is edited by
-    hand and the block decides when a whole cohort goes read-only: a date nobody can read
-    falls back to `semester_end + ARCHIVE_GRACE` and is FLAGGED, so it reaches the person
-    who wrote it through the digest issue rather than by freezing the cohort on a day they
-    did not choose. A block that is not a mapping at all is dropped the same way.
+    The block IS the switch. A cohort that writes none is never frozen automatically:
+    every repository in an org going read-only is far too large a thing to happen off a
+    date nobody typed, and the site row announcing it is worse still - it tells students a
+    term ends on a day their own schedule.yml never mentions. Writing the block, empty or
+    not, is what turns archiving on; sixty days after `semester_end` by default.
 
-    A cohort with no `semester_end` and no `archive.date` resolves to None: nothing
-    freezes it automatically, because there is no clock to freeze it against."""
+    Inside the block neither half is ever a crash, because this file is edited by hand: a
+    date nobody can read falls back to `semester_end + ARCHIVE_GRACE` and is FLAGGED, so
+    it reaches the person who wrote it through the digest issue rather than by freezing
+    the cohort on a day they did not choose. A block that is not a mapping at all is
+    dropped the same way.
+
+    A block with neither `date:` nor a `semester_end` to count from resolves to None: it
+    asked, but there is no clock to freeze it against, which `scheduler._no_archive_date`
+    says out loud."""
+    if "archive" not in meta:
+        return None, True, False, None
+    raw = meta["archive"]
     default = semester_end + ARCHIVE_GRACE if semester_end else None
     cost = (
         f"this cohort freezes at its default date instead ({default})"
@@ -1089,24 +1110,68 @@ def _parse_archive(
         else "nothing freezes this cohort automatically"
     )
     if raw is None:
-        return default, True
+        return default, True, True, None
     if not isinstance(raw, dict):
         _drop(
             drops,
             "archive",
-            "not a mapping (it must be `date:` and/or `show_on_site:` under it)",
+            "not a mapping (it must be `date:`, `description:` and/or "
+            "`show_on_site:` under it)",
             cost,
             field_name="archive",
         )
-        return default, True
+        return default, True, True, None
     lines = take_lines(raw)
     _flag_unknown_keys(
         drops, raw, KNOWN_ARCHIVE, "archive", "that setting is ignored", lines
     )
+    shown = raw.get("show_on_site")
+    if shown is not None and not isinstance(shown, bool):
+        # `is not False` alone read every value it could not parse as true, so the one
+        # thing this key exists to do was silently not done. YAML spells false several
+        # ways and they all arrive here as a bool; anything else - `"nope"`, `0`, a list -
+        # is a hand edit that did not take, and is flagged like `date:` and
+        # `description:`. The row still shows, because that is the default and the fault
+        # is now visible to whoever meant to hide it.
+        _flag_bad_value(
+            drops,
+            "archive",
+            "show_on_site",
+            shown,
+            "the site's archive row is shown anyway",
+            lines,
+        )
+        shown = None
     return (
         _flagged_date(raw, "date", drops, "archive", cost, lines) or default,
-        raw.get("show_on_site") is not False,
+        shown is not False,
+        True,
+        _archive_description(raw, drops, lines),
     )
+
+
+def _archive_description(raw: dict, drops: Drops, lines: dict[str, int]) -> str | None:
+    """The block's optional `description:` - what the site's archive row SAYS.
+
+    Anything that is not a usable sentence is FLAGGED and dropped, never raised and never
+    printed: a list or a mapping here would otherwise reach the deployed site as
+    `['a', 'b']`. The row then reads as it does for a cohort that wrote no `description:`
+    at all - its label and its date - which is a hand edit that visibly did not take, and
+    that is what `dropped` is for."""
+    said = raw.get("description")
+    if said is None:
+        return None
+    if isinstance(said, str) and said.strip():
+        return said
+    _flag_bad_value(
+        drops,
+        "archive",
+        "description",
+        said,
+        "the site's archive row carries no sentence at all",
+        lines,
+    )
+    return None
 
 
 def parse(meta: dict) -> Schedule:
@@ -1143,8 +1208,8 @@ def parse(meta: dict) -> Schedule:
     term_cost = "the site synthesises term dates, shifting every session row"
     semester_start = _flagged_date(meta, "semester_start", drops, "", term_cost)
     semester_end = _flagged_date(meta, "semester_end", drops, "", term_cost)
-    archive_date, archive_show_on_site = _parse_archive(
-        meta.get("archive"), semester_end, drops
+    archive_date, archive_show_on_site, archive_declared, archive_description = (
+        _parse_archive(meta, semester_end, drops)
     )
     return Schedule(
         timezone=str(tz_name or DEFAULT_TZ),
@@ -1158,6 +1223,8 @@ def parse(meta: dict) -> Schedule:
         events=_parse_events(meta.get("events"), tz, drops),
         archive_date=archive_date,
         archive_show_on_site=archive_show_on_site,
+        archive_declared=archive_declared,
+        archive_description=archive_description,
         dropped=drops.report,
         faults=drops.faults,
     )

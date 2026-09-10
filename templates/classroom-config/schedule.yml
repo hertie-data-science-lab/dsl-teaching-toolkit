@@ -29,10 +29,6 @@
 # semester_start:                   # OPTIONAL - default: inferred from the cohort tag (f2026 -> 1 Sep 2026)
 # semester_end:                     # OPTIONAL - default: 15 weeks after the start
 
-# archive:                          # OPTIONAL - when this cohort is frozen READ-ONLY
-#   date:                           # OPTIONAL - default: semester_end + 60 days. Nothing freezes a cohort that declares neither
-#   show_on_site: true              # OPTIONAL - default: true. false = no "Cohort archived" row on the deployed site's Schedule tab
-
 # releases:                         
 #   seed-syllabus:                  # week 0: the course opens before teaching starts. 
 #     event_datetime:               # REQUIRED - ships the syllabus and anything else students need up front
@@ -113,3 +109,10 @@
 #   clinic-drop-in:                 # no type -> a special_event row
 #     title: "Clinic drop-in"
 #     event_datetime:               # REQUIRED
+
+# archive the org (freezes in place): removes all write permissions, retains all read permissions
+archive:
+  date:                       # optional (default: semester_end + 60 days)
+  show_on_site: true          # a "Cohort archived" row on the site's Schedule tab, also sends a notice email 14 days out
+  description: >-             # optional, `{{date}}` is filled in automatically
+    This cohort is archived on {{date}}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.

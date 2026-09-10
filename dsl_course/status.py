@@ -353,7 +353,7 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
     archives = (
         f"archives {sched.archive_date}"
         if sched.archive_date
-        else "no archive date (set semester_end or archive.date)"
+        else "archive not scheduled (write an archive: block)"
     )
     has_due_dates = bool(sched.semester_start or sched.assignments or sched.events)
     dates = (

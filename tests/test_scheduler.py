@@ -100,6 +100,16 @@ def _grading_spec_defaults(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _no_open_notices(monkeypatch):
+    """Every tick asks the cohort's `classroom-config` which archive notices are open, so
+    it can close one whose date has moved or been taken away
+    (`scheduler._stale_archive_notices`) - real gh I/O, on a path these tests are not
+    about. Answered with "none open", which is the ordinary case; the tests that ARE
+    about it stub it themselves."""
+    monkeypatch.setattr(scheduler.issues, "open_titles", lambda repo: set())
+
+
+@pytest.fixture(autouse=True)
 def _no_source_preflight(monkeypatch):
     """`run` also pre-flights the plan's sources against the course org, which is real gh
     I/O. These tests are about the release/snapshot/autograde phases, so it is stubbed to
@@ -3132,9 +3142,34 @@ def test_the_break_glass_single_cohort_run_skips_a_closed_out_cohort(monkeypatch
 # --------------------------------------------------------------- the archive phase
 
 
-def _archive(monkeypatch, archive_date, now, dry_run=False, existing=None, mails=True):
-    """Drive `_archive_phase` alone, recording the close-out, the issue and the mail."""
-    seen: dict = {"closed": [], "gate": [], "issues": [], "mailed": []}
+def _archive(
+    monkeypatch,
+    archive_date,
+    now,
+    dry_run=False,
+    existing=None,
+    mails=True,
+    open_notices=(),
+    central_ref=lambda org: "main",
+):
+    """Drive `_archive_phase` alone, recording the close-out, the issue, the mail and any
+    stale notice it closed."""
+    seen: dict = {
+        "closed": [],
+        "gate": [],
+        "issues": [],
+        "mailed": [],
+        "notices_closed": [],
+    }
+    monkeypatch.setattr(scheduler.issues, "open_titles", lambda repo: set(open_notices))
+    monkeypatch.setattr(scheduler.discovery, "central_ref_for", central_ref)
+    monkeypatch.setattr(
+        scheduler.issues,
+        "close_issues_titled",
+        lambda repo, title, comment=None: (
+            seen["notices_closed"].append((title, comment)) or 0
+        ),
+    )
     monkeypatch.setattr(
         scheduler.teardown,
         "close_out",
@@ -3249,7 +3284,7 @@ def test_an_unchanged_notice_is_not_rewritten_every_tick(monkeypatch):
     # `upsert_issue` edits unconditionally, and this body changes exactly once in the
     # fortnight. Four ticks an hour for a fortnight is ~1,300 identical edits otherwise.
     when = date(2027, 2, 16)
-    standing = scheduler._archive_notice_body("Cohort-Org", when, True)
+    standing = scheduler._archive_notice_body("Cohort-Org", when, True, "main")
     _, seen = _archive(
         monkeypatch,
         when,
@@ -3271,6 +3306,7 @@ def test_a_cohort_with_no_archive_date_earns_an_advisory_in_its_own_digest(monke
     # A fault with no clock: there is no moment it bites at, which is exactly what is
     # wrong with it. Not a parser drop, so `Validate schedule` stays green in August.
     (fault,) = scheduler._no_archive_date(Schedule())
+    assert "writes no `archive:` block" in fault.what
     assert "ever archive it" in fault.what
     assert fault.fires is None and fault.file == "schedule.yml"
     # And it stays a LINE. An undated fault sits at the notify bar by default, so without
@@ -3278,3 +3314,108 @@ def test_a_cohort_with_no_archive_date_earns_an_advisory_in_its_own_digest(monke
     # ladder every term, about a cohort whose term end nobody has typed yet.
     assert fault.severity(WHEN) < faults_mod.NOTIFY_FROM
     assert scheduler._no_archive_date(Schedule(archive_date=ARCHIVES)) == []
+
+
+def test_a_block_no_date_can_be_derived_from_says_that_instead(monkeypatch):
+    # Not writing the block is a decision; writing one nothing can date is a mistake, and
+    # telling a cohort to write a block it already wrote helps nobody.
+    (fault,) = scheduler._no_archive_date(Schedule(archive_declared=True))
+    assert "archive date cannot be derived" in fault.what
+    assert fault.severity(WHEN) < faults_mod.NOTIFY_FROM
+
+
+def test_both_notice_surfaces_give_the_same_instruction(monkeypatch):
+    # Moving or removing the date is the thing a reader is most likely to DO about the
+    # notice, so the issue and the mail beside it say it in the same words - and say only
+    # that, rather than teaching the block's defaults to somebody holding a date.
+    body = scheduler._archive_notice_body("Cohort-Org", date(2027, 2, 16), True, "main")
+    assert body.count("To move this archiving date or remove it altogether, edit ") == 1
+    assert "`schedule.yml` in this repo." in body
+    assert "sixty days" not in body
+
+
+def test_the_notice_says_what_the_freeze_does_and_links_the_runbook(monkeypatch):
+    # What the freeze does to access is the question the fortnight's warning has to
+    # answer, and the one thing a reader may want afterwards - reopening a repo - is a
+    # Settings-page click the runbook spells out. The link is pinned to the tier this
+    # cohort's course org runs, not to whatever `release` holds.
+    body = scheduler._archive_notice_body("Cohort-Org", date(2027, 2, 16), True, "main")
+    assert "write accesses are revoked and the org is frozen in place" in body
+    assert "un-archive it from its own Settings page" in body
+    assert (
+        "https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/blob/main/"
+        "docs/10-grade-and-return-assignments.md#closing-the-cohort-out"
+    ) in body
+
+
+def test_an_unreadable_central_ref_still_files_the_notice(monkeypatch):
+    # The ref is read from the course org's own `dsl-course.yml`. A cohort must still be
+    # warned that it freezes in a fortnight when that file cannot be read, so the link
+    # falls back to the default tier rather than the notice failing.
+    def boom(org):
+        raise RuntimeError("no dsl-course.yml")
+
+    when = date(2027, 2, 16)
+    rc, seen = _archive(
+        monkeypatch,
+        when,
+        datetime(2027, 2, 5, 9, tzinfo=timezone.utc),
+        central_ref=boom,
+    )
+    ((_, body),) = seen["issues"]
+    assert rc == 0
+    assert f"/blob/{scheduler.CENTRAL_REF}/" in body
+
+
+def test_a_notice_is_closed_when_the_archive_is_called_off(monkeypatch):
+    # The `archive:` block was taken away after the notice went out. Nothing will freeze
+    # this cohort now, and nothing else would ever close the issue: a cohort that is never
+    # archived is never sealed, so `teardown._close_notices` never runs on it. Until this
+    # swept, it stood open all term naming a date on which nothing would happen.
+    stale = "Cohort archives on 2027-02-16"
+    rc, seen = _archive(
+        monkeypatch,
+        None,
+        datetime(2027, 2, 2, 9, tzinfo=timezone.utc),
+        open_notices=(stale, "Roster digest"),
+    )
+    assert rc == 0
+    ((title, comment),) = seen["notices_closed"]
+    # Closed with a comment: closing it silently would read as "this happened".
+    assert title == stale
+    assert "taken away" in comment and "Nothing was frozen" in comment
+    # And nothing was frozen, mailed or re-opened on the way.
+    assert (seen["closed"], seen["issues"], seen["mailed"]) == ([], [], [])
+    # Idempotent: the tick after it finds nothing open and writes nothing.
+    _, again = _archive(monkeypatch, None, datetime(2027, 2, 3, 9, tzinfo=timezone.utc))
+    assert again["notices_closed"] == []
+
+
+def test_a_notice_that_is_still_due_is_left_alone(monkeypatch):
+    # The one notice the schedule still names is the one that must survive the sweep,
+    # every tick of the fortnight.
+    when = date(2027, 2, 16)
+    due = scheduler.teardown.archive_notice_title(when)
+    _, seen = _archive(
+        monkeypatch,
+        when,
+        datetime(2027, 2, 2, 9, tzinfo=timezone.utc),
+        open_notices=(due,),
+    )
+    assert seen["notices_closed"] == []
+    assert [title for title, _ in seen["issues"]] == [due]
+
+
+def test_a_notice_whose_date_moved_out_of_the_window_goes_with_it(monkeypatch):
+    # Pushed the date back a month: the notice for the old one is a false date, and the
+    # phase now returns before ever opening a new one.
+    _, seen = _archive(
+        monkeypatch,
+        date(2027, 3, 16),
+        datetime(2027, 2, 2, 9, tzinfo=timezone.utc),
+        open_notices=("Cohort archives on 2027-02-16",),
+    )
+    assert [title for title, _ in seen["notices_closed"]] == [
+        "Cohort archives on 2027-02-16"
+    ]
+    assert seen["issues"] == []

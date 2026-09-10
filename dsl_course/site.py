@@ -989,19 +989,53 @@ def _event_entry(event: schedule.Event, fallback: date) -> str:
     )
 
 
-def _archive_entry(when: date, today: date) -> str:
+def _archive_entry(when: date, today: date, description: str | None = None) -> str:
     """The "Cohort archived" row: when this cohort is frozen read-only.
 
     A `special_event` rather than a type of its own, because it IS one - a dated thing
     that happens to the cohort and releases nothing - and the theme already colours that
     row. Inventing a fourth row type would mean shipping a theme change for one line.
 
+    `description` is `archive.description` from schedule.yml and is the WHOLE of what
+    either surface says - there is no default sentence, because the toolkit does not know
+    what a freeze means for a given cohort's students and a wrong reassurance is worse
+    than none. Without one the row still renders as its "Cohort archived" label and date,
+    and is not announced at all (below). The seeded skeleton carries a sentence ready to
+    uncomment.
+
+    That sentence naturally names the day, and a day typed into it twice goes stale the
+    moment `archive.date` moves or is left to its default - so `{date}` in it is filled
+    in here with the date this row itself carries, spelled the way the row dates the
+    freeze (`YYYY-MM-DD`; the front matter adds only the placeholder clock time that
+    `hide_time` suppresses). A plain replacement rather than `str.format`, because this is
+    faculty prose: any other brace in it is left exactly as typed - and, being faculty
+    prose in a Jekyll body, fenced with `{% raw %}` so those braces cannot run as Liquid.
+
     `announce` opts the row into the home page's Updates box for the last
     `schedule.ARCHIVE_NOTICE` before the date, and the body is the sentence that box
-    prints. It is a flag rather than a rendering decision because the collection is
-    cleared and rewritten on every sync, so the day after the freeze the flag is simply
-    not written again - there is nothing to take back."""
-    soon = "announce: true\n" if when - today <= schedule.ARCHIVE_NOTICE else ""
+    prints - so it is written only when there IS one, and only while the freeze is still
+    ahead. The box captures each bullet INSIDE its `limit: 7` loop and drops an empty one
+    afterwards (`templates/site/_includes/announcements.html`), so a row announced with
+    no body spent the newest of seven slots on nothing - and, sorting by its own future
+    date, the top one - for the whole fortnight. Past the date there is nothing to
+    announce either: the freeze has happened. It is a flag rather than a rendering
+    decision because the collection is cleared and rewritten on every sync, so once the
+    window closes the flag is simply not written again - there is nothing to take
+    back."""
+    dated = description.replace("{date}", when.isoformat()) if description else ""
+    # Folded onto one line, because a value reaching several lines could write a `---` of
+    # its own and split the front matter off the page - but FENCED, not `q`-quoted. `q`
+    # is for a one-line double-quoted YAML scalar and this is the document's BODY: it
+    # rewrote faculty's `"` to a `'` for a rule that does not apply here, and left a `{{`
+    # or a `{%` in the sentence to run as Liquid - where a malformed tag fails the whole
+    # site build and a well-formed one quietly prints something else.
+    folded = " ".join(dated.split())
+    said = f"{liquid_raw(folded)}\n" if folded else ""
+    soon = (
+        "announce: true\n"
+        if folded and today <= when and when - today <= schedule.ARCHIVE_NOTICE
+        else ""
+    )
     return (
         f"---\n"
         f"type: special_event\n"
@@ -1010,9 +1044,7 @@ def _archive_entry(when: date, today: date) -> str:
         f"{soon}"
         f'description: "Cohort archived"\n'
         f"---\n"
-        f"This cohort is archived on {when}: every repository in it becomes read-only. "
-        f"You keep read access to everything you can see now, so take a copy of anything "
-        f"you want to go on working in.\n"
+        f"{said}"
     )
 
 
@@ -1179,7 +1211,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # scheduler acts on, so what students are told and what happens are one date.
         if sched.archive_date and sched.archive_show_on_site:
             event_entries["cohort-archived.md"] = _archive_entry(
-                sched.archive_date, date.today()
+                sched.archive_date, date.today(), sched.archive_description
             )
         # The term's own boundaries, when the schedule pins them.
         if sched.semester_start:

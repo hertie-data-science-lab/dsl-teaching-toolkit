@@ -157,3 +157,10 @@ events:
   guest-lecture:
     title: Guest lecture (industry speaker)
     event_datetime: tbc
+
+# archive the org (freezes in place): removes all write permissions, retains all read permissions
+archive:
+  date: 2027-02-16            # optional (default: semester_end + 60 days)
+  show_on_site: true          # a "Cohort archived" row on the site's Schedule tab, also sends a notice email 14 days out
+  description: >-             # optional, `{date}` is filled in automatically
+    This cohort is archived on {date}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account.

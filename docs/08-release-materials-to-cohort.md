@@ -73,6 +73,12 @@ Further releases keep adding to `upstream` and re-use that same pull request; cl
 unresolved does not settle anything, because the conflict is still there and the next
 release opens the question again.
 
+**The first release after upgrading is the exception.** A cohort released before this
+version of the toolkit has no `upstream` yet, so that first release cuts it from the branch
+students read as it stands and lands on top of it - which overwrites an edit typed into the
+cohort's copy between the upgrade and that release, with no pull request to review. From
+the second release on, edits are kept.
+
 `upstream` is the toolkit's branch. Do not work on it and do not make it the default: the
 default branch is what students read, what the website reads, and what a release merges
 into.

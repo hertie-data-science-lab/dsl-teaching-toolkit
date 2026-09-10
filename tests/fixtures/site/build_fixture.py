@@ -226,8 +226,13 @@ def _events() -> dict[str, str]:
         ),
         "term-start.md": site._term_date_entry("Term starts", date(2026, 9, 7)),
         "term-end.md": site._term_date_entry("Term ends", end),
+        # Inside its notice window and with a sentence, which is the only shape that
+        # carries `announce: true` - and the only one that puts faculty prose, fenced,
+        # into a document body for Jekyll to compile.
         "cohort-archived.md": site._archive_entry(
-            archived, archived - schedule.ARCHIVE_NOTICE
+            archived,
+            archived - schedule.ARCHIVE_NOTICE,
+            "This cohort goes read-only on {date}. You keep read access to everything.",
         ),
     }
 

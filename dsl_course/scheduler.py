@@ -93,6 +93,7 @@ from . import (
     teardown,
 )
 from .assign import provision_all, solution_released
+from .central import CENTRAL, CENTRAL_REF
 from .collect import (
     SnapshotResult,
     collect,
@@ -876,6 +877,10 @@ def _refresh_sheets(
 def _no_archive_date(sched: schedule.Schedule) -> list[ConfigFault]:
     """The advisory a cohort earns by having no date on which it is ever closed out.
 
+    Two ways to earn it, and they need different sentences: writing no `archive:` block at
+    all, which is a decision - archiving is opt-in - and writing one no date can be
+    derived from, which is a mistake. `archive_date` is None for both.
+
     A fault with no `fires`, because there is no moment it bites at - that is exactly
     what is wrong with it. Raised here rather than by the parser, because a term with no
     dates yet is a perfectly ordinary August and must not fail `Validate schedule`; it is
@@ -890,19 +895,30 @@ def _no_archive_date(sched: schedule.Schedule) -> list[ConfigFault]:
     itself for the same reason: listed, never anybody's inbox."""
     if sched.archive_date is not None:
         return []
+    if sched.archive_declared:
+        what = (
+            "this cohort's `archive:` block names no `date:` and the cohort no "
+            "`semester_end`, so its archive date cannot be derived - nothing will ever "
+            "archive it"
+        )
+        fix_text = "give the `archive:` block a `date:`, or add a `semester_end:`"
+    else:
+        what = (
+            "this cohort writes no `archive:` block, so nothing will ever archive it - "
+            "it stays live, writable and joinable after the term ends"
+        )
+        fix_text = (
+            "add an `archive:` block; empty, it archives the cohort 60 days after "
+            "`semester_end`"
+        )
     return [
         ConfigFault(
             "",
-            "this cohort declares neither `semester_end` nor `archive.date`, so nothing "
-            "will ever archive it - it stays live, writable and joinable after the term "
-            "ends",
-            field="semester_end",
+            what,
+            field="archive",
             file=schedule.SCHEDULE_PATH,
             ceiling=Severity.ADVISORY,
-            fix_text=(
-                "add a `semester_end:`, which archives the cohort 60 days later, or an "
-                "`archive:` block with a `date:` of its own"
-            ),
+            fix_text=fix_text,
         )
     ]
 
@@ -913,9 +929,22 @@ def _no_archive_date(sched: schedule.Schedule) -> list[ConfigFault]:
 _MAILED_MARK = "<!-- dsl-archive-notice: mailed -->"
 
 
-def _archive_notice_body(cohort_org: str, when: date, mailed: bool) -> str:
+# The runbook section a reader of the notice is sent to for what an archive does and how
+# to reopen a repo afterwards. An absolute URL into this toolkit, so it resolves from a
+# cohort's own `classroom-config` - see the doc-filenames table in
+# docs/reference/maintainers.md.
+_CLOSE_OUT_DOC = "docs/10-grade-and-return-assignments.md#closing-the-cohort-out"
+
+
+def _archive_notice_body(
+    cohort_org: str, when: date, mailed: bool, central_ref: str
+) -> str:
     """The notice issue's body. Rewritten on every tick, which GitHub does not email
-    about - the one mail is sent beside it, once."""
+    about - the one mail is sent beside it, once.
+
+    `central_ref` is the tier this cohort's course org runs, so the runbook link lands on
+    the docs its own workflows are checked out at rather than on whatever `release`
+    happens to hold."""
     # The mark goes in ONLY when a mail actually went. It is the whole of this issue's
     # state, so stamping it on a tick that sent nothing - no address in people.yml, no
     # mail transport wired up - would record a mail that never happened and every later
@@ -927,16 +956,62 @@ def _archive_notice_body(cohort_org: str, when: date, mailed: bool) -> str:
         else "No email went with this notice - see the run log.\n"
     )
     return (
-        f"On **{when}** every repository in `{cohort_org}` is archived: students' work, "
-        f"the released materials, the enrolment repo and this one.\n\n"
-        f"Nothing is deleted and nobody is removed. Everyone who can read this cohort "
-        f"still can; nobody can change anything. Un-archiving a repository from its own "
-        f"Settings page brings it back exactly as it was.\n\n"
-        f"Anything you still need to change in this cohort, change before then. To move "
-        f"the date or take it away, edit `{schedule.SCHEDULE_PATH}` in this repo: an "
-        f"`archive:` block with its own `date:` overrides the default, which is sixty "
-        f"days after `semester_end`.\n\n"
+        f"This notice is opened automatically by the scheduler.\n\n"
+        f"On **{when}** all the repositories in `{cohort_org}` will be archived. Nothing "
+        f"is deleted and all read access permissions remain as they are, write accesses "
+        f"are revoked and the org is frozen in place.\n\n"
+        f"If there is anything you would like to make changes to, please make those "
+        f"before then. To move this archiving date or remove it altogether, edit "
+        f"`{schedule.SCHEDULE_PATH}` in this repo. To reopen a repository after the "
+        f"freeze, un-archive it from its own Settings page - see "
+        f"[Closing the cohort out]"
+        f"(https://github.com/{CENTRAL}/blob/{central_ref}/{_CLOSE_OUT_DOC}).\n\n"
         f"{told}"
+    )
+
+
+# What the comment says when an archive notice is closed because its date is no longer
+# the one the schedule names. Closing it silently would read as "this happened".
+_CALLED_OFF_COMMENT = (
+    "This notice no longer matches `classroom-config/schedule.yml`: the archive date has "
+    "been moved, or the `archive:` block taken away - and a cohort with no block is "
+    "never archived automatically. Nothing was frozen. If the cohort should still be "
+    "closed out, the **Archive cohort** button does it."
+)
+
+
+def _stale_archive_notices(cohort_org: str, keep: str, dry_run: bool) -> int:
+    """Close every open `Cohort archives on <date>` notice in this cohort but `keep`
+    (`""` keeps none). Returns the error count.
+
+    The notice names its date in the TITLE, so a moved date cannot edit it - a second
+    notice is opened instead (`teardown.archive_notice_title` says why) - and nothing
+    closed the first while the cohort was live. `teardown._close_notices` sweeps every
+    dated notice, but only at the seal, and a cohort whose `archive:` block was removed
+    is never sealed at all: its notice stood open for the rest of the term, naming a date
+    on which nothing would happen.
+
+    Stateless like the rest of the tick: it re-derives which notice SHOULD be open from
+    the schedule and closes the others, so a duplicate opened during an outage goes with
+    them, and a tick with nothing to close costs one issue listing and no writes."""
+    repo = f"{cohort_org}/{schedule.CONFIG_REPO}"
+    try:
+        stale = sorted(
+            title
+            for title in issues.open_titles(repo)
+            if teardown.is_archive_notice(title) and title != keep
+        )
+    except RuntimeError as exc:
+        # A listing that could not be read is not "no notice is open".
+        log_err(str(exc))
+        return 1
+    if not stale:
+        return 0
+    if dry_run:
+        log(f"    DRY-RUN close {len(stale)} stale archive notice(s) in {repo}")
+        return 0
+    return sum(
+        issues.close_issues_titled(repo, title, _CALLED_OFF_COMMENT) for title in stale
     )
 
 
@@ -962,7 +1037,15 @@ def _archive_notice(
     mailed = found is not None and _MAILED_MARK in found.body
     if not mailed:
         mailed = notify.notify_cohort_archiving(cohort_org, course_org, when, now)
-    body = _archive_notice_body(cohort_org, when, mailed)
+    try:
+        central_ref = discovery.central_ref_for(course_org)
+    except Exception:
+        # Every exception, not just the RuntimeError a bad ref raises: this reads the
+        # course org's `dsl-course.yml`, and a notice that failed over one unreadable
+        # line in it would leave a cohort with no warning that it freezes in a
+        # fortnight. The default tier is the right guess, and the link still resolves.
+        central_ref = CENTRAL_REF
+    body = _archive_notice_body(cohort_org, when, mailed, central_ref)
     if found is not None and found.body == body:
         # `upsert_issue` edits unconditionally, and this body changes exactly once in the
         # fortnight - when the mail goes. Four ticks an hour for fourteen days is about
@@ -983,15 +1066,19 @@ def _archive_phase(
     first. Returns the error count.
 
     AFTER the releases, so a copy due on the archive date still ships before the freeze;
-    and only ever for a cohort that named a date, because freezing a whole org off a
-    synthesised term end is the worst possible use of a guess.
+    and only ever for a cohort whose `archive:` block asked for it, because freezing a
+    whole org nobody asked to freeze is the worst possible use of a default.
+
+    Every path also converges the NOTICE, because an `archive:` block can be taken away
+    or its date moved after one is open, and the title names the old date for ever
+    otherwise (`_stale_archive_notices`).
 
     `teardown.close_out` is idempotent and re-entrant, so a run that died half way is
     simply picked up by the next tick - which is why this needs no fire-once marker of its
     own. The tick after a successful one never reaches here at all: the sealed
     `classroom-config` takes the cohort out of `discovery.live_cohorts`."""
     if sched.archive_date is None:
-        return 0
+        return _stale_archive_notices(cohort_org, "", dry_run)
     today = now.date()
     if today >= sched.archive_date:
         if dry_run:
@@ -1001,8 +1088,14 @@ def _archive_phase(
         # a `--now` past the archive date would otherwise fire a close-out that refused.
         return teardown.close_out(course_org, cohort_org, dry_run=False, today=today)
     if sched.archive_date - today > schedule.ARCHIVE_NOTICE:
-        return 0
-    return _archive_notice(course_org, cohort_org, sched.archive_date, now, dry_run)
+        return _stale_archive_notices(cohort_org, "", dry_run)
+    errors = _archive_notice(course_org, cohort_org, sched.archive_date, now, dry_run)
+    # The notice for TODAY's date is the one that should stand; any other dated one is a
+    # date somebody moved, and two open notices naming two dates tell the teaching team
+    # nothing.
+    return errors + _stale_archive_notices(
+        cohort_org, teardown.archive_notice_title(sched.archive_date), dry_run
+    )
 
 
 def _release_phase(

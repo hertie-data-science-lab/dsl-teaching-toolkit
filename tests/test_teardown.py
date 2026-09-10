@@ -140,11 +140,33 @@ def test_a_passed_semester_end_no_longer_opens_the_gate(org, monkeypatch):
 
 
 def test_force_closes_a_cohort_that_has_no_archive_date_at_all(org, monkeypatch):
+    # Which is every cohort that writes no `archive:` block - archiving is opt-in, and
+    # closing one of those out is a person's decision, taken with the button's `force`.
     monkeypatch.setattr(teardown.schedule, "load", lambda o: _sched(None, None))
     assert teardown.close_out(COURSE, COHORT, dry_run=False) == 1
     assert org == []
     assert teardown.close_out(COURSE, COHORT, dry_run=False, force=True) == 0
     assert ("archive", "classroom-config") in org
+
+
+def test_a_dry_run_prints_the_counts_whatever_the_date(org, monkeypatch, capsys):
+    # The counts are how somebody decides whether to ask for a close-out, so withholding
+    # them until the date has passed answers the question only once it no longer needs
+    # asking. Nothing is frozen either way.
+    monkeypatch.setattr(teardown.schedule, "load", lambda o: _sched(None, None))
+    assert teardown.close_out(COURSE, COHORT, dry_run=True) == 0
+    assert _archived(org) == []
+    printed = capsys.readouterr().out
+    assert "is not due to be archived" in printed
+    assert "A real run would need --force" in printed
+
+
+def test_only_a_real_run_needs_the_date(org, monkeypatch):
+    # The same cohort, the same schedule: the dry run reports, the real run refuses.
+    monkeypatch.setattr(teardown.schedule, "load", lambda o: _sched(date(2099, 1, 1)))
+    assert teardown.close_out(COURSE, COHORT, dry_run=True) == 0
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 1
+    assert _archived(org) == []
 
 
 def test_the_gate_can_be_decided_against_the_callers_date(org, monkeypatch):

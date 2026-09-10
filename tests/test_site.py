@@ -161,13 +161,81 @@ def test_tbc_rows_render_with_theme_flags():
     assert "tbc: true" in out and "dateless" not in out
 
 
+def _body(said: str) -> str:
+    """The archive row's body as the document holds it: the sentence, fenced. Spelled out
+    once, in test_the_cohorts_own_sentence_is_printed_verbatim, and shared from there."""
+    return f"---\n{{% raw %}}\n{said}\n{{% endraw %}}\n"
+
+
 def test_the_archive_row_is_a_special_event_that_says_what_freezes():
-    out = site._archive_entry(date(2027, 2, 16), date(2026, 12, 20))
+    said = "Everything here goes read-only. You keep read access."
+    out = site._archive_entry(date(2027, 2, 16), date(2026, 12, 20), said)
     assert "type: special_event" in out
     assert 'description: "Cohort archived"' in out
     assert "date: 2027-02-16T09:00:00" in out
     assert "hide_time: true" in out  # a whole day, not a 09:00 appointment
-    assert "read-only" in out and "take a copy" in out
+    # What it SAYS is the cohort's own sentence and nothing else.
+    assert out.endswith(_body(said))
+
+
+def test_the_cohorts_own_sentence_is_printed_verbatim():
+    # This is the sentence students read, and a cohort that bothered to write one did not
+    # write it to be paraphrased or padded - so it arrives fenced rather than quoted: the
+    # fence is what keeps a `{%` in it from running as Liquid, and `q`'s rewrite of every
+    # `"` to a `'` was a YAML rule that never applied to a document body.
+    said = 'We freeze on the 16th - your "repos" stay readable for ever.'
+    out = site._archive_entry(date(2027, 2, 16), date(2027, 2, 1), said)
+    assert out.endswith(f"---\n{{% raw %}}\n{said}\n{{% endraw %}}\n")
+    # And the row itself is unchanged: the description is the BODY, not the row's title.
+    assert 'description: "Cohort archived"' in out
+    assert "date: 2027-02-16T09:00:00" in out
+
+
+def test_a_sentence_that_looks_like_liquid_cannot_run_as_liquid():
+    # Unfenced, a malformed tag fails the WHOLE site build and a well-formed one silently
+    # prints something else. Neither is a thing faculty typing a sentence into
+    # schedule.yml would have any reason to expect.
+    said = "Frozen {% raw-looking %} - ask {{ site.title }}."
+    out = site._archive_entry(date(2027, 2, 16), date(2027, 2, 1), said)
+    assert out.endswith(_body(said))
+
+
+def test_the_sentence_can_ask_for_the_archive_date_by_name():
+    # A date typed into the sentence as a literal goes stale the moment `archive.date`
+    # moves or is left to its default; `{date}` cannot. Every occurrence is filled.
+    out = site._archive_entry(
+        date(2027, 2, 16),
+        date(2027, 2, 1),
+        "Archived on {date}. Read-only from {date}.",
+    )
+    assert out.endswith(_body("Archived on 2027-02-16. Read-only from 2027-02-16."))
+
+
+def test_a_sentence_without_the_token_is_left_alone():
+    # Including its braces: this is faculty prose, not a format string, so anything but
+    # the exact token survives verbatim.
+    said = "We freeze in {other} words - nothing here is a placeholder."
+    out = site._archive_entry(date(2027, 2, 16), date(2027, 2, 1), said)
+    assert out.endswith(_body(said))
+
+
+def test_a_multi_line_sentence_cannot_split_the_front_matter():
+    # It lands in the body of a Jekyll document, so a value carrying its own `---` would
+    # otherwise cut the page in half. Folded onto one line, inside the fence.
+    out = site._archive_entry(
+        date(2027, 2, 16), date(2027, 2, 1), "Frozen.\n---\nGone."
+    )
+    assert out.count("---\n") == 2
+    assert out.endswith(_body("Frozen. --- Gone."))
+
+
+def test_without_a_sentence_the_row_carries_none():
+    # There is no default: the toolkit does not know what a freeze means for a given
+    # cohort's students, and a wrong reassurance is worse than none. The row still
+    # renders - its label and its date - and the theme skips a bullet with an empty body.
+    out = site._archive_entry(date(2027, 2, 16), date(2027, 2, 1))
+    assert out.endswith('description: "Cohort archived"\n---\n')
+    assert "read-only" not in out
 
 
 def test_the_archive_row_only_reaches_the_updates_box_inside_its_window():
@@ -175,8 +243,30 @@ def test_the_archive_row_only_reaches_the_updates_box_inside_its_window():
     # to act on. Outside the window the row is still on the schedule, silently.
     when = date(2027, 2, 16)
     edge = when - schedule_mod.ARCHIVE_NOTICE
-    assert "announce: true" in site._archive_entry(when, edge)
-    assert "announce" not in site._archive_entry(when, edge - timedelta(days=1))
+    said = "Everything here goes read-only on {date}."
+    assert "announce: true" in site._archive_entry(when, edge, said)
+    assert "announce" not in site._archive_entry(when, edge - timedelta(days=1), said)
+
+
+def test_the_window_closes_once_the_freeze_has_happened():
+    # The upper bound alone left every past archive date announced for ever - and a date
+    # in the past sorts nowhere near the top of a box ordered by date, so the bullet
+    # would sit in the Updates box saying a freeze was coming that already came.
+    when = date(2027, 2, 16)
+    said = "Everything here goes read-only on {date}."
+    assert "announce: true" in site._archive_entry(when, when, said)
+    assert "announce" not in site._archive_entry(when, when + timedelta(days=1), said)
+
+
+def test_a_row_with_nothing_to_say_is_not_announced():
+    # The Updates box captures each bullet inside its `limit: 7` loop and drops an empty
+    # one afterwards, so an announced row with no body did not simply render as nothing:
+    # it spent a slot - the newest, this row sorting by its own future date - on nothing,
+    # for the whole fortnight.
+    when = date(2027, 2, 16)
+    inside = when - timedelta(days=1)
+    assert "announce" not in site._archive_entry(when, inside)
+    assert "announce: true" in site._archive_entry(when, inside, "We freeze on {date}.")
 
 
 def test_term_date_entry_hides_the_placeholder_time():
