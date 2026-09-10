@@ -627,15 +627,23 @@ def _choice_input(
     )
 
 
+# The `copy_from` dropdown's first option, and so the one an untouched form submits.
+# It is NAMED rather than empty: every other dropdown here labels its stand-in (`_choice`
+# falls back to `(none-yet)`), and nothing says GitHub accepts an empty-string choice
+# option - if it does not, both scaffold buttons break in every org at the next refresh.
+_FRESH_STARTER = "(fresh starter)"
+
+
 def _copy_from_input(description: str, options: list[str]) -> str:
     """The `copy_from` dropdown: an existing repo of this kind to start the new one from,
-    or the BLANK first option - the fresh starter - which is what an untouched form
-    submits.
+    or `_FRESH_STARTER` first - the empty skeleton, which is what an untouched form
+    submits. The run step reads that placeholder as no answer, so scaffold still gets an
+    empty `copy_from`.
 
     No `default:`, unlike every other dropdown here (`_choice_input` pre-selects the
     newest term): copying a whole repo forward is a choice to make deliberately, and a
     form arriving with last year's already filled in would make it the accident."""
-    listed = _choice(['""', *options])
+    listed = _choice([_FRESH_STARTER, *options])
     return (
         f'      copy_from:\n        description: "{description}"\n'
         f"        required: false\n        type: choice\n        options:\n{listed}"
@@ -1469,7 +1477,7 @@ def render_new_materials(source_repos: list[str] | None = None) -> str:
 # `copy_from` starts the new repo as an existing one - every branch, every file, the whole
 # history - instead of as the empty skeleton, which is how a course carries forward from
 # one year to the next. Only the toolkit's own files are rewritten afterwards; yours
-# arrive exactly as you left them. Leave it blank for the fresh starter.
+# arrive exactly as you left them. Leave it on the first option for a fresh starter.
 # The dropdown is refreshed by the 'Refresh actions' workflow.
 
 on:
@@ -1478,7 +1486,7 @@ on:
       tag:
         description: "Year tag, e.g. f2026 or s2026 - creates course-materials-<tag>"
         required: true
-{_copy_from_input("Materials repo to copy forward - blank starts from the empty skeleton", materials)}
+{_copy_from_input(f"Materials repo to copy forward - {_FRESH_STARTER} is the empty skeleton", materials)}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
@@ -1492,6 +1500,7 @@ on:
         run: |
           gh auth setup-git
           args=(--org "$ORG" --tag "$TAG")
+          [ "$COPY_FROM" = "{_FRESH_STARTER}" ] && COPY_FROM=""
           [ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")
           python3 -m dsl_course.scaffold materials "${{args[@]}}"
           python3 -m dsl_course.seed refresh --course-org "$ORG"
@@ -1559,6 +1568,7 @@ on:
           args=(--org "$ORG" --number "$NUMBER" --tag "$TAG" --name "$NAME" \\
             --format "$FORMAT" --type "$TYPE" --team-formation "$TEAM_FORMATION" \\
             --submit-via "$SUBMIT_VIA" --autograde "$AUTOGRADE")
+          [ "$COPY_FROM" = "{_FRESH_STARTER}" ] && COPY_FROM=""
           [ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")
           python3 -m dsl_course.scaffold assignment "${{args[@]}}"
           python3 -m dsl_course.seed refresh --course-org "$ORG"

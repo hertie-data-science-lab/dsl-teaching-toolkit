@@ -656,8 +656,12 @@ def test_scaffold_buttons_route_inputs_through_env_not_the_shell():
         assert "${{" not in step["run"]
         assert '--tag "$TAG"' in rendered
         # `copy_from` is a repo name off a form like any other input, and it reaches the
-        # CLI as an argument only when someone filled the box in.
+        # CLI as an argument only when someone picked a repo: the placeholder first option
+        # is emptied first, so scaffold is handed no --copy-from at all.
         assert step["env"]["COPY_FROM"] == "${{ inputs.copy_from }}"
+        assert (
+            f'[ "$COPY_FROM" = "{workflows_render._FRESH_STARTER}" ] && COPY_FROM=""'
+        ) in rendered
         assert '[ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")' in rendered
     assert workflow_jobs(materials)["scaffold"]["steps"][-1]["env"]["TAG"] == (
         "${{ inputs.tag }}"
@@ -868,12 +872,15 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     ],
     ids=["new_materials", "new_assignment"],
 )
-def test_the_copy_forward_dropdown_starts_blank(rendered):
+def test_the_copy_forward_dropdown_starts_on_the_fresh_starter(rendered):
     # GitHub selects the first option, and every other repo dropdown carries a `default:`
     # naming this year's - so a `copy_from` built the same way would copy a whole repo
-    # forward for anyone who typed a tag and pressed the button. Blank first, no default.
+    # forward for anyone who typed a tag and pressed the button. The fresh starter is
+    # first and there is no default; it is a named option, never an empty string, because
+    # an option GitHub rejects would take both scaffold buttons down with it.
     spec = workflow_inputs(rendered)["copy_from"]
-    assert spec["options"][0] == ""
+    assert spec["options"][0] == workflows_render._FRESH_STARTER
+    assert "" not in spec["options"]
     assert "default" not in spec
     assert spec["required"] is False
 
@@ -885,7 +892,7 @@ def test_the_copy_forward_dropdown_lists_only_materials_repos():
         ["course-materials-f2026", "lecture-code-f2026"]
     )
     assert workflow_inputs(rendered)["copy_from"]["options"] == [
-        "",
+        workflows_render._FRESH_STARTER,
         "course-materials-f2026",
     ]
 
