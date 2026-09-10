@@ -392,7 +392,7 @@ the cohort is archived automatically; left out, it never is.
 |---|---|---|---|
 | `date` | no | `semester_end` + 60 days | the day every repository in the cohort org is archived |
 | `show_on_site` | no | `true` | a "Cohort archived" row on the site's schedule, and a notice in its Updates box for the fortnight before |
-| `description` | no | *none* | the sentence that row and that notice say - all of it; with none they say nothing |
+| `description` | no | *none* | the sentence that row and that notice say - all of it; with none they say nothing, and `{date}` in it is filled in with the archive date |
 
 ```yaml
 archive:

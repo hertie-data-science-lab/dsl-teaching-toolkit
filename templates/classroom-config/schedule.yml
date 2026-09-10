@@ -110,7 +110,7 @@
 #     title: "Clinic drop-in"
 #     event_datetime:               # REQUIRED
 
-# archive:                          # OPTIONAL, and LAST because it is the end of the term: writing this block is what turns archiving ON: the whole cohort goes READ-ONLY on its date. No block, nothing ever freezes
+# archive:                          # OPTIONAL - writing this block turns archiving ON. Archive the org (freezes in place): removes all write permissions, retains all read permissions
 #   date:                           # OPTIONAL - default: semester_end + 60 days
 #   show_on_site: true              # OPTIONAL - default: true. false = no "Cohort archived" row on the deployed site's Schedule tab
-#   description:                    # OPTIONAL, but ALL that row and the site's Updates box SAY - there is no default, so with none they say nothing. Suggested wording: "This cohort is archived on <date>: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account."
+#   description:                    # OPTIONAL, but ALL that row and the site's Updates box SAY - there is no default, so with none they say nothing. Write `{{date}}` in it and the archive date above is filled in for you. Suggested wording: "This cohort is archived on {{date}}: every repository in it becomes read-only. You keep read access, so you can still fork or clone anything you want to keep working on into your own account."

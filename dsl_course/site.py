@@ -1004,6 +1004,13 @@ def _archive_entry(when: date, today: date, description: str | None = None) -> s
     empty bullet (`templates/site/_includes/announcements.html`). The seeded skeleton
     carries a sentence ready to uncomment.
 
+    That sentence naturally names the day, and a day typed into it twice goes stale the
+    moment `archive.date` moves or is left to its default - so `{date}` in it is filled
+    in here with the date this row itself carries, spelled the way the row dates the
+    freeze (`YYYY-MM-DD`; the front matter adds only the placeholder clock time that
+    `hide_time` suppresses). A plain replacement rather than `str.format`, because this is
+    faculty prose: any other brace in it is left exactly as typed.
+
     `announce` opts the row into the home page's Updates box for the last
     `schedule.ARCHIVE_NOTICE` before the date, and the body is the sentence that box
     prints. It is a flag rather than a rendering decision because the collection is
@@ -1013,7 +1020,8 @@ def _archive_entry(when: date, today: date, description: str | None = None) -> s
     # `q` rather than the raw string: this is faculty-written text going into the body of
     # a Jekyll document, and a value that folded onto several lines could write a `---`
     # of its own and split the front matter off the page.
-    said = f"{q(description)}\n" if description else ""
+    dated = description.replace("{date}", when.isoformat()) if description else None
+    said = f"{q(dated)}\n" if dated else ""
     return (
         f"---\n"
         f"type: special_event\n"
