@@ -1132,6 +1132,9 @@ def test_the_worked_example_shows_the_archive_block():
     assert sched.archive_date == date(2027, 2, 16)
     assert sched.archive_date == sched.semester_end + schedule.ARCHIVE_GRACE
     assert sched.archive_show_on_site is True
+    # And it asks for its date by name rather than typing it twice - the habit the
+    # example is there to teach (`site._archive_entry` fills the token in).
+    assert "{date}" in sched.archive_description
 
 
 # ------------------------------------- a block authored as a list (never-raise contract)

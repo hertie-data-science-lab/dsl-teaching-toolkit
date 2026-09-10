@@ -334,6 +334,14 @@ def test_seeded_scaffolds_render_this_cohorts_tag(fake):
         assert "{tag}" not in content and "{year" not in content, f"{repo}/{path}"
 
 
+def test_the_seeded_archive_hint_keeps_its_date_token(fake):
+    # `{date}` in an archive description is filled in by the site sync, not by the seeder,
+    # so the scaffold escapes it and the cohort's copy must still read `{date}`. Rendered
+    # away here, the suggested wording would teach a date typed out by hand.
+    bc.setup_cohort_extras("Deep-Learning-f2027", "release")
+    assert "{date}" in fake.files[("classroom-config", "schedule.yml")]
+
+
 def test_the_seeded_people_stub_teaches_every_required_field(fake):
     # The commented skeleton IS the schema a fresh cohort is handed. Uncommenting it must
     # yield entries the real parser accepts with nothing missing - `email:` included,

@@ -183,6 +183,25 @@ def test_the_cohorts_own_sentence_is_printed_verbatim():
     assert "date: 2027-02-16T09:00:00" in out
 
 
+def test_the_sentence_can_ask_for_the_archive_date_by_name():
+    # A date typed into the sentence as a literal goes stale the moment `archive.date`
+    # moves or is left to its default; `{date}` cannot. Every occurrence is filled.
+    out = site._archive_entry(
+        date(2027, 2, 16),
+        date(2027, 2, 1),
+        "Archived on {date}. Read-only from {date}.",
+    )
+    assert out.endswith("---\nArchived on 2027-02-16. Read-only from 2027-02-16.\n")
+
+
+def test_a_sentence_without_the_token_is_left_alone():
+    # Including its braces: this is faculty prose, not a format string, so anything but
+    # the exact token survives verbatim.
+    said = "We freeze in {other} words - nothing here is a placeholder."
+    out = site._archive_entry(date(2027, 2, 16), date(2027, 2, 1), said)
+    assert out.endswith(f"---\n{said}\n")
+
+
 def test_a_multi_line_sentence_cannot_split_the_front_matter():
     # It lands in the body of a Jekyll document, so a value carrying its own `---` would
     # otherwise cut the page in half. `q` folds it onto one line.
