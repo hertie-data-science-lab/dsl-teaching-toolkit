@@ -1,6 +1,6 @@
 # Manually release an assignment to a cohort
 
-Hand out one **private repo per student** from a course org assignment template, optional autograder included.
+Hand out one **private repo per student** from a course org assignment template.
 
 > NB: this is the manual ad hoc alternative to [pre-scheduling & automating](07-schedule-releases.md) the term's assignment releases.
 

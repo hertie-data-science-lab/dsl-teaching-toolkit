@@ -110,7 +110,7 @@ Things whose *literal spelling* is depended on from outside Python:
   marked file would still read as untouched and be rewritten by the nightly refresh -
   faculty's patterns gone, and whatever they withheld shipping again on a green run. The
   price is that its wording cannot be improved in a repo that already has it.
-- **`deploy.UPSTREAM_BRANCH`** (`upstream`) is the toolkit's branch in every release dest,
+- **`course.UPSTREAM_BRANCH`** (`upstream`) is the toolkit's branch in every release dest,
   and the dest's DEFAULT branch is what students, the website and `propagate` read. The
   release commits onto `upstream` and merges it into the default one; a conflict aborts the
   merge, pushes `upstream` and leaves one pull request open. Two things follow. Making

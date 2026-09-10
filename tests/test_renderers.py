@@ -70,8 +70,8 @@ ALL_RENDERED = {
     "generate_syllabus": workflows_render.render_generate_syllabus(
         ["course-materials-f2026"], ["Cohort-f2026"]
     ),
-    "new_materials": workflows_render.render_new_materials(),
-    "new_assignment": workflows_render.render_new_assignment(),
+    "new_materials": workflows_render.render_new_materials(["course-materials-f2026"]),
+    "new_assignment": workflows_render.render_new_assignment(["assignment-1-f2026"]),
     "derive_student_version": workflows_render.render_derive_student_version(
         ["assignment-1-f2026"]
     ),
@@ -655,6 +655,14 @@ def test_scaffold_buttons_route_inputs_through_env_not_the_shell():
         step = workflow_jobs(rendered)["scaffold"]["steps"][-1]
         assert "${{" not in step["run"]
         assert '--tag "$TAG"' in rendered
+        # `copy_from` is a repo name off a form like any other input, and it reaches the
+        # CLI as an argument only when someone picked a repo: the placeholder first option
+        # is emptied first, so scaffold is handed no --copy-from at all.
+        assert step["env"]["COPY_FROM"] == "${{ inputs.copy_from }}"
+        assert (
+            f'[ "$COPY_FROM" = "{workflows_render._FRESH_STARTER}" ] && COPY_FROM=""'
+        ) in rendered
+        assert '[ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")' in rendered
     assert workflow_jobs(materials)["scaffold"]["steps"][-1]["env"]["TAG"] == (
         "${{ inputs.tag }}"
     )
@@ -808,8 +816,8 @@ def test_classroom_config_roster_dispatcher_fires_send_codes_on_students_csv():
     assert "contents/dsl-course.yml" in tmpl
 
 
-# The whole assignment, in the order the eight boxes are numbered. Pinned as a LIST: the
-# order is what a person reads down, and GitHub caps a workflow_dispatch at ten - a ninth
+# The whole assignment, in the order the nine boxes are numbered. Pinned as a LIST: the
+# order is what a person reads down, and GitHub caps a workflow_dispatch at ten - a tenth
 # box means one of these earned its place over an edit to a file, so it is a decision, not
 # a diff nobody noticed.
 NEW_ASSIGNMENT_INPUTS = [
@@ -821,6 +829,7 @@ NEW_ASSIGNMENT_INPUTS = [
     "team_formation",
     "submit_via",
     "autograde",
+    "copy_from",
 ]
 
 
@@ -853,6 +862,39 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     ):
         assert step["env"][env_name] == f"${{{{ inputs.{field} }}}}"
         assert f'"${env_name}"' in rendered
+
+
+@pytest.mark.parametrize(
+    "rendered",
+    [
+        workflows_render.render_new_materials(REPOS_2),
+        workflows_render.render_new_assignment(ASSIGNMENTS_2),
+    ],
+    ids=["new_materials", "new_assignment"],
+)
+def test_the_copy_forward_dropdown_starts_on_the_fresh_starter(rendered):
+    # GitHub selects the first option, and every other repo dropdown carries a `default:`
+    # naming this year's - so a `copy_from` built the same way would copy a whole repo
+    # forward for anyone who typed a tag and pressed the button. The fresh starter is
+    # first and there is no default; it is a named option, never an empty string, because
+    # an option GitHub rejects would take both scaffold buttons down with it.
+    spec = workflow_inputs(rendered)["copy_from"]
+    assert spec["options"][0] == workflows_render._FRESH_STARTER
+    assert "" not in spec["options"]
+    assert "default" not in spec
+    assert spec["required"] is False
+
+
+def test_the_copy_forward_dropdown_lists_only_materials_repos():
+    # New materials repo is fed the course org's CONTENT repos, which include the code and
+    # dataset ones - and none of those is a materials repo to start the year from.
+    rendered = workflows_render.render_new_materials(
+        ["course-materials-f2026", "lecture-code-f2026"]
+    )
+    assert workflow_inputs(rendered)["copy_from"]["options"] == [
+        workflows_render._FRESH_STARTER,
+        "course-materials-f2026",
+    ]
 
 
 @pytest.mark.parametrize("name", sorted(ALL_RENDERED))
