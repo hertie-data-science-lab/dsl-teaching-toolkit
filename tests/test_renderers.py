@@ -311,6 +311,30 @@ def test_refresh_re_seeds_itself_nightly_without_a_gate():
     assert "needs" not in workflow_jobs(rendered)["refresh"]
 
 
+RELEASE_ASSIGNMENT_INPUTS = [
+    "course_source_repo",
+    "cohort_org",
+    "include_solution",
+    "dry_run",
+]
+
+
+def test_the_hand_out_button_asks_what_where_and_two_switches():
+    # Four boxes, numbered in the order they are answered: GitHub renders them as a flat
+    # list and numbers nothing itself, so the numbering in the descriptions is the only
+    # grouping there is - and it must match the order the boxes are rendered in.
+    inp = workflow_inputs(
+        workflows_render.render_provision(COHORTS_2, ASSIGNMENTS_2, ASSIGNMENTS_2[0])
+    )
+    assert list(inp) == RELEASE_ASSIGNMENT_INPUTS
+    for n, name in enumerate(RELEASE_ASSIGNMENT_INPUTS, start=1):
+        assert inp[name]["description"].startswith(f"{n}. ")
+    # The template it is seeded into is still the one it opens on.
+    assert inp["course_source_repo"]["default"] == ASSIGNMENTS_2[0]
+    assert inp["include_solution"]["default"] is False
+    assert inp["dry_run"]["default"] is False
+
+
 def test_the_hand_out_button_asks_nothing_about_the_assignments_shape():
     # individual-or-group was a box, and a dispatch could hand out a shape the template
     # had not declared - one repo per student for an assignment whose teams, sheet and

@@ -810,6 +810,10 @@ def render_provision(
     firing and a box asking a faculty member to pick between two keys is a coin toss over
     which half of a cohort gets its repos.
 
+    The four that remain are numbered in the order they are answered - what to hand out,
+    where it goes, then the two switches - because GitHub renders dispatch inputs as a
+    flat list of boxes with no grouping of its own.
+
     `source_repo` is the repo this copy is being placed in: when
     that repo is ITSELF one of the templates, the dropdown opens on its own name, the way
     `render_release` pre-fills `course_source_repo` with the repo it is seeded into. The
@@ -824,14 +828,14 @@ def render_provision(
 on:
   workflow_dispatch:
     inputs:
-{_choice_input("cohort_org", "Target cohort org", cohort_orgs)}
-{_assignment_input(assignments or [], default=source_repo)}
+{_assignment_input(assignments or [], "1. Course-org repo to hand out from", source_repo)}
+{_choice_input("cohort_org", "2. Target cohort org", cohort_orgs)}
       include_solution:
-        description: "Also push the solution (from the template's solution branch) into each student repo"
+        description: "3. Also push the model solution from the template's solution branch into every student repo"
         type: boolean
         default: false
       dry_run:
-        description: "Preview only - list the repos that WOULD be created, don't create them"
+        description: "4. Preview only - list the repos that would be created, create nothing"
         type: boolean
         default: false
 
