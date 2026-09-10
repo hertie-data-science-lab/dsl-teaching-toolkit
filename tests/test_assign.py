@@ -105,9 +105,7 @@ def test_the_grading_sheet_is_created_at_handout_with_one_row_per_student(
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
 
-    assign.provision_all(
-        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
-    )
+    assign.provision_all("COURSE", "assignment-1-f2026", "COHORT", roster_path=path)
 
     ((sheet,),) = (sheet_writes,)
     assert (sheet["key"], sheet["slug"]) == ("assignment-1", "assignment-1")
@@ -133,9 +131,7 @@ def test_a_handout_that_provisioned_nothing_does_not_rewrite_the_sheet(
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
 
-    assign.provision_all(
-        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
-    )
+    assign.provision_all("COURSE", "assignment-1-f2026", "COHORT", roster_path=path)
 
     assert sheet_writes == []
 
@@ -167,9 +163,13 @@ def test_the_handout_sheet_for_a_group_assignment_is_keyed_on_the_team_name(
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
 
-    assign.provision_all(
-        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=True
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.GradingSpec(type="group"),
     )
+
+    assign.provision_all("COURSE", "assignment-1-f2026", "COHORT", roster_path=path)
 
     ((sheet,),) = (sheet_writes,)
     assert sheet["is_group"] is True
@@ -208,7 +208,6 @@ def test_an_unusable_solution_branch_does_not_block_provisioning(
         "COHORT",
         roster_path=path,
         solution=True,
-        group=False,
     )
     err = capsys.readouterr().err
     assert provisioned == ["assignment-1-ada-l"], (
@@ -237,7 +236,7 @@ def test_a_handout_that_skipped_every_repo_syncs_no_site(tmp_path, monkeypatch):
 
     def run():
         return assign.provision_all(
-            "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
+            "COURSE", "assignment-1-f2026", "COHORT", roster_path=path
         )
 
     monkeypatch.setattr(assign, "provision_one", lambda *a, **k: "skipped")
@@ -287,7 +286,6 @@ def _marker_run(
         "COHORT",
         roster_path=path,
         solution=True,
-        group=False,
     )
     return rc, recorded
 
@@ -696,7 +694,6 @@ def test_provisioning_skips_auditors(tmp_path, capsys, monkeypatch):
         "assignment-1-f2026",
         "COHORT",
         roster_path=path,
-        group=False,
         dry_run=True,
     )
     out = capsys.readouterr().out
@@ -721,7 +718,6 @@ def test_provisioning_still_works_for_a_roster_without_a_role_column(
         "assignment-1-f2026",
         "COHORT",
         roster_path=str(path),
-        group=False,
         dry_run=True,
     )
     out = capsys.readouterr().out
@@ -744,7 +740,6 @@ def test_a_dry_run_names_no_student_in_a_public_log(tmp_path, capsys, monkeypatc
         "assignment-1-f2026",
         "COHORT",
         roster_path=path,
-        group=False,
         dry_run=True,
     )
     out = capsys.readouterr().out
@@ -765,7 +760,6 @@ def test_not_yet_onboarded_rows_are_still_skipped_separately(tmp_path, capsys):
         "assignment-1-f2026",
         "COHORT",
         roster_path=path,
-        group=False,
         dry_run=True,
     )
     out = capsys.readouterr().out
@@ -773,12 +767,10 @@ def test_not_yet_onboarded_rows_are_still_skipped_separately(tmp_path, capsys):
     assert "1 auditor row(s) skipped" in out
 
 
-def test_group_none_infers_per_team_from_the_templates_grading_yml(
-    tmp_path, capsys, monkeypatch
-):
-    # group=None (the default - scheduler and untick'd button alike) asks the template's
-    # own grading_config.yml: `type: group` provisions per TEAM without anyone
-    # force-ticking.
+def test_the_shape_is_read_off_the_templates_grading_yml(tmp_path, capsys, monkeypatch):
+    # The only route there is - the button and the cron alike. `type: group` provisions
+    # per TEAM, and nothing a caller passes can make it hand out per student instead:
+    # the teams, the sheet and the Join-team form are all keyed on that declaration.
     monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
     monkeypatch.setattr(
         "dsl_course.assign.load_grading_spec",
@@ -805,28 +797,6 @@ def test_group_none_infers_per_team_from_the_templates_grading_yml(
     assert "assignment-4-project-team-1" in out
     assert "assignment-4-project-team-2" in out
     assert "2 team(s)" in out
-
-
-def test_group_false_forces_individual_even_for_a_group_template(
-    tmp_path, capsys, monkeypatch
-):
-    # An explicit False beats the assignment's own `type: group` - the caller decided.
-    monkeypatch.setenv("DSL_VERBOSE", "1")  # per-repo lines are verbose-only
-    monkeypatch.setattr(
-        "dsl_course.assign.load_grading_spec",
-        lambda org, template: collect.grades.GradingSpec(type="group"),
-    )
-    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
-    rc, _changed = assign.provision_all(
-        "COURSE",
-        "assignment-4-project-f2026",
-        "COHORT",
-        roster_path=path,
-        group=False,
-        dry_run=True,
-    )
-    assert rc == 0
-    assert "assignment-4-project-ada-l" in capsys.readouterr().out
 
 
 # ------------------------------------ what counts as a failed handout (the exit code)
@@ -1134,7 +1104,7 @@ def test_provision_all_records_handout_under_schedule_key_and_survives_site_fail
     monkeypatch.setattr(site, "sync_site", boom_site)
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
     rc, _changed = assign.provision_all(
-        "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path, group=False
+        "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path
     )
     assert captured["key"] == "project"  # the schedule key, not "group-project"
     assert rc == 1  # the site failure was counted, not raised as a traceback
@@ -1371,11 +1341,16 @@ def test_a_group_handout_with_no_teams_yet_waits_on_the_cron_and_fails_on_the_bu
         raise AssertionError("nothing may be provisioned without a team")
 
     monkeypatch.setattr(assign, "ensure_cohort_template", boom)
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.GradingSpec(type="group"),
+    )
     path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
 
     def run(**kw):
         return assign.provision_all(
-            "COURSE", "project-f2026", "COHORT", roster_path=path, group=True, **kw
+            "COURSE", "project-f2026", "COHORT", roster_path=path, **kw
         )
 
     assert run(scheduled=True) == (0, False)
@@ -1548,9 +1523,7 @@ def _listing_run(tmp_path, monkeypatch, listing):
     monkeypatch.setattr(assign, "gh", lambda *a, **k: (0, ""))
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
-    assign.provision_all(
-        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
-    )
+    assign.provision_all("COURSE", "assignment-1-f2026", "COHORT", roster_path=path)
     return listed, created
 
 
@@ -1856,9 +1829,13 @@ def test_the_handout_composes_one_feedback_body_per_team(
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
 
-    assign.provision_all(
-        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=True
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.GradingSpec(type="group"),
     )
+
+    assign.provision_all("COURSE", "assignment-1-f2026", "COHORT", roster_path=path)
 
     assert ["@ada-l" in b for b in bodies] == [True, False]
     assert ["@ben-k" in b for b in bodies] == [False, True]
@@ -1886,9 +1863,7 @@ def test_the_handout_refreshes_the_team_formation_lock(tmp_path, monkeypatch):
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
 
-    assign.provision_all(
-        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
-    )
+    assign.provision_all("COURSE", "assignment-1-f2026", "COHORT", roster_path=path)
     assert locked == [("COURSE", "COHORT", sched)]
 
 
@@ -1914,9 +1889,7 @@ def test_a_tick_that_handed_nothing_out_does_not_rewrite_the_lock(
     monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
     monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
 
-    assign.provision_all(
-        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path, group=False
-    )
+    assign.provision_all("COURSE", "assignment-1-f2026", "COHORT", roster_path=path)
     assert locked == []
 
 

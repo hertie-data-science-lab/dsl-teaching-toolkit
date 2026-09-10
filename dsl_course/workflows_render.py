@@ -800,7 +800,12 @@ def render_provision(
     assignments: list[str] | None = None,
     source_repo: str = "",
 ) -> str:
-    """The hand-out button. `source_repo` is the repo this copy is being placed in: when
+    """The hand-out button. It asks WHICH assignment and WHERE, and nothing about what
+    the assignment IS: individual or group is the template's own `grading_config.yml`, the
+    same file the grading sheet and the Join-team form read, so a dispatch cannot hand out
+    a shape the rest of the term does not expect.
+
+    `source_repo` is the repo this copy is being placed in: when
     that repo is ITSELF one of the templates, the dropdown opens on its own name, the way
     `render_release` pre-fills `course_source_repo` with the repo it is seeded into. The
     org `.github` copy, and a materials repo, name no template of their own and get the
@@ -820,15 +825,6 @@ on:
         description: "Also push the solution (from the template's solution branch) into each student repo"
         type: boolean
         default: false
-      type:
-        description: "individual (one repo per student) or group (one per team from teams.csv). auto = whatever the template's grading_config.yml declares (default: individual)"
-        required: true
-        type: choice
-        default: auto
-        options:
-          - auto
-          - individual
-          - group
       slug:
         description: "Only if TWO schedule.yml assignments hand out from this template: which one (the schedule key). Leave empty otherwise"
         required: false
@@ -848,14 +844,12 @@ on:
           COHORT_ORG: ${{{{ inputs.cohort_org }}}}
           COURSE_SOURCE_REPO: ${{{{ inputs.course_source_repo }}}}
           INC_SOL: ${{{{ inputs.include_solution }}}}
-          TYPE: ${{{{ inputs.type }}}}
           SLUG: ${{{{ inputs.slug }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
         run: |
           gh auth setup-git
           args=(--master-org "$MASTER_ORG" --course-source-repo "$COURSE_SOURCE_REPO" --cohort-org "$COHORT_ORG")
           [ "$INC_SOL" = "true" ] && args+=(--solution)
-          args+=(--type "$TYPE")
           [ -n "$SLUG" ] && args+=(--slug "$SLUG")
           [ "$DRY_RUN" = "true" ] && args+=(--dry-run)
           python3 -m dsl_course.assign "${{args[@]}}"

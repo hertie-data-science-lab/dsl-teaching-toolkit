@@ -13,7 +13,7 @@ Idempotent: existing repos are left alone.
     cohort/<slug>-<handle>   (private; student = collaborator)
     where <slug> is the template name minus a trailing -fYYYY / -sYYYY.
 
-With --type group it instead makes ONE repo per team, `cohort/<slug>-<team>`, and grants the
+For a `type: group` assignment it instead makes ONE repo per team, `cohort/<slug>-<team>`, and grants the
 GitHub Team materialised from classroom-config/teams.csv (see dsl_course.sync_teams) - so
 membership changes propagate to access. Grades are never written here; they go to each
 student's private gradebook repo (see dsl_course.grades), so a possibly-public team repo
@@ -934,15 +934,6 @@ def main() -> int:
         help="Also push the solution (template's `solution` branch) into each student repo",
     )
     parser.add_argument(
-        "--type",
-        dest="kind",
-        choices=["auto", "individual", "group"],
-        default="auto",
-        help="individual = one repo per student; group = one per team (from "
-        "classroom-config/teams.csv); auto = whatever the template's "
-        "grading_config.yml declares (default: individual).",
-    )
-    parser.add_argument(
         "--slug",
         default="",
         help="Which assignment in the cohort's schedule.yml this is, when two of them hand out from the same template (each with its own cohort_dest_repo). Leave empty otherwise.",
@@ -971,7 +962,6 @@ def main() -> int:
         "--dry-run", action=argparse.BooleanOptionalAction, default=None
     )
     args = parser.parse_args()
-    kind = args.kind
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
@@ -991,7 +981,6 @@ def main() -> int:
             args.cohort_org,
             roster_path=args.roster,
             solution=args.solution,
-            group={"auto": None, "individual": False, "group": True}[kind],
             dry_run=bool(args.dry_run),
             slug=args.slug,
         )
@@ -1048,7 +1037,6 @@ def provision_all(
     cohort_org: str,
     roster_path: str | None = None,
     solution: bool = False,
-    group: bool | None = None,
     dry_run: bool = False,
     touch_existing: bool = True,
     scheduled: bool = False,
@@ -1064,10 +1052,11 @@ def provision_all(
     `changed` is the same predicate this function's own site sync uses: at least one unit
     was not `skipped`.
 
-    Callable directly (e.g. by the scheduler) as well as from the CLI. `group=None`
-    (the default) reads the assignment's own declaration - `type: group` in the
-    grading_config.yml on the template's solution branch; pass True to force per-team for
-    a template that doesn't declare it.
+    Callable directly (e.g. by the scheduler) as well as from the CLI. Individual or
+    group is the assignment's own declaration - `type:` in the grading_config.yml on the
+    template's solution branch - and there is no override: the sheet, the Join-team form
+    and the teams themselves are all keyed on that file, so a handout free to disagree
+    with it puts a cohort's work in repos nothing else is looking for.
 
     `scheduled` marks the hourly cron: a group assignment with no teams yet is then a
     green wait, not the error a button press gets.
@@ -1085,11 +1074,10 @@ def provision_all(
     # answer to be spelt, which is how a handout came to provision a shape the sheet did
     # not expect.
     gspec = load_grading_spec(master_org, template)
-    if group is None:
-        # The assignment's own grading_config.yml is the only declaration there is.
-        group = gspec.is_group
-        if group:
-            log("  (declared `type: group` - provisioning per team)")
+    # The assignment's own grading_config.yml is the only declaration there is.
+    group = gspec.is_group
+    if group:
+        log("  (declared `type: group` - provisioning per team)")
 
     students = roster.load_path(roster_path) if roster_path else roster.load(cohort_org)
     if students is None:  # missing/unreadable roster - load() already logged why
@@ -1121,7 +1109,7 @@ def provision_all(
         return 1, False
     key, slug = target
     # The sheet's header and the Feedback issue's body, off the definition read above.
-    spec = sheet_spec(sched, key, slug, gspec, bool(group))
+    spec = sheet_spec(sched, key, slug, gspec, group)
     feedback_bodies: dict[str, str] = {}
 
     # A provisioning unit is (repo_name, [member handles], team slug). Individual = one per
@@ -1133,8 +1121,7 @@ def provision_all(
             # need different words: telling a course whose teams the teaching team
             # allocates to wait for students to self-select points them at a form that
             # refuses every request (see templates/welcome/team-formation.yml).
-            # The RAW declaration, not `team_formation_resolved`: `--group` can force a
-            # per-team handout of a template that declares nothing, and a template that
+            # The RAW declaration, not `team_formation_resolved`: a template that
             # declares nothing self-selects.
             self_select = gspec.team_formation != ASSIGNED
             if scheduled:
@@ -1318,7 +1305,7 @@ def provision_all(
         key,
         slug,
         template,
-        is_group=bool(group),
+        is_group=group,
         now=datetime.now(timezone.utc),
         units=sheet_units,
     ):

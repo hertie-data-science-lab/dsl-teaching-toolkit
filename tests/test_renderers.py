@@ -311,19 +311,15 @@ def test_refresh_re_seeds_itself_nightly_without_a_gate():
     assert "needs" not in workflow_jobs(rendered)["refresh"]
 
 
-def test_provision_type_choice_defaults_to_auto():
-    # Manual dispatch surfaces the individual/group choice, but `auto` (follow
-    # schedule.yml / the template's grading_config.yml) is the default - dispatching without
-    # thinking about it must match what the schedule would have done.
+def test_the_hand_out_button_asks_nothing_about_the_assignments_shape():
+    # individual-or-group was a box, and a dispatch could hand out a shape the template
+    # had not declared - one repo per student for an assignment whose teams, sheet and
+    # Join-team form were all keyed per team. The declaration is the only route now.
     rendered = workflows_render.render_provision(
         ["Cohort-f2026"], ["assignment-4-project-f2026"]
     )
-    inp = workflow_inputs(rendered)
-    assert inp["type"]["options"] == ["auto", "individual", "group"]
-    assert inp["type"]["default"] == "auto"
-    step = workflow_jobs(rendered)["provision"]["steps"][-1]
-    assert step["env"]["TYPE"] == "${{ inputs.type }}"
-    assert '--type "$TYPE"' in rendered
+    assert "type" not in workflow_inputs(rendered)
+    assert "--type" not in rendered
 
 
 def test_collect_submissions_refreshes_the_sheet_and_freezes_nothing():
