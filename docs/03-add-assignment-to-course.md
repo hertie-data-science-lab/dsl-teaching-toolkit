@@ -29,9 +29,10 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
       - `type` (`individual` or `group` - one repo per student vs per team)
       - `team_formation` (group only: `self_select` = students use the welcome repo's
         **Join team** form; `assigned` = you write `classroom-config/teams.csv`)
-      - `submit_via` (`github`, or `external` for work handed in on Moodle / Kaggle / in
-        class - the repo then carries the brief and the Feedback issue and nothing is ever
-        collected from it)
+      - `submit_via` = where students hand in. `github` = they push to their repo, and the
+        cutoff, the receipts and the late window apply; `external` = handed in elsewhere
+        (Moodle, Kaggle, in class), so the repo only carries the brief and the Feedback
+        issue and nothing is ever collected from it
       - `autograde` (off by default; on seeds a `tests/` stub on `solution` for you to
         fill, and each submission's pass count appears on the grading sheet as a first
         pass for graders - never shown to students)

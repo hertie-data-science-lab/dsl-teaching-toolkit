@@ -1580,7 +1580,7 @@ on:
 {_STARTER_FORMATS_INPUT}
 {_choice_input("type", "6. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual")}
 {_choice_input("team_formation", "7. Group only: self_select = students use the Join team form; assigned = you write teams.csv", list(TEAM_FORMATIONS), "self_select")}
-{_choice_input("submit_via", "8. external = handed in off GitHub (Moodle, Kaggle, in class) - no receipts, no late arithmetic", list(SUBMIT_VIA), "github")}
+{_choice_input("submit_via", "8. Where students hand in. github = they push to their repo and the cutoff, receipts and late window apply; external = handed in elsewhere (Moodle, Kaggle, in class), so the repo only carries the brief and nothing is collected", list(SUBMIT_VIA), "github")}
       autograde:
         description: "9. Also run hidden tests at the cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
         type: boolean
