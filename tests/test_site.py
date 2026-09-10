@@ -167,7 +167,9 @@ def test_the_archive_row_is_a_special_event_that_says_what_freezes():
     assert 'description: "Cohort archived"' in out
     assert "date: 2027-02-16T09:00:00" in out
     assert "hide_time: true" in out  # a whole day, not a 09:00 appointment
-    assert "read-only" in out and "take a copy" in out
+    # And that an archived repo is still clonable and forkable: the old wording read like
+    # a deadline to get your work out, which it never was.
+    assert "read-only" in out and "fork or clone anything you want to keep" in out
 
 
 def test_the_archive_row_only_reaches_the_updates_box_inside_its_window():
