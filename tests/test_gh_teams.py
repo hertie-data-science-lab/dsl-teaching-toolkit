@@ -363,22 +363,45 @@ def test_a_course_org_is_not_told_its_private_repos_are_forkable(monkeypatch, ca
     assert "forkable" not in capsys.readouterr().out
 
 
+def _fork_field_answers(monkeypatch, answer: tuple[int, str]) -> list[tuple[str, ...]]:
+    """Record every gh call of a convergence whose FORK patch gets `answer`; everything
+    else succeeds."""
+    calls: list[tuple[str, ...]] = []
+
+    def fake_gh(*a, **k):
+        calls.append(a)
+        return answer if any("fork" in arg for arg in a) else (0, "")
+
+    monkeypatch.setattr(gh_teams, "gh", fake_gh)
+    return calls
+
+
 def test_a_refused_forking_setting_never_takes_the_tightening_with_it(monkeypatch):
     # GitHub validates a PATCH body as a UNIT, so the loosening field rides in a call of
     # its own: bundled, a refusal (an enterprise policy above the org, a plan without the
     # setting) would drop `default_repository_permission=none` too and leave every member
-    # reading every repo behind a log line about forking. Counted, so it is still LOUD.
-    calls: list[tuple[str, ...]] = []
-
-    def refuses_the_fork_field(*a, **k):
-        calls.append(a)
-        return (1, "gh: HTTP 422") if any("fork" in arg for arg in a) else (0, "")
-
-    monkeypatch.setattr(gh_teams, "gh", refuses_the_fork_field)
-    assert gh_teams.converge_org_settings("Cohort-f2026", private_forks=True) == 1
+    # reading every repo behind a log line about forking.
+    calls = _fork_field_answers(monkeypatch, (1, "gh: HTTP 422"))
+    gh_teams.converge_org_settings("Cohort-f2026", private_forks=True)
     fields = [f for call in calls for f in call]
     assert "default_repository_permission=none" in fields
     assert "members_can_create_repositories=false" in fields
+
+
+def test_a_forking_policy_github_refuses_is_named_not_red(monkeypatch, capsys):
+    # An enterprise policy above the org forbids private forks, or the plan does not carry
+    # the setting. No re-run can change either, so counting it left every nightly refresh
+    # of that org red for ever - and the line has to say what students will find missing.
+    _fork_field_answers(monkeypatch, (1, "gh: HTTP 403 forbidden by enterprise policy"))
+    assert gh_teams.converge_org_settings("Cohort-f2026", private_forks=True) == 0
+    assert "not forkable" in capsys.readouterr().out
+
+
+def test_a_forking_patch_that_never_reached_github_is_still_a_failure(monkeypatch):
+    # Nothing was refused here - the request did not get there, so the org's real setting
+    # is unknown and a re-run may well fix it. That is exactly what a red run is for.
+    _fork_field_answers(monkeypatch, (1, "gh: dial tcp 140.82.121.6:443: i/o timeout"))
+    assert gh_teams.converge_org_settings("Cohort-f2026", private_forks=True) == 1
 
 
 def test_a_failed_tighten_reds_the_run(monkeypatch):

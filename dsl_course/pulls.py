@@ -6,7 +6,9 @@ re-derive "should this be open?" from the world every quarter of an hour, so the
 they ask is "is there already a PR from this branch?" and the answer has to be exact. A
 PR is addressed by its HEAD BRANCH, not by its title: the branch is what the caller
 controls, a title is prose someone may edit, and two PRs proposing the same branch is the
-one outcome that turns a release conflict into a wall of notifications.
+one outcome that turns a release conflict into a wall of notifications. The BASE is asked
+for too, but only to refuse: a PR from this head onto some other branch is a decision
+somebody took, not this caller's PR to edit.
 
 `gh pr list --head` filters server-side, and the two client-side tests here are what make
 the answer trustworthy anyway: `headRefName` must match exactly, and the PR must not be
@@ -40,10 +42,14 @@ _PR_URL = re.compile(r"https://\S+/pull/(\d+)")
 
 
 class PullRequest(NamedTuple):
-    """One open pull request found by its head branch: its number and its web URL."""
+    """One open pull request found by its head branch: its number, its web URL and the
+    branch it proposes to merge INTO - which the caller has to see, because a head branch
+    answers "is there a pull request?" and only the base answers "is it the one I would
+    have opened?"."""
 
     number: int
     url: str
+    base: str
 
 
 class Upserted(NamedTuple):
@@ -81,12 +87,12 @@ def find_pr(repo: str, head: str) -> PullRequest | None:
             "--limit",
             _LIST_LIMIT,
             "--json",
-            "number,url,headRefName,isCrossRepository",
+            "number,url,baseRefName,headRefName,isCrossRepository",
         )
     except (RuntimeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"could not list pull requests in {repo}: {exc}") from exc
     found = [
-        PullRequest(r["number"], r.get("url") or "")
+        PullRequest(r["number"], r.get("url") or "", r.get("baseRefName") or "")
         for r in sorted(rows, key=lambda r: r["number"])
         if r.get("headRefName") == head and not r.get("isCrossRepository")
     ]
@@ -111,6 +117,11 @@ def upsert_pr(
     whose body is an explanation written once does not - and rewriting that would talk
     over whatever a human added to it.
 
+    An open PR from `head` onto ANOTHER base is not this call's: a human retargeted it,
+    and it is named in the log and left exactly as it is - no body refresh, and nothing new
+    opened, which is also what GitHub would allow, a second open PR from one head being
+    refused.
+
     `reviewer` (`<org>/<team>`) is requested only on the PR this call OPENED, in a separate
     edit that is allowed to fail: whether a team can be requested at all depends on the
     org's plan, and a release must not go red because a review request did not stick. A
@@ -121,6 +132,15 @@ def upsert_pr(
     except RuntimeError as exc:
         log_err(str(exc))
         return Upserted(1)
+    if existing and existing.base != base:
+        # Somebody retargeted it. Not this call's pull request any more - editing its body
+        # would talk over that decision, and opening a second one from the same head is
+        # what GitHub refuses anyway. Named, so the run says where the head branch went.
+        log(
+            f"  [warn] {repo}#{existing.number} already proposes `{head}` into "
+            f"`{existing.base}`, not `{base}` - leaving it alone"
+        )
+        return Upserted(0, existing.url)
     if existing:
         if refresh_body:
             code, out = gh(
