@@ -51,10 +51,16 @@ def test_parse_handles_splits_comma_and_space():
 
 def test_schedule_yml_seed_is_commented_and_covers_every_field():
     # Mostly-commented, like the old cohort dsl-course.yml schedule block - faculty
-    # uncomment what they want to pin.
+    # uncomment what they want to pin. The one live block is `archive:` at the end: the
+    # maintainer wants every cohort to say in its own file what happens at term end, with
+    # the date left to its default and the sentence written out.
     schedule = welcome.template("classroom-config/schedule.yml")
+    skeleton, live = schedule.split("\narchive:\n")
     assert all(
-        line.startswith("#") or not line.strip() for line in schedule.splitlines()
+        line.startswith("#") or not line.strip() for line in skeleton.splitlines()
+    )
+    assert (
+        live.startswith("  date:") and "description: >-" in live and "{{date}}" in live
     )
     for key in (
         "timezone",
