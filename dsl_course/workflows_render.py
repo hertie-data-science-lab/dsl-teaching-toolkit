@@ -627,6 +627,21 @@ def _choice_input(
     )
 
 
+def _copy_from_input(options: list[str], description: str) -> str:
+    """The `copy_from` dropdown: an existing repo of this kind to start the new one from,
+    or the BLANK first option - the fresh starter - which is what an untouched form
+    submits.
+
+    No `default:`, unlike every other dropdown here (`_choice_input` pre-selects the
+    newest term): copying a whole repo forward is a choice to make deliberately, and a
+    form arriving with last year's already filled in would make it the accident."""
+    listed = "\n".join(f"          - {o}" for o in ['""', *options])
+    return (
+        f'      copy_from:\n        description: "{description}"\n'
+        f"        required: false\n        type: choice\n        options:\n{listed}"
+    )
+
+
 # The five Release materials inputs read top to bottom as the release itself: what to copy
 # (1, 2), then where it lands (3, 4, 5). They are numbered in the UI because GitHub renders
 # workflow_dispatch inputs as a flat list of boxes with no grouping. The input NAMES are
@@ -1442,9 +1457,20 @@ on:
 """
 
 
-def render_new_materials() -> str:
-    """Scaffold a correctly-structured course-materials-<tag> repo, then refresh."""
+def render_new_materials(source_repos: list[str] | None = None) -> str:
+    """Scaffold a correctly-structured course-materials-<tag> repo, then refresh.
+
+    `source_repos` is the course org's content repos; only the `course-materials-*` ones
+    can be copied forward into another materials repo, so the dropdown is the prefix's
+    share of that list. It is repopulated by the nightly refresh, like every other one."""
+    materials = [r for r in source_repos or [] if r.startswith(MATERIALS_REPO_PREFIX)]
     return f"""name: New materials repo
+
+# `copy_from` starts the new repo as an existing one - every branch, every file, the whole
+# history - instead of as the empty skeleton, which is how a course carries forward from
+# one year to the next. Only the toolkit's own files are rewritten afterwards; yours
+# arrive exactly as you left them. Leave it blank for the fresh starter.
+# The dropdown is refreshed by the 'Refresh actions' workflow.
 
 on:
   workflow_dispatch:
@@ -1452,6 +1478,7 @@ on:
       tag:
         description: "Year tag, e.g. f2026 or s2026 - creates course-materials-<tag>"
         required: true
+{_copy_from_input(materials, "Materials repo to copy forward - blank starts from the empty skeleton")}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
@@ -1461,14 +1488,17 @@ on:
           DSL_BOT_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
           ORG: ${{{{ github.repository_owner }}}}
           TAG: ${{{{ inputs.tag }}}}
+          COPY_FROM: ${{{{ inputs.copy_from }}}}
         run: |
           gh auth setup-git
-          python3 -m dsl_course.scaffold materials --org "$ORG" --tag "$TAG"
+          args=(--org "$ORG" --tag "$TAG")
+          [ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")
+          python3 -m dsl_course.scaffold materials "${{args[@]}}"
           python3 -m dsl_course.seed refresh --course-org "$ORG"
 """
 
 
-def render_new_assignment() -> str:
+def render_new_assignment(assignments: list[str] | None = None) -> str:
     """Scaffold an assignment-N-<tag> template repo (main + solution branch), then refresh.
 
     EIGHT boxes, and between them they are the whole assignment: everything but `format`
@@ -1478,9 +1508,12 @@ def render_new_assignment() -> str:
     course's own `assignment_defaults:` in dsl-course.yml, and is written into that same
     file so it can be revised there per assignment afterwards.
 
-    GitHub caps a workflow_dispatch at 10 inputs, and there is deliberately no ninth here:
-    an assignment's remaining settings belong in a file the instructor can revise, not in a
-    form filled in once, before the brief has even been written."""
+    The ninth, `copy_from`, is the one that asks for none of it: last year's template
+    arrives whole, and the `grading_config.yml` that comes with it is the definition, so
+    boxes 4-8 are ignored. GitHub caps a workflow_dispatch at 10 inputs, and there is
+    deliberately no tenth: an assignment's remaining settings belong in a file the
+    instructor can revise, not in a form filled in once, before the brief has even been
+    written."""
     return f"""name: New assignment
 
 on:
@@ -1503,6 +1536,7 @@ on:
         description: "8. Run the template's tests/ at the cutoff. The count is shown to graders, never to a student"
         type: boolean
         default: false
+{_copy_from_input(assignments or [], "9. Copy an existing template forward instead - both branches, whole history. Boxes 4-8 are then ignored")}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
@@ -1519,12 +1553,14 @@ on:
           TEAM_FORMATION: ${{{{ inputs.team_formation }}}}
           SUBMIT_VIA: ${{{{ inputs.submit_via }}}}
           AUTOGRADE: ${{{{ inputs.autograde }}}}
+          COPY_FROM: ${{{{ inputs.copy_from }}}}
         run: |
           gh auth setup-git
-          python3 -m dsl_course.scaffold assignment --org "$ORG" --number "$NUMBER" \\
-            --tag "$TAG" --name "$NAME" --format "$FORMAT" --type "$TYPE" \\
-            --team-formation "$TEAM_FORMATION" --submit-via "$SUBMIT_VIA" \\
-            --autograde "$AUTOGRADE"
+          args=(--org "$ORG" --number "$NUMBER" --tag "$TAG" --name "$NAME" \\
+            --format "$FORMAT" --type "$TYPE" --team-formation "$TEAM_FORMATION" \\
+            --submit-via "$SUBMIT_VIA" --autograde "$AUTOGRADE")
+          [ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")
+          python3 -m dsl_course.scaffold assignment "${{args[@]}}"
           python3 -m dsl_course.seed refresh --course-org "$ORG"
 """
 

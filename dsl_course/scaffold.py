@@ -12,6 +12,9 @@ more, e.g. `datasets/`, freely; delete `labs/` if unused) and the run-from-repo 
 workflows. Assignment repos get a starter on `main` (no tests - grading is faculty-side)
 and a `solution` branch carrying the model solution, `grading_config.yml`, and the HIDDEN
 tests, so generate never ships any of them to students.
+
+Either kind can start from last year's instead of from the stubs: `--copy-from <repo>`
+copies every branch of it, history and all, and rewrites only the SYSTEM-owned files.
 """
 
 from __future__ import annotations
@@ -809,7 +812,75 @@ def materials_readme(org: str) -> str:
     )
 
 
-def scaffold_materials(org: str, tag: str) -> int:
+# Where a copied branch waits in the new repo's clone before it is pushed. Not
+# `refs/heads/`: git refuses to fetch into the branch a working copy has checked out, and
+# a clone of a repo with no commits has its default branch checked out (unborn), so the
+# obvious refspec fails on exactly the branch that matters.
+_COPY_REFS = "refs/copy"
+
+
+def _source_branches(wd: Path) -> list[str]:
+    """Every branch a clone's origin has, in name order.
+
+    `refs/remotes/origin/HEAD` is the symref naming the default branch rather than a
+    branch of its own; pushed under that name it would open the new repo with a branch
+    called `HEAD`."""
+    code, out = git(
+        "-C",
+        str(wd),
+        "for-each-ref",
+        "--format=%(refname:strip=3)",
+        "refs/remotes/origin",
+    )
+    return [b for b in out.split() if b != "HEAD"] if code == 0 else []
+
+
+def _copy_branches(
+    org: str, source: str, repo: str, *, needs: tuple[str, ...] = ()
+) -> bool:
+    """Copy every branch of `org/source`, history and all, into the just-created
+    `org/repo`. False (having said why) if any of it failed.
+
+    This is what `copy_from` means: next year's repo starts as this year's, so a course
+    is revised rather than re-typed. Only the SYSTEM-owned files are written over the
+    copy afterwards; every INSTRUCTOR-owned file arrives exactly as its author left it,
+    with the history that explains it.
+
+    `needs` names the branches the copy would be worthless without - an assignment whose
+    source has no `solution` branch would arrive with no model answer and no
+    `grading_config.yml`, and grade on the defaults, so the run refuses instead."""
+    with tempfile.TemporaryDirectory() as work:
+        src, new = Path(work) / "source", Path(work) / "new"
+        if not clone(org, source, src):
+            log_err(f"  ! could not clone {org}/{source} - nothing was copied")
+            return False
+        branches = _source_branches(src)
+        if not branches:
+            log_err(f"  ! {org}/{source} has no branches to copy")
+            return False
+        missing = [b for b in needs if b not in branches]
+        if missing:
+            log_err(
+                f"  ! {org}/{source} has no {' or '.join(missing)} branch - copy from a "
+                "repo that has one, or leave copy_from empty for a fresh starter"
+            )
+            return False
+        if not clone(org, repo, new):
+            log_err(f"  ! could not clone {org}/{repo} to copy into")
+            return False
+        fetched = [f"refs/remotes/origin/{b}:{_COPY_REFS}/{b}" for b in branches]
+        if git("-C", str(new), *GIT_ENV, "fetch", "-q", str(src), *fetched)[0] != 0:
+            log_err(f"  ! could not read {org}/{source}'s branches")
+            return False
+        pushed = [f"{_COPY_REFS}/{b}:refs/heads/{b}" for b in branches]
+        if git("-C", str(new), *GIT_ENV, "push", "-q", "origin", *pushed)[0] != 0:
+            log_err(f"  ! could not push {org}/{source}'s branches into {org}/{repo}")
+            return False
+    log_ok(f"copied {org}/{source} into {org}/{repo} ({', '.join(branches)})")
+    return True
+
+
+def scaffold_materials(org: str, tag: str, copy_from: str = "") -> int:
     repo = f"{MATERIALS_REPO_PREFIX}{tag}"
     log_step(f"Scaffolding {org}/{repo}")
     if not create_repo(
@@ -823,32 +894,40 @@ def scaffold_materials(org: str, tag: str) -> int:
         return 1
     grant_faculty(org, repo, COURSE_TEAM_ACCESS)
     grant_tagged_team_access(org, repo, tag)
-    readme = materials_readme(org)
     failures = 0
+    # Copying comes FIRST, before a single API write: `_copy_branches` pushes whole
+    # branches, and a `main` the Contents API had already opened would make that push a
+    # non-fast-forward. The SYSTEM-owned files are then written over the copy (last
+    # year's are a year old), and the skeleton is not written at all - a copied repo
+    # already holds a README, a syllabus and its sections, authored.
+    if copy_from and not _copy_branches(org, copy_from, repo):
+        return 1
     failures += refresh_materials_system_files(org, repo)
-    # INSTRUCTOR-OWNED, every one of them, and all CREATE-ONLY: written when the repo is
-    # scaffolded and never again. A re-run against a repo faculty have since authored must
-    # not revert their work, and neither must the nightly refresh - see the note on
-    # `_SYLLABUS_STUB` for why "is it still ours?" is not a question this can ask safely.
-    # A failed seed (an absent file whose write failed) reds the scaffold.
-    user_files = {
-        "README.md": readme.encode(),
-        "SYLLABUS.md": _SYLLABUS_STUB.format(tag=tag).encode(),
-        "lectures/01_session-1/.gitkeep": b"",
-        # A stub, not a .gitkeep: a text file here IS the published reading list (its
-        # contents are inlined on the site's Materials tab), and an empty folder gave no
-        # sign of that - the tab then reads blank with nothing to explain why.
-        f"readings/01_session-1/{READING_OVERLAY_FILE}": _READINGS_STUB,
-        "labs/01_session-1/.gitkeep": b"",
-        RELEASEIGNORE: _RELEASEIGNORE_STUB.encode(),
-    }
-    # One commit for the skeleton: they all carried the same subject anyway, so writing
-    # them one at a time opened a repo faculty then author by hand with a column of
-    # identical `init: materials skeleton` lines.
-    if not put_files(
-        org, repo, user_files, "init: materials skeleton", create_only=True
-    ):
-        failures += 1
+    if not copy_from:
+        # INSTRUCTOR-OWNED, every one of them, and all CREATE-ONLY: written when the repo
+        # is scaffolded and never again. A re-run against a repo faculty have since
+        # authored must not revert their work, and neither must the nightly refresh - see
+        # the note on `_SYLLABUS_STUB` for why "is it still ours?" is not a question this
+        # can ask safely. A failed seed (an absent file whose write failed) reds the
+        # scaffold.
+        user_files = {
+            "README.md": materials_readme(org).encode(),
+            "SYLLABUS.md": _SYLLABUS_STUB.format(tag=tag).encode(),
+            "lectures/01_session-1/.gitkeep": b"",
+            # A stub, not a .gitkeep: a text file here IS the published reading list (its
+            # contents are inlined on the site's Materials tab), and an empty folder gave
+            # no sign of that - the tab then reads blank with nothing to explain why.
+            f"readings/01_session-1/{READING_OVERLAY_FILE}": _READINGS_STUB,
+            "labs/01_session-1/.gitkeep": b"",
+            RELEASEIGNORE: _RELEASEIGNORE_STUB.encode(),
+        }
+        # One commit for the skeleton: they all carried the same subject anyway, so
+        # writing them one at a time opened a repo faculty then author by hand with a
+        # column of identical `init: materials skeleton` lines.
+        if not put_files(
+            org, repo, user_files, "init: materials skeleton", create_only=True
+        ):
+            failures += 1
     # Equip the run-from-repo Release workflows (same as Refresh does for content repos).
     # push_content_workflows lands both in one commit, logs its own failure, and returns
     # 1 - a materials repo with no Release workflows must not report success.
@@ -873,6 +952,7 @@ def scaffold_assignment(
     team_formation: str = "self_select",
     submit_via: str = "github",
     autograde: bool = False,
+    copy_from: str = "",
 ) -> int:
     """Create `assignment-<number>-<tag>` and write the assignment's own definition into it.
 
@@ -884,7 +964,12 @@ def scaffold_assignment(
 
     `fmt` is the exception: it picks which starter stub is seeded on `main` and nothing
     else. The grader reads whatever is in the repo, so a student who works in a notebook on
-    a `py` assignment still grades; `none` seeds no starter at all."""
+    a `py` assignment still grades; `none` seeds no starter at all.
+
+    `copy_from` overrides all of them: last year's template arrives whole, both branches,
+    and the `grading_config.yml` that came with it is the assignment's definition. Writing
+    the button's answers over it would silently re-declare an assignment the course has
+    already run."""
     repo = f"assignment-{number}-{tag}"
     title = name.strip() or f"Assignment {number}"
     defaults = course_assignment_defaults(org)
@@ -899,6 +984,21 @@ def scaffold_assignment(
         return 1
     grant_faculty(org, repo, COURSE_TEAM_ACCESS)
     grant_tagged_team_access(org, repo, tag)
+    set_repo_topics(org, repo, [f"assignment-{number}", "assignment"])
+    if copy_from:
+        # Nothing else to do: both branches, every stub's grown-up version and the
+        # definition itself came with the copy. `solution` is required rather than
+        # optional, because a template without one hands out a starter nobody can mark
+        # against and grades on the toolkit's defaults.
+        if not _copy_branches(org, copy_from, repo, needs=(SOLUTION_BRANCH,)):
+            return 1
+        log(
+            "  (format, type, team_formation, submit_via and autograde were ignored - "
+            f"the copied definition governs: https://github.com/{org}/{repo}/blob/"
+            f"{SOLUTION_BRANCH}/grading_config.yml)"
+        )
+        log_ok(f"assignment template ready: {org}/{repo} (copied from {copy_from})")
+        return 0
     # main: the brief, one starter stub, and (for a group assignment) CONTRIBUTIONS.md -
     # what students receive on generate. No tests, no autograder - grading runs
     # faculty-side from the solution branch. ONE commit, create-only, exactly as
@@ -919,7 +1019,6 @@ def scaffold_assignment(
         "init: assignment starter",
         create_only=True,
     )
-    set_repo_topics(org, repo, [f"assignment-{number}", "assignment"])
 
     # solution branch: the model solution, grading_config.yml, and the HIDDEN tests -
     # all kept OFF main so generate never copies them into student repos.
@@ -1206,6 +1305,14 @@ def main() -> int:
     pm = sub.add_parser("materials")
     pm.add_argument("--org", required=True)
     pm.add_argument("--tag", required=True, help="Year tag, e.g. f2026 or s2026")
+    pm.add_argument(
+        "--copy-from",
+        dest="copy_from",
+        default="",
+        help="An existing course-materials-* repo to start from: its branches and their "
+        "history are copied into the new repo, and only the SYSTEM-owned files are "
+        "rewritten. Omit it for the fresh skeleton.",
+    )
     pa = sub.add_parser("assignment")
     pa.add_argument("--org", required=True)
     pa.add_argument("--number", required=True)
@@ -1254,6 +1361,14 @@ def main() -> int:
         help="true = seed a tests/ stub on the solution branch and run it at the "
         "cutoff; the count is shown to graders and never to a student",
     )
+    pa.add_argument(
+        "--copy-from",
+        dest="copy_from",
+        default="",
+        help="An existing assignment-* template to start from: `main` and `solution` are "
+        "copied whole, and every option above is ignored - the copied "
+        "grading_config.yml defines the assignment.",
+    )
     ps = sub.add_parser("site")
     ps.add_argument("--org", required=True)
     args = parser.parse_args()
@@ -1262,7 +1377,7 @@ def main() -> int:
     # an Actions log a one-line error beats a traceback.
     try:
         if args.cmd == "materials":
-            return scaffold_materials(args.org, args.tag)
+            return scaffold_materials(args.org, args.tag, args.copy_from)
         if args.cmd == "site":
             return scaffold_site(args.org)
         return scaffold_assignment(
@@ -1275,6 +1390,7 @@ def main() -> int:
             team_formation=args.team_formation,
             submit_via=args.submit_via,
             autograde=args.autograde == "true",
+            copy_from=args.copy_from,
         )
     except RuntimeError as exc:
         log_err(str(exc))

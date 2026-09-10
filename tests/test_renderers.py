@@ -70,8 +70,8 @@ ALL_RENDERED = {
     "generate_syllabus": workflows_render.render_generate_syllabus(
         ["course-materials-f2026"], ["Cohort-f2026"]
     ),
-    "new_materials": workflows_render.render_new_materials(),
-    "new_assignment": workflows_render.render_new_assignment(),
+    "new_materials": workflows_render.render_new_materials(["course-materials-f2026"]),
+    "new_assignment": workflows_render.render_new_assignment(["assignment-1-f2026"]),
     "derive_student_version": workflows_render.render_derive_student_version(
         ["assignment-1-f2026"]
     ),
@@ -156,6 +156,8 @@ DATED_RENDERED = {
     "derive_student_version": workflows_render.render_derive_student_version(
         ASSIGNMENTS_2
     ),
+    "new_materials": workflows_render.render_new_materials(REPOS_2),
+    "new_assignment": workflows_render.render_new_assignment(ASSIGNMENTS_2),
     "patch_assignment": workflows_render.render_patch_assignment(
         COHORTS_2, ASSIGNMENTS_2
     ),
@@ -187,6 +189,11 @@ def test_every_org_repo_dropdown_pre_selects_the_newest(name):
         options = spec.get("options", [])
         if not any("2026" in o for o in options):
             continue  # a fixed vocabulary (reading-list / individual / group / ...)
+        if field == "copy_from":
+            # The deliberate exception, asserted for itself below: copying a whole repo
+            # forward is a choice, so the blank first option is what an untouched form
+            # submits and there is no `default:` to arrive at it by accident.
+            continue
         default = spec.get("default")
         # Sync enrolment's cohort_org is the one exception: it stays pinned to the
         # faculty-only sentinel, because touching a cohort must be opted into.
@@ -655,6 +662,10 @@ def test_scaffold_buttons_route_inputs_through_env_not_the_shell():
         step = workflow_jobs(rendered)["scaffold"]["steps"][-1]
         assert "${{" not in step["run"]
         assert '--tag "$TAG"' in rendered
+        # `copy_from` is a repo name off a form like any other input, and it reaches the
+        # CLI as an argument only when someone filled the box in.
+        assert step["env"]["COPY_FROM"] == "${{ inputs.copy_from }}"
+        assert '[ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")' in rendered
     assert workflow_jobs(materials)["scaffold"]["steps"][-1]["env"]["TAG"] == (
         "${{ inputs.tag }}"
     )
@@ -808,8 +819,8 @@ def test_classroom_config_roster_dispatcher_fires_send_codes_on_students_csv():
     assert "contents/dsl-course.yml" in tmpl
 
 
-# The whole assignment, in the order the eight boxes are numbered. Pinned as a LIST: the
-# order is what a person reads down, and GitHub caps a workflow_dispatch at ten - a ninth
+# The whole assignment, in the order the nine boxes are numbered. Pinned as a LIST: the
+# order is what a person reads down, and GitHub caps a workflow_dispatch at ten - a tenth
 # box means one of these earned its place over an edit to a file, so it is a decision, not
 # a diff nobody noticed.
 NEW_ASSIGNMENT_INPUTS = [
@@ -821,6 +832,7 @@ NEW_ASSIGNMENT_INPUTS = [
     "team_formation",
     "submit_via",
     "autograde",
+    "copy_from",
 ]
 
 
@@ -853,6 +865,36 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     ):
         assert step["env"][env_name] == f"${{{{ inputs.{field} }}}}"
         assert f'"${env_name}"' in rendered
+
+
+@pytest.mark.parametrize(
+    "rendered",
+    [
+        workflows_render.render_new_materials(REPOS_2),
+        workflows_render.render_new_assignment(ASSIGNMENTS_2),
+    ],
+    ids=["new_materials", "new_assignment"],
+)
+def test_the_copy_forward_dropdown_starts_blank(rendered):
+    # GitHub selects the first option, and every other repo dropdown carries a `default:`
+    # naming this year's - so a `copy_from` built the same way would copy a whole repo
+    # forward for anyone who typed a tag and pressed the button. Blank first, no default.
+    spec = workflow_inputs(rendered)["copy_from"]
+    assert spec["options"][0] == ""
+    assert "default" not in spec
+    assert spec["required"] is False
+
+
+def test_the_copy_forward_dropdown_lists_only_materials_repos():
+    # New materials repo is fed the course org's CONTENT repos, which include the code and
+    # dataset ones - and none of those is a materials repo to start the year from.
+    rendered = workflows_render.render_new_materials(
+        ["course-materials-f2026", "lecture-code-f2026"]
+    )
+    assert workflow_inputs(rendered)["copy_from"]["options"] == [
+        "",
+        "course-materials-f2026",
+    ]
 
 
 @pytest.mark.parametrize("name", sorted(ALL_RENDERED))
