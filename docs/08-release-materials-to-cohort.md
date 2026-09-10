@@ -90,6 +90,9 @@ What it does and does not carry:
 - only paths that have actually been released - it walks the cohort's `deploy:` entries;
 - **deletions are not propagated**: a file you removed from the cohort's copy stays in the
   course org, and the pull request says so;
+- a cohort repo that is **behind its latest release** - one with the conflict pull request
+  above still open - is skipped until that pull request is merged, because its copy is
+  missing what the course org has already released; the pull request names what was left;
 - the branch is regenerated on every run, so re-running after more edits refreshes the same
   pull request rather than stacking on it.
 

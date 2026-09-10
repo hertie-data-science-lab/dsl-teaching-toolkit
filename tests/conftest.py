@@ -328,16 +328,33 @@ class BareOrigins:
         return path
 
     def commit(
-        self, name: str, files: dict[str, str | None], message: str = "edit"
+        self,
+        name: str,
+        files: dict[str, str | None],
+        message: str = "edit",
+        branch: str = "main",
     ) -> None:
-        """One commit on `main` of a bare repo, through a throwaway clone - the only way to
-        write into a repo with no working tree. A `None` value DELETES that path.
+        """One commit on `branch` of a bare repo, through a throwaway clone - the only way
+        to write into a repo with no working tree. A `None` value DELETES that path.
+
+        `branch` is what students read unless a test needs the release branch a held merge
+        leaves ahead of it (`deploy.UPSTREAM_BRANCH`), which is a real state a cohort repo
+        sits in whenever a release conflicted.
 
         The commit borrows the engine's identity and its disabled hooks, so a developer's
         global git hooks cannot fail somebody else's test run."""
         self._scratch += 1
         work = self.root / "scratch" / f"{name}{self._scratch}"
         git_ok("clone", "-q", str(self.bare(name)), str(work))
+        if branch != "main":
+            remote = f"origin/{branch}"
+            probe = ghcli.git("-C", str(work), "rev-parse", "--verify", remote)
+            # Off the remote branch when it is already there, off whatever was cloned when
+            # it is not - which is how a first release cuts `upstream` too.
+            start = [remote] if probe[0] == 0 else []
+            git_ok(
+                "-C", str(work), *ghcli.GIT_ENV, "checkout", "-q", "-B", branch, *start
+            )
         for rel, text in files.items():
             path = work / rel
             if text is None:
@@ -356,7 +373,7 @@ class BareOrigins:
             "-m",
             message,
         )
-        git_ok("-C", str(work), "push", "-q", "origin", "HEAD:refs/heads/main")
+        git_ok("-C", str(work), "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
 
     def clone_only(self, *args, **kwargs) -> tuple[int, str]:
         """`ghcli.gh` as these fixtures allow it: `repo clone` reaches the bare repo beside

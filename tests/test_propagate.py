@@ -164,6 +164,51 @@ def test_a_deletion_is_named_in_the_body_and_never_made(world):
     assert "`lectures/01/notes.md`" in call["body"]
 
 
+def test_a_cohort_behind_its_latest_release_is_not_carried_back(world, capsys):
+    # `upstream` ahead of the branch students read is a release held at a conflict pull
+    # request. The cohort's copy is missing the course org's own newer content, so
+    # carrying it back would propose that content as a cohort edit and revert the fix on
+    # merge - which is what the teardown would do, propagating before it seals.
+    world.commit(
+        "cm", {"lectures/01/lab.md": "the course fix", "labs/01/lab.md": "lab one"}
+    )
+    world.commit("materials", {"lectures/01/lab.md": "week one"})
+    world.commit(
+        "materials", {"lectures/01/lab.md": "the course fix"}, branch="upstream"
+    )
+    world.commit("extras", {"labs/01/lab.md": "the cohort's fix"})
+    world.plan(
+        _release(
+            "lecture-1",
+            FIRED,
+            Deploy("cm", "lectures/01", "materials"),
+            Deploy("cm", "labs/01", "extras"),
+        )
+    )
+
+    assert world.run().errors == 0
+    # Nothing off the stale dest; every other dest is carried exactly as usual.
+    assert world.proposed() == ["propagate: labs/01 from Cohort-Org"]
+    # The course's own newer content, not the cohort's stale copy of what preceded it.
+    assert world.read("lectures/01/lab.md") == "the course fix"
+    (call,) = world.pulls.calls
+    assert "behind their latest release" in call["body"]
+    assert "`materials/lectures/01`" in call["body"]
+    assert "[skip]" in capsys.readouterr().out
+
+
+def test_a_cohort_with_no_upstream_branch_is_carried(world):
+    # A cohort released into before releases were merge-based has no `upstream` at all:
+    # there is no release for it to be behind, so it is read like any other dest.
+    world.commit("cm", {"lectures/01/lab.md": "week one"})
+    world.commit("materials", {"lectures/01/lab.md": "corrected"})
+    world.plan(_release("lecture-1", FIRED, Deploy("cm", "lectures/01", "materials")))
+
+    assert world.run().errors == 0
+    assert world.branches("materials") == ["main"]
+    assert world.proposed() == ["propagate: lectures/01 from Cohort-Org"]
+
+
 def test_a_whole_repo_carry_leaves_the_root_excluded_paths_alone(world):
     # The root-only half of the release filter, run in reverse. A cohort repo's `.github`
     # is the toolkit's own rendered workflows, so carrying it back would push a cohort's

@@ -24,6 +24,10 @@ generous about what it copies and deliberately explicit about what it does not:
 - DELETIONS ARE NOT PROPAGATED. A file the cohort deleted stays in the course repo, and
   the pull request names it: deleting from a course repo on the strength of a cohort's
   working copy is not a decision this should take unattended.
+- A cohort repo BEHIND its latest release is not read at all. Its `upstream` holds a
+  release the branch students read has not merged - a held conflict pull request - so
+  copying that branch back would offer the course org its own newer content as a cohort
+  edit, and merging it would revert the fix. Those paths are named, not carried.
 - The branch is REGENERATED from the course repo's default branch on every run and
   force-pushed, so a run always proposes what the cohort has now rather than accumulating.
   The pull request is reused and its body rewritten (`pulls.upsert_pr`), so a re-run is
@@ -50,7 +54,7 @@ from typing import NamedTuple
 
 from . import pulls, schedule
 from .course import is_repo_root
-from .deploy import _copy_ignore, _resolve_within
+from .deploy import UPSTREAM_BRANCH, _copy_ignore, _resolve_within
 from .fs import Deny, copy_tree
 from .ghcli import GIT_ENV, clone, git
 from .log import log, log_err, log_ok, log_step
@@ -152,6 +156,25 @@ def _base_branch(sd: Path) -> str | None:
     return out.strip() if code == 0 and out.strip() else None
 
 
+def _behind_its_release(dd: Path) -> bool:
+    """Whether a cohort clone's default branch is missing what was last released to it.
+
+    A release lands on `deploy.UPSTREAM_BRANCH` and is MERGED into the branch students
+    read, so a merge that conflicted - or a push that failed, or the quarter hour between
+    a course commit and the release carrying it - leaves `upstream` ahead of that branch
+    with a pull request standing. Propagating from it then reads the course org's own
+    newer content back as a cohort edit, and merging what this proposes reverts the
+    course's fix. The teardown propagates before it seals, so a conflict pull request open
+    on archive day is exactly that case.
+
+    A dest with NO `upstream` has never had a merge-based release - a cohort released into
+    before that branch existed - so there is nothing it could be behind: up to date."""
+    remote = f"origin/{UPSTREAM_BRANCH}"
+    if git("-C", str(dd), "rev-parse", "--verify", "--quiet", remote)[0] != 0:
+        return False
+    return git("-C", str(dd), "merge-base", "--is-ancestor", remote, "HEAD")[0] != 0
+
+
 @dataclass
 class Source:
     """One course source repo, cloned and put on the propagate branch, and the account of
@@ -164,7 +187,8 @@ class Source:
     # `cohort_dest_path` that renames the folder is exactly the case a reader of the pull
     # request needs spelled out.
     carried: list[str] = field(default_factory=list)
-    kept: list[str] = field(default_factory=list)  # what the cohort no longer has
+    kept: list[str] = field(default_factory=list)  # what the cohort's copy lacks
+    behind: list[str] = field(default_factory=list)  # dest paths a stale dest holds
 
 
 def _prepare_source(
@@ -203,11 +227,19 @@ def _body(cohort_org: str, source: Source, branch: str) -> str:
         if source.kept
         else ""
     )
+    behind = (
+        f"\n\n**Not carried** - these cohort repos are behind their latest release. "
+        f"Merge the open `{UPSTREAM_BRANCH}` -> default-branch pull request in the "
+        f"cohort repo first, then run this again:\n"
+        + "\n".join(f"- `{p}`" for p in source.behind)
+        if source.behind
+        else ""
+    )
     return (
         f"`{cohort_org}` has edits to material this repo released to it. This branch "
         f"carries them back, one commit per released path, in the order the term ran.\n\n"
         f"{chr(10).join(source.carried)}"
-        f"{kept}\n\n"
+        f"{kept}{behind}\n\n"
         f"Merge it, cherry-pick the commits you want, or close it. `{branch}` is cut "
         f"fresh from `{source.base}` and force-pushed on every run, so closing this "
         f"settles nothing: the next run proposes whatever the cohort has then.\n"
@@ -309,27 +341,45 @@ def propagate(
         # withholds at the root would be reported as something the cohort had deleted.
         root = Path(work).resolve()
         dests: dict[str, Path] = {}
+        behind: set[str] = set()
         for repo in sorted({d.cohort_dest_repo for d in deploys}):
             dd = root / "cohort" / repo
-            if clone(cohort_org, repo, dd):
-                dests[repo] = dd
-            else:
+            if not clone(cohort_org, repo, dd):
                 log_err(f"could not clone {cohort_org}/{repo}")
+                continue
+            if _behind_its_release(dd):
+                behind.add(repo)
+                log(
+                    f"  [skip] {cohort_org}/{repo} is behind its latest release - "
+                    f"nothing is carried back from it until the open "
+                    f"`{UPSTREAM_BRANCH}` -> `{_base_branch(dd) or 'default branch'}` "
+                    f"pull request there is merged"
+                )
+                continue
+            dests[repo] = dd
         sources: dict[str, Source] = {}
         for repo in sorted({d.course_source_repo for d in deploys}):
             prepared = _prepare_source(course_org, repo, branch, root)
             if prepared is not None:
                 sources[repo] = prepared
         for d in deploys:
-            if d.cohort_dest_repo not in dests or d.course_source_repo not in sources:
+            source = sources.get(d.course_source_repo)
+            cohort_rel = _rel(deploy_dest(d))
+            course_rel = _rel(d.course_source_path)
+            where = f"{d.cohort_dest_repo}/{cohort_rel or '(repo root)'}"
+            if d.cohort_dest_repo in behind:
+                # Not an error and not a note: the cohort's copy is intact, it is simply
+                # not the copy to read yet. Named in the body, because a pull request
+                # silently missing a dest's paths reads as "the cohort changed nothing".
+                if source is not None:
+                    source.behind.append(where)
+                continue
+            if d.cohort_dest_repo not in dests or source is None:
                 # One end missing is one copy lost, counted once per deploy exactly as the
                 # release counts it - both ends failing is still one path not carried.
                 errors += 1
                 continue
-            source = sources[d.course_source_repo]
             cohort_root = dests[d.cohort_dest_repo]
-            cohort_rel = _rel(deploy_dest(d))
-            course_rel = _rel(d.course_source_path)
             srcp = _resolve_within(cohort_root, cohort_rel)
             destp = _resolve_within(source.dir, course_rel)
             if srcp is None or destp is None:
@@ -339,7 +389,6 @@ def propagate(
                 )
                 errors += 1
                 continue
-            where = f"{d.cohort_dest_repo}/{cohort_rel or '(repo root)'}"
             if not srcp.exists():
                 # Released into a path the cohort no longer has, or never had: a note, not
                 # a failure. A plan entry can be edited after it fired, and a cohort repo
