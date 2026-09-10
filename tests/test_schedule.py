@@ -2338,13 +2338,52 @@ def test_a_clean_plan_has_no_faults():
 # ------------------------------------------------------------------ archive:
 
 
-def test_the_archive_date_defaults_to_sixty_days_after_the_term_ends():
+def test_a_cohort_that_writes_no_block_is_never_archived():
+    # Archiving is opt-in: a whole org going read-only, and a site row announcing it, may
+    # not happen off a date nobody typed - not even a term end.
+    for meta in ({}, {"semester_end": "2026-12-18"}):
+        sched = parse(meta)
+        assert sched.archive_date is None
+        assert sched.archive_declared is False
+        assert sched.dropped == []
+
+
+def test_writing_the_block_at_all_turns_archiving_on():
+    # `archive:` on its own IS the switch - the date inside it is the part with a default.
     # The grace is the point: the real courses this was measured against went on being
     # pushed to for about three weeks past their last class.
-    sched = parse({"semester_end": "2026-12-18"})
-    assert sched.archive_date == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
-    assert sched.archive_show_on_site is True
+    for block in (None, {}, {"show_on_site": True}):
+        sched = parse({"semester_end": "2026-12-18", "archive": block})
+        assert sched.archive_date == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
+        assert sched.archive_show_on_site is True
+        assert sched.archive_declared is True
+        assert sched.dropped == []
+
+
+def test_the_block_can_say_what_the_site_says():
+    # The row and the Updates box are the two places students read about the freeze, and
+    # a cohort that wants to say it in its own words says it once, here.
+    said = "Everything here goes read-only on the 16th. Grab what you want first."
+    sched = parse({"archive": {"date": "2027-02-16", "description": said}})
+    assert sched.archive_description == said
     assert sched.dropped == []
+
+
+def test_an_unusable_description_is_dropped_rather_than_printed():
+    # A list reaching the deployed site as `['a', 'b']` is a hand edit that did not take -
+    # flagged, never raised, and never printed. The row then reads as it does for a
+    # cohort that wrote no description at all.
+    for said in (["a", "b"], {"text": "x"}, "", "   ", 7):
+        sched = parse({"semester_end": "2026-12-18", "archive": {"description": said}})
+        assert sched.archive_description is None
+        assert sched.archive_date == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
+        (drop,) = sched.dropped
+        assert drop.startswith("archive.description: unusable value")
+        assert "no sentence at all" in drop
+
+
+def test_a_block_with_no_description_says_nothing_about_one():
+    assert parse({"archive": {"date": "2027-02-16"}}).archive_description is None
 
 
 def test_a_declared_archive_date_wins_over_the_default():
@@ -2352,11 +2391,12 @@ def test_a_declared_archive_date_wins_over_the_default():
     assert sched.archive_date == date(2027, 1, 15)
 
 
-def test_a_cohort_with_no_term_end_has_no_archive_date():
-    # Nothing may freeze a whole cohort off a guess: with no semester_end there is no
-    # clock to freeze it against, so it never archives by itself.
-    assert parse({}).archive_date is None
-    assert parse({"archive": {"show_on_site": False}}).archive_date is None
+def test_a_block_with_no_term_end_and_no_date_has_no_archive_date():
+    # It asked to be archived, but there is no clock to archive it against. Neither a
+    # crash nor a freeze - `scheduler._no_archive_date` says so in the digest instead.
+    sched = parse({"archive": {"show_on_site": False}})
+    assert sched.archive_date is None
+    assert sched.archive_declared is True
 
 
 def test_a_cohort_with_no_term_end_can_still_name_its_own_archive_date():

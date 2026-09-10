@@ -1,8 +1,10 @@
 """dsl-course teardown -- close a finished cohort out.
 
-Runs on the cohort's own `archive.date` (`schedule.yml`, default `semester_end` + 60 days),
-fired by the scheduler; the Archive cohort button is for closing one out early. Six steps,
-in this order, and the order is the whole design:
+Runs on the cohort's own `archive.date`, fired by the scheduler - and only for a cohort
+whose `schedule.yml` writes an `archive:` block (its `date:` defaults to `semester_end` +
+60 days). Archiving is opt-in, so the Archive cohort button is for closing one out early,
+and the only way to close out a cohort that wrote no block. Six steps, in this order, and
+the order is the whole design:
 
 0. PROPAGATE: offer the cohort's edits to its released material back to the course org as
    a pull request (`dsl_course.propagate`). First, because it is the only step that READS
@@ -37,9 +39,11 @@ NOTHING IS EVER DELETED. The bot holds no `delete_repo` scope, and every step he
 reversible by hand: un-archiving a repo from its own Settings page brings it back exactly
 as it was.
 
-`--dry-run` is the default and prints counts only. A real run refuses until the cohort's
-`archive.date` has arrived; `--force` is a person saying it in as many words, which is what
-an early close-out - and a cohort with no term dates at all - needs.
+`--dry-run` is the default and prints counts only - always, whatever the date, because
+the counts are how somebody decides whether to ask for a close-out. Only a REAL run
+refuses until the cohort's `archive.date` has arrived; `--force` is a person saying it in
+as many words, which is what an early close-out - and a cohort that never asked to be
+archived - needs.
 
 Usage:
     python3 -m dsl_course.teardown --cohort-org hertie-dsl-demo-f2026
@@ -119,8 +123,13 @@ def archive_notice_title(when: date) -> str:
     return f"{ARCHIVE_NOTICE_PREFIX}{when}"
 
 
-def _is_archive_notice(title: str) -> bool:
+def is_archive_notice(title: str) -> bool:
     """Whether an open issue's title is one of this toolkit's archive notices.
+
+    Public, and beside `archive_notice_title` for the same reason: two ends have to agree
+    about it. This one closes every dated notice at the seal, and the scheduler closes a
+    notice whose date has been moved or taken away while the cohort is still live
+    (`scheduler._stale_archive_notices`).
 
     The prefix AND a date that parses, rather than the prefix alone: `issues` matches by
     exact title precisely so that an issue a human filed quoting one is never adopted, and
@@ -146,11 +155,11 @@ class Closed(NamedTuple):
 def archive_due(sched: schedule.Schedule, today: date) -> bool:
     """Whether this cohort's archive date has arrived.
 
-    `semester_end` alone is deliberately NOT enough any more: the sixty-day grace after it
-    is the whole point (`schedule.ARCHIVE_GRACE`), because a term goes on being pushed to
-    for weeks after its last class. A cohort with no `archive.date` at all - no
-    `semester_end` and no override - is never due, and needs `--force`, which is a person
-    taking the decision instead."""
+    A cohort that writes no `archive:` block has no such date and is never due: archiving
+    is opt-in, so closing it out is `--force`, which is a person taking the decision
+    instead. Where the block is written, the sixty-day grace after `semester_end` is the
+    whole point (`schedule.ARCHIVE_GRACE`), because a term goes on being pushed to for
+    weeks after its last class."""
     return sched.archive_date is not None and sched.archive_date <= today
 
 
@@ -317,7 +326,7 @@ def _close_notices(cohort_org: str, dry_run: bool) -> int:
         return 0
     errors = 0
     try:
-        titles += sorted(t for t in open_titles(repo) if _is_archive_notice(t))
+        titles += sorted(t for t in open_titles(repo) if is_archive_notice(t))
     except RuntimeError as exc:
         # A listing that could not be read is not "no notice is open", and the rest of
         # them are still worth closing while the repo takes writes.
@@ -413,14 +422,24 @@ def close_out(
         declared = (
             f"archives on {sched.archive_date}"
             if sched.archive_date
-            else "declares no archive date and no semester_end to derive one from"
+            else "names no archive date - it has no `archive:` block, or none with a "
+            "date anything can be derived from"
         )
-        log_err(
+        not_due = (
             f"{cohort_org} is not due to be archived: {CONFIG_REPO}/"
-            f"{schedule.SCHEDULE_PATH} {declared}. Wait for that date, change it, or "
-            f"re-run with --force to close the cohort out now."
+            f"{schedule.SCHEDULE_PATH} {declared}."
         )
-        return 1
+        if not dry_run:
+            log_err(
+                f"{not_due} Wait for that date, change it, or re-run with --force to "
+                f"close the cohort out now."
+            )
+            return 1
+        # A dry run freezes nothing, and printing the counts is how somebody decides
+        # whether to ask for a close-out at all - so refusing to print them until the
+        # date has passed answers the question only once it no longer needs asking.
+        # It goes on, and says what the real run would need.
+        log(f"  {not_due} A real run would need --force.")
 
     registrar = registrar_summary(cohort_org)
     log(f"  registrar export: {registrar}")

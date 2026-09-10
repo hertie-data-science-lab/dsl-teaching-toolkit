@@ -162,12 +162,44 @@ def test_tbc_rows_render_with_theme_flags():
 
 
 def test_the_archive_row_is_a_special_event_that_says_what_freezes():
-    out = site._archive_entry(date(2027, 2, 16), date(2026, 12, 20))
+    said = "Everything here goes read-only. You keep read access."
+    out = site._archive_entry(date(2027, 2, 16), date(2026, 12, 20), said)
     assert "type: special_event" in out
     assert 'description: "Cohort archived"' in out
     assert "date: 2027-02-16T09:00:00" in out
     assert "hide_time: true" in out  # a whole day, not a 09:00 appointment
-    assert "read-only" in out and "take a copy" in out
+    # What it SAYS is the cohort's own sentence and nothing else.
+    assert out.endswith(f"---\n{said}\n")
+
+
+def test_the_cohorts_own_sentence_is_printed_verbatim():
+    # This is the sentence students read, and a cohort that bothered to write one did not
+    # write it to be paraphrased or padded.
+    said = "We freeze on the 16th - your repos stay readable for ever."
+    out = site._archive_entry(date(2027, 2, 16), date(2027, 2, 1), said)
+    assert out.endswith(f"---\n{said}\n")
+    # And the row itself is unchanged: the description is the BODY, not the row's title.
+    assert 'description: "Cohort archived"' in out
+    assert "date: 2027-02-16T09:00:00" in out
+
+
+def test_a_multi_line_sentence_cannot_split_the_front_matter():
+    # It lands in the body of a Jekyll document, so a value carrying its own `---` would
+    # otherwise cut the page in half. `q` folds it onto one line.
+    out = site._archive_entry(
+        date(2027, 2, 16), date(2027, 2, 1), "Frozen.\n---\nGone."
+    )
+    assert out.count("---\n") == 2
+    assert out.endswith("Frozen. --- Gone.\n")
+
+
+def test_without_a_sentence_the_row_carries_none():
+    # There is no default: the toolkit does not know what a freeze means for a given
+    # cohort's students, and a wrong reassurance is worse than none. The row still
+    # renders - its label and its date - and the theme skips a bullet with an empty body.
+    out = site._archive_entry(date(2027, 2, 16), date(2027, 2, 1))
+    assert out.endswith('description: "Cohort archived"\n---\n')
+    assert "read-only" not in out
 
 
 def test_the_archive_row_only_reaches_the_updates_box_inside_its_window():

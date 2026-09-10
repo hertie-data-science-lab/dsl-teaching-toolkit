@@ -1274,6 +1274,15 @@ def test_the_archive_notice_links_the_file_that_moves_the_date(wired):
     body = sent.one["body"]
     assert "Cohort-f2026/classroom-config/edit/main/schedule.yml" in body
     assert "Nothing is deleted and nobody is removed" in body
+    # In the ONE sentence the notice issue beside it also ends on, so the two surfaces
+    # do not hand the reader two different recipes for the same edit. The mail says
+    # WHICH repo, because it is read outside the repo the issue lives in.
+    assert (
+        "To move this archiving date or remove it altogether, edit "
+        '<a href="https://github.com/Cohort-f2026/classroom-config/edit/main/'
+        "schedule.yml\">schedule.yml</a> in the cohort's "
+        "<code>classroom-config</code> repo." in body
+    )
 
 
 def test_a_cohort_with_no_mail_transport_says_so_rather_than_claiming_it_told_anyone(

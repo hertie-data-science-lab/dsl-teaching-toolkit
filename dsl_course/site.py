@@ -980,12 +980,20 @@ def _event_entry(event: schedule.Event, fallback: date) -> str:
     )
 
 
-def _archive_entry(when: date, today: date) -> str:
+def _archive_entry(when: date, today: date, description: str | None = None) -> str:
     """The "Cohort archived" row: when this cohort is frozen read-only.
 
     A `special_event` rather than a type of its own, because it IS one - a dated thing
     that happens to the cohort and releases nothing - and the theme already colours that
     row. Inventing a fourth row type would mean shipping a theme change for one line.
+
+    `description` is `archive.description` from schedule.yml and is the WHOLE of what
+    either surface says - there is no default sentence, because the toolkit does not know
+    what a freeze means for a given cohort's students and a wrong reassurance is worse
+    than none. Without one the row still renders as its "Cohort archived" label and date,
+    and the Updates bullet is simply not emitted: the theme strips the body and skips an
+    empty bullet (`templates/site/_includes/announcements.html`). The seeded skeleton
+    carries a sentence ready to uncomment.
 
     `announce` opts the row into the home page's Updates box for the last
     `schedule.ARCHIVE_NOTICE` before the date, and the body is the sentence that box
@@ -993,6 +1001,10 @@ def _archive_entry(when: date, today: date) -> str:
     cleared and rewritten on every sync, so the day after the freeze the flag is simply
     not written again - there is nothing to take back."""
     soon = "announce: true\n" if when - today <= schedule.ARCHIVE_NOTICE else ""
+    # `q` rather than the raw string: this is faculty-written text going into the body of
+    # a Jekyll document, and a value that folded onto several lines could write a `---`
+    # of its own and split the front matter off the page.
+    said = f"{q(description)}\n" if description else ""
     return (
         f"---\n"
         f"type: special_event\n"
@@ -1001,9 +1013,7 @@ def _archive_entry(when: date, today: date) -> str:
         f"{soon}"
         f'description: "Cohort archived"\n'
         f"---\n"
-        f"This cohort is archived on {when}: every repository in it becomes read-only. "
-        f"You keep read access to everything you can see now, so take a copy of anything "
-        f"you want to go on working in.\n"
+        f"{said}"
     )
 
 
@@ -1170,7 +1180,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         # scheduler acts on, so what students are told and what happens are one date.
         if sched.archive_date and sched.archive_show_on_site:
             event_entries["cohort-archived.md"] = _archive_entry(
-                sched.archive_date, date.today()
+                sched.archive_date, date.today(), sched.archive_description
             )
         # The term's own boundaries, when the schedule pins them.
         if sched.semester_start:

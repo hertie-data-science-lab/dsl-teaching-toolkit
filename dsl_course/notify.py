@@ -1030,7 +1030,9 @@ def _archive_message(cohort_org: str, course_org: str, when: date) -> tuple[str,
     """The (subject, HTML body) of the archive notice.
 
     It links `schedule.yml`, not the notice issue: the only thing a reader might want to
-    DO about this is move or remove the date, and that is an edit to that file."""
+    DO about this is move or remove the date, and that is an edit to that file - which is
+    the one sentence it ends on, in the same words as the notice issue beside it
+    (`scheduler._archive_notice_body`), so the two do not offer two different recipes."""
     label = _course_label(course_org, cohort_org)
     edit_at = f"https://github.com/{cohort_org}/{CONFIG_REPO}/edit/main/{SCHEDULE_PATH}"
     body = (
@@ -1042,10 +1044,9 @@ def _archive_message(cohort_org: str, course_org: str, when: date) -> tuple[str,
         f"everyone who can read the cohort still can, and nobody can change "
         f"anything.</p>\n"
         f"<p>Anything you still need to change in this cohort, change before then. To "
-        f"move the date or take it away, edit "
-        f"{_anchor(edit_at, f'{cohort_org}/{CONFIG_REPO}/{SCHEDULE_PATH}')} - an "
-        f"<code>archive:</code> block with its own <code>date:</code> overrides the "
-        f"default, which is sixty days after <code>semester_end</code>.</p>\n"
+        f"move this archiving date or remove it altogether, edit "
+        f"{_anchor(edit_at, SCHEDULE_PATH)} in the cohort's "
+        f"<code>{CONFIG_REPO}</code> repo.</p>\n"
     )
     return f"[{label}] {cohort_org} is archived on {when}", body
 

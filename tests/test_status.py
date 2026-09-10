@@ -320,4 +320,4 @@ def test_c6_says_so_when_nothing_will_ever_archive_the_cohort(monkeypatch):
         schedule, "load", lambda org: schedule.Schedule(semester_start=date(2026, 9, 7))
     )
     detail = status.collect("Course", "Cohort-f2026")["C6"]["detail"]
-    assert "no archive date (set semester_end or archive.date)" in detail
+    assert "archive not scheduled (write an archive: block)" in detail
