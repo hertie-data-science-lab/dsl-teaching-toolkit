@@ -133,12 +133,11 @@ def sync(
         return _unreadable_course_config(course_org, exc)
 
     # Roster/teams/instructors reconcile only for whichever cohort(s) are in scope -
-    # not fanned out to every other, unrelated cohort.
-    targets = (
-        list(live)
-        if all_cohorts
-        else ([cohort_org] if cohort_org and cohort_is_live(cohort_org) else [])
-    )
+    # not fanned out to every other, unrelated cohort. A named cohort is checked against
+    # the `live` list rather than probed again: the answer is already taken, and asking a
+    # second time prints the "[skip] ... archived cohort" line twice for one cohort.
+    named_is_live = cohort_org and cohort_org.casefold() in {c.casefold() for c in live}
+    targets = list(live) if all_cohorts else ([cohort_org] if named_is_live else [])
     content_repos = discover_content_repos(course_org) if targets else []
     assignments = discover_assignments(course_org) if targets else []
     for org in targets:
