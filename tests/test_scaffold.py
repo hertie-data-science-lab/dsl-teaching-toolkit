@@ -808,6 +808,29 @@ def test_a_copied_assignment_needs_a_solution_branch(origins, capsys):
     assert origins.branches("assignment-1-f2026") == []
 
 
+def test_a_copy_into_a_repo_that_already_has_content_lands_no_branch(origins, capsys):
+    # `create_repo` reports an existing repo as success, so a re-run - or a tag already
+    # spent on something else - copies into a repo git will not fast-forward. The rejected
+    # `main` has to take `solution` with it: a solution branch left standing beside
+    # somebody else's main is exactly what a plain re-scaffold then refuses to rebuild,
+    # and the run would have red-flagged a repo it had already half-changed.
+    origins.commit("assignment-1-f2025", {"README.md": "# The brief\n"})
+    origins.commit(
+        "assignment-1-f2025", {"grading_config.yml": "type: group\n"}, "solution"
+    )
+    origins.commit("assignment-1-f2026", {"README.md": "# Something else\n"})
+
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", copy_from="assignment-1-f2025"
+        )
+        == 1
+    )
+    assert origins.branches("assignment-1-f2026") == ["main"]
+    assert origins.read("assignment-1-f2026", "README.md") == "# Something else"
+    assert "could not push" in capsys.readouterr().err
+
+
 def test_the_seeded_readme_would_be_withheld_from_a_release(fake):
     # The end-to-end coupling: the file scaffold actually writes must trip deploy's guard,
     # so an unedited placeholder cannot reach students as their course overview. If the

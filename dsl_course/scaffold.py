@@ -865,7 +865,15 @@ def _copy_branches(org: str, source: str, repo: str, *, needs: str = "") -> bool
             log_err(f"  ! could not read {org}/{source}'s branches")
             return False
         pushed = [f"{_COPY_REFS}/{b}:refs/heads/{b}" for b in branches]
-        if git("-C", str(new), *GIT_ENV, "push", "-q", "origin", *pushed)[0] != 0:
+        # `--atomic`, as a release's own two-branch push is: the destination is normally
+        # empty, but a re-run against a tag that already has a repo has one branch git
+        # rejects and others it does not, and half a copy is worse than none - a
+        # `solution` that arrived beside somebody else's `main` is what the plain
+        # scaffold then refuses to rebuild.
+        code, _ = git(
+            "-C", str(new), *GIT_ENV, "push", "-q", "--atomic", "origin", *pushed
+        )
+        if code != 0:
             log_err(f"  ! could not push {org}/{source}'s branches into {org}/{repo}")
             return False
     log_ok(f"copied {org}/{source} into {org}/{repo} ({', '.join(branches)})")
