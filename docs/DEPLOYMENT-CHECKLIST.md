@@ -411,9 +411,8 @@ type, and the type is never a field you set - it follows from where the row came
 | lab | a released session folder under `labs/` |
 | assignment | an `assignments:` entry - shown on **both** its handout date and its due date |
 | exam | an `events:` entry with `type: exam` |
-| special_event | an `events:` entry with no `type` (clinic, guest lecture, revision session) |
+| special_event | an `events:` entry with no `type` (clinic, guest lecture, revision session), and the `archive` block's date - the "Cohort archived" row |
 | term_date | the `semester_start` / `semester_end` scalars |
-| special_event | the `archive` block's date - the "Cohort archived" row |
 
 So lecture vs lab is decided by the deployed section folder, not by the entry label, and a
 week with both a lecture and a lab renders two rows.

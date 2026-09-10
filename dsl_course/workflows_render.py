@@ -1056,7 +1056,7 @@ on:
 
 
 def render_archive_cohort(cohort_orgs: list[str]) -> str:
-    """Close a finished cohort out: freeze the work, revoke the students, seal the record."""
+    """Close a finished cohort out: carry its edits back, freeze every repo, seal it."""
     return f"""name: Archive cohort
 
 # End of term. The scheduler runs this by itself on the cohort's own `archive.date`
@@ -1079,7 +1079,7 @@ on:
     inputs:
 {_cohort_dropdown(cohort_orgs)}
       dry_run:
-        description: "Preview the teardown - freeze nothing, revoke nothing"
+        description: "Preview the teardown - freeze nothing, open no pull request"
         type: boolean
         default: true
       force:
