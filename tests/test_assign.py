@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import assign, collect, grades
+from dsl_course import assign, collect, grades, workflows_place
 from dsl_course.schedule import Schedule
 from tests.conftest import ROSTER_HEADER
 
@@ -510,6 +510,19 @@ def test_the_release_buttons_and_the_ignore_list_are_withheld_together(monkeypat
             "rubric-draft.md",
         )
     ]
+
+
+def test_a_retired_button_left_on_a_template_is_withheld_too(monkeypatch):
+    # Retiring a workflow moves its path out of the hosted tuples, but a course template
+    # whose nightly refresh has not run yet still carries the file - and the cohort copy
+    # frozen from it is what students generate off. So the strip reads what may never be
+    # in a student repo, which keeps the retired paths in it.
+    retired = workflows_place.RETIRED_WORKFLOWS[0]
+    deleted = _template_tree(
+        monkeypatch, {retired: "name: Release code", "starter.py": ""}
+    )
+    assert assign.withhold_from_template("COHORT", "a1")
+    assert deleted == [(retired,)]
 
 
 def test_an_empty_template_tree_stops_the_handout(monkeypatch, capsys):
@@ -2024,6 +2037,41 @@ def test_the_correction_reaches_every_untouched_submission_repo(monkeypatch):
         "assignment-1-bob",
     ]
     assert all(files == {"starter.py": FIXED} for _, files in commits)
+
+
+def test_a_release_button_cannot_be_patched_into_the_student_repos(monkeypatch):
+    # `path` is free text naming a file or A FOLDER, so `.github/workflows` would push the
+    # button the template now hosts - and the org-admin token it reads - into every
+    # submission repo, and back onto the cohort template every later onboarder generates
+    # from. That is `withhold_from_template` undone after the fact, so the same set is
+    # unpatchable here.
+    commits = _cohort(
+        monkeypatch,
+        {
+            "assignment-1": {"starter.py": AS_HANDED_OUT},
+            "assignment-1-ada": {"starter.py": AS_HANDED_OUT},
+        },
+        corrected={
+            workflows_place.RELEASE_ASSIGNMENT: b"name: Release assignment",
+            "starter.py": FIXED,
+        },
+    )
+    assert _run(dry_run=False) == 0
+    assert commits and all(files == {"starter.py": FIXED} for _, files in commits)
+
+
+def test_a_patch_of_nothing_but_release_buttons_writes_nothing(monkeypatch, capsys):
+    # And with the buttons dropped there is no correction left, so the run stops where a
+    # patch of a path that is not on the template stops, rather than committing nothing
+    # to every repo in the cohort.
+    commits = _cohort(
+        monkeypatch,
+        {"assignment-1": {"starter.py": AS_HANDED_OUT}},
+        corrected={workflows_place.RELEASE_ASSIGNMENT: b"name: Release assignment"},
+    )
+    assert _run(dry_run=False) == 1
+    assert commits == []
+    assert workflows_place.RELEASE_ASSIGNMENT in capsys.readouterr().out
 
 
 def test_a_file_the_student_has_changed_is_kept_unless_overwrite_says_otherwise(

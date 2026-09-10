@@ -82,7 +82,7 @@ from .repos import (
     set_repo_topics,
     topic_name,
 )
-from .workflows_place import RELEASE_WORKFLOWS
+from .workflows_place import NEVER_IN_STUDENT_REPOS
 
 # Fire-once sentinel for the SCHEDULED solution push, in classroom-config. Needed because
 # `due_releases` is cumulative by design - a handout release re-fires every tick so a late
@@ -197,9 +197,9 @@ def withhold_from_template(cohort_org: str, template: str) -> bool:
     failure is re-run by the next hourly tick or the next click; answers published to a
     cohort cannot be taken back.
 
-    The `RELEASE_WORKFLOWS` go with no pattern needed and no way to opt back in - the rule
-    `.releaseignore` already applies to ITSELF (`releaseignore._SELF_EXCLUDED`), for the
-    same reason. A course-org assignment template hosts **Release assignment** so faculty
+    `NEVER_IN_STUDENT_REPOS` goes with no pattern needed and no way to opt back in - the
+    rule `.releaseignore` already applies to ITSELF (`releaseignore._SELF_EXCLUDED`), for
+    the same reason. A course-org assignment template hosts **Release assignment** so faculty
     can hand it out from the repo they are editing, and template-generate copies the whole
     default branch - so without this the button, and the org-admin token it reads, would
     land in every student repo. Matched by exact PATH, so the autograder workflow beside
@@ -234,7 +234,7 @@ def withhold_from_template(cohort_org: str, template: str) -> bool:
         return False
     # Whatever the file names, plus the buttons that are never a student's to press.
     # Sorted, so the delete list is stable however the two sets overlap.
-    withheld = tuple(sorted(set(withheld) | (set(paths) & set(RELEASE_WORKFLOWS))))
+    withheld = tuple(sorted(set(withheld) | (set(paths) & set(NEVER_IN_STUDENT_REPOS))))
     if not withheld:
         return True
     if not put_files(
@@ -613,6 +613,20 @@ def patch_released(
         f"{' (dry run)' if dry_run else ''}"
     )
     corrected = template_files(master_org, template, path)
+    # The second outbound copy from a course template, and the one with no
+    # `generate_from_template` in it. `path` is free text naming a file OR A FOLDER, so
+    # `.github` or `.github/workflows` sweeps up the Release assignment button the
+    # template now hosts - into every submission repo, and onto the cohort template every
+    # later onboarder generates from, undoing `withhold_from_template` after the fact.
+    # Same set, same exact-path rule, same absence of a way to opt back in.
+    unpatchable = sorted(set(corrected) & set(NEVER_IN_STUDENT_REPOS))
+    for withheld in unpatchable:
+        del corrected[withheld]
+    if unpatchable:
+        log(
+            f"  withheld from the patch: {', '.join(unpatchable)} - a faculty release "
+            f"button is never a student's to hold"
+        )
     if not corrected:
         log_err(
             f"`{path}` is not on {master_org}/{template}'s default branch - nothing to "

@@ -14,9 +14,7 @@ from .workflows_render import for_placement, render_provision, render_release
 RELEASE_MATERIALS = ".github/workflows/release-materials.yml"
 RELEASE_ASSIGNMENT = ".github/workflows/release-assignment.yml"
 
-# The run-from-repo workflows push_content_workflows places in every content repo - and
-# the set `assign.withhold_from_template` strips off a cohort template, so that no student
-# repo generated from one inherits a faculty button.
+# The run-from-repo workflows push_content_workflows places in every content repo.
 RELEASE_WORKFLOWS = (RELEASE_MATERIALS, RELEASE_ASSIGNMENT)
 
 # What an assignment-* TEMPLATE hosts instead: the button that hands that template out,
@@ -29,6 +27,16 @@ TEMPLATE_WORKFLOWS = (RELEASE_ASSIGNMENT,)
 # takes any folder or file, which is all Release code ever did) - removed from content repos
 # seeded before that change, so no repo keeps a workflow whose CLI no longer exists.
 RETIRED_WORKFLOWS = (".github/workflows/release-code.yml",)
+
+# What no student repo may carry: every faculty release button, whether a repo hosts it
+# today or was seeded before it was retired. `assign.withhold_from_template` strips these
+# off a cohort template before per-student repos generate from it, and `patch_released`
+# refuses to push one. RETIRED is in the set deliberately: retiring a workflow (step 4 of
+# "Adding a workflow") moves its path out of the tuples above, and a course template whose
+# nightly refresh has not run yet still carries the file - so a set that named only what
+# is hosted TODAY would stop stripping exactly the path a retirement leaves lying around,
+# on a handout that still goes green.
+NEVER_IN_STUDENT_REPOS = RELEASE_WORKFLOWS + RETIRED_WORKFLOWS
 
 
 def push_content_workflows(
