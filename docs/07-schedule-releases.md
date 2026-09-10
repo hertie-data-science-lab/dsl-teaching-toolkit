@@ -22,7 +22,7 @@ Three blocks carry the whole term, and each is defined by what it **does**:
 - **`assignments:`** - each assignment's whole lifecycle: hand-out, due date, grading.
 - **`events:`** - **display-only** calendar rows. Nothing deploys; the row simply appears on the cohort site.
 
-Two scalars sit alongside them - `semester_start:` and `semester_end:` - which bookend the term and render as rows of their own.
+Two scalars sit alongside them - `semester_start:` and `semester_end:` - which bookend the term and render as rows of their own. An optional `archive:` block says when the cohort is frozen read-only, sixty days after the term by default.
 
 ## `releases:` 
 
@@ -219,6 +219,24 @@ events:
     event_datetime: tbc # site will show just TBC, no proposed datetime
                        # sorted end-of-term until a real date replaces
 ```
+
+## `archive:`
+
+When this cohort is frozen read-only: every repository in the org archived, nothing deleted, nobody removed. See [Closing the cohort out](10-grade-and-return-assignments.md#closing-the-cohort-out).
+
+| Field | Required | Default | Meaning |
+|---|---|---|---|
+| `date` | no | `semester_end` + 60 days | the day the whole cohort org is archived |
+| `show_on_site` | no | `true` | a "Cohort archived" row on the deployed schedule, and a notice in the site's Updates box for the fortnight before |
+
+```yaml
+semester_end: 2026-12-18
+archive:
+  date: 2027-02-16        # optional - without it, 60 days after semester_end
+```
+
+Omit the whole block and the default applies. A cohort with no `semester_end` **and** no
+`archive.date` is never archived automatically, and its `schedule.yml` notice issue says so.
 
 ---
 Full schema, field by field, see [here](DEPLOYMENT-CHECKLIST.md#scheduleyml).

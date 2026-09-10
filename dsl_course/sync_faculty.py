@@ -56,8 +56,8 @@ from .course import (
 )
 from .discovery import (
     discover_assignments,
-    discover_cohorts,
     discover_content_repos,
+    live_cohorts,
 )
 from .faults import ConfigFault, Unusable
 from .gh_contents import line_of, load_yaml_config, take_lines
@@ -613,7 +613,10 @@ def sync(
     instructors/TAs (its own team + its course-org tag team). Pass an explicit
     single-item list to scope to just one cohort, e.g. a freshly bootstrapped one,
     without re-touching every other cohort."""
-    targets = discover_cohorts(course_org) if cohorts is None else cohorts
+    # LIVE cohorts, not every registered one: a cohort that has been closed out is a
+    # read-only org, and every grant below would 403 on it nightly for the rest of the
+    # course's life (`discovery.cohort_is_live`).
+    targets = live_cohorts(course_org) if cohorts is None else cohorts
     log_step(
         f"Materialising faculty access: course-admin across {1 + len(targets)} "
         f"org(s), instructors across {len(targets)} cohort(s)"

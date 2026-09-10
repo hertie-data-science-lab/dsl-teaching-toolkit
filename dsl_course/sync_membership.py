@@ -44,6 +44,7 @@ import yaml
 from . import sync_faculty, sync_roster, sync_teams
 from .discovery import (
     COHORTS_PATH,
+    cohort_is_live,
     discover_assignments,
     discover_cohorts,
     discover_content_repos,
@@ -122,18 +123,21 @@ def sync(
             f"the cohort first if this is genuinely its course org."
         )
         return 1
+    # The REGISTRY authorises (above); the LIVE cohorts are what this reconciles into.
+    # A cohort that has been closed out is a read-only org, so every grant, team write and
+    # roster push below would 403 on it - nightly, for the rest of the course's life.
+    live = [c for c in all_registered if cohort_is_live(c)]
     try:
-        errors = sync_faculty.sync_course_admins(
-            course_org, all_registered, dry_run=dry_run
-        )
+        errors = sync_faculty.sync_course_admins(course_org, live, dry_run=dry_run)
     except _CONTENT_FAULT as exc:
         return _unreadable_course_config(course_org, exc)
 
     # Roster/teams/instructors reconcile only for whichever cohort(s) are in scope -
-    # not fanned out to every other, unrelated cohort.
-    targets = (
-        list(all_registered) if all_cohorts else ([cohort_org] if cohort_org else [])
-    )
+    # not fanned out to every other, unrelated cohort. A named cohort is checked against
+    # the `live` list rather than probed again: the answer is already taken, and asking a
+    # second time prints the "[skip] ... archived cohort" line twice for one cohort.
+    named_is_live = cohort_org and cohort_org.casefold() in {c.casefold() for c in live}
+    targets = list(live) if all_cohorts else ([cohort_org] if named_is_live else [])
     content_repos = discover_content_repos(course_org) if targets else []
     assignments = discover_assignments(course_org) if targets else []
     for org in targets:

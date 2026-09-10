@@ -120,9 +120,11 @@ def archive_repo(org: str, name: str, *, person: bool = False) -> bool:
     no `delete_repo` scope, so a finished cohort is CLOSED rather than destroyed, and a repo
     frozen in error is un-archived from its own Settings page with nothing lost.
 
-    An archived repo takes no push, no issue and NO COLLABORATOR CHANGE, so anything a
-    caller means to revoke has to be revoked BEFORE this lands - see `dsl_course.teardown`,
-    whose whole order follows from that.
+    An archived repo takes no push, no issue and no collaborator change, so anything a
+    caller still means to READ or WRITE has to happen BEFORE this lands - see
+    `dsl_course.teardown`, whose whole order follows from that. Freezing is also how it
+    withdraws write access: read-only for everyone is what a closed cohort is, so nobody
+    is revoked and everyone keeps the read they had.
 
     `person=True` when the repo is somebody's, so the failure line names it only in the
     verbose log (see `log.log_err_person`)."""

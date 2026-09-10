@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -30,6 +30,8 @@ from dsl_course import (
     source_digest,
 )
 from dsl_course import collect as collect_mod
+from dsl_course import faults as faults_mod
+from dsl_course import issues as issues_mod
 from dsl_course.faults import ConfigFault, Unusable
 from dsl_course.grades import GradingSpec
 from dsl_course.schedule import (
@@ -1552,7 +1554,7 @@ def test_main_all_cohorts_with_none_registered_is_a_noop(monkeypatch):
     # A freshly bootstrapped course org runs the hourly cron before any cohort is
     # registered - that gap must be a quiet no-op, not a red run (and a failure
     # email to the bot owner) every hour.
-    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: [])
+    monkeypatch.setattr(scheduler.discovery, "discover_cohorts", lambda org: [])
     monkeypatch.setattr(
         sys, "argv", ["scheduler", "--course-org", "Course-Org", "--all-cohorts"]
     )
@@ -1761,8 +1763,11 @@ def test_an_unparseable_plan_leaves_the_exit_code_alone_and_keeps_the_digest_ope
 
     assert scheduler.run("Course-Org", "Cohort-Org", now) == 0
 
-    (fault,) = synced["faults"]
-    assert fault.file == "schedule.yml" and "not valid YAML" in fault.what
+    unreadable, no_archive = synced["faults"]
+    assert unreadable.file == "schedule.yml" and "not valid YAML" in unreadable.what
+    # A file nobody can parse declares no archive date either, so it earns that advisory
+    # in the same digest.
+    assert "ever archive it" in no_archive.what
     captured = capsys.readouterr()
     assert "is NOT valid YAML" in captured.err
     assert "0/0 release(s) due" in captured.out
@@ -1819,9 +1824,10 @@ def test_run_releases_counts_a_raised_site_sync(monkeypatch):
 def test_all_cohorts_loop_survives_one_cohorts_raised_failure(monkeypatch, capsys):
     # The lesson PR #151/#146 applied to the nightly refresh: one cohort's raised failure
     # (unreachable API, a blown-up site sync) must not abort the remaining cohorts' work.
-    # main() imports discover_cohorts from .seed at call time, so patch it at the source.
+    # `_registered_cohorts` filters the registry through `discovery.live_cohorts`, so
+    # the registry read itself is what a test replaces.
     monkeypatch.setattr(
-        scheduler, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
     )
     seen: list[str] = []
 
@@ -1882,7 +1888,9 @@ def test_skip_autograde_releases_without_grading(monkeypatch):
     # The release job's invocation. Grading is the slow half (two hours, a clone per
     # submission); leaving it in this job is what made a queued release wait on it.
     calls = _phase_spies(monkeypatch, _DUE_RELEASE)
-    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
     monkeypatch.setattr(
         sys,
         "argv",
@@ -2003,7 +2011,7 @@ def test_the_cadence_is_read_once_per_course_not_once_per_cohort(
     # one workflow per course org however many cohorts it serves.
     _phase_spies(monkeypatch, _DUE_RELEASE)
     monkeypatch.setattr(
-        scheduler, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
     )
     _all_cohorts_argv(monkeypatch)
     assert scheduler.main() == 0
@@ -2018,7 +2026,9 @@ def test_a_dry_run_never_reads_or_writes_the_cadence(monkeypatch, cadence_calls)
     # The manual dispatch button defaults to dry-run, so a curious click must not close a
     # live alarm, arm a disarmed org, or comment on anything.
     _phase_spies(monkeypatch, _DUE_RELEASE)
-    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
     _all_cohorts_argv(monkeypatch, "--dry-run")
     assert scheduler.main() == 0
     assert cadence_calls["fetch_runs"] == []
@@ -2078,7 +2088,9 @@ def test_lateness_is_asked_about_the_whole_plan_not_just_what_is_due(
     # `late_items` is left real here on purpose: the wiring has to hand it the MERGED plan
     # (`releases:` entries plus the synthesised handouts) and the verdict's previous tick.
     _phase_spies(monkeypatch, _DUE_RELEASE)
-    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
     late = _verdict(now=WHEN + timedelta(hours=3), prev=WHEN - timedelta(hours=1))
     monkeypatch.setattr(scheduler.cadence, "evaluate", lambda *a: late)
     # An hour of queue between GitHub accepting this run and the runner starting it: the
@@ -2098,7 +2110,9 @@ def test_a_cadence_read_that_fails_reddens_the_run_and_releases_anyway(
     # worth nothing more: every cohort's release still fires, and nothing is reported off a
     # reading that was never taken.
     calls = _phase_spies(monkeypatch, _DUE_RELEASE)
-    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
 
     def boom(org):
         raise RuntimeError("gh: HTTP 502")
@@ -2117,7 +2131,9 @@ def test_a_lateness_check_that_raises_reddens_the_run_and_releases_anyway(
     # try - as an argument to the reporter - so a raise there escaped the release phase and
     # cost the cohort its releases, which is the one thing the cadence check may never do.
     calls = _phase_spies(monkeypatch, _DUE_RELEASE)
-    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
 
     def boom(*a):
         raise RuntimeError("a plan this reader cannot walk")
@@ -2133,7 +2149,9 @@ def test_a_cadence_report_that_fails_reddens_the_run_and_releases_anyway(
     monkeypatch, cadence_calls
 ):
     calls = _phase_spies(monkeypatch, _DUE_RELEASE)
-    monkeypatch.setattr(scheduler, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A"]
+    )
     monkeypatch.setattr(scheduler.cadence, "report_cohort", lambda *a: 1)
     monkeypatch.setattr(scheduler.cadence, "report_course", lambda *a: 1)
     _all_cohorts_argv(monkeypatch)
@@ -2145,7 +2163,7 @@ def test_list_cohorts_prints_json_and_nothing_else(monkeypatch, capsys):
     # It IS the grading matrix: the workflow captures stdout and hands it to fromJSON, so
     # one stray log line on stdout would take grading out for the whole course.
     monkeypatch.setattr(
-        scheduler, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
     )
     monkeypatch.setattr(
         sys,
@@ -2165,7 +2183,7 @@ def test_list_cohorts_keeps_a_retry_notice_off_stdout(monkeypatch, capsys):
         print("  [wait] rate-limited, retry 1/3 in 30s")
         return ["Cohort-A"]
 
-    monkeypatch.setattr(scheduler, "discover_cohorts", noisy)
+    monkeypatch.setattr(scheduler.discovery, "discover_cohorts", noisy)
     monkeypatch.setattr(
         sys, "argv", ["scheduler", "--course-org", "Course-Org", "--list-cohorts"]
     )
@@ -2185,7 +2203,7 @@ def test_a_cohort_listing_that_cannot_be_read_says_so_and_goes_red(
     def boom(org):
         raise RuntimeError("gh: Internal Server Error (HTTP 500)")
 
-    monkeypatch.setattr(scheduler, "discover_cohorts", boom)
+    monkeypatch.setattr(scheduler.discovery, "discover_cohorts", boom)
     monkeypatch.setattr(sys, "argv", ["scheduler", "--course-org", "Course-Org", flag])
     assert scheduler.main() == 1
     out = capsys.readouterr()
@@ -2206,7 +2224,7 @@ def test_a_registry_nobody_can_parse_releases_nothing_and_stays_green(
     def boom(org):
         raise Unusable("malformed cohort registry in Course-Org/.github")
 
-    monkeypatch.setattr(scheduler, "discover_cohorts", boom)
+    monkeypatch.setattr(scheduler.discovery, "discover_cohorts", boom)
     monkeypatch.setattr(scheduler, "_preflight_course", lambda *a: 0)
     monkeypatch.setattr(sys, "argv", ["scheduler", "--course-org", "Course-Org", flag])
     assert scheduler.main() == 0
@@ -2220,6 +2238,10 @@ def test_a_registry_nobody_can_parse_releases_nothing_and_stays_green(
 
 
 # ----------------------------------------------------- source pre-flight (unattended)
+
+
+# A cohort's archive date, far enough out that the notice window is not open.
+ARCHIVES = date(2027, 2, 16)
 
 
 def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None):
@@ -2249,8 +2271,10 @@ def _preflight(monkeypatch, faults, now=WHEN, dry_run=False, digest=None):
         "notify_source_transitions",
         lambda *a, **k: seen.update(mailed=a, mail_kw=k) or notify.Unsent(),
     )
+    # A cohort that names no archive date earns an advisory of its own, which is not
+    # what any of these tests is about - see the archive-phase section.
     rc = scheduler._preflight_sources(
-        "Course-Org", "Cohort-Org", Schedule(), now, dry_run
+        "Course-Org", "Cohort-Org", Schedule(archive_date=ARCHIVES), now, dry_run
     )
     return rc, seen
 
@@ -3062,3 +3086,195 @@ def test_the_sync_membership_fast_path_checks_and_exits_green(monkeypatch):
     )
     assert scheduler.main() == 0
     assert [a[0] for a in called] == ["Course-Org"]
+
+
+# ------------------------------------------------------ a cohort that is closed out
+
+
+def test_a_closed_out_cohort_is_not_released_into(monkeypatch, capsys):
+    # Its whole org is read-only, so every release, snapshot and digest write this tick
+    # would 403 - four times an hour, for the rest of the course's life. The live cohort
+    # beside it still ticks.
+    monkeypatch.setattr(
+        scheduler.discovery, "discover_cohorts", lambda org: ["Cohort-A", "Cohort-B"]
+    )
+    monkeypatch.setattr(
+        scheduler.discovery, "repo_is_archived", lambda org, name: org == "Cohort-A"
+    )
+    seen: list[str] = []
+    monkeypatch.setattr(
+        scheduler, "run", lambda course, cohort, now, **k: seen.append(cohort) or 0
+    )
+    monkeypatch.setattr(
+        "sys.argv", ["scheduler", "--course-org", "Course-Org", "--all-cohorts"]
+    )
+    assert scheduler.main() == 0
+    assert seen == ["Cohort-B"]
+    assert "archived cohort - left frozen" in capsys.readouterr().out
+
+
+def test_the_break_glass_single_cohort_run_skips_a_closed_out_cohort(monkeypatch):
+    # `--cohort-org` is the by-hand path, and it takes the same answer as the loop: a
+    # frozen cohort has nothing to release and the tick would be spent on 403s.
+    monkeypatch.setattr(scheduler.discovery, "repo_is_archived", lambda org, name: True)
+
+    def boom(*a, **k):
+        raise AssertionError("a frozen cohort must not be run")
+
+    monkeypatch.setattr(scheduler, "run", boom)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["scheduler", "--course-org", "Course-Org", "--cohort-org", "Cohort-A"],
+    )
+    assert scheduler.main() == 0
+
+
+# --------------------------------------------------------------- the archive phase
+
+
+def _archive(monkeypatch, archive_date, now, dry_run=False, existing=None, mails=True):
+    """Drive `_archive_phase` alone, recording the close-out, the issue and the mail."""
+    seen: dict = {"closed": [], "gate": [], "issues": [], "mailed": []}
+    monkeypatch.setattr(
+        scheduler.teardown,
+        "close_out",
+        lambda course, cohort, dry_run=True, today=None: (
+            seen["closed"].append(cohort) or seen["gate"].append(today) or 0
+        ),
+    )
+    monkeypatch.setattr(scheduler.issues, "find_issue", lambda repo, title: existing)
+    monkeypatch.setattr(
+        scheduler.issues,
+        "upsert_issue",
+        lambda repo, title, body, **k: (
+            seen["issues"].append((title, body)) or issues_mod.Upserted(0)
+        ),
+    )
+    monkeypatch.setattr(
+        scheduler.notify,
+        "notify_cohort_archiving",
+        lambda cohort, course, when, at: seen["mailed"].append(cohort) or mails,
+    )
+    rc = scheduler._archive_phase(
+        "Course-Org",
+        "Cohort-Org",
+        Schedule(archive_date=archive_date),
+        now,
+        dry_run,
+    )
+    return rc, seen
+
+
+def test_a_cohort_is_closed_out_on_its_archive_date(monkeypatch):
+    when = date(2027, 2, 16)
+    _, seen = _archive(monkeypatch, when, datetime(2027, 2, 16, 6, tzinfo=timezone.utc))
+    assert seen["closed"] == ["Cohort-Org"]
+
+
+def test_the_close_out_is_decided_off_this_ticks_clock(monkeypatch):
+    # `close_out` re-derived the real today for its own archive-date gate, so a tick run
+    # with `--now` past the date fired a close-out that then refused it: the run decided
+    # to archive the cohort and archived nothing.
+    when = date(2027, 2, 16)
+    _, seen = _archive(monkeypatch, when, datetime(2027, 2, 20, 6, tzinfo=timezone.utc))
+    assert seen["closed"] == ["Cohort-Org"]
+    assert seen["gate"] == [date(2027, 2, 20)]
+
+
+def test_a_cohort_is_not_closed_out_the_day_before(monkeypatch):
+    when = date(2027, 2, 16)
+    _, seen = _archive(
+        monkeypatch, when, datetime(2027, 2, 15, 23, tzinfo=timezone.utc)
+    )
+    assert seen["closed"] == []
+
+
+def test_a_cohort_with_no_archive_date_is_never_closed_out(monkeypatch):
+    # Freezing a whole org off a synthesised term end is the worst possible use of a
+    # guess: such a cohort is closed out by hand, with --force.
+    _, seen = _archive(monkeypatch, None, datetime(2099, 1, 1, tzinfo=timezone.utc))
+    assert (seen["closed"], seen["issues"], seen["mailed"]) == ([], [], [])
+
+
+def test_a_fortnight_out_the_cohort_is_told_once(monkeypatch):
+    when = date(2027, 2, 16)
+    edge = datetime(2027, 2, 2, 9, tzinfo=timezone.utc)  # exactly 14 days
+    rc, seen = _archive(monkeypatch, when, edge)
+    assert rc == 0
+    assert seen["mailed"] == ["Cohort-Org"]
+    ((title, body),) = seen["issues"]
+    assert title == "Cohort archives on 2027-02-16"
+    assert scheduler._MAILED_MARK in body
+    assert "read-only" not in title  # the date is the whole identity of this issue
+    assert seen["closed"] == []
+
+
+def test_the_notice_is_quiet_the_day_before_its_window_opens(monkeypatch):
+    when = date(2027, 2, 16)
+    _, seen = _archive(monkeypatch, when, datetime(2027, 2, 1, 9, tzinfo=timezone.utc))
+    assert (seen["issues"], seen["mailed"]) == ([], [])
+
+
+def test_the_mail_goes_once_however_many_ticks_the_fortnight_has(monkeypatch):
+    # Four ticks an hour for a fortnight is about 1,300 chances to say it again. The issue
+    # body is what records that it went.
+    when = date(2027, 2, 16)
+    _, seen = _archive(
+        monkeypatch,
+        when,
+        datetime(2027, 2, 5, 9, tzinfo=timezone.utc),
+        existing=issues_mod.Issue(7, scheduler._MAILED_MARK),
+    )
+    assert seen["mailed"] == []
+
+
+def test_a_notice_whose_mail_never_went_offers_it_again(monkeypatch):
+    # An org with no address in people.yml, or with no mail transport wired up, gets a
+    # `False` - and that must NOT be recorded as "mailed", or the tick after somebody
+    # fixes the transport would read the mark and stay quiet for the rest of the
+    # fortnight. The issue is filed either way; only the mark waits for a real send.
+    when = date(2027, 2, 16)
+    _, seen = _archive(
+        monkeypatch,
+        when,
+        datetime(2027, 2, 5, 9, tzinfo=timezone.utc),
+        mails=False,
+    )
+    ((_, body),) = seen["issues"]
+    assert scheduler._MAILED_MARK not in body
+    assert "No email went with this notice" in body
+
+
+def test_an_unchanged_notice_is_not_rewritten_every_tick(monkeypatch):
+    # `upsert_issue` edits unconditionally, and this body changes exactly once in the
+    # fortnight. Four ticks an hour for a fortnight is ~1,300 identical edits otherwise.
+    when = date(2027, 2, 16)
+    standing = scheduler._archive_notice_body("Cohort-Org", when, True)
+    _, seen = _archive(
+        monkeypatch,
+        when,
+        datetime(2027, 2, 5, 9, tzinfo=timezone.utc),
+        existing=issues_mod.Issue(7, standing),
+    )
+    assert (seen["issues"], seen["mailed"]) == ([], [])
+
+
+def test_a_dry_run_neither_freezes_nor_notifies(monkeypatch):
+    when = date(2027, 2, 16)
+    _, seen = _archive(
+        monkeypatch, when, datetime(2027, 2, 16, tzinfo=timezone.utc), dry_run=True
+    )
+    assert (seen["closed"], seen["issues"], seen["mailed"]) == ([], [], [])
+
+
+def test_a_cohort_with_no_archive_date_earns_an_advisory_in_its_own_digest(monkeypatch):
+    # A fault with no clock: there is no moment it bites at, which is exactly what is
+    # wrong with it. Not a parser drop, so `Validate schedule` stays green in August.
+    (fault,) = scheduler._no_archive_date(Schedule())
+    assert "ever archive it" in fault.what
+    assert fault.fires is None and fault.file == "schedule.yml"
+    # And it stays a LINE. An undated fault sits at the notify bar by default, so without
+    # the cap this would be mailed to the teaching team and re-mailed by the digest's age
+    # ladder every term, about a cohort whose term end nobody has typed yet.
+    assert fault.severity(WHEN) < faults_mod.NOTIFY_FROM
+    assert scheduler._no_archive_date(Schedule(archive_date=ARCHIVES)) == []

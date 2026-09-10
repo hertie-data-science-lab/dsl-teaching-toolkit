@@ -15,7 +15,8 @@ not fetch - are vendored, under `base/`.
 The states it covers are the ones that render DIFFERENTLY, one of each: a released
 session, an unreleased one, a lab, a session whose readings are still to come, a
 handed-out assignment and a pending one, a dated exam and a TBC one, a special event,
-the two term boundaries, and an All Materials index nested three directories deep.
+the two term boundaries, the archive row inside its notice window, and an All Materials
+index nested three directories deep.
 
     python3 tests/fixtures/site/build_fixture.py <dest>
 """
@@ -32,7 +33,7 @@ HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 sys.path.insert(0, str(ROOT))
 
-from dsl_course import grades, schedule_plan, site, site_repo
+from dsl_course import grades, schedule, schedule_plan, site, site_repo
 
 BERLIN = ZoneInfo("Europe/Berlin")
 COURSE_ORG = "hertie-dsl-fixture-course"
@@ -191,8 +192,11 @@ def _assignments() -> dict[str, str]:
 
 
 def _events() -> dict[str, str]:
-    """A dated exam, a TBC one, a special event and the two term boundaries."""
+    """A dated exam, a TBC one, a special event, the two term boundaries, and the archive
+    row inside its notice window - which is the only state of it that renders anywhere but
+    the schedule table."""
     end = date(2026, 12, 18)
+    archived = end + schedule.ARCHIVE_GRACE
     return {
         "01-midterm-exam.md": site._exam_entry(
             "MidTerm Exam", datetime(2026, 11, 2, 9, 0, tzinfo=BERLIN)
@@ -206,6 +210,9 @@ def _events() -> dict[str, str]:
         ),
         "term-start.md": site._term_date_entry("Term starts", date(2026, 9, 7)),
         "term-end.md": site._term_date_entry("Term ends", end),
+        "cohort-archived.md": site._archive_entry(
+            archived, archived - schedule.ARCHIVE_NOTICE
+        ),
     }
 
 

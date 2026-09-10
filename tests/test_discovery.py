@@ -425,3 +425,46 @@ def test_student_repo_names_by_topic_or_by_name():
         "assignment-1-wizards",
         "grades-ada-l",
     }
+
+
+# ------------------------------------------------------------------- live cohorts
+
+
+def _closed_out(*orgs: str):
+    """`repo_is_archived` as it answers for a cohort whose classroom-config is frozen."""
+    return lambda org, name: org in orgs
+
+
+def test_live_cohorts_leaves_a_closed_out_cohort_out(monkeypatch, capsys):
+    # An archived classroom-config IS the "this cohort is finished" marker, and every
+    # write a course-side sweep would make on such an org 403s. Skipped as a LINE, not an
+    # error: being finished is a state somebody chose.
+    monkeypatch.setattr(
+        discovery,
+        "get_file_content",
+        _registry("cohorts:\n  - Course-f2025\n  - Course-f2026\n"),
+    )
+    monkeypatch.setattr(discovery, "repo_is_archived", _closed_out("Course-f2025"))
+    assert discovery.live_cohorts("Course") == ["Course-f2026"]
+    printed = capsys.readouterr()
+    assert "[skip] Course-f2025 (archived cohort - left frozen)" in printed.out
+    assert "Course-f2025" not in printed.err
+
+
+def test_a_cohort_whose_archived_flag_cannot_be_read_counts_as_live(monkeypatch):
+    # `repos.repo_is_archived` fails OPEN, and this inherits that: guessing "live" costs
+    # one failed write that says so out loud, guessing "finished" silently stops syncing a
+    # cohort mid-term.
+    monkeypatch.setattr(discovery, "repo_is_archived", lambda org, name: False)
+    assert discovery.cohort_is_live("Course-f2026") is True
+
+
+def test_the_registry_still_lists_a_closed_out_cohort(monkeypatch):
+    # `discover_cohorts` answers "which cohorts does this course own?" - a question about
+    # the registry, not about whether a term is over. A finished cohort stays registered,
+    # so a dispatch naming it is still authorised and the profile page still lists it.
+    monkeypatch.setattr(
+        discovery, "get_file_content", _registry("cohorts:\n  - Course-f2025\n")
+    )
+    monkeypatch.setattr(discovery, "repo_is_archived", _closed_out("Course-f2025"))
+    assert discovery.discover_cohorts("Course") == ["Course-f2025"]

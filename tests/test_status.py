@@ -5,6 +5,7 @@ where a constant that moved modules goes unnoticed."""
 from __future__ import annotations
 
 import json
+from datetime import date
 
 from dsl_course import (
     config_digest,
@@ -294,3 +295,29 @@ def test_c3_points_at_the_grading_sheets_folder(monkeypatch):
     row = status.collect("Course", "Cohort-f2026")["C3"]
     assert row["path"] == "grading_sheets/"
     assert "grading_sheets/" in row["label"] and "grading_sheets/" in row["edit_url"]
+
+
+def test_c6_says_when_the_whole_cohort_freezes(monkeypatch):
+    # The one date in schedule.yml that acts on every repo in the org, and the one nobody
+    # would otherwise think to check before the day it fires.
+    _stub_every_read(monkeypatch)
+    monkeypatch.setattr(
+        schedule,
+        "load",
+        lambda org: schedule.Schedule(
+            semester_end=date(2026, 12, 18), archive_date=date(2027, 2, 16)
+        ),
+    )
+    assert (
+        "archives 2027-02-16"
+        in status.collect("Course", "Cohort-f2026")["C6"]["detail"]
+    )
+
+
+def test_c6_says_so_when_nothing_will_ever_archive_the_cohort(monkeypatch):
+    _stub_every_read(monkeypatch)
+    monkeypatch.setattr(
+        schedule, "load", lambda org: schedule.Schedule(semester_start=date(2026, 9, 7))
+    )
+    detail = status.collect("Course", "Cohort-f2026")["C6"]["detail"]
+    assert "no archive date (set semester_end or archive.date)" in detail

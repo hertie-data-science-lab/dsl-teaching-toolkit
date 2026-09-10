@@ -12,70 +12,23 @@ makes around the copy. The commits, branches, merges and pushes are git's own.
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-from dsl_course import deploy, ghcli, pulls
+from dsl_course import deploy, ghcli
 from dsl_course.schedule import Deploy
+from tests.conftest import BareOrigins, PullsFake, git_ok
 
 PR_URL = "https://github.com/Cohort-Org/materials/pull/1"
 
-# The fixtures' own commits stand in for a person's; they borrow the engine's identity and
-# its disabled hooks, so a developer's global git hooks cannot fail them.
-_ID = ghcli.GIT_ENV
 
+class World(BareOrigins):
+    """A course org and a cohort org as bare repositories on disk, plus the one call this
+    suite is about. Everything under it - the origins, the throwaway-clone commits, the
+    reads afterwards - is `conftest.BareOrigins`, shared with `test_propagate`."""
 
-def _git(*args: str) -> str:
-    code, out = ghcli.git(*args)
-    assert code == 0, f"`git {' '.join(args)}` failed: {out}"
-    return out
-
-
-class PullsFake:
-    """The `pulls` module as `deploy` sees it, recording what it was asked to upsert.
-
-    `upsert_pr` is idempotent by head branch - that is `test_pulls`' subject, and asserting
-    it again here would only re-test the fake. What this one is for is WHAT the release
-    asks for, and how often."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict] = []
-
-    def upsert_pr(self, repo: str, **kwargs) -> pulls.Upserted:
-        self.calls.append({"repo": repo, **kwargs})
-        return pulls.Upserted(0, PR_URL)
-
-
-class World:
-    """A course org and a cohort org as bare repositories on disk."""
-
-    def __init__(self, root: Path, pulls_fake: PullsFake) -> None:
-        self.root = root
-        self.origins = root / "origins"
-        self.origins.mkdir(parents=True, exist_ok=True)
+    def __init__(self, root, pulls_fake: PullsFake) -> None:
+        super().__init__(root)
         self.pulls = pulls_fake
-        self._scratch = 0
-
-    def bare(self, name: str) -> Path:
-        path = self.origins / f"{name}.git"
-        if not path.exists():
-            _git("init", "-q", "--bare", "-b", "main", str(path))
-        return path
-
-    def commit(self, name: str, files: dict[str, str], message: str = "edit") -> None:
-        """Put one commit on `main` of a bare repo, through a throwaway clone - the only
-        way to write into a repo with no working tree."""
-        self._scratch += 1
-        work = self.root / "scratch" / f"{name}{self._scratch}"
-        _git("clone", "-q", str(self.bare(name)), str(work))
-        for rel, text in files.items():
-            path = work / rel
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
-        _git("-C", str(work), "add", "-A")
-        _git("-C", str(work), *_ID, "commit", "-q", "--no-verify", "-m", message)
-        _git("-C", str(work), "push", "-q", "origin", "HEAD:refs/heads/main")
 
     def release(self, *paths: str) -> tuple[int, bool]:
         return deploy.deploy_many(
@@ -86,40 +39,24 @@ class World:
         )
 
     def branches(self, name: str = "materials") -> list[str]:
-        listed = _git(
-            "--git-dir",
-            str(self.bare(name)),
-            "for-each-ref",
-            "--format=%(refname:short)",
-            "refs/heads",
-        )
-        return sorted(listed.split())
-
-    def sha(self, branch: str, name: str = "materials") -> str:
-        return _git("--git-dir", str(self.bare(name)), "rev-parse", branch)
+        return self.refs(name)
 
     def read(self, branch: str, path: str, name: str = "materials") -> str:
-        return _git("--git-dir", str(self.bare(name)), "show", f"{branch}:{path}")
+        return self.show(name, branch, path)
 
     def files(self, branch: str, name: str = "materials") -> list[str]:
-        listed = _git(
-            "--git-dir", str(self.bare(name)), "ls-tree", "-r", "--name-only", branch
-        )
-        return sorted(listed.split())
+        return self.tree(name, branch)
+
+    def sha(self, branch: str, name: str = "materials") -> str:
+        return self.rev(name, branch)
 
 
 @pytest.fixture
 def world(tmp_path, monkeypatch) -> World:
-    fake = PullsFake()
+    fake = PullsFake(PR_URL)
     built = World(tmp_path, fake)
 
-    def clone_only(*args, **kwargs):
-        if args[:2] == ("repo", "clone"):
-            name = args[2].split("/", 1)[1]
-            return ghcli.git("clone", "-q", str(built.bare(name)), str(args[3]))
-        return 0, ""
-
-    monkeypatch.setattr(ghcli, "gh", clone_only)
+    monkeypatch.setattr(ghcli, "gh", built.clone_only)
     monkeypatch.setattr(deploy, "create_repo", lambda *a, **k: True)
     monkeypatch.setattr(deploy, "repo_is_archived", lambda *a, **k: False)
     monkeypatch.setattr(deploy, "allow_forking", lambda *a, **k: True)
@@ -272,12 +209,12 @@ def _orphan_upstream(world) -> None:
     """An `upstream` sharing no history with the branch students read - what a dest that
     was deleted and re-created leaves behind."""
     work = world.root / "scratch" / "orphan"
-    _git("clone", "-q", str(world.bare("materials")), str(work))
-    _git("-C", str(work), *ghcli.GIT_ENV, "checkout", "-q", "--orphan", "upstream")
+    git_ok("clone", "-q", str(world.bare("materials")), str(work))
+    git_ok("-C", str(work), *ghcli.GIT_ENV, "checkout", "-q", "--orphan", "upstream")
     (work / "OLD.md").write_text("released before the repo was re-made\n")
-    _git("-C", str(work), "add", "-A")
-    _git("-C", str(work), *ghcli.GIT_ENV, "commit", "-q", "--no-verify", "-m", "old")
-    _git("-C", str(work), "push", "-q", "origin", "upstream")
+    git_ok("-C", str(work), "add", "-A")
+    git_ok("-C", str(work), *ghcli.GIT_ENV, "commit", "-q", "--no-verify", "-m", "old")
+    git_ok("-C", str(work), "push", "-q", "origin", "upstream")
 
 
 def test_a_merge_git_refused_is_an_error_not_a_conflict(world, capsys):
@@ -308,7 +245,9 @@ def test_a_dest_that_calls_its_default_branch_upstream_is_refused(world, capsys)
     # Silently releasing nothing for ever is worse than a red run.
     world.commit("cm", {"lectures/01/lab.md": "week one"})
     world.commit("materials", {"README.md": "the cohort"})
-    _git("--git-dir", str(world.bare("materials")), "branch", "-m", "main", "upstream")
+    git_ok(
+        "--git-dir", str(world.bare("materials")), "branch", "-m", "main", "upstream"
+    )
 
     assert world.release("lectures/01") == (1, False)
     assert world.branches() == ["upstream"]

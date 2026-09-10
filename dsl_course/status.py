@@ -348,7 +348,20 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         else dropped.lstrip(" -"),
     )
 
+    # When the whole cohort goes read-only - the one date in this file that acts on
+    # every repo in the org, and the one nobody would otherwise think to check.
+    archives = (
+        f"archives {sched.archive_date}"
+        if sched.archive_date
+        else "no archive date (set semester_end or archive.date)"
+    )
     has_due_dates = bool(sched.semester_start or sched.assignments or sched.events)
+    dates = (
+        f"start={sched.semester_start}, {len(sched.assignments)} due date(s), "
+        f"{len(sched.events)} event(s), "
+        if has_due_dates
+        else ""
+    )
     data["C6"] = _row(
         "C6",
         f"Due dates & events ({schedule.SCHEDULE_PATH})",
@@ -357,10 +370,7 @@ def collect(course_org: str, cohort_org: str) -> dict[str, dict]:
         schedule.SCHEDULE_PATH,
         cohort_branch,
         has_due_dates,
-        f"start={sched.semester_start}, {len(sched.assignments)} due date(s), "
-        f"{len(sched.events)} event(s){dropped}"
-        if has_due_dates
-        else dropped.lstrip(" -"),
+        f"{dates}{archives}{dropped}",
     )
 
     # load_cohort_faculty returns None when people.yml is absent - an empty desired set

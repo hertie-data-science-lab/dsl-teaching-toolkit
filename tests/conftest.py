@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import subprocess
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 import yaml
@@ -19,10 +20,12 @@ from dsl_course import (
     bootstrap_course,
     central,
     collect,
+    discovery,
     gh_contents,
     ghcli,
     grades,
     issues,
+    pulls,
     repos,
     roster,
     schedule,
@@ -105,6 +108,17 @@ def _the_central_ref_is_present(monkeypatch):
     `identical` is what the SHA path reads off `compare/main...{sha}`; the branch path
     only looks at the exit code."""
     monkeypatch.setattr(central, "gh", lambda *a, **k: (0, "identical"))
+
+
+@pytest.fixture(autouse=True)
+def _no_cohort_is_closed_out(monkeypatch):
+    """Answer `discovery.cohort_is_live`'s probe with "still running" by default.
+
+    Every course-side sweep now asks whether a cohort's `classroom-config` is archived
+    before writing into it, which is a live `gh api repos/<org>/classroom-config`. A
+    running cohort is the uninteresting answer for every test but the ones about the skip
+    itself, which set their own after this fixture and win."""
+    monkeypatch.setattr(discovery, "repo_is_archived", lambda org, name: False)
 
 
 @pytest.fixture(autouse=True)
@@ -253,6 +267,147 @@ def issue_row(number: int, title: str, body: str = "") -> dict:
     """One row of the `gh issue list --json number,body,title,state` listing. `GhFake`
     stamps the state, from whichever of its two lists the row was put in."""
     return {"number": number, "title": title, "body": body}
+
+
+# --------------------------------------------------------------- against real git
+
+# Two suites run against real repositories rather than a stubbed `git` - the release's
+# merge onto `upstream` (`test_release_merge`) and the propagate back out of a cohort
+# (`test_propagate`). Both are about what ends up on a BRANCH and in a COMMIT HISTORY,
+# which a stubbed `git` can only assert back at itself, and both need the same three
+# things: bare origins on disk, a way to put a commit in one, and a `gh repo clone` that
+# reaches them. Written once here, so the two cannot drift into asserting against
+# differently-built worlds.
+
+
+def git_ok(*args: str) -> str:
+    """One git command that MUST succeed, returning its stdout.
+
+    These fixtures build their world with git itself, and a set-up step that failed
+    silently would leave the test asserting about a repo that was never built."""
+    code, out = ghcli.git(*args)
+    assert code == 0, f"`git {' '.join(args)}` failed: {out}"
+    return out
+
+
+class PullsFake:
+    """`pulls` as `deploy` and `propagate` see it, recording what it was asked to upsert.
+
+    `upsert_pr` is idempotent by head branch - that is `test_pulls`' subject, and asserting
+    it again in a caller's tests would only re-test the fake. What this records is WHAT is
+    proposed, and how often."""
+
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.calls: list[dict] = []
+
+    def upsert_pr(self, repo: str, **kwargs) -> pulls.Upserted:
+        self.calls.append({"repo": repo, **kwargs})
+        return pulls.Upserted(0, self.url)
+
+
+class BareOrigins:
+    """GitHub repositories as bare git repositories on disk, and the reads a test makes of
+    them afterwards.
+
+    Every method takes the repo NAME first and a ref second, because a suite that works in
+    one repo and one that works across four both read better that way; each suite wraps
+    these in whatever its own subject calls them."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        self.origins = root / "origins"
+        self.origins.mkdir(parents=True, exist_ok=True)
+        self._scratch = 0
+
+    def bare(self, name: str) -> Path:
+        """The bare repo `name`, created empty the first time it is mentioned."""
+        path = self.origins / f"{name}.git"
+        if not path.exists():
+            git_ok("init", "-q", "--bare", "-b", "main", str(path))
+        return path
+
+    def commit(
+        self,
+        name: str,
+        files: dict[str, str | None],
+        message: str = "edit",
+        branch: str = "main",
+    ) -> None:
+        """One commit on `branch` of a bare repo, through a throwaway clone - the only way
+        to write into a repo with no working tree. A `None` value DELETES that path.
+
+        `branch` is what students read unless a test needs the release branch a held merge
+        leaves ahead of it (`deploy.UPSTREAM_BRANCH`), which is a real state a cohort repo
+        sits in whenever a release conflicted.
+
+        The commit borrows the engine's identity and its disabled hooks, so a developer's
+        global git hooks cannot fail somebody else's test run."""
+        self._scratch += 1
+        work = self.root / "scratch" / f"{name}{self._scratch}"
+        git_ok("clone", "-q", str(self.bare(name)), str(work))
+        if branch != "main":
+            remote = f"origin/{branch}"
+            probe = ghcli.git("-C", str(work), "rev-parse", "--verify", remote)
+            # Off the remote branch when it is already there, off whatever was cloned when
+            # it is not - which is how a first release cuts `upstream` too.
+            start = [remote] if probe[0] == 0 else []
+            git_ok(
+                "-C", str(work), *ghcli.GIT_ENV, "checkout", "-q", "-B", branch, *start
+            )
+        for rel, text in files.items():
+            path = work / rel
+            if text is None:
+                path.unlink()
+                continue
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        git_ok("-C", str(work), "add", "-A")
+        git_ok(
+            "-C",
+            str(work),
+            *ghcli.GIT_ENV,
+            "commit",
+            "-q",
+            "--no-verify",
+            "-m",
+            message,
+        )
+        git_ok("-C", str(work), "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
+
+    def clone_only(self, *args, **kwargs) -> tuple[int, str]:
+        """`ghcli.gh` as these fixtures allow it: `repo clone` reaches the bare repo beside
+        it, and every other call is a silent success. Anything that is genuinely about a
+        gh API call is somebody else's test."""
+        if args[:2] == ("repo", "clone"):
+            name = args[2].split("/", 1)[1]
+            return ghcli.git("clone", "-q", str(self.bare(name)), str(args[3]))
+        return 0, ""
+
+    def _read(self, name: str, *args: str) -> str:
+        return git_ok("--git-dir", str(self.bare(name)), *args)
+
+    def refs(self, name: str) -> list[str]:
+        """Every branch the bare repo holds, sorted."""
+        listed = self._read(
+            name, "for-each-ref", "--format=%(refname:short)", "refs/heads"
+        )
+        return sorted(listed.split())
+
+    def rev(self, name: str, ref: str) -> str:
+        return self._read(name, "rev-parse", ref)
+
+    def show(self, name: str, ref: str, path: str) -> str:
+        return self._read(name, "show", f"{ref}:{path}")
+
+    def tree(self, name: str, ref: str) -> list[str]:
+        """Every path in the tree at `ref`, sorted."""
+        return sorted(self._read(name, "ls-tree", "-r", "--name-only", ref).split())
+
+    def subjects(self, name: str, rev_range: str) -> list[str]:
+        """The commit subjects in `rev_range`, oldest first."""
+        listed = self._read(name, "log", "--format=%s", "--reverse", rev_range)
+        return listed.splitlines()
 
 
 def source_fault(

@@ -1,35 +1,49 @@
 """dsl-course teardown -- close a finished cohort out.
 
-Run once, at the end of term, after the last grades have gone out. Five steps, in this
-order, and the order is the whole design:
+Runs on the cohort's own `archive.date` (`schedule.yml`, default `semester_end` + 60 days),
+fired by the scheduler; the Archive cohort button is for closing one out early. Six steps,
+in this order, and the order is the whole design:
 
-1. revoke each student's DIRECT collaborator grant - and any invitation they have not
-   accepted yet - on the submission repos and gradebooks named after them;
-2. ARCHIVE those repos: GitHub's read-only freeze;
-3. archive `welcome`, the way IN to the cohort, so a finished term cannot still be joined;
+0. PROPAGATE: offer the cohort's edits to its released material back to the course org as
+   a pull request (`dsl_course.propagate`). First, because it is the only step that READS
+   the cohort - after step 4 every repo in it is read-only - and it is the last chance to
+   carry a correction home. It never blocks the seal: a cohort is closed whether or not
+   faculty ever wanted its edits.
+1. close the toolkit's own open notices in `classroom-config` - the digest issues, the
+   cadence alarm and the "archives on <date>" notice - saying the cohort is now archived,
+   since nothing will ever close them afterwards and an archived repo takes no issue
+   write;
+2. one last website sync, so the deployed site shows the archived state rather than the
+   state of the term's last release;
+3. ARCHIVE every repo in the org - students' work first, then `welcome` (the way IN, so a
+   finished term cannot still be joined), then the released content, the website and the
+   cohort's own `.github`;
 4. write the teardown record into the cohort's private `classroom-config`;
 5. archive `classroom-config` itself, LAST.
 
-Revoke before freeze, because an archived repo takes no collaborator change: a repo frozen
-before it is revoked keeps that grant for as long as it stays frozen. Seal last, because an
-archived `classroom-config` is already what `seed.refresh`'s per-cohort loop reads as "this
-cohort is finished, leave it frozen" (`_live_cohorts` probes the ORG, never one of its
-repos) - so until that step lands the cohort is still a live one, and a run that died half
-way is resumed simply by running it again. Every step is idempotent: a
-repo already archived is passed over, a grant already revoked is a no-op, and a cohort whose
-`classroom-config` is archived is already closed out and does nothing at all.
+NOBODY IS REVOKED. An archived repo is read-only for everyone, so freezing IS the
+withdrawal of write access - and a student keeps read access to their own work, which is
+the point of closing a cohort rather than deleting it. Membership and teams are left
+exactly as they are.
+
+Seal last, because an archived `classroom-config` is what every course-side sweep reads as
+"this cohort is finished, leave it frozen" (`discovery.cohort_is_live`) - so until that
+step lands the cohort is still a live one, and a run that died half way is resumed simply
+by running it again. Every step is idempotent: a repo already archived is passed over, and
+a cohort whose `classroom-config` is archived is already closed out and does nothing at
+all.
 
 NOTHING IS EVER DELETED. The bot holds no `delete_repo` scope, and every step here is
-reversible by hand: un-archiving a repo from its own Settings page brings it back exactly as
-it was, and `students.csv` - still in the sealed record - is what re-grants the access.
+reversible by hand: un-archiving a repo from its own Settings page brings it back exactly
+as it was.
 
-`--dry-run` is the default and prints counts only. A real run refuses unless the cohort's
-`schedule.yml` declares a `semester_end` that has passed; `--force` is a person saying it
-in as many words, which is what a cohort with no term dates needs.
+`--dry-run` is the default and prints counts only. A real run refuses until the cohort's
+`archive.date` has arrived; `--force` is a person saying it in as many words, which is what
+an early close-out - and a cohort with no term dates at all - needs.
 
 Usage:
     python3 -m dsl_course.teardown --cohort-org hertie-dsl-demo-f2026
-    python3 -m dsl_course.teardown --cohort-org hertie-dsl-demo-f2026 --no-dry-run
+    python3 -m dsl_course.teardown --course-org COURSE --cohort-org COHORT --no-dry-run
 """
 
 from __future__ import annotations
@@ -39,8 +53,9 @@ import sys
 from datetime import date, datetime, timezone
 from typing import NamedTuple
 
-from . import schedule
-from .course import CONFIG_REPO, GRADEBOOK_PREFIX, submission_suffix
+from . import cadence, config_digest, propagate, schedule, site, source_digest
+from .course import CONFIG_REPO, pages_repo
+from .deploy import UPSTREAM_BRANCH
 from .discovery import (
     ASSIGNMENT_TEMPLATE_TOPIC,
     classify_repos,
@@ -49,9 +64,9 @@ from .discovery import (
 )
 from .gh_contents import get_file_content, put_file, read_csv
 from .grades import COHORT_CSV_NAME
+from .issues import close_issues_titled, open_titles
 from .log import log, log_err, log_ok, log_person, log_step
 from .repos import archive_repo
-from .sync_roster import revoke_repo_grants
 
 # The record itself, in the private repo it describes. Its own directory rather than a root
 # file, so the sealed repo shows at a glance which files are the term's working state and
@@ -79,32 +94,65 @@ and the registrar export (`{COHORT_CSV_NAME}`). Together those are this cohort's
 assessment: delete the repository when your institution's retention period for that record
 expires, and the archived student repos with it."""
 
+# The comment left on every notice this closes. Its own sentence, because the issues being
+# closed are about things nobody can now fix - a roster row the parser could not use, a
+# release whose source was never staged - and closing them silently would read as "fixed".
+_CLOSING_COMMENT = (
+    "This cohort has been archived and is read-only. Nothing in it can be changed now, so "
+    "this notice is closed unresolved rather than fixed. The teardown record is in "
+    f"`{RECORD_PATH}`."
+)
 
-class Target(NamedTuple):
-    """One repo a teardown freezes: its name, whether it is frozen already, and the login
-    it is NAMED after (`""` when it is named after something else - see `named_login`)."""
 
-    repo: str
-    archived: bool
-    login: str
+# What every archive notice's title begins with, whatever date it names. The date is what
+# makes the two ends able to spell one title identically; the prefix is what makes the
+# ones for OTHER dates findable when this closes the cohort out.
+ARCHIVE_NOTICE_PREFIX = "Cohort archives on "
+
+
+def archive_notice_title(when: date) -> str:
+    """The title of the "this cohort is about to freeze" issue.
+
+    Here rather than in the scheduler that OPENS it, because the two ends have to spell it
+    identically - `issues` addresses an issue by its exact title - and teardown is the end
+    that can never be skipped. The date is in the title so that moving `archive.date` opens
+    a notice about the new one rather than silently editing the old one's body."""
+    return f"{ARCHIVE_NOTICE_PREFIX}{when}"
+
+
+def _is_archive_notice(title: str) -> bool:
+    """Whether an open issue's title is one of this toolkit's archive notices.
+
+    The prefix AND a date that parses, rather than the prefix alone: `issues` matches by
+    exact title precisely so that an issue a human filed quoting one is never adopted, and
+    a prefix match on its own would close "Cohort archives on the last day of what?"
+    written by an instructor. Nothing this toolkit opens spells the date any other way."""
+    if not title.startswith(ARCHIVE_NOTICE_PREFIX):
+        return False
+    try:
+        date.fromisoformat(title[len(ARCHIVE_NOTICE_PREFIX) :])
+    except ValueError:
+        return False
+    return True
 
 
 class Closed(NamedTuple):
-    """What one run did, in the shape both the summary line and the record read."""
+    """What one run froze, in the shape both the summary line and the record read."""
 
-    frozen: list[str]  # every submission repo and gradebook now archived
-    withdrawn: int  # direct grants + pending invitations taken back
+    frozen: list[str]  # every repo this run archived
+    already: list[str]  # every repo that was archived before it started
     errors: int
 
 
-def term_ended(sched: schedule.Schedule, today: date) -> bool:
-    """Whether the cohort's declared term is over.
+def archive_due(sched: schedule.Schedule, today: date) -> bool:
+    """Whether this cohort's archive date has arrived.
 
-    A cohort with no `semester_end:` is NOT over. The key is optional everywhere else - the
-    site synthesises a term end 15 weeks after the start when it is missing - but
-    synthesising one HERE would freeze a live cohort's work off a guess. Such a cohort needs
-    `--force`, which is a person taking the decision instead."""
-    return sched.semester_end is not None and sched.semester_end < today
+    `semester_end` alone is deliberately NOT enough any more: the sixty-day grace after it
+    is the whole point (`schedule.ARCHIVE_GRACE`), because a term goes on being pushed to
+    for weeks after its last class. A cohort with no `archive.date` at all - no
+    `semester_end` and no override - is never due, and needs `--force`, which is a person
+    taking the decision instead."""
+    return sched.archive_date is not None and sched.archive_date <= today
 
 
 def _is_template(repo: dict) -> bool:
@@ -114,39 +162,35 @@ def _is_template(repo: dict) -> bool:
     )
 
 
-def named_login(repo: str, template: str | None) -> str:
-    """The login `repo` is NAMED after - the `<handle>` in `<slug>-<handle>` and in
-    `grades-<handle>` - or `""` when it is named after something else.
+def freeze_order(cohort_org: str, repos: list[dict]) -> list[dict]:
+    """Every repo in the org except `classroom-config`, in the order they are frozen.
 
-    The narrowest possible target for a revoke, and deliberately so: a GROUP repo's suffix
-    is a TEAM name, and a team is not a collaborator on its own repo, so the probe finds
-    nothing there and takes nothing away. A repo recognised only by its `submission` topic,
-    whose template is no longer in the org, is `""` for the same reason - it is frozen, but
-    nobody's access is guessed at from a name that no rule explains."""
-    if template:
-        return submission_suffix(repo, template)
-    if repo.startswith(GRADEBOOK_PREFIX):
-        return repo.removeprefix(GRADEBOOK_PREFIX)
-    return ""
+    Students' work first, because it is the cohort's record and the reason any of this is
+    reversible rather than a delete. `welcome` next: its Join issues are how a student
+    enrols themselves, and an open one on a finished cohort writes into a
+    `classroom-config` that is about to be sealed - a red run instead of a place. Then the
+    released content, then the website (after step 2's final sync), and the cohort's own
+    `.github` last of the live repos, because it holds the dispatchers that wake everything
+    else.
 
-
-def targets(repos: list[dict]) -> list[Target]:
-    """Every repo in a cohort LISTING that holds a student's work or their marks.
-
-    `discovery.is_student_repo` is the shared rule - the `submission` / `gradebook` topic OR
-    the name, so a repo whose topic stamp never landed still counts - minus the cohort-side
-    assignment TEMPLATES it also covers. A template holds the brief every student was given,
-    which is nobody's personal record, and listing one in the teardown record as a student's
-    repo would be a plain lie about what was frozen."""
+    `classroom-config` is not here at all: it is the marker, and the caller freezes it
+    after the record is written."""
     derived = classify_repos(repos)
+    site_repo = pages_repo(cohort_org)
+
+    def rank(repo: dict) -> int:
+        name = repo["name"]
+        if is_student_repo(repo, derived) or _is_template(repo):
+            return 0
+        if name == WELCOME_REPO:
+            return 1
+        if name == site_repo:
+            return 3
+        return 4 if name == ".github" else 2
+
     return sorted(
-        Target(
-            r["name"],
-            bool(r.get("archived")),
-            named_login(r["name"], derived.get(r["name"])),
-        )
-        for r in repos
-        if is_student_repo(r, derived) and not _is_template(r)
+        (r for r in repos if r["name"] != CONFIG_REPO),
+        key=lambda r: (rank(r), r["name"]),
     )
 
 
@@ -166,32 +210,36 @@ def render_record(
     closed: Closed,
     *,
     sealed_on: date,
-    semester_end: date | None,
+    archive_date: date | None,
     registrar: str,
-    welcome: str,
+    propagated: str,
 ) -> str:
     """The teardown record, as it is written into the private `classroom-config`.
 
     It names the repos it froze. That is the point of it and it is safe: this file is
     written into the cohort's PRIVATE record, beside the roster those names are drawn from,
     and never into a log or a page. Nothing in this function is ever printed."""
-    term = (
-        f"Term ended **{semester_end}**."
-        if semester_end
-        else "`schedule.yml` declares no `semester_end` - closed out with `--force`."
+    due = (
+        f"Its archive date was **{archive_date}**."
+        if archive_date
+        else "`schedule.yml` declares no archive date - closed out with `--force`."
     )
-    rows = "\n".join(f"- `{name}`" for name in closed.frozen) or "- (none)"
+    frozen = sorted(closed.frozen + closed.already)
+    rows = "\n".join(f"- `{name}`" for name in frozen) or "- (none)"
     return f"""{_RECORD_BANNER}
 # Teardown record - {cohort_org}
 
-Closed out on **{sealed_on}** (UTC). {term}
+Closed out on **{sealed_on}** (UTC). {due}
 
-| What | Count |
+| What | Detail |
 | --- | --- |
-| Submission repos and gradebooks archived | {len(closed.frozen)} |
-| Direct grants and invitations withdrawn | {closed.withdrawn} |
-| Enrolment repo (`{WELCOME_REPO}`) | {welcome} |
+| Repositories frozen | {len(frozen)} ({len(closed.already)} already were) |
+| Cohort edits carried back | {propagated} |
 | Registrar export | {registrar} |
+
+**Nobody was revoked.** An archived repository is read-only for everyone, so freezing IS
+the withdrawal of write access - and everyone who could read this cohort still can, which
+is the point of closing it rather than deleting it. Org membership and teams are untouched.
 
 **Nothing was deleted.** Archiving is GitHub's reversible read-only freeze: un-archive a
 repo from its own Settings page and it comes back exactly as it was, and `students.csv` is
@@ -205,68 +253,170 @@ what re-grants a student their access if one has to be reopened.
 """
 
 
-def _freeze(cohort_org: str, live: list[Target], dry_run: bool) -> Closed:
-    """Revoke then archive, one repo at a time. See the module docstring for the order.
+def _carry_back(course_org: str, cohort_org: str, dry_run: bool) -> tuple[str, int]:
+    """Step 0: offer this cohort's edits back to the course org. `(what the record says,
+    errors)`.
 
-    A repo whose access could NOT be settled is deliberately left LIVE: freezing it would
-    make the revoke impossible until somebody un-archives it by hand, so the run reds and
-    the next one picks that repo up."""
+    Nothing here can stop the cohort being sealed. A course org that never wanted the
+    cohort's edits is still entitled to a closed cohort, and leaving one half-frozen
+    because a clone failed would be the worst of both. The failure is counted, so the run
+    goes red and a person can re-run it - which is safe, because everything else is
+    idempotent - and it is written into the record either way.
+
+    Swallows everything for the same reason: this is the one step that talks to a second
+    org, so it has twice as many ways to raise.
+
+    A cohort repo the propagate did not READ is the one outcome that is neither an error
+    there nor a success here. `propagate` skips a dest whose `upstream` is ahead - a
+    standing conflict pull request - and names it in the pull request body; but with
+    every due dest behind there is no pull request, so it came back as
+    `Propagated(0, ())` and this wrote "nothing had been edited" over a cohort whose
+    edits were never looked at, into a record that is then sealed read-only. So it is
+    named in the record, with what to do about it, and counted - the seal still lands
+    (nothing here can hold it back), the run reds, and the edits are still there to
+    recover before anybody un-archives the org."""
+    if not course_org:
+        log(
+            "  [skip] no --course-org given, so this cohort's edits are NOT being "
+            "carried back. Run Propagate cohort edits before un-archiving anything."
+        )
+        return "not offered - no course org was named", 0
+    try:
+        done = propagate.propagate(course_org, cohort_org, dry_run=dry_run)
+    except Exception as exc:
+        log_err(
+            f"could not carry {cohort_org}'s edits back to {course_org} "
+            f"({type(exc).__name__}): {exc}"
+        )
+        return "FAILED - the cohort was sealed without carrying them back", 1
+    said: list[str] = []
+    if done.errors:
+        said.append(f"{done.errors} path(s) could not be carried back")
+    if done.urls:
+        said.append(", ".join(done.urls))
+    if done.behind:
+        said.append(
+            f"NOT read: {', '.join(f'`{r}`' for r in done.behind)} - behind its latest "
+            f"release. Merge the open `{UPSTREAM_BRANCH}` pull request there and re-run "
+            f"Propagate cohort edits before un-archiving anything"
+        )
+    unread = 1 if done.behind else 0
+    return "; ".join(said) or "nothing had been edited", done.errors + unread
+
+
+def _close_notices(cohort_org: str, dry_run: bool) -> int:
+    """Step 1: close the toolkit's own open issues in `classroom-config`.
+
+    Every one of them asks somebody to go and fix a file in a repo that is about to be
+    read-only, and nothing will ever close them afterwards - an archived repo takes no
+    issue write either, so this is the last moment. Closed with a comment, because closing
+    them silently would read as "fixed".
+
+    EVERY title the toolkit can leave open in this repo, which is the six hand-edited-file
+    digests, the schedule's own source digest, the cadence alarm and the archive notice -
+    those, and nothing else, are what write here (`cadence.report_cohort` is the one that
+    is not a digest). A title missed here stands open inside a frozen repo for ever, since
+    the sweep that would have closed it never runs on a closed-out cohort again.
+
+    The archive notice is the one whose title MOVES: it names a date, and `archive.date`
+    can be moved after one is open, which opens a second notice rather than editing the
+    first (`archive_notice_title` says why). So every dated notice standing in the repo is
+    closed, not just the one for today's date - the earlier one would otherwise be sealed
+    in, open, contradicting the record."""
+    repo = f"{cohort_org}/{CONFIG_REPO}"
+    titles = [d.title for d in config_digest.COHORT_DIGESTS] + [
+        source_digest.TITLE,
+        cadence.LATE_TITLE,
+    ]
+    if dry_run:
+        log(
+            f"    DRY-RUN close any of {len(titles)} toolkit notice(s) still open, and "
+            f"every `{ARCHIVE_NOTICE_PREFIX.strip()} <date>` notice with them"
+        )
+        return 0
+    errors = 0
+    try:
+        titles += sorted(t for t in open_titles(repo) if _is_archive_notice(t))
+    except RuntimeError as exc:
+        # A listing that could not be read is not "no notice is open", and the rest of
+        # them are still worth closing while the repo takes writes.
+        log_err(str(exc))
+        errors = 1
+    return errors + sum(
+        close_issues_titled(repo, title, _CLOSING_COMMENT) for title in titles
+    )
+
+
+def _final_sync(course_org: str, cohort_org: str, dry_run: bool) -> int:
+    """Step 2: one last website sync, before the site repo is frozen.
+
+    The deployed site carries the cohort's own "Cohort archived" schedule row
+    (`site._archive_entry`), and without this the last thing it ever says is whatever the
+    term's final release left there. Swallows everything: a site that is one sync behind is
+    not a reason to leave a cohort half-closed."""
+    if not course_org:
+        return 0
+    if dry_run:
+        log(f"    DRY-RUN sync {cohort_org}'s website one last time")
+        return 0
+    try:
+        if site.sync_site(course_org, cohort_org) != 0:
+            log_err(f"{cohort_org}'s final website sync was incomplete")
+            return 1
+    except Exception as exc:
+        log_err(f"{cohort_org}'s final website sync failed: {exc}")
+        return 1
+    return 0
+
+
+def _freeze(cohort_org: str, listing: list[dict], dry_run: bool) -> Closed:
+    """Step 3: archive every repo in the org but `classroom-config`, in `freeze_order`.
+
+    Per-repo lines go through `log_person`, because a `<slug>-<handle>` on stdout of a
+    workflow running in the course org's PUBLIC `.github` publishes who was in the
+    cohort."""
     frozen: list[str] = []
-    withdrawn = errors = 0
-    for target in live:
-        if target.login:
-            gained, failed = revoke_repo_grants(
-                cohort_org, target.repo, target.login, dry_run=dry_run
-            )
-            withdrawn += gained
-            if failed:
-                errors += failed
-                log_person(
-                    f"  ! {cohort_org}/{target.repo} left live - its access could not "
-                    f"be settled, so freezing it would strand the grant"
-                )
-                continue
+    already: list[str] = []
+    errors = 0
+    for repo in freeze_order(cohort_org, listing):
+        name = repo["name"]
+        if repo.get("archived"):
+            already.append(name)
+            continue
         if dry_run:
-            log_person(f"    DRY-RUN archive {cohort_org}/{target.repo}")
-            frozen.append(target.repo)
-        elif archive_repo(cohort_org, target.repo, person=True):
-            log_person(f"  [ok] archived {cohort_org}/{target.repo}")
-            frozen.append(target.repo)
+            log_person(f"    DRY-RUN archive {cohort_org}/{name}")
+            frozen.append(name)
+        elif archive_repo(cohort_org, name, person=True):
+            log_person(f"  [ok] archived {cohort_org}/{name}")
+            frozen.append(name)
         else:
             errors += 1
-    return Closed(frozen, withdrawn, errors)
+    return Closed(frozen, already, errors)
 
 
-def _freeze_welcome(
-    cohort_org: str, listing: list[dict], dry_run: bool
-) -> tuple[str, int]:
-    """Archive the cohort's `welcome` repo - the way IN to the cohort. Returns
-    `(what the record says about it, errors)`.
-
-    Its Join course and Join team issues are how a student enrols themselves, and an open
-    one on a finished cohort is an enrolment into a term that is over: the handler writes
-    into `classroom-config`, which by then is sealed and cannot take it, so the student gets
-    a red run instead of a place. Frozen AFTER the student repos and BEFORE the record is
-    sealed, for the same reason as everything else here - the marker moves last.
-
-    Not a per-person repo, so a failure names it in the public log like any other piece of
-    infrastructure, and reds the run: a cohort left joinable is not closed."""
-    row = next((r for r in listing if r["name"] == WELCOME_REPO), None)
-    if row is None:
-        return "not in this org", 0
-    if row.get("archived"):
-        return "already frozen", 0
-    if dry_run:
-        log(f"    DRY-RUN archive {cohort_org}/{WELCOME_REPO}")
-        return "frozen with them", 0
-    if archive_repo(cohort_org, WELCOME_REPO):
-        log_ok(f"archived {cohort_org}/{WELCOME_REPO}")
-        return "frozen with them", 0
-    return "NOT frozen", 1
-
-
-def close_out(cohort_org: str, dry_run: bool = True, force: bool = False) -> int:
+def close_out(
+    course_org: str,
+    cohort_org: str,
+    dry_run: bool = True,
+    force: bool = False,
+    today: date | None = None,
+) -> int:
     """Close `cohort_org` out. 0 when it is closed (or already was), 1 on any failure.
+
+    `course_org` may be `""`: the cohort is still closed, but its edits are not offered
+    back and its website is not synced one last time, and the record says so.
+
+    `today` is the date the archive-date gate is decided against, and the CALLER's clock
+    where it has one: the scheduler decides the cohort is due off its own `now` (which
+    `--now` can set), and re-deriving the date here meant a run that had decided to
+    archive then refused to. Defaults to today, which is what the CLI wants. The record's
+    `sealed_on` is the real clock either way - it is when the freeze actually happened.
+
+    Only a failed FREEZE holds the seal back, because that is the one failure the marker
+    would lie about: a `classroom-config` archived over a repo that is still live tells
+    every sweep the cohort is finished when it is not. Everything else - the propagate, the
+    notices, the final sync - counts towards the exit code and is left for a re-run, which
+    is safe because every step here is idempotent.
 
     Counts only in the log: every faculty workflow runs in the course org's PUBLIC
     `.github`, and one `<slug>-<handle>` line there publishes who was in the cohort. The
@@ -285,54 +435,46 @@ def close_out(cohort_org: str, dry_run: bool = True, force: bool = False) -> int
         return 0
 
     sched = schedule.load(cohort_org)
-    if not term_ended(sched, datetime.now(timezone.utc).date()) and not force:
+    if not archive_due(sched, today or datetime.now(timezone.utc).date()) and not force:
         declared = (
-            f"declares semester_end {sched.semester_end}"
-            if sched.semester_end
-            else "declares no semester_end"
+            f"archives on {sched.archive_date}"
+            if sched.archive_date
+            else "declares no archive date and no semester_end to derive one from"
         )
         log_err(
-            f"{cohort_org}'s term is not over: {CONFIG_REPO}/{schedule.SCHEDULE_PATH} "
-            f"{declared}. Close the cohort out after the term ends, or re-run with "
-            f"--force to close it out anyway."
+            f"{cohort_org} is not due to be archived: {CONFIG_REPO}/"
+            f"{schedule.SCHEDULE_PATH} {declared}. Wait for that date, change it, or "
+            f"re-run with --force to close the cohort out now."
         )
         return 1
 
-    found = targets(listing)
-    live = [t for t in found if not t.archived]
-    already = [t.repo for t in found if t.archived]
     registrar = registrar_summary(cohort_org)
-    log(
-        f"  {len(found)} submission repo(s) and gradebook(s): {len(live)} to freeze, "
-        f"{len(already)} already frozen"
-    )
     log(f"  registrar export: {registrar}")
+    propagated, errors = _carry_back(course_org, cohort_org, dry_run)
+    errors += _close_notices(cohort_org, dry_run)
+    errors += _final_sync(course_org, cohort_org, dry_run)
 
-    closed = _freeze(cohort_org, live, dry_run)
-    frozen = sorted(closed.frozen + already)
-    welcome, welcome_errors = _freeze_welcome(cohort_org, listing, dry_run)
-    errors = closed.errors + welcome_errors
-    if errors:
+    closed = _freeze(cohort_org, listing, dry_run)
+    if closed.errors:
         log_err(
-            f"{errors} step(s) failed - {cohort_org} is NOT sealed. Fix the cause "
-            f"and run this again; it resumes from wherever it stopped."
+            f"{closed.errors} repo(s) could not be frozen - {cohort_org} is NOT sealed. "
+            f"Fix the cause and run this again; it resumes from wherever it stopped."
         )
         return 1
     if dry_run:
         log_ok(
-            f"dry run: {len(closed.frozen)} repo(s) would be frozen, {closed.withdrawn} "
-            f"grant(s)/invite(s) withdrawn, {WELCOME_REPO} {welcome}, then "
-            f"{CONFIG_REPO} sealed"
+            f"dry run: {len(closed.frozen)} repo(s) would be frozen "
+            f"({len(closed.already)} already are), then {CONFIG_REPO} sealed"
         )
-        return 0
+        return 1 if errors else 0
 
     record = render_record(
         cohort_org,
-        Closed(frozen, closed.withdrawn, 0),
+        closed,
         sealed_on=datetime.now(timezone.utc).date(),
-        semester_end=sched.semester_end,
+        archive_date=sched.archive_date,
         registrar=registrar,
-        welcome=welcome,
+        propagated=propagated,
     )
     if not put_file(
         cohort_org,
@@ -348,19 +490,25 @@ def close_out(cohort_org: str, dry_run: bool = True, force: bool = False) -> int
         return 1
     if not archive_repo(cohort_org, CONFIG_REPO):
         log_err(
-            f"the record is written but {cohort_org}/{CONFIG_REPO} is NOT sealed, so the "
-            f"nightly refresh still treats this cohort as live. Re-run to finish."
+            f"the record is written but {cohort_org}/{CONFIG_REPO} is NOT sealed, so "
+            f"every nightly sweep still treats this cohort as live. Re-run to finish."
         )
         return 1
     log_ok(
-        f"{cohort_org} closed out: {len(frozen)} repo(s) frozen, {closed.withdrawn} "
-        f"grant(s)/invite(s) withdrawn, {WELCOME_REPO} {welcome}, {CONFIG_REPO} sealed"
+        f"{cohort_org} closed out: {len(closed.frozen) + len(closed.already)} repo(s) "
+        f"frozen, {CONFIG_REPO} sealed"
     )
-    return 0
+    return 1 if errors else 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--course-org",
+        default="",
+        help="Course org - where this cohort's edits are offered back before it is "
+        "frozen, and where its website is synced from. Omit and both are skipped.",
+    )
     parser.add_argument("--cohort-org", required=True)
     # Default ON, like every other write button: the rendered workflow passes --dry-run /
     # --no-dry-run explicitly, so a bare local invocation cannot freeze a cohort by accident.
@@ -368,19 +516,24 @@ def main() -> int:
         "--dry-run",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Print the counts; freeze nothing, revoke nothing (default).",
+        help="Print the counts; freeze nothing (default).",
     )
     parser.add_argument(
         "--force",
         action="store_true",
-        help="Close out even though the term is not over (or has no declared end).",
+        help="Close out even though the archive date has not arrived (or is not set).",
     )
     args = parser.parse_args()
 
     # A read helper that could not reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
-        return close_out(args.cohort_org, dry_run=args.dry_run, force=args.force)
+        return close_out(
+            args.course_org,
+            args.cohort_org,
+            dry_run=args.dry_run,
+            force=args.force,
+        )
     except RuntimeError as exc:
         log_err(str(exc))
         return 1

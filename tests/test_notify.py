@@ -13,7 +13,7 @@ batch this module handed the transport - recipients, cc, subject, body, HTML fla
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -1243,3 +1243,58 @@ def test_no_address_reaches_the_public_run_log(wired, capsys):
     printed = capsys.readouterr()
     assert "jan@x.edu" not in printed.out + printed.err
     assert sent.one["to"] == ["jan@x.edu"]
+
+
+# ------------------------------------------------- a cohort about to be frozen
+
+
+ARCHIVES = date(2027, 2, 16)
+
+
+def _archiving(wired, **kw):
+    """The archive notice's mail, and whether the notifier says it went."""
+    sent = wired(**kw)
+    went = notify.notify_cohort_archiving("Cohort-f2026", "Course-Org", ARCHIVES, NOW)
+    return went, sent
+
+
+def test_the_archive_notice_mails_the_whole_teaching_team(wired):
+    went, sent = _archiving(wired)
+    assert went is True
+    # One batch addressed to the group, instructors and TAs alike: the date is everybody's.
+    assert sent.one["to"] == ["jan@x.edu", "cam@x.edu"]
+    assert str(ARCHIVES) in sent.one["subject"]
+    assert "Cohort-f2026" in sent.one["subject"]
+    assert sent.one["html"] is True
+
+
+def test_the_archive_notice_links_the_file_that_moves_the_date(wired):
+    # The only thing a reader might want to DO about this is move or remove the date.
+    _, sent = _archiving(wired)
+    body = sent.one["body"]
+    assert "Cohort-f2026/classroom-config/edit/main/schedule.yml" in body
+    assert "Nothing is deleted and nobody is removed" in body
+
+
+def test_a_cohort_with_no_mail_transport_says_so_rather_than_claiming_it_told_anyone(
+    wired,
+):
+    # `False` is what stops the scheduler stamping "mailed" into the notice issue, so a
+    # tick after somebody wires the transport up sends the mail instead of going quiet.
+    went, sent = _archiving(wired, configured=False)
+    assert (went, sent.calls) == (False, 0)
+
+
+def test_a_cohort_with_no_address_anywhere_mails_nobody(wired):
+    went, sent = _archiving(wired, people={"people": {}}, maintainer=None)
+    assert (went, sent.calls) == (False, 0)
+
+
+def test_a_partly_delivered_archive_notice_is_not_recorded_as_sent(wired, monkeypatch):
+    # Half the team told is not the team told, and the next tick has to offer it again.
+    _archiving(wired)
+    monkeypatch.setattr(notify.mailer, "send_bulk", lambda ms, **k: ["jan@x.edu"])
+    assert (
+        notify.notify_cohort_archiving("Cohort-f2026", "Course-Org", ARCHIVES, NOW)
+        is False
+    )

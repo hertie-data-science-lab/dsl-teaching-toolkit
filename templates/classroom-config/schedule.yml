@@ -29,6 +29,10 @@
 # semester_start:                   # OPTIONAL - default: inferred from the cohort tag (f2026 -> 1 Sep 2026)
 # semester_end:                     # OPTIONAL - default: 15 weeks after the start
 
+# archive:                          # OPTIONAL - when this cohort is frozen READ-ONLY
+#   date:                           # OPTIONAL - default: semester_end + 60 days. Nothing freezes a cohort that declares neither
+#   show_on_site: true              # OPTIONAL - default: true. false = no "Cohort archived" row on the deployed site's Schedule tab
+
 # releases:                         
 #   seed-syllabus:                  # week 0: the course opens before teaching starts. 
 #     event_datetime:               # REQUIRED - ships the syllabus and anything else students need up front

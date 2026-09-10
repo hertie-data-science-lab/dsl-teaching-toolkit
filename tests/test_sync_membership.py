@@ -347,3 +347,44 @@ def test_a_read_that_failed_still_reds_the_run(monkeypatch, capsys):
     _one_cohort(monkeypatch, roster=roster_sync)
     assert sync_membership.sync("Course", cohort_org="A") == 1
     assert "cohort A failed to sync" in capsys.readouterr().err
+
+
+def test_a_closed_out_cohort_is_not_reconciled(monkeypatch):
+    # Its org is read-only: every team grant and roster write would 403 nightly. The
+    # registry still lists it (that is what authorises a dispatch); the sync skips it.
+    monkeypatch.setattr(sync_membership, "discover_cohorts", lambda org: ["A", "B"])
+    monkeypatch.setattr(sync_membership, "discover_content_repos", lambda org: [])
+    monkeypatch.setattr(sync_membership, "discover_assignments", lambda org: [])
+    monkeypatch.setattr(sync_membership, "cohort_is_live", lambda org: org != "A")
+    admins: list[list[str]] = []
+    monkeypatch.setattr(
+        sync_membership.sync_faculty,
+        "sync_course_admins",
+        lambda course, cohorts, **k: admins.append(list(cohorts)) or 0,
+    )
+    processed: list[str] = []
+    monkeypatch.setattr(
+        sync_membership.sync_roster,
+        "sync",
+        lambda org, **k: processed.append(org) or 0,
+    )
+    monkeypatch.setattr(sync_membership.sync_teams, "sync", lambda org, **k: 0)
+    monkeypatch.setattr(
+        sync_membership.sync_faculty, "sync_cohort_instructors", lambda *a, **k: 0
+    )
+    assert sync_membership.sync("Course", all_cohorts=True) == 0
+    assert (processed, admins) == (["B"], [["B"]])
+
+
+def test_a_dispatch_from_a_closed_out_cohort_reconciles_nothing(monkeypatch):
+    monkeypatch.setattr(sync_membership, "discover_cohorts", lambda org: ["A"])
+    monkeypatch.setattr(sync_membership, "discover_content_repos", lambda org: [])
+    monkeypatch.setattr(sync_membership, "discover_assignments", lambda org: [])
+    monkeypatch.setattr(sync_membership, "cohort_is_live", lambda org: False)
+    _stub_course_admins(monkeypatch)
+
+    def boom(org, **k):
+        raise AssertionError("a frozen cohort must not be reconciled")
+
+    monkeypatch.setattr(sync_membership.sync_roster, "sync", boom)
+    assert sync_membership.sync("Course", cohort_org="A") == 0

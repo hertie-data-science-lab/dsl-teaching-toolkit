@@ -1014,19 +1014,64 @@ on:
 """
 
 
+def render_propagate_cohort(cohort_orgs: list[str]) -> str:
+    """Carry a cohort's edits to released material back into the course org."""
+    return f"""name: Propagate cohort edits
+
+# A release copies course org -> cohort, and lands on `upstream` so that an instructor's
+# correction typed into the cohort repo survives the next release. This is the way back:
+# for every path this cohort has already been released, it copies what the cohort has NOW
+# over the course org's own copy, on a branch `from-<cohort-org>`, and opens ONE pull
+# request per source repo. Faculty merge it, cherry-pick from it, or close it.
+# DELETIONS ARE NOT PROPAGATED - a file the cohort dropped is named in the pull request
+# and left where it is.
+# The branch is cut fresh from the source repo's default branch and force-pushed on every
+# run, so each run proposes what the cohort has then; the pull request is reused.
+# Dry run first; it clones nothing and prints the path pairs.
+# Also runs as the first step of Archive cohort - see docs/10.
+
+on:
+  workflow_dispatch:
+    inputs:
+{_cohort_dropdown(cohort_orgs)}
+      dry_run:
+        description: "Preview the paths - clone nothing, push nothing, open nothing"
+        type: boolean
+        default: true
+
+{_concurrency("propagate-cohort")}
+{_PERMISSIONS_JOBS}{_CHECK_TEAM}
+  propagate-cohort:
+{_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Propagate cohort edits
+        env:
+          GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
+          COURSE_ORG: ${{{{ github.repository_owner }}}}
+          COHORT_ORG: ${{{{ inputs.cohort_org }}}}
+          DRY_RUN: ${{{{ inputs.dry_run }}}}
+        run: |
+          args=(--course-org "$COURSE_ORG" --cohort-org "$COHORT_ORG")
+{_DRY_RUN_GATE}
+          python3 -m dsl_course.propagate "${{args[@]}}"
+"""
+
+
 def render_archive_cohort(cohort_orgs: list[str]) -> str:
-    """Close a finished cohort out: freeze the work, revoke the students, seal the record."""
+    """Close a finished cohort out: carry its edits back, freeze every repo, seal it."""
     return f"""name: Archive cohort
 
-# End of term, once, after the last grades have gone out. Revokes each student's direct
-# grant on the submission repos and gradebooks named after them, ARCHIVES those repos,
-# archives `welcome` so a finished term cannot still be joined, writes the teardown record
-# into the cohort's private classroom-config and archives that last - which is also what
-# tells the nightly refresh this cohort is finished.
-# NOTHING IS DELETED. Archiving is GitHub's reversible read-only freeze, and un-archiving a
-# repo from its own Settings page brings it back exactly as it was.
-# `dry_run` defaults to true and prints counts only. A real run refuses unless the cohort's
-# schedule.yml declares a `semester_end` that has passed; `force` says so by hand.
+# End of term. The scheduler runs this by itself on the cohort's own `archive.date`
+# (schedule.yml - default: semester_end + 60 days); this button is for closing one out
+# early. It offers the cohort's edits back to this org as a pull request first, closes the
+# toolkit's open notices, syncs the website one last time, then ARCHIVES every repo in the
+# cohort org - students' work, `welcome` so a finished term cannot still be joined, the
+# released materials, the website, `.github` - writes the teardown record into the private
+# classroom-config and archives that last, which is what tells every nightly sweep the
+# cohort is finished.
+# NOBODY IS REVOKED and NOTHING IS DELETED: an archived repo is read-only for everyone, so
+# students keep read access to their own work, and un-archiving a repo from its own
+# Settings page brings it back exactly as it was. Membership and teams are untouched.
+# `dry_run` defaults to true and prints counts only. A real run refuses until the cohort's
+# archive date has arrived; `force` says so by hand.
 # A run that dies half way is resumed by running it again - see docs/10.
 
 on:
@@ -1034,11 +1079,11 @@ on:
     inputs:
 {_cohort_dropdown(cohort_orgs)}
       dry_run:
-        description: "Preview the teardown - freeze nothing, revoke nothing"
+        description: "Preview the teardown - freeze nothing, open no pull request"
         type: boolean
         default: true
       force:
-        description: "Close out even though the term is not over"
+        description: "Close out before the cohort's archive date"
         type: boolean
         default: false
 
@@ -1048,11 +1093,12 @@ on:
 {_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Archive cohort
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
+          COURSE_ORG: ${{{{ github.repository_owner }}}}
           COHORT_ORG: ${{{{ inputs.cohort_org }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
           FORCE: ${{{{ inputs.force }}}}
         run: |
-          args=(--cohort-org "$COHORT_ORG")
+          args=(--course-org "$COURSE_ORG" --cohort-org "$COHORT_ORG")
 {_DRY_RUN_GATE}
           [ "$FORCE" = "true" ] && args+=(--force)
           python3 -m dsl_course.teardown "${{args[@]}}"
