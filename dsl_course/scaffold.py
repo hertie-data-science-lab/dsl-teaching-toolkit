@@ -1489,10 +1489,19 @@ def main() -> int:
     ps = sub.add_parser("site")
     ps.add_argument("--org", required=True)
     args = parser.parse_args()
+    # The `--format` box, refused here - before the repo exists, so a mistyped answer
+    # costs a re-run and nothing else. Caught on its OWN, the way `deploy.main` catches
+    # `parse_path_pairs`: a ValueError from anywhere deeper is a bug and still earns its
+    # traceback, rather than being printed as though a faculty member had mistyped a box.
+    if args.cmd == "assignment":
+        try:
+            formats = parse_formats(args.formats)
+        except ValueError as exc:
+            log_err(str(exc))
+            return 1
     # scaffold_materials equips the new repo's Release workflows, which reads the cohort
-    # registry + assignment list; a read helper that couldn't reach the API raises, and a
-    # `--format` box nobody can act on refuses here, before the repo exists. In an Actions
-    # log a one-line error beats a traceback either way.
+    # registry + assignment list; a read helper that couldn't reach the API raises, and in
+    # an Actions log a one-line error beats a traceback.
     try:
         if args.cmd == "materials":
             return scaffold_materials(args.org, args.tag, args.copy_from)
@@ -1502,7 +1511,7 @@ def main() -> int:
             args.org,
             args.number,
             args.tag,
-            parse_formats(args.formats),
+            formats,
             args.kind,
             name=args.name,
             team_formation=args.team_formation,
@@ -1510,7 +1519,7 @@ def main() -> int:
             autograde=args.autograde == "true",
             copy_from=args.copy_from,
         )
-    except (RuntimeError, ValueError) as exc:
+    except RuntimeError as exc:
         log_err(str(exc))
         return 1
 
