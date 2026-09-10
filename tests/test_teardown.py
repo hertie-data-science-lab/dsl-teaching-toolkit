@@ -86,6 +86,11 @@ def org(monkeypatch):
         "close_issues_titled",
         lambda repo, title, comment=None: (calls.append(("close", title)), 0)[1],
     )
+    # The archive notices standing in the repo are read, not derived from the schedule:
+    # the date in a title is whatever `archive.date` said when the notice was opened.
+    monkeypatch.setattr(
+        teardown, "open_titles", lambda repo: {teardown.archive_notice_title(DUE)}
+    )
     monkeypatch.setattr(
         teardown.site,
         "sync_site",
@@ -226,6 +231,37 @@ def test_every_notice_the_toolkit_can_have_open_is_closed(org):
     # The cadence alarm is the one writer here that is not a digest, and the sweep that
     # would have closed it never runs on a closed-out cohort again.
     assert cadence.LATE_TITLE in closed
+
+
+def test_a_notice_left_by_an_earlier_archive_date_is_closed_too(org, monkeypatch):
+    # `archive.date` can be moved after a notice is open, and moving it opens a notice
+    # about the new date rather than editing the old one - so both are standing on the
+    # day, and the one nothing closes would be sealed into the frozen repo for ever.
+    moved = teardown.archive_notice_title(date(2026, 1, 8))
+    asked = "Cohort archives on which day, exactly?"
+    monkeypatch.setattr(
+        teardown,
+        "open_titles",
+        lambda repo: {moved, teardown.archive_notice_title(DUE), asked},
+    )
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 0
+    closed = {t for kind, t in org if kind == "close"}
+    assert {moved, teardown.archive_notice_title(DUE)} <= closed
+    # An instructor's own issue quoting the phrase is not one of ours to close.
+    assert asked not in closed
+
+
+def test_an_unreadable_issue_listing_still_closes_the_titles_we_know(org, monkeypatch):
+    # The listing is the only way to find a notice for a date the schedule no longer
+    # names; the digests are named in the source and are closed either way.
+    def boom(repo):
+        raise RuntimeError("could not list issues in " + repo)
+
+    monkeypatch.setattr(teardown, "open_titles", boom)
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 1
+    closed = {t for kind, t in org if kind == "close"}
+    assert {d.title for d in config_digest.COHORT_DIGESTS} <= closed
+    assert ("archive", "classroom-config") in org
 
 
 def test_a_notice_that_will_not_close_still_lets_the_cohort_seal(org, monkeypatch):

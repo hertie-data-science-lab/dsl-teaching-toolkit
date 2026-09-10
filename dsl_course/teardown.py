@@ -63,7 +63,7 @@ from .discovery import (
 )
 from .gh_contents import get_file_content, put_file, read_csv
 from .grades import COHORT_CSV_NAME
-from .issues import close_issues_titled
+from .issues import close_issues_titled, open_titles
 from .log import log, log_err, log_ok, log_person, log_step
 from .repos import archive_repo
 
@@ -103,6 +103,12 @@ _CLOSING_COMMENT = (
 )
 
 
+# What every archive notice's title begins with, whatever date it names. The date is what
+# makes the two ends able to spell one title identically; the prefix is what makes the
+# ones for OTHER dates findable when this closes the cohort out.
+ARCHIVE_NOTICE_PREFIX = "Cohort archives on "
+
+
 def archive_notice_title(when: date) -> str:
     """The title of the "this cohort is about to freeze" issue.
 
@@ -110,7 +116,23 @@ def archive_notice_title(when: date) -> str:
     identically - `issues` addresses an issue by its exact title - and teardown is the end
     that can never be skipped. The date is in the title so that moving `archive.date` opens
     a notice about the new one rather than silently editing the old one's body."""
-    return f"Cohort archives on {when}"
+    return f"{ARCHIVE_NOTICE_PREFIX}{when}"
+
+
+def _is_archive_notice(title: str) -> bool:
+    """Whether an open issue's title is one of this toolkit's archive notices.
+
+    The prefix AND a date that parses, rather than the prefix alone: `issues` matches by
+    exact title precisely so that an issue a human filed quoting one is never adopted, and
+    a prefix match on its own would close "Cohort archives on the last day of what?"
+    written by an instructor. Nothing this toolkit opens spells the date any other way."""
+    if not title.startswith(ARCHIVE_NOTICE_PREFIX):
+        return False
+    try:
+        date.fromisoformat(title[len(ARCHIVE_NOTICE_PREFIX) :])
+    except ValueError:
+        return False
+    return True
 
 
 class Closed(NamedTuple):
@@ -263,7 +285,7 @@ def _carry_back(course_org: str, cohort_org: str, dry_run: bool) -> tuple[str, i
     return ", ".join(done.urls), 0
 
 
-def _close_notices(cohort_org: str, sched: schedule.Schedule, dry_run: bool) -> int:
+def _close_notices(cohort_org: str, dry_run: bool) -> int:
     """Step 1: close the toolkit's own open issues in `classroom-config`.
 
     Every one of them asks somebody to go and fix a file in a repo that is about to be
@@ -275,19 +297,34 @@ def _close_notices(cohort_org: str, sched: schedule.Schedule, dry_run: bool) -> 
     digests, the schedule's own source digest, the cadence alarm and the archive notice -
     those, and nothing else, are what write here (`cadence.report_cohort` is the one that
     is not a digest). A title missed here stands open inside a frozen repo for ever, since
-    the sweep that would have closed it never runs on a closed-out cohort again."""
+    the sweep that would have closed it never runs on a closed-out cohort again.
+
+    The archive notice is the one whose title MOVES: it names a date, and `archive.date`
+    can be moved after one is open, which opens a second notice rather than editing the
+    first (`archive_notice_title` says why). So every dated notice standing in the repo is
+    closed, not just the one for today's date - the earlier one would otherwise be sealed
+    in, open, contradicting the record."""
+    repo = f"{cohort_org}/{CONFIG_REPO}"
     titles = [d.title for d in config_digest.COHORT_DIGESTS] + [
         source_digest.TITLE,
         cadence.LATE_TITLE,
     ]
-    if sched.archive_date:
-        titles.append(archive_notice_title(sched.archive_date))
     if dry_run:
-        log(f"    DRY-RUN close any of {len(titles)} toolkit notice(s) still open")
+        log(
+            f"    DRY-RUN close any of {len(titles)} toolkit notice(s) still open, and "
+            f"every `{ARCHIVE_NOTICE_PREFIX.strip()} <date>` notice with them"
+        )
         return 0
-    return sum(
-        close_issues_titled(f"{cohort_org}/{CONFIG_REPO}", title, _CLOSING_COMMENT)
-        for title in titles
+    errors = 0
+    try:
+        titles += sorted(t for t in open_titles(repo) if _is_archive_notice(t))
+    except RuntimeError as exc:
+        # A listing that could not be read is not "no notice is open", and the rest of
+        # them are still worth closing while the repo takes writes.
+        log_err(str(exc))
+        errors = 1
+    return errors + sum(
+        close_issues_titled(repo, title, _CLOSING_COMMENT) for title in titles
     )
 
 
@@ -388,7 +425,7 @@ def close_out(
     registrar = registrar_summary(cohort_org)
     log(f"  registrar export: {registrar}")
     propagated, errors = _carry_back(course_org, cohort_org, dry_run)
-    errors += _close_notices(cohort_org, sched, dry_run)
+    errors += _close_notices(cohort_org, dry_run)
     errors += _final_sync(course_org, cohort_org, dry_run)
 
     closed = _freeze(cohort_org, listing, dry_run)
