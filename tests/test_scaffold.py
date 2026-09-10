@@ -721,6 +721,27 @@ def test_a_copied_materials_repo_is_re_seeded_with_the_system_files_only(origins
     }
 
 
+def test_a_materials_copy_lands_before_the_first_api_write(origins, fake, monkeypatch):
+    # The ordering IS the guard, so it is pinned rather than left to a comment. The
+    # Contents API opens `main` with a root commit of its own on a repo that has none,
+    # and the copy's push is --atomic: written first, it would reject the copy whole and
+    # leave a green-looking repo holding two toolkit files and none of the year's
+    # materials. Nothing else in the suite can see this - the recorder's writes never
+    # reach the bare repo the copy pushes into, so the two never collide.
+    origins.commit("course-materials-f2025", {"README.md": "# 2025\n"})
+    seeded = scaffold.refresh_materials_system_files
+    already: list[list[str]] = []
+
+    def spy(org, repo):
+        already.append(origins.branches(repo))
+        return seeded(org, repo)
+
+    monkeypatch.setattr(scaffold, "refresh_materials_system_files", spy)
+
+    assert scaffold.scaffold_materials("Org", "f2026", "course-materials-f2025") == 0
+    assert already == [["main"]]
+
+
 def test_a_materials_copy_that_could_not_be_cloned_reds_the_scaffold(
     origins, monkeypatch, capsys
 ):
