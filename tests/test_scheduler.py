@@ -30,6 +30,7 @@ from dsl_course import (
     source_digest,
 )
 from dsl_course import collect as collect_mod
+from dsl_course import faults as faults_mod
 from dsl_course import issues as issues_mod
 from dsl_course.faults import ConfigFault, Unusable
 from dsl_course.grades import GradingSpec
@@ -3260,4 +3261,8 @@ def test_a_cohort_with_no_archive_date_earns_an_advisory_in_its_own_digest(monke
     (fault,) = scheduler._no_archive_date(Schedule())
     assert "ever archive it" in fault.what
     assert fault.fires is None and fault.file == "schedule.yml"
+    # And it stays a LINE. An undated fault sits at the notify bar by default, so without
+    # the cap this would be mailed to the teaching team and re-mailed by the digest's age
+    # ladder every term, about a cohort whose term end nobody has typed yet.
+    assert fault.severity(WHEN) < faults_mod.NOTIFY_FROM
     assert scheduler._no_archive_date(Schedule(archive_date=ARCHIVES)) == []

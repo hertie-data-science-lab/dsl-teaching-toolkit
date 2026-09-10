@@ -104,7 +104,7 @@ from .collect import (
 )
 from .course import COURSE_ADMIN_TEAM
 from .deploy import deploy_many
-from .faults import ConfigFault, Unusable
+from .faults import ConfigFault, Severity, Unusable
 from .grades import (
     cohort_sheet_faults,
     cutoff_at,
@@ -880,7 +880,14 @@ def _no_archive_date(sched: schedule.Schedule) -> list[ConfigFault]:
     what is wrong with it. Raised here rather than by the parser, because a term with no
     dates yet is a perfectly ordinary August and must not fail `Validate schedule`; it is
     the unattended tick, term after term, that has standing to point out that this cohort
-    will still be live and joinable years from now."""
+    will still be live and joinable years from now.
+
+    Capped at ADVISORY, which is what keeps it a line in the digest issue rather than
+    email. An undated fault otherwise sits at WARNING - the notify bar itself
+    (`faults.NOTIFY_FROM`) - so this would be routed, mailed to the teaching team, and
+    then re-mailed by the digest's age ladder every term for ever, about a cohort whose
+    only sin is that nobody has typed a term end yet. The `.releaseignore` case caps
+    itself for the same reason: listed, never anybody's inbox."""
     if sched.archive_date is not None:
         return []
     return [
@@ -891,6 +898,7 @@ def _no_archive_date(sched: schedule.Schedule) -> list[ConfigFault]:
             "ends",
             field="semester_end",
             file=schedule.SCHEDULE_PATH,
+            ceiling=Severity.ADVISORY,
             fix_text=(
                 "add a `semester_end:`, which archives the cohort 60 days later, or an "
                 "`archive:` block with a `date:` of its own"
