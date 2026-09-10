@@ -1091,6 +1091,7 @@ on:
           COHORT_ORG: ${{{{ inputs.cohort_org }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
         run: |
+          gh auth setup-git
           args=(--course-org "$COURSE_ORG" --cohort-org "$COHORT_ORG")
 {_DRY_RUN_GATE}
           python3 -m dsl_course.propagate "${{args[@]}}"
@@ -1142,6 +1143,7 @@ on:
           DRY_RUN: ${{{{ inputs.dry_run }}}}
           FORCE: ${{{{ inputs.force }}}}
         run: |
+          gh auth setup-git
           args=(--course-org "$COURSE_ORG" --cohort-org "$COHORT_ORG")
 {_DRY_RUN_GATE}
           [ "$FORCE" = "true" ] && args+=(--force)
