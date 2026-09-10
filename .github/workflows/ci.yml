@@ -73,12 +73,14 @@ jobs:
       - name: Check the pages that can fail by rendering nothing
         # The recursive All Materials index and the schedule both empty themselves rather
         # than erroring, so assert a leaf from the fixture's deepest level and one row of
-        # each kind actually reached the HTML.
+        # each kind actually reached the HTML. "Handed in outside GitHub" is the fixture's
+        # `submit_via: external` assignment, whose wording is one half of an `{% if %}` -
+        # a branch that renders nothing is the same silent failure.
         run: |
           cd "$RUNNER_TEMP/build"
           missing=0
           for needle in \
-            "further-notes.pdf" \
+            "further-notes.pdf" "Handed in outside GitHub" \
             "table-row-lecture" "table-row-lab" "table-row-assignment" \
             "table-row-due" "table-row-exam" "table-row-special_event" \
             "table-row-term_date"; do

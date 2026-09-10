@@ -14,9 +14,9 @@ not fetch - are vendored, under `base/`.
 
 The states it covers are the ones that render DIFFERENTLY, one of each: a released
 session, an unreleased one, a lab, a session whose readings are still to come, a
-handed-out assignment and a pending one, a dated exam and a TBC one, a special event,
-the two term boundaries, the archive row inside its notice window, and an All Materials
-index nested three directories deep.
+handed-out assignment, a pending one, one handed in off GitHub, a dated exam and a TBC
+one, a special event, the two term boundaries, the archive row inside its notice window,
+and an All Materials index nested three directories deep.
 
     python3 tests/fixtures/site/build_fixture.py <dest>
 """
@@ -39,6 +39,9 @@ BERLIN = ZoneInfo("Europe/Berlin")
 COURSE_ORG = "hertie-dsl-fixture-course"
 COHORT_ORG = "hertie-dsl-fixture-f2026"
 MATERIALS = "course-materials"
+# Handed in off GitHub (`submit_via: external`), so its page and its due row must not tell
+# the cohort to push to `main`.
+EXTERNAL = "assignment-3-f2026"
 # The moment the fixture is rendered "at", so a handout pin is in the past or the future
 # by construction rather than by when CI happens to run.
 NOW = datetime(2026, 10, 1, 12, 0, tzinfo=BERLIN)
@@ -103,11 +106,14 @@ def _repo_tree(_org: str, repo: str) -> tuple[str, tuple[str, ...]]:
     return "main", TREE if repo == MATERIALS else ()
 
 
-def _grading_spec(_org: str, _repo: str):
-    """The assignment's own definition, which names the repo shape a student looks for.
-    The fixture's assignment is individual, so the empty file's defaults are exactly
-    right - it is stubbed only because the read would otherwise go to GitHub."""
-    return grades.parse_grading_spec("")
+def _grading_spec(_org: str, repo: str):
+    """The assignment's own definition, which names the repo shape a student looks for and
+    says whether the work is handed in on GitHub at all. The fixture's assignments are
+    individual, so the empty file's defaults are otherwise exactly right - it is stubbed
+    only because the read would otherwise go to GitHub."""
+    return grades.parse_grading_spec(
+        "submit_via: external\n" if repo == EXTERNAL else ""
+    )
 
 
 def _get_file_content(_org: str, _repo: str, path: str) -> str | None:
@@ -169,7 +175,8 @@ def _lectures() -> dict[str, str]:
 
 
 def _assignments() -> dict[str, str]:
-    """One handed out (repo link, brief, README-derived name) and one still pending."""
+    """One handed out (repo link, brief, README-derived name), one still pending, and one
+    handed in off GitHub - the three ways an assignment says where the work goes."""
     return {
         "01-assignment-1.md": site._assignment_entry(
             COURSE_ORG,
@@ -186,6 +193,15 @@ def _assignments() -> dict[str, str]:
             "assignment-2-f2026",
             datetime(2026, 11, 24, 23, 59, tzinfo=BERLIN),
             handout=datetime(2026, 11, 3, 9, 0, tzinfo=BERLIN),
+            now=NOW,
+        ),
+        "03-assignment-3.md": site._assignment_entry(
+            COURSE_ORG,
+            COHORT_ORG,
+            EXTERNAL,
+            datetime(2026, 12, 8, 23, 59, tzinfo=BERLIN),
+            handout=datetime(2026, 9, 30, 9, 0, tzinfo=BERLIN),
+            handed_out=frozenset({"assignment-3"}),
             now=NOW,
         ),
     }

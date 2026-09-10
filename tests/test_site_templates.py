@@ -382,6 +382,7 @@ def test_every_data_file_a_template_reads_is_one_the_site_has(rel, site_data):
         "announce",
         "repo_url",
         "repo_name",
+        "submit_external",
         "due_event",
     ],
 )
@@ -397,6 +398,36 @@ def test_every_flag_the_sync_writes_is_read_by_a_template(flag, written_fields):
         for m in re.findall(r'map:\s*"([A-Za-z0-9_]+)"', text)
     }
     assert flag in read, f"nothing renders {flag}"
+
+
+# The `{% if ...submit_external %}...{% else %}...{% endif %}` either template wraps its
+# where-to-submit wording in.
+_EXTERNAL_BRANCH = re.compile(
+    r"{%-?\s*if\s+[\w.]*\bsubmit_external\s*-?%}(?P<external>.*?)"
+    r"{%-?\s*else\s*-?%}(?P<github>.*?){%-?\s*endif\s*-?%}",
+    re.DOTALL,
+)
+
+
+@pytest.mark.parametrize(
+    "rel", ["_layouts/assignment.html", "_includes/schedule_row_due.html"]
+)
+def test_only_a_github_assignment_is_told_to_submit_by_pushing(rel):
+    # The two places that say where the work goes. Both printed the push sentence off
+    # `repo_url` alone, so an assignment handed in on Moodle - whose repo carries the
+    # brief and nothing else - told the cohort to push to `main`. The state is the
+    # assignment's own definition's to declare, so every word of the push wording has to
+    # sit behind the flag that carries it.
+    body = _strip_comments(_templates()[rel])
+    halves = [(m["external"], m["github"]) for m in _EXTERNAL_BRANCH.finditer(body)]
+    assert halves, f"{rel} does not branch on submit_external"
+    for external, _github in halves:
+        assert "outside GitHub" in external, f"{rel} says nothing in the external case"
+    for phrase in ("push", "Submit via"):
+        behind = sum(github.count(phrase) for _external, github in halves)
+        assert body.count(phrase) == behind, (
+            f"{rel} says {phrase!r} outside the submit_external branch"
+        )
 
 
 # ---------------------------------------------------------------------------
