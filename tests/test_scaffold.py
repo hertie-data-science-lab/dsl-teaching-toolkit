@@ -730,6 +730,66 @@ def test_a_format_box_the_scaffold_cannot_act_on_creates_no_repo(
     assert "ipynb, py, rmd, qmd, latex" in line and "none on its own" in line
 
 
+@pytest.mark.parametrize(
+    "answer, autograde",
+    [("rmd,qmd", False), ("rmd,qmd", True), ("ipynb,py", True)],
+    ids=["rmd-qmd", "rmd-qmd-autograded", "ipynb-py-autograded"],
+)
+def test_two_starters_that_would_overwrite_each_other_are_refused(answer, autograde):
+    # Never a clash on `main` - every format has its own extension. It is the file a
+    # GRADER ends up reading: `.Rmd` and `.qmd` both build starter.html, and the
+    # autograded cutoff nbconverts the submitted notebook over starter.py. The loser is
+    # silently the half of the submission nobody marks, so the box refuses the pair
+    # rather than the brief warning about it.
+    with pytest.raises(ValueError, match="ask for one of the two"):
+        scaffold.parse_formats(answer, autograde)
+
+
+def test_a_colliding_format_box_creates_no_repo(fake, monkeypatch, capsys):
+    # Refused at the same edge as a mistyped one, and for the same reason: a template
+    # deleted and re-made costs more than a re-run of the button.
+    made = _descriptions(monkeypatch)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "scaffold",
+            "assignment",
+            "--org",
+            "Org",
+            "--number",
+            "1",
+            "--tag",
+            "f2026",
+            "--format",
+            "ipynb,py",
+            "--autograde",
+            "true",
+        ],
+    )
+
+    assert scaffold.main() == 1
+
+    assert made == {} and fake.writes == []
+    (line,) = capsys.readouterr().err.splitlines()
+    assert "only the notebook would be marked" in line
+
+
+def test_a_notebook_beside_a_py_starter_is_fine_without_autograding(fake, monkeypatch):
+    # Nothing converts anything when the cutoff runs no hidden tests, so the pair is an
+    # ordinary two-language handout and both starters are seeded.
+    _clone_ok(monkeypatch, _git_ok)
+
+    assert scaffold.parse_formats("ipynb,py") == ["ipynb", "py"]
+    assert scaffold.scaffold_assignment("Org", "1", "f2026", ["ipynb", "py"]) == 0
+
+    assert fake.written("assignment-1-f2026") == {
+        "README.md",
+        "starter.ipynb",
+        "starter.py",
+    }
+
+
 def test_rerun_never_overwrites_an_authored_assignment_starter(fake, monkeypatch):
     _clone_ok(monkeypatch, _git_ok)
     authored = '"""Assignment 1."""\n\n\ndef solve():\n    return real_work()\n'

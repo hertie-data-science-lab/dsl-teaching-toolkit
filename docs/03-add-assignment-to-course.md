@@ -25,7 +25,8 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
         no `solution` branch is refused.
       - `format` = which starter file(s) to seed, comma-separated: `ipynb`, `py`, `rmd`,
         `qmd`, `latex` - or `none` on its own for the brief and nothing else. Picks the
-        starters, and nothing else (see [Formats](#formats-and-what-students-hand-in)).
+        starters, and nothing else. Two that would land on one graded filename are
+        refused (see [Formats](#formats-and-what-students-hand-in)).
       - `type` (`individual` or `group` - one repo per student vs per team)
       - `team_formation` (group only: `self_select` = students use the welcome repo's
         **Join team** form; `assigned` = you write `classroom-config/teams.csv`)
@@ -85,11 +86,12 @@ knits, a `.qmd` that renders, a `.tex` that compiles, a notebook that runs. Name
 > **The graded artefact is the built one** - a grader reads the rendered document and
 > checks it against the source. The starter and the seeded brief both say so.
 
-Two starters can want the same filename, and the second one wins. `rmd` and `qmd` both
-build `starter.html`; and with `autograde` on, the cutoff converts a submitted
-`starter.ipynb` to `starter.py` before the hidden tests import it, so on `ipynb,py` the
-notebook is what gets marked. Combine formats that build different things, or say in the
-brief which one is marked.
+Two starters may not share the file a grader reads, and the button refuses the pairs that
+would: `rmd,qmd`, because both build `starter.html`; and `ipynb,py` **when `autograde` is
+on**, because the cutoff converts the submitted `starter.ipynb` to `starter.py` before the
+hidden tests import it, over whatever the student wrote there. `ipynb,py` on a hand-marked
+assignment is fine - nothing converts anything - and so is every other combination. The
+refusal comes before the repo is created, so it costs a re-run of the button.
 
 The `.Rmd` and `.qmd` stubs seed an `{r}` chunk; swap it for `{python}` if your course
 works in Python and nothing else changes.

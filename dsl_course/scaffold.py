@@ -992,13 +992,15 @@ def _seed_template_workflows(org: str, repo: str) -> int:
     )
 
 
-def parse_formats(answer: str) -> list[str]:
+def parse_formats(answer: str, autograde: bool = False) -> list[str]:
     """The `--format` answer as the starters to seed, in the order they were named.
 
     The system edge: one comma-separated box, typed by hand, becomes the list the rest of
     the module works in. Duplicates collapse - a starter is seeded once - and `none`
     stands alone, because guessing which half of `ipynb,none` was meant is how a template
     ends up with a file its brief never mentions.
+
+    `autograde` is here because one of the refusals depends on it: see `_collision`.
 
     Raises ValueError, which the CLI prints as one line before the repo is created, so a
     mistyped format costs a re-run and nothing else."""
@@ -1019,7 +1021,35 @@ def parse_formats(answer: str) -> list[str]:
                 "beside one"
             )
         return []
+    if clash := _collision(named, autograde):
+        raise ValueError(f"--format: {clash} - ask for one of the two, not both")
     return named
+
+
+def _collision(named: list[str], autograde: bool) -> str:
+    """Why two of these starters cannot be seeded side by side, or "" when they can.
+
+    Never a clash on `main`: `_STARTERS` gives every format its own extension. It is the
+    file a GRADER ends up reading that collides, so the loser is silently the half of the
+    submission nobody marks - which is why this is refused at the box rather than warned
+    about in the brief.
+
+    `ipynb` beside `py` is only a clash when the cutoff runs: `collect` nbconverts every
+    submitted notebook to `<stem>.py` before the hidden tests import it, over whatever
+    `starter.py` the student wrote. With no autograding nothing converts anything, and the
+    pair is an ordinary two-language handout."""
+    if "rmd" in named and "qmd" in named:
+        return (
+            "rmd and qmd both build starter.html, so whichever renders last is the only "
+            "one a grader would read"
+        )
+    if autograde and "ipynb" in named and "py" in named:
+        return (
+            "with autograde on, the cutoff converts the submitted starter.ipynb over "
+            "starter.py before the hidden tests import it, so only the notebook would "
+            "be marked"
+        )
+    return ""
 
 
 def _not_a_format(problem: str) -> ValueError:
@@ -1494,7 +1524,7 @@ def main() -> int:
     # traceback, rather than being printed as though a faculty member had mistyped a box.
     if args.cmd == "assignment":
         try:
-            formats = parse_formats(args.formats)
+            formats = parse_formats(args.formats, args.autograde == "true")
         except ValueError as exc:
             log_err(str(exc))
             return 1
