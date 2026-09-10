@@ -128,8 +128,9 @@ def _carried(root: Path, deny: Deny) -> set[str]:
     """Every file under `root` this copy would carry, as posix paths relative to it.
 
     Only used to work out what a propagate is NOT doing: the difference between the two
-    ends is the set of files the cohort no longer has, which the pull request names rather
-    than deletes. Filtered by the same `deny` the copy uses, or a whole-repo propagate
+    ends is the set of files the cohort's copy does not have - deleted there, or never
+    released to it at all - which the pull request names rather than deletes. Filtered by
+    the same `deny` the copy uses, or a whole-repo propagate
     would report the course org's own `.github` as something the cohort had deleted."""
     if root.is_file():
         return {root.name}
@@ -221,8 +222,9 @@ def _body(cohort_org: str, source: Source, branch: str) -> str:
     now holds and the branch is regenerated every run - a body describing a previous run's
     branch is worse than none."""
     kept = (
-        "\n\nThese paths are in this repo but no longer in the cohort's copy. "
-        "**Deletions are not propagated** - they are listed here, not removed:\n"
+        "\n\nThese paths are in this repo but not in the cohort's copy - never released "
+        "there (withheld by a `.releaseignore`, or still an unwritten stub), or deleted "
+        "there. **Not propagated** either way - they are listed here, not removed:\n"
         + "\n".join(f"- `{p}`" for p in source.kept)
         if source.kept
         else ""

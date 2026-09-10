@@ -160,7 +160,10 @@ def test_a_deletion_is_named_in_the_body_and_never_made(world):
     assert world.run().errors == 0
     assert "lectures/01/notes.md" in world.files()
     (call,) = world.pulls.calls
-    assert "Deletions are not propagated" in call["body"]
+    # The wording covers a path the cohort never had either - one a `.releaseignore`
+    # withheld, or a stub that was never released - which is not a deletion at all.
+    assert "not in the cohort's copy" in call["body"]
+    assert "**Not propagated** either way" in call["body"]
     assert "`lectures/01/notes.md`" in call["body"]
 
 
