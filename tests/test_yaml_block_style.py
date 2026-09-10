@@ -192,7 +192,7 @@ SEEDED = {
         kind="group",
         team_formation="assigned",
         submit_via="github",
-        fmt="ipynb",
+        formats=["ipynb"],
         autograde=True,
         defaults={
             "max_team_size": 3,
@@ -206,7 +206,7 @@ SEEDED = {
             kind="individual",
             team_formation="self_select",
             submit_via="external",
-            fmt="none",
+            formats=[],
             autograde=False,
             defaults={},
         )

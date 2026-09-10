@@ -1251,7 +1251,12 @@ def entry_for_repo(sched: Schedule, repo: str) -> tuple[str, AssignmentEntry] | 
     return found[0] if found else None
 
 
-def resolve_target(sched: Schedule, repo: str, slug: str = "") -> tuple[str, str] | str:
+def resolve_target(
+    sched: Schedule,
+    repo: str,
+    slug: str = "",
+    remedy: str = "say which with `slug`",
+) -> tuple[str, str] | str:
     """`(schedule key, cohort-side name)` for the assignment `repo` hands out, or an ERROR
     MESSAGE (a `str`) when the plan names more than one of them and `slug` does not say
     which.
@@ -1269,6 +1274,11 @@ def resolve_target(sched: Schedule, repo: str, slug: str = "") -> tuple[str, str
     keep separate grades, so the handout and the collection must not be free to disagree
     about which of them they are acting on.
 
+    `remedy` is what that refusal tells the reader to do about it, because the answer is
+    the CALLER's: Collect and Patch carry a `slug` box and are told to fill it in, while
+    the handout button has none and is sent to the schedule instead. The predicate lives
+    here either way - one owner, so a caller cannot quietly stop refusing.
+
     A `str` rather than a raise, deliberately: the hourly scheduler calls straight into
     these consumers and has to count one assignment's refusal without abandoning the tick.
     """
@@ -1284,7 +1294,7 @@ def resolve_target(sched: Schedule, repo: str, slug: str = "") -> tuple[str, str
     elif len(found) > 1:
         return (
             f"{repo} is handed out by {len(found)} assignments in this cohort's "
-            f"schedule.yml ({', '.join(s for s, _ in found)}) - say which with `slug`, "
+            f"schedule.yml ({', '.join(s for s, _ in found)}) - {remedy}, "
             f"since they make different repos and keep different grades"
         )
     if not found:

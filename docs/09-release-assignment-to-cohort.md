@@ -28,14 +28,14 @@ Pick the `course_source_repo` - the same field a scheduled handout names in `sch
 - then it creates one **private** `<name>-<handle>` repo per onboarded student/group, with that student as
 collaborator.
 
-Other inputs: 
+Four boxes, in the order you answer them: `course_source_repo`, `cohort_org`, then
 - `include_solution` (**off** by default; also push the template's `solution`
 branch into each student repo). Schedulable instead, as `solution_datetime:` on the
 assignment - see [07](07-schedule-releases.md#releasing-the-model-solution)
-- `type` (`auto` **default** = follow the template's `grading_config.yml`;
-or force `individual` / `group` for this dispatch -
-see [Group or individual?](#group-or-individual))
 - `dry_run` (**off** by default; list the repos that *would* be created).
+
+It asks nothing about the assignment itself: individual or group is the template's own
+`grading_config.yml` - see [Group or individual?](#group-or-individual).
 
 Auditors (`role=auditor`) are skipped. The assignment's brief appears on the cohort site automatically - at hand-out, not before, however you hand out.
 
@@ -51,7 +51,9 @@ assignments:
     handout_datetime: 2026-10-20T14:00
 ```
 
-**Release assignment** can override it for one dispatch: its `type` input takes `individual` or `group`, and the default `auto` follows the template.
+Nothing overrides it: the teams, the grading sheet and the Join-team form are all keyed
+on that declaration, so a handout free to disagree with it would put a cohort's work in
+repos nothing else is looking for. To change the shape, edit `grading_config.yml`.
 
 - `group` = one shared repo per team from `teams.csv` (repo `<slug>-<team>`, every member a collaborator), marked per team in the grading sheet's `teams:` block, with one `adjustment_individual` per member.
 - `individual` = one private repo per onboarded, enrolled student (`<slug>-<handle>`), marked in the sheet's `submissions:` block.

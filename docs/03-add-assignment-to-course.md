@@ -17,22 +17,26 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
       - `assignment_name` = the assignment's name, e.g. `Neural networks from scratch`
       - `assignment_number` = `1`, `2`, etc
       - `semester_tag` = `f/sYYYY`
-      - `format` (`ipynb` / `py` / `rmd` / `qmd` / `latex` / `none`) - picks which starter
-        stub you get, and nothing else (see [Formats](#formats-and-what-students-hand-in)).
+      - `copy_from` (optional): an existing `assignment-*` template to start from instead -
+        `main` and `solution` arrive whole, history included, and nothing is written over
+        them. Every box below it is then ignored, because the copied `grading_config.yml`
+        is this assignment's definition, and the run says so with a link to it. The name
+        and the number are still used: they name the repo and describe it. A source with
+        no `solution` branch is refused.
+      - `format` = which starter file(s) to seed, comma-separated: `ipynb`, `py`, `rmd`,
+        `qmd`, `latex` - or `none` on its own for the brief and nothing else. Picks the
+        starters, and nothing else. Two that would land on one graded filename are
+        refused (see [Formats](#formats-and-what-students-hand-in)).
       - `type` (`individual` or `group` - one repo per student vs per team)
       - `team_formation` (group only: `self_select` = students use the welcome repo's
         **Join team** form; `assigned` = you write `classroom-config/teams.csv`)
-      - `submit_via` (`github`, or `external` for work handed in on Moodle / Kaggle / in
-        class - the repo then carries the brief and the Feedback issue and nothing is ever
-        collected from it)
-      - `autograde` (off by default; on seeds a `tests/` stub and runs it at the cutoff)
-      - `copy_from` (optional): an existing `assignment-*` template to start from instead -
-        `main` and `solution` arrive whole, history included, and nothing is written over
-        them. Only the number and the tag are used after that - they name the repo; the
-        name, `format`, `type`, `team_formation`, `submit_via` and `autograde` are
-        ignored, because the copied `grading_config.yml` is this assignment's definition,
-        and the run says so with a link to it. A source with no `solution` branch is
-        refused.
+      - `submit_via` = where students hand in. `github` = they push to their repo, and the
+        cutoff, the receipts and the late window apply; `external` = handed in elsewhere
+        (Moodle, Kaggle, in class), so the repo only carries the brief and the Feedback
+        issue and nothing is ever collected from it
+      - `autograde` (off by default; on seeds a `tests/` stub on `solution` for you to
+        fill, and each submission's pass count appears on the grading sheet as a first
+        pass for graders - never shown to students)
    - Everything else - the team cap, the late window, the penalty - comes from
      `assignment_defaults:` in the course org's `.github/dsl-course.yml` and is written
      into the assignment's own `grading_config.yml`, where you can revise it per assignment.
@@ -66,8 +70,9 @@ Repeat for each assignment (`number` = 2, 3, …).
 
 ### Formats and what students hand in
 
-Each `format` seeds one starter on `main`, and each one already builds: an `.Rmd` that
-knits, a `.qmd` that renders, a `.tex` that compiles, a notebook that runs.
+Each format seeds one starter on `main`, and each one already builds: an `.Rmd` that
+knits, a `.qmd` that renders, a `.tex` that compiles, a notebook that runs. Name several -
+`ipynb,py` - and each gets its own starter and its own model-answer stub on `solution`.
 
 | `format` | Starter on `main` | What the student commits |
 |---|---|---|
@@ -81,11 +86,19 @@ knits, a `.qmd` that renders, a `.tex` that compiles, a notebook that runs.
 > **The graded artefact is the built one** - a grader reads the rendered document and
 > checks it against the source. The starter and the seeded brief both say so.
 
+Two starters may not share the file a grader reads, and the button refuses the pairs that
+would: `rmd,qmd`, because both build `starter.html`; and `ipynb,py` **when `autograde` is
+on**, because the cutoff converts the submitted `starter.ipynb` to `starter.py` before the
+hidden tests import it, over whatever the student wrote there. `ipynb,py` on a hand-marked
+assignment is fine - nothing converts anything - and so is every other combination. The
+refusal comes before the repo is created, so it costs a re-run of the button.
+
 The `.Rmd` and `.qmd` stubs seed an `{r}` chunk; swap it for `{python}` if your course
 works in Python and nothing else changes.
 
 Grading reads whatever is actually in the repo, so a student who works in a notebook on a
-`py` assignment still grades, and `none` is the raw-repo option.
+`py` assignment still grades, and `none` - which stands alone in the box - is the raw-repo
+option.
 
 ### One notebook, not two: derive the starter
 

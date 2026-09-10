@@ -311,19 +311,39 @@ def test_refresh_re_seeds_itself_nightly_without_a_gate():
     assert "needs" not in workflow_jobs(rendered)["refresh"]
 
 
-def test_provision_type_choice_defaults_to_auto():
-    # Manual dispatch surfaces the individual/group choice, but `auto` (follow
-    # schedule.yml / the template's grading_config.yml) is the default - dispatching without
-    # thinking about it must match what the schedule would have done.
+RELEASE_ASSIGNMENT_INPUTS = [
+    "course_source_repo",
+    "cohort_org",
+    "include_solution",
+    "dry_run",
+]
+
+
+def test_the_hand_out_button_asks_what_where_and_two_switches():
+    # Four boxes, numbered in the order they are answered: GitHub renders them as a flat
+    # list and numbers nothing itself, so the numbering in the descriptions is the only
+    # grouping there is - and it must match the order the boxes are rendered in.
+    inp = workflow_inputs(
+        workflows_render.render_provision(COHORTS_2, ASSIGNMENTS_2, ASSIGNMENTS_2[0])
+    )
+    assert list(inp) == RELEASE_ASSIGNMENT_INPUTS
+    for n, name in enumerate(RELEASE_ASSIGNMENT_INPUTS, start=1):
+        assert inp[name]["description"].startswith(f"{n}. ")
+    # The template it is seeded into is still the one it opens on.
+    assert inp["course_source_repo"]["default"] == ASSIGNMENTS_2[0]
+    assert inp["include_solution"]["default"] is False
+    assert inp["dry_run"]["default"] is False
+
+
+def test_the_hand_out_button_asks_nothing_about_the_assignments_shape():
+    # individual-or-group was a box, and a dispatch could hand out a shape the template
+    # had not declared - one repo per student for an assignment whose teams, sheet and
+    # Join-team form were all keyed per team. The declaration is the only route now.
     rendered = workflows_render.render_provision(
         ["Cohort-f2026"], ["assignment-4-project-f2026"]
     )
-    inp = workflow_inputs(rendered)
-    assert inp["type"]["options"] == ["auto", "individual", "group"]
-    assert inp["type"]["default"] == "auto"
-    step = workflow_jobs(rendered)["provision"]["steps"][-1]
-    assert step["env"]["TYPE"] == "${{ inputs.type }}"
-    assert '--type "$TYPE"' in rendered
+    assert "type" not in workflow_inputs(rendered)
+    assert "--type" not in rendered
 
 
 def test_collect_submissions_refreshes_the_sheet_and_freezes_nothing():
@@ -340,26 +360,30 @@ def test_collect_submissions_refreshes_the_sheet_and_freezes_nothing():
     assert "--deadline" not in rendered
 
 
-@pytest.mark.parametrize(
-    "rendered",
-    [
-        workflows_render.render_provision(["Cohort-f2026"], ["assignment-1-f2026"]),
-        workflows_render.render_collect_submissions(
-            ["Cohort-f2026"], ["assignment-1-f2026"]
-        ),
-    ],
-    ids=["release-assignment", "collect-submissions"],
-)
-def test_the_two_per_assignment_buttons_can_name_which_schedule_entry(rendered):
+def test_a_read_only_button_can_name_which_schedule_entry():
     # Two schedule entries may hand out from one template when each names its own
-    # `cohort_dest_repo`. Both buttons start from the TEMPLATE, so both need a way to say
-    # which of the two - and neither may guess: they make different repos and keep
-    # different marks. Empty (the normal case) passes no flag at all.
+    # `cohort_dest_repo`, and Collect submissions starts from the TEMPLATE - so it needs a
+    # way to say which of the two sheets to refresh. It may say it because refreshing the
+    # wrong sheet costs a re-run; the HANDOUT may not, and has no such box.
+    rendered = workflows_render.render_collect_submissions(
+        ["Cohort-f2026"], ["assignment-1-f2026"]
+    )
     inp = workflow_inputs(rendered)
     assert inp["slug"]["required"] is False and inp["slug"]["default"] == ""
     assert len(inp) <= GITHUB_MAX_DISPATCH_INPUTS
     assert "SLUG: ${{ inputs.slug }}" in rendered
     assert '[ -n "$SLUG" ] && args+=(--slug "$SLUG")' in rendered
+
+
+def test_the_hand_out_button_never_picks_between_two_schedule_entries():
+    # It was a box, and one press of it decided which half of a cohort got repos. The
+    # schedule fires each entry on its own datetime and knows which is which, so an
+    # ambiguous template is refused by the run instead.
+    rendered = workflows_render.render_provision(
+        ["Cohort-f2026"], ["assignment-1-f2026"]
+    )
+    assert "slug" not in workflow_inputs(rendered)
+    assert "--slug" not in rendered
 
 
 def test_archive_cohort_previews_by_default_and_never_deletes():
@@ -879,24 +903,54 @@ NEW_ASSIGNMENT_INPUTS = [
     "assignment_name",
     "assignment_number",
     "semester_tag",
+    "copy_from",
     "format",
     "type",
     "team_formation",
     "submit_via",
     "autograde",
-    "copy_from",
 ]
+
+
+def test_the_boxes_a_copy_ignores_are_not_marked_required():
+    # GitHub renders an asterisk beside every `required: true` label, so boxes 5-9 were
+    # demanding an answer on the same form where box 4 says it ignores them. They all
+    # carry a `default:`, and a choice/string with a default and a boolean are submitted
+    # whether or not anyone touches the form - so the run step still gets all nine.
+    inputs = workflow_inputs(
+        workflows_render.render_new_assignment(["assignment-1-f2025"])
+    )
+    for name in NEW_ASSIGNMENT_INPUTS[:3]:
+        assert inputs[name]["required"] is True  # the three that name the repo
+    assert inputs["copy_from"]["required"] is False
+    for name in NEW_ASSIGNMENT_INPUTS[4:]:
+        assert "required" not in inputs[name], name
+        assert "default" in inputs[name], name
 
 
 def test_new_assignment_button_asks_for_the_whole_assignment():
     # Every one of these but `format` lands verbatim in grading_config.yml, so the answers
     # given here are the ones the handout, the sheet and the Join-team form later obey -
-    # none of them is hand-edited in afterwards.
+    # none of them is hand-edited in afterwards. `format` picks the starters instead, and
+    # is the one box the scaffold parses rather than records.
     rendered = workflows_render.render_new_assignment()
     inputs = workflow_inputs(rendered)
     assert list(inputs) == NEW_ASSIGNMENT_INPUTS
     assert len(inputs) <= GITHUB_MAX_DISPATCH_INPUTS
-    assert inputs["format"]["options"] == list(course.FORMATS)
+    # GitHub renders the boxes in this order and numbers nothing itself, so the numbering
+    # in the descriptions is the only thing that can be wrong about it. `copy_from` is
+    # box 4 and says so: it voids boxes 5-9, and a form is filled in top to bottom.
+    for n, name in enumerate(NEW_ASSIGNMENT_INPUTS, start=1):
+        assert inputs[name]["description"].startswith(f"{n}. ")
+    assert "Boxes 5-9 are then ignored" in inputs["copy_from"]["description"]
+    # Box 5 takes a LIST, so it is free text rather than a dropdown - and every format the
+    # scaffold accepts has to be named in the description, because that is the only place
+    # a faculty member can read the vocabulary off. Asserted as the WHOLE joined list
+    # rather than one member at a time: `py` is a substring of `ipynb`, so a per-member
+    # check passes a description that dropped it.
+    assert "type" not in inputs["format"] and inputs["format"]["default"] == "ipynb"
+    assert ", ".join(course.STARTER_FORMATS) in inputs["format"]["description"]
+    assert course.NO_STARTER in inputs["format"]["description"]
     assert inputs["type"]["options"] == list(course.ASSIGNMENT_TYPES)
     assert inputs["team_formation"]["options"] == list(course.TEAM_FORMATIONS)
     assert inputs["submit_via"]["options"] == list(course.SUBMIT_VIA)
@@ -909,6 +963,7 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
         ("NAME", "assignment_name"),
         ("NUMBER", "assignment_number"),
         ("TAG", "semester_tag"),
+        ("COPY_FROM", "copy_from"),
         ("FORMAT", "format"),
         ("TYPE", "type"),
         ("TEAM_FORMATION", "team_formation"),
