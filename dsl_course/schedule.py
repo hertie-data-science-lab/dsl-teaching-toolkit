@@ -39,6 +39,7 @@ lifecycle, `events` are display-only calendar rows.
     archive:                         # OPTIONAL - and the SWITCH: with no block, nothing
       date: 2027-02-16               # ever freezes this cohort. default: semester_end + 60
       show_on_site: true             # default true: a row on the site's Schedule tab
+      description: We freeze here.   # optional: what that row and the Updates box say
 
 Every field is optional - a cohort with no schedule.yml (or a blank one) behaves exactly
 as before everywhere that reads it (releases are skipped, dates synthesised).
@@ -393,6 +394,11 @@ class Schedule:
     # ARCHIVE_GRACE` - which is what stops a term with no dates freezing off a guess.
     archive_date: date | None = None
     archive_show_on_site: bool = True
+    # What the site's archive row and its Updates box SAY, when the cohort would rather
+    # say it in its own words. None is the ordinary case and leaves `site._archive_entry`
+    # to print its default sentence - which is the one the seeded skeleton quotes, so
+    # faculty can see what they are replacing before they replace it.
+    archive_description: str | None = None
     # Whether the cohort wrote an `archive:` block at all. Only `scheduler._no_archive_date`
     # reads it, to tell "nobody asked for archiving" from "asked, but no date can be
     # derived" - two different things to say, and `archive_date` is None for both.
@@ -1070,14 +1076,14 @@ def _parse_events(raw: object, tz: ZoneInfo, drops: Drops) -> list[Event]:
     return out
 
 
-KNOWN_ARCHIVE = frozenset({"date", "show_on_site"})
+KNOWN_ARCHIVE = frozenset({"date", "description", "show_on_site"})
 
 
 def _parse_archive(
     meta: dict, semester_end: date | None, drops: Drops
-) -> tuple[date | None, bool, bool]:
+) -> tuple[date | None, bool, bool, str | None]:
     """The optional `archive:` block - `(when this cohort freezes, whether the site says
-    so, whether it asked to freeze at all)`.
+    so, whether it asked to freeze at all, what the site says about it)`.
 
     The block IS the switch. A cohort that writes none is never frozen automatically:
     every repository in an org going read-only is far too large a thing to happen off a
@@ -1095,7 +1101,7 @@ def _parse_archive(
     asked, but there is no clock to freeze it against, which `scheduler._no_archive_date`
     says out loud."""
     if "archive" not in meta:
-        return None, True, False
+        return None, True, False, None
     raw = meta["archive"]
     default = semester_end + ARCHIVE_GRACE if semester_end else None
     cost = (
@@ -1104,7 +1110,7 @@ def _parse_archive(
         else "nothing freezes this cohort automatically"
     )
     if raw is None:
-        return default, True, True
+        return default, True, True, None
     if not isinstance(raw, dict):
         _drop(
             drops,
@@ -1113,7 +1119,7 @@ def _parse_archive(
             cost,
             field_name="archive",
         )
-        return default, True, True
+        return default, True, True, None
     lines = take_lines(raw)
     _flag_unknown_keys(
         drops, raw, KNOWN_ARCHIVE, "archive", "that setting is ignored", lines
@@ -1122,7 +1128,32 @@ def _parse_archive(
         _flagged_date(raw, "date", drops, "archive", cost, lines) or default,
         raw.get("show_on_site") is not False,
         True,
+        _archive_description(raw, drops, lines),
     )
+
+
+def _archive_description(raw: dict, drops: Drops, lines: dict[str, int]) -> str | None:
+    """The block's optional `description:` - what the site's archive row SAYS.
+
+    Anything that is not a usable sentence falls back to the default one and is FLAGGED,
+    never raised and never printed: a list or a mapping here would otherwise reach the
+    deployed site as `['a', 'b']`, and a blank string would leave students an archive row
+    with no sentence under it at all. Both are a hand edit that did not take, which is
+    what `dropped` is for."""
+    said = raw.get("description")
+    if said is None:
+        return None
+    if isinstance(said, str) and said.strip():
+        return said
+    _flag_bad_value(
+        drops,
+        "archive",
+        "description",
+        said,
+        "the site's archive row says the default sentence instead",
+        lines,
+    )
+    return None
 
 
 def parse(meta: dict) -> Schedule:
@@ -1159,8 +1190,8 @@ def parse(meta: dict) -> Schedule:
     term_cost = "the site synthesises term dates, shifting every session row"
     semester_start = _flagged_date(meta, "semester_start", drops, "", term_cost)
     semester_end = _flagged_date(meta, "semester_end", drops, "", term_cost)
-    archive_date, archive_show_on_site, archive_declared = _parse_archive(
-        meta, semester_end, drops
+    archive_date, archive_show_on_site, archive_declared, archive_description = (
+        _parse_archive(meta, semester_end, drops)
     )
     return Schedule(
         timezone=str(tz_name or DEFAULT_TZ),
@@ -1175,6 +1206,7 @@ def parse(meta: dict) -> Schedule:
         archive_date=archive_date,
         archive_show_on_site=archive_show_on_site,
         archive_declared=archive_declared,
+        archive_description=archive_description,
         dropped=drops.report,
         faults=drops.faults,
     )

@@ -172,6 +172,33 @@ def test_the_archive_row_is_a_special_event_that_says_what_freezes():
     assert "read-only" in out and "fork or clone anything you want to keep" in out
 
 
+def test_the_cohorts_own_sentence_replaces_the_default_one():
+    # Verbatim: this is the sentence students read, and a cohort that bothered to write
+    # one did not write it to be paraphrased.
+    said = "We freeze on the 16th - your repos stay readable for ever."
+    out = site._archive_entry(date(2027, 2, 16), date(2027, 2, 1), said)
+    assert out.endswith(f"---\n{said}\n")
+    assert "becomes read-only" not in out  # the default is gone, not appended to
+    # And the row itself is unchanged: the description is the BODY, not the row's title.
+    assert 'description: "Cohort archived"' in out
+    assert "date: 2027-02-16T09:00:00" in out
+
+
+def test_a_multi_line_sentence_cannot_split_the_front_matter():
+    # It lands in the body of a Jekyll document, so a value carrying its own `---` would
+    # otherwise cut the page in half. `q` folds it onto one line.
+    out = site._archive_entry(
+        date(2027, 2, 16), date(2027, 2, 1), "Frozen.\n---\nGone."
+    )
+    assert out.count("---\n") == 2
+    assert out.endswith("Frozen. --- Gone.\n")
+
+
+def test_without_a_sentence_of_its_own_the_default_stands():
+    out = site._archive_entry(date(2027, 2, 16), date(2027, 2, 1))
+    assert out.endswith(site.ARCHIVE_SENTENCE.format(when="2027-02-16") + "\n")
+
+
 def test_the_archive_row_only_reaches_the_updates_box_inside_its_window():
     # The box is where a student would actually notice it, and two weeks is long enough
     # to act on. Outside the window the row is still on the schedule, silently.

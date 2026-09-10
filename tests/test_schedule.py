@@ -2360,6 +2360,32 @@ def test_writing_the_block_at_all_turns_archiving_on():
         assert sched.dropped == []
 
 
+def test_the_block_can_say_what_the_site_says():
+    # The row and the Updates box are the two places students read about the freeze, and
+    # a cohort that wants to say it in its own words says it once, here.
+    said = "Everything here goes read-only on the 16th. Grab what you want first."
+    sched = parse({"archive": {"date": "2027-02-16", "description": said}})
+    assert sched.archive_description == said
+    assert sched.dropped == []
+
+
+def test_an_unusable_description_leaves_the_default_sentence_standing():
+    # A list reaching the deployed site as `['a', 'b']`, or a blank string leaving the row
+    # with no sentence under it at all, is a hand edit that did not take - flagged, never
+    # raised, and never printed.
+    for said in (["a", "b"], {"text": "x"}, "", "   ", 7):
+        sched = parse({"semester_end": "2026-12-18", "archive": {"description": said}})
+        assert sched.archive_description is None
+        assert sched.archive_date == date(2026, 12, 18) + schedule.ARCHIVE_GRACE
+        (drop,) = sched.dropped
+        assert drop.startswith("archive.description: unusable value")
+        assert "default sentence" in drop
+
+
+def test_a_block_with_no_description_says_nothing_about_one():
+    assert parse({"archive": {"date": "2027-02-16"}}).archive_description is None
+
+
 def test_a_declared_archive_date_wins_over_the_default():
     sched = parse({"semester_end": "2026-12-18", "archive": {"date": "2027-01-15"}})
     assert sched.archive_date == date(2027, 1, 15)
