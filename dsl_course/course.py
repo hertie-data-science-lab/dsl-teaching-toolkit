@@ -51,6 +51,17 @@ SOLUTION_BRANCH = "solution"
 # spelling, here, or the two would disagree about where a faculty member puts the answer.
 SOLUTION_DIR = "solution"
 
+# The two branches the TOOLKIT owns, as opposed to the ones faculty author. A release lands
+# on `UPSTREAM_BRANCH` in each cohort dest and is merged from there into the branch students
+# read, so a cohort-side edit survives the next release instead of being copied over
+# (`deploy` is its only writer; every reader resolves the default branch). A cohort's own
+# edits are proposed back to the course repo on `<PROPOSAL_BRANCH_PREFIX><cohort-org>`
+# (`propagate`, which regenerates it on every run). Named here rather than re-spelled per
+# module because `scaffold` has to recognise both to leave them behind when it copies a repo
+# forward, and a rename reaching only one side would quietly copy them again.
+UPSTREAM_BRANCH = "upstream"
+PROPOSAL_BRANCH_PREFIX = "from-"
+
 # The account every graded subprocess runs as - the students' notebooks, their `run.sh`,
 # the hidden tests that import their code, the reading-copy export.
 #

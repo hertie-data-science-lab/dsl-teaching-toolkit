@@ -184,6 +184,30 @@ def allow_forking(org: str, name: str) -> bool:
     return False
 
 
+def set_default_branch(org: str, name: str, branch: str) -> bool:
+    """Point the repo's HEAD at `branch`. Idempotent (naming the branch it already opens
+    on is accepted).
+
+    `create_repo`'s POST carries no default_branch field, and a push does not move HEAD -
+    so a repo whose branches all arrived by push opens on whichever one GitHub guessed
+    from them. Nothing else in the toolkit has to say it: the release and propagate commit
+    onto whatever `default_branch` reports. This exists for the copy paths, which build a
+    repo out of another repo's branches and have to carry that repo's default over with
+    them."""
+    code, out = gh(
+        "api",
+        "--method",
+        "PATCH",
+        f"repos/{org}/{name}",
+        "--field",
+        f"default_branch={branch}",
+    )
+    if code == 0:
+        return True
+    log_err(f"could not open {org}/{name} on {branch}: {out[:160]}")
+    return False
+
+
 def default_branch(org: str, name: str, *, fallback: str | None = None) -> str:
     """The repo's default branch.
 

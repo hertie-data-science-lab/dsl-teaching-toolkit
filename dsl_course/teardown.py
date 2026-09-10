@@ -54,8 +54,7 @@ from datetime import date, datetime, timezone
 from typing import NamedTuple
 
 from . import cadence, config_digest, propagate, schedule, site, source_digest
-from .course import CONFIG_REPO, pages_repo
-from .deploy import UPSTREAM_BRANCH
+from .course import CONFIG_REPO, UPSTREAM_BRANCH, pages_repo
 from .discovery import (
     ASSIGNMENT_TEMPLATE_TOPIC,
     classify_repos,

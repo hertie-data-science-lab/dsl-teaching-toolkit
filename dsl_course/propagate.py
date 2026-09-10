@@ -10,7 +10,7 @@ course org, as a pull request. The reverse of `deploy`:
     course/<course_source_repo>/<its default branch>  faculty merge, cherry-pick or close
 
 The course org is the source of truth, and a release copies one way. Since a release lands
-on `upstream` and is MERGED into the branch students read (`deploy.UPSTREAM_BRANCH`), an
+on `upstream` and is MERGED into the branch students read (`course.UPSTREAM_BRANCH`), an
 instructor's correction typed into the cohort repo now survives the next release - but it
 lives only in that cohort, and next year's cohort is cut from the course org. This is what
 carries it home.
@@ -53,8 +53,8 @@ from pathlib import Path
 from typing import NamedTuple
 
 from . import pulls, schedule
-from .course import is_repo_root
-from .deploy import UPSTREAM_BRANCH, _copy_ignore, _resolve_within
+from .course import PROPOSAL_BRANCH_PREFIX, UPSTREAM_BRANCH, is_repo_root
+from .deploy import _copy_ignore, _resolve_within
 from .fs import Deny, copy_tree
 from .ghcli import GIT_ENV, clone, git
 from .log import log, log_err, log_ok, log_step
@@ -70,7 +70,7 @@ def branch_for(cohort_org: str) -> str:
     releases into several at once and each one's edits are a separate conversation with
     faculty. Toolkit-owned: it is regenerated from the default branch on every run, so
     anything committed onto it by hand is lost at the next tick."""
-    return f"from-{cohort_org}"
+    return f"{PROPOSAL_BRANCH_PREFIX}{cohort_org}"
 
 
 def _rel(path: str) -> str:

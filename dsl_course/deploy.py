@@ -43,6 +43,7 @@ from .course import (
     INSTRUCTORS_TEAM,
     SYLLABUS_SAMPLE_FILE,
     SYLLABUS_SESSIONS_FILE,
+    UPSTREAM_BRANCH,
     is_repo_root,
 )
 from .fs import copy_tree, union_deny
@@ -88,16 +89,6 @@ ROOT_RELEASE_EXCLUDED = frozenset(
 WITHHELD_ROOT_STUBS = ("README.md", "SYLLABUS.md")
 
 UNEDITED_README_MARKERS = ("**Replace this placeholder.**", FACULTY_ONLY_HEADING)
-
-# The branch a release actually lands on. What students read is the dest's DEFAULT branch,
-# which the release then `git merge`s this into - so an edit made in the cohort repo is
-# merged with the next release instead of copied over, which is what made every cohort-side
-# fix vanish within the quarter hour. A copy that cannot be merged cleanly stops at a pull
-# request and leaves the default branch exactly as students last saw it.
-#
-# Toolkit-owned and invisible to everything else: `deploy_many` is the only writer, and
-# every reader in the package (site, discovery, status) resolves the default branch.
-UPSTREAM_BRANCH = "upstream"
 
 
 def _warn_withheld_stub(source_org: str, repo: str, path: str) -> None:

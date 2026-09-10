@@ -15,7 +15,16 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dsl_course import derive, gh_contents, ghcli, grades, releaseignore, scaffold
+from dsl_course import (
+    course,
+    derive,
+    gh_contents,
+    ghcli,
+    grades,
+    releaseignore,
+    repos,
+    scaffold,
+)
 
 
 class FakeRepo:
@@ -587,6 +596,389 @@ def test_an_unrelated_feature_solution_branch_does_not_block_the_scaffold(
 
     _clone_ok(monkeypatch, git_fake)
     assert scaffold.scaffold_assignment("Org", "1", "f2026") == 0
+
+
+# ------------------------------------------------------------------- copy_from
+
+# Against real repositories - a bare origin per repo, cloned exactly as the scaffold
+# clones one - because everything copy_from promises is a fact about git: that both
+# branches arrive, that the history comes with them, and that an instructor's own file
+# lands byte for byte. Only `gh` is faked (into a local `git clone`).
+
+_ID = ghcli.GIT_ENV
+
+
+def _git(*args: str) -> str:
+    code, out = ghcli.git(*args)
+    assert code == 0, f"`git {' '.join(args)}` failed: {out}"
+    return out
+
+
+class Origins:
+    """A course org's repos, as bare repositories on disk."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = root
+        (root / "origins").mkdir(parents=True, exist_ok=True)
+        self._scratch = 0
+
+    def bare(self, name: str) -> Path:
+        path = self.root / "origins" / f"{name}.git"
+        if not path.exists():
+            _git("init", "-q", "--bare", "-b", "main", str(path))
+        return path
+
+    def commit(self, name: str, files: dict[str, str], branch: str = "main") -> None:
+        """The FIRST commit on `branch` of a bare repo, through a throwaway clone - the
+        only way to write into a repo with no working tree. A branch beyond the first is
+        cut from what the clone checked out, which is how a `solution` starts life."""
+        self._scratch += 1
+        work = self.root / "scratch" / f"{name}{self._scratch}"
+        _git("clone", "-q", str(self.bare(name)), str(work))
+        if ghcli.git("-C", str(work), "rev-parse", "--verify", "-q", "HEAD")[0] == 0:
+            _git("-C", str(work), "checkout", "-q", "-b", branch)
+        for rel, text in files.items():
+            path = work / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        _git("-C", str(work), "add", "-A")
+        _git(
+            "-C", str(work), *_ID, "commit", "-q", "--no-verify", "-m", f"add {branch}"
+        )
+        _git("-C", str(work), *_ID, "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
+
+    def branches(self, name: str) -> list[str]:
+        listed = _git(
+            "--git-dir",
+            str(self.bare(name)),
+            "for-each-ref",
+            "--format=%(refname:short)",
+            "refs/heads",
+        )
+        return sorted(listed.split())
+
+    def files(self, name: str, branch: str = "main") -> list[str]:
+        listed = _git(
+            "--git-dir", str(self.bare(name)), "ls-tree", "-r", "--name-only", branch
+        )
+        return sorted(listed.split())
+
+    def read(self, name: str, path: str, branch: str = "main") -> str:
+        return _git("--git-dir", str(self.bare(name)), "show", f"{branch}:{path}")
+
+    def subjects(self, name: str, branch: str = "main") -> list[str]:
+        listed = _git("--git-dir", str(self.bare(name)), "log", "--format=%s", branch)
+        return listed.splitlines()
+
+    def head(self, name: str) -> str:
+        """The branch the repo opens on - what `repos.default_branch` reads, and what the
+        scaffold's own default-branch PATCH moves."""
+        return _git(
+            "--git-dir", str(self.bare(name)), "symbolic-ref", "--short", "HEAD"
+        ).strip()
+
+    def set_head(self, name: str, branch: str) -> None:
+        _git(
+            "--git-dir",
+            str(self.bare(name)),
+            "symbolic-ref",
+            "HEAD",
+            f"refs/heads/{branch}",
+        )
+
+
+@pytest.fixture
+def origins(fake, tmp_path, monkeypatch) -> Origins:
+    """`fake`, with `gh repo clone` answered from local bare repos and `create_repo`
+    opening one. The Contents-API writes stay on the recorder, so a test can say both what
+    was copied and what was written over the copy."""
+    world = Origins(tmp_path)
+
+    def clone_only(*args, **kwargs):
+        if args[:2] == ("repo", "clone"):
+            name = args[2].split("/", 1)[1]
+            return ghcli.git("clone", "-q", str(world.bare(name)), str(args[3]))
+        return 0, ""
+
+    def repo_api(*args, **kwargs):
+        """`repos`' own reads and writes, answered off the bare repos: the repo object
+        carries the branch each one opens on, and the default-branch PATCH moves it - so a
+        test can say which branch a copy landed on rather than that a flag was passed."""
+        if args[:3] == ("api", "--method", "PATCH"):
+            field, _, value = args[5].partition("=")
+            if field == "default_branch":
+                world.set_head(args[3].split("/", 2)[2], value)
+            return 0, ""
+        if args[:1] == ("api",) and args[1].startswith("repos/"):
+            name = args[1].split("/", 2)[2]
+            return 0, json.dumps({"default_branch": world.head(name), "private": True})
+        return 0, ""
+
+    monkeypatch.setattr(ghcli, "gh", clone_only)
+    monkeypatch.setattr(repos, "gh", repo_api)
+    monkeypatch.setattr(
+        scaffold, "create_repo", lambda org, repo, **k: bool(world.bare(repo))
+    )
+    return world
+
+
+def test_a_copied_materials_repo_arrives_whole_and_keeps_its_history(origins):
+    # What copy_from is for: next year starts as this year, so the instructor edits the
+    # lecture rather than re-typing it - and the file arrives byte for byte, with the
+    # commit that explains it.
+    origins.commit(
+        "course-materials-f2025",
+        {
+            "README.md": "# Data science, 2025\n",
+            "lectures/01_session-1/slides.md": "week one\n",
+            ".releaseignore": "**/drafts/\n",
+        },
+    )
+
+    assert scaffold.scaffold_materials("Org", "f2026", "course-materials-f2025") == 0
+
+    assert origins.files("course-materials-f2026") == [
+        ".releaseignore",
+        "README.md",
+        "lectures/01_session-1/slides.md",
+    ]
+    assert origins.read("course-materials-f2026", "README.md") == "# Data science, 2025"
+    assert origins.subjects("course-materials-f2026") == ["add main"]
+
+
+def test_a_copied_materials_repo_is_re_seeded_with_the_system_files_only(origins, fake):
+    # The copy carries LAST year's maintainer guide and syllabus example, which are the
+    # toolkit describing itself and may be a year out of date - so those are rewritten.
+    # The skeleton is not written at all: every file it would seed is already there,
+    # authored, and create-only writes would only log a column of skips.
+    origins.commit("course-materials-f2025", {"README.md": "# 2025\n"})
+
+    assert scaffold.scaffold_materials("Org", "f2026", "course-materials-f2025") == 0
+
+    assert fake.written("course-materials-f2026") == {
+        "MAINTAINING.md",
+        "SYLLABUS.md.sample",
+    }
+
+
+def test_a_materials_copy_lands_before_the_first_api_write(origins, fake, monkeypatch):
+    # The ordering IS the guard, so it is pinned rather than left to a comment. The
+    # Contents API opens `main` with a root commit of its own on a repo that has none,
+    # and the copy's push is --atomic: written first, it would reject the copy whole and
+    # leave a green-looking repo holding two toolkit files and none of the year's
+    # materials. Nothing else in the suite can see this - the recorder's writes never
+    # reach the bare repo the copy pushes into, so the two never collide.
+    origins.commit("course-materials-f2025", {"README.md": "# 2025\n"})
+    seeded = scaffold.refresh_materials_system_files
+    already: list[list[str]] = []
+
+    def spy(org, repo):
+        already.append(origins.branches(repo))
+        return seeded(org, repo)
+
+    monkeypatch.setattr(scaffold, "refresh_materials_system_files", spy)
+
+    assert scaffold.scaffold_materials("Org", "f2026", "course-materials-f2025") == 0
+    assert already == [["main"]]
+
+
+def test_a_materials_copy_that_could_not_be_cloned_reds_the_scaffold(
+    origins, monkeypatch, capsys
+):
+    # The repo has just been created and is empty; carrying on would seed a skeleton over
+    # the copy that never arrived and report it ready.
+    monkeypatch.setattr(scaffold, "clone", lambda *a, **k: False)
+
+    assert scaffold.scaffold_materials("Org", "f2026", "course-materials-f2025") == 1
+    assert "nothing was copied" in capsys.readouterr().err
+
+
+def test_a_copied_assignment_brings_both_branches(origins, fake):
+    origins.commit(
+        "assignment-1-f2025", {"README.md": "# The brief\n", "starter.py": "pass\n"}
+    )
+    origins.commit(
+        "assignment-1-f2025",
+        {"grading_config.yml": "type: group\n", "solution/starter.py": "return 1\n"},
+        branch="solution",
+    )
+
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", "ipynb", copy_from="assignment-1-f2025"
+        )
+        == 0
+    )
+
+    assert origins.branches("assignment-1-f2026") == ["main", "solution"]
+    assert origins.files("assignment-1-f2026") == ["README.md", "starter.py"]
+    # `solution` is cut from `main` and adds to it, exactly as the scaffold builds one.
+    assert origins.files("assignment-1-f2026", "solution") == [
+        "README.md",
+        "grading_config.yml",
+        "solution/starter.py",
+        "starter.py",
+    ]
+    # The definition is the copied one, not one written from the button's answers.
+    assert (
+        origins.read("assignment-1-f2026", "grading_config.yml", "solution")
+        == "type: group"
+    )
+    # And nothing was seeded over it - no brief stub, no starter, no model answer.
+    assert fake.written("assignment-1-f2026") == set()
+
+
+def test_a_copy_leaves_the_toolkit_owned_branches_behind(origins, capsys):
+    # `from-<cohort-org>` and `upstream` are regenerated by propagate and release from
+    # whatever the repo holds at the time. Copied forward they would open next year's repo
+    # on last year's half-merged working state, under names the toolkit then reuses. Said
+    # out loud, though: an instructor who left work on one of them has nothing else to
+    # tell them the copy dropped it on purpose.
+    origins.commit("assignment-1-f2025", {"README.md": "# The brief\n"})
+    origins.commit(
+        "assignment-1-f2025", {"grading_config.yml": "type: group\n"}, "solution"
+    )
+    origins.commit("assignment-1-f2025", {"README.md": "# Proposed\n"}, "from-Cohort")
+    origins.commit("assignment-1-f2025", {"README.md": "# Released\n"}, "upstream")
+
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", "ipynb", copy_from="assignment-1-f2025"
+        )
+        == 0
+    )
+
+    assert origins.branches("assignment-1-f2026") == ["main", "solution"]
+    (line,) = [l for l in capsys.readouterr().out.splitlines() if "left behind" in l]
+    assert "from-Cohort" in line and "upstream" in line
+
+
+def test_a_copy_opens_on_the_branch_its_source_opened_on(origins):
+    # The copy pushes every branch at once and a push does not move HEAD, so the new repo
+    # opens on whichever branch GitHub guessed out of them - and for a template the branch
+    # it opens on is the one every student repo is generated from.
+    origins.set_head("assignment-1-f2025", "trunk")
+    origins.commit("assignment-1-f2025", {"README.md": "# The brief\n"}, "trunk")
+    origins.commit(
+        "assignment-1-f2025",
+        {"grading_config.yml": "type: individual\n"},
+        course.SOLUTION_BRANCH,
+    )
+
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", "py", copy_from="assignment-1-f2025"
+        )
+        == 0
+    )
+
+    assert origins.head("assignment-1-f2026") == "trunk"
+
+
+def test_a_source_that_opens_on_its_solution_branch_is_not_copied(origins, capsys):
+    # Copied as it stands, the new template would generate every student repo from the
+    # model answers, the grading_config.yml and the hidden tests. Refused before anything
+    # is created, so nothing is left behind for the next run to trip over.
+    origins.commit("assignment-1-f2025", {"README.md": "# The brief\n"})
+    origins.commit(
+        "assignment-1-f2025",
+        {"grading_config.yml": "type: individual\n"},
+        course.SOLUTION_BRANCH,
+    )
+    origins.set_head("assignment-1-f2025", course.SOLUTION_BRANCH)
+
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", "py", copy_from="assignment-1-f2025"
+        )
+        == 1
+    )
+
+    assert not (origins.root / "origins" / "assignment-1-f2026.git").exists()
+    assert course.SOLUTION_BRANCH in capsys.readouterr().err
+
+
+def test_a_copied_assignment_says_which_boxes_it_ignored(origins, capsys):
+    # `format`, `type` and the rest describe an assignment this one already is. Saying so
+    # once, with the file that does govern it, is the difference between an instructor
+    # editing that file and one wondering why `individual` came out `group`. The NAME is
+    # in that list too: box 1 is required, so every copy is typed a title that the copied
+    # grading_config.yml then overrides in the sheet, the handout and the site.
+    origins.commit("assignment-1-f2025", {"README.md": "# The brief\n"})
+    origins.commit(
+        "assignment-1-f2025", {"grading_config.yml": "title: Regression\n"}, "solution"
+    )
+
+    assert (
+        scaffold.scaffold_assignment(
+            "Org",
+            "1",
+            "f2026",
+            "ipynb",
+            "individual",
+            name="Neural networks from scratch",
+            copy_from="assignment-1-f2025",
+        )
+        == 0
+    )
+
+    assert (
+        origins.read("assignment-1-f2026", "grading_config.yml", "solution")
+        == "title: Regression"
+    )
+    (line,) = [l for l in capsys.readouterr().out.splitlines() if "were ignored" in l]
+    for field in (
+        "name",
+        "format",
+        "type",
+        "team_formation",
+        "submit_via",
+        "autograde",
+    ):
+        assert field in line
+    assert (
+        "https://github.com/Org/assignment-1-f2026/blob/solution/grading_config.yml"
+        in line
+    )
+
+
+def test_a_copied_assignment_needs_a_solution_branch(origins, capsys):
+    # A template with no solution branch has no model answer and no grading_config.yml:
+    # copied forward it would hand out a starter nobody can mark against, and grade on the
+    # toolkit's defaults. Refused, rather than half a template reported ready.
+    origins.commit("assignment-1-f2025", {"README.md": "# The brief\n"})
+
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", copy_from="assignment-1-f2025"
+        )
+        == 1
+    )
+    assert "no solution branch" in capsys.readouterr().err
+    assert origins.branches("assignment-1-f2026") == []
+
+
+def test_a_copy_into_a_repo_that_already_has_content_lands_no_branch(origins, capsys):
+    # `create_repo` reports an existing repo as success, so a re-run - or a tag already
+    # spent on something else - copies into a repo git will not fast-forward. The rejected
+    # `main` has to take `solution` with it: a solution branch left standing beside
+    # somebody else's main is exactly what a plain re-scaffold then refuses to rebuild,
+    # and the run would have red-flagged a repo it had already half-changed.
+    origins.commit("assignment-1-f2025", {"README.md": "# The brief\n"})
+    origins.commit(
+        "assignment-1-f2025", {"grading_config.yml": "type: group\n"}, "solution"
+    )
+    origins.commit("assignment-1-f2026", {"README.md": "# Something else\n"})
+
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", copy_from="assignment-1-f2025"
+        )
+        == 1
+    )
+    assert origins.branches("assignment-1-f2026") == ["main"]
+    assert origins.read("assignment-1-f2026", "README.md") == "# Something else"
+    assert "could not push" in capsys.readouterr().err
 
 
 def test_the_seeded_readme_would_be_withheld_from_a_release(fake):
