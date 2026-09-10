@@ -29,7 +29,6 @@ from . import mailer
 from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER, pin_central_ref
 from .course import (
     ASSIGNMENT_TYPES,
-    FORMATS,
     MATERIALS_REPO_PREFIX,
     SANDBOX_USER,
     SUBMIT_VIA,
@@ -1530,22 +1529,39 @@ on:
 """
 
 
+# Box 5 is the one answer on this form that is a LIST - any number of starters, seeded
+# side by side - so it is free text where every neighbour is a dropdown: `type: choice`
+# takes one option and nothing else. The vocabulary therefore lives in the description,
+# which is where `scaffold.parse_formats` refuses an answer back to. `ipynb` is pre-filled
+# for the same reason `cohort_dest_repo` carries `materials`: it is the answer the toolkit
+# supplies anyway, so showing it teaches the default rather than hiding it.
+_STARTER_FORMATS_INPUT = """\
+      format:
+        description: "5. Starter file(s) to seed, comma-separated: ipynb, py, rmd, qmd, latex - or none for the README.md only"
+        default: "ipynb"
+        required: true"""
+
+
 def render_new_assignment(assignments: list[str] | None = None) -> str:
     """Scaffold an assignment-N-<tag> template repo (main + solution branch), then refresh.
 
-    EIGHT boxes, and between them they are the whole assignment: everything but `format`
+    NINE boxes, and between them they are the whole assignment: everything but `format`
     lands verbatim in the solution branch's `grading_config.yml`, which the handout, the
     grading sheet, the receipts and the Join-team form all read. What the form does NOT ask
     - the team cap, the late window, the penalty, the question maxima - comes from the
     course's own `assignment_defaults:` in dsl-course.yml, and is written into that same
     file so it can be revised there per assignment afterwards.
 
-    The ninth, `copy_from`, is the one that asks for none of it: last year's template
-    arrives whole, and the `grading_config.yml` that comes with it is the definition, so
-    boxes 1 and 4-8 are ignored. GitHub caps a workflow_dispatch at 10 inputs, and there is
-    deliberately no tenth: an assignment's remaining settings belong in a file the
-    instructor can revise, not in a form filled in once, before the brief has even been
-    written."""
+    `copy_from` is the box that asks for none of it: last year's template arrives whole,
+    and the `grading_config.yml` that comes with it is the definition, so boxes 5-9 are
+    ignored. It is box 4 for that reason - GitHub renders these top to bottom and the
+    answer that voids the rest belongs above them, not after eight boxes filled in for
+    nothing. The name and the number are asked for either way: they name the repo and
+    describe it.
+
+    GitHub caps a workflow_dispatch at 10 inputs, and there is deliberately no tenth: an
+    assignment's remaining settings belong in a file the instructor can revise, not in a
+    form filled in once, before the brief has even been written."""
     return f"""name: New assignment
 
 on:
@@ -1560,15 +1576,15 @@ on:
       semester_tag:
         description: "3. Year tag, e.g. f2026 or s2026 - creates assignment-<number>-<tag>"
         required: true
-{_choice_input("format", "4. Which starter file to seed - none = the brief only. Grading reads whatever students commit either way", list(FORMATS), "ipynb")}
-{_choice_input("type", "5. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual")}
-{_choice_input("team_formation", "6. Group only: self_select = students use the Join team form; assigned = you write teams.csv", list(TEAM_FORMATIONS), "self_select")}
-{_choice_input("submit_via", "7. external = handed in off GitHub (Moodle, Kaggle, in class) - no receipts, no late arithmetic", list(SUBMIT_VIA), "github")}
+{_copy_from_input("4. Copy an existing template forward instead - both branches, whole history. Boxes 5-9 are then ignored", assignments or [])}
+{_STARTER_FORMATS_INPUT}
+{_choice_input("type", "6. individual = one repo per student; group = one repo per team (teams.csv)", list(ASSIGNMENT_TYPES), "individual")}
+{_choice_input("team_formation", "7. Group only: self_select = students use the Join team form; assigned = you write teams.csv", list(TEAM_FORMATIONS), "self_select")}
+{_choice_input("submit_via", "8. external = handed in off GitHub (Moodle, Kaggle, in class) - no receipts, no late arithmetic", list(SUBMIT_VIA), "github")}
       autograde:
-        description: "8. Run the template's tests/ at the cutoff. The count is shown to graders, never to a student"
+        description: "9. Also run hidden tests at the cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
         type: boolean
         default: false
-{_copy_from_input("9. Copy an existing template forward instead - both branches, whole history. Boxes 1 and 4-8 are then ignored", assignments or [])}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
@@ -1580,12 +1596,12 @@ on:
           NAME: ${{{{ inputs.assignment_name }}}}
           NUMBER: ${{{{ inputs.assignment_number }}}}
           TAG: ${{{{ inputs.semester_tag }}}}
+          COPY_FROM: ${{{{ inputs.copy_from }}}}
           FORMAT: ${{{{ inputs.format }}}}
           TYPE: ${{{{ inputs.type }}}}
           TEAM_FORMATION: ${{{{ inputs.team_formation }}}}
           SUBMIT_VIA: ${{{{ inputs.submit_via }}}}
           AUTOGRADE: ${{{{ inputs.autograde }}}}
-          COPY_FROM: ${{{{ inputs.copy_from }}}}
         run: |
           gh auth setup-git
           args=(--org "$ORG" --number "$NUMBER" --tag "$TAG" --name "$NAME" \\

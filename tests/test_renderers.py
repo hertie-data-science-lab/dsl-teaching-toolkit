@@ -879,24 +879,36 @@ NEW_ASSIGNMENT_INPUTS = [
     "assignment_name",
     "assignment_number",
     "semester_tag",
+    "copy_from",
     "format",
     "type",
     "team_formation",
     "submit_via",
     "autograde",
-    "copy_from",
 ]
 
 
 def test_new_assignment_button_asks_for_the_whole_assignment():
     # Every one of these but `format` lands verbatim in grading_config.yml, so the answers
     # given here are the ones the handout, the sheet and the Join-team form later obey -
-    # none of them is hand-edited in afterwards.
+    # none of them is hand-edited in afterwards. `format` picks the starters instead, and
+    # is the one box the scaffold parses rather than records.
     rendered = workflows_render.render_new_assignment()
     inputs = workflow_inputs(rendered)
     assert list(inputs) == NEW_ASSIGNMENT_INPUTS
     assert len(inputs) <= GITHUB_MAX_DISPATCH_INPUTS
-    assert inputs["format"]["options"] == list(course.FORMATS)
+    # GitHub renders the boxes in this order and numbers nothing itself, so the numbering
+    # in the descriptions is the only thing that can be wrong about it. `copy_from` is
+    # box 4 and says so: it voids boxes 5-9, and a form is filled in top to bottom.
+    for n, name in enumerate(NEW_ASSIGNMENT_INPUTS, start=1):
+        assert inputs[name]["description"].startswith(f"{n}. ")
+    assert "Boxes 5-9 are then ignored" in inputs["copy_from"]["description"]
+    # Box 5 takes a LIST, so it is free text rather than a dropdown - and every format the
+    # scaffold accepts has to be named in the description, because that is the only place
+    # a faculty member can read the vocabulary off.
+    assert "type" not in inputs["format"] and inputs["format"]["default"] == "ipynb"
+    for fmt in course.FORMATS:
+        assert fmt in inputs["format"]["description"]
     assert inputs["type"]["options"] == list(course.ASSIGNMENT_TYPES)
     assert inputs["team_formation"]["options"] == list(course.TEAM_FORMATIONS)
     assert inputs["submit_via"]["options"] == list(course.SUBMIT_VIA)
@@ -909,6 +921,7 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
         ("NAME", "assignment_name"),
         ("NUMBER", "assignment_number"),
         ("TAG", "semester_tag"),
+        ("COPY_FROM", "copy_from"),
         ("FORMAT", "format"),
         ("TYPE", "type"),
         ("TEAM_FORMATION", "team_formation"),
