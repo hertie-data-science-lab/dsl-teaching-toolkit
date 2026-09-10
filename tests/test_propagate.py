@@ -86,7 +86,7 @@ class World:
     def plan(self, *releases: Release) -> None:
         self.releases = list(releases)
 
-    def run(self, now: datetime = NOW, dry_run: bool = False) -> int:
+    def run(self, now: datetime = NOW, dry_run: bool = False) -> propagate.Propagated:
         return propagate.propagate(COURSE, COHORT, now, dry_run=dry_run)
 
     def branches(self, name: str) -> list[str]:
@@ -152,7 +152,8 @@ def test_a_cohort_edit_is_proposed_back_as_one_commit_and_one_pull_request(world
     world.commit("materials", {"lectures/01/lab.md": "week one, corrected"})
     world.plan(_release("lecture-1", FIRED, Deploy("cm", "lectures/01", "materials")))
 
-    assert world.run() == 0
+    done = world.run()
+    assert (done.errors, done.urls) == (0, (PR_URL,))
     assert world.read("lectures/01/lab.md") == "week one, corrected"
     assert world.subjects() == ["propagate: lectures/01 from Cohort-Org"]
     (call,) = world.pulls.calls
@@ -168,10 +169,10 @@ def test_a_second_run_regenerates_the_branch_and_reuses_the_pull_request(world):
     world.commit("cm", {"lectures/01/lab.md": "week one"})
     world.commit("materials", {"lectures/01/lab.md": "corrected"})
     world.plan(_release("lecture-1", FIRED, Deploy("cm", "lectures/01", "materials")))
-    assert world.run() == 0
+    assert world.run().errors == 0
 
     world.commit("materials", {"lectures/01/lab.md": "corrected again"})
-    assert world.run() == 0
+    assert world.run().errors == 0
     # One commit, not two: the branch is cut fresh from main every run, so it proposes
     # what the cohort has NOW rather than accumulating every version of it.
     assert world.subjects() == ["propagate: lectures/01 from Cohort-Org"]
@@ -184,7 +185,7 @@ def test_a_deploy_that_has_not_fired_yet_is_not_propagated(world):
     world.commit("materials", {"lectures/02/lab.md": "edited early"})
     world.plan(_release("lecture-2", LATER, Deploy("cm", "lectures/02", "materials")))
 
-    assert world.run() == 0
+    assert world.run().errors == 0
     assert world.pulls.calls == []
     assert world.branches("cm") == ["main"]
 
@@ -194,7 +195,7 @@ def test_a_cohort_that_changed_nothing_opens_nothing(world):
     world.commit("materials", {"lectures/01/lab.md": "week one"})
     world.plan(_release("lecture-1", FIRED, Deploy("cm", "lectures/01", "materials")))
 
-    assert world.run() == 0
+    assert world.run().errors == 0
     assert world.pulls.calls == []
     assert world.branches("cm") == ["main"]
 
@@ -206,7 +207,7 @@ def test_a_path_the_cohort_does_not_have_is_a_note_not_a_failure(world, capsys):
     world.commit("materials", {"README.md": "the cohort"})
     world.plan(_release("lecture-1", FIRED, Deploy("cm", "lectures/01", "materials")))
 
-    assert world.run() == 0
+    assert world.run().errors == 0
     assert world.pulls.calls == []
     assert "[note]" in capsys.readouterr().out
 
@@ -225,7 +226,7 @@ def test_a_deletion_is_named_in_the_body_and_never_made(world):
     world.commit("materials", {"lectures/01/lab.md": "corrected"})
     world.plan(_release("lecture-1", FIRED, Deploy("cm", "lectures/01", "materials")))
 
-    assert world.run() == 0
+    assert world.run().errors == 0
     assert "lectures/01/notes.md" in world.files()
     (call,) = world.pulls.calls
     assert "Deletions are not propagated" in call["body"]
@@ -237,7 +238,7 @@ def test_the_body_names_paths_and_says_the_branch_is_regenerated(world):
     world.commit("materials", {"lectures/01/lab.md": "corrected"})
     world.plan(_release("lecture-1", FIRED, Deploy("cm", "lectures/01", "materials")))
 
-    assert world.run() == 0
+    assert world.run().errors == 0
     body = world.pulls.calls[0]["body"]
     assert "`materials/lectures/01` -> `lectures/01`" in body
     assert "force-pushed on every run" in body
@@ -258,7 +259,7 @@ def test_each_source_repo_gets_its_own_pull_request(world):
         _release("lab-1", FIRED, Deploy("labs", "labs/01", "materials")),
     )
 
-    assert world.run() == 0
+    assert world.run().errors == 0
     assert sorted(c["repo"] for c in world.pulls.calls) == [
         "Course-Org/cm",
         "Course-Org/labs",
@@ -296,7 +297,7 @@ def test_one_commit_per_released_path_in_session_order(world):
         ),
     )
 
-    assert world.run() == 0
+    assert world.run().errors == 0
     # The plan's own order, entry by entry and deploy by deploy inside an entry - so the
     # branch reads the way the term ran rather than alphabetically.
     assert world.subjects() == [
@@ -311,7 +312,7 @@ def test_a_dry_run_clones_nothing_and_prints_the_pairs(world, capsys):
         _release("lecture-1", FIRED, Deploy("cm", "lectures/01", "materials", "wk01"))
     )
 
-    assert world.run(dry_run=True) == 0
+    assert world.run(dry_run=True).errors == 0
     out = capsys.readouterr().out
     assert "Cohort-Org/materials/wk01 -> Course-Org/cm/lectures/01" in out
     assert world.pulls.calls == []
@@ -320,5 +321,5 @@ def test_a_dry_run_clones_nothing_and_prints_the_pairs(world, capsys):
 
 def test_a_cohort_with_nothing_released_yet_does_nothing(world):
     world.plan()
-    assert world.run() == 0
+    assert world.run().errors == 0
     assert world.pulls.calls == []

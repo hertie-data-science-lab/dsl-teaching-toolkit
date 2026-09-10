@@ -1,9 +1,10 @@
 """Cohort teardown -- what gets frozen, in what order, and what is left resumable.
 
-The order is the feature: an archived repo takes no collaborator change, so a revoke that
-does not happen BEFORE the freeze can never happen at all, and the sealed `classroom-config`
-is the marker the nightly refresh reads as "this cohort is finished". Both are asserted here
-against a recorded call sequence rather than trusted to a comment.
+The order is the feature. Everything that READS the cohort has to happen before anything
+in it is frozen (the propagate, the notices, the last site sync), and the sealed
+`classroom-config` is the marker every course-side sweep reads as "this cohort is
+finished" - so it goes last, and a run that died half way is resumed by running it again.
+Both are asserted here against a recorded call sequence rather than trusted to a comment.
 """
 
 from __future__ import annotations
@@ -12,18 +13,21 @@ from datetime import date
 
 import pytest
 
-from dsl_course import schedule, teardown
+from dsl_course import config_digest, propagate, schedule, source_digest, teardown
 from tests.conftest import repo_row
 
 COHORT = "hertie-dsl-demo-f2026"
+COURSE = "hertie-dsl-demo-course-e1234"
+PR_URL = "https://github.com/hertie-dsl-demo-course-e1234/cm/pull/7"
 
-# A cohort mid-teardown: two individual repos, one group repo, two gradebooks, one already
-# frozen, plus the infra and the template that must never be counted as somebody's work.
+# A cohort at the end of term: two individual repos, one group repo, two gradebooks, one
+# already frozen, the released materials, the website, and the infra.
 LISTING = [
     repo_row("classroom-config"),
     repo_row("welcome"),
     repo_row(".github", topics=["dsl-cohort"]),
     repo_row(f"{COHORT}.github.io", visibility="public"),
+    repo_row("materials"),
     repo_row("assignment-1", isTemplate=True, topics=["assignment-template"]),
     repo_row("assignment-2-project", isTemplate=True, topics=["assignment-template"]),
     repo_row("assignment-1-ada-l", topics=["submission"]),
@@ -33,17 +37,22 @@ LISTING = [
     repo_row("grades-bob-b", archived=True),
 ]
 
+# A date that stays in the past, so a fixture pinned to this year does not start refusing
+# once the year catches up with it.
+DUE = date(2026, 3, 1)
 
-def _sched(end: date | None) -> schedule.Schedule:
-    return schedule.Schedule(semester_end=end)
+
+def _sched(archive: date | None, end: date | None = date(2025, 12, 18)):
+    return schedule.Schedule(semester_end=end, archive_date=archive)
 
 
 @pytest.fixture
 def org(monkeypatch):
     """A cohort org whose every write is recorded rather than made.
 
-    Returns the call log: `("revoke", repo)`, `("archive", repo)`, `("put", path)` in the
-    order they were attempted, which is what the ordering tests read."""
+    Returns the call log: `("propagate", cohort)`, `("close", title)`, `("sync", cohort)`,
+    `("archive", repo)`, `("put", path)` in the order they were attempted, which is what
+    the ordering tests read."""
     calls: list[tuple[str, str]] = []
     # No rendered workflow sets DSL_VERBOSE, so no test may inherit it from the shell
     # either - the per-person lines are exactly what the public-log assertion is about.
@@ -51,21 +60,29 @@ def org(monkeypatch):
     monkeypatch.setattr(
         teardown, "list_org_repos", lambda o: [dict(r) for r in LISTING]
     )
-    # A term that ENDED, and a date that stays in the past: `close_out` reads the wall
-    # clock, so a fixture pinned to this year's December would start refusing in December.
-    monkeypatch.setattr(teardown.schedule, "load", lambda o: _sched(date(2025, 12, 18)))
+    monkeypatch.setattr(teardown.schedule, "load", lambda o: _sched(DUE))
     monkeypatch.setattr(
         teardown,
         "get_file_content",
         lambda o, r, p: "hertie_email,name,github_handle\na@uni.edu,Ada,ada-l\n",
     )
     monkeypatch.setattr(
-        teardown,
-        "revoke_repo_grants",
-        lambda o, repo, login, dry_run=False: (
-            calls.append(("dry-revoke" if dry_run else "revoke", repo)),
-            (1, 0),
+        teardown.propagate,
+        "propagate",
+        lambda course, cohort, dry_run=False: (
+            calls.append(("propagate", cohort)),
+            propagate.Propagated(0, (PR_URL,)),
         )[1],
+    )
+    monkeypatch.setattr(
+        teardown,
+        "close_issues_titled",
+        lambda repo, title, comment=None: (calls.append(("close", title)), 0)[1],
+    )
+    monkeypatch.setattr(
+        teardown.site,
+        "sync_site",
+        lambda course, cohort: (calls.append(("sync", cohort)), 0)[1],
     )
     monkeypatch.setattr(
         teardown,
@@ -80,87 +97,47 @@ def org(monkeypatch):
     return calls
 
 
-# --------------------------------------------------------------- what counts as a target
+def _archived(calls) -> list[str]:
+    return [r for kind, r in calls if kind == "archive"]
 
 
-def test_only_the_repos_holding_a_students_work_or_marks_are_frozen():
-    # Infra, the public site and the assignment TEMPLATE are not anybody's record: the
-    # template holds the brief every student was given, and freezing it into the teardown
-    # record as a student repo would misdescribe what was frozen.
-    assert [t.repo for t in teardown.targets(LISTING)] == [
-        "assignment-1-ada-l",
-        "assignment-1-bob-b",
-        "assignment-2-project-team-x",
-        "grades-ada-l",
-        "grades-bob-b",
-    ]
-
-
-def test_a_submission_repo_whose_topic_never_landed_still_counts():
-    # The `submission` topic is stamped in a separate call after the create. Discovery's
-    # rule is topic OR name, and teardown must not depend on one PATCH having landed.
-    listing = [
-        repo_row("assignment-1", isTemplate=True),
-        repo_row("assignment-1-ada-l"),
-    ]
-    assert [t.repo for t in teardown.targets(listing)] == ["assignment-1-ada-l"]
-
-
-def test_a_frozen_repo_is_carried_as_already_archived():
-    frozen = {t.repo: t.archived for t in teardown.targets(LISTING)}
-    assert frozen["grades-bob-b"] is True
-    assert frozen["grades-ada-l"] is False
+# ------------------------------------------------------------------------ the date gate
 
 
 @pytest.mark.parametrize(
-    ("repo", "template", "login"),
+    ("archive", "due"),
     [
-        ("assignment-1-ada-l", "assignment-1", "ada-l"),
-        ("grades-ada-l", None, "ada-l"),
-        # A GROUP repo's suffix is a team name. It is returned, and the probe behind it
-        # finds nothing, because a team is not a collaborator on its own repo.
-        ("assignment-2-project-team-x", "assignment-2-project", "team-x"),
-        # Recognised only by its topic, with no template left in the org to split on.
-        ("assignment-9-orphan", None, ""),
+        (date(2026, 2, 16), True),
+        (date(2026, 3, 1), True),  # the day itself IS due
+        (date(2026, 3, 2), False),
+        (None, False),  # nothing to freeze against
     ],
 )
-def test_the_login_a_repo_is_named_after(repo, template, login):
-    assert teardown.named_login(repo, template) == login
+def test_archive_due_reads_only_the_archive_date(archive, due):
+    assert teardown.archive_due(_sched(archive), date(2026, 3, 1)) is due
 
 
-# ------------------------------------------------------------------------ the refusal
-
-
-@pytest.mark.parametrize(
-    ("end", "ended"),
-    [
-        (date(2026, 12, 18), True),
-        (date(2027, 1, 1), False),
-        (date(2026, 12, 31), False),  # today itself is not "over"
-        (None, False),  # nothing declared is never evidence the term ended
-    ],
-)
-def test_term_ended_reads_only_a_declared_semester_end(end, ended):
-    assert teardown.term_ended(_sched(end), date(2026, 12, 31)) is ended
-
-
-def test_a_live_term_refuses_and_touches_nothing(org, monkeypatch):
-    monkeypatch.setattr(teardown.schedule, "load", lambda o: _sched(date(2099, 1, 1)))
-    assert teardown.close_out(COHORT, dry_run=False) == 1
+def test_a_passed_semester_end_no_longer_opens_the_gate(org, monkeypatch):
+    # The sixty-day grace after the term is the whole point: the courses this was measured
+    # against went on being pushed to for weeks after their last class.
+    monkeypatch.setattr(
+        teardown.schedule, "load", lambda o: _sched(date(2099, 1, 1), date(2020, 1, 1))
+    )
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 1
     assert org == []
 
 
-def test_force_closes_a_cohort_that_never_declared_a_term_end(org, monkeypatch):
-    monkeypatch.setattr(teardown.schedule, "load", lambda o: _sched(None))
-    assert teardown.close_out(COHORT, dry_run=False) == 1
+def test_force_closes_a_cohort_that_has_no_archive_date_at_all(org, monkeypatch):
+    monkeypatch.setattr(teardown.schedule, "load", lambda o: _sched(None, None))
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 1
     assert org == []
-    assert teardown.close_out(COHORT, dry_run=False, force=True) == 0
+    assert teardown.close_out(COURSE, COHORT, dry_run=False, force=True) == 0
     assert ("archive", "classroom-config") in org
 
 
 def test_a_cohort_with_no_classroom_config_is_refused(org, monkeypatch):
     monkeypatch.setattr(teardown, "list_org_repos", lambda o: [repo_row("welcome")])
-    assert teardown.close_out(COHORT, dry_run=False) == 1
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 1
     assert org == []
 
 
@@ -170,111 +147,143 @@ def test_an_already_sealed_cohort_is_a_no_op(org, monkeypatch):
     listing = [dict(r) for r in LISTING]
     listing[0]["archived"] = True
     monkeypatch.setattr(teardown, "list_org_repos", lambda o: listing)
-    assert teardown.close_out(COHORT, dry_run=False) == 0
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 0
     assert org == []
 
 
 # ------------------------------------------------------------------------- the ordering
 
 
-def test_every_repo_is_revoked_before_it_is_frozen(org):
-    # An archived repo takes no collaborator change, so a repo frozen first keeps its
-    # grant for as long as it stays frozen.
-    assert teardown.close_out(COHORT, dry_run=False) == 0
-    # The infra repos are nobody's in particular and hold no direct grant to take back.
-    for kind, repo in org:
-        if kind == "archive" and repo not in ("welcome", "classroom-config"):
-            assert ("revoke", repo) in org[: org.index((kind, repo))], repo
+def test_everything_that_reads_the_cohort_happens_before_anything_is_frozen(org):
+    # After the freeze every repo in the org is read-only: the propagate cannot clone what
+    # it needs to, the notices cannot be closed, and the site cannot be rebuilt.
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 0
+    first_freeze = next(i for i, (kind, _) in enumerate(org) if kind == "archive")
+    kinds = [kind for kind, _ in org[:first_freeze]]
+    assert kinds[0] == "propagate"
+    assert "close" in kinds and "sync" in kinds
+
+
+def test_the_site_is_synced_before_the_site_repo_is_frozen(org):
+    # The deployed site carries the "Cohort archived" row, and this is the last sync that
+    # can ship it.
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 0
+    assert org.index(("sync", COHORT)) < org.index(("archive", f"{COHORT}.github.io"))
+
+
+def test_every_repo_in_the_org_is_frozen_in_order_and_the_marker_goes_last(org):
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 0
+    assert _archived(org) == [
+        # students' work and the briefs they were set, first: they are the record
+        "assignment-1",
+        "assignment-1-ada-l",
+        "assignment-1-bob-b",
+        "assignment-2-project",
+        "assignment-2-project-team-x",
+        "grades-ada-l",
+        # then the way IN, so a finished term cannot still be joined
+        "welcome",
+        # then the released content, the website, and the cohort's own dispatchers
+        "materials",
+        f"{COHORT}.github.io",
+        ".github",
+        # and the marker last of all
+        "classroom-config",
+    ]
 
 
 def test_the_private_record_is_sealed_last(org):
-    assert teardown.close_out(COHORT, dry_run=False) == 0
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 0
     # The record is written, and only then is the repo holding it frozen - and that is the
-    # very last thing the run does, so an interrupted run leaves a cohort the nightly
-    # refresh still treats as live and this command still resumes.
+    # very last thing the run does, so an interrupted run leaves a cohort every sweep still
+    # treats as live and this command still resumes.
     assert org[-2:] == [("put", teardown.RECORD_PATH), ("archive", "classroom-config")]
 
 
 def test_a_frozen_repo_is_not_touched_again(org):
-    assert teardown.close_out(COHORT, dry_run=False) == 0
-    assert ("archive", "grades-bob-b") not in org
-    assert ("revoke", "grades-bob-b") not in org
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 0
+    assert "grades-bob-b" not in _archived(org)
 
 
-def test_the_way_in_is_frozen_after_the_work_and_before_the_seal(org):
-    # An open Join course issue on a finished cohort enrols a student into a term that is
-    # over - and the handler writes into a classroom-config that is by then sealed. So
-    # `welcome` is frozen too: after the student repos, before the marker.
-    assert teardown.close_out(COHORT, dry_run=False) == 0
-    archived = [r for k, r in org if k == "archive"]
-    assert archived[-2:] == ["welcome", "classroom-config"]
-    assert archived.index("welcome") > archived.index("grades-ada-l")
+# --------------------------------------------------------------------- the notices closed
 
 
-def test_an_already_frozen_welcome_is_left_alone(org, monkeypatch):
-    listing = [dict(r) for r in LISTING]
-    next(r for r in listing if r["name"] == "welcome")["archived"] = True
-    monkeypatch.setattr(teardown, "list_org_repos", lambda o: listing)
-    assert teardown.close_out(COHORT, dry_run=False) == 0
-    assert ("archive", "welcome") not in org
+def test_every_notice_the_toolkit_can_have_open_is_closed(org):
+    # Each one asks somebody to fix a file in a repo that is about to be read-only, and
+    # nothing will ever close them afterwards - an archived repo takes no issue write.
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 0
+    closed = {t for kind, t in org if kind == "close"}
+    assert {d.title for d in config_digest.COHORT_DIGESTS} <= closed
+    assert source_digest.TITLE in closed
+    assert teardown.archive_notice_title(DUE) in closed
 
 
-def test_a_welcome_that_will_not_freeze_reds_the_run_and_blocks_the_seal(
-    org, monkeypatch
+def test_a_notice_that_will_not_close_still_lets_the_cohort_seal(org, monkeypatch):
+    # An issue left open inside a frozen repo is untidy; a cohort left half-closed is not.
+    monkeypatch.setattr(teardown, "close_issues_titled", lambda *a, **k: 1)
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 1
+    assert ("archive", "classroom-config") in org
+
+
+# ------------------------------------------------------------------------ step 0, propagate
+
+
+def test_the_propagate_runs_first_and_its_url_reaches_the_record(org):
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 0
+    assert org[0] == ("propagate", COHORT)
+
+
+def test_a_failed_propagate_reds_the_run_but_never_blocks_the_seal(
+    org, monkeypatch, capsys
 ):
-    # A cohort still joinable is not closed, so this fails like any other repo would.
+    # A course org that never wanted the cohort's edits is still entitled to a closed
+    # cohort, and a half-frozen org is the worst of both.
+    def boom(course, cohort, dry_run=False):
+        raise RuntimeError("gh: HTTP 502")
+
+    monkeypatch.setattr(teardown.propagate, "propagate", boom)
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 1
+    assert ("archive", "classroom-config") in org
+    assert "could not carry" in capsys.readouterr().err
+
+
+def test_without_a_course_org_the_cohort_still_closes(org, monkeypatch):
+    # The CLI's --course-org is optional, and the record says what was skipped.
+    def boom(*a, **k):
+        raise AssertionError("nothing to propagate into")
+
+    monkeypatch.setattr(teardown.propagate, "propagate", boom)
+    monkeypatch.setattr(teardown.site, "sync_site", boom)
+    assert teardown.close_out("", COHORT, dry_run=False) == 0
+    assert ("archive", "classroom-config") in org
+
+
+# ------------------------------------------------------------------------ failure and dry run
+
+
+def test_a_repo_that_will_not_freeze_blocks_the_seal(org, monkeypatch):
+    # The one failure the marker would lie about: a sealed classroom-config over a repo
+    # that is still live tells every sweep the cohort is finished when it is not.
     def archive(o, repo, person=False):
         org.append(("archive", repo))
-        return repo != "welcome"
+        return repo != "materials"
 
     monkeypatch.setattr(teardown, "archive_repo", archive)
-    assert teardown.close_out(COHORT, dry_run=False) == 1
-    assert ("archive", "classroom-config") not in org
-    assert ("put", teardown.RECORD_PATH) not in org
-
-
-def test_the_classroom_config_is_never_treated_as_a_students_repo(org):
-    assert teardown.close_out(COHORT, dry_run=False) == 0
-    assert [r for k, r in org if k == "archive"].count("classroom-config") == 1
-
-
-# ------------------------------------------------------------------- failure and dry run
-
-
-def test_a_repo_whose_access_cannot_be_read_is_left_live_and_reds_the_run(
-    org, monkeypatch
-):
-    # Freezing it would strand the grant behind a read-only repo, so it stays live, the
-    # run reds, and nothing is sealed - the next run picks that repo up.
-    monkeypatch.setattr(
-        teardown,
-        "revoke_repo_grants",
-        lambda o, repo, login, dry_run=False: (
-            (0, 1) if repo == "assignment-1-ada-l" else (1, 0)
-        ),
-    )
-    assert teardown.close_out(COHORT, dry_run=False) == 1
-    assert ("archive", "assignment-1-ada-l") not in org
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 1
     assert ("archive", "classroom-config") not in org
     assert ("put", teardown.RECORD_PATH) not in org
 
 
 def test_an_unwritable_record_leaves_the_cohort_live(org, monkeypatch):
     monkeypatch.setattr(teardown, "put_file", lambda *a, **k: False)
-    assert teardown.close_out(COHORT, dry_run=False) == 1
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 1
     assert ("archive", "classroom-config") not in org
 
 
-def test_a_dry_run_writes_nothing_at_all(org):
-    # It still PROBES - the counts it prints have to be the real ones - but every probe
-    # is itself a dry run, and nothing is frozen, written or sealed.
-    assert teardown.close_out(COHORT) == 0
-    assert org == [
-        ("dry-revoke", "assignment-1-ada-l"),
-        ("dry-revoke", "assignment-1-bob-b"),
-        ("dry-revoke", "assignment-2-project-team-x"),
-        ("dry-revoke", "grades-ada-l"),
-    ]
+def test_a_dry_run_freezes_nothing_and_writes_nothing(org):
+    # It still PROPAGATES - in dry-run - because the counts it prints have to be real.
+    assert teardown.close_out(COURSE, COHORT) == 0
+    assert org == [("propagate", COHORT)]
 
 
 # ------------------------------------------------------------------------- what is said
@@ -284,7 +293,7 @@ def test_no_log_line_names_a_student_or_their_repo(org, capsys):
     # Every faculty workflow runs in the course org's PUBLIC .github, so one
     # `<slug>-<handle>` line there publishes who was in the cohort. DSL_VERBOSE is unset
     # here, exactly as it is in every rendered workflow.
-    assert teardown.close_out(COHORT, dry_run=False) == 0
+    assert teardown.close_out(COURSE, COHORT, dry_run=False) == 0
     printed = capsys.readouterr()
     said = printed.out + printed.err
     for secret in ("ada-l", "bob-b", "team-x", "grades-", "assignment-1-"):
@@ -297,30 +306,30 @@ def test_the_record_names_what_was_frozen_and_why_it_is_being_kept():
     # cohort's account of its own retention.
     text = teardown.render_record(
         COHORT,
-        teardown.Closed(["assignment-1-ada-l", "grades-ada-l"], 3, 0),
-        sealed_on=date(2027, 1, 5),
-        semester_end=date(2026, 12, 18),
+        teardown.Closed(["assignment-1-ada-l"], ["grades-ada-l"], 0),
+        sealed_on=date(2027, 2, 16),
+        archive_date=date(2027, 2, 16),
         registrar="cohort-gradebook.csv, 30 student row(s)",
-        welcome="frozen with them",
+        propagated=PR_URL,
     )
     assert text.startswith("<!-- SYSTEM-OWNED")
     assert "`assignment-1-ada-l`" in text and "`grades-ada-l`" in text
-    assert "| Direct grants and invitations withdrawn | 3 |" in text
-    assert "| Enrolment repo (`welcome`) | frozen with them |" in text
+    assert "| Repositories frozen | 2 (1 already were) |" in text
+    assert PR_URL in text
     assert "cohort-gradebook.csv, 30 student row(s)" in text
-    assert "2026-12-18" in text and "2027-01-05" in text
-    assert "Nothing was deleted." in text
+    assert "2027-02-16" in text
+    assert "Nobody was revoked." in text and "Nothing was deleted." in text
     assert "retention period" in text
 
 
-def test_a_forced_record_says_the_term_end_was_never_declared():
+def test_a_forced_record_says_no_archive_date_was_ever_declared():
     text = teardown.render_record(
         COHORT,
-        teardown.Closed([], 0, 0),
+        teardown.Closed([], [], 0),
         sealed_on=date(2027, 1, 5),
-        semester_end=None,
+        archive_date=None,
         registrar="cohort-gradebook.csv, 0 student row(s)",
-        welcome="not in this org",
+        propagated="nothing had been edited",
     )
     assert "`--force`" in text
 

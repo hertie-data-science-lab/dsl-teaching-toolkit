@@ -1059,15 +1059,19 @@ def render_archive_cohort(cohort_orgs: list[str]) -> str:
     """Close a finished cohort out: freeze the work, revoke the students, seal the record."""
     return f"""name: Archive cohort
 
-# End of term, once, after the last grades have gone out. Revokes each student's direct
-# grant on the submission repos and gradebooks named after them, ARCHIVES those repos,
-# archives `welcome` so a finished term cannot still be joined, writes the teardown record
-# into the cohort's private classroom-config and archives that last - which is also what
-# tells the nightly refresh this cohort is finished.
-# NOTHING IS DELETED. Archiving is GitHub's reversible read-only freeze, and un-archiving a
-# repo from its own Settings page brings it back exactly as it was.
-# `dry_run` defaults to true and prints counts only. A real run refuses unless the cohort's
-# schedule.yml declares a `semester_end` that has passed; `force` says so by hand.
+# End of term. The scheduler runs this by itself on the cohort's own `archive.date`
+# (schedule.yml - default: semester_end + 60 days); this button is for closing one out
+# early. It offers the cohort's edits back to this org as a pull request first, closes the
+# toolkit's open notices, syncs the website one last time, then ARCHIVES every repo in the
+# cohort org - students' work, `welcome` so a finished term cannot still be joined, the
+# released materials, the website, `.github` - writes the teardown record into the private
+# classroom-config and archives that last, which is what tells every nightly sweep the
+# cohort is finished.
+# NOBODY IS REVOKED and NOTHING IS DELETED: an archived repo is read-only for everyone, so
+# students keep read access to their own work, and un-archiving a repo from its own
+# Settings page brings it back exactly as it was. Membership and teams are untouched.
+# `dry_run` defaults to true and prints counts only. A real run refuses until the cohort's
+# archive date has arrived; `force` says so by hand.
 # A run that dies half way is resumed by running it again - see docs/10.
 
 on:
@@ -1079,7 +1083,7 @@ on:
         type: boolean
         default: true
       force:
-        description: "Close out even though the term is not over"
+        description: "Close out before the cohort's archive date"
         type: boolean
         default: false
 
@@ -1089,11 +1093,12 @@ on:
 {_run_preamble(_TIMEOUT_MANY_REPOS)}      - name: Archive cohort
         env:
           GH_TOKEN: ${{{{ secrets.DSL_BOT_TOKEN }}}}
+          COURSE_ORG: ${{{{ github.repository_owner }}}}
           COHORT_ORG: ${{{{ inputs.cohort_org }}}}
           DRY_RUN: ${{{{ inputs.dry_run }}}}
           FORCE: ${{{{ inputs.force }}}}
         run: |
-          args=(--cohort-org "$COHORT_ORG")
+          args=(--course-org "$COURSE_ORG" --cohort-org "$COHORT_ORG")
 {_DRY_RUN_GATE}
           [ "$FORCE" = "true" ] && args+=(--force)
           python3 -m dsl_course.teardown "${{args[@]}}"

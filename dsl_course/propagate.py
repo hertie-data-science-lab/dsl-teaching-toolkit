@@ -83,6 +83,18 @@ class Carried(NamedTuple):
         return f"- `{self.cohort}` -> `{self.course or '(repo root)'}`"
 
 
+class Propagated(NamedTuple):
+    """What one run did: the error count its callers fold into their own, and the pull
+    request it left open on each source repo.
+
+    The URLs are here for the teardown, which runs this as its first step and then seals
+    the cohort: the record it writes into the sealed repo is the only place that can
+    still say where the cohort's last edits went."""
+
+    errors: int = 0
+    urls: tuple[str, ...] = ()
+
+
 def due_deploys(cohort_org: str, now: datetime) -> list[Deploy]:
     """Every copy this cohort's plan has already fired, in the plan's own order.
 
@@ -217,8 +229,8 @@ def _commit(sd: Path, message: str) -> bool:
 
 def _open_pr(
     course_org: str, repo: str, cohort_org: str, source: Source, branch: str
-) -> int:
-    """Push the branch and keep ONE pull request for it. Returns the error count.
+) -> Propagated:
+    """Push the branch and keep ONE pull request for it.
 
     `--force-with-lease` rather than `--force`: the lease is against the ref this run
     cloned, so a branch somebody moved in the meantime refuses rather than being
@@ -236,7 +248,7 @@ def _open_pr(
     )
     if code != 0:
         log_err(f"  {slug}: could not push `{branch}` - {out[:200]}")
-        return 1
+        return Propagated(1)
     opened = pulls.upsert_pr(
         slug,
         head=branch,
@@ -247,7 +259,7 @@ def _open_pr(
     )
     if opened.url:
         log_ok(f"  {slug}: {len(source.carried)} path(s) proposed - {opened.url}")
-    return opened.errors
+    return Propagated(opened.errors, (opened.url,) if opened.url else ())
 
 
 def propagate(
@@ -255,9 +267,8 @@ def propagate(
     cohort_org: str,
     now: datetime | None = None,
     dry_run: bool = False,
-) -> int:
+) -> Propagated:
     """Propose `cohort_org`'s edits to its released material back into `course_org`.
-    Returns the error count.
 
     A cohort with nothing due, or with nothing changed, opens nothing and says so in one
     line: this runs from a button and from the teardown, and a pull request per run saying
@@ -270,7 +281,7 @@ def propagate(
     )
     if not deploys:
         log_ok(f"nothing has been released to {cohort_org} yet - nothing to carry back")
-        return 0
+        return Propagated()
     if dry_run:
         for d in deploys:
             log(
@@ -278,10 +289,11 @@ def propagate(
                 f"{deploy_dest(d) or '(repo root)'} -> {course_org}/"
                 f"{d.course_source_repo}/{d.course_source_path}"
             )
-        return 0
+        return Propagated()
 
     branch = branch_for(cohort_org)
     errors = 0
+    urls: list[str] = []
     with tempfile.TemporaryDirectory() as work:
         root = Path(work)
         dests: dict[str, Path] = {}
@@ -359,8 +371,10 @@ def propagate(
             if not source.carried:
                 log_ok(f"  {course_org}/{repo}: no cohort edits to carry back")
                 continue
-            errors += _open_pr(course_org, repo, cohort_org, source, branch)
-    return errors
+            opened = _open_pr(course_org, repo, cohort_org, source, branch)
+            errors += opened.errors
+            urls += list(opened.urls)
+    return Propagated(errors, tuple(urls))
 
 
 def main() -> int:
@@ -380,11 +394,11 @@ def main() -> int:
     # A read helper that couldn't reach the API raises; in an Actions log a one-line
     # error beats a traceback, and the run still goes red.
     try:
-        errors = propagate(args.course_org, args.cohort_org, dry_run=args.dry_run)
+        done = propagate(args.course_org, args.cohort_org, dry_run=args.dry_run)
     except RuntimeError as exc:
         log_err(str(exc))
         return 1
-    return 1 if errors else 0
+    return 1 if done.errors else 0
 
 
 if __name__ == "__main__":
