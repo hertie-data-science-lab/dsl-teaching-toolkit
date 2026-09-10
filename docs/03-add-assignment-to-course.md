@@ -1,7 +1,8 @@
 # Add an assignment to the course org
 
-Scaffold an assignment **template** repo, then fill in the brief, starter, and (optionally)
-the model solution + autograder. One per assignment: `assignment-N-{f/s}YYYY`.
+Scaffold an assignment **template** repo, then fill in the brief and starter. Assignments
+are marked by hand; the model solution and the autograder are optional extras on top. One
+per assignment: `assignment-N-{f/s}YYYY`.
 
 ## Prerequisites
 
@@ -25,6 +26,11 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
         class - the repo then carries the brief and the Feedback issue and nothing is ever
         collected from it)
       - `autograde` (off by default; on seeds a `tests/` stub and runs it at the cutoff)
+      - `copy_from` (optional): an existing `assignment-*` template to start from instead -
+        `main` and `solution` arrive whole, history included, and nothing is written over
+        them. `format`, `type`, `team_formation`, `submit_via` and `autograde` are then
+        ignored: the copied `grading_config.yml` is this assignment's definition, and the
+        run says so with a link to it. A source with no `solution` branch is refused.
    - Everything else - the team cap, the late window, the penalty - comes from
      `assignment_defaults:` in the course org's `.github/dsl-course.yml` and is written
      into the assignment's own `grading_config.yml`, where you can revise it per assignment.
@@ -37,12 +43,13 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
 
 2. **Push your content** 
    - Brief + starter → `main`
-   - Model solution, `grading_config.yml` and the hidden `tests/` → `solution`
+   - Model solution and `grading_config.yml` → `solution`
    - Student repos are generated from **`main` only**, unless you tick `include_solution` at release time. 
-   - A purely hand-marked assignment needs nothing: `autograde` defaults to **false**, and a
-     template with no `solution` branch at all is hand-marked too. The cutoff still freezes the
-     sheet and records the decision not to machine-mark it.
-   - For a partially machine-marked assignment set `autograde: true` in `grading_config.yml`:
+   - A purely hand-marked assignment needs nothing further: `autograde` defaults to **false**,
+     and a template with no `solution` branch at all is hand-marked too. The cutoff still
+     freezes the sheet and records the decision not to machine-mark it, and the grading sheet,
+     the receipts and the late arithmetic all run as they always do.
+   - Optionally, for a partially machine-marked assignment, set `autograde: true` in `grading_config.yml`:
      - put the hidden tests in `tests/` (the path is `grading_config.yml`'s `tests:` field): plain pytest files that `from starter import ...`, run faculty-side only and never shipped to students.
      - `info.autograde` in the grading sheet then shows how many of them each submission passed - a count for you to mark against, never the mark itself, and never shown to a student.
      - Not a Python course? Put a `run.sh` in `tests/` and the sandbox runs that instead - [the recipe](10-grade-and-return-assignments.md#tests-in-another-language-testsrunsh).

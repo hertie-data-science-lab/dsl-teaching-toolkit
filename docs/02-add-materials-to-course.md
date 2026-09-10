@@ -28,6 +28,10 @@ Live example: [`example-course/course-org/course-materials-f2026/`](../example-c
       - a placeholder `SYLLABUS.md` 
       - a commented-out `.releaseignore` 
       >It also seeds the two run-from-repo Release workflows (Release materials, Release assignment). 
+   - `copy_from` (optional) starts the new repo as an existing `course-materials-*` instead
+     of as the skeleton - every branch, every file, the whole history. Your content arrives
+     as you left it; only `MAINTAINING.md`, `SYLLABUS.md.sample` and the workflows are
+     rewritten. This is how a course carries forward from one year to the next.
    - You have push on it immediately.
 
 2. **Push your content** to remote's `main` (git push or the web uploader):
