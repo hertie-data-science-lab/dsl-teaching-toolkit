@@ -49,6 +49,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from . import pulls, schedule
+from .course import is_repo_root
 from .deploy import _copy_ignore, _resolve_within
 from .fs import Deny, copy_tree
 from .ghcli import GIT_ENV, clone, git
@@ -56,31 +57,25 @@ from .log import log, log_err, log_ok, log_step
 from .schedule import Deploy
 from .schedule_plan import deploy_dest
 
-# The branch every run of this rewrites, in the COURSE repo. Named after the cohort it
-# carries, because a course org releases into several at once and each one's edits are a
-# separate conversation with faculty. Toolkit-owned: it is regenerated from the default
-# branch on every run, so anything committed onto it by hand is lost at the next tick.
-BRANCH_PREFIX = "from-"
-
 
 def branch_for(cohort_org: str) -> str:
-    """The branch a cohort's edits are proposed on. One spelling, because the push, the
-    pull request lookup and the body's own explanation all have to name the same ref."""
-    return f"{BRANCH_PREFIX}{cohort_org}"
+    """The branch a cohort's edits are proposed on, in the COURSE repo.
+
+    One spelling, because the push, the pull request lookup and the body's own explanation
+    all have to name the same ref. Named after the cohort it carries, because a course org
+    releases into several at once and each one's edits are a separate conversation with
+    faculty. Toolkit-owned: it is regenerated from the default branch on every run, so
+    anything committed onto it by hand is lost at the next tick."""
+    return f"from-{cohort_org}"
 
 
-class Carried(NamedTuple):
-    """One propagated path: where it came from and where it landed in the course repo.
+def _rel(path: str) -> str:
+    """A plan path as this module spells it: `""` for every "release everything" spelling.
 
-    Both halves, because they are usually the same string and occasionally not - a
-    `cohort_dest_path` that renames the folder is exactly the case a reader of the pull
-    request needs spelled out."""
-
-    cohort: str  # `<repo>/<path>` in the cohort org
-    course: str  # the path inside the course source repo
-
-    def line(self) -> str:
-        return f"- `{self.cohort}` -> `{self.course or '(repo root)'}`"
+    `course.is_repo_root` owns which those are (`""`, `/` and `.` are all written by
+    faculty), and without it a plan that says `.` reaches a commit subject, a pull request
+    body and a `kept` path as a bare dot."""
+    return "" if is_repo_root(path) else path.strip("/")
 
 
 class Propagated(NamedTuple):
@@ -112,10 +107,16 @@ def _deny(path: Path, clone_root: Path) -> Deny:
     """The copy filter for one end of a propagate.
 
     `deploy._copy_ignore` applies its root-only exclusions at the clone root when a WHOLE
-    repo is being copied, and nowhere for a subpath copy - the same rule in both
-    directions, so what a release refuses to ship is what a propagate refuses to carry
-    back. The `.github` a cohort repo has holds nothing but toolkit workflows, and
-    MAINTAINING.md is the course org describing itself."""
+    repo is being copied, and nowhere for a subpath copy - the toolkit's own half of the
+    release filter, run in reverse, so what a release refuses to ship is what a propagate
+    refuses to carry back. The `.github` a cohort repo has holds nothing but toolkit
+    workflows, and MAINTAINING.md is the course org describing itself.
+
+    Deliberately NOT the other half: a source's `.releaseignore` (`deploy` unions
+    `releaseignore.deny_for` into this) is faculty saying what students may not see, and
+    a released tree never held those paths in the first place. There is nothing in the
+    cohort to withhold on the way back - and a file the cohort ADDED at a withheld path
+    is a proposal in a pull request a human reads, not a leak."""
     return _copy_ignore(path if path == clone_root else None)
 
 
@@ -158,7 +159,11 @@ class Source:
 
     dir: Path
     base: str
-    carried: list[Carried] = field(default_factory=list)
+    # One rendered `- `<cohort repo>/<path>` -> `<course path>`` line per commit made.
+    # Both ends, because they are usually the same string and occasionally not - a
+    # `cohort_dest_path` that renames the folder is exactly the case a reader of the pull
+    # request needs spelled out.
+    carried: list[str] = field(default_factory=list)
     kept: list[str] = field(default_factory=list)  # what the cohort no longer has
 
 
@@ -201,7 +206,7 @@ def _body(cohort_org: str, source: Source, branch: str) -> str:
     return (
         f"`{cohort_org}` has edits to material this repo released to it. This branch "
         f"carries them back, one commit per released path, in the order the term ran.\n\n"
-        f"{chr(10).join(c.line() for c in source.carried)}"
+        f"{chr(10).join(source.carried)}"
         f"{kept}\n\n"
         f"Merge it, cherry-pick the commits you want, or close it. `{branch}` is cut "
         f"fresh from `{source.base}` and force-pushed on every run, so closing this "
@@ -286,8 +291,8 @@ def propagate(
         for d in deploys:
             log(
                 f"  DRY-RUN  {cohort_org}/{d.cohort_dest_repo}/"
-                f"{deploy_dest(d) or '(repo root)'} -> {course_org}/"
-                f"{d.course_source_repo}/{d.course_source_path}"
+                f"{_rel(deploy_dest(d)) or '(repo root)'} -> {course_org}/"
+                f"{d.course_source_repo}/{_rel(d.course_source_path) or '(repo root)'}"
             )
         return Propagated()
 
@@ -308,25 +313,21 @@ def propagate(
             prepared = _prepare_source(course_org, repo, branch, root)
             if prepared is not None:
                 sources[repo] = prepared
-        # One end missing is one copy lost, counted once per deploy exactly as the release
-        # counts it - both ends failing is still one path not carried.
-        errors += sum(
-            1
-            for d in deploys
-            if d.cohort_dest_repo not in dests or d.course_source_repo not in sources
-        )
-
         for d in deploys:
             if d.cohort_dest_repo not in dests or d.course_source_repo not in sources:
+                # One end missing is one copy lost, counted once per deploy exactly as the
+                # release counts it - both ends failing is still one path not carried.
+                errors += 1
                 continue
             source = sources[d.course_source_repo]
             cohort_root = dests[d.cohort_dest_repo]
-            cohort_rel = deploy_dest(d)
+            cohort_rel = _rel(deploy_dest(d))
+            course_rel = _rel(d.course_source_path)
             srcp = _resolve_within(cohort_root, cohort_rel)
-            destp = _resolve_within(source.dir, d.course_source_path)
+            destp = _resolve_within(source.dir, course_rel)
             if srcp is None or destp is None:
                 log_err(
-                    f"unsafe path pair `{cohort_rel}` -> `{d.course_source_path}` for "
+                    f"unsafe path pair `{cohort_rel}` -> `{course_rel}` for "
                     f"{d.course_source_repo} - skipped."
                 )
                 errors += 1
@@ -341,14 +342,12 @@ def propagate(
                 )
                 continue
             deny = _deny(srcp, cohort_root)
-            gone = sorted(
-                _carried(destp, _deny(destp, source.dir)) - _carried(srcp, deny)
+            gone = (
+                sorted(_carried(destp, _deny(destp, source.dir)) - _carried(srcp, deny))
                 if destp.exists()
-                else ()
+                else []
             )
-            source.kept.extend(
-                f"{d.course_source_path.strip('/')}/{p}".lstrip("/") for p in gone
-            )
+            source.kept.extend(f"{course_rel}/{p}".lstrip("/") for p in gone)
             try:
                 if srcp.is_dir():
                     copy_tree(srcp, destp, deny)
@@ -359,12 +358,11 @@ def propagate(
                 log_err(f"could not copy `{where}` from {cohort_org}: {exc}")
                 errors += 1
                 continue
-            course_rel = d.course_source_path.strip("/")
             if _commit(
                 source.dir,
                 f"propagate: {course_rel or 'the repo root'} from {cohort_org}",
             ):
-                source.carried.append(Carried(where, course_rel))
+                source.carried.append(f"- `{where}` -> `{course_rel or '(repo root)'}`")
 
         for repo in sorted(sources):
             source = sources[repo]
