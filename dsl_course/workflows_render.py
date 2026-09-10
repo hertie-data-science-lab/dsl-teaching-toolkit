@@ -30,7 +30,9 @@ from .central import CENTRAL, CENTRAL_REF_PLACEHOLDER, pin_central_ref
 from .course import (
     ASSIGNMENT_TYPES,
     MATERIALS_REPO_PREFIX,
+    NO_STARTER,
     SANDBOX_USER,
+    STARTER_FORMATS,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
     term_tag,
@@ -1529,12 +1531,14 @@ on:
 # Box 5 is the one answer on this form that is a LIST - any number of starters, seeded
 # side by side - so it is free text where every neighbour is a dropdown: `type: choice`
 # takes one option and nothing else. The vocabulary therefore lives in the description,
-# which is where `scaffold.parse_formats` refuses an answer back to. `ipynb` is pre-filled
-# for the same reason `cohort_dest_repo` carries `materials`: it is the answer the toolkit
+# which is where `scaffold.parse_formats` refuses an answer back to - and it is READ off
+# `course.STARTER_FORMATS`, like the three dropdowns below it, because a box offering a
+# word the reader would refuse is exactly the form that lies. `ipynb` is pre-filled for
+# the same reason `cohort_dest_repo` carries `materials`: it is the answer the toolkit
 # supplies anyway, so showing it teaches the default rather than hiding it.
-_STARTER_FORMATS_INPUT = """\
+_STARTER_FORMATS_INPUT = f"""\
       format:
-        description: "5. Starter file(s) to seed, comma-separated: ipynb, py, rmd, qmd, latex - or none for the README.md only"
+        description: "5. Starter file(s) to seed, comma-separated: {", ".join(STARTER_FORMATS)} - or {NO_STARTER} for the README.md only"
         default: "ipynb"
         required: true"""
 
@@ -1552,8 +1556,8 @@ def render_new_assignment(assignments: list[str] | None = None) -> str:
     `copy_from` is the box that asks for none of it: last year's template arrives whole,
     and the `grading_config.yml` that comes with it is the definition, so boxes 5-9 are
     ignored. It is box 4 for that reason - GitHub renders these top to bottom and the
-    answer that voids the rest belongs above them, not after the five boxes it voids. The name and the number are asked for either way: they name the repo and
-    describe it.
+    answer that voids the rest belongs above them, not after the five boxes it voids. The
+    name and the number are asked for either way: they name the repo and describe it.
 
     GitHub caps a workflow_dispatch at 10 inputs, and there is deliberately no tenth: an
     assignment's remaining settings belong in a file the instructor can revise, not in a

@@ -102,8 +102,14 @@ NO_TEAMS = "none"
 DEFAULT_MAX_TEAM_SIZE = 5
 # Which starter stubs `New assignment` seeds, and nothing else: grading reads whatever
 # is in the repo, and a student may commit anything. The button takes any number of them,
-# comma-separated; `none` is the raw-repo answer and the one that stands alone.
-FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", "none")
+# comma-separated; `none` is the raw-repo answer and the one that stands alone - which is
+# why it is named here, beside the vocabulary it belongs to, rather than spelt again in
+# each of the three layers that has to recognise it.
+NO_STARTER = "none"
+FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", NO_STARTER)
+# The starters an instructor may actually name, `none` being the answer that means none of
+# them: the words the New assignment box offers and the ones `scaffold` refuses back to.
+STARTER_FORMATS = tuple(f for f in FORMATS if f != NO_STARTER)
 
 
 # The four ROLE teams every org's access is expressed in: the two faculty teams, created

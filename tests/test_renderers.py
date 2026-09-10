@@ -929,10 +929,12 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     assert "Boxes 5-9 are then ignored" in inputs["copy_from"]["description"]
     # Box 5 takes a LIST, so it is free text rather than a dropdown - and every format the
     # scaffold accepts has to be named in the description, because that is the only place
-    # a faculty member can read the vocabulary off.
+    # a faculty member can read the vocabulary off. Asserted as the WHOLE joined list
+    # rather than one member at a time: `py` is a substring of `ipynb`, so a per-member
+    # check passes a description that dropped it.
     assert "type" not in inputs["format"] and inputs["format"]["default"] == "ipynb"
-    for fmt in course.FORMATS:
-        assert fmt in inputs["format"]["description"]
+    assert ", ".join(course.STARTER_FORMATS) in inputs["format"]["description"]
+    assert course.NO_STARTER in inputs["format"]["description"]
     assert inputs["type"]["options"] == list(course.ASSIGNMENT_TYPES)
     assert inputs["team_formation"]["options"] == list(course.TEAM_FORMATIONS)
     assert inputs["submit_via"]["options"] == list(course.SUBMIT_VIA)

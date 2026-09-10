@@ -35,9 +35,11 @@ from .course import (
     FACULTY_ONLY_HEADING,
     FORMATS,
     MATERIALS_REPO_PREFIX,
+    NO_STARTER,
     PROPOSAL_BRANCH_PREFIX,
     SOLUTION_BRANCH,
     SOLUTION_DIR,
+    STARTER_FORMATS,
     SUBMIT_VIA,
     SYLLABUS_SAMPLE_FILE,
     TEAM_FORMATIONS,
@@ -64,12 +66,6 @@ from .workflows_place import (
 # and Pages cannot be enabled - nor the first deploy dispatched - on a repo with no branch.
 # Everything else a site holds arrives with the first `site sync`.
 SITE_DEPLOY_WORKFLOW = ".github/workflows/deploy.yml"
-
-# The `--format` answer that means no starter at all, and the only one that may not share
-# the box: `none` beside a real format is a contradiction, not a default (see
-# `parse_formats`).
-NO_STARTER = "none"
-
 
 _SYLLABUS_STUB = """\
 # {tag} syllabus
@@ -1026,7 +1022,7 @@ def parse_formats(answer: str) -> list[str]:
 def _not_a_format(problem: str) -> ValueError:
     """Every refusal of a `--format` answer, in the one line that names what may be
     typed - the box takes free text, so the answer to a bad one is the vocabulary."""
-    listed = ", ".join(fmt for fmt in FORMATS if fmt != NO_STARTER)
+    listed = ", ".join(STARTER_FORMATS)
     return ValueError(
         f"--format: {problem} - name any of {listed}, comma-separated, or "
         f"{NO_STARTER} on its own"
