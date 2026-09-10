@@ -1,8 +1,10 @@
 """dsl-course teardown -- close a finished cohort out.
 
-Runs on the cohort's own `archive.date` (`schedule.yml`, default `semester_end` + 60 days),
-fired by the scheduler; the Archive cohort button is for closing one out early. Six steps,
-in this order, and the order is the whole design:
+Runs on the cohort's own `archive.date`, fired by the scheduler - and only for a cohort
+whose `schedule.yml` writes an `archive:` block (its `date:` defaults to `semester_end` +
+60 days). Archiving is opt-in, so the Archive cohort button is for closing one out early,
+and the only way to close out a cohort that wrote no block. Six steps, in this order, and
+the order is the whole design:
 
 0. PROPAGATE: offer the cohort's edits to its released material back to the course org as
    a pull request (`dsl_course.propagate`). First, because it is the only step that READS
@@ -39,7 +41,7 @@ as it was.
 
 `--dry-run` is the default and prints counts only. A real run refuses until the cohort's
 `archive.date` has arrived; `--force` is a person saying it in as many words, which is what
-an early close-out - and a cohort with no term dates at all - needs.
+an early close-out - and a cohort that never asked to be archived - needs.
 
 Usage:
     python3 -m dsl_course.teardown --cohort-org hertie-dsl-demo-f2026

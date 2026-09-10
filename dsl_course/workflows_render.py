@@ -1101,19 +1101,21 @@ def render_archive_cohort(cohort_orgs: list[str]) -> str:
     """Close a finished cohort out: carry its edits back, freeze every repo, seal it."""
     return f"""name: Archive cohort
 
-# End of term. The scheduler runs this by itself on the cohort's own `archive.date`
-# (schedule.yml - default: semester_end + 60 days); this button is for closing one out
-# early. It offers the cohort's edits back to this org as a pull request first, closes the
-# toolkit's open notices, syncs the website one last time, then ARCHIVES every repo in the
-# cohort org - students' work, `welcome` so a finished term cannot still be joined, the
-# released materials, the website, `.github` - writes the teardown record into the private
-# classroom-config and archives that last, which is what tells every nightly sweep the
-# cohort is finished.
+# End of term. The scheduler runs this by itself ONLY for a cohort whose schedule.yml
+# writes an `archive:` block (its `date:` defaults to semester_end + 60 days). Archiving is
+# opt-in, so this button closes a cohort out early - and is the only way to close out one
+# that wrote no block. It offers the cohort's edits back to this org as a pull request
+# first, closes the toolkit's open notices, syncs the website one last time, then ARCHIVES
+# every repo in the cohort org - students' work, `welcome` so a finished term cannot still
+# be joined, the released materials, the website, `.github` - writes the teardown record
+# into the private classroom-config and archives that last, which is what tells every
+# nightly sweep the cohort is finished.
 # NOBODY IS REVOKED and NOTHING IS DELETED: an archived repo is read-only for everyone, so
 # students keep read access to their own work, and un-archiving a repo from its own
 # Settings page brings it back exactly as it was. Membership and teams are untouched.
 # `dry_run` defaults to true and prints counts only. A real run refuses until the cohort's
-# archive date has arrived; `force` says so by hand.
+# archive date has arrived; `force` says so by hand, which is how a cohort with no
+# `archive:` block - and so no date - is closed out.
 # A run that dies half way is resumed by running it again - see docs/10.
 
 on:
