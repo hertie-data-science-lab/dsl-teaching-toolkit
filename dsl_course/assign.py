@@ -1102,23 +1102,21 @@ def provision_all(
     # on the name then meant no teams found at all, or a team granted on the repo under a
     # slug that Sync membership reconciles a DIFFERENT team for.
     sched = schedule.load(cohort_org)
-    # Two entries handing out from one template is legitimate - a resit off the same
-    # brief - and the button cannot choose between them: it is one press, and the answer
-    # decides which half of the cohort gets repos. The SCHEDULE knows (each entry fires on
-    # its own datetime), so that is where this handout is sent, named, rather than picking.
-    scheduled_from = schedule.entries_for_repo(sched, template)
-    if not slug and len(scheduled_from) > 1:
-        log_err(
-            f"{template} is handed out by {len(scheduled_from)} assignments in "
-            f"{cohort_org}'s schedule.yml "
-            f"({', '.join(key for key, _ in scheduled_from)}) - they make different "
-            "repos and keep different grades, so hand this one out from the schedule "
-            "(each entry fires on its own handout_datetime) rather than from this button"
-        )
-        return 1, False
     # The parameter is consumed HERE and nowhere else: from the next line on, `slug` means
     # the cohort-side name, exactly as it does everywhere else in this file.
-    target = schedule.resolve_target(sched, template, slug)
+    #
+    # Two entries handing out from one template is legitimate - a resit off the same
+    # brief - and `resolve_target` refuses to choose between them. The REMEDY is this
+    # caller's to name: the button cannot answer, because it is one press and the answer
+    # decides which half of the cohort gets repos, so it is sent to the schedule, which
+    # fires each entry on its own datetime and therefore knows which one it is.
+    target = schedule.resolve_target(
+        sched,
+        template,
+        slug,
+        remedy="hand this one out from the schedule (each entry fires on its own "
+        "handout_datetime) rather than from this button",
+    )
     if isinstance(target, str):
         log_err(target)
         return 1, False
