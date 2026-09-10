@@ -385,7 +385,8 @@ events:
     event_datetime: 2026-11-17T10:00
 ```
 
-**`archive`** - when this cohort is frozen read-only. Optional at both ends.
+**`archive`** - when this cohort is frozen read-only. Optional, and the switch: written,
+the cohort is archived automatically; left out, it never is.
 
 | Field | Required | Default | Meaning |
 |---|---|---|---|
@@ -398,7 +399,8 @@ archive:
   show_on_site: true      # optional - false keeps it off the site
 ```
 
-A cohort with no `semester_end` and no `archive.date` is never archived automatically.
+`archive:` with nothing under it means "yes, on the default date". With no block at all, or
+no `semester_end` to count from, nothing is archived automatically.
 
 #### Schedule row types
 

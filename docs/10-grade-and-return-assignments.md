@@ -244,10 +244,9 @@ freeze carries on.
 
 ## Closing the cohort out
 
-**This happens on its own.** Sixty days after your `semester_end`, the scheduler archives
-the whole cohort org. You do not have to remember it, and nobody has to be around for it.
-
-Set your own date, or turn the default off, in `schedule.yml`:
+**Ask for it once and it happens on its own.** Write an `archive:` block in `schedule.yml`
+and the scheduler archives the whole cohort org on its date. You do not have to remember
+it, and nobody has to be around for it.
 
 ```yaml
 archive:
@@ -255,8 +254,9 @@ archive:
   show_on_site: true     # optional - default: true. A "Cohort archived" row on the site
 ```
 
-A cohort that declares neither `semester_end` nor `archive.date` is **never** archived
-automatically. Its `schedule.yml` notice issue will say so, term after term.
+The block is the switch: `archive:` on its own is enough, and means sixty days after your
+`semester_end`. **Without the block, nothing is ever archived** - the cohort stays live and
+writable, and its digest issue says so, term after term.
 
 **A fortnight before**, the cohort gets one issue in `classroom-config` and one email to
 the teaching team saying what is about to happen. That is the moment to move the date if
@@ -276,15 +276,17 @@ you need longer. Students see it too, in the site's Updates box and on its sched
 
 **Nobody is removed and nothing is deleted.** An archived repository is read-only for
 everyone, so students keep read access to their own work, to the materials and to their
-grades - indefinitely - and nobody, students or faculty, can change any of it. Org
-membership and the project teams are untouched.
+grades - indefinitely - and nobody, students or faculty, can change any of it. They can
+still fork or clone any of it into their own accounts afterwards. Org membership and the
+project teams are untouched.
 
 To reopen anything - a grade appeal, a late submission - un-archive that repo from its own
 Settings page. It comes back exactly as it was, write access included.
 
-**Archive cohort** is the button for closing a cohort out early. `dry_run` is on by default
-and prints the counts; the real run **refuses** until the archive date has arrived, and
-`force` overrides that. Run it again if it fails part-way - it picks up where it stopped,
+**Archive cohort** is the button for closing a cohort out early, or at all. `dry_run` is on
+by default and prints the counts; the real run **refuses** until the archive date has
+arrived, and `force` overrides that - which is how a cohort with no `archive:` block, and
+so no date, is closed out. Run it again if it fails part-way - it picks up where it stopped,
 and only the last step seals the record.
 
 `classroom-config` is now the cohort's whole record of assessment - roster, teams, schedule,
