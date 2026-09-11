@@ -88,6 +88,40 @@ jobs:
           done
           exit $missing
 
+      - name: Check a published file renders from the site and an unpublished one does not
+        # Publishing has two halves built by different code - the mirror that copies the
+        # bytes and the front matter that links them - and a mismatch is a 404 on a live
+        # site. The fixture publishes session 1's `slides.html` (with its `slides_files/`
+        # bundle) and not the `slides.pdf` beside it, so one page carries both row shapes.
+        run: |
+          cd "$RUNNER_TEMP/build"
+          missing=0
+          for f in \
+            files/course-materials/lectures/01_week-1/slides.html \
+            files/course-materials/lectures/01_week-1/slides_files/figure/plot.svg; do
+            if [ ! -f "$f" ]; then
+              echo "::error::$f was never copied into the site"
+              missing=1
+            fi
+          done
+          if ! grep -rq 'href="[^"]*/files/course-materials/lectures/01_week-1/slides\.html"' .; then
+            echo "::error::slides.html is published but no page links its hosted copy"
+            missing=1
+          fi
+          if ! grep -rq 'slides\.html</a>.*file-actions.*github\.com.*>source</a>' .; then
+            echo "::error::slides.html has no [source] link beside it"
+            missing=1
+          fi
+          if ! grep -q 'slides\.html</a>.*· <a[^>]*github\.com[^>]*>source</a></span>\]' index.html; then
+            echo "::error::the Updates box does not carry the inline source link"
+            missing=1
+          fi
+          if grep -rq 'slides\.pdf</a>.*file-actions' .; then
+            echo "::error::slides.pdf is not published but carries a [source] link"
+            missing=1
+          fi
+          exit $missing
+
       - name: Check the Updates box announces only what released
         # The home page's box is sorted newest-first over the WHOLE term, so an unfiltered
         # one announces the last week of term as "New Lab is up" before week one has

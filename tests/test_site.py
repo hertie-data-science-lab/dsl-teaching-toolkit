@@ -12,7 +12,15 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
-from dsl_course import discovery, gh_contents, grades, schedule_plan, site, site_repo
+from dsl_course import (
+    discovery,
+    gh_contents,
+    ghcli,
+    grades,
+    schedule_plan,
+    site,
+    site_repo,
+)
 from dsl_course import schedule as schedule_mod
 from dsl_course.schedule import (
     AssignmentEntry,
@@ -21,7 +29,8 @@ from dsl_course.schedule import (
     Release,
     Schedule,
 )
-from tests.conftest import entry_links
+from dsl_course.site_repo import Link
+from tests.conftest import BareOrigins, entry_links
 
 UTC = ZoneInfo("UTC")
 
@@ -68,7 +77,11 @@ def test_lecture_entry_shows_real_time_from_a_datetime(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     md = site._lecture_entry(
-        "Cohort", "2", _row(datetime(2026, 9, 15, 14, 30, tzinfo=BERLIN)), RELEASED
+        "Cohort",
+        "2",
+        _row(datetime(2026, 9, 15, 14, 30, tzinfo=BERLIN)),
+        RELEASED,
+        hosted={},
     )
     assert "date: 2026-09-15T14:30:00" in md
     assert "not yet released" not in md
@@ -77,18 +90,24 @@ def test_lecture_entry_shows_real_time_from_a_datetime(monkeypatch):
 def test_lecture_entry_falls_back_to_0900_for_a_bare_date(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
-    md = site._lecture_entry("Cohort", "2", _row(date(2026, 9, 15)), RELEASED)
+    md = site._lecture_entry(
+        "Cohort", "2", _row(date(2026, 9, 15)), RELEASED, hosted={}
+    )
     assert "date: 2026-09-15T09:00:00" in md
 
 
 def test_lecture_entry_renders_a_lab_row_as_its_own_type(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
-    md = site._lecture_entry("Cohort", "3", _row(date(2026, 9, 17)), RELEASED, "lab")
+    md = site._lecture_entry(
+        "Cohort", "3", _row(date(2026, 9, 17)), RELEASED, "lab", hosted={}
+    )
     assert "type: lab" in md
     assert 'title: "Lab 3"' in md
     assert "Session 3" not in md
-    lec = site._lecture_entry("Cohort", "3", _row(date(2026, 9, 15)), RELEASED)
+    lec = site._lecture_entry(
+        "Cohort", "3", _row(date(2026, 9, 15)), RELEASED, hosted={}
+    )
     assert "type: lecture" in lec and 'title: "Session 3"' in lec
 
 
@@ -98,10 +117,10 @@ def test_only_the_unreleased_row_carries_the_theme_flag(monkeypatch):
     monkeypatch.setattr(site, "_session_files", lambda *a: [])
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     assert "unreleased: true" not in site._lecture_entry(
-        "Cohort", "2", _row(date(2026, 9, 15)), RELEASED
+        "Cohort", "2", _row(date(2026, 9, 15)), RELEASED, hosted={}
     )
     assert "unreleased: true" in site._lecture_entry(
-        "Cohort", "2", _row(date(2026, 9, 15)), []
+        "Cohort", "2", _row(date(2026, 9, 15)), [], hosted={}
     )
 
 
@@ -677,7 +696,9 @@ def _plan(
     monkeypatch.setattr(site.schedule, "load", lambda org: sched)
     monkeypatch.setattr(site, "people_yaml", lambda *a, **k: "people: []\n")
     monkeypatch.setattr(
-        site, "_session_files", files or (lambda org, repo, subpath, folder: [])
+        site,
+        "_session_files",
+        files or (lambda org, repo, subpath, folder, hosted: []),
     )
     # The memoised tree, which `_session_links` reads the default branch from to build its
     # folder-link URLs. Stubbed even where `_session_files` is faked: without it the fake
@@ -945,7 +966,9 @@ def test_a_released_row_replaces_its_placeholder_with_links(monkeypatch, tmp_pat
         tmp_path,
         sched,
         sources=[("materials", "labs", "02_week-2", 2)],
-        files=lambda org, repo, subpath, folder: [("lab.pdf", "https://x/lab.pdf")],
+        files=lambda org, repo, subpath, folder, hosted: [
+            Link("lab.pdf", "https://x/lab.pdf")
+        ],
     )
     body = plan.collections["_lectures"]["lab-02.md"]
     assert ("lab", "lab.pdf") in entry_links(body)
@@ -1005,8 +1028,8 @@ def test_the_lecture_row_never_carries_the_weeks_lab_links(monkeypatch, tmp_path
             ("materials", "lectures", "02_week-2", 2),
             ("materials", "labs", "02_week-2", 2),
         ],
-        files=lambda org, repo, subpath, folder: [
-            (f"{subpath}.pdf", f"https://x/{subpath}")
+        files=lambda org, repo, subpath, folder, hosted: [
+            Link(f"{subpath}.pdf", f"https://x/{subpath}")
         ],
     )
     session = plan.collections["_lectures"]["session-02.md"]
@@ -1236,7 +1259,9 @@ def test_two_plan_entries_citing_one_template_stay_two_assignments(
 def test_session_files_missing_tree_is_empty(monkeypatch):
     monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "HTTP 404: Not Found"))
-    assert site._session_files("Cohort-f2026", "materials", "lectures", "03_x") == []
+    assert (
+        site._session_files("Cohort-f2026", "materials", "lectures", "03_x", {}) == []
+    )
 
 
 def test_session_files_fetch_failure_raises_rather_than_stripping_the_site(monkeypatch):
@@ -1244,7 +1269,7 @@ def test_session_files_fetch_failure_raises_rather_than_stripping_the_site(monke
     monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", lambda *a, **k: (1, "HTTP 502: bad gateway"))
     with pytest.raises(RuntimeError):
-        site._session_files("Cohort-f2026", "materials", "lectures", "03_x")
+        site._session_files("Cohort-f2026", "materials", "lectures", "03_x", {})
 
 
 def test_team_people_missing_team_is_empty(monkeypatch):
@@ -1448,7 +1473,9 @@ def test_front_matter_survives_a_backslash_in_a_title(monkeypatch):
 
 
 def test_links_block_survives_a_backslash_in_a_filename():
-    block = site_repo.links_block([("lectures", [("notes \\x.pdf", "https://x/1")])])
+    block = site_repo.links_block(
+        [("lectures", [Link("notes \\x.pdf", "https://x/1")])]
+    )
     parsed = yaml.safe_load(block)  # must parse, no ScannerError
     assert "notes" in parsed["links"][0]["name"]
 
@@ -1518,7 +1545,9 @@ def test_display_only_rows_come_from_events_alone(monkeypatch, tmp_path):
 
 # ------------------------------------------------- a session's declared name + blurb
 def test_a_row_carries_the_title_and_description_the_plan_declared(monkeypatch):
-    monkeypatch.setattr(site, "_session_files", lambda *a: [("s.pdf", "https://x/1")])
+    monkeypatch.setattr(
+        site, "_session_files", lambda *a: [Link("s.pdf", "https://x/1")]
+    )
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     out = site._lecture_entry(
         "Cohort-f2026",
@@ -1529,6 +1558,7 @@ def test_a_row_carries_the_title_and_description_the_plan_declared(monkeypatch):
             description="Sample spaces and Bayes' rule.",
         ),
         RELEASED,
+        hosted={},
     )
     # `title` stays the ordinal - what the theme has always assumed it is - and the
     # declared name rides `subtitle` beside it.
@@ -1540,10 +1570,16 @@ def test_a_row_carries_the_title_and_description_the_plan_declared(monkeypatch):
 def test_a_row_omits_the_declared_fields_it_was_not_given(monkeypatch):
     # Omitted, not written blank: the theme tests for them, so an empty string would
     # render an empty line where there should be nothing at all.
-    monkeypatch.setattr(site, "_session_files", lambda *a: [("s.pdf", "https://x/1")])
+    monkeypatch.setattr(
+        site, "_session_files", lambda *a: [Link("s.pdf", "https://x/1")]
+    )
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
     out = site._lecture_entry(
-        "Cohort-f2026", "1", _row(datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN)), RELEASED
+        "Cohort-f2026",
+        "1",
+        _row(datetime(2026, 9, 1, 8, 0, tzinfo=BERLIN)),
+        RELEASED,
+        hosted={},
     )
     assert "subtitle:" not in out and "description:" not in out
 
@@ -1559,6 +1595,7 @@ def test_an_unreleased_row_still_says_what_the_session_is_about():
             description="Linearity of expectation.",
         ),
         [],
+        hosted={},
     )
     # What the session covers is known the day the plan is written, so it is published
     # then - the term reads as a syllabus from day one. Only the FILES wait for release,
@@ -1602,7 +1639,9 @@ def test_readings_pending_reaches_the_rendered_row():
     )
     row = schedule_plan.planned_sessions(s)[("2", "lecture")]
     # live_repos empty -> _dest_link renders plain code and makes no tree call
-    page = site._lecture_entry("COHORT", "2", row, sources=[], live_repos=frozenset())
+    page = site._lecture_entry(
+        "COHORT", "2", row, sources=[], live_repos=frozenset(), hosted={}
+    )
     assert "readings_pending: true" in page
     assert "materials/readings/02_x" in page
     assert "not yet released" in page
@@ -1694,3 +1733,276 @@ def test_a_dispatch_naming_a_closed_out_cohort_syncs_nothing(monkeypatch):
         ["site", "sync", "--course-org", "Course", "--cohort-org", "Cohort-A"],
     )
     assert site.main() == 0
+
+
+# ---------------------------------------------------- public copies of published files
+# What a cohort site hosts itself, so an HTML deck renders in a browser instead of showing
+# as source on GitHub. `_mirror_public` is the ONE decision: it says which paths it copied,
+# and every renderer links a hosted copy only for a path it names - so a page cannot offer
+# a rendered copy that a size cap, a denylist or a failed clone stopped being made.
+
+
+@pytest.fixture(autouse=True)
+def _fresh_publish_policy():
+    """The policy memo lives for one sync run, and a test is a run."""
+    site._publish_policy.cache_clear()
+    yield
+    site._publish_policy.cache_clear()
+
+
+@pytest.fixture
+def origins(tmp_path, monkeypatch) -> BareOrigins:
+    """Cohort repos as bare repos on disk, with `gh repo clone` reaching them."""
+    world = BareOrigins(tmp_path / "world")
+    monkeypatch.setattr(ghcli, "gh", world.clone_only)
+    return world
+
+
+def _policy(*patterns: str) -> dict[str, tuple]:
+    return {"materials": (site.parse_patterns("\n".join(patterns)),)}
+
+
+def _mirror(monkeypatch, origins, tmp_path, tree: dict[str, str], policies):
+    """Mirror a faked cohort repo into a site checkout; return (hosted, what it serves).
+
+    Called twice by the tests that are about a SECOND sync: the cohort repo is seeded on
+    the first call only and the site checkout is reused, which is the state a re-sync
+    actually runs against."""
+    if tree and "main" not in origins.refs("materials"):
+        origins.commit("materials", tree)
+    monkeypatch.setattr(
+        site, "_repo_tree", lambda org, repo: ("main", tuple(sorted(tree)))
+    )
+    site_wd = tmp_path / "site"
+    hosted = site._mirror_public(site_wd, "Cohort-f2026", policies)
+    served = site_wd / site.SITE_FILES_DIR
+    return hosted, sorted(
+        p.relative_to(served).as_posix() for p in served.rglob("*") if p.is_file()
+    )
+
+
+def test_a_published_file_is_linked_to_the_hosted_copy_and_to_its_source(monkeypatch):
+    # The row a published deck renders as: the NAME opens the site's own copy, `url` is
+    # still the file on GitHub so the template can offer `[source]` beside it.
+    monkeypatch.setattr(
+        site,
+        "_repo_tree",
+        cache(lambda org, repo: ("main", ("lectures/01_a/slides.html",))),
+    )
+    link = site._session_files(
+        "Cohort-f2026",
+        "materials",
+        "lectures",
+        "01_a",
+        {"materials": frozenset({"lectures/01_a/slides.html"})},
+    )[0]
+    assert link.url == (
+        "https://github.com/Cohort-f2026/materials/blob/main/lectures/01_a/slides.html"
+    )
+    assert link.view_url == (
+        "https://cohort-f2026.github.io/files/materials/lectures/01_a/slides.html"
+    )
+
+
+@pytest.mark.parametrize(
+    ("path", "linked"),
+    [
+        ("lectures/01_a/slides.html", True),
+        ("lectures/01_a/slides.pdf", True),
+        # Copied, but GitHub already renders it - a second copy would only be a second
+        # place for it to go stale, so the row is left exactly as it was.
+        ("lectures/01_a/lab.ipynb", False),
+    ],
+)
+def test_only_a_format_a_browser_renders_is_linked_to_its_copy(
+    monkeypatch, path, linked
+):
+    monkeypatch.setattr(site, "_repo_tree", cache(lambda org, repo: ("main", (path,))))
+    link = site._session_files(
+        "Cohort-f2026",
+        "materials",
+        "lectures",
+        "01_a",
+        {"materials": frozenset({path})},
+    )[0]
+    assert bool(link.view_url) is linked
+
+
+def test_a_file_that_was_not_copied_is_never_linked_to_a_copy(monkeypatch):
+    # The whole point of reading what the mirror DID: a deck dropped for its size, or
+    # left behind by a clone that failed, must render as today's row rather than as a 404.
+    monkeypatch.setattr(
+        site,
+        "_repo_tree",
+        cache(lambda org, repo: ("main", ("lectures/01_a/slides.html",))),
+    )
+    link = site._session_files("Cohort-f2026", "materials", "lectures", "01_a", {})[0]
+    assert link.view_url == ""
+
+
+def test_a_course_that_publishes_nothing_writes_the_front_matter_it_always_did():
+    # The golden: every cohort site alive today publishes nothing, and its rows must come
+    # out byte for byte as they did before any of this existed.
+    block = site_repo.links_block(
+        [("lectures", [Link("slides.pdf", "https://github.com/o/r/blob/main/s.pdf")])]
+    )
+    assert block == (
+        "links:\n"
+        "    - url: https://github.com/o/r/blob/main/s.pdf\n"
+        '      name: "slides.pdf"\n'
+        '      section: "lecture"'
+    )
+
+
+def test_a_published_decks_bundle_follows_it(monkeypatch, origins, tmp_path):
+    # A Quarto deck is one deliverable plus a `<stem>_files/` directory its renderer
+    # invented. Copied without it, the deck loads with no figures and no styles - and no
+    # faculty member should have to write a pattern for a folder they did not name.
+    tree = {
+        "lectures/01_a/slides.html": "deck",
+        "lectures/01_a/slides_files/figure/plot.svg": "<svg/>",
+        "lectures/01_a/notes.md": "notes",
+    }
+    hosted, served = _mirror(
+        monkeypatch, origins, tmp_path, tree, _policy("lectures/**/*.html")
+    )
+    assert served == [
+        "materials/lectures/01_a/slides.html",
+        "materials/lectures/01_a/slides_files/figure/plot.svg",
+    ]
+    assert hosted["materials"] == frozenset(
+        {"lectures/01_a/slides.html", "lectures/01_a/slides_files/figure/plot.svg"}
+    )
+
+
+def test_a_denylisted_path_is_never_copied_however_wide_the_pattern(
+    monkeypatch, origins, tmp_path
+):
+    # `everything x all files` is a real answer on the form, and it must not be able to
+    # put a solution, a hidden test or a `.env` on a public site.
+    tree = {
+        "lectures/01_a/slides.html": "deck",
+        "lectures/01_a/solution/answers.pdf": "answers",
+        "tests/test_hidden.py": "assert True\n",
+        ".env": "KEY=example",
+        "lectures/01_a/.DS_Store": "junk",
+    }
+    _hosted, served = _mirror(monkeypatch, origins, tmp_path, tree, _policy("**"))
+    assert served == ["materials/lectures/01_a/slides.html"]
+
+
+def test_removing_a_pattern_removes_the_copy(monkeypatch, origins, tmp_path):
+    # Unpublishing is deleting the pattern: the mirror is rebuilt every sync, so what is
+    # no longer matched stops being served.
+    tree = {"lectures/01_a/slides.html": "deck", "labs/01_a/lab.html": "lab"}
+    _hosted, served = _mirror(
+        monkeypatch, origins, tmp_path, tree, _policy("**/*.html")
+    )
+    assert served == [
+        "materials/labs/01_a/lab.html",
+        "materials/lectures/01_a/slides.html",
+    ]
+    _hosted, served = _mirror(
+        monkeypatch, origins, tmp_path, tree, _policy("lectures/**/*.html")
+    )
+    assert served == ["materials/lectures/01_a/slides.html"]
+    # And declaring nothing public takes the whole mirror with it - without a clone, since
+    # nothing has to be read to know it.
+    monkeypatch.setattr(site, "clone", _never_cloned)
+    hosted, served = _mirror(monkeypatch, origins, tmp_path, tree, {"materials": ()})
+    assert (hosted, served) == ({}, [])
+
+
+def _never_cloned(*_a, **_k):
+    raise AssertionError("cloned a repo with nothing declared public")
+
+
+def test_a_course_with_no_publish_file_is_never_cloned(monkeypatch, origins, tmp_path):
+    # The cost of this feature on a course that does not use it has to be zero: no clone,
+    # no copy, no directory.
+    monkeypatch.setattr(site, "yaml_file", lambda *a: {})
+    monkeypatch.setattr(site, "clone", _never_cloned)
+    policies = site._publish_policies("Course-Org", _one_deploy(), ["materials"])
+    assert policies == {"materials": ()}
+    assert _mirror(monkeypatch, origins, tmp_path, {}, policies) == ({}, [])
+
+
+def _one_deploy() -> Schedule:
+    return Schedule(
+        releases=[
+            Release(
+                "s1",
+                datetime(2026, 9, 8, 10, 0, tzinfo=BERLIN),
+                deploy=[Deploy("course-materials-f2026", "lectures/01_a", "materials")],
+            )
+        ]
+    )
+
+
+def test_a_policy_that_does_not_parse_stops_the_sync(monkeypatch):
+    # Syntactically a bad indent is indistinguishable from "nothing public", and reading
+    # it that way would unpublish a whole course's decks over a typo - on a green run,
+    # since the rest of the site syncs fine. So it fails loudly, like people.yml: nothing
+    # is republished and nothing is wiped.
+    def boom(*_a):
+        raise yaml.YAMLError("mapping values are not allowed here")
+
+    monkeypatch.setattr(site, "yaml_file", boom)
+    with pytest.raises(yaml.YAMLError):
+        site._publish_policies("Course-Org", _one_deploy(), ["materials"])
+
+    monkeypatch.setattr(site, "yaml_file", lambda *a: {"public": "lectures/**"})
+    with pytest.raises(ValueError, match="must be a list of patterns"):
+        site._publish_policies("Course-Org", _one_deploy(), ["materials"])
+
+
+def test_a_file_github_would_refuse_is_skipped_rather_than_failing_the_sync(
+    monkeypatch, origins, tmp_path, capsys
+):
+    # One 200 MB recording in a materials repo would otherwise fail the site's own push
+    # and take the whole cohort site offline - for a file that is still on GitHub.
+    monkeypatch.setattr(site, "_MAX_PUBLIC_FILE_BYTES", 8)
+    tree = {"lectures/01_a/recording.pdf": "x" * 64, "lectures/01_a/slides.html": "d"}
+    hosted, served = _mirror(
+        monkeypatch, origins, tmp_path, tree, _policy("lectures/**")
+    )
+    assert served == ["materials/lectures/01_a/slides.html"]
+    assert "recording.pdf" not in hosted["materials"]
+    out = capsys.readouterr()
+    assert "recording.pdf" in out.err and "::warning::" in out.err
+
+
+def test_a_clone_that_failed_leaves_the_last_syncs_copies_standing(
+    monkeypatch, origins, tmp_path, capsys
+):
+    # Delete-and-rebuild, in that order and only after the clone: a site republished with
+    # every rendered deck missing because one clone failed is the worse outage.
+    tree = {"lectures/01_a/slides.html": "deck"}
+    policy = _policy("lectures/**/*.html")
+    _hosted, served = _mirror(monkeypatch, origins, tmp_path, tree, policy)
+    assert served == ["materials/lectures/01_a/slides.html"]
+    monkeypatch.setattr(site, "clone", lambda *a, **k: False)
+    hosted, served = _mirror(monkeypatch, origins, tmp_path, tree, policy)
+    # The copies stand, and nothing links them: a stale file nobody points at beats a
+    # page full of dead links.
+    assert served == ["materials/lectures/01_a/slides.html"] and hosted == {}
+    assert "could not clone" in capsys.readouterr().err
+
+
+def test_the_policy_is_read_from_the_source_repo_the_plan_names(monkeypatch):
+    # Course-level, in the repo faculty actually edit - keyed on the cohort DESTINATION,
+    # which is the repo whose files the site links and whose bytes get copied.
+    asked: list[tuple[str, str, str]] = []
+
+    def yaml_file(org, repo, path):
+        asked.append((org, repo, path))
+        return {"public": ["lectures/**/*.html"]}
+
+    monkeypatch.setattr(site, "yaml_file", yaml_file)
+    sched = _one_deploy()
+    sched.releases[0].deploy.append(Deploy("course-code-f2026", "src", "code"))
+    policies = site._publish_policies("Course-Org", sched, ["materials"])
+    # The `code` destination is not one of this cohort's content repos, so it is not asked
+    # about at all.
+    assert asked == [("Course-Org", "course-materials-f2026", "publish.yml")]
+    assert policies["materials"][0].check_file("lectures/01_a/slides.html").include

@@ -125,7 +125,9 @@ Its syntax is **exactly `.gitignore`'s** - patterns, `**`, character classes, `!
 re-include, `/` to anchor or to mean a directory, `#` comments.
 
 It applies to every copy out of the repo it sits in: the cohort release, the public course
-site, and the assignment handout.
+site, the assignment handout, and the cohort site's public copy of a file named in
+`publish.yml` - that copy is made from the RELEASED cohort repo, so a file withheld here
+never reaches it ([11](11-configure-cohort-site.md)).
 
 What that means in practice:
 

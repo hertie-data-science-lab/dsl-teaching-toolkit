@@ -109,6 +109,8 @@ def test_fresh_materials_repo_gets_the_full_skeleton(fake):
         "labs/01_session-1/.gitkeep",
         # Seeded inert, purely so faculty find out the withhold list exists.
         ".releaseignore",
+        # The other half of that question: what the cohort site may host in the open.
+        "publish.yml",
     }
     assert fake.skips == []
 
@@ -1632,3 +1634,102 @@ def test_a_failed_branch_policy_clear_is_reported(monkeypatch, capsys):
     )
     assert scaffold.scaffold_site("Org") == 0
     assert "github-pages branch policy" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------------- publish.yml
+
+PUBLISH_TABLE = [
+    (course.NOTHING_PUBLIC, course.PUBLIC_HTML_PDF, []),
+    (course.PUBLIC_LECTURES, course.PUBLIC_HTML, ["lectures/**/*.html"]),
+    (
+        course.PUBLIC_LECTURES,
+        course.PUBLIC_HTML_PDF,
+        ["lectures/**/*.html", "lectures/**/*.pdf"],
+    ),
+    (course.PUBLIC_LECTURES, course.PUBLIC_ALL_FILES, ["lectures/**"]),
+    (
+        course.PUBLIC_EXCEPT_READINGS,
+        course.PUBLIC_HTML_PDF,
+        ["**/*.html", "**/*.pdf", "!readings/**"],
+    ),
+    (
+        course.PUBLIC_EXCEPT_READINGS,
+        course.PUBLIC_ALL_FILES,
+        ["**", "!readings/**"],
+    ),
+    (course.PUBLIC_EVERYTHING, course.PUBLIC_HTML, ["**/*.html"]),
+    (course.PUBLIC_EVERYTHING, course.PUBLIC_ALL_FILES, ["**"]),
+]
+
+
+@pytest.mark.parametrize(("dirs", "types", "expected"), PUBLISH_TABLE)
+def test_the_two_form_answers_map_to_the_patterns_they_promise(dirs, types, expected):
+    # The whole of what the two dropdowns do. The `!` line comes LAST on the
+    # except-readings answers, because the last matching pattern wins - written above the
+    # pattern it carves out of, it would do nothing at all.
+    assert scaffold.publish_patterns(dirs, types) == expected
+
+
+def test_the_seeded_publish_file_declares_the_patterns_it_was_asked_for():
+    # Through YAML, not by reading the text: every pattern is quoted because `**/*.html`
+    # opens with an alias character and `!readings/**` with a tag - an unquoted list is a
+    # file the site cannot read at all, and the failure would be a silent no-op. The
+    # except-readings answer is the one that needs both.
+    declared = yaml.safe_load(
+        scaffold._publish_stub(course.PUBLIC_EXCEPT_READINGS, course.PUBLIC_HTML_PDF)
+    )
+    assert declared["public"] == ["**/*.html", "**/*.pdf", "!readings/**"]
+
+
+def test_the_seeded_publish_file_is_instructor_owned_and_explains_itself():
+    body = scaffold._publish_stub(course.NOTHING_PUBLIC, course.PUBLIC_HTML_PDF)
+    assert body.startswith("# INSTRUCTOR-OWNED")
+    # Seeded inert when nothing was asked for, like `.releaseignore`: it exists to be
+    # found, and a publish list nobody knows about is one nobody uses.
+    assert yaml.safe_load(body)["public"] is None
+    assert "lectures/**/*.html" in body
+
+
+def test_a_fresh_materials_repo_carries_the_answers_it_was_given(fake):
+    assert (
+        scaffold.scaffold_materials(
+            "Org", "f2026", public_dirs="lectures", public_types="html + pdf"
+        )
+        == 0
+    )
+    declared = yaml.safe_load(fake.files[("course-materials-f2026", "publish.yml")])
+    assert declared["public"] == ["lectures/**/*.html", "lectures/**/*.pdf"]
+
+
+def test_a_materials_repo_that_already_has_one_keeps_it(fake):
+    # Create-only, like every other instructor-owned file: a re-run against a repo whose
+    # publish list faculty have since edited must not revert it - that would either
+    # unpublish a term's decks or publish what they had just withdrawn.
+    mine = 'public:\n  - "labs/**/*.pdf"\n'
+    fake.files[("course-materials-f2026", "publish.yml")] = mine
+
+    assert scaffold.scaffold_materials("Org", "f2026", public_dirs="everything") == 0
+
+    assert fake.files[("course-materials-f2026", "publish.yml")] == mine
+    assert "course-materials-f2026/publish.yml" in fake.skips
+
+
+def test_a_copied_materials_repo_is_not_given_a_publish_file(origins, fake):
+    # `copy_from` brings last year's whole repo, its publish list included, and the two
+    # dropdowns are ignored - exactly as the rest of the skeleton is.
+    origins.commit(
+        "course-materials-f2025",
+        {"README.md": "# 2025\n", "publish.yml": 'public:\n  - "labs/**/*.pdf"\n'},
+    )
+
+    assert (
+        scaffold.scaffold_materials(
+            "Org", "f2026", "course-materials-f2025", public_dirs="everything"
+        )
+        == 0
+    )
+
+    assert "publish.yml" not in fake.written("course-materials-f2026")
+    assert origins.read("course-materials-f2026", "publish.yml") == (
+        'public:\n  - "labs/**/*.pdf"'
+    )
