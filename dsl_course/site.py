@@ -24,7 +24,10 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import shutil
+import stat
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from functools import cache
@@ -32,9 +35,11 @@ from pathlib import Path
 from urllib.parse import quote
 
 import yaml
+from pathspec import GitIgnoreSpec
 
 from . import schedule
 from .course import (
+    PUBLISH_FILE,
     assignment_slug,
     pages_repo,
     session_number,
@@ -53,10 +58,12 @@ from .discovery import (
     live_cohorts,
 )
 from .gh_contents import get_file_content, repo_tree
+from .ghcli import clone
 from .grades import load_grading_spec
-from .log import log_err, log_step
+from .log import log, log_err, log_step, log_withheld
 from .public_site import resync_public_site, sync_public_site
 from .readings import demote_headings, is_reading_overlay
+from .releaseignore import parse as parse_patterns
 from .repos import (
     default_branch,
     has_denied_component,
@@ -71,6 +78,7 @@ from .schedule_plan import (
 from .site_repo import (
     PUBLISH_CONFIG,
     ROW_NOUN,
+    Link,
     SitePlan,
     block,
     iso_when,
@@ -139,15 +147,250 @@ def _source_section(repo: str, subpath: str) -> str:
     return subpath or repo
 
 
+def _ext(name: str) -> str:
+    """A file name's extension, lowercased and without the dot ('' when it has none). Not
+    `Path().suffix`, which would call the whole of `Makefile` an extension-less name but
+    read `figure-1` in `figure-1.tar.gz` inconsistently with the allowlist faculty write."""
+    return name.rsplit(".", 1)[-1].lower() if "." in name.rsplit("/", 1)[-1] else ""
+
+
+# ---------------------------------------------------------------- publicly hosted copies
+
+# Where a cohort site serves the public copies, under its root. `files/`, never `<repo>/`:
+# `/materials/` is the All Materials page's own permalink, and a cohort whose content repo
+# is called `materials` would otherwise take that page's URL. Jekyll serves any path that
+# does not begin with `_`, so nothing has to be declared for these to be published.
+SITE_FILES_DIR = "files"
+
+# A rendered deck: the format GitHub shows as SOURCE, which is the whole reason this
+# exists, and the one whose assets sit in a `<stem>_files/` directory beside it.
+_DECK_EXTENSIONS = frozenset({"html", "htm"})
+# What is worth linking a hosted copy for - a deck, plus pdf, on which the browser opens
+# its own viewer. Everything else (`ipynb`, `md`, `csv`) GitHub already renders, so a
+# second copy would only be a second place for it to go stale.
+_RENDERED_EXTENSIONS = _DECK_EXTENSIONS | {"pdf"}
+
+# GitHub refuses a file over 100 MB on a push, so one carried into the site repo fails the
+# sync's own push rather than the release that put it in the materials repo.
+_MAX_PUBLIC_FILE_BYTES = 100 * 1024 * 1024
+
+# Cohort repo -> the paths this run actually copied under `files/<repo>/`. The ONE record
+# of what is hosted: the mirror hands it back and every renderer reads it, so a page cannot
+# link a rendered copy that a size cap, a broken clone or a denylist stopped being made.
+Hosted = dict[str, frozenset[str]]
+
+
+@cache
+def _publish_policy(course_org: str, source_repo: str) -> GitIgnoreSpec | None:
+    """What `publish.yml` in `source_repo` declares public, or None when it declares
+    nothing.
+
+    The policy is COURSE-level and lives in the source repo faculty actually edit, not in
+    each cohort's copy: one file per course, applying to every cohort of it. Memoised for
+    the run because `--all-cohorts` asks the same course the same question once per cohort.
+
+    Patterns go through the same parser faculty's `.releaseignore` goes through, so the one
+    syntax they already know covers both directions of the same question.
+
+    A file that is absent or empty is "nothing public", said deliberately, and the mirror
+    may then delete what an earlier sync copied. A file that does not PARSE, or whose
+    `public:` is not a list of patterns, stops the sync and reports - the same rule
+    `people.yml` follows next door, and for the same reason: read as "nothing public" it
+    would unpublish a whole course's rendered decks over a typo, on a green run."""
+    declared = yaml_file(course_org, source_repo, PUBLISH_FILE).get("public")
+    if declared is None:
+        return None
+    if not isinstance(declared, list) or not all(isinstance(x, str) for x in declared):
+        raise ValueError(
+            f"{course_org}/{source_repo}/{PUBLISH_FILE}: `public:` must be a list of "
+            "patterns"
+        )
+    return parse_patterns("\n".join(declared)) if declared else None
+
+
+def _publish_policies(
+    course_org: str, sched: schedule.Schedule, content_repos: list[str]
+) -> dict[str, tuple[GitIgnoreSpec, ...]]:
+    """Each cohort content repo the schedule releases into, mapped to the policies of the
+    source repos that feed it.
+
+    Keyed on the DESTINATION, because that is the repo whose files the site links and
+    whose bytes the mirror copies - the policy is read from the source repo the plan names
+    as feeding it. Several sources may feed one destination (`lectures/` from the materials
+    repo, `datasets/` from another), so a path is public if ANY of their policies says so.
+
+    A repo with no policies at all is still a key: that is the instruction to delete what
+    an earlier sync copied for it. A repo no release plan names is absent, because nothing
+    was ever copied for it.
+
+    The schedule's declared destinations, not discovery's findings: this decides what gets
+    CLONED and copied into a public site repo, so it reads a faculty declaration rather
+    than a heuristic over an org listing (the same argument `_indexable_repos` makes)."""
+    sources: dict[str, set[str]] = {}
+    for release in sched.releases:
+        for d in release.deploy:
+            if d.cohort_dest_repo in content_repos:
+                sources.setdefault(d.cohort_dest_repo, set()).add(d.course_source_repo)
+    return {
+        repo: tuple(
+            spec
+            for source in sorted(source_repos)
+            if (spec := _publish_policy(course_org, source)) is not None
+        )
+        for repo, source_repos in sources.items()
+    }
+
+
+def _publishable(path: str) -> bool:
+    """Whether a path may be published at all, whatever a pattern says. The denylist
+    (`solution/`, `tests/`, `grading_config.yml`, `.env`) and the never-material names,
+    at any depth - the same two lists every other outbound copy is filtered through."""
+    return not has_denied_component(path) and not has_never_material_component(path)
+
+
+def _view_url(cohort_org: str, repo: str, path: str) -> str:
+    """Where the cohort site serves its own copy of one published file.
+
+    Absolute, not site-relative: the templates prepend `site.baseurl` to anything without
+    a scheme, and a link record now carries two destinations - so the one that is already
+    a full URL on every other row stays a full URL here too."""
+    return f"https://{pages_repo(cohort_org)}/{SITE_FILES_DIR}/{repo}/{quote(path)}"
+
+
+def _public_selection(
+    src: Path, repo: str, paths: tuple[str, ...], specs: tuple[GitIgnoreSpec, ...]
+) -> frozenset[str]:
+    """Which paths of `repo` the site can host, out of its released tree.
+
+    Everything a policy matches - last match wins WITHIN one policy, which is what makes
+    `!lectures/09_*/**` carve a session back out - plus the `<stem>_files/` bundle beside
+    each matched deck: a rendered deck without its bundle loads with no figures and no
+    styles, and no faculty member should have to write a pattern for a directory their
+    renderer invented. The denylist gates every candidate, bundles included, and cannot be
+    written around.
+
+    A file GitHub would refuse on a push is dropped with a warning rather than failing the
+    sync: one 200 MB recording in a materials repo would otherwise take a cohort's whole
+    site offline, and the file it is a copy of is still on GitHub. So is anything that is
+    not a regular file - `lstat`, so a `notes.pdf -> ../solution/answers.pdf` is judged as
+    the link it is rather than as what it points at - and anything the clone does not
+    have, which is a tree and a clone that disagree, not a file to publish.
+
+    Judged over the same tree the links are built from (`_repo_tree`); the clone is only
+    where the bytes and the sizes come from."""
+    matched = {
+        path
+        for path in paths
+        if _publishable(path) and any(spec.check_file(path).include for spec in specs)
+    }
+    for path in list(matched):
+        if _ext(path) in _DECK_EXTENSIONS:
+            prefix = _bundle_prefix(path)
+            matched |= {a for a in paths if a.startswith(prefix) and _publishable(a)}
+    keep = set()
+    for path in matched:
+        try:
+            st = (src / path).lstat()
+        except OSError:
+            continue
+        if not stat.S_ISREG(st.st_mode):
+            continue
+        if st.st_size > _MAX_PUBLIC_FILE_BYTES:
+            log_withheld(
+                f"{repo}/{path} from the cohort site's public copies: it is over "
+                f"{_MAX_PUBLIC_FILE_BYTES // (1024 * 1024)} MB, which GitHub refuses"
+            )
+            continue
+        keep.add(path)
+    return frozenset(keep)
+
+
+def _bundle_prefix(path: str) -> str:
+    """The `<stem>_files/` directory a rendered deck keeps its assets in, beside it."""
+    return f"{path.rsplit('.', 1)[0]}_files/"
+
+
+def _mirror_public(
+    site_wd: Path, cohort_org: str, policies: dict[str, tuple[GitIgnoreSpec, ...]]
+) -> Hosted:
+    """Copy every publicly declared file of this cohort's content repos into the site's
+    own `files/<repo>/` tree, and say what actually landed there.
+
+    The copy source is the RELEASED cohort repo, never the course-org source: one release
+    boundary for the whole toolkit, so a `.releaseignore` that held a file back from the
+    cohort holds it back from the public site without publishing having to re-ask. The
+    clone is shallow - this wants the files at HEAD, not a term of old blobs.
+
+    Deleted and rebuilt per repo on every sync, which is what makes unpublishing work:
+    removing a pattern removes the copy. Only ever AFTER a successful clone - a site that
+    republished with every rendered deck deleted because one clone failed is a worse
+    outage than a copy one sync stale. (The site repo's git history keeps the old bytes
+    either way; purging those is done by hand, and the docs say so.)
+
+    Logs name repos and paths only. A materials repo is course property, and nothing here
+    reads a student's repo: `policies` covers the release plan's declared destinations."""
+    hosted: Hosted = {}
+    root = site_wd / SITE_FILES_DIR
+    for repo in sorted(policies):
+        served = root / repo
+        if not policies[repo]:
+            # Nothing declared public. No clone is needed to know it, and an earlier
+            # sync's copy has to go.
+            if served.exists():
+                shutil.rmtree(served)
+            continue
+        _branch, paths = _repo_tree(cohort_org, repo)
+        with tempfile.TemporaryDirectory() as work:
+            src = Path(work) / repo
+            if not clone(cohort_org, repo, src, shallow=True):
+                log_err(
+                    f"could not clone {cohort_org}/{repo} - its public copies on the "
+                    "site are left as the last sync made them"
+                )
+                continue
+            keep = _public_selection(src, repo, paths, policies[repo])
+            if served.exists():
+                shutil.rmtree(served)
+            if not keep:
+                continue
+            for rel in keep:
+                dest = served / rel
+                dest.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src / rel, dest)
+            hosted[repo] = keep
+            log(f"  hosting {len(keep)} public file(s) from {repo}")
+    return hosted
+
+
 def _gh_url(org: str, repo: str, branch: str, kind: str, path: str) -> str:
-    """A GitHub `blob`/`tree` URL for a path in a repo. One template, three callers."""
+    """A GitHub `blob`/`tree` URL for a path in a repo. One template, three callers.
+
+    The cohort site's own script parses THIS shape out of the rendered page to offer a file
+    in the student's own fork or clone (`templates/site/_includes/open_in.html`), so the
+    two change together."""
     return f"https://github.com/{org}/{repo}/{kind}/{branch}/{quote(path)}"
 
 
+def _file_link(
+    cohort_org: str, repo: str, branch: str, path: str, name: str, hosted: Hosted
+) -> Link:
+    """One released file as a link: the GitHub blob it always has, plus the site's own
+    hosted copy when the mirror actually made one AND a browser would render it
+    (`_RENDERED_EXTENSIONS`). The one place the two destinations are paired, and it reads
+    what was COPIED rather than re-deciding what should have been - a page cannot link a
+    copy that does not exist."""
+    view = (
+        _view_url(cohort_org, repo, path)
+        if _ext(path) in _RENDERED_EXTENSIONS and path in hosted.get(repo, ())
+        else ""
+    )
+    return Link(name, _gh_url(cohort_org, repo, branch, "blob", path), view)
+
+
 def _session_files(
-    org: str, repo: str, subpath: str, folder: str
-) -> list[tuple[str, str]]:
-    """(name, blob-url) for every file at ANY depth under `folder` (already confirmed by
+    org: str, repo: str, subpath: str, folder: str, hosted: Hosted
+) -> list[Link]:
+    """A `Link` for every file at ANY depth under `folder` (already confirmed by
     discovery.discover_release_sources to match a session's ordinal prefix), at `subpath`
     in a repo (or the repo root when `subpath` is empty - a release destination left
     at its default).
@@ -162,7 +405,7 @@ def _session_files(
     prefix = _source_prefix(subpath, folder)
     branch, paths = _repo_tree(org, repo)
     return [
-        (path[len(prefix) + 1 :], _gh_url(org, repo, branch, "blob", path))
+        _file_link(org, repo, branch, path, path[len(prefix) + 1 :], hosted)
         for path in paths
         if path.startswith(f"{prefix}/")
     ]
@@ -186,16 +429,9 @@ def _link_extensions(meta: dict) -> frozenset[str]:
     return frozenset(str(x).strip().lstrip(".").lower() for x in raw if str(x).strip())
 
 
-def _ext(name: str) -> str:
-    """A file name's extension, lowercased and without the dot ('' when it has none). Not
-    `Path().suffix`, which would call the whole of `Makefile` an extension-less name but
-    read `figure-1` in `figure-1.tar.gz` inconsistently with the allowlist faculty write."""
-    return name.rsplit(".", 1)[-1].lower() if "." in name.rsplit("/", 1)[-1] else ""
-
-
 def _shape_links(
-    blobs: list[tuple[str, str]], tree_base: str, allow: frozenset[str]
-) -> list[tuple[str, str]]:
+    blobs: list[Link], tree_base: str, allow: frozenset[str]
+) -> list[Link]:
     """The links a session row actually SHOWS, out of every file it released.
 
     Release is recursive (see `_session_files`) because a release copies a session folder
@@ -228,41 +464,52 @@ def _shape_links(
     committed straight into a cohort's own content repo never meets the release filter, so
     a release-only rule leaves it listed for the rest of the term.
 
-    `blobs` is (path-relative-to-the-session-folder, url) as `_session_files` returns it;
+    `blobs` is `_session_files`' output, named by path relative to the session folder;
     `tree_base` is the session folder's own GitHub tree URL. Order follows `blobs` (path
-    sorted), files before folders, for a stable diff."""
-    blobs = [(n, u) for n, u in blobs if not has_never_material_component(n)]
+    sorted), files before folders, for a stable diff. A FOLDER link never carries a hosted
+    copy: what it opens is a GitHub listing, and this site hosts files, not directories."""
+    blobs = [b for b in blobs if not has_never_material_component(b.name)]
     if allow:
-        return [(n, u) for n, u in blobs if _ext(n) in allow] + [
-            (_BROWSE_ALL, tree_base)
+        return [b for b in blobs if _ext(b.name) in allow] + [
+            Link(_BROWSE_ALL, tree_base)
         ]
-    files = [(n, u) for n, u in blobs if "/" not in n]
+    files = [b for b in blobs if "/" not in b.name]
     counts: dict[str, int] = {}
-    for name, _ in blobs:
-        head, sep, _rest = name.partition("/")
+    for b in blobs:
+        head, sep, _rest = b.name.partition("/")
         if sep:
             counts[head] = counts.get(head, 0) + 1
     folders = [
-        (f"{d}/ ({n} file{'' if n == 1 else 's'})", f"{tree_base}/{quote(d)}")
+        Link(f"{d}/ ({n} file{'' if n == 1 else 's'})", f"{tree_base}/{quote(d)}")
         for d, n in counts.items()
     ]
     return files + folders
 
 
 def _session_links(
-    org: str, repo: str, subpath: str, folder: str, allow: frozenset[str]
-) -> list[tuple[str, str]]:
+    org: str,
+    repo: str,
+    subpath: str,
+    folder: str,
+    allow: frozenset[str],
+    hosted: Hosted,
+) -> list[Link]:
     """`_session_files` shaped for display (`_shape_links`), with the session folder's own
     GitHub tree URL for the folder links. The branch comes from the memoised `_repo_tree`,
     so naming the folder costs no extra API call."""
     branch, _paths = _repo_tree(org, repo)
     tree = _gh_url(org, repo, branch, "tree", _source_prefix(subpath, folder))
-    return _shape_links(_session_files(org, repo, subpath, folder), tree, allow)
+    return _shape_links(_session_files(org, repo, subpath, folder, hosted), tree, allow)
 
 
 def _row_links(
-    org: str, repo: str, subpath: str, folder: str, allow: frozenset[str]
-) -> list[tuple[str, str]]:
+    org: str,
+    repo: str,
+    subpath: str,
+    folder: str,
+    allow: frozenset[str],
+    hosted: Hosted,
+) -> list[Link]:
     """One released section folder's display links - `_session_links`, minus the OVERLAY,
     whose content the row already inlines (see `_released_reading_list`). That file is the
     prose reading list; listing it again as a download says the same thing twice.
@@ -270,10 +517,10 @@ def _row_links(
     Only the overlay is subtracted, not every text file. Subtracting by extension took an
     uploaded `notes.md` or `refs.bib` - a reading in its own right - out of the downloads as
     well, so a student could not get it."""
-    links = _session_links(org, repo, subpath, folder, allow)
+    links = _session_links(org, repo, subpath, folder, allow, hosted)
     if _source_section(repo, subpath) != READINGS_SECTION:
         return links
-    return [(n, u) for n, u in links if not is_reading_overlay(n)]
+    return [link for link in links if not is_reading_overlay(link.name)]
 
 
 def _released_reading_list(cohort_org: str, sources: list[tuple[str, str, str]]) -> str:
@@ -296,11 +543,12 @@ def _released_reading_list(cohort_org: str, sources: list[tuple[str, str, str]])
         if _source_section(repo, subpath) != READINGS_SECTION:
             continue
         prefix = _source_prefix(subpath, folder)
-        for name, _url in _session_files(cohort_org, repo, subpath, folder):
-            if not is_reading_overlay(name):
+        # Names only, so nothing here needs to know what the site hosts.
+        for link in _session_files(cohort_org, repo, subpath, folder, {}):
+            if not is_reading_overlay(link.name):
                 continue
             text = (
-                get_file_content(cohort_org, repo, f"{prefix}/{name}") or ""
+                get_file_content(cohort_org, repo, f"{prefix}/{link.name}") or ""
             ).strip()
             if text:
                 parts.append(demote_headings(text))
@@ -338,7 +586,9 @@ class _IndexEntry:
 
     name: str
     is_dir: bool
-    url: str
+    # Both destinations in one record, the same one a session row carries. A directory's
+    # never has a hosted copy: what it opens is a GitHub listing.
+    link: Link
     files: int = 0
     entries: dict[str, _IndexEntry] = field(default_factory=dict)
 
@@ -368,6 +618,7 @@ def _insert_released_path(
     branch: str,
     full_path: str,
     prefix: str,
+    hosted: Hosted,
 ) -> None:
     """Add one released blob into the nested tree rooted at `root`, creating every
     ancestor directory it needs and counting the file into each one's `files`.
@@ -385,13 +636,12 @@ def _insert_released_path(
         entry_path = f"{entry_path}/{part}" if entry_path else part
         entry = node.get(part)
         if entry is None:
-            entry = node[part] = _IndexEntry(
-                part,
-                is_dir,
-                _gh_url(
-                    cohort_org, repo, branch, "tree" if is_dir else "blob", entry_path
-                ),
+            link = (
+                Link(part, _gh_url(cohort_org, repo, branch, "tree", entry_path))
+                if is_dir
+                else _file_link(cohort_org, repo, branch, entry_path, part, hosted)
             )
+            entry = node[part] = _IndexEntry(part, is_dir, link)
         entry.files += 1
         node = entry.entries
 
@@ -403,7 +653,11 @@ def _emit_entries(entries: list[_IndexEntry], indent: str) -> list[str]:
     lines: list[str] = []
     for e in entries:
         lines.append(f'{indent}- name: "{q(e.label)}"')
-        lines.append(f"{indent}  url: {e.url}")
+        lines.append(f"{indent}  url: {e.link.url}")
+        # Written only where there is one, exactly as `links_block` writes it: an index
+        # with nothing public is byte-identical to the one every course has today.
+        if e.link.view_url:
+            lines.append(f"{indent}  view_url: {e.link.view_url}")
         if e.is_dir:
             lines.append(f"{indent}  files: {e.files}")
             lines.append(f"{indent}  entries:")
@@ -432,9 +686,11 @@ def _indexable_repos(
     return planned | {repo for repo, _sub, _folder, _n in release_sources}
 
 
-def _released_syllabus(cohort_org: str, content_repos: list[str]) -> str | None:
-    """The URL of the syllabus released to this cohort, or None when there isn't one - the
-    home page then shows no line at all rather than an empty one.
+def _released_syllabus(
+    cohort_org: str, content_repos: list[str], hosted: Hosted
+) -> Link | None:
+    """The syllabus released to this cohort, or None when there isn't one - the home page
+    then shows no line at all rather than an empty one.
 
     Found by name, under whatever name and format the course uses (`SYLLABUS.md`,
     `SYLLABUS.pdf`, `syllabus-2026.docx`). Faculty name it; we only have to find it - and a
@@ -452,22 +708,30 @@ def _released_syllabus(cohort_org: str, content_repos: list[str]) -> str | None:
 
     Reads the trees the caller already discovered, so this costs no API call. Order is
     deterministic without re-sorting: `content_repos` arrives sorted and `_repo_tree` returns
-    sorted paths."""
+    sorted paths.
+
+    A syllabus the course publishes is pinned as the HOSTED copy - the home page shows one
+    link, so unlike a file row there is nowhere to put a second one, and a rendered
+    `SYLLABUS.html` shown as source is exactly the failure publishing exists to fix. An
+    unpublished one, which is nearly all of them, is the GitHub blob it has always been."""
     fallback = None
     for repo in content_repos:
         branch, paths = _repo_tree(cohort_org, repo)
         for path in paths:
             if "/" in path or "syllab" not in path.lower():
                 continue
-            url = _gh_url(cohort_org, repo, branch, "blob", path)
+            link = _file_link(cohort_org, repo, branch, path, path, hosted)
             if path.rsplit(".", 1)[0].lower() == "syllabus":
-                return url
-            fallback = fallback or url
+                return link
+            fallback = fallback or link
     return fallback
 
 
 def _materials_index(
-    cohort_org: str, content_repos: list[str], syllabus: str | None = None
+    cohort_org: str,
+    content_repos: list[str],
+    hosted: Hosted,
+    syllabus: Link | None = None,
 ) -> str:
     """`_data/materials.yml` - every file released to this cohort, nested exactly as its
     repo has it, for the All Materials tab.
@@ -513,19 +777,21 @@ def _materials_index(
             # The second check is the harmless twin of the first and stays a separate
             # list: nothing on it leaks anything, it is what a machine drops in a folder
             # (see `repos.NEVER_MATERIAL`).
-            if has_denied_component(path) or has_never_material_component(path):
+            if not _publishable(path):
                 continue
             if "/" not in path:
-                docs.setdefault(
-                    path,
-                    _IndexEntry(
-                        path, False, _gh_url(cohort_org, repo, branch, "blob", path), 1
-                    ),
-                )
+                doc = _file_link(cohort_org, repo, branch, path, path, hosted)
+                docs.setdefault(path, _IndexEntry(path, False, doc, files=1))
                 continue
             section, prefix = _section_boundary(repo, path)
             _insert_released_path(
-                found.setdefault(section, {}), cohort_org, repo, branch, path, prefix
+                found.setdefault(section, {}),
+                cohort_org,
+                repo,
+                branch,
+                path,
+                prefix,
+                hosted,
             )
     rows_out: list[str] = []
     for section in sorted(found):
@@ -534,15 +800,18 @@ def _materials_index(
         rows_out.append(f"    files: {sum(e.files for e in entries)}")
         rows_out.append("    entries:")
         rows_out.extend(_emit_entries(entries, "      "))
-    doc_rows = [
-        line
-        for e in sorted(docs.values(), key=lambda e: e.name.lower())
-        for line in (f'  - name: "{q(e.name)}"', f"    url: {e.url}")
-    ]
+    # Through the same emitter as every other node: a root document is a file entry that
+    # happens to sit at the top level, and a second copy of "how a node is written" is how
+    # the two come to disagree about a field.
+    doc_rows = _emit_entries(sorted(docs.values(), key=lambda e: e.name.lower()), "  ")
     header = (
         "# Generated by `python3 -m dsl_course.site sync` - every released file, nested\n"
         "# as its repo has it. Edit nothing here; it is rewritten on every sync.\n"
-    ) + (f"syllabus: {syllabus}\n" if syllabus else "")
+    ) + (
+        # ONE key: the home page pins a single link, so what it opens is the hosted copy
+        # where there is one and the GitHub blob otherwise.
+        f"syllabus: {syllabus.view_url or syllabus.url}\n" if syllabus else ""
+    )
     # Stated, not reached: `sections: []` is the empty index, the same shape
     # `links_block` uses for a row with nothing to link.
     # Documents first, then the sections - the order the page renders them in.
@@ -595,6 +864,8 @@ def _lecture_entry(
     kind: str = "lecture",
     allow: frozenset[str] = frozenset(),
     live_repos: frozenset[str] = frozenset(),
+    *,
+    hosted: Hosted,
 ) -> str:
     """One row of a teaching week: the lecture (`kind='lecture'`) or the lab
     (`kind='lab'`), which the theme renders as separate schedule lines out of the same
@@ -636,7 +907,7 @@ def _lecture_entry(
             [
                 (
                     _source_section(repo, subpath),
-                    _row_links(cohort_org, repo, subpath, folder, allow),
+                    _row_links(cohort_org, repo, subpath, folder, allow, hosted),
                 )
                 for repo, subpath, folder in sources
             ]
@@ -1070,7 +1341,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
     ones marked not-yet-released), this year's assignments, and the display-only rows of
     the schedule (exams, special events and term dates)."""
 
-    def build(_wd: Path) -> SitePlan:
+    def build(site_wd: Path) -> SitePlan:
         # ONE listing of the cohort answers both questions this build asks of it: which
         # repos hold released content, and which assignments have actually gone out.
         # Taken here rather than memoised in `discovery`, because a memo would serve a
@@ -1155,6 +1426,11 @@ def sync_site(course_org: str, cohort_org: str) -> int:
         indexable = sorted(
             set(content_repos) & _indexable_repos(sched, release_sources)
         )
+        # What this course declares PUBLIC, per release destination (`publish.yml` in the
+        # source repo the plan names). The copy happens here, before a single row is
+        # rendered, so every page that links a hosted copy links one that exists.
+        policies = _publish_policies(course_org, sched, content_repos)
+        hosted = _mirror_public(site_wd, cohort_org, policies)
 
         def session_row(s: str, kind: str) -> str:
             """One row, from the plan where it has one and a synthesised weekly date where
@@ -1173,6 +1449,7 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 kind,
                 allow,
                 live_repos=frozenset(content_repos),
+                hosted=hosted,
             )
 
         config = {}
@@ -1242,9 +1519,10 @@ def sync_site(course_org: str, cohort_org: str) -> int:
                 "_data/materials.yml": _materials_index(
                     cohort_org,
                     indexable,
+                    hosted,
                     # Absent when the cohort has no syllabus, so the home page shows no
                     # line rather than an empty one.
-                    syllabus=_released_syllabus(cohort_org, indexable),
+                    syllabus=_released_syllabus(cohort_org, indexable, hosted),
                 ),
                 **theme_pages(cohort=True),
                 # The course-specific layouts, includes and stylesheet - shipped
@@ -1285,6 +1563,9 @@ def sync_site(course_org: str, cohort_org: str) -> int:
     # clear ran on the rare path and never on the common one. Keys include the org, so this
     # is purely about memory, never staleness.
     _repo_tree.cache_clear()
+    # Cleared for memory, like the tree memo above, not for staleness: the key names the
+    # course org, and the policy is one small file per source repo.
+    _publish_policy.cache_clear()
     return sync_site_repo(cohort_org, build)
 
 

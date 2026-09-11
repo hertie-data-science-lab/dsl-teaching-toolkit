@@ -148,6 +148,17 @@ def site_data(generated) -> dict:
     return data
 
 
+def _tree_nodes(nodes: list[dict]) -> list[dict]:
+    """Every node of the All Materials tree, flat.
+
+    Flat, and its fields read unprefixed, because `include.entry` IS one node at whatever
+    depth the recursion has reached - so a key only a leaf carries (`view_url`, on a file
+    the site hosts its own copy of) is read exactly the way one every level carries is."""
+    return [
+        n for node in nodes for n in [node, *_tree_nodes(node.get("entries") or [])]
+    ]
+
+
 @pytest.fixture(scope="module")
 def written_fields(documents, generated) -> set[str]:
     """Every field a template may legitimately read off a document.
@@ -158,7 +169,9 @@ def written_fields(documents, generated) -> set[str]:
     tell."""
     fields = {p for doc in documents for p in _field_paths(doc)}
     index = yaml.safe_load(generated["files"]["_data/materials.yml"])
-    return fields | _field_paths(index.get("sections"))
+    return fields | {
+        key for node in _tree_nodes(index.get("sections") or []) for key in node
+    }
 
 
 def _templates() -> dict[str, str]:
@@ -579,3 +592,105 @@ def test_a_retired_path_leaves_the_site_repo_and_the_rest_stays(monkeypatch):
     assert "_layouts/class.html" not in tracked["files"]
     assert "_layouts/page.html" in tracked["files"]
     assert "_layouts/new.html" in tracked["files"]
+
+
+# ---------------------------------------------------------------------------
+# The hosted copy of a published file
+# ---------------------------------------------------------------------------
+
+# The three pages that show a file link - a session row, the Updates box, the All
+# Materials tree. All three go through one include, which is what stops the same file
+# opening rendered on one page and as source on another.
+_LINK_TEMPLATES = (
+    "_includes/session_entry.html",
+    "_includes/lecture_links.html",
+    "_includes/materials_entry.html",
+)
+
+_VIEW_BRANCH = re.compile(
+    r"{%-?\s*if\s+[\w.]*\bview_url\s*-?%}(?P<shown>.*?){%-?\s*endif\s*-?%}", re.DOTALL
+)
+
+
+@pytest.mark.parametrize("rel", _LINK_TEMPLATES)
+def test_every_page_that_shows_a_file_link_goes_through_the_one_include(rel):
+    assert "include file_link.html" in _strip_comments(_templates()[rel])
+
+
+def test_the_source_link_is_shown_only_beside_a_hosted_copy():
+    # `[source]` is the file's own home on GitHub, and it is only worth showing where the
+    # name has been pointed somewhere else. Rendered unconditionally it would put a second
+    # link on every row of every site that publishes nothing.
+    body = _strip_comments(_templates()["_includes/file_link.html"])
+    branches = [m["shown"] for m in _VIEW_BRANCH.finditer(body)]
+    assert branches, "file_link.html does not branch on view_url"
+    # Every mention of the control is inside one of those branches, and there is exactly
+    # one of it.
+    assert body.count("file-actions") == sum(b.count("file-actions") for b in branches)
+    # Two shapes of the same control - bracketed, and the Updates box's inline one - and
+    # nothing outside the branches.
+    assert (
+        body.count(">source</a>") == sum(b.count(">source</a>") for b in branches) == 2
+    )
+    # And the FIRST branch is the name's own href, so a hosted copy is what it opens.
+    assert body.index("include.view_url") < body.index("file-actions")
+
+
+def test_the_updates_box_takes_the_inline_shape_of_the_source_link():
+    # The box brackets every file it lists, so the bracketed control would read
+    # `[slides.html [source]]`. One include, two shapes, and the caller says which.
+    assert "inline=true" in _strip_comments(
+        _templates()["_includes/lecture_links.html"]
+    )
+    link = _strip_comments(_templates()["_includes/file_link.html"])
+    assert "include.inline" in link
+    assert "· <a href=" in link
+    # The lists that bracket nothing keep the bracketed one.
+    for rel in ("_includes/session_entry.html", "_includes/materials_entry.html"):
+        assert "inline" not in _strip_comments(_templates()[rel])
+
+
+def test_the_shared_link_include_adds_no_whitespace_of_its_own():
+    # It renders inside a sentence in the Updates box, where a stray newline is a visible
+    # space in the middle of `[name]`.
+    body = _templates()["_includes/file_link.html"]
+    # No trailing newline of its own, and the comment above the markup trims the one after
+    # it (`-%}`).
+    assert body.endswith("{% endif %}")
+    assert "-%}\n<a" in body
+
+
+def test_the_shipped_stylesheet_defines_the_source_links_own_class():
+    # Same argument as the schedule table's classes: a class the theme does not own must
+    # be defined by the stylesheet the toolkit ships, or it renders unstyled everywhere.
+    scss = _SCSS_COMMENT.sub("", _templates()["_sass/_course.scss"])
+    assert re.search(r"\.file-actions(?![-\w])", scss)
+
+
+def test_the_fixture_site_holds_both_shapes_of_file_row(generated):
+    # The fixture is what CI builds with Jekyll, so it has to exercise the branch: one
+    # published file with a hosted copy, one without. With only one shape, a template that
+    # rendered the other wrong would build green.
+    session = _front_matter(generated["collections"]["_lectures"]["session-01.md"])
+    hosted = {link["name"]: link.get("view_url") for link in session["links"]}
+    assert hosted["slides.html"].startswith("https://")
+    assert hosted["slides.pdf"] is None
+
+
+def test_the_hosted_copy_is_served_from_the_path_the_link_names(tmp_path):
+    # The two halves of publishing, against each other: the mirror writes `files/<repo>/
+    # <path>` and the link says `https://<site>/files/<repo>/<path>`. They are built by
+    # different code and a mismatch is a 404 on a live site.
+    build_fixture.build(tmp_path)
+    index = yaml.safe_load(
+        (tmp_path / "_data" / "materials.yml").read_text(encoding="utf-8")
+    )
+    served = [
+        p.relative_to(tmp_path).as_posix()
+        for p in (tmp_path / "files").rglob("*")
+        if p.is_file()
+    ]
+    assert served
+    for node in _tree_nodes(index["sections"]):
+        if node.get("view_url"):
+            assert node["view_url"].split(".github.io/")[1] in served
