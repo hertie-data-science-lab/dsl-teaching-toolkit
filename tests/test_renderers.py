@@ -2146,3 +2146,32 @@ def test_the_git_authentication_sweep_sees_the_pushing_buttons():
         "publish_site",
         "scheduler",
     } <= pushing
+
+
+def test_the_publishing_dropdowns_default_to_nothing_public():
+    # The one answer on this form that cannot be taken back is the one that puts bytes on
+    # a public site, so an untouched form must produce exactly today's course.
+    inputs = workflow_inputs(workflows_render.render_new_materials())
+    assert inputs["public_dirs"]["options"] == list(course.PUBLIC_DIRS)
+    assert inputs["public_dirs"]["default"] == course.NOTHING_PUBLIC
+    assert inputs["public_types"]["options"] == list(course.PUBLIC_TYPES)
+    assert inputs["public_types"]["default"] == course.PUBLIC_HTML_PDF
+    # Neither is required: both always arrive answered, and neither is a decision the form
+    # needs a faculty member to make.
+    assert inputs["public_dirs"].get("required") is not True
+    assert inputs["public_types"].get("required") is not True
+
+
+def test_the_publishing_answers_reach_the_scaffolder():
+    # A dropdown whose answer never leaves the form is a setting that silently does
+    # nothing - the whole of what these two boxes do is become `publish.yml`.
+    rendered = workflows_render.render_new_materials()
+    step = next(
+        s
+        for job in workflow_jobs(rendered).values()
+        for s in job.get("steps", [])
+        if "scaffold materials" in s.get("run", "")
+    )
+    assert step["env"]["PUBLIC_DIRS"] == "${{ inputs.public_dirs }}"
+    assert step["env"]["PUBLIC_TYPES"] == "${{ inputs.public_types }}"
+    assert "--public-dirs" in step["run"] and "--public-types" in step["run"]

@@ -31,6 +31,10 @@ from .course import (
     ASSIGNMENT_TYPES,
     MATERIALS_REPO_PREFIX,
     NO_STARTER,
+    NOTHING_PUBLIC,
+    PUBLIC_DIRS,
+    PUBLIC_HTML_PDF,
+    PUBLIC_TYPES,
     SANDBOX_USER,
     STARTER_FORMATS,
     SUBMIT_VIA,
@@ -1502,7 +1506,12 @@ def render_new_materials(source_repos: list[str] | None = None) -> str:
 
     `source_repos` is the course org's content repos; only the `course-materials-*` ones
     can be copied forward into another materials repo, so the dropdown is the prefix's
-    share of that list. It is repopulated by the nightly refresh, like every other one."""
+    share of that list. It is repopulated by the nightly refresh, like every other one.
+
+    The two publishing dropdowns seed `publish.yml` and nothing else - the file is the
+    definition afterwards, and no workflow rewrites it. They default to publishing nothing,
+    because the one answer that cannot be taken back is the one that puts bytes on a public
+    site: a course that never touches them is exactly today's course."""
     materials = [r for r in source_repos or [] if r.startswith(MATERIALS_REPO_PREFIX)]
     return f"""name: New materials repo
 
@@ -1511,6 +1520,12 @@ def render_new_materials(source_repos: list[str] | None = None) -> str:
 # one year to the next. Only the toolkit's own files are rewritten afterwards; yours
 # arrive exactly as you left them. Leave it on the first option for a fresh starter.
 # The dropdown is refreshed by the 'Refresh actions' workflow.
+#
+# The last two boxes write the new repo's `publish.yml` - what the cohort site may host
+# publicly, so an HTML deck opens rendered in a browser instead of showing as source on
+# GitHub. Everything else stays private, exactly as today. They seed the file and nothing
+# more: edit it in the repo afterwards, and no workflow rewrites it. A copied repo brings
+# its own, so they are ignored on `copy_from`.
 
 on:
   workflow_dispatch:
@@ -1519,6 +1534,8 @@ on:
         description: "Year tag, e.g. f2026 or s2026 - creates course-materials-<tag>"
         required: true
 {_copy_from_input(f"Materials repo to copy forward - {_FRESH_STARTER} is the empty skeleton", materials)}
+{_choice_input("public_dirs", "Rendered publicly on the cohort site: which folders. Everything else stays private to enrolled students", list(PUBLIC_DIRS), NOTHING_PUBLIC, required=False)}
+{_choice_input("public_types", "Rendered publicly on the cohort site: which file types out of those folders", list(PUBLIC_TYPES), PUBLIC_HTML_PDF, required=False)}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:
@@ -1529,9 +1546,12 @@ on:
           ORG: ${{{{ github.repository_owner }}}}
           TAG: ${{{{ inputs.tag }}}}
           COPY_FROM: ${{{{ inputs.copy_from }}}}
+          PUBLIC_DIRS: ${{{{ inputs.public_dirs }}}}
+          PUBLIC_TYPES: ${{{{ inputs.public_types }}}}
         run: |
           gh auth setup-git
-          args=(--org "$ORG" --tag "$TAG")
+          args=(--org "$ORG" --tag "$TAG" \\
+            --public-dirs "$PUBLIC_DIRS" --public-types "$PUBLIC_TYPES")
           [ "$COPY_FROM" = "{_FRESH_STARTER}" ] && COPY_FROM=""
           [ -n "$COPY_FROM" ] && args+=(--copy-from "$COPY_FROM")
           python3 -m dsl_course.scaffold materials "${{args[@]}}"
