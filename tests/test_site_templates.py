@@ -246,6 +246,9 @@ _OWN_CLASSES = frozenset(
         "profile-choice",
         "profile-hint",
         "profile-buttons",
+        "profile-entry",
+        "profile-saved",
+        "btn--field",
     }
 )
 
@@ -737,9 +740,10 @@ def test_the_hosted_copy_is_served_from_the_path_the_link_names(tmp_path):
 # Opening a file in the student's own copy (_includes/open_in.html)
 # ---------------------------------------------------------------------------
 
-# The pages that LIST released files. The Updates box and the schedule table show file
-# links too and are deliberately left out (a sentence and a timetable, not a list), and
-# /profile/ takes the include for its own buttons rather than for the set-up line.
+# The pages that LIST released files, plus the two that name a student's own repo. The
+# Updates box and the schedule table show file links too and are deliberately left out (a
+# sentence and a timetable, not a list), and /profile/ takes the include for its own
+# buttons rather than for the set-up line.
 _OPEN_IN_LAYOUTS = frozenset(
     {
         "_layouts/lectures.html",
@@ -747,6 +751,7 @@ _OPEN_IN_LAYOUTS = frozenset(
         "_layouts/readings.html",
         "_layouts/materials.html",
         "_layouts/assignment.html",
+        "_layouts/assignments.html",
         "_layouts/home.html",
         "_layouts/profile.html",
     }
@@ -876,13 +881,36 @@ def test_the_folder_fields_default_to_one_folder_per_repo():
 def test_nothing_is_stored_until_save_is_pressed():
     # Typing is not saving: a half-typed path that enabled a button would open the wrong
     # folder and read as the page's fault. `refresh` runs on every keystroke and must
-    # therefore write nothing - the only writers are the three click handlers.
+    # therefore write nothing - the only writers are the click handlers.
     body = _strip_comments(_profile())
     refresh = body.split("function refresh() {")[1].split("\n  }")[0]
     assert "api.save" not in refresh
-    assert body.count("api.save") == len(re.findall(r"api\.save", body))
-    # And the readout under Save comes from storage, not from the boxes.
+    # And the readout under each field comes from storage, not from the boxes.
     assert "api.stored" in body
+
+
+def test_every_field_carries_its_own_save_and_its_own_saved_line():
+    # One Save per field, beside its own box, with what it stored directly underneath -
+    # rather than one button at the end of the step for four unrelated settings.
+    body = _strip_comments(_profile())
+    saves = re.findall(r'data-save="(\w+)"', body)
+    assert saves == ["handle", "materials", "assignments", "editor"]
+    for name in saves:
+        assert f'id="dsl-saved-{name}"' in body, name
+    # Each Save is a button in the same red family as the step buttons, sized down.
+    assert body.count('class="btn btn--field"') == len(saves)
+
+
+def test_saving_empties_the_box_and_an_empty_box_saves_nothing():
+    # The pair that makes the cleared box safe. A save empties the box and promotes what it
+    # stored to the placeholder; a second press must therefore NOT read that empty box as
+    # "forget it". `clear` is the only way back to unset, so it has to exist.
+    body = _strip_comments(_profile())
+    save = body.split("function save(name) {")[1].split("\n  }")[0]
+    assert "if (!value) { return; }" in save
+    assert 'box(name).value = ""' in save
+    assert 'setAttribute("placeholder", api.stored(name) || examples[name])' in body
+    assert '"clear"' in body
 
 
 def test_the_clone_button_waits_for_the_fork():
@@ -918,3 +946,47 @@ def test_the_profile_tab_is_lifted_out_of_the_nav_by_its_permalink():
     assert "position: absolute" in lifted
     # And put back in the flow where the nav collapses behind the burger.
     assert "position: static" in lifted
+
+
+def test_a_students_own_repo_replaces_the_shape_wherever_a_page_prints_it():
+    # A page is public and identical for everyone, so it prints `assignment-1-<your-handle>`
+    # and points at the org's filtered repo list. Once the browser knows the handle both can
+    # be exact - and both are MARKED in the layout, never matched on the sentence around
+    # them, because those sentences get reworded.
+    body = _strip_comments(_open_in())
+    assert "[data-dsl-repo]" in body and "[data-dsl-repo-url]" in body
+    page = _strip_comments(_templates()["_layouts/assignment.html"])
+    # Every one of them, not a count that drifts: an unmarked span goes on saying
+    # `<your-handle>` on a page where every other mention of the repo is the real name.
+    assert page.count("{{ page.repo_name | escape }}</code>") == page.count(
+        "<code data-dsl-repo>"
+    )
+    assert page.count('href="{{ page.repo_url }}"') == page.count("data-dsl-repo-url")
+    # A GROUP assignment is named for the team, which no browser can know, so it is left
+    # exactly as rendered.
+    own = body.split("function ownRepo(shape, handle) {")[1].split("\n  }")[0]
+    assert '"<your-handle>"' in own
+
+
+def test_the_assignments_index_offers_each_repo_before_the_brief_is_opened():
+    # One row per assignment, each with the same buttons a file row gets - so a student
+    # going back to work in week 6 does not have to open the brief to reach the repo. The
+    # shape is per row, because the page lists several.
+    index = _strip_comments(_templates()["_layouts/assignments.html"])
+    assert 'data-dsl-assignment="{{ entry.repo_name | escape }}"' in index
+    assert '<span class="file-btns"' in index
+    assert ">repo</a>" in index
+    # Only for an assignment that has been handed out: a pending one has no `repo_url`
+    # because there is nothing at the other end of it yet.
+    assert "{% if entry.repo_url %}" in index
+    body = _strip_comments(_open_in())
+    assert "[data-dsl-assignment]" in body
+
+
+def test_the_assignment_page_offers_a_clone():
+    # The repo a student is least likely to already have, so it leads the row - and only
+    # for the editor with a clone scheme worth offering.
+    body = _strip_comments(_open_in())
+    block = body.split("function decorateAssignment(root, me) {")[1].split("\n  }")[0]
+    assert "vscode://vscode.git/clone?url=" in block
+    assert '"Clone"' in block
