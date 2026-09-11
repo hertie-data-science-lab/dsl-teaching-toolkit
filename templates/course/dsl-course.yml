@@ -17,6 +17,8 @@ course_code: {course_code}
 #   # subfolder - so a rendered deck lists the deck, not its hundreds of assets. Either way
 #   # everything you release still ships, and the folder itself is always one click away.
 #   # (The public open-courseware site always lists root files - it hosts what it lists.)
+#   # WHICH of those files the cohort site hosts publicly, so an HTML deck opens rendered
+#   # instead of showing as source, is `publish.yml` in the materials repo - not here.
 
 # What every assignment under this course starts from. **New assignment** stamps these
 # values into the `grading_config.yml` it generates, so each assignment's own file says
