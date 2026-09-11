@@ -13,9 +13,16 @@ this page's own buttons derive a path exactly the way a file row does).
 
 One static page, no back end: the site is public and identical for everybody, so what it
 learns here it keeps in the reader's own browser (localStorage) and sends nowhere. Nothing
-is stored until Save is pressed, and every button below step 1 reads the SAVED values, not
-what is currently typed - a half-typed path that enabled a button would open the wrong
-folder and look like the page's fault.
+is stored until a Save is pressed, and every button below step 1 reads the SAVED values,
+not what is currently in a box - a half-typed path that enabled a button would open the
+wrong folder and look like the page's fault.
+
+One Save per field, beside its own box, with what it stored on the line underneath. On a
+save the box empties and the value it stored becomes the box's placeholder, so the field
+shows its setting the way an unfilled field shows its example. That is also why an empty
+box plus Save is a no-op rather than a delete: the box is empty after every save, and the
+second press must not wipe what the first one stored. `clear` on the saved line is how a
+setting is actually removed.
 
 Four numbered steps, in the order they have to happen: details, fork, clone, open. Step 3
 stays greyed until step 2 has been taken, because cloning a fork that does not exist yet is
@@ -39,25 +46,37 @@ default name.
 
     <div class="profile-field">
       <label for="dsl-handle">GitHub handle</label>
-      <input type="text" id="dsl-handle" autocomplete="off" autocapitalize="off"
-             spellcheck="false" placeholder="j.doe">
+      <span class="profile-entry">
+        <input type="text" id="dsl-handle" autocomplete="off" autocapitalize="off"
+               spellcheck="false" placeholder="j.doe">
+        <button type="button" class="btn btn--field" data-save="handle">Save</button>
+      </span>
       <p class="profile-hint">Your GitHub username - the last part of your profile address.</p>
+      <p class="profile-hint profile-saved" id="dsl-saved-handle"></p>
     </div>
 
     <div class="profile-field">
       <label for="dsl-materials">Materials folder (local path)</label>
-      <input type="text" id="dsl-materials" autocomplete="off" spellcheck="false"
-             placeholder="/Users/j.doe/Documents/repositories/materials">
+      <span class="profile-entry">
+        <input type="text" id="dsl-materials" autocomplete="off" spellcheck="false"
+               placeholder="/Users/j.doe/Documents/repositories/materials">
+        <button type="button" class="btn btn--field" data-save="materials">Save</button>
+      </span>
       <p class="profile-hint">Where your clone of <code>materials</code> is, or the folder
         you are about to clone it into.</p>
+      <p class="profile-hint profile-saved" id="dsl-saved-materials"></p>
     </div>
 
     <div class="profile-field">
       <label for="dsl-assignments">Assignment folder (local path)</label>
-      <input type="text" id="dsl-assignments" autocomplete="off" spellcheck="false"
-             placeholder="/Users/j.doe/Documents/repositories/assignments">
+      <span class="profile-entry">
+        <input type="text" id="dsl-assignments" autocomplete="off" spellcheck="false"
+               placeholder="/Users/j.doe/Documents/repositories/assignments">
+        <button type="button" class="btn btn--field" data-save="assignments">Save</button>
+      </span>
       <p class="profile-hint">Where your assignment repos sit. Blank means the same folder
         as above.</p>
+      <p class="profile-hint profile-saved" id="dsl-saved-assignments"></p>
     </div>
 
     <div class="profile-field">
@@ -66,16 +85,14 @@ default name.
       <label class="profile-choice"><input type="radio" name="dsl-editor" id="dsl-editor-other" value="other"> Other:
         <input type="text" id="dsl-editor-template" autocomplete="off" spellcheck="false"
                placeholder="myeditor://open/{path}"></label>
+      <span class="profile-entry">
+        <button type="button" class="btn btn--field" data-save="editor">Save</button>
+      </span>
       <p class="profile-hint">Your editor's link scheme, ending in <code>{path}</code>
         where the file goes. The separator before it belongs to the scheme, as in the VS Code
         one (<code>vscode://file/{path}</code>).</p>
+      <p class="profile-hint profile-saved" id="dsl-saved-editor"></p>
     </div>
-
-    <p class="profile-buttons">
-      <button type="button" class="btn" id="dsl-save">Save</button>
-      <span class="profile-hint" id="dsl-dirty" hidden>Unsaved changes - press Save.</span>
-    </p>
-    <p class="profile-hint" id="dsl-saved"></p>
   </section>
 
   <section class="profile-step">
@@ -142,18 +159,8 @@ default name.
     }
   }
 
-  /* What is in the boxes right now - which is NOT what any button below step 1 uses. */
-  function typed() {
-    return {
-      handle: el("dsl-handle").value.trim(),
-      materials: el("dsl-materials").value.trim(),
-      assignments: el("dsl-assignments").value.trim(),
-      editor: el("dsl-editor-vscode").checked
-        ? api.VSCODE
-        : el("dsl-editor-template").value.trim()
-    };
-  }
-
+  /* The three fields that ARE a box, and the one that is a box plus a pair of radios. */
+  var BOXES = { handle: "dsl-handle", materials: "dsl-materials", assignments: "dsl-assignments" };
   var FIELDS = ["handle", "materials", "assignments", "editor"];
   var LABELS = {
     handle: "GitHub handle",
@@ -161,63 +168,70 @@ default name.
     assignments: "assignment folder",
     editor: "editor"
   };
+  /* The placeholder each box shipped with - its EXAMPLE. A saved value takes the
+     placeholder's place, so the example has to be kept somewhere to come back to. */
+  var examples = {};
 
-  function stored() {
-    var out = {};
-    for (var i = 0; i < FIELDS.length; i++) { out[FIELDS[i]] = api.stored(FIELDS[i]); }
-    return out;
+  function box(name) { return BOXES[name] ? el(BOXES[name]) : null; }
+
+  function typedIn(name) {
+    var b = box(name);
+    return b ? b.value.trim() : "";
   }
 
-  /* The readout under Save, built from what is actually IN the browser - not from
-     `api.profile()`, whose job is to fill the blanks in with defaults. A default nobody
-     saved has no business appearing under the word "Saved". */
-  function showSaved(saved) {
-    var out = el("dsl-saved");
+  function editorValue() {
+    return el("dsl-editor-vscode").checked
+      ? api.VSCODE
+      : el("dsl-editor-template").value.trim();
+  }
+
+  function savedLine(name) {
+    var out = el("dsl-saved-" + name);
     while (out.firstChild) { out.removeChild(out.firstChild); }
-    var any = false;
-    for (var i = 0; i < FIELDS.length; i++) {
-      var value = saved[FIELDS[i]];
-      if (!value) { continue; }
-      if (any) { out.appendChild(document.createElement("br")); }
-      out.appendChild(document.createTextNode("Saved " + LABELS[FIELDS[i]] + ": "));
+    var value = api.stored(name);
+    if (value) {
+      out.appendChild(document.createTextNode("Saved " + LABELS[name] + ": "));
       var c = document.createElement("code");
       c.appendChild(document.createTextNode(value));
       out.appendChild(c);
-      any = true;
+      /* The only way back to unset, and it has to exist: an empty box plus Save is a
+         no-op, because the box is empty after every save. */
+      out.appendChild(document.createTextNode(" · "));
+      var a = document.createElement("a");
+      a.setAttribute("href", "#");
+      a.appendChild(document.createTextNode("clear"));
+      a.addEventListener("click", function (e) {
+        e.preventDefault();
+        api.save(name, "");
+        if (name === "editor") { el("dsl-editor-template").value = ""; }
+        refresh();
+      });
+      out.appendChild(a);
     }
-    if (!any) { out.appendChild(document.createTextNode("Nothing saved in this browser yet.")); }
-  }
-
-  function dirty(saved) {
-    var now = typed();
-    var blank = true;
-    for (var i = 0; i < FIELDS.length; i++) {
-      if (saved[FIELDS[i]]) { blank = false; }
+    if (typedIn(name)) {
+      if (value) { out.appendChild(document.createElement("br")); }
+      out.appendChild(document.createTextNode("Not saved yet - press Save."));
     }
-    /* An untouched first visit is not an unsaved change: the VS Code radio is on by
-       default, so `typed().editor` differs from empty storage before anyone has done
-       anything. */
-    if (blank && !now.handle && !now.materials && !now.assignments
-        && now.editor === api.VSCODE) { return false; }
-    for (i = 0; i < FIELDS.length; i++) {
-      if (now[FIELDS[i]] !== saved[FIELDS[i]]) { return true; }
-    }
-    return false;
   }
 
   function refresh() {
     /* Typing a scheme IS choosing "Other" - leaving the radio behind would save a
        template the page then ignores. */
     if (el("dsl-editor-template").value.trim()) { el("dsl-editor-other").checked = true; }
-    var saved = stored();
     var me = api.profile();
     var forked = api.stored("forked");
-    showSaved(saved);
-    show("dsl-dirty", dirty(saved));
+
+    for (var i = 0; i < FIELDS.length; i++) {
+      var name = FIELDS[i];
+      var b = box(name);
+      if (b) { b.setAttribute("placeholder", api.stored(name) || examples[name]); }
+      savedLine(name);
+    }
+
     show("dsl-fork-todo", !forked);
     show("dsl-fork-done", !!forked);
-
     el("dsl-fork").setAttribute("href", "https://github.com/" + org + "/" + repo + "/fork");
+
     /* VS Code is the only editor with a clone scheme worth offering; for any other, the
        fork's own page is where the Code menu lives. */
     var fork = "https://github.com/" + encodeURIComponent(me.handle) + "/" + repo;
@@ -234,30 +248,46 @@ default name.
     show("dsl-open-hint", !open);
   }
 
-  function load() {
-    var saved = stored();
-    el("dsl-handle").value = saved.handle;
-    el("dsl-materials").value = saved.materials;
-    el("dsl-assignments").value = saved.assignments;
-    var preset = !saved.editor || saved.editor === api.VSCODE;
-    el("dsl-editor-vscode").checked = preset;
-    el("dsl-editor-other").checked = !preset;
-    el("dsl-editor-template").value = preset ? "" : saved.editor;
+  function save(name) {
+    if (name === "editor") {
+      api.save("editor", editorValue());
+    } else {
+      var value = typedIn(name);
+      /* An empty box is "nothing new to store", never "forget what you stored" - see the
+         comment at the top of this page. */
+      if (!value) { return; }
+      api.save(name, value);
+      box(name).value = "";
+    }
     refresh();
   }
 
   api.ready(function () {
     try {
+      var i;
+      for (i = 0; i < FIELDS.length; i++) {
+        var b = box(FIELDS[i]);
+        examples[FIELDS[i]] = b ? b.getAttribute("placeholder") : "";
+      }
+      /* The editor box is the one that is not cleared on save: it pairs with a radio, so
+         an empty box would leave the choice ambiguous. */
+      var stored = api.stored("editor");
+      var preset = !stored || stored === api.VSCODE;
+      el("dsl-editor-vscode").checked = preset;
+      el("dsl-editor-other").checked = !preset;
+      el("dsl-editor-template").value = preset ? "" : stored;
+
       var fields = root.querySelectorAll("input");
-      for (var i = 0; i < fields.length; i++) {
+      for (i = 0; i < fields.length; i++) {
         fields[i].addEventListener("input", refresh);
         fields[i].addEventListener("change", refresh);
       }
-      el("dsl-save").addEventListener("click", function () {
-        var now = typed();
-        for (var j = 0; j < FIELDS.length; j++) { api.save(FIELDS[j], now[FIELDS[j]]); }
-        refresh();
-      });
+      var buttons = root.querySelectorAll("button[data-save]");
+      for (i = 0; i < buttons.length; i++) {
+        buttons[i].addEventListener("click", function () {
+          save(this.getAttribute("data-save"));
+        });
+      }
       /* Opening the fork page and recording that it happened are the same click: the page
          has no way to ask GitHub, and asking would mean sending the reader's handle
          somewhere. Marking it by hand is the same promise, made by the student. */
@@ -270,8 +300,8 @@ default name.
         api.save("forked", "1");
         refresh();
       });
-      load();
-    } catch (e) { /* Leaves the page as rendered: fields empty, buttons greyed. */ }
+      refresh();
+    } catch (e) { /* Leaves the page as rendered: boxes empty, buttons greyed. */ }
   });
 })();
 </script>

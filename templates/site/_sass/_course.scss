@@ -296,9 +296,11 @@
 }
 
 /* Your Profile (_layouts/profile.html). Four numbered steps, each a heading, a control and
-   the hint that says why it is not available yet - a form, not a page of prose. */
+   the hint that says why it is not available yet - a form, not a page of prose.
+
+   No width on the block itself: the boxes are capped below, but a saved path is long and
+   a column narrow enough to suit a text field wrapped every one of them. */
 .profile-steps {
-    max-width: 34em;
 
     /* `[hidden]` is a rule in the BROWSER's stylesheet, which every author rule below
        outranks - so a hidden hint would show anyway. */
@@ -335,7 +337,27 @@
         vertical-align: 0.08em;
     }
     .profile-field {
-        margin: 0 0 1.2em 0;
+        margin: 0 0 1.4em 0;
+    }
+    /* One field: its box and its own Save, side by side and capped together, so the
+       button sits at the end of the box rather than out at the page edge. */
+    .profile-entry {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        max-width: 34em;
+    }
+    /* Sized for a text field rather than for a step: a full-size pill beside a 1.6em box
+       is taller than the thing it saves. */
+    .btn--field {
+        flex: none;
+        padding: 3px 14px;
+        font-size: 0.8em;
+    }
+    /* What that Save stored, directly under the field it belongs to - and full width,
+       because these are absolute paths. */
+    .profile-saved {
+        max-width: none;
     }
     label,
     .profile-label {
@@ -351,6 +373,7 @@
     input[type="text"] {
         width: 100%;
         max-width: 26em;
+        min-width: 0;
         padding: 0.3em 0.4em;
         border: 1px solid #d8d8d8;
         border-radius: 3px;
