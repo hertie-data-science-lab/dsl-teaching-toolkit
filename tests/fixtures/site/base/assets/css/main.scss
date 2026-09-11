@@ -7,5 +7,12 @@
 $brand-color: #BA0020;
 $display-font: 'Titillium Web', sans-serif;
 $grey-color-dark: #4a4a4a;
+$on-palm: 600px;
+
+@mixin media-query($device) {
+    @media screen and (max-width: $device) {
+        @content;
+    }
+}
 
 @import "course";

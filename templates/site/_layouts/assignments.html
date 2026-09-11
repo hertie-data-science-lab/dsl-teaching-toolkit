@@ -8,11 +8,19 @@ layout: page
 The intro line only makes sense beside an actual list, so an empty collection says so
 instead. `content` is the generated page stub (site.py), which states who can open them.
 
+Each released entry carries the same button row a file gets, so the work can be reached
+without opening the brief first: `repo` here, and `online` and `local` added by
+_includes/open_in.html once the reader has a profile. `data-dsl-assignment` hands it the
+repo SHAPE per row, which is the one thing no URL on this page carries - a pending
+assignment has no `repo_url` and so no row, because there is nothing at the other end yet.
+
 `handout_pending` (site.py) is an assignment the plan has dated but not yet handed out. It
 is listed, because its dates are already public on the schedule - but unlinked, and with
 its own sentence in place of a brief: the page behind it holds nothing until hand-out, and
 the title shown is the plan-side name, never the one the template's README gives it.
 {% endcomment %}
+{% include open_in.html %}
+
 {% if site.assignments == nil or site.assignments.size == 0 %}
 <p>No assignments yet.</p>
 {% else %}
@@ -26,7 +34,7 @@ One heading either way - only the anchor differs, and duplicating the `h2` betwe
 branches is how the two come to disagree. A pending entry has no `pdf`/`attachment`, so the
 files block below needs no guard of its own.
 {%- endcomment -%}
-<h2 class="session-title">{% if entry.handout_pending %}{% include session_title.html lecture=entry %}{% else %}<a href="{{ entry.url | prepend: site.baseurl }}">{% include session_title.html lecture=entry %}</a>{% endif %}</h2>
+<h2 class="session-title">{% if entry.handout_pending %}{% include session_title.html lecture=entry %}{% else %}<a href="{{ entry.url | prepend: site.baseurl }}">{% include session_title.html lecture=entry %}</a>{% endif %}{% if entry.repo_url %} <span class="file-btns" data-dsl-assignment="{{ entry.repo_name | escape }}"><a class="file-btn" data-dsl-repo-url target="_blank" rel="noopener" title="Your repo for this assignment on GitHub" href="{{ entry.repo_url }}">repo</a></span>{% endif %}</h2>
 {% if entry.handout_pending %}<div class="markdown-content session-note">{{ entry.content }}</div>{% endif %}
 {% if entry.pdf %}
 <p class="session-files-label" style="margin-bottom: 2px;"><strong>Files</strong></p>

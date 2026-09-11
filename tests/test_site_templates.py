@@ -228,18 +228,46 @@ def _classes(text: str) -> set[str]:
     }
 
 
+# Everything else the toolkit renders and so has to style itself: the Updates box's inline
+# source link, the row of buttons beside every other file link, and the form that fills in
+# the profile the last two of those buttons need.
+_OWN_CLASSES = frozenset(
+    {
+        "file-actions",
+        "file-btns",
+        "file-btn",
+        "open-in-line",
+        "profile-steps",
+        "profile-step",
+        "profile-step-title",
+        "profile-step-num",
+        "profile-field",
+        "profile-label",
+        "profile-choice",
+        "profile-hint",
+        "profile-buttons",
+        "profile-entry",
+        "profile-saved",
+        "btn--field",
+    }
+)
+
+
 @pytest.mark.parametrize(
     "cls",
     sorted(
-        {c for rel in _TABLE_TEMPLATES for c in _classes(_templates()[rel])}
-        - _THEME_CHROME
+        (
+            {c for rel in _TABLE_TEMPLATES for c in _classes(_templates()[rel])}
+            - _THEME_CHROME
+        )
+        | _OWN_CLASSES
     ),
 )
-def test_the_shipped_stylesheet_defines_the_schedule_tables_own_classes(cls):
+def test_the_shipped_stylesheet_defines_every_class_the_toolkit_owns(cls):
     scss = _SCSS_COMMENT.sub("", _templates()["_sass/_course.scss"])
     assert re.search(rf"\.{re.escape(cls)}(?![-\w])", scss), (
-        f".{cls} is used by the schedule table but no rule in _sass/_course.scss "
-        f"defines it"
+        f".{cls} is rendered by a shipped template but no rule in "
+        f"_sass/_course.scss defines it"
     )
 
 
@@ -617,23 +645,37 @@ def test_every_page_that_shows_a_file_link_goes_through_the_one_include(rel):
     assert "include file_link.html" in _strip_comments(_templates()[rel])
 
 
-def test_the_source_link_is_shown_only_beside_a_hosted_copy():
-    # `[source]` is the file's own home on GitHub, and it is only worth showing where the
-    # name has been pointed somewhere else. Rendered unconditionally it would put a second
-    # link on every row of every site that publishes nothing.
+def test_render_is_offered_only_where_the_site_hosts_a_copy():
+    # `render` opens the cohort site's own copy, which exists only for a published file a
+    # browser draws (html, pdf). Rendered unconditionally it is a button to a 404 on every
+    # other row of every site.
     body = _strip_comments(_templates()["_includes/file_link.html"])
     branches = [m["shown"] for m in _VIEW_BRANCH.finditer(body)]
     assert branches, "file_link.html does not branch on view_url"
-    # Every mention of the control is inside one of those branches, and there is exactly
-    # one of it.
-    assert body.count("file-actions") == sum(b.count("file-actions") for b in branches)
-    # Two shapes of the same control - bracketed, and the Updates box's inline one - and
-    # nothing outside the branches.
     assert (
-        body.count(">source</a>") == sum(b.count(">source</a>") for b in branches) == 2
+        body.count(">render</a>") == sum(b.count(">render</a>") for b in branches) == 1
     )
+    # `source` is the opposite: unconditional in the button row, because the file's home
+    # on GitHub is worth a button whether or not anything else is. The Updates box's
+    # inline shape keeps it conditional - there the name itself goes to GitHub unless a
+    # hosted copy has taken it.
+    assert body.count(">source</a>") == 2
+    assert sum(b.count(">source</a>") for b in branches) == 1
     # And the FIRST branch is the name's own href, so a hosted copy is what it opens.
-    assert body.index("include.view_url") < body.index("file-actions")
+    assert body.index("include.view_url") < body.index("file-btns")
+
+
+def test_every_button_in_a_file_row_opens_a_new_tab():
+    # Every one of them leaves the page the reader is working through - a repo, a rendered
+    # deck, an editor in the browser - and taking the list away to show one of them is how
+    # a student loses their place in it. `rel=noopener` comes with `target=_blank`.
+    body = _strip_comments(_templates()["_includes/file_link.html"])
+    for button in body.split('<a class="file-btn"')[1:]:
+        head = button.split(">")[0]
+        assert 'target="_blank"' in head and 'rel="noopener"' in head, head
+    # The NAME is not one of them: it is the quiet link the page has always had, and on a
+    # site that publishes nothing it is the only link in the row.
+    assert 'target="_blank"' not in body.split('<span class="file-btns">')[0]
 
 
 def test_the_updates_box_takes_the_inline_shape_of_the_source_link():
@@ -645,6 +687,11 @@ def test_the_updates_box_takes_the_inline_shape_of_the_source_link():
     link = _strip_comments(_templates()["_includes/file_link.html"])
     assert "include.inline" in link
     assert "· <a href=" in link
+    # And no button row inside the sentence.
+    assert (
+        "file-btns"
+        not in link.split("{% if include.inline %}")[1].split("{% else %}")[0]
+    )
     # The lists that bracket nothing keep the bracketed one.
     for rel in ("_includes/session_entry.html", "_includes/materials_entry.html"):
         assert "inline" not in _strip_comments(_templates()[rel])
@@ -658,13 +705,6 @@ def test_the_shared_link_include_adds_no_whitespace_of_its_own():
     # it (`-%}`).
     assert body.endswith("{% endif %}")
     assert "-%}\n<a" in body
-
-
-def test_the_shipped_stylesheet_defines_the_source_links_own_class():
-    # Same argument as the schedule table's classes: a class the theme does not own must
-    # be defined by the stylesheet the toolkit ships, or it renders unstyled everywhere.
-    scss = _SCSS_COMMENT.sub("", _templates()["_sass/_course.scss"])
-    assert re.search(r"\.file-actions(?![-\w])", scss)
 
 
 def test_the_fixture_site_holds_both_shapes_of_file_row(generated):
@@ -694,3 +734,259 @@ def test_the_hosted_copy_is_served_from_the_path_the_link_names(tmp_path):
     for node in _tree_nodes(index["sections"]):
         if node.get("view_url"):
             assert node["view_url"].split(".github.io/")[1] in served
+
+
+# ---------------------------------------------------------------------------
+# Opening a file in the student's own copy (_includes/open_in.html)
+# ---------------------------------------------------------------------------
+
+# The pages that LIST released files, plus the two that name a student's own repo. The
+# Updates box and the schedule table show file links too and are deliberately left out (a
+# sentence and a timetable, not a list), and /profile/ takes the include for its own
+# buttons rather than for the set-up line.
+_OPEN_IN_LAYOUTS = frozenset(
+    {
+        "_layouts/lectures.html",
+        "_layouts/labs.html",
+        "_layouts/readings.html",
+        "_layouts/materials.html",
+        "_layouts/assignment.html",
+        "_layouts/assignments.html",
+        "_layouts/home.html",
+        "_layouts/profile.html",
+    }
+)
+
+
+def _open_in() -> str:
+    return _templates()["_includes/open_in.html"]
+
+
+def test_the_open_in_control_is_included_once_by_every_page_that_lists_files():
+    # Once: the include carries the site's only script, which guards itself but would
+    # otherwise be parsed twice. And by every one of them: a page that lists files without
+    # it is a page where the profile a student filled in silently does nothing.
+    included = {
+        rel
+        for rel, text in _liquid_templates().items()
+        if "include open_in.html" in _strip_comments(text)
+    }
+    assert included == _OPEN_IN_LAYOUTS
+    for rel in included:
+        assert _strip_comments(_templates()[rel]).count("include open_in.html") == 1, (
+            rel
+        )
+
+
+def test_the_control_takes_what_it_needs_from_data_attributes():
+    # Never from the rendered prose: an assignment page's repo SHAPE is front matter, and
+    # reading it out of the sentence that happens to print it would break the day that
+    # sentence is reworded.
+    body = _strip_comments(_open_in())
+    assert 'data-org="{{ site.github_org }}"' in body
+    assert 'data-repo-name="{{ page.repo_name | escape }}"' in body
+
+
+def test_the_control_parses_the_url_shape_the_sync_writes():
+    # THE contract between dsl_course/site.py and the script: `_gh_url` writes the link,
+    # the script reads it back off the rendered page. A change to either alone turns every
+    # control on every cohort site off, silently.
+    literal = re.search(r"var SOURCE = /(.+?)/;", _open_in()).group(1)
+    pattern = re.compile(literal.replace("\\/", "/"))
+    url = site._gh_url(
+        "cohort-f2026", "materials", "main", "blob", "labs/01/lab one.ipynb"
+    )
+    m = pattern.match(url)
+    assert m, url
+    assert m.groups() == (
+        "cohort-f2026",
+        "materials",
+        "blob",
+        "main",
+        "labs/01/lab%20one.ipynb",
+    )
+    # A directory link is the same shape with `tree`, and is offered too - "local" opens
+    # the folder.
+    tree = site._gh_url("cohort-f2026", "materials", "main", "tree", "labs/01")
+    assert pattern.match(tree).group(3) == "tree"
+    # Another org's repo is left alone by the script; the shape still has to parse for the
+    # comparison to happen at all.
+    assert pattern.match("https://example.invalid/a/b/blob/main/c") is None
+
+
+def test_only_one_file_knows_where_the_settings_are_stored():
+    # Two files, one browser: /profile/ writes the settings and the control reads them
+    # back, so a key spelt twice is a profile that fills in and quietly does nothing. The
+    # page names FIELDS and goes through the include, which owns the keys.
+    keys = re.search(r"var KEYS = \{(.+?)\};", _open_in(), re.DOTALL).group(1)
+    for key in (
+        "dsl.handle",
+        "dsl.folder.materials",
+        "dsl.folder.assignments",
+        "dsl.editor",
+        "dsl.forked",
+    ):
+        assert f'"{key}"' in keys, key
+    assert '"dsl.' not in _templates()["_layouts/profile.html"]
+
+
+# --- H
+@pytest.mark.parametrize("cls", ["callout", "btn"])
+def test_a_class_the_control_hooks_onto_is_one_a_shipped_layout_renders(cls):
+    # `.callout a.btn` is how the script finds an assignment's repo button. The THEME
+    # styles both, so no rule in _sass/_course.scss would notice the assignment layout
+    # spelling them differently - the control would just never appear there again.
+    assert ".callout a.btn" in _open_in()
+    assert cls in _classes(_templates()["_layouts/assignment.html"]), cls
+
+
+# ---------------------------------------------------------------------------
+# Your Profile (_layouts/profile.html)
+# ---------------------------------------------------------------------------
+
+
+def _profile() -> str:
+    return _templates()["_layouts/profile.html"]
+
+
+def test_the_profile_page_is_four_numbered_steps_in_the_order_they_happen():
+    # Details, fork, clone, open. The order is the point: each step's button needs what
+    # the one before it produced, and a page that offered all four at once is how a
+    # student came to clone a fork that did not exist yet.
+    body = _strip_comments(_profile())
+    numbers = re.findall(r'<span class="profile-step-num">(\d)</span>', body)
+    assert numbers == ["1", "2", "3", "4"]
+    titles = re.findall(r"</span>\s*([^<]+?)</h2>", body)
+    assert titles == [
+        "Your details",
+        "Fork the materials repo",
+        "Clone your fork",
+        "Open it in your editor",
+    ]
+
+
+def test_the_folder_fields_default_to_one_folder_per_repo():
+    # The path a student is most likely to want, spelt out rather than described: the
+    # clone itself, not the folder it sits in. `localUrl` accepts either - a folder that
+    # already ends in the repo name does not get it twice - so the placeholder can be the
+    # more useful of the two.
+    body = _strip_comments(_profile())
+    placeholders = dict(
+        re.findall(r'id="dsl-(materials|assignments)"[^>]*?placeholder="([^"]+)"', body)
+    )
+    assert placeholders["materials"].endswith("/repositories/materials")
+    assert placeholders["assignments"].endswith("/repositories/assignments")
+
+
+def test_nothing_is_stored_until_save_is_pressed():
+    # Typing is not saving: a half-typed path that enabled a button would open the wrong
+    # folder and read as the page's fault. `refresh` runs on every keystroke and must
+    # therefore write nothing - the only writers are the click handlers.
+    body = _strip_comments(_profile())
+    refresh = body.split("function refresh() {")[1].split("\n  }")[0]
+    assert "api.save" not in refresh
+    # And the readout under each field comes from storage, not from the boxes.
+    assert "api.stored" in body
+
+
+def test_every_field_carries_its_own_save_and_its_own_saved_line():
+    # One Save per field, beside its own box, with what it stored directly underneath -
+    # rather than one button at the end of the step for four unrelated settings.
+    body = _strip_comments(_profile())
+    saves = re.findall(r'data-save="(\w+)"', body)
+    assert saves == ["handle", "materials", "assignments", "editor"]
+    for name in saves:
+        assert f'id="dsl-saved-{name}"' in body, name
+    # Each Save is a button in the same red family as the step buttons, sized down.
+    assert body.count('class="btn btn--field"') == len(saves)
+
+
+def test_saving_empties_the_box_and_an_empty_box_saves_nothing():
+    # The pair that makes the cleared box safe. A save empties the box and promotes what it
+    # stored to the placeholder; a second press must therefore NOT read that empty box as
+    # "forget it". `clear` is the only way back to unset, so it has to exist.
+    body = _strip_comments(_profile())
+    save = body.split("function save(name) {")[1].split("\n  }")[0]
+    assert "if (!value) { return; }" in save
+    assert 'box(name).value = ""' in save
+    assert 'setAttribute("placeholder", api.stored(name) || examples[name])' in body
+    assert '"clear"' in body
+
+
+def test_the_clone_button_waits_for_the_fork():
+    # Cloning a fork that does not exist is the one failure with no useful message at the
+    # other end - the editor just reports a repository it cannot find. The flag is this
+    # browser's own; the page cannot ask GitHub without sending the reader's handle
+    # somewhere, so a student who forked elsewhere says so by hand.
+    body = _strip_comments(_profile())
+    clone = body.split('link(el("dsl-clone"),')[1].split(";")[0]
+    assert "forked" in clone and "me.handle" in clone
+    assert 'el("dsl-forked").addEventListener' in body
+
+
+def test_a_custom_scheme_link_never_opens_a_new_tab():
+    # `target=_blank` on a `vscode://` link hands the URL to the handler and leaves an
+    # empty tab behind for the reader to close. One helper decides, so every button that
+    # can carry either kind of URL gets the same answer.
+    body = _strip_comments(_templates()["_includes/open_in.html"])
+    helper = body.split("function newTab(a, href) {")[1].split("\n  }")[0]
+    assert "/^https?:/i" in helper
+    assert 'a.setAttribute("target", "_blank")' in helper
+    assert 'a.removeAttribute("target")' in helper
+
+
+def test_the_profile_tab_is_lifted_out_of_the_nav_by_its_permalink():
+    # The header is the theme's, so the tab bar is where the toolkit can reach the tab
+    # from - by the page it points at, never by its place in the row, which the next tab
+    # added would take.
+    scss = _SCSS_COMMENT.sub("", _templates()["_sass/_course.scss"])
+    rule = 'li:has(> a[href$="/profile/"])'
+    assert rule in scss
+    lifted = scss.split(rule)[1].split("\n}")[0]
+    assert "position: absolute" in lifted
+    # And put back in the flow where the nav collapses behind the burger.
+    assert "position: static" in lifted
+
+
+def test_a_students_own_repo_replaces_the_shape_wherever_a_page_prints_it():
+    # A page is public and identical for everyone, so it prints `assignment-1-<your-handle>`
+    # and points at the org's filtered repo list. Once the browser knows the handle both can
+    # be exact - and both are MARKED in the layout, never matched on the sentence around
+    # them, because those sentences get reworded.
+    body = _strip_comments(_open_in())
+    assert "[data-dsl-repo]" in body and "[data-dsl-repo-url]" in body
+    page = _strip_comments(_templates()["_layouts/assignment.html"])
+    # Every one of them, not a count that drifts: an unmarked span goes on saying
+    # `<your-handle>` on a page where every other mention of the repo is the real name.
+    assert page.count("{{ page.repo_name | escape }}</code>") == page.count(
+        "<code data-dsl-repo>"
+    )
+    assert page.count('href="{{ page.repo_url }}"') == page.count("data-dsl-repo-url")
+    # A GROUP assignment is named for the team, which no browser can know, so it is left
+    # exactly as rendered.
+    own = body.split("function ownRepo(shape, handle) {")[1].split("\n  }")[0]
+    assert '"<your-handle>"' in own
+
+
+def test_the_assignments_index_offers_each_repo_before_the_brief_is_opened():
+    # One row per assignment, each with the same buttons a file row gets - so a student
+    # going back to work in week 6 does not have to open the brief to reach the repo. The
+    # shape is per row, because the page lists several.
+    index = _strip_comments(_templates()["_layouts/assignments.html"])
+    assert 'data-dsl-assignment="{{ entry.repo_name | escape }}"' in index
+    assert '<span class="file-btns"' in index
+    assert ">repo</a>" in index
+    # Only for an assignment that has been handed out: a pending one has no `repo_url`
+    # because there is nothing at the other end of it yet.
+    assert "{% if entry.repo_url %}" in index
+    body = _strip_comments(_open_in())
+    assert "[data-dsl-assignment]" in body
+
+
+def test_the_assignment_page_offers_a_clone():
+    # The repo a student is least likely to already have, so it leads the row - and only
+    # for the editor with a clone scheme worth offering.
+    body = _strip_comments(_open_in())
+    block = body.split("function decorateAssignment(root, me) {")[1].split("\n  }")[0]
+    assert "vscode://vscode.git/clone?url=" in block
+    assert '"Clone"' in block
