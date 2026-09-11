@@ -108,16 +108,28 @@ jobs:
             echo "::error::slides.html is published but no page links its hosted copy"
             missing=1
           fi
-          if ! grep -rq 'slides\.html</a>.*file-actions.*github\.com.*>source</a>' .; then
-            echo "::error::slides.html has no [source] link beside it"
+          if ! grep -rq 'slides\.html</a> <span class="file-btns">.*github\.com.*>source</a>.*>render</a>' .; then
+            echo "::error::slides.html has no source and render buttons beside it"
             missing=1
           fi
           if ! grep -q 'slides\.html</a>.*· <a[^>]*github\.com[^>]*>source</a></span>\]' index.html; then
             echo "::error::the Updates box does not carry the inline source link"
             missing=1
           fi
-          if grep -rq 'slides\.pdf</a>.*file-actions' .; then
-            echo "::error::slides.pdf is not published but carries a [source] link"
+          # The unpublished file beside it: `source`, because every file has a home on
+          # GitHub, and no `render`, because this site hosts no copy of it to draw.
+          if ! grep -rq 'slides\.pdf</a> <span class="file-btns">.*>source</a></span>' .; then
+            echo "::error::slides.pdf carries no source button"
+            missing=1
+          fi
+          if grep -rq 'slides\.pdf</a>.*>render</a>' .; then
+            echo "::error::slides.pdf is not published but offers a rendered copy"
+            missing=1
+          fi
+          # Every button in the row leaves the page, so every one of them leaves in a new
+          # tab. `local` is the exception and is added by script, not here.
+          if grep -rho '<a class="file-btn"[^>]*>' . | grep -v 'target="_blank"'; then
+            echo "::error::a file-row button was rendered without target=_blank"
             missing=1
           fi
           exit $missing
@@ -133,6 +145,12 @@ jobs:
           missing=0
           grep -q 'id="dsl-profile"' profile/index.html || {
             echo "::error::/profile/ built without its form"; missing=1; }
+          for step in 1 2 3 4; do
+            grep -q "profile-step-num\">$step<" profile/index.html || {
+              echo "::error::/profile/ built without step $step"; missing=1; }
+          done
+          grep -q 'id="dsl-save"' profile/index.html || {
+            echo "::error::/profile/ built without its Save button"; missing=1; }
           for f in lectures/index.html assignments/01-assignment-1.html; do
             grep -q "Open files in your local copy" "$f" || {
               echo "::error::$f carries no set-up line"; missing=1; }
