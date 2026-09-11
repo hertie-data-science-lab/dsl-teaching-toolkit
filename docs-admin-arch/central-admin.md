@@ -149,12 +149,13 @@ the only channel and the run log says so.
 ## Deploying the toolkit
 
 Every seeded workflow in every org checks this repo out at run time, so whatever sits on the
-ref an org runs **is** that org's engine. Two tiers, two branches:
+ref an org runs **is** that org's engine. Three tiers, three branches:
 
 | Tier | Branch | Runs on |
 |---|---|---|
 | trunk | `main` | the demo course org and its cohorts. PRs squash-merge here |
 | release | `release` | every real org, and the default for one that declares nothing |
+| preview | `preview` | the demo course org, and only while a PR is being looked at. Force-pushed from a PR tip; never promoted from |
 
 `release` never carries commits of its own: it is always a fast-forward of `main`. An org's
 tier is `central_ref:` in its **course** org's `.github/dsl-course.yml`; cohorts inherit it. The [inventory report](https://github.com/hertie-data-science-lab/dsl-teaching-toolkit/actions/workflows/refresh-inventory.yml) shows it per course org, and
@@ -185,6 +186,24 @@ Two merges close together cannot overlap (the workflow holds a `deploy-main` con
 group), but a run here can still overlap the org's own 05:27 **Refresh actions**: both write
 the same rendered files, so the worst case is a stale render that the next cron converges -
 known, and accepted rather than guarded.
+
+### Deploy preview
+
+The same deploy, one step earlier: a PR looked at in a real org **before** it merges, rather
+than only between the merge and Promote. Force-push the PR's head to the branch -
+`git push --force origin <pr-tip>:preview` - set `central_ref: preview` in
+`hertie-dsl-demo-course-e1234/.github/dsl-course.yml`, and **Deploy preview** re-renders that
+org out of the tip on every push. Inspect it with the checklist below. Only the demo course may
+pin `preview`; a real org never does.
+
+The branch is rewritten by every push, which is what it is for - so `preview` is not a history,
+nothing is promoted from it, and the `tiers` ruleset protects `release` alone (see
+[Protecting the tiers](#protecting-the-tiers-set-by-hand)).
+
+**Unpin after the merge.** The merge moves `main`, not this branch, so an org left on `preview`
+goes on running the pre-merge tip. Put the demo course back on `central_ref: main` and run its
+**Refresh actions**; leave the branch itself alone until then - deleting a ref an org is still
+rendered against takes its whole Actions tab down.
 
 ### Check the demo org before you promote
 
@@ -268,11 +287,13 @@ code straight into every live org. Two settings, neither of them in code:
    private half to Settings -> Secrets and variables -> Actions -> `PROMOTE_DEPLOY_KEY`.
    **The DSL bot holds `read` here** - it reads across orgs for Promote's refresh fan-out
    and never pushes.
-2. **A repository ruleset on `release`** (Settings -> Rules -> New branch ruleset): target
+2. **A repository ruleset on `release` only** (Settings -> Rules -> New branch ruleset): target
    that branch, *Restrict updates*, *Restrict deletions*, *Block force pushes*, *Require
    linear history*, and set the bypass list to **Deploy keys** only. Promote passes
    `--force-with-lease` purely as a concurrency guard; every push it makes is a
-   fast-forward, so blocking force pushes never blocks it.
+   fast-forward, so blocking force pushes never blocks it. Do not widen the ruleset to
+   `preview`: that branch is force-pushed from a PR tip by design, and nothing is ever
+   promoted from it.
 On `main`: PR only, with **both** `ci.yml` jobs required - `pytest` **and**
 `jekyll-contract` - and those checks set **strict** (*Require branches to be up to date
 before merging*). Strict is load-bearing, not tidiness: **Deploy main** deploys every merge
@@ -286,15 +307,15 @@ been. Required checks are named by hand and a job can only be named after it has
 `central_ref:` is documented (commented out) in every course org's `.github/dsl-course.yml`.
 To put the demo course on the trunk, set **`central_ref: main`** in
 `hertie-dsl-demo-course-e1234/.github/dsl-course.yml` and run **Refresh actions** in that org;
-its cohorts follow. Valid values are `main`, `release`, or a full 40-character commit SHA on
-`main`'s history; anything else is refused, and the org keeps the workflows it already has
-until someone fixes the key.
+its cohorts follow. Valid values are `main`, `release`, `preview`, or a full 40-character commit
+SHA on `main`'s history; anything else is refused, and the org keeps the workflows it already
+has until someone fixes the key.
 
 **Always in this order: edit `central_ref:`, run that org's Refresh actions, then retire the
 ref it used to run.** An org's seeded workflows check the toolkit out at the ref they were
 rendered with, so deleting a ref an org still points at takes its whole Actions tab down -
-Refresh included, which is the one button that would have healed it. `staging` was a third
-tier until 2026-09-07 and is now junk like any other typo: the demo course org was moved to
+Refresh included, which is the one button that would have healed it. `staging` was a tier
+until 2026-09-07 and is now junk like any other typo: the demo course org was moved to
 `main` and refreshed green before that change merged, and the `staging` branch is deleted
 after the merge.
 

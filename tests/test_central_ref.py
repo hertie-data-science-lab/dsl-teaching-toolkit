@@ -34,10 +34,19 @@ def _configs(monkeypatch, files: dict[str, dict]) -> None:
 # ------------------------------------------------------ what a declaration resolves to
 
 
-def test_the_tiers_are_the_trunk_and_the_release_branch():
+def test_the_tiers_are_the_trunk_the_release_branch_and_the_preview_branch():
     # Two tiers along one linear history: `main` is the trunk, and what the demo course org
     # runs; `release` is every real org. `staging` sat between them until 2026-09-07.
-    assert central.TIERS == ("main", "release")
+    # `preview` is off to the side - a PR tip, force-pushed, pinned by the demo course only.
+    assert central.TIERS == ("main", "release", "preview")
+
+
+def test_the_demo_course_can_pin_a_pr_tip_before_it_merges(monkeypatch):
+    # The whole point of the tier: an unmerged branch cannot be pinned as a SHA (a pinned
+    # SHA has to be on main's history), so inspecting a feature in a real org before the
+    # merge needs a ref of its own.
+    _configs(monkeypatch, {"Course": {"central_ref": "preview"}})
+    assert discovery.central_ref_for("Course") == "preview"
 
 
 def test_a_course_org_runs_the_tier_it_declares(monkeypatch):
@@ -89,7 +98,9 @@ def test_the_retired_staging_tier_is_junk_like_any_other(monkeypatch):
     # There is no compatibility shim for it: an org whose file still says `staging` goes
     # red and gets fixed, rather than quietly running a tier that no longer exists.
     _configs(monkeypatch, {"Course": {"central_ref": "staging"}})
-    with pytest.raises(central.MissingCentralRef, match="not one of main, release"):
+    with pytest.raises(
+        central.MissingCentralRef, match="not one of main, release, preview"
+    ):
         discovery.central_ref_for("Course")
 
 

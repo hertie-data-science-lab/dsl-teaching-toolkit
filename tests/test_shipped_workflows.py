@@ -41,10 +41,10 @@ SHIPPED_WORKFLOWS = _shipped_workflows()
 
 
 def test_the_shipped_workflow_sweep_sees_them_all():
-    # ci, bootstrap-org, promote, deploy-main, refresh-tier, refresh-inventory,
-    # token-canary, both dispatchers, validate-schedule, onboard, team-formation - a broken
-    # glob would make the tests below vacuous.
-    assert len(SHIPPED_WORKFLOWS) >= 12
+    # ci, bootstrap-org, promote, deploy-main, deploy-preview, refresh-tier,
+    # refresh-inventory, token-canary, both dispatchers, validate-schedule, onboard,
+    # team-formation - a broken glob would make the tests below vacuous.
+    assert len(SHIPPED_WORKFLOWS) >= 13
 
 
 @pytest.mark.parametrize("rel", sorted(SHIPPED_WORKFLOWS))
@@ -215,11 +215,11 @@ def _caller(workflow: str) -> dict:
     return SHIPPED_WORKFLOWS[f".github/workflows/{workflow}"]["jobs"]["refresh-orgs"]
 
 
-def test_both_tiers_deploy_through_the_same_fan_out():
-    # One implementation, called twice. Two copies would drift, and the tier nobody was
+def test_every_tier_deploys_through_the_same_fan_out():
+    # One implementation, called three times. Copies would drift, and the tier nobody was
     # looking at would be the one that stopped converging.
-    assert _caller("promote.yml")["uses"] == FAN_OUT
-    assert _caller("deploy-main.yml")["uses"] == FAN_OUT
+    for workflow in ("promote.yml", "deploy-main.yml", "deploy-preview.yml"):
+        assert _caller(workflow)["uses"] == FAN_OUT
 
 
 def test_the_fan_out_refreshes_orgs_from_the_deployed_checkout():
@@ -255,6 +255,23 @@ def test_a_merge_to_main_fans_out_over_the_main_tier():
     assert doc["concurrency"] == {"group": "deploy-main", "cancel-in-progress": False}
     assert _caller("deploy-main.yml")["with"] == {
         "tier": "main",
+        "ref": "${{ github.sha }}",
+    }
+
+
+def test_a_push_to_preview_fans_out_over_the_preview_tier():
+    # `preview` is a PR tip the maintainer force-pushes, so the demo course org can be
+    # looked at BEFORE the merge; every push re-renders the org on it. Same shape as
+    # "Deploy main" - a merge is the same deploy, one step later.
+    doc = SHIPPED_WORKFLOWS[".github/workflows/deploy-preview.yml"]
+    trigger = doc.get("on", doc.get(True))
+    assert trigger == {"push": {"branches": ["preview"]}}
+    assert doc["concurrency"] == {
+        "group": "deploy-preview",
+        "cancel-in-progress": False,
+    }
+    assert _caller("deploy-preview.yml")["with"] == {
+        "tier": "preview",
         "ref": "${{ github.sha }}",
     }
 
@@ -373,7 +390,7 @@ def test_the_fan_out_carries_both_bot_tokens():
     assert env["GH_TOKEN"] == "${{ secrets.DSL_BOT_TOKEN }}"
     assert env["DSL_BOT_TOKEN"] == "${{ secrets.DSL_BOT_TOKEN }}"
     # Passed explicitly by each caller rather than inherited wholesale.
-    for workflow in ("promote.yml", "deploy-main.yml"):
+    for workflow in ("promote.yml", "deploy-main.yml", "deploy-preview.yml"):
         assert _caller(workflow)["secrets"] == {
             "DSL_BOT_TOKEN": "${{ secrets.DSL_BOT_TOKEN }}"
         }

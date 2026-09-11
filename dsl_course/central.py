@@ -15,11 +15,16 @@ from .log import log_err
 
 CENTRAL = "hertie-data-science-lab/dsl-teaching-toolkit"
 
-# The two deployment tiers, in promotion order. `main` is the trunk - PRs squash-merge
-# here, and it is what the demo course org and its cohorts run; `release` is every real
-# org. `release` carries no commits of its own: it is always a fast-forward of `main` - see
+# The deployment tiers, in promotion order. `main` is the trunk - PRs squash-merge here,
+# and it is what the demo course org and its cohorts run; `release` is every real org.
+# `release` carries no commits of its own: it is always a fast-forward of `main` - see
 # .github/workflows/promote.yml and docs-admin-arch/central-admin.md.
-TIERS = ("main", "release")
+#
+# `preview` is the PRE-MERGE inspection tier: a branch the maintainer force-pushes from a
+# PR tip, so a feature can be looked at in a real org before it is merged. Pinned by the
+# demo course org only, never by a real org, and rewritable by design - the `tiers` ruleset
+# protects `release` alone, and must go on doing so.
+TIERS = ("main", "release", "preview")
 
 # The DEFAULT ref a seeded workflow runs the engine from, for any org that does not say
 # otherwise in its own `.github/dsl-course.yml` `central_ref:`.

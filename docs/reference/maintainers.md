@@ -10,19 +10,28 @@ Every seeded workflow, in every bootstrapped org, checks this repo out at the re
 runs - `central_ref:` in its course org's `.github/dsl-course.yml`, defaulting to
 `central.CENTRAL_REF` (`release`).
 
-Two tiers, along one linear history. PRs squash-merge to `main`, which is what the demo
-course org runs: **Deploy main** fans the refresh out to every org on `main` as the merge
-lands, so a change is live there within minutes. Real orgs run `release`, which moves only
-when someone presses **Promote to release** - a fast-forward along main's history, with no
-approval environment, because the gate is an INSPECTION. Press it only once a manual
-end-to-end look at the demo course org has passed: its issues, comments, the mails that went
-out, the run logs and the cohort site, read by a person. A green test suite is not that
+Two tiers along one linear history, and a third off to the side. PRs squash-merge to `main`,
+which is what the demo course org runs: **Deploy main** fans the refresh out to every org on
+`main` as the merge lands, so a change is live there within minutes. Real orgs run `release`,
+which moves only when someone presses **Promote to release** - a fast-forward along main's
+history, with no approval environment, because the gate is an INSPECTION. Press it only once a
+manual end-to-end look at the demo course org has passed: its issues, comments, the mails that
+went out, the run logs and the cohort site, read by a person. A green test suite is not that
 inspection.
 
 Engine changes are live on the next press in each org; workflow *shapes* (inputs, jobs, crons)
 are re-rendered by the same fan-out, and by each org's nightly **Refresh actions**. Rollback is
 a `git revert` on `main`, promoted forward - never a force-push. `central_ref:` may be `main`,
-`release`, or a full 40-character SHA on main's history.
+`release`, `preview`, or a full 40-character SHA on main's history.
+
+**`preview` is the third tier: a PR looked at in a real org before it merges.** Force-push the
+PR's head to it - `git push --force origin <pr-tip>:preview` - set the demo course org's
+`central_ref: preview`, and **Deploy preview** re-renders that org out of the tip; then inspect
+it as you would before a promotion. Only the demo course may pin it, never a real org. The
+branch is rewritten by every push, which is the point and is why nothing is ever promoted from
+it: the `tiers` ruleset protects `release` alone, and must stay that way. Once the PR merges,
+put the demo course back on `central_ref: main` and run its **Refresh actions** - an org left
+on `preview` keeps running the old tip, because the merge moves `main`, not this branch.
 
 An org's seeded workflows check the toolkit out at **the ref they were rendered with**, so
 moving an org between refs is always: edit `central_ref:`, run that org's **Refresh actions**,

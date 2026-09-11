@@ -1,0 +1,42 @@
+name: Deploy preview
+
+# `preview` is a PR tip, deployed. The maintainer force-pushes the head of a feature branch
+# here (`git push --force origin <pr-tip>:preview`) and this re-renders every org that
+# declares `central_ref: preview` - the demo course org, which is the only org that may
+# ever pin it. Real orgs run `release`; nothing about this workflow reaches them.
+#
+# It is the same deploy as a merge, one step earlier: the point is to inspect a feature in a
+# real org BEFORE it merges, rather than only between the merge and Promote to release.
+#
+# The branch is rewritten by design - another PR, or another push of the same one, replaces
+# it - so `preview` is not a history and nothing is promoted from it. The `tiers` ruleset
+# protects `release` only, which is what makes the force-push possible, and it must stay
+# that way.
+#
+# UNPIN AFTER THE MERGE. An org left on `preview` goes on running whatever that branch last
+# pointed at - the pre-merge tip, not the merged commit - until its `central_ref:` goes back
+# to `main` and its Refresh actions has run. The merge itself moves nothing here.
+
+on:
+  push:
+    branches: [preview]
+
+# One deploy at a time. Two force-pushes minutes apart would otherwise have two runs
+# writing the same files into the same org, and the loser to finish wins the file - which
+# would leave the org rendered from the older tip.
+concurrency:
+  group: deploy-preview
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  refresh-orgs:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/refresh-tier.yml
+    with:
+      tier: preview
+      ref: ${{ github.sha }}
+    secrets:
+      DSL_BOT_TOKEN: ${{ secrets.DSL_BOT_TOKEN }}
