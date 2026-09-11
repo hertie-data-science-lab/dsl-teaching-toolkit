@@ -894,6 +894,25 @@ def test_every_page_states_its_own_access_rule():
         assert "enrolled" not in page
 
 
+def test_your_profile_is_the_last_cohort_tab():
+    # The page is generated, so a site created before this one existed gets BOTH the stub
+    # and the tab on its next sync - which is the only way a new tab reaches seven live
+    # cohorts. Last, because it is a setting rather than course content; and cohort-only,
+    # because the public open-courseware site has no repo a reader could fork.
+    cohort = site_repo.theme_pages(cohort=True)
+    assert "layout: profile" in cohort["profile.md"]
+    assert "permalink: /profile/" in cohort["profile.md"]
+    assert "profile.md" not in site_repo.theme_pages(cohort=False)
+    names = [
+        i["name"] for i in yaml.safe_load(site_repo.nav_yaml(cohort=True))["items"]
+    ]
+    assert names[-1] == "Your Profile"
+    public = [
+        i["name"] for i in yaml.safe_load(site_repo.nav_yaml(cohort=False))["items"]
+    ]
+    assert "Your Profile" not in public
+
+
 def test_no_nav_tab_can_point_at_a_page_this_site_does_not_get():
     # The tab bar and the pages come from one table, and BOTH syncs generate the nav - so
     # the public site cannot ship a Readings tab pointing at a page only cohort sites get.

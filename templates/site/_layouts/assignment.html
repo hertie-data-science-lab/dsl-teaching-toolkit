@@ -28,6 +28,8 @@ title: page.title
   </header>
 
   <div>
+    {% include open_in.html %}
+
     {% if page.due_event %}
     {%- comment -%}
     The date lives on `due_event`, which is where site.py writes it and what the schedule's

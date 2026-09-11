@@ -228,18 +228,29 @@ def _classes(text: str) -> set[str]:
     }
 
 
+# Everything else the toolkit renders and so has to style itself: the `[source]` link
+# beside a hosted file, and the control and the form that open a file in a student's own
+# copy.
+_OWN_CLASSES = frozenset(
+    {"file-actions", "open-in", "open-in-seg", "open-in-line", "profile-form"}
+)
+
+
 @pytest.mark.parametrize(
     "cls",
     sorted(
-        {c for rel in _TABLE_TEMPLATES for c in _classes(_templates()[rel])}
-        - _THEME_CHROME
+        (
+            {c for rel in _TABLE_TEMPLATES for c in _classes(_templates()[rel])}
+            - _THEME_CHROME
+        )
+        | _OWN_CLASSES
     ),
 )
-def test_the_shipped_stylesheet_defines_the_schedule_tables_own_classes(cls):
+def test_the_shipped_stylesheet_defines_every_class_the_toolkit_owns(cls):
     scss = _SCSS_COMMENT.sub("", _templates()["_sass/_course.scss"])
     assert re.search(rf"\.{re.escape(cls)}(?![-\w])", scss), (
-        f".{cls} is used by the schedule table but no rule in _sass/_course.scss "
-        f"defines it"
+        f".{cls} is rendered by a shipped template but no rule in "
+        f"_sass/_course.scss defines it"
     )
 
 
@@ -660,13 +671,6 @@ def test_the_shared_link_include_adds_no_whitespace_of_its_own():
     assert "-%}\n<a" in body
 
 
-def test_the_shipped_stylesheet_defines_the_source_links_own_class():
-    # Same argument as the schedule table's classes: a class the theme does not own must
-    # be defined by the stylesheet the toolkit ships, or it renders unstyled everywhere.
-    scss = _SCSS_COMMENT.sub("", _templates()["_sass/_course.scss"])
-    assert re.search(r"\.file-actions(?![-\w])", scss)
-
-
 def test_the_fixture_site_holds_both_shapes_of_file_row(generated):
     # The fixture is what CI builds with Jekyll, so it has to exercise the branch: one
     # published file with a hosted copy, one without. With only one shape, a template that
@@ -694,3 +698,104 @@ def test_the_hosted_copy_is_served_from_the_path_the_link_names(tmp_path):
     for node in _tree_nodes(index["sections"]):
         if node.get("view_url"):
             assert node["view_url"].split(".github.io/")[1] in served
+
+
+# ---------------------------------------------------------------------------
+# Opening a file in the student's own copy (_includes/open_in.html)
+# ---------------------------------------------------------------------------
+
+# The pages that LIST released files. The Updates box and the schedule table show file
+# links too and are deliberately left out (a sentence and a timetable, not a list), and
+# /profile/ takes the include for its own buttons rather than for the set-up line.
+_OPEN_IN_LAYOUTS = frozenset(
+    {
+        "_layouts/lectures.html",
+        "_layouts/labs.html",
+        "_layouts/readings.html",
+        "_layouts/materials.html",
+        "_layouts/assignment.html",
+        "_layouts/home.html",
+        "_layouts/profile.html",
+    }
+)
+
+
+def _open_in() -> str:
+    return _templates()["_includes/open_in.html"]
+
+
+def test_the_open_in_control_is_included_once_by_every_page_that_lists_files():
+    # Once: the include carries the site's only script, which guards itself but would
+    # otherwise be parsed twice. And by every one of them: a page that lists files without
+    # it is a page where the profile a student filled in silently does nothing.
+    included = {
+        rel
+        for rel, text in _liquid_templates().items()
+        if "include open_in.html" in _strip_comments(text)
+    }
+    assert included == _OPEN_IN_LAYOUTS
+    for rel in included:
+        assert _strip_comments(_templates()[rel]).count("include open_in.html") == 1, (
+            rel
+        )
+
+
+def test_the_control_takes_what_it_needs_from_data_attributes():
+    # Never from the rendered prose: an assignment page's repo SHAPE is front matter, and
+    # reading it out of the sentence that happens to print it would break the day that
+    # sentence is reworded.
+    body = _strip_comments(_open_in())
+    assert 'data-org="{{ site.github_org }}"' in body
+    assert 'data-repo-name="{{ page.repo_name | escape }}"' in body
+
+
+def test_the_control_parses_the_url_shape_the_sync_writes():
+    # THE contract between dsl_course/site.py and the script: `_gh_url` writes the link,
+    # the script reads it back off the rendered page. A change to either alone turns every
+    # control on every cohort site off, silently.
+    literal = re.search(r"var SOURCE = /(.+?)/;", _open_in()).group(1)
+    pattern = re.compile(literal.replace("\\/", "/"))
+    url = site._gh_url(
+        "cohort-f2026", "materials", "main", "blob", "labs/01/lab one.ipynb"
+    )
+    m = pattern.match(url)
+    assert m, url
+    assert m.groups() == (
+        "cohort-f2026",
+        "materials",
+        "blob",
+        "main",
+        "labs/01/lab%20one.ipynb",
+    )
+    # A directory link is the same shape with `tree`, and is offered too - "local" opens
+    # the folder.
+    tree = site._gh_url("cohort-f2026", "materials", "main", "tree", "labs/01")
+    assert pattern.match(tree).group(3) == "tree"
+    # Another org's repo is left alone by the script; the shape still has to parse for the
+    # comparison to happen at all.
+    assert pattern.match("https://example.invalid/a/b/blob/main/c") is None
+
+
+def test_only_one_file_knows_where_the_settings_are_stored():
+    # Two files, one browser: /profile/ writes the settings and the control reads them
+    # back, so a key spelt twice is a profile that fills in and quietly does nothing. The
+    # page names FIELDS and goes through the include, which owns the keys.
+    keys = re.search(r"var KEYS = \{(.+?)\};", _open_in(), re.DOTALL).group(1)
+    for key in (
+        "dsl.handle",
+        "dsl.folder.materials",
+        "dsl.folder.assignments",
+        "dsl.editor",
+    ):
+        assert f'"{key}"' in keys, key
+    assert '"dsl.' not in _templates()["_layouts/profile.html"]
+
+
+# --- H
+@pytest.mark.parametrize("cls", ["callout", "btn"])
+def test_a_class_the_control_hooks_onto_is_one_a_shipped_layout_renders(cls):
+    # `.callout a.btn` is how the script finds an assignment's repo button. The THEME
+    # styles both, so no rule in _sass/_course.scss would notice the assignment layout
+    # spelling them differently - the control would just never appear there again.
+    assert ".callout a.btn" in _open_in()
+    assert cls in _classes(_templates()["_layouts/assignment.html"]), cls

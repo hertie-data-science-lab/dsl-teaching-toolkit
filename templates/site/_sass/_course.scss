@@ -232,6 +232,109 @@
     }
 }
 
+/* The site's quiet aside - a line that explains rather than instructs, and steps back
+   from the text it sits with. */
+%quiet-note {
+    font-size: 0.85em;
+    color: $grey-color-dark;
+}
+
+/* `[edit online][local]` beside a file link - the same file in the student's own fork or
+   their own clone (see _includes/open_in.html). Added by script, and only once the browser
+   holds the profile it needs, so nothing here renders on a first visit. Segmented and
+   quiet: it sits after the file's own name, which is still what a reader opens. */
+.open-in {
+    display: inline-flex;
+    margin-left: 0.5em;
+    font-size: 0.8em;
+    vertical-align: middle;
+    white-space: nowrap;
+
+    .open-in-seg {
+        padding: 0 0.45em;
+        border: 1px solid #d8d8d8;
+        border-right: 0;
+        color: $grey-color-dark;
+        background: #fafafa;
+        line-height: 1.7;
+        text-decoration: none;
+
+        &:first-child {
+            border-radius: 3px 0 0 3px;
+        }
+        &:last-child {
+            border-right: 1px solid #d8d8d8;
+            border-radius: 0 3px 3px 0;
+        }
+        &:hover {
+            background: #f0f0f0;
+            text-decoration: none;
+        }
+    }
+}
+
+/* The one line a student sees before they have a profile: what the control would do, and
+   where to switch it on. An offer, not an instruction, above pages whose subject is the
+   material rather than this. */
+.open-in-line {
+    @extend %quiet-note;
+    margin: 0 0 0.8em 0;
+}
+
+/* Your Profile (_layouts/profile.html). A settings form, not a page of prose: label over
+   field, one gap between fields, hints under them. */
+.profile-form {
+    max-width: 34em;
+
+    .profile-field {
+        margin: 0 0 1.2em 0;
+    }
+    label,
+    .profile-label {
+        display: block;
+        font-weight: bold;
+        margin-bottom: 0.2em;
+    }
+    .profile-choice {
+        display: block;
+        font-weight: normal;
+        margin: 0.1em 0;
+    }
+    input[type="text"] {
+        width: 100%;
+        max-width: 26em;
+        padding: 0.3em 0.4em;
+        border: 1px solid #d8d8d8;
+        border-radius: 3px;
+        font-family: inherit;
+        font-size: 0.95em;
+    }
+    .profile-choice input[type="text"] {
+        max-width: 18em;
+    }
+    .profile-hint {
+        @extend %quiet-note;
+        margin: 0.25em 0 0 0;
+    }
+    .profile-buttons {
+        margin: 0 0 1.4em 0;
+
+        .profile-hint {
+            display: block;
+        }
+    }
+    /* A button whose inputs are not filled in yet carries no href at all - it is not a
+       link and cannot be focused. These two rules are only how that LOOKS: greyed, with
+       the hint beside it saying what is missing until the moment the button works. */
+    .btn:not([href]) {
+        opacity: 0.45;
+        cursor: default;
+    }
+    .btn[href] + .profile-hint {
+        display: none;
+    }
+}
+
 /* An assignment page's name, under its identifier in the h1 (see _layouts/assignment.html).
    Sized between the title and the body: it is the assignment's real name, not metadata. */
 .post-subtitle {
