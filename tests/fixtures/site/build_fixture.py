@@ -16,7 +16,9 @@ The states it covers are the ones that render DIFFERENTLY, one of each: a releas
 session, an unreleased one, a lab, a session whose readings are still to come, a
 handed-out assignment, a pending one, one handed in off GitHub, a dated exam and a TBC
 one, a special event, the two term boundaries, the archive row inside its notice window,
-and an All Materials index nested three directories deep.
+an All Materials index nested three directories deep, and - within the released session -
+a published file linked to the site's own hosted copy beside an unpublished one linked to
+GitHub.
 
     python3 tests/fixtures/site/build_fixture.py <dest>
 """
@@ -25,6 +27,7 @@ from __future__ import annotations
 
 import shutil
 import sys
+import tempfile
 from datetime import date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -54,11 +57,19 @@ TREE = (
     "labs/01_week-1/Lab_Session_1.ipynb",
     "lectures/01_week-1/demo.py",
     "lectures/01_week-1/handouts/extra/further-notes.pdf",
+    "lectures/01_week-1/slides.html",
+    "lectures/01_week-1/slides_files/figure/plot.svg",
     "lectures/01_week-1/slides.pdf",
     "lectures/02_week-2/slides.pdf",
     "readings/01_week-1/READINGS.md",
     "readings/01_week-1/schmidhuber-1997.pdf",
 )
+
+# What this course's `publish.yml` declares, through the real parser: rendered decks and
+# nothing else - the shape a Quarto course takes. Session 1 therefore carries BOTH row
+# shapes, a published `slides.html` (whose `slides_files/` bundle follows it) beside an
+# unpublished `slides.pdf`, which is the pair the templates have to tell apart.
+PUBLISH_POLICY = {MATERIALS: (site.parse_patterns("lectures/**/*.html"),)}
 
 READINGS_MD = """# Session 1 readings
 
@@ -124,7 +135,7 @@ def _get_file_content(_org: str, _repo: str, path: str) -> str | None:
     return None
 
 
-def _lectures() -> dict[str, str]:
+def _lectures(hosted: dict) -> dict[str, str]:
     """The `_lectures` collection: the four session states that render differently."""
     released = schedule_plan.PlannedRow(
         when=datetime(2026, 9, 7, 10, 0, tzinfo=BERLIN),
@@ -155,10 +166,15 @@ def _lectures() -> dict[str, str]:
                 (MATERIALS, "lectures", "01_week-1"),
                 (MATERIALS, "readings", "01_week-1"),
             ],
+            hosted=hosted,
         ),
         # Released, but the plan's readings have not landed -> readings_pending.
         "session-02.md": site._lecture_entry(
-            COHORT_ORG, "2", pending_readings, [(MATERIALS, "lectures", "02_week-2")]
+            COHORT_ORG,
+            "2",
+            pending_readings,
+            [(MATERIALS, "lectures", "02_week-2")],
+            hosted=hosted,
         ),
         # Nothing shipped -> unreleased, and the row names where it will land.
         "session-03.md": site._lecture_entry(
@@ -167,9 +183,15 @@ def _lectures() -> dict[str, str]:
             unreleased,
             [],
             live_repos=frozenset({MATERIALS}),
+            hosted=hosted,
         ),
         "lab-01.md": site._lecture_entry(
-            COHORT_ORG, "1", lab, [(MATERIALS, "labs", "01_week-1")], kind="lab"
+            COHORT_ORG,
+            "1",
+            lab,
+            [(MATERIALS, "labs", "01_week-1")],
+            kind="lab",
+            hosted=hosted,
         ),
     }
 
@@ -237,17 +259,17 @@ def _events() -> dict[str, str]:
     }
 
 
-def collections() -> dict[str, dict[str, str]]:
+def collections(hosted: dict) -> dict[str, dict[str, str]]:
     """The generated collections, front-matter stamp and all - exactly what
     `_sync_site_repo` writes into the site repo."""
     return {
-        "_lectures": _lectures(),
+        "_lectures": _lectures(hosted),
         "_assignments": _assignments(),
         "_events": _events(),
     }
 
 
-def data_files() -> dict[str, str]:
+def data_files(hosted: dict) -> dict[str, str]:
     """The generated `_data/*.yml`, keyed by repo-relative path."""
     return {
         "_data/people.yml": site_repo.people_yaml(
@@ -257,29 +279,45 @@ def data_files() -> dict[str, str]:
         "_data/materials.yml": site._materials_index(
             COHORT_ORG,
             [MATERIALS],
-            syllabus=f"https://github.com/{COHORT_ORG}/{MATERIALS}/blob/main/SYLLABUS.md",
+            hosted,
+            syllabus=site_repo.Link(
+                "SYLLABUS.md",
+                f"https://github.com/{COHORT_ORG}/{MATERIALS}/blob/main/SYLLABUS.md",
+            ),
         ),
     }
 
 
-def generated() -> dict[str, dict[str, str] | dict[str, dict[str, str]]]:
+def generated(
+    site_wd: Path | None = None,
+) -> dict[str, dict[str, str] | dict[str, dict[str, str]]]:
     """Everything the sync writes, with the gh reads stubbed out and put back.
 
     Reassigning the module globals rather than passing fakes down: `_repo_tree` is
     memoised and `get_file_content` is imported into `site`'s namespace, so this is the
-    seam every caller below actually goes through."""
+    seam every caller below actually goes through.
+
+    `site_wd` is a real site checkout to mirror the public copies into, so `files/` holds
+    what a live sync would put there and the built site serves the very copy its rows
+    link. Without one the mirror still runs, into a throwaway directory: what the rows say
+    is hosted has to come from the REAL `_mirror_public` either way, or the fixture would
+    claim a copy nothing ever made."""
     real_tree, real_content = site._repo_tree, site.get_file_content
-    real_spec = site.load_grading_spec
+    real_spec, real_clone = site.load_grading_spec, site.clone
     site._repo_tree, site.get_file_content = _repo_tree, _get_file_content
-    site.load_grading_spec = _grading_spec
+    site.load_grading_spec, site.clone = _grading_spec, _clone
     try:
+        with tempfile.TemporaryDirectory() as work:
+            hosted = site._mirror_public(
+                site_wd or Path(work), COHORT_ORG, PUBLISH_POLICY
+            )
         return {
-            "collections": collections(),
-            "files": {**data_files(), **site_repo.theme_pages(cohort=True)},
+            "collections": collections(hosted),
+            "files": {**data_files(hosted), **site_repo.theme_pages(cohort=True)},
         }
     finally:
         site._repo_tree, site.get_file_content = real_tree, real_content
-        site.load_grading_spec = real_spec
+        site.load_grading_spec, site.clone = real_spec, real_clone
 
 
 # The overlay the offline build layers on top of the generated `_config.yml`. The primary
@@ -299,13 +337,24 @@ remote_theme: ""
 """
 
 
+def _clone(_org: str, repo: str, dest, branch=None, shallow=False) -> bool:
+    """A `ghcli.clone` stand-in: the cohort repo's released tree as real (tiny) files, so
+    the mirror below has bytes to copy. Every path of TREE, whether published or not - the
+    policy is what decides, and that decision is the code under test."""
+    for rel in TREE if repo == MATERIALS else ():
+        f = Path(dest) / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(f"fixture {rel}\n", encoding="utf-8")
+    return True
+
+
 def build(dest: Path) -> None:
     """Write the whole fixture site into `dest`, replacing whatever was there."""
     if dest.exists():
         shutil.rmtree(dest)
     shutil.copytree(HERE / "base", dest)
 
-    out = generated()
+    out = generated(dest)
     # Written through the sync's OWN apply step, so the site CI builds is assembled the
     # way a real one is - config upsert, collection regeneration, front-matter stamp and
     # all - rather than by a second copy of it here that can drift out of step.

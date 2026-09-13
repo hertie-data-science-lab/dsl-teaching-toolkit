@@ -120,6 +120,14 @@ Things whose *literal spelling* is depended on from outside Python:
   marked file would still read as untouched and be rewritten by the nightly refresh -
   faculty's patterns gone, and whatever they withheld shipping again on a green run. The
   price is that its wording cannot be improved in a repo that already has it.
+- **`course.PUBLISH_FILE`** (`publish.yml`) is the other filename faculty type into a
+  materials repo, and **`site.SITE_FILES_DIR`** (`files/`) is where the cohort site serves
+  what it names, at `files/<cohort-repo>/<path>`. Both are spelt outside Python: the
+  filename in every course's repo, the served path in every link the sync has ever written
+  and in the URL a student has bookmarked. `files/` cannot become `<repo>/` - `/materials/`
+  is the All Materials page's own permalink. Seeded CREATE-ONLY and INSTRUCTOR-OWNED, and
+  no workflow writes it after creation: a refresh that rewrote one would either unpublish a
+  term's decks or publish what faculty had just withdrawn, on a green run.
 - **`course.UPSTREAM_BRANCH`** (`upstream`) is the toolkit's branch in every release dest,
   and the dest's DEFAULT branch is what students, the website and `propagate` read. The
   release commits onto `upstream` and merges it into the default one; a conflict aborts the

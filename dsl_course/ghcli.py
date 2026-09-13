@@ -374,13 +374,25 @@ def gh(*args: str, stdin: str | None = None, retries: int = 3) -> tuple[int, str
     return code, (out + err).strip()
 
 
-def clone(org: str, repo: str, dest: str | Path, branch: str | None = None) -> bool:
+def clone(
+    org: str,
+    repo: str,
+    dest: str | Path,
+    branch: str | None = None,
+    shallow: bool = False,
+) -> bool:
     """Clone `org/repo` into `dest`, optionally at `branch`. True on success.
 
     `-- -q` hands git its own quiet flag: a clone's progress output is hundreds of lines
     nobody reads in an Actions log. Every clone in the toolkit goes through here, so the
-    argv shape is written once."""
+    argv shape is written once.
+
+    `shallow` is for a caller that only wants the files at HEAD - the site's public copies
+    - and not the history: a materials repo carrying a term of rendered decks is most of
+    its own size in old blobs, fetched every sync for nothing."""
     args = ["repo", "clone", f"{org}/{repo}", str(dest), "--", "-q"]
+    if shallow:
+        args += ["--depth", "1", "--single-branch"]
     if branch is not None:
         args += ["-b", branch]
     code, _ = gh(*args)

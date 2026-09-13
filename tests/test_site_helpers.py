@@ -15,6 +15,7 @@ import pytest
 import yaml
 
 from dsl_course import gh_contents, public_site, repos, schedule_plan, site, site_repo
+from dsl_course.site_repo import Link
 from tests.conftest import entry_links, repo_row
 
 
@@ -215,11 +216,14 @@ def test_public_links_are_site_relative(tmp_path):
         wk, "/public-materials/course-materials-f2026/session-1/lectures"
     )
     assert len(links) == 1
-    name, url = links[0]
-    assert name == "01 intro.pdf"
-    assert url.startswith("/public-materials/")
-    assert "%20" in url or "01%20intro" in url  # space URL-encoded
-    assert "github.com" not in url and "raw." not in url
+    link = links[0]
+    assert link.name == "01 intro.pdf"
+    assert link.url.startswith("/public-materials/")
+    assert "%20" in link.url or "01%20intro" in link.url  # space URL-encoded
+    assert "github.com" not in link.url and "raw." not in link.url
+    # The public course site HOSTS everything it links, so a link there never carries a
+    # second destination.
+    assert link.view_url == ""
 
 
 def test_public_lecture_entry_reading_list_mode_has_no_links():
@@ -232,11 +236,13 @@ def test_public_lecture_entry_reading_list_mode_has_no_links():
 
 
 def test_lecture_entry_labels_links_by_repo_or_subpath():
-    def fake_session_files(org, repo, subpath, folder):
+    def fake_session_files(org, repo, subpath, folder, hosted):
         return {
-            ("labs", ""): [("intro.pdf", "https://x/1")],  # root shape: label = repo
+            ("labs", ""): [
+                Link("intro.pdf", "https://x/1")
+            ],  # root shape: label = repo
             ("materials", "lectures"): [
-                ("slides.pdf", "https://x/2")
+                Link("slides.pdf", "https://x/2")
             ],  # nested: label = subpath
         }.get((repo, subpath), [])
 
@@ -249,6 +255,7 @@ def test_lecture_entry_labels_links_by_repo_or_subpath():
             "1",
             schedule_plan.PlannedRow(when=date(2026, 9, 7)),
             [("labs", "", "01_intro"), ("materials", "lectures", "01_intro")],
+            hosted={},
         )
     assert "https://x/1" in entry and "https://x/2" in entry
     assert ("lab", "intro.pdf") in entry_links(entry)
@@ -256,8 +263,8 @@ def test_lecture_entry_labels_links_by_repo_or_subpath():
 
 
 def test_public_lecture_entry_actual_readings_mode_links_are_local():
-    lec = [("s.pdf", "/public-materials/m/session-1/lectures/s.pdf")]
-    rds = [("r.pdf", "/public-materials/m/session-1/readings/r.pdf")]
+    lec = [Link("s.pdf", "/public-materials/m/session-1/lectures/s.pdf")]
+    rds = [Link("r.pdf", "/public-materials/m/session-1/readings/r.pdf")]
     e = public_site._public_lecture_entry(
         "1", date(2025, 1, 1), [("lectures", lec), ("readings", rds)], ""
     )
@@ -272,7 +279,7 @@ def test_public_lecture_entry_renders_a_lab_row_as_its_own_type():
     e = public_site._public_lecture_entry(
         "2",
         date(2025, 1, 1),
-        [("labs", [("lab.ipynb", "/public-materials/m/session-2/labs/lab.ipynb")])],
+        [("labs", [Link("lab.ipynb", "/public-materials/m/session-2/labs/lab.ipynb")])],
         "",
         "lab",
     )
@@ -293,8 +300,11 @@ def test_public_lecture_entry_labels_any_discovered_section():
         "3",
         date(2025, 1, 1),
         [
-            ("labs", [("lab3.ipynb", "/public-materials/m/session-3/labs/lab3.ipynb")]),
-            ("faq", [("faq.md", "/public-materials/m/session-3/faq/faq.md")]),
+            (
+                "labs",
+                [Link("lab3.ipynb", "/public-materials/m/session-3/labs/lab3.ipynb")],
+            ),
+            ("faq", [Link("faq.md", "/public-materials/m/session-3/faq/faq.md")]),
         ],
         "",
     )
@@ -334,13 +344,15 @@ def test_session_files_lists_nested_files_by_path(monkeypatch):
     # a non-recursive listing dropped them from the site entirely.
     monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", _tree_gh)
-    pairs = site._session_files("Cohort-f2026", "materials", "lectures", "03_week-3")
-    assert [n for n, _ in pairs] == [
+    links = site._session_files(
+        "Cohort-f2026", "materials", "lectures", "03_week-3", {}
+    )
+    assert [x.name for x in links] == [
         "handouts/deep/further.md",  # sorted by path, so nested first
         "handouts/extra notes.pdf",
         "notes.pdf",
     ]
-    urls = dict(pairs)
+    urls = {x.name: x.url for x in links}
     assert (
         urls["notes.pdf"]
         == "https://github.com/Cohort-f2026/materials/blob/main/lectures/03_week-3/notes.pdf"
@@ -352,8 +364,8 @@ def test_session_files_root_shape_and_other_sessions_excluded(monkeypatch):
     monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", _tree_gh)
     # subpath="" - the release landed at the repo root (default destination)
-    assert site._session_files("Cohort-f2026", "lectures", "", "01_intro") == [
-        (
+    assert site._session_files("Cohort-f2026", "lectures", "", "01_intro", {}) == [
+        Link(
             "root-shape.pdf",
             "https://github.com/Cohort-f2026/lectures/blob/main/01_intro/root-shape.pdf",
         )
@@ -372,7 +384,7 @@ def test_repo_tree_is_fetched_once_per_repo(monkeypatch):
     monkeypatch.setattr(site, "default_branch", lambda org, repo, **k: "main")
     monkeypatch.setattr(gh_contents, "gh", counting_gh)
     for folder in ("03_week-3", "04_week-4", "03_week-30"):
-        assert site._session_files("Cohort-f2026", "materials", "lectures", folder)
+        assert site._session_files("Cohort-f2026", "materials", "lectures", folder, {})
     assert len(calls) == 1
 
 
@@ -382,7 +394,9 @@ def test_session_files_absent_repo_is_empty(monkeypatch):
     monkeypatch.setattr(
         gh_contents, "gh", lambda *a, **k: (1, "gh: Not Found (HTTP 404)")
     )
-    assert site._session_files("Cohort-f2026", "materials", "lectures", "03_x") == []
+    assert (
+        site._session_files("Cohort-f2026", "materials", "lectures", "03_x", {}) == []
+    )
 
 
 def test_session_files_real_failure_raises(monkeypatch):
@@ -393,7 +407,7 @@ def test_session_files_real_failure_raises(monkeypatch):
         gh_contents, "gh", lambda *a, **k: (1, "gh: HTTP 500 Server Error")
     )
     with pytest.raises(RuntimeError, match="could not read the tree"):
-        site._session_files("Cohort-f2026", "materials", "lectures", "03_x")
+        site._session_files("Cohort-f2026", "materials", "lectures", "03_x", {})
 
 
 # --------------------------------------------------------------- display link shaping
@@ -403,22 +417,22 @@ def test_session_files_real_failure_raises(monkeypatch):
 # below is the real `lectures/01_introduction` of hertie-intro-to-data-science-f2025,
 # whose site carried 200 links for this one session.
 ITDS_SESSION_01 = [
-    ("01-introduction.Rmd", "https://x/rmd"),
-    ("01-introduction.html", "https://x/html"),
-    ("01-introduction.pdf", "https://x/pdf"),
-    ("01-introduction_files/figure-html/indeed-1.svg", "https://x/fig"),
-    ("add_hertie_logo.html", "https://x/logo"),
-    ("libs/fabric/fabric.min.js", "https://x/fabric"),
-    ("libs/remark-css/metropolis.css", "https://x/metro"),
-    ("pics/1_1_hello.png", "https://x/p1"),
-    ("pics/1_2_data.png", "https://x/p2"),
-    ("simons-touch.css", "https://x/css"),
+    Link("01-introduction.Rmd", "https://x/rmd"),
+    Link("01-introduction.html", "https://x/html"),
+    Link("01-introduction.pdf", "https://x/pdf"),
+    Link("01-introduction_files/figure-html/indeed-1.svg", "https://x/fig"),
+    Link("add_hertie_logo.html", "https://x/logo"),
+    Link("libs/fabric/fabric.min.js", "https://x/fabric"),
+    Link("libs/remark-css/metropolis.css", "https://x/metro"),
+    Link("pics/1_1_hello.png", "https://x/p1"),
+    Link("pics/1_2_data.png", "https://x/p2"),
+    Link("simons-touch.css", "https://x/css"),
 ]
 TREE = "https://github.com/o/r/tree/main/lectures/01_introduction"
 
 
 def test_shape_links_lists_root_files_and_folds_subfolders():
-    names = [n for n, _ in site._shape_links(ITDS_SESSION_01, TREE, frozenset())]
+    names = [x.name for x in site._shape_links(ITDS_SESSION_01, TREE, frozenset())]
     # 10 blobs -> 5 root files + one entry per subfolder, in path order, files first.
     assert names == [
         "01-introduction.Rmd",
@@ -433,7 +447,7 @@ def test_shape_links_lists_root_files_and_folds_subfolders():
 
 
 def test_shape_links_points_a_folded_folder_at_its_tree():
-    got = dict(site._shape_links(ITDS_SESSION_01, TREE, frozenset()))
+    got = {x.name: x.url for x in site._shape_links(ITDS_SESSION_01, TREE, frozenset())}
     assert got["pics/ (2 files)"] == f"{TREE}/pics"
     # A file still links to the file, not to its folder.
     assert got["01-introduction.pdf"] == "https://x/pdf"
@@ -441,8 +455,8 @@ def test_shape_links_points_a_folded_folder_at_its_tree():
 
 def test_shape_links_allowlist_matches_at_any_depth_and_offers_the_folder():
     names = [
-        n
-        for n, _ in site._shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf", "css"}))
+        x.name
+        for x in site._shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf", "css"}))
     ]
     # Nothing is hidden without a way back: the browse link is the escape hatch.
     assert names == [
@@ -451,18 +465,14 @@ def test_shape_links_allowlist_matches_at_any_depth_and_offers_the_folder():
         "simons-touch.css",
         site._BROWSE_ALL,
     ]
-    assert (
-        dict(site._shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf"})))[
-            site._BROWSE_ALL
-        ]
-        == TREE
-    )
+    browse = site._shape_links(ITDS_SESSION_01, TREE, frozenset({"pdf"}))[-1]
+    assert browse.name == site._BROWSE_ALL and browse.url == TREE
 
 
 def test_shape_links_leaves_a_flat_folder_untouched():
     # The worked example's shape: no subfolders, so there is nothing to fold and the row
     # reads exactly as it did before any of this.
-    flat = [("slides.md", "https://x/1"), ("demo.py", "https://x/2")]
+    flat = [Link("slides.md", "https://x/1"), Link("demo.py", "https://x/2")]
     assert site._shape_links(flat, TREE, frozenset()) == flat
 
 
@@ -473,13 +483,13 @@ def test_shape_links_lists_a_dotfile_but_not_a_never_material_name():
     # materials.
     # Path-sorted, as `_session_files` hands them over ('.R' sorts before '.g').
     blobs = [
-        (".Rprofile", "https://x/rprofile"),
-        (".gitkeep", "https://x/keep"),
-        ("media/.gitkeep", "https://x/mk"),
-        ("media/fig.png", "https://x/fig"),
-        ("slides.pdf", "https://x/pdf"),
+        Link(".Rprofile", "https://x/rprofile"),
+        Link(".gitkeep", "https://x/keep"),
+        Link("media/.gitkeep", "https://x/mk"),
+        Link("media/fig.png", "https://x/fig"),
+        Link("slides.pdf", "https://x/pdf"),
     ]
-    names = [n for n, _ in site._shape_links(blobs, TREE, frozenset())]
+    names = [x.name for x in site._shape_links(blobs, TREE, frozenset())]
     # ...and the fold counts what it shows: `media/` holds two blobs, one of them junk.
     assert names == [".Rprofile", "slides.pdf", "media/ (1 file)"]
 
@@ -488,10 +498,10 @@ def test_shape_links_drops_junk_from_the_allowlist_shape_too():
     # The allowlist matches by extension at any depth, so a `.ipynb_checkpoints/` copy of a
     # notebook is exactly the kind of thing it would otherwise list twice over.
     blobs = [
-        (".ipynb_checkpoints/lab-checkpoint.ipynb", "https://x/ck"),
-        ("lab.ipynb", "https://x/lab"),
+        Link(".ipynb_checkpoints/lab-checkpoint.ipynb", "https://x/ck"),
+        Link("lab.ipynb", "https://x/lab"),
     ]
-    names = [n for n, _ in site._shape_links(blobs, TREE, frozenset({"ipynb"}))]
+    names = [x.name for x in site._shape_links(blobs, TREE, frozenset({"ipynb"}))]
     assert names == ["lab.ipynb", site._BROWSE_ALL]
 
 
@@ -500,13 +510,13 @@ def test_shape_links_matches_a_directory_component_and_ignores_case():
     # match has to be component-wise. Case varies in the wild by whichever machine wrote
     # the file.
     blobs = [
-        ("__pycache__/helpers.cpython-312.pyc", "https://x/pyc"),
-        (".DS_Store", "https://x/ds"),
-        ("data/.ds_store", "https://x/ds2"),
-        ("data/Thumbs.db", "https://x/th"),
-        ("data/housing.csv", "https://x/csv"),
+        Link("__pycache__/helpers.cpython-312.pyc", "https://x/pyc"),
+        Link(".DS_Store", "https://x/ds"),
+        Link("data/.ds_store", "https://x/ds2"),
+        Link("data/Thumbs.db", "https://x/th"),
+        Link("data/housing.csv", "https://x/csv"),
     ]
-    names = [n for n, _ in site._shape_links(blobs, TREE, frozenset())]
+    names = [x.name for x in site._shape_links(blobs, TREE, frozenset())]
     assert names == ["data/ (1 file)"]
 
 
@@ -543,7 +553,7 @@ def test_the_allowlist_never_leaves_a_public_file_unreachable(tmp_path):
     (tmp_path / "deck.html").write_text("x")
     (tmp_path / "notes.pdf").write_text("x")
     (tmp_path / "libs" / "style.css").write_text("x")
-    names = [n for n, _ in public_site._public_links(tmp_path, "/m/session-1")]
+    names = [x.name for x in public_site._public_links(tmp_path, "/m/session-1")]
     assert names == [
         "deck.html",
         "notes.pdf",
@@ -558,7 +568,7 @@ def test_public_links_lists_nested_files_when_nothing_sits_at_the_root(tmp_path)
     (tmp_path / "handouts").mkdir()
     (tmp_path / "handouts" / "notes.pdf").write_text("x")
     (tmp_path / "handouts" / "extra.pdf").write_text("x")
-    names = [n for n, _ in public_site._public_links(tmp_path, "/m/session-1")]
+    names = [x.name for x in public_site._public_links(tmp_path, "/m/session-1")]
     assert names == ["handouts/extra.pdf", "handouts/notes.pdf"]
 
 
@@ -600,13 +610,13 @@ def _readings_sources():
 def test_released_reading_list_inlines_text_and_ignores_the_pdf(monkeypatch):
     files = {
         ("materials", "readings", "01_week-1"): [
-            ("READINGS.md", "u"),
-            ("blitzstein_ch1.pdf", "u"),
+            Link("READINGS.md", "u"),
+            Link("blitzstein_ch1.pdf", "u"),
         ],
-        ("materials", "lectures", "01_x"): [("slides.pdf", "u")],
+        ("materials", "lectures", "01_x"): [Link("slides.pdf", "u")],
     }
     monkeypatch.setattr(
-        site, "_session_files", lambda o, r, s, f: files.get((r, s, f), [])
+        site, "_session_files", lambda o, r, s, f, hosted: files.get((r, s, f), [])
     )
     monkeypatch.setattr(
         site,
@@ -625,7 +635,9 @@ def test_released_reading_list_propagates_a_read_failure(monkeypatch):
     # A rate-limited read must not republish the row with the reading list silently
     # emptied - same rule as every other fail-loud read in this module.
     monkeypatch.setattr(
-        site, "_session_files", lambda o, r, s, f: [("READINGS.md", "u")]
+        site,
+        "_session_files",
+        lambda o, r, s, f, hosted: [Link("READINGS.md", "u")],
     )
 
     def boom(*a, **k):
@@ -641,18 +653,20 @@ def test_row_links_drops_the_citation_file_it_already_inlined(monkeypatch):
     monkeypatch.setattr(
         site,
         "_session_files",
-        lambda o, r, s, f: [
-            ("READINGS.md", "https://x/md"),
-            ("ch1.pdf", "https://x/pdf"),
+        lambda o, r, s, f, hosted: [
+            Link("READINGS.md", "https://x/md"),
+            Link("ch1.pdf", "https://x/pdf"),
         ],
     )
     names = [
-        n for n, _ in site._row_links("C", "materials", "readings", "01_a", frozenset())
+        x.name
+        for x in site._row_links("C", "materials", "readings", "01_a", frozenset(), {})
     ]
     assert names == ["ch1.pdf"]  # READINGS.md IS the list, not a download beside it
     # Any other section keeps its text files - only `readings` inlines the overlay.
     names = [
-        n for n, _ in site._row_links("C", "materials", "lectures", "01_a", frozenset())
+        x.name
+        for x in site._row_links("C", "materials", "lectures", "01_a", frozenset(), {})
     ]
     assert "READINGS.md" in names
 
@@ -665,15 +679,16 @@ def test_row_links_keeps_an_uploaded_text_file_that_is_not_the_overlay(monkeypat
     monkeypatch.setattr(
         site,
         "_session_files",
-        lambda o, r, s, f: [
-            ("READINGS.md", "https://x/overlay"),
-            ("notes.md", "https://x/notes"),
-            ("refs.bib", "https://x/refs"),
-            ("ch1.pdf", "https://x/pdf"),
+        lambda o, r, s, f, hosted: [
+            Link("READINGS.md", "https://x/overlay"),
+            Link("notes.md", "https://x/notes"),
+            Link("refs.bib", "https://x/refs"),
+            Link("ch1.pdf", "https://x/pdf"),
         ],
     )
     names = [
-        n for n, _ in site._row_links("C", "materials", "readings", "01_a", frozenset())
+        x.name
+        for x in site._row_links("C", "materials", "readings", "01_a", frozenset(), {})
     ]
     assert "READINGS.md" not in names  # its content is already inlined on the row
     assert sorted(names) == ["ch1.pdf", "notes.md", "refs.bib"]
@@ -703,7 +718,7 @@ def _parse(monkeypatch, repos):
     monkeypatch.setattr(
         site, "_repo_tree", lambda o, r: ("main", tuple(sorted(repos[r])))
     )
-    return yaml.safe_load(site._materials_index("Cohort-f2026", list(repos)))
+    return yaml.safe_load(site._materials_index("Cohort-f2026", list(repos), {}))
 
 
 def _index(monkeypatch, repos):
@@ -723,7 +738,7 @@ def test_root_documents_are_one_group_not_a_section_per_repo(monkeypatch):
         "lectures": ("01_intro/deck.html", "README.md", "SYLLABUS.md"),
     }
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", repos[r]))
-    got = yaml.safe_load(site._materials_index("C", sorted(repos)))
+    got = yaml.safe_load(site._materials_index("C", sorted(repos), {}))
     assert [d["name"] for d in got["documents"]] == ["README.md", "SYLLABUS.md"]
     # ...and they are gone from the sections, which now hold only session folders.
     assert [s["name"] for s in got["sections"]] == ["labs", "lectures"]
@@ -735,7 +750,7 @@ def test_root_documents_are_one_group_not_a_section_per_repo(monkeypatch):
 
 def test_a_cohort_with_only_root_documents_is_not_reported_as_empty(monkeypatch):
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ("SYLLABUS.md",)))
-    got = yaml.safe_load(site._materials_index("C", ["materials"]))
+    got = yaml.safe_load(site._materials_index("C", ["materials"], {}))
     assert [d["name"] for d in got["documents"]] == ["SYLLABUS.md"]
     assert got["sections"] == []
 
@@ -817,11 +832,13 @@ def test_index_nests_a_directory_instead_of_only_folding_it(monkeypatch):
 
 def test_index_is_empty_yaml_when_nothing_is_released(monkeypatch):
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", ()))
-    assert yaml.safe_load(site._materials_index("Cohort-f2026", ["materials"])) == {
+    assert yaml.safe_load(site._materials_index("Cohort-f2026", ["materials"], {})) == {
         "sections": []
     }
     # And with no repos at all, without touching the tree.
-    assert yaml.safe_load(site._materials_index("Cohort-f2026", [])) == {"sections": []}
+    assert yaml.safe_load(site._materials_index("Cohort-f2026", [], {})) == {
+        "sections": []
+    }
 
 
 def test_index_puts_directories_before_files(monkeypatch):
@@ -948,8 +965,8 @@ def test_the_syllabus_is_found_under_any_name_and_format(monkeypatch):
     # Faculty name it; we only have to find it. ITDS really does use the PDF.
     for name in ("SYLLABUS.md", "SYLLABUS.pdf", "syllabus-2026.docx", "Syllabus.MD"):
         monkeypatch.setattr(site, "_repo_tree", lambda o, r, n=name: ("main", (n,)))
-        assert site._released_syllabus("C", ["materials"]) == (
-            f"https://github.com/C/materials/blob/main/{name}"
+        assert site._released_syllabus("C", ["materials"], {}) == Link(
+            name, f"https://github.com/C/materials/blob/main/{name}"
         )
 
 
@@ -964,7 +981,7 @@ def test_a_syllabus_image_inside_a_session_folder_is_not_the_syllabus(monkeypatc
             ("lectures/01_x/pics/ids-syllabus-2024.png", "lectures/01_x/deck.html"),
         ),
     )
-    assert site._released_syllabus("C", ["materials"]) is None
+    assert site._released_syllabus("C", ["materials"], {}) is None
 
 
 def test_no_syllabus_means_no_key_at_all(monkeypatch):
@@ -973,9 +990,21 @@ def test_no_syllabus_means_no_key_at_all(monkeypatch):
     monkeypatch.setattr(
         site, "_repo_tree", lambda o, r: ("main", ("lectures/01/a.md",))
     )
-    assert "syllabus" not in yaml.safe_load(site._materials_index("C", ["materials"]))
-    with_one = yaml.safe_load(site._materials_index("C", ["materials"], syllabus="u"))
+    assert "syllabus" not in yaml.safe_load(
+        site._materials_index("C", ["materials"], {})
+    )
+    with_one = yaml.safe_load(
+        site._materials_index("C", ["materials"], {}, syllabus=Link("S.md", "u"))
+    )
     assert with_one["syllabus"] == "u"
+    # A published syllabus pins the copy that renders: the home page shows ONE link, so
+    # unlike a file row there is nowhere to put the GitHub one beside it.
+    hosted = yaml.safe_load(
+        site._materials_index(
+            "C", ["materials"], {}, syllabus=Link("S.html", "u", "https://site/S.html")
+        )
+    )
+    assert hosted["syllabus"] == "https://site/S.html"
 
 
 def test_an_exact_syllabus_stem_beats_a_longer_name(monkeypatch):
@@ -987,14 +1016,14 @@ def test_an_exact_syllabus_stem_beats_a_longer_name(monkeypatch):
         "_repo_tree",
         lambda o, r: ("main", ("SYLLABUS-draft.pdf", "SYLLABUS.pdf")),
     )
-    assert site._released_syllabus("C", ["m"]).endswith("/SYLLABUS.pdf")
+    assert site._released_syllabus("C", ["m"], {}).url.endswith("/SYLLABUS.pdf")
 
 
 def test_a_longer_name_is_still_used_when_it_is_all_there_is(monkeypatch):
     monkeypatch.setattr(
         site, "_repo_tree", lambda o, r: ("main", ("syllabus-2026.docx",))
     )
-    assert site._released_syllabus("C", ["m"]).endswith("/syllabus-2026.docx")
+    assert site._released_syllabus("C", ["m"], {}).url.endswith("/syllabus-2026.docx")
 
 
 def test_the_syllabus_choice_is_stable_when_a_cohort_has_two(monkeypatch):
@@ -1002,7 +1031,7 @@ def test_the_syllabus_choice_is_stable_when_a_cohort_has_two(monkeypatch):
     # the caller's sorted repo list and _repo_tree's sorted paths, not from re-sorting.
     trees = {"zzz": ("SYLLABUS.md",), "aaa": ("SYLLABUS.md",)}
     monkeypatch.setattr(site, "_repo_tree", lambda o, r: ("main", trees[r]))
-    assert site._released_syllabus("C", ["aaa", "zzz"]).endswith(
+    assert site._released_syllabus("C", ["aaa", "zzz"], {}).url.endswith(
         "/aaa/blob/main/SYLLABUS.md"
     )
 
@@ -1071,7 +1100,7 @@ def test_a_denylisted_file_is_never_linked_from_a_public_page(tmp_path):
     (tmp_path / "grading.yml").write_text("points: 10")
     (tmp_path / ".env").write_text("KEY=live")
     links = public_site._public_links(tmp_path, "/m/session-1/lectures")
-    assert [name for name, _ in links] == ["deck.html"]
+    assert [link.name for link in links] == ["deck.html"]
 
 
 def test_the_denylist_matches_by_name_at_any_depth_and_ignores_case():

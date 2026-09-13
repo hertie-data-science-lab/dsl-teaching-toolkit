@@ -111,6 +111,32 @@ FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", NO_STARTER)
 # them: the words the New assignment box offers and the ones `scaffold` refuses back to.
 STARTER_FORMATS = tuple(f for f in FORMATS if f != NO_STARTER)
 
+# The two answers the New materials repo form asks about PUBLISHING, out of which
+# `scaffold.publish_patterns` writes the repo's seeded `publish.yml`. Here, in the shared
+# vocabulary, for the same reason the assignment words are: `workflows_render` (layer 3)
+# builds the dropdowns and `scaffold` (layer 5) reads the answers back, and a dropdown
+# offering a word the reader would refuse is a form that lies.
+#
+# `(nothing public)` is the default and is spelt with brackets so it cannot be mistaken
+# for a directory name - the same device `NO_STARTER`'s neighbours use on their own forms.
+NOTHING_PUBLIC = "(nothing public)"
+PUBLIC_LECTURES = "lectures"
+PUBLIC_EXCEPT_READINGS = "everything except readings"
+PUBLIC_EVERYTHING = "everything"
+PUBLIC_DIRS = (
+    NOTHING_PUBLIC,
+    PUBLIC_LECTURES,
+    PUBLIC_EXCEPT_READINGS,
+    PUBLIC_EVERYTHING,
+)
+# The file those answers are written into, at the root of a materials repo. A filename
+# faculty type by hand, so it is spelt once: `scaffold` seeds it and `site` reads it.
+PUBLISH_FILE = "publish.yml"
+PUBLIC_HTML = "html"
+PUBLIC_HTML_PDF = "html + pdf"
+PUBLIC_ALL_FILES = "all files"
+PUBLIC_TYPES = (PUBLIC_HTML, PUBLIC_HTML_PDF, PUBLIC_ALL_FILES)
+
 
 # The four ROLE teams every org's access is expressed in: the two faculty teams, created
 # in course and cohort orgs alike, and the two cohort-only student teams. Named here

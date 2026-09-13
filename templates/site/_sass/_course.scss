@@ -219,6 +219,19 @@
     }
 }
 
+/* `[source]` beside a file the site hosts its own rendered copy of - the file's home on
+   GitHub. Quieter than the name it follows, because the name is what a student opens; the
+   bracketed link is there for the one who wants the repo. Outside `.session-block`
+   deliberately: the same control appears in the Updates box and in All Materials. */
+.file-actions {
+    font-size: 0.85em;
+    opacity: 0.7;
+
+    a {
+        white-space: nowrap;
+    }
+}
+
 /* An assignment page's name, under its identifier in the h1 (see _layouts/assignment.html).
    Sized between the title and the body: it is the assignment's real name, not metadata. */
 .post-subtitle {

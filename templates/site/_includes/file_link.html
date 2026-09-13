@@ -1,0 +1,28 @@
+{%- comment -%}
+SYSTEM-OWNED - do not edit. Written by the DSL course sync from templates/site/ in the
+toolkit; every sync rewrites it.
+{%- endcomment -%}
+{%- comment -%}
+ONE file link, wherever a page shows one: a session row, the Updates box, the All Materials
+tree. Params: `name`, `url`, optional `view_url`, `title` and `inline`.
+
+`inline` is for a caller that already brackets the link: the Updates box renders each file
+as `[name]`, so a bracketed `[source]` inside that reads `[slides.html [source]]`. Set it
+and the source link is a middle dot and a word instead - `[slides.html - source]` - which
+is the same control without the second pair of brackets. Lists that do not bracket
+anything (a session row, the All Materials tree) leave it unset and keep `[source]`.
+
+`url` is the file on GitHub. `view_url` is the cohort site's own hosted copy, written by the
+sync only for a file the course published (publish.yml) that a browser renders - so the NAME
+opens the copy that renders, and `[source]` beside it keeps the file's own home one click
+away. With no `view_url` this is exactly the single anchor every site has always had.
+
+No `assign` and no `capture`: materials_entry.html includes this from inside its own
+recursion, and both write to Liquid's outermost scope. Hence the three-way `if` inside the
+href rather than one computed variable - and hence the site-relative case spelt out, since
+the public course site links `/public-materials/...`, which needs the baseurl.
+
+The file ends without a newline, and the comments either side trim their own: this renders
+inside a sentence in the Updates box, where a stray space is visible.
+{%- endcomment -%}
+<a{% if include.title %} title="{{ include.title }}"{% endif %} href="{% if include.view_url %}{{ include.view_url }}{% elsif include.url contains '://' %}{{ include.url }}{% else %}{{ include.url | prepend: site.baseurl }}{% endif %}">{{ include.name }}</a>{% if include.view_url %}{% if include.inline %} <span class="file-actions">· <a href="{{ include.url }}">source</a></span>{% else %} <span class="file-actions">[<a href="{{ include.url }}">source</a>]</span>{% endif %}{% endif %}

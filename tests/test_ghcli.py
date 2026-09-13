@@ -332,6 +332,25 @@ def test_clone_carries_a_branch_when_one_is_asked_for(monkeypatch):
     assert seen[-1] == ("repo", "clone", "O/R", "/tmp/x", "--", "-q")
 
 
+def test_a_shallow_clone_asks_for_one_commit_of_one_branch(monkeypatch):
+    # The site's public copies want the files at HEAD, not a term of old blobs - and a
+    # materials repo carrying rendered decks is most of its own size in history.
+    seen: list[tuple[str, ...]] = []
+    monkeypatch.setattr(ghcli, "gh", lambda *a, **k: seen.append(a) or (0, ""))
+    assert ghcli.clone("O", "R", "/tmp/x", shallow=True)
+    assert seen[-1] == (
+        "repo",
+        "clone",
+        "O/R",
+        "/tmp/x",
+        "--",
+        "-q",
+        "--depth",
+        "1",
+        "--single-branch",
+    )
+
+
 # ------------------------------------------------- the opt-in org allowlist (tests/e2e)
 
 

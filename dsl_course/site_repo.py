@@ -697,9 +697,27 @@ def _singular(label: str) -> str:
     return label[:-1] if len(label) > 1 and label.endswith("s") else label
 
 
-def links_block(sections: list[tuple[str, list[tuple[str, str]]]]) -> str:
-    r"""A front-matter `links:` block from `(section-label, [(file-name, url), ...])` pairs
-    in publication order, or `links: []` when there is nothing to link.
+@dataclass(frozen=True)
+class Link:
+    """One file link on a site row: the name a reader clicks, the `url` behind it, and -
+    only when the cohort site hosts a public copy of that file - the `view_url` of the
+    copy.
+
+    A record rather than a pair because a link now carries two destinations for one file
+    and the templates have to tell them apart: the name opens `view_url` where there is
+    one (the rendered copy, which is the whole point of publishing it) and `url` otherwise,
+    with `url` shown beside it as `[source]`. Empty by default, because on every site that
+    publishes nothing every link has exactly one destination and the front matter must stay
+    byte-identical to what it was."""
+
+    name: str
+    url: str
+    view_url: str = ""
+
+
+def links_block(sections: list[tuple[str, list[Link]]]) -> str:
+    r"""A front-matter `links:` block from `(section-label, [Link, ...])` in publication
+    order, or `links: []` when there is nothing to link.
 
     `name` is the FILENAME alone and `section` the singular section noun beside it. Both
     sites emit the same shape. The section used to be glued onto the front of the name
@@ -711,16 +729,22 @@ def links_block(sections: list[tuple[str, list[tuple[str, str]]]]) -> str:
     was showing; and a file genuinely named `reading - notes.pdf` released into `lectures/`
     matched both pages. A field the templates can test is the same routing without either.
 
+    `view_url:` is written only when the link has one, so a course that publishes nothing
+    gets the same three lines per link it has always got. An empty key would be a field
+    every template then has to test for emptiness rather than for presence, on every row of
+    every site, to gain nothing.
+
     Escaping is per FIELD, not over the pair: `q` escapes `\` and `"`, and a filename
     carrying a backslash (`\sigma.pdf`) is an invalid YAML escape that fails the whole
     Jekyll build."""
     rows = []
-    for label, pairs in sections:
-        for name, url in pairs:
+    for label, links in sections:
+        for link in links:
             rows.append(
-                f"    - url: {url}\n"
-                f'      name: "{q(name)}"\n'
-                f'      section: "{q(_singular(label))}"'
+                f"    - url: {link.url}\n"
+                + (f"      view_url: {link.view_url}\n" if link.view_url else "")
+                + f'      name: "{q(link.name)}"\n'
+                + f'      section: "{q(_singular(label))}"'
             )
     return ("links:\n" + "\n".join(rows)) if rows else "links: []"
 

@@ -19,3 +19,7 @@ uv.lock
 # macOS Finder metadata; packaging residue
 .DS_Store
 *.egg-info/
+
+# The fixture site is built by CI on Linux and by hand on macOS; a lockfile from either
+# pins the other platform out.
+tests/fixtures/site/Gemfile.lock

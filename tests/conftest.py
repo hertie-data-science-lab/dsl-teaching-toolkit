@@ -463,11 +463,18 @@ def workflow_jobs(rendered: str) -> dict:
     return yaml.safe_load(rendered)["jobs"]
 
 
-def entry_links(rendered: str) -> list[tuple[str, str]]:
-    """The (section, name) pairs of a rendered session entry's `links:` block.
+def entry_link_rows(rendered: str) -> list[dict]:
+    """Every link of a rendered session entry's `links:` block, whole - each a mapping of
+    whatever fields the emitter wrote (`url`, `name`, `section`, and `view_url` only where
+    the file has a hosted copy).
 
-    Parsed rather than substring-matched: `name` and `section` are two fields now, so an
-    assertion written against the rendered bytes would be asserting the emitter's line
-    order as much as its content."""
+    Parsed rather than substring-matched: a link is four fields now, so an assertion
+    written against the rendered bytes would be asserting the emitter's line order as much
+    as its content."""
     front = rendered.split("---\n")[1]
-    return [(l["section"], l["name"]) for l in yaml.safe_load(front).get("links") or []]
+    return yaml.safe_load(front).get("links") or []
+
+
+def entry_links(rendered: str) -> list[tuple[str, str]]:
+    """The (section, name) pairs of the same block - the view most assertions want."""
+    return [(l["section"], l["name"]) for l in entry_link_rows(rendered)]

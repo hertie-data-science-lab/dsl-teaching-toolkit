@@ -44,6 +44,7 @@ from .schedule_plan import READINGS_SECTION, row_kind
 from .site_repo import (
     PUBLISH_CONFIG,
     ROW_NOUN,
+    Link,
     SitePlan,
     block,
     iso_when,
@@ -95,9 +96,9 @@ def _withheld_from_site(root: Path, path: Path) -> bool:
     )
 
 
-def _public_links(local_dir: Path, url_prefix: str) -> list[tuple[str, str]]:
-    """(display-name, site-relative URL) for the files of a copied session folder that the
-    page LISTS - not every file it serves.
+def _public_links(local_dir: Path, url_prefix: str) -> list[Link]:
+    """A `Link` (display-name, site-relative URL) per file of a copied session folder that
+    the page LISTS - not every file it serves.
 
     URLs are relative to the public site root (`/PUBLIC_MATERIALS_DIR/...`), so they
     resolve for the public - never blob/raw URLs into the private source repo. Names are
@@ -130,7 +131,9 @@ def _public_links(local_dir: Path, url_prefix: str) -> list[tuple[str, str]]:
     ]
     if any("/" not in rel for rel in rels):
         rels = [rel for rel in rels if "/" not in rel]
-    return [(rel, f"{url_prefix}/{quote(rel)}") for rel in rels]
+    # No `view_url`: this site already hosts every file it links, so the name IS the
+    # hosted copy and there is no second destination to name.
+    return [Link(rel, f"{url_prefix}/{quote(rel)}") for rel in rels]
 
 
 def _reading_list_md(readings_session_dir: Path, keep: Callable[[Path], bool]) -> str:
@@ -154,7 +157,7 @@ def _reading_list_md(readings_session_dir: Path, keep: Callable[[Path], bool]) -
 def _public_lecture_entry(
     session: str,
     when: date,
-    section_links: list[tuple[str, list[tuple[str, str]]]],
+    section_links: list[tuple[str, list[Link]]],
     reading_list_md: str,
     kind: str = "lecture",
 ) -> str:
@@ -171,7 +174,7 @@ def _public_lecture_entry(
     A public course site has no schedule.yml to read, so it declares no `subtitle:` or
     `description:` of its own; the theme simply shows the ordinal.
 
-    `section_links` is `(section, [(name, url), ...])` in publication order; each link is
+    `section_links` is `(section, [Link, ...])` in publication order; each link is
     named `<section-singular> - <file>`, as on the cohort site."""
     links = links_block(section_links)
     title = f"{ROW_NOUN[kind]} {session}"
@@ -261,8 +264,8 @@ def sync_public_site(
                 url_base = f"/{PUBLIC_MATERIALS_DIR}/{source_repo}/session-{s}"
                 # Links per row: the week's `labs` section becomes its own lab row,
                 # everything else (lectures, faq, readings) the session row.
-                section_links: list[tuple[str, list[tuple[str, str]]]] = []
-                lab_links: list[tuple[str, list[tuple[str, str]]]] = []
+                section_links: list[tuple[str, list[Link]]] = []
+                lab_links: list[tuple[str, list[Link]]] = []
                 reading_list_md = ""
 
                 for section in file_sections:
