@@ -751,7 +751,6 @@ _OPEN_IN_LAYOUTS = frozenset(
         "_layouts/readings.html",
         "_layouts/materials.html",
         "_layouts/assignment.html",
-        "_layouts/assignments.html",
         "_layouts/home.html",
         "_layouts/profile.html",
     }
@@ -966,21 +965,6 @@ def test_a_students_own_repo_replaces_the_shape_wherever_a_page_prints_it():
     # exactly as rendered.
     own = body.split("function ownRepo(shape, handle) {")[1].split("\n  }")[0]
     assert '"<your-handle>"' in own
-
-
-def test_the_assignments_index_offers_each_repo_before_the_brief_is_opened():
-    # One row per assignment, each with the same buttons a file row gets - so a student
-    # going back to work in week 6 does not have to open the brief to reach the repo. The
-    # shape is per row, because the page lists several.
-    index = _strip_comments(_templates()["_layouts/assignments.html"])
-    assert 'data-dsl-assignment="{{ entry.repo_name | escape }}"' in index
-    assert '<span class="file-btns"' in index
-    assert ">repo</a>" in index
-    # Only for an assignment that has been handed out: a pending one has no `repo_url`
-    # because there is nothing at the other end of it yet.
-    assert "{% if entry.repo_url %}" in index
-    body = _strip_comments(_open_in())
-    assert "[data-dsl-assignment]" in body
 
 
 def test_the_assignment_page_offers_a_clone():
