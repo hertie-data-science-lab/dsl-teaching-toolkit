@@ -155,15 +155,6 @@ jobs:
             grep -q "id=\"dsl-saved-$field\"" profile/index.html || {
               echo "::error::/profile/ built without a saved line for $field"; missing=1; }
           done
-          # The Assignments index offers each repo without the brief being opened. The
-          # fixture hands out assignment 1 and leaves assignment 2 pending, so this also
-          # checks the pending one gets no row.
-          grep -q 'data-dsl-assignment="assignment-1-&lt;your-handle&gt;"' assignments/index.html || {
-            echo "::error::the assignments index has no repo row for assignment 1"; missing=1; }
-          if grep -q 'data-dsl-assignment="assignment-2' assignments/index.html; then
-            echo "::error::the assignments index offers a repo for a pending assignment"
-            missing=1
-          fi
           # Every place the assignment page prints the repo shape is marked for the script.
           for f in assignments/01-assignment-1.html; do
             test "$(grep -c 'code data-dsl-repo' "$f")" -gt 0 || {

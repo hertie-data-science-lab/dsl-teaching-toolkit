@@ -207,19 +207,19 @@ day that sentence is reworded.
     return shape.replace("<your-handle>", handle);
   }
 
-  /* Everything inside `scope` that names the repo by its SHAPE, or points at the org's
+  /* Everything on the page that names the repo by its SHAPE, or points at the org's
      filtered repo list because the page could not know which repo was the reader's. Once
      it can, the shape becomes the name and the list becomes the repo itself. Both are
      marked in the layout rather than matched on the prose around them, which is reworded.
      */
-  function resolveRepo(scope, org, repo) {
+  function resolveRepo(org, repo) {
     var i;
-    var named = scope.querySelectorAll("[data-dsl-repo]");
+    var named = document.querySelectorAll("[data-dsl-repo]");
     for (i = 0; i < named.length; i++) {
       named[i].textContent = repo;
     }
     var href = "https://github.com/" + encodeSegment(org) + "/" + encodeSegment(repo);
-    var linked = scope.querySelectorAll("[data-dsl-repo-url]");
+    var linked = document.querySelectorAll("[data-dsl-repo-url]");
     for (i = 0; i < linked.length; i++) {
       linked[i].setAttribute("href", href);
       newTab(linked[i], href);
@@ -227,18 +227,16 @@ day that sentence is reworded.
   }
 
   function decorateAssignment(root, me) {
-    /* ONE assignment's page, so the resolve below can take the whole document: the callout
-       and the closing line are far apart and both name the repo. The index is the other
-       shape - many repos, one row each - and is left to the function below. Today a page
-       is one or the other (only an assignment page carries `data-repo-name`), and this
-       says so rather than relying on it. */
-    if (document.querySelector("[data-dsl-assignment]")) { return; }
+    /* ONE assignment's page, and the resolve below takes the whole document: the callout
+       and the closing line are far apart and both name the repo. Only an assignment page
+       carries `data-repo-name`, so everywhere else there is no repo to resolve and this
+       returns at once. */
     var org = root.getAttribute("data-org");
     var repo = ownRepo(root.getAttribute("data-repo-name"), me.handle);
     if (!repo) { return; }
     var btn = document.querySelector(".callout a.btn");
     if (!btn) { return; }
-    resolveRepo(document, org, repo);
+    resolveRepo(org, repo);
     /* Outlined, beside the solid one: the same destinations a file row offers, but full
        size here because this page has one repo rather than a list of files - and
        secondary, because the repo on GitHub is still the thing to open first. Clone leads
@@ -257,28 +255,6 @@ day that sentence is reworded.
       var el = button(offers[i][0], offers[i][1], offers[i][2], "btn btn--ghost");
       btn.parentNode.insertBefore(el, at.nextSibling);
       at = el;
-    }
-  }
-
-  function decorateAssignmentList(root, me) {
-    /* The Assignments index: one row per assignment, each carrying its own shape, so the
-       work is reachable without opening the brief first. The same small buttons a file row
-       gets, and the `repo` one Liquid rendered is repointed off the org's filtered list. */
-    var org = root.getAttribute("data-org");
-    var rows = document.querySelectorAll("[data-dsl-assignment]");
-    for (var i = 0; i < rows.length; i++) {
-      var row = rows[i];
-      var repo = ownRepo(row.getAttribute("data-dsl-assignment"), me.handle);
-      if (!repo) { continue; }
-      resolveRepo(row, org, repo);
-      var online = onlineUrl(org, repo, "");
-      var local = localUrl(me.editor, me.assignments, repo, "");
-      if (online) {
-        row.appendChild(button(online, "online", "Edit " + repo + " in the browser", "file-btn"));
-      }
-      if (local) {
-        row.appendChild(button(local, "local", "Open " + repo + " in your editor", "file-btn"));
-      }
     }
   }
 
@@ -312,7 +288,6 @@ day that sentence is reworded.
       try {
         decorateFiles(root, me);
         decorateAssignment(root, me);
-        decorateAssignmentList(root, me);
       } catch (e) { /* Only ever ADDS nodes: a failure leaves the page as it was. */ }
     });
   }
