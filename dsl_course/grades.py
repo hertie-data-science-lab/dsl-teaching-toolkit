@@ -1548,9 +1548,9 @@ def grading_config_faults(
     the ORG, which cannot be set through the API at all (`_org_settings_faults`). One GET
     for the whole plan, and none at all for a cohort with no such assignment.
 
-    Everything else here is the definition alone, which lives in the course org. Nothing is appended until every
-    template has been read: a read that failed is "we could not look", and the digest
-    closes what it is not handed."""
+    Everything else here is the definition alone, which lives in the course org. Nothing
+    is appended until every template has been read: a read that failed is "we could not
+    look", and the digest closes what it is not handed."""
     faults: list[ConfigFault] = []
     # Whether any assignment under this plan has handed the visibility flag to its
     # students, which is what makes the org's own two switches worth an API read - see
@@ -1670,7 +1670,7 @@ def _org_settings_faults(cohort_org: str) -> list[ConfigFault]:
     settings = gh_teams.org_settings(cohort_org)
     if settings is None:
         return []  # we could not look; `org_settings` has already said why
-    wrong = []
+    wrong: list[str] = []
     if settings.get(gh_teams.MEMBERS_CAN_DELETE) is True:
         wrong.append(
             "**Allow members to delete or transfer repositories** is ON, so a student "
@@ -1690,11 +1690,17 @@ def _org_settings_faults(cohort_org: str) -> list[ConfigFault]:
             f"`visibility: student_choice`, which makes each student an admin of their "
             f"own repo - and {' and '.join(wrong)}",
             file=GRADING_FILE,
+            # Both switches named whichever one is wrong: the fix is one visit to one
+            # page, and a sentence that named only the offender would send somebody back
+            # there a second time for the other.
             fix_text=(
-                f"on https://github.com/organizations/{cohort_org}/settings/"
-                f"member_privileges turn that switch the other way. Both are web-only "
-                f"org settings - the toolkit can read them and not set them - and they "
-                f"are the one-time cohort-org step in docs/DEPLOYMENT-CHECKLIST.md"
+                f"on the cohort org's Member privileges page "
+                f"(https://github.com/organizations/{cohort_org}/settings/"
+                f"member_privileges) set **Allow members to change repository "
+                f"visibilities** ON and **Allow members to delete or transfer "
+                f"repositories** OFF. Both are web-only org settings - the toolkit reads "
+                f"them and cannot set them - and they are the one-time cohort-org step "
+                f"in docs/DEPLOYMENT-CHECKLIST.md"
             ),
         )
     ]
