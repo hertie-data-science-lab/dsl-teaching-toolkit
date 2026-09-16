@@ -1295,9 +1295,11 @@ def _post_receipts(
     """Tell each student what we recorded for them, in their own repo's Feedback issue.
 
     Never fatal: a receipt is a courtesy, and a repo whose issue cannot be opened must not
-    stop the sheet - which is the record - from being written. Nothing at all for work
-    handed in off GitHub: there is no push to acknowledge."""
-    if spec.submit_external:
+    stop the sheet - which is the record - from being written. Nothing at all where the
+    assignment has no Feedback issue to post into: work handed in off GitHub has no push to
+    acknowledge, and a shape whose repo is not the student's own has nowhere private to say
+    it. The gradebook carries the feedback for all of them."""
+    if not spec.has_feedback_issue:
         return
     posted = 0
     for repo, unit, members in targets:
@@ -1470,7 +1472,7 @@ def sync_sheet(
 
     derive = (
         bool(targets)
-        and not spec.submit_external
+        and spec.collects_commits
         and (
             phase is SheetPhase.FREEZING
             or (phase is SheetPhase.OPEN and due is not None and now >= due)

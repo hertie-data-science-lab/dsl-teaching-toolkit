@@ -84,10 +84,19 @@ SANDBOX_USER = "dsl-sandbox"
 # because three layers spell them: `workflows_render` builds the New assignment dropdowns
 # from them, `scaffold` writes the chosen values into the file, and `grades` reads them
 # back - and a dropdown offering a word the reader would refuse is a form that lies.
-SUBMIT_VIA = (
-    "github",
-    "external",
-)  # `external` = handed in off GitHub (Moodle, Kaggle)
+# How the work reaches us. `github` = one repo per unit, pushed to; `external` = handed in
+# off GitHub (Moodle, Kaggle, in class), so no repo is created at all; `shared` = one drop
+# box for the whole cohort, a folder per unit. The words are NEVER renamed: live
+# INSTRUCTOR-OWNED `grading_config.yml` files carry them.
+SUBMIT_VIA = ("github", "external", "shared")
+# What the New assignment form OFFERS, which is the accepted vocabulary minus whatever the
+# engine cannot yet act on - the reader takes `shared` and says it is not supported yet, and
+# a dropdown offering a word that answer would refuse is a form that lies.
+SUBMIT_VIA_OFFERED = ("github", "external")
+# Who may read a unit's repo. `private` is the default and what every assignment gets until
+# an instructor says otherwise; `public` is portfolio work. Room for `internal` (visible to
+# an Enterprise, invisible to the world) if the plan ever buys it.
+VISIBILITIES = ("private", "public")
 ASSIGNMENT_TYPES = ("individual", "group")
 # How a group assignment's teams come about. `none` is NOT one of them: it is the answer
 # an INDIVIDUAL assignment gives, which is why the Join-team form can refuse a slug
@@ -110,6 +119,29 @@ FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", NO_STARTER)
 # The starters an instructor may actually name, `none` being the answer that means none of
 # them: the words the New assignment box offers and the ones `scaffold` refuses back to.
 STARTER_FORMATS = tuple(f for f in FORMATS if f != NO_STARTER)
+
+
+def has_feedback_issue(submit_via: str, visibility: str) -> bool:
+    """Whether this assignment has a Feedback issue at all - the thread receipts and the
+    final comment go on.
+
+    DERIVED from the shape, never configured: the issue lives in the unit's own repo, so
+    it exists exactly where there IS one and only that unit can read it. An external
+    assignment has no repo, a shared drop box is the whole cohort's, and a public repo is
+    the world's. Every shape still gets the private `grades-<handle>` gradebook, which is
+    where feedback goes when this is false."""
+    return submit_via == "github" and visibility == "private"
+
+
+def collects_commits(submit_via: str) -> bool:
+    """Whether there are commits to freeze, time and grade against the cutoff.
+
+    The gate on every piece of submission arithmetic - the snapshot, the late days, the
+    receipts, the `info:` block. False for `external` alone today, and named for what it
+    ASKS rather than for the one value that answers it, so the shapes to come do not have
+    to re-open each of those call sites."""
+    return submit_via in ("github", "shared")
+
 
 # The two answers the New materials repo form asks about PUBLISHING, out of which
 # `scaffold.publish_patterns` writes the repo's seeded `publish.yml`. Here, in the shared

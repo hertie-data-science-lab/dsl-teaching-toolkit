@@ -954,7 +954,7 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     assert course.NO_STARTER in inputs["format"]["description"]
     assert inputs["type"]["options"] == list(course.ASSIGNMENT_TYPES)
     assert inputs["team_formation"]["options"] == list(course.TEAM_FORMATIONS)
-    assert inputs["submit_via"]["options"] == list(course.SUBMIT_VIA)
+    assert inputs["submit_via"]["options"] == list(course.SUBMIT_VIA_OFFERED)
     # Hand-marking is the default, so `tests/` is seeded only when someone asks for it.
     assert inputs["autograde"]["type"] == "boolean"
     assert inputs["autograde"]["default"] is False

@@ -225,6 +225,27 @@ def test_a_group_members_grade_is_the_team_total_plus_their_own_adjustment():
     assert "score" not in view  # a group's score is the team's, not the member's
 
 
+def test_an_external_groups_member_is_shown_the_team_score_in_their_gradebook():
+    # The rule that withholds a team's score from a member exists because the score is
+    # already in the team's own repo, where every member can read it. An external group
+    # assignment has no repo, so the gradebook is the ONLY place that score can be seen -
+    # and withholding it there leaves a team with a grade and no marks behind it.
+    sheet = sentinel_sheet()
+    view = student_view(
+        group_spec(submit_external=True),
+        "team-alpha",
+        sheet["teams"]["team-alpha"],
+        "ben-k",
+    )
+    assert view["score"] == {"Q1": 14, "Q2": 13, "Q3": 10, "Q4": 6}
+    assert (
+        view["final_grade"] == "40"
+    )  # unchanged: still the team total + own adjustment
+    assert view["team_feedback"] == "TEAM-FEEDBACK-SENTINEL"
+    # The allowlist is still the guarantee: the relaxation opens no new key at all.
+    assert set(view) <= set(STUDENT_VIEW_KEYS)
+
+
 def test_the_late_penalty_is_taken_before_the_adjustment_is_added():
     # 20 x (1 - 10% x 2) = 16, then +4 - the waived penalty - is 20. The other order
     # would penalise the waiver itself.

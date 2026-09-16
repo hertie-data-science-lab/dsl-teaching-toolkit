@@ -33,6 +33,7 @@ from decimal import Decimal, InvalidOperation
 from functools import cache
 from pathlib import Path
 from typing import Self
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -52,9 +53,13 @@ from .course import (
     NO_TEAMS,
     SOLUTION_BRANCH,
     SUBMIT_VIA,
+    SUBMIT_VIA_OFFERED,
     TEAM_FORMATIONS,
+    VISIBILITIES,
+    collects_commits,
     course_phrase,
     feedback_issue_body,
+    has_feedback_issue,
     receipt_body,
     resolve_is_group,
     submission_repo,
@@ -76,7 +81,7 @@ from .gh_contents import (
     yaml_mark_line,
     yaml_problem,
 )
-from .ghcli import bot_login, clone, gh
+from .ghcli import bot_login, clone, gh, is_missing_resource
 from .log import log, log_err, log_ok, log_person, log_step
 from .repos import (
     add_collaborator,
@@ -180,6 +185,11 @@ class SheetSpec:
     title: str
     is_group: bool
     submit_external: bool = False
+    # The other two halves of the assignment's SHAPE, carried so the derived rules below
+    # are the vocabulary's own rather than a second spelling of them here. Defaults are
+    # what an assignment that says nothing gets: one private repo per unit.
+    submit_shared: bool = False
+    visibility: str = "private"
     questions: dict[str, str] | None = None
     late_window_days: int | None = None
     late_penalty_per_day: str | None = None
@@ -192,6 +202,25 @@ class SheetSpec:
     # has to act on it, where a grader scans the sheet's header and wants it short.
     due_long: str = ""
     cutoff_long: str = ""
+
+    @property
+    def submit_via(self) -> str:
+        """The shape, back out of the two flags the sheet carries - so `has_feedback_issue`
+        and `collects_commits` below are asked of `course`'s vocabulary, in one place,
+        rather than re-derived from booleans here."""
+        if self.submit_external:
+            return "external"
+        return "shared" if self.submit_shared else "github"
+
+    @property
+    def has_feedback_issue(self) -> bool:
+        """Whether this assignment's units have a Feedback issue to post into."""
+        return has_feedback_issue(self.submit_via, self.visibility)
+
+    @property
+    def collects_commits(self) -> bool:
+        """Whether there is anything to freeze, time or grade against the cutoff."""
+        return collects_commits(self.submit_via)
 
     @property
     def container_key(self) -> str:
@@ -247,11 +276,11 @@ def _fresh_block(spec: SheetSpec, members: list[str], info: dict | None = None) 
     filled "on the next tick", a late onboarder's row would sit empty for a quarter of an
     hour with no way to tell it from a non-submission.
 
-    `submit_external` means the work was handed in somewhere else, so there is no commit to
-    time and no `info:` block at all - rather than one full of blanks, which reads as a
+    An assignment that collects no commits - one handed in somewhere else - has nothing to
+    time and so no `info:` block at all, rather than one full of blanks, which reads as a
     toolkit that tried to fill it and failed."""
     block: dict = {}
-    if not spec.submit_external:
+    if spec.collects_commits:
         block[INFO_KEY] = _fresh_info(spec) | (info or {})
     block[spec.score_key] = _blank_score(spec)
     if spec.is_group:
@@ -308,7 +337,7 @@ def _merged_block(
     if frozen or info is None:
         if INFO_KEY in block:
             merged[INFO_KEY] = block[INFO_KEY]  # nothing looked; nothing to replace it
-    elif not spec.submit_external:
+    elif spec.collects_commits:
         merged[INFO_KEY] = _fresh_info(spec) | info
     for key, value in block.items():
         if key == INFO_KEY:
@@ -567,7 +596,7 @@ def _config_facts(spec: SheetSpec) -> list[str]:
         shape.append("submitted outside GitHub")
     shape.append("autograde on" if spec.autograde else "autograde off")
     timing = [f"due {spec.due_display}"] if spec.due_display else []
-    if spec.submit_external:
+    if not spec.collects_commits:
         timing.append("no late arithmetic")
     elif spec.late_window_days and spec.cutoff_display:
         rate = spec.late_penalty_per_day
@@ -1024,6 +1053,46 @@ def _penalty(value: object, where: str, dropped: list[str]) -> str | None:
     return raw
 
 
+def _submit_via(value: object, where: str, dropped: list[str]) -> str:
+    """The assignment's shape, out of the vocabulary `course` declares.
+
+    A word the vocabulary knows but the engine cannot act on yet comes straight through and
+    is refused by `_cross_check` a moment later, with a sentence about the SHAPE. What this
+    offers back on a typo is therefore only what the toolkit can do today: telling an
+    instructor that `shared` is allowed, and then refusing it on the next line, would be two
+    answers to one question."""
+    text = str(value or "").strip().lower()
+    if text in SUBMIT_VIA:
+        return text
+    return _one_of(value, SUBMIT_VIA_OFFERED, "submit_via", "github", where, dropped)
+
+
+def _submit_url(value: object, where: str, dropped: list[str]) -> str:
+    """Where an EXTERNAL assignment is handed in - the address behind the site's
+    `Submit on <host>` button, and the only thing the toolkit ever knows about a handover
+    it does not see.
+
+    `https://` only. The button is the one link on a public course site that sends a whole
+    cohort somewhere on the strength of one hand-typed line, and a `javascript:` or
+    `http://` one is either an attack or a downgrade. Refused rather than raised, like
+    every other value here: the site then shows the brief with no button, which is exactly
+    what an assignment that names no address gets."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if text.lower().startswith("https://") and urlsplit(text).hostname:
+        return text
+    dropped.append(
+        Dropped(
+            where,
+            "submit_url",
+            f"`submit_url: {value}` is not an `https://` address - the site shows the "
+            f"brief with no submit button",
+        )
+    )
+    return ""
+
+
 # One reader per key, so the per-assignment file and the course-wide defaults block below
 # validate the same value the same way and cannot drift into two vocabularies.
 _READERS = {
@@ -1033,7 +1102,11 @@ _READERS = {
         v, TEAM_FORMATIONS, "team_formation", "self_select", w, d
     ),
     "max_team_size": _team_cap,
-    "submit_via": lambda v, w, d: _one_of(v, SUBMIT_VIA, "submit_via", "github", w, d),
+    "submit_via": _submit_via,
+    "visibility": lambda v, w, d: _one_of(
+        v, VISIBILITIES, "visibility", "private", w, d
+    ),
+    "submit_url": _submit_url,
     "format": lambda v, w, d: _one_of(v, FORMATS, "format", NO_STARTER, w, d),
     "questions": _questions,
     "late_window_days": _whole_days,
@@ -1075,6 +1148,13 @@ class GradingSpec:
     team_formation: str = "self_select"
     max_team_size: int | None = None
     submit_via: str = "github"
+    # PRIVATE unless the assignment asks otherwise: everything the toolkit creates for a
+    # student is private to them and the teaching team, and a default that published a
+    # cohort's work would be a default nobody chose.
+    visibility: str = "private"
+    # Where an `external` assignment is handed in (Moodle, Kaggle). Only the site reads it,
+    # and only to put a button beside the brief.
+    submit_url: str = ""
     format: str = "none"
     questions: dict[str, str] | None = None
     late_window_days: int | None = None
@@ -1108,9 +1188,32 @@ class GradingSpec:
 
     @property
     def submit_external(self) -> bool:
-        """Handed in off GitHub (Moodle, Kaggle, in class), so the repo holds the brief
-        and the Feedback issue and nothing is ever collected from it."""
+        """Handed in off GitHub (Moodle, Kaggle, in class), so no repo is created at all
+        and nothing is ever collected."""
         return self.submit_via == "external"
+
+    @property
+    def submit_shared(self) -> bool:
+        """One drop box for the whole cohort, a folder per unit."""
+        return self.submit_via == "shared"
+
+    @property
+    def has_feedback_issue(self) -> bool:
+        """Whether this assignment's units have a Feedback issue to post into - the
+        vocabulary's own rule (`course.has_feedback_issue`), asked here so nothing has to
+        spell the pair of conditions a second time."""
+        return has_feedback_issue(self.submit_via, self.visibility)
+
+    @property
+    def collects_commits(self) -> bool:
+        """Whether there is anything to freeze, time or grade against the cutoff."""
+        return collects_commits(self.submit_via)
+
+    @property
+    def submit_host(self) -> str:
+        """`moodle.hertie-school.org` out of `submit_url` - what the site's button is
+        labelled with, so a student can see where it goes before they press it."""
+        return urlsplit(self.submit_url).hostname or "" if self.submit_url else ""
 
     @property
     def runs_completion_check(self) -> bool:
@@ -1167,6 +1270,49 @@ def parse_assignment_defaults(raw: object) -> dict:
     return values
 
 
+def _cross_check(values: dict, dropped: list[str]) -> None:
+    """The settings that are only wrong BESIDE another one, refused the same way the rest
+    are: the value is corrected in place and the reason is recorded.
+
+    Each reader above sees one key and cannot see the shape it sits in, so this is where a
+    combination the toolkit will not act on is caught - and it is caught at the parse, once,
+    rather than by each of the handout, the sheet, the receipts and the site making their
+    own guess about what was meant."""
+    via = values.get("submit_via", "github")
+    if via == "shared":
+        # Accepted vocabulary, unimplemented shape: reading it and handing out per-student
+        # repos anyway would be the toolkit quietly doing the opposite of what the file says.
+        values["submit_via"] = via = "github"
+        dropped.append(
+            Dropped(
+                GRADING_FILE,
+                "submit_via",
+                "`submit_via: shared` is not supported yet - using `github`",
+                ("github", "external"),
+            )
+        )
+    if via == "external" and values.get("visibility", "private") != "private":
+        # Nothing is created, so there is nothing for a visibility to describe.
+        values["visibility"] = "private"
+        dropped.append(
+            Dropped(
+                GRADING_FILE,
+                "visibility",
+                "`visibility:` says nothing about an assignment handed in off GitHub - "
+                "no repo is created for it - ignored",
+            )
+        )
+    if via != "external" and values.get("submit_url"):
+        values["submit_url"] = ""
+        dropped.append(
+            Dropped(
+                GRADING_FILE,
+                "submit_url",
+                "`submit_url:` is only read for `submit_via: external` - ignored",
+            )
+        )
+
+
 def parse_grading_spec(text: str) -> GradingSpec:
     """Parse a `grading_config.yml` into a `GradingSpec`.
 
@@ -1181,6 +1327,7 @@ def parse_grading_spec(text: str) -> GradingSpec:
         data = {}
     dropped: list[str] = []
     values = _read_settings(data, SPEC_KEYS, GRADING_FILE, dropped)
+    _cross_check(values, dropped)
     for line in dropped:
         log_err(line)
     return GradingSpec(**values, dropped=tuple(dropped))
@@ -1592,6 +1739,8 @@ def sheet_spec(
         title=gspec.title or (entry.title if entry else "") or slug,
         is_group=is_group,
         submit_external=gspec.submit_external,
+        submit_shared=gspec.submit_shared,
+        visibility=gspec.visibility,
         questions=gspec.questions,
         late_window_days=gspec.late_window_days,
         late_penalty_per_day=gspec.late_penalty_per_day,
@@ -1624,7 +1773,7 @@ def late_policy(spec) -> str:
 
     The rate TRAILS the date rather than bracketing it: `cutoff_long` already ends in the
     cohort's timezone, and two parentheticals in a row read as a typo."""
-    if spec.submit_external or not (spec.late_window_days and spec.cutoff_long):
+    if not spec.collects_commits or not (spec.late_window_days and spec.cutoff_long):
         return ""
     rate = (
         f", at {spec.late_penalty_per_day} of your grade per day started"
@@ -1717,9 +1866,15 @@ _ISSUE_ORDER = "sort=created&direction=asc"
 def _feedback_issues(
     cohort_org: str, repo: str, query: str, jq: str
 ) -> list[str] | None:
+    """The issues this query matches, or None when the question could not be ANSWERED.
+
+    A repo that is not there answers it: there are no issues in a repo that does not
+    exist. That is an ordinary state on every shape that creates no repo - an external
+    assignment has none at all - and reading it as "the lookup failed" reddened the run
+    for every student in the cohort and held their feedback back with it."""
     code, out = gh("api", f"repos/{cohort_org}/{repo}/issues?{query}", "--jq", jq)
     if code != 0:
-        return None
+        return [] if is_missing_resource(out) else None
     return [line for line in out.splitlines() if line.strip()]
 
 
@@ -2087,12 +2242,20 @@ def student_view(
         {
             "final_grade": _plain(final) if final is not None else _verbatim(score),
             # A group's score is the TEAM's: it reaches the team in the team's own repo,
-            # and reaches the member only through the final grade derived from it.
-            "score": None if spec.is_group else (_marked(score) or score),
+            # and reaches the member only through the final grade derived from it. Unless
+            # there IS no team repo - an external group assignment creates none, so the
+            # gradebook is the only place that score can be read at all, and withholding
+            # it there would leave a team with a grade nobody was ever shown the marks
+            # behind. `STUDENT_VIEW_KEYS` is untouched: the allowlist stays the guarantee.
+            "score": (
+                None
+                if (spec.is_group and not spec.submit_external)
+                else (_marked(score) or score)
+            ),
             "max_points": _max_points(spec),
             "feedback": person.get("feedback_individual"),
             "submitted": _submitted_display(
-                info.get("submitted"), spec.submit_external
+                info.get("submitted"), not spec.collects_commits
             ),
             "days_late": days_late,
             "penalty": _penalty_display(rate, days_late),
@@ -2627,7 +2790,7 @@ def team_result(spec: SheetSpec, team: str, block: dict | None) -> TeamResult:
         team_score=block.get(spec.score_key),
         max_points=_max_points(spec),
         submitted_display=_submitted_display(
-            info.get("submitted"), spec.submit_external
+            info.get("submitted"), not spec.collects_commits
         ),
         days_late=days_late,
         penalty=_penalty_display(penalty_rate(spec.late_penalty_per_day), days_late),
@@ -3106,6 +3269,50 @@ def _issue_targets(
     return out
 
 
+def _listed_private(listed: dict[str, dict] | None, repo: str) -> bool:
+    """Whether GitHub itself lists this repo as private, as far as one cohort listing can
+    tell.
+
+    Unknown - no listing, or no row for this repo - answers private, the same optimistic
+    default `repos.repo_is_private` takes: an API blip must not hold a whole cohort's
+    feedback back. What it is really for is the opposite case, a repo that IS listed and is
+    not private, which a `visibility:` edited after handout would otherwise leave the
+    config claiming was."""
+    row = (listed or {}).get(repo)
+    return row is None or (row.get("visibility") or "private") == "private"
+
+
+def _feedback_thread(
+    spec: SheetSpec,
+    cohort_org: str,
+    repo: str,
+    unit: str,
+    members: list[str],
+    listed: dict[str, dict] | None,
+) -> int | IssueLookupFailed | None:
+    """The Feedback issue this unit's comment goes on: its number, None where there is
+    none, or `LOOKUP_FAILED` where the question could not be answered.
+
+    Opening one is the exception rather than the rule. Only an assignment that HAS a
+    Feedback issue - `github` and `private` - may have one opened here; every other shape
+    LOOKS for one and uses it if it is there, and creates nothing. That asymmetry is what
+    keeps a cohort handed out before this shipped, whose repos and issues already exist,
+    receiving its feedback in the thread it was told to read - while an assignment that
+    creates no repos never has a thread conjured for it.
+
+    The live visibility guard sits on the CREATE for the same reason the static rule does:
+    a repo listed public is not one this run may open a Feedback issue in, whatever the
+    file still says."""
+    if spec.has_feedback_issue and _listed_private(listed, repo):
+        return ensure_feedback_issue(
+            cohort_org, repo, feedback_body(spec, unit, members)
+        )
+    found = find_feedback_issue(cohort_org, repo)
+    if isinstance(found, IssueLookupFailed):
+        return found
+    return found[0] if found else None
+
+
 def _hold_undecided(
     books: dict[str, dict[str, dict]], reasons: dict[str, dict[str, str]]
 ) -> dict[str, dict[str, tuple[str, str]]]:
@@ -3274,6 +3481,13 @@ def distribute(
                 f"until it is settled in the sheet"
             )
 
+    # ONE listing of the cohort for the whole run: what GitHub says each submission repo's
+    # visibility actually is, as against what its `grading_config.yml` declares. A
+    # `visibility:` edited after handout is otherwise a silent no-op, and the belt-and-
+    # braces this buys - never OPENING a Feedback issue in a repo the world can read - is
+    # worth one paginated listing per distribute.
+    listed = None if dry_run else _existing_repos(cohort_org)
+
     # 1. The feedback comment on each submission repo's Feedback issue.
     for slug in sorted(sheets):
         spec = specs[slug]
@@ -3296,8 +3510,8 @@ def distribute(
                 int(known) if known.isdigit() else None
             )
             if issue is None:
-                issue = ensure_feedback_issue(
-                    cohort_org, repo, feedback_body(spec, target, members)
+                issue = _feedback_thread(
+                    spec, cohort_org, repo, target, members, listed
                 )
             if isinstance(issue, IssueLookupFailed):
                 # The listing could not be READ. Opening one here is how a second Feedback
@@ -3307,8 +3521,11 @@ def distribute(
                 log_person(f"  [wait] Feedback issue unreadable on {cohort_org}/{repo}")
                 continue
             if issue is None:
-                # A submission repo that is not there (a student who never onboarded, a
-                # team formed after the handout). Counted, never named.
+                # No thread to post on: a submission repo that is not there (a student who
+                # never onboarded, a team formed after the handout, an assignment handed in
+                # off GitHub that creates none at all), or one whose shape says it has no
+                # Feedback issue. The mark is in the gradebook either way. Counted, never
+                # named.
                 counts["skipped"] += 1
                 continue
             posted = post_marked_comment(
@@ -3317,8 +3534,8 @@ def distribute(
             if not posted and known:
                 # The recorded thread is gone (deleted, or transferred). Look it up once,
                 # rather than leaving this student unreachable for the rest of the term.
-                issue = ensure_feedback_issue(
-                    cohort_org, repo, feedback_body(spec, target, members)
+                issue = _feedback_thread(
+                    spec, cohort_org, repo, target, members, listed
                 )
                 posted = isinstance(issue, int) and post_marked_comment(
                     cohort_org, repo, issue, body, GRADE_MARK.format(digest)

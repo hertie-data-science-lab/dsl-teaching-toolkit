@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 import pytest
 import yaml
 
-from dsl_course import collect, gh_contents, ghcli, grades
+from dsl_course import collect, course, gh_contents, ghcli, grades
 from dsl_course.faults import Severity
 from dsl_course.roster import Student
 from dsl_course.schedule import Schedule
@@ -106,6 +106,62 @@ def test_the_group_shape_reads_off_type_and_team_formation():
     assert (
         collect.parse_grading_spec("type: group\nmax_team_size: 3\n").max_team_size == 3
     )
+
+
+def test_the_shape_of_an_assignment_is_read_off_three_keys(capsys):
+    # `submit_via` + `visibility` are the whole of the shape, and everything that follows
+    # from it - the Feedback issue, the submission arithmetic - is DERIVED, never declared.
+    spec = collect.parse_grading_spec("")
+    assert (spec.submit_via, spec.visibility) == ("github", "private")
+    assert spec.has_feedback_issue and spec.collects_commits
+    external = collect.parse_grading_spec("submit_via: external\n")
+    assert not external.has_feedback_issue and not external.collects_commits
+    public = collect.parse_grading_spec("visibility: public\n")
+    assert not public.has_feedback_issue and public.collects_commits
+    assert capsys.readouterr().err == ""
+
+
+def test_a_visibility_the_toolkit_cannot_act_on_falls_back_to_private(capsys):
+    spec = collect.parse_grading_spec("visibility: internal\n")
+    assert spec.visibility == "private"
+    assert "is not one of private/public" in capsys.readouterr().err
+
+
+def test_shared_is_recognised_and_refused_until_it_is_implemented(capsys):
+    # The word is in the vocabulary (`course.SUBMIT_VIA`) so a file naming it is answered
+    # about the SHAPE rather than about spelling - but nothing acts on it yet, so it hands
+    # out exactly as `github` does and says so.
+    spec = collect.parse_grading_spec("submit_via: shared\n")
+    assert spec.submit_via == "github" and not spec.submit_shared
+    assert "not supported yet" in capsys.readouterr().err
+    # ...and the form never offers a word the reader would refuse.
+    assert "shared" not in course.SUBMIT_VIA_OFFERED
+
+
+def test_visibility_says_nothing_about_an_assignment_that_creates_no_repo(capsys):
+    # Nothing is created for an external assignment, so there is nothing for a visibility
+    # to describe - and leaving `public` standing there would read as a promise.
+    spec = collect.parse_grading_spec("submit_via: external\nvisibility: public\n")
+    assert spec.visibility == "private"
+    assert "no repo is created for it" in capsys.readouterr().err
+
+
+def test_submit_url_is_read_for_external_only_and_https_only(capsys):
+    url = "https://moodle.example.edu/mod/assign/view.php?id=42"
+    spec = collect.parse_grading_spec(f"submit_via: external\nsubmit_url: {url}\n")
+    assert spec.submit_url == url and spec.submit_host == "moodle.example.edu"
+    assert capsys.readouterr().err == ""
+    # The site's button is the one link that sends a whole cohort somewhere off the
+    # strength of one hand-typed line: https, or no button at all.
+    for bad in ("http://moodle.example.edu/x", "javascript:alert(1)", "moodle.edu"):
+        spec = collect.parse_grading_spec(f"submit_via: external\nsubmit_url: {bad}\n")
+        assert spec.submit_url == "" and spec.submit_host == ""
+        assert "is not an `https://` address" in capsys.readouterr().err
+    # And it describes a handover the toolkit does not see, so on any other shape it is a
+    # line pointing students away from the repo they are supposed to push to.
+    spec = collect.parse_grading_spec(f"submit_url: {url}\n")
+    assert spec.submit_url == ""
+    assert "only read for `submit_via: external`" in capsys.readouterr().err
 
 
 def test_a_setting_the_toolkit_does_not_read_is_flagged_by_name(capsys):

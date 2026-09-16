@@ -543,6 +543,7 @@ def _distribute(
     put_files_ok: bool = True,
     course_name=lambda org: "",
     assignment: str = "",
+    listed: dict[str, dict] | None = None,
 ) -> dict:
     """`distribute` over a local classroom-config clone, writing to nothing.
 
@@ -582,6 +583,10 @@ def _distribute(
     monkeypatch.setattr(grades, "gh", fake_gh)
     monkeypatch.setattr(ghcli, "gh", fake_gh)
     monkeypatch.setattr(grades, "ensure_gradebooks", lambda org, dry_run=False: 0)
+    # The cohort listing distribute takes to check what each repo's visibility REALLY is.
+    # None is "could not be read", which is the optimistic default every other reader of
+    # this question takes, and what every test that does not care about it gets.
+    monkeypatch.setattr(grades, "_existing_repos", lambda org: listed)
     monkeypatch.setattr(grades, "course_org_for_cohort", lambda org: "COURSE")
     monkeypatch.setattr(grades, "_grading_text", lambda org, tpl: grading)
     monkeypatch.setattr(
@@ -1154,6 +1159,57 @@ def test_a_missing_submission_repo_is_a_counted_skip(tmp_path, monkeypatch, caps
     assert out["comments"] == []
     assert out["rc"] == 0  # a student who never onboarded is not a failure
     assert '"skipped": 1' in capsys.readouterr().out
+
+
+_EXTERNAL_GRADING = _GRADING_YML + "submit_via: external\n"
+
+
+def test_an_external_assignment_never_has_a_feedback_issue_opened_for_it(
+    tmp_path, monkeypatch, capsys
+):
+    # Nothing was created for it, so there is nothing to open an issue in - and opening
+    # one would mint the very repo this shape exists not to create.
+    out = _distribute(monkeypatch, tmp_path, grading=_EXTERNAL_GRADING, issue=None)
+    assert out["issues"] == [] and out["comments"] == []
+    assert out["rc"] == 0
+    assert '"skipped": 1' in capsys.readouterr().out
+    # The mark still reaches the student, in the one place this shape puts it.
+    ((gb_repo, files, _delete),) = out["gradebooks"]
+    assert gb_repo == "grades-ada-l" and "43" in files["README.md"]
+
+
+def test_an_external_assignments_existing_issue_still_gets_the_comment(
+    tmp_path, monkeypatch
+):
+    # Maths a1: handed out before this shipped, so the repos and their Feedback issues are
+    # already there and the students were told to read them. Found, never opened.
+    monkeypatch.setattr(grades, "find_feedback_issue", lambda org, repo: (7, "open"))
+    out = _distribute(monkeypatch, tmp_path, grading=_EXTERNAL_GRADING)
+    assert out["issues"] == []  # nothing was ENSURED
+    ((repo, _body, _marker),) = out["comments"]
+    assert repo == "assignment-1-ada-l"
+
+
+def test_no_feedback_issue_is_opened_in_a_repo_the_listing_calls_public(
+    tmp_path, monkeypatch
+):
+    # The static "issue iff github AND private" rule is a declaration in a file; this is
+    # the live half of it, against a `visibility:` edited after handout.
+    monkeypatch.setattr(grades, "find_feedback_issue", lambda org, repo: None)
+    out = _distribute(
+        monkeypatch,
+        tmp_path,
+        listed={
+            "assignment-1-ada-l": {"name": "assignment-1-ada-l", "visibility": "public"}
+        },
+    )
+    assert out["issues"] == [] and out["comments"] == []
+
+
+def test_a_listing_that_could_not_be_read_still_opens_the_issue(tmp_path, monkeypatch):
+    # The optimistic default every other reader of this question takes: an API blip must
+    # not hold a whole cohort's feedback back.
+    assert _distribute(monkeypatch, tmp_path, listed=None)["issues"]
 
 
 # A handle no roster row claims. A sheet is hand-typed, and the demo org carried six of

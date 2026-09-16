@@ -49,7 +49,7 @@ from .course import (
     SOLUTION_BRANCH,
     SOLUTION_DIR,
     STARTER_FORMATS,
-    SUBMIT_VIA,
+    SUBMIT_VIA_OFFERED,
     SYLLABUS_SAMPLE_FILE,
     TEAM_FORMATIONS,
     UPSTREAM_BRANCH,
@@ -1686,7 +1686,7 @@ def main() -> int:
     pa.add_argument(
         "--submit-via",
         dest="submit_via",
-        choices=list(SUBMIT_VIA),
+        choices=list(SUBMIT_VIA_OFFERED),
         default="github",
         help="external = handed in off GitHub (Moodle, Kaggle, in class): the repo "
         "carries the brief and the Feedback issue, and nothing is ever collected",
