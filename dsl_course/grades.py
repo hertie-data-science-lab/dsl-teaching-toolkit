@@ -110,6 +110,12 @@ _STARTER_README = (
     "# Your gradebook\n\n"
     "This private repository is viewable only by you. Grades and feedback for each "
     "piece of assessment appear in `grades.yml` as the course progresses.\n\n"
+    # Not every assignment has a Feedback issue to read: an assignment handed in off
+    # GitHub creates no repo at all, and a shared or public one is not private to the
+    # student. This page is the channel every shape writes to, so it says so on the line
+    # under the one that says the repo is theirs.
+    "Feedback for assignments handed in outside GitHub, in a shared repo or in a public "
+    "repo appears here and nowhere else.\n\n"
     "## What each field means\n\n"
     "| Field | Meaning |\n"
     "| --- | --- |\n"
@@ -120,6 +126,20 @@ _STARTER_README = (
     "late days cost. |\n"
     "| `team` | Group assignments only: the team you submitted with. |\n"
     "| `team_feedback` | Group assignments only: feedback shared with the whole team. |\n"
+    # `student_choice` was dropped as a setting (a repo admin can delete or transfer the
+    # repo, and the org switches that would forbid it are web-only), so the answer to "can
+    # I show this to an employer?" is a recipe rather than a knob - and it belongs where
+    # the student is already looking.
+    "\n## Keeping your work\n\n"
+    "Your assignment repos are private to you and the teaching team and stay readable "
+    "after the course ends. To show one publicly, publish a copy under your own account; "
+    "the original stays private.\n\n"
+    "```\n"
+    "git clone https://github.com/<cohort-org>/<slug>-<your-handle>\n"
+    "cd <slug>-<your-handle>\n"
+    "git remote set-url origin https://github.com/<you>/<new-public-repo>\n"
+    "git push -u origin main\n"
+    "```\n"
 )
 
 

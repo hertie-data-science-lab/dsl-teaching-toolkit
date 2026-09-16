@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from dsl_course import roster
+from dsl_course import grades, roster
 from dsl_course.grades import (
     NOTES_KEY,
     STUDENT_VIEW_KEYS,
@@ -562,3 +562,19 @@ def test_load_sheets_reads_every_sheet_in_a_classroom_config_checkout(tmp_path):
 
 def test_load_sheets_is_empty_where_no_assignment_has_been_handed_out(tmp_path):
     assert load_sheets(tmp_path) == {}
+
+
+def test_the_starter_gradebook_says_it_is_the_only_channel_some_shapes_have():
+    # The first file a student opens, and for an assignment handed in off GitHub - or in a
+    # shared or public repo - the only place their feedback ever appears. It also answers
+    # the question `student_choice` was dropped rather than answer: how to show the work.
+    starter = grades._STARTER_README
+    assert (
+        "Feedback for assignments handed in outside GitHub, in a shared repo or in a "
+        "public repo appears here and nowhere else." in starter
+    )
+    assert "## Keeping your work" in starter
+    assert (
+        "git remote set-url origin https://github.com/<you>/<new-public-repo>"
+        in starter
+    )

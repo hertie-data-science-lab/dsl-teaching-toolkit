@@ -30,6 +30,39 @@ def _team_lock_is_current(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def gradebooks(monkeypatch):
+    """A private gradebook per onboarded student, provisioned at the end of every cohort's
+    sync. It reads the roster and lists the org, so it is stubbed here for the tests about
+    the sync's own orchestration; the one about it sets its own."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        sync_membership,
+        "ensure_gradebooks",
+        lambda org, dry_run=False: calls.append(org) or 0,
+    )
+    return calls
+
+
+def test_every_live_cohorts_sync_provisions_its_gradebooks(monkeypatch, gradebooks):
+    # The gradebook is where feedback goes for every shape that has no Feedback issue, and
+    # the assignment brief points at it from the day it is published - so it exists from
+    # the moment a student onboards, not from the first distribute.
+    _stub_course_admins(monkeypatch)
+    monkeypatch.setattr(sync_membership, "discover_cohorts", lambda org: ["Cohort-A"])
+    monkeypatch.setattr(sync_membership, "cohort_is_live", lambda org: True)
+    for name in ("sync_roster", "sync_teams"):
+        monkeypatch.setattr(getattr(sync_membership, name), "sync", lambda *a, **k: 0)
+    monkeypatch.setattr(
+        sync_membership.sync_faculty, "sync_cohort_instructors", lambda *a, **k: 0
+    )
+    monkeypatch.setattr(sync_membership, "discover_content_repos", lambda org: [])
+    monkeypatch.setattr(sync_membership, "discover_assignments", lambda org: [])
+
+    assert sync_membership.sync("Course", all_cohorts=True) == 0
+    assert gradebooks == ["Cohort-A"]
+
+
 def test_empty_registry_is_visible_but_not_fatal(monkeypatch, capsys):
     # An empty registry can be legitimate for a brand-new course org, so the run does not
     # fail - but it must be loudly visible, not a silent green "Sync complete".

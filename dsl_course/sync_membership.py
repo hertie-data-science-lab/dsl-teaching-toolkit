@@ -52,7 +52,7 @@ from .discovery import (
 from .faults import Unusable
 from .gh_contents import read_error
 from .gh_teams import acting_login
-from .grades import write_team_lock
+from .grades import ensure_gradebooks, write_team_lock
 from .log import log_err, log_ok
 
 # What a cohort's hand-edited config can be wrong in a way this sync cannot act on: a CSV
@@ -155,6 +155,11 @@ def sync(
             # and a form answering off a stale mirror either refuses a real team or lets
             # one form for an assignment the template says is individual.
             errors += 0 if write_team_lock(course_org, org, dry_run=dry_run) else 1
+            # A private gradebook per onboarded student, from the moment they onboard
+            # rather than from the first distribute: it is where feedback goes for every
+            # shape that has no Feedback issue, and the assignment brief points at it from
+            # the day it is published. Idempotent, one cohort listing.
+            errors += ensure_gradebooks(org, dry_run=dry_run)
         except _CONTENT_FAULT as exc:
             # A file faculty have to fix, not a run that broke. This cohort is skipped -
             # a roster nobody can read is not an empty roster, and acting on it would
