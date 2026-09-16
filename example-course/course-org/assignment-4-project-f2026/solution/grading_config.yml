@@ -3,7 +3,8 @@ title: Group project          # the assignment's name, shown to graders and on t
 type: group                   # individual | group
 team_formation: self_select   # self_select (students use the Join-team form) | assigned
 max_team_size: 4              # group only
-submit_via: github            # github | external (Moodle, Kaggle, in class...)
+submit_via: github            # github (they push to their repo) | external (handed in elsewhere)
+visibility: private           # private | public - who may read the student's repo
 format: py                    # ipynb | py | rmd | qmd | latex | none - the starter stub only
 
 questions:                    # the score skeleton, and the maximum shown beside each blank

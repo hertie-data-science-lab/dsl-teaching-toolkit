@@ -32,8 +32,8 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
         **Join team** form; `assigned` = you write `classroom-config/teams.csv`)
       - `submit_via` = where students hand in. `github` = they push to their repo, and the
         cutoff, the receipts and the late window apply; `external` = handed in elsewhere
-        (Moodle, Kaggle, in class), so the repo only carries the brief and the Feedback
-        issue and nothing is ever collected from it
+        (Moodle, Kaggle, in class), so **no repo is created**: the brief and a submit link
+        appear on the site and feedback goes to the student's gradebook
       - `autograde` (off by default; on seeds a `tests/` stub on `solution` for you to
         fill, and each submission's pass count appears on the grading sheet as a first
         pass for graders - never shown to students)
@@ -153,6 +153,25 @@ as the moment approaches. Earlier than that nothing is said.
 
 A template still carrying the pre-rename `grading.yml` is reported the same way - nothing
 reads that file, so the assignment grades as if it declared nothing at all.
+
+### Where the work goes, and who sees it
+
+Two settings in `grading_config.yml`, and everything else follows from them.
+
+| Setting | Values | What it does |
+|---|---|---|
+| `submit_via` | `github` (default) | One private repo per student or team. The cutoff, the receipts and the late window apply. |
+| | `external` | Handed in off GitHub. **No repo is created.** Nothing is collected, nothing is timed, and the grading sheet has no `info:` block. |
+| `submit_url` | an `https://` address | `external` only: puts a **Submit on \<host\>** button on the assignment's page and its due row. Without one the page says to read the brief. |
+
+The **Feedback issue** - the thread the receipts and the final comment appear in - exists
+only where there is a private repo of the student's own to put it in, so an `external`
+assignment has none. Its marks and its feedback go to the student's private
+`grades-<handle>` gradebook, which every shape writes to and which exists from the day they
+onboard.
+
+`submit_url` is not a form box: **New assignment** seeds a commented line for it in
+`grading_config.yml`, and you fill it in there.
 
 ### Group vs individual assignments
 

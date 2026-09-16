@@ -39,6 +39,15 @@ It asks nothing about the assignment itself: individual or group is the template
 
 Auditors (`role=auditor`) are skipped. The assignment's brief appears on the cohort site automatically - at hand-out, not before, however you hand out.
 
+### An assignment handed in somewhere else
+
+`submit_via: external` in the template's `grading_config.yml` (Moodle, Kaggle, in class)
+creates **nothing**: no cohort template, no repo per student, no Feedback issue, no
+solution push. The handout still records the moment in `schedule.yml`, publishes the brief
+and a **Submit on \<host\>** button (from `submit_url`) on the cohort site, writes the
+grading sheet with every student or team in it, and makes sure each student has their
+private `grades-<handle>` gradebook - which is where their feedback goes.
+
 ## Group or individual?
 
 The shape is the template's own declaration - `type:` in the `grading_config.yml` on its

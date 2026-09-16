@@ -19,6 +19,11 @@ membership changes propagate to access. Grades are never written here; they go t
 student's private gradebook repo (see dsl_course.grades), so a possibly-public team repo
 never carries marks.
 
+For `submit_via: external` - handed in off GitHub (Moodle, Kaggle, in class) - it creates
+NOTHING: no cohort template, no repo, no Feedback issue, no solution push. It records the
+handout, writes the grading sheet and the gradebooks, and syncs the site
+(`_release_external`).
+
 Usage:
     python3 -m dsl_course.assign \\
         --master-org TEST-HERTIE-COURSE --course-source-repo assignment-1-f2026 \\

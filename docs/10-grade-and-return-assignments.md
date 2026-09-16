@@ -101,12 +101,15 @@ Between the due date and the cutoff the sheet refreshes off committer dates alon
 `submitted` can move at the freeze - the last derivation there will ever be.
 
 An assignment whose `grading_config.yml` says `submit_via: external` has no `info:` block at all:
-there is no commit to time.
+no repo is created for it, so there is no commit to time.
 
 ## Marking, step by step
 
-1. **Handout.** The sheet appears with one row per student or team, and every submission
-   repo gets a **Feedback** issue.
+1. **Handout.** The sheet appears with one row per student or team, every student has a
+   private `grades-<handle>` gradebook, and every submission repo gets a **Feedback**
+   issue. An `external` assignment has no repos, so it gets no issues: its marks and
+   feedback reach students through the gradebook alone, and a group's team score and team
+   feedback go into each member's.
 2. **The due date.** `info:` fills, and each student gets a submission receipt on that
    issue. Late pushes refresh both, quarter-hourly, until the cutoff.
 3. **Collect submissions** (button) does that refresh now instead of waiting. It never

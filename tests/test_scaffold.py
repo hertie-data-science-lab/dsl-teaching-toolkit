@@ -659,6 +659,29 @@ def test_the_generated_definition_carries_the_answers_and_the_course_defaults(
     assert written["grading_config.yml"].startswith("# INSTRUCTOR-OWNED")
 
 
+def test_the_submit_url_line_is_live_only_where_it_means_something(fake, monkeypatch):
+    # `submit_url` is the one thing the toolkit is ever told about a handover it does not
+    # see, and it is not a form input - so the seeded file is where an instructor finds it.
+    # On a github assignment it would be a line pointing students away from the repo they
+    # are supposed to push to, so it is seeded commented out.
+    written = _solution_files(monkeypatch)
+    assert (
+        scaffold.scaffold_assignment("Org", "1", "f2026", [], submit_via="external")
+        == 0
+    )
+    external = written["grading_config.yml"]
+    assert "\nsubmit_url: https://" in external
+    assert grades.parse_grading_spec(external).submit_host == "moodle.hertie-school.org"
+
+    assert (
+        scaffold.scaffold_assignment("Org", "2", "f2026", [], submit_via="github") == 0
+    )
+    github = written["grading_config.yml"]
+    assert "\n# submit_url: https://" in github
+    spec = grades.parse_grading_spec(github)
+    assert spec.submit_url == "" and spec.dropped == ()
+
+
 def test_the_model_answer_is_seeded_where_derive_reads_it(fake, monkeypatch):
     # `derive` writes `solution/X` onto `main` as `X`. A model answer seeded as
     # `solution/solution.ipynb` therefore derived a SECOND notebook beside the untouched

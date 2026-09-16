@@ -270,7 +270,19 @@ def _grading_config(
             live=group and cap is not None,
         ),
         _setting(
-            "submit_via", submit_via, "github | external (Moodle, Kaggle, in class...)"
+            "submit_via",
+            submit_via,
+            "github (they push to their repo) | external (handed in elsewhere: Moodle, "
+            "Kaggle, in class - no repo is created)",
+        ),
+        # Live only where it means something. `submit_url` is the one thing the toolkit is
+        # ever told about a handover it does not see, and on a github assignment it would
+        # be a line pointing students away from the repo they are supposed to push to.
+        _setting(
+            "submit_url",
+            "https://moodle.hertie-school.org/mod/assign/view.php?id=CHANGE-ME",
+            "external only: the `Submit on ...` button on the site (https only)",
+            live=submit_via == "external",
         ),
         # ONE format, because `grades` reads one: the key is the vocabulary this file
         # teaches, and the only thing it drives - the `completion_check` default - is
