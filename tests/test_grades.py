@@ -40,6 +40,17 @@ def test_ensure_gradebooks_skips_auditors(monkeypatch, capsys):
     assert "1 auditor row(s) skipped" in out
 
 
+def test_a_cohort_with_no_roster_rows_yet_is_a_skip_not_a_failure(monkeypatch, capsys):
+    # This runs on every nightly Sync membership. An empty roster is a freshly bootstrapped
+    # cohort and a missing one is a content fault the roster's own digest already reports,
+    # so neither may redden a run in an org the maintainer cannot fix it in.
+    monkeypatch.setattr(grades.roster, "load", lambda org: [])
+    assert grades.ensure_gradebooks("COHORT") == 0
+    monkeypatch.setattr(grades.roster, "load", lambda org: None)
+    assert grades.ensure_gradebooks("COHORT") == 0
+    assert capsys.readouterr().err == ""
+
+
 def test_ensure_gradebooks_names_no_student_in_a_public_log(monkeypatch, capsys):
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
     students = roster.parse(

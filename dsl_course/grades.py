@@ -3052,13 +3052,20 @@ def ensure_gradebooks(cohort_org: str, dry_run: bool = False) -> int:
     one: a student who onboarded since the last run has no repo to push a grade into, and
     the failure a moment later would say only "could not write".
 
-    Auditors are read-only and are never assessed, so they get no gradebook."""
+    Auditors are read-only and are never assessed, so they get no gradebook.
+
+    A roster that is absent or empty is a SKIP, not a failure, for the reason
+    `sync_roster.sync` gives: an empty roster is a freshly bootstrapped cohort and a
+    missing one is a content fault the roster's own digest issue already reports to the
+    people who can fix it. This runs on every nightly Sync membership now, and reddening
+    that run would tell a maintainer only that something is wrong in an org they cannot fix
+    it in."""
     students = roster.load(cohort_org)
     if students is None:  # missing/unreadable roster - load() already logged why
-        return 1
+        return 0
     if not students:
-        log_err(f"roster in {cohort_org} has no rows yet - no gradebooks to sync.")
-        return 1
+        log(f"  [skip] no gradebooks in {cohort_org} - its roster has no rows yet")
+        return 0
     participants = roster.enrolled(students)
     auditing = len(students) - len(participants)
     onboarded = [s for s in participants if s.onboarded]

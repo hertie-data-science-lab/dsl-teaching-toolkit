@@ -1097,14 +1097,13 @@ def _assignment_entry(
     # The plan's own declaration wins, and is the only one that can appear BEFORE hand-out:
     # the README it otherwise comes from is embargoed until then.
     subtitle = found[1].title if found else ""
-    # `repo_name` either way - the shape is the plan's, known before anything ships - and
-    # `repo_url` only once there is something at the other end of it. So the theme tests
-    # the flag for state and the URL only for "have I somewhere to link", rather than
-    # inferring one from the other.
-    # The shape is the SPEC's and is known before anything ships, so the flag is written
-    # whatever the handout state; the address behind it is a place to go NOW, so like
-    # `repo_url` it waits until there is something to go there for. Without the flag both
-    # the page and the due row told a Moodle cohort to submit by pushing to `main`.
+    # Where the work goes. The SHAPE is known before anything ships - `repo_name` for a
+    # github assignment, `submit_external` for one handed in off it - so it is written
+    # whatever the handout state; an ADDRESS is a place to go now, so `repo_url` and
+    # `submit_url` both wait until there is something to go there for. The theme therefore
+    # tests the shape for state and the URL only for "have I somewhere to link", rather
+    # than inferring one from the other. Without the flag both the page and the due row
+    # told a Moodle cohort to submit by pushing to `main`.
     if external:
         repo_lines = ["submit_external: true"]
         if out and spec.submit_url:
