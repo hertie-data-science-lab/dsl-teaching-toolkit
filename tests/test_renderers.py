@@ -960,6 +960,10 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     # dropdown and the reader can never disagree about what is on offer.
     assert inputs["visibility"]["options"] == list(course.VISIBILITIES)
     assert inputs["visibility"]["default"] == "private"
+    # And the box says what each of them does: the form is the only place an instructor
+    # meets this vocabulary before they have a `grading_config.yml` to read.
+    for word in course.VISIBILITIES:
+        assert word in inputs["visibility"]["description"]
     # Hand-marking is the default, so `tests/` is seeded only when someone asks for it.
     assert inputs["autograde"]["type"] == "boolean"
     assert inputs["autograde"]["default"] is False

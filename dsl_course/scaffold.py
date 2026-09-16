@@ -297,7 +297,9 @@ def _grading_config(
             "visibility",
             visibility,
             "private (the student and the teaching team) | public (the whole internet: "
-            "portfolio work, no Feedback issue) - read at hand-out only",
+            "portfolio work, no Feedback issue) | student_choice (private, and the "
+            "student is its admin: theirs to publish after the grading cutoff, and no "
+            "Feedback issue) - read at hand-out only",
             live=submit_via != "external",
         ),
         # ONE format, because `grades` reads one: the key is the vocabulary this file

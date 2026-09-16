@@ -706,6 +706,30 @@ def test_the_visibility_box_lands_in_the_file_the_handout_reads(fake, monkeypatc
     assert not spec.has_feedback_issue  # derived, never declared
 
 
+def test_student_choice_lands_in_the_file_and_names_the_word_it_writes(
+    fake, monkeypatch
+):
+    # The third answer box 10 offers. It has to survive the round trip as the WORD - the
+    # handout branches on it, and a value the scaffold wrote and the reader then refused
+    # would hand out repos nobody chose.
+    written = _solution_files(monkeypatch)
+    assert (
+        scaffold.scaffold_assignment(
+            "Org", "1", "f2026", [], visibility="student_choice"
+        )
+        == 0
+    )
+    text = written["grading_config.yml"]
+    assert "\nvisibility: student_choice" in text
+    spec = grades.parse_grading_spec(text)
+    assert spec.visibility == "student_choice" and spec.dropped == ()
+    assert spec.visibility_is_students and not spec.has_feedback_issue
+    # And the seeded line teaches its own vocabulary: every value the reader takes is
+    # named in the comment beside it, or the file offers an instructor two of three.
+    (line,) = [ln for ln in text.splitlines() if ln.startswith("visibility:")]
+    assert all(word in line for word in course.VISIBILITIES)
+
+
 def test_the_visibility_line_is_commented_where_no_repo_is_created(fake, monkeypatch):
     # `visibility:` describes a repo and `external` creates none - the parse drops it
     # there - so a live line would be a setting that reads as if it did something.
