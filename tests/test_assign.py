@@ -2556,6 +2556,14 @@ def _public_writes(monkeypatch, _provisioned):
             seen["visibility"].append((repo, vis)) or True
         ),
     )
+    monkeypatch.setattr(assign.sync_teams, "ensure_team", lambda *a, **k: True)
+    monkeypatch.setattr(
+        assign,
+        "grant_team_repo_access",
+        lambda org, team, repo, permission, person=False: (
+            seen["granted"].append((team, permission)) or True
+        ),
+    )
     return seen
 
 
@@ -2613,6 +2621,94 @@ def test_a_failed_visibility_patch_is_counted_and_withholds_nothing(
     assert _public_writes["granted"] == [("ada-l", "maintain")]
     assert pushed == ["assignment-1-ada-l"]
     assert "assignment-1-ada-l" not in capsys.readouterr().out
+
+
+# ------------------------------- an assignment whose repos the students may publish
+#
+# `visibility: student_choice` creates the same PRIVATE repos and hands the flag over: the
+# student is `admin` of their own work, which is the only permission that carries GitHub's
+# visibility switch. Everything else follows from `course.visibility_is_students`.
+
+
+def test_a_student_choice_repo_is_created_private_and_never_patched(_public_writes):
+    # No PATCH at all: the repo IS private, which is what the assignment asked for. The
+    # student flips it themselves, and the tick puts it back until the cutoff.
+    assert _one_public(visibility="student_choice") == "ok"
+    assert [g["private"] for g in _public_writes["generated"]] == [True]
+    assert _public_writes["visibility"] == []
+
+
+def test_a_student_choice_student_is_admin_of_their_own_repo(_public_writes):
+    assert _one_public(visibility="student_choice") == "ok"
+    assert _public_writes["granted"] == [("ada-l", "admin")]
+
+
+def test_a_student_choice_team_is_admin_of_the_repo_it_shares(_public_writes):
+    # A team project belongs to all of its members, so the grant is on the TEAM: a repo
+    # only one of them could publish would not be theirs.
+    assert (
+        assign.provision_one(
+            "COURSE",
+            "assignment-1",
+            "COHORT",
+            "assignment-1-team-alpha",
+            ["ada-l", "ben-k"],
+            "assignment-1",
+            team="team-alpha",
+            visibility="student_choice",
+        )
+        == "ok"
+    )
+    assert _public_writes["granted"] == [("team-alpha", "admin")]
+
+
+@pytest.mark.parametrize("visibility", ["private", "public"])
+def test_every_other_shape_keeps_the_maintain_floor(_public_writes, visibility):
+    # `maintain` deliberately excludes the visibility switch, so a `public` assignment's
+    # repos are public because the assignment said so and stay that way.
+    assert _one_public(visibility=visibility) == "ok"
+    assert _public_writes["granted"] == [("ada-l", "maintain")]
+    _public_writes["granted"].clear()
+    assert (
+        assign.provision_one(
+            "COURSE",
+            "assignment-1",
+            "COHORT",
+            "assignment-1-team-alpha",
+            ["ada-l"],
+            "assignment-1",
+            team="team-alpha",
+            visibility=visibility,
+        )
+        == "ok"
+    )
+    assert _public_writes["granted"] == [("team-alpha", "maintain")]
+
+
+def test_a_student_choice_handout_opens_no_feedback_issue(
+    tmp_path, monkeypatch, feedback_issues, sheet_writes, gradebooks
+):
+    # The repo may be public tomorrow, so there is nowhere in it that a mark can be
+    # written and kept private - the gradebook carries the feedback instead.
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.parse_grading_spec("visibility: student_choice\n"),
+    )
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    seen: list[dict] = []
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: seen.append(k) or "ok")
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    assert assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path
+    ) == (0, True)
+    assert feedback_issues == []
+    assert [k["feedback_body"] for k in seen] == [""]
+    assert [k["visibility"] for k in seen] == ["student_choice"]
 
 
 def test_a_public_handout_opens_no_feedback_issue(

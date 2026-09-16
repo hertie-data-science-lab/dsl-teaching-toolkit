@@ -29,6 +29,12 @@ opens no Feedback issue: nothing about a student's marking may be written where 
 internet can read it, so their feedback goes to their private gradebook alone. The cohort
 template stays private either way.
 
+For `visibility: student_choice` it creates the same PRIVATE repos and makes each unit
+`admin` of its own - the one permission that carries GitHub's visibility switch - so the
+student, or every member of a team, can publish their own work once it has been marked.
+No Feedback issue there either: the repo may be public tomorrow. Until the grading cutoff
+the scheduler puts any of them back that has gone public early.
+
 Usage:
     python3 -m dsl_course.assign \\
         --master-org TEST-HERTIE-COURSE --course-source-repo assignment-1-f2026 \\
@@ -60,6 +66,7 @@ from .course import (
     SOLUTION_BRANCH,
     SOLUTION_DIR,
     submission_repo,
+    visibility_is_students,
 )
 from .discovery import ASSIGNMENT_TEMPLATE_TOPIC, classify_repos, list_org_repos
 from .fs import copy_tree
@@ -744,6 +751,12 @@ def provision_one(
     that would nightly undo a deliberate change, and an edit to `visibility:` after
     hand-out is reported by the cohort's `grading_config.yml` digest instead.
 
+    It also decides the unit's own PERMISSION. `maintain` is the floor for everything the
+    toolkit owns the flag on, and it deliberately excludes GitHub's visibility switch;
+    `student_choice` is the shape where the student owns it, so there the grant is `admin`
+    - on the collaborator and on the team alike, because a team project belongs to all of
+    its members and a repo only one of them could publish is not theirs.
+
     `existing` is the cohort's repos off ONE listing (`_org_listing`), keyed by name;
     membership in it answers "does this repo already exist?" without a GET per student,
     and each row carries the `topics` that `_tag_submission` converges off. None - no
@@ -759,6 +772,10 @@ def provision_one(
     `team`, so each member is added as a collaborator. Group assignments also pass the
     GitHub Team slug: the team is materialised from `handles` and granted on the repo, so
     membership changes propagate to access (and members get @mentions + a team space)."""
+    # ONE answer for both arms below, off the vocabulary's own predicate rather than the
+    # word: a group repo whose team could not publish it would leave a student_choice
+    # assignment half-owned, and that is exactly the kind of drift two spellings buy.
+    permission = "admin" if visibility_is_students(visibility) else "maintain"
     if team is not None and not handles:
         # Every member was rejected by the roster allowlist upstream (typo'd handles, a
         # stranger's login), so this team can be granted nothing. Checked BEFORE anything is
@@ -887,10 +904,10 @@ def provision_one(
         # its result counts towards this repo's status rather than being discarded.
         team_ok = sync_teams.ensure_team(cohort_org, team, set(handles), prune=False)
         access_ok = grant_team_repo_access(
-            cohort_org, team, repo, "maintain", person=True
+            cohort_org, team, repo, permission, person=True
         )
         if access_ok:
-            log_person(f"  [ok]   + team {team} (maintain)")
+            log_person(f"  [ok]   + team {team} ({permission})")
         if not team_ok:
             # One per group repo, and `provision_all` tallies the `failed-team-members`
             # status below into the count faculty read. The team NAME is a roster of who
@@ -926,9 +943,9 @@ def provision_one(
     added = 0
     for handle in handles:
         if add_collaborator(
-            cohort_org, repo, handle, permission="maintain", person=True
+            cohort_org, repo, handle, permission=permission, person=True
         ):
-            log_person(f"  [ok]   + @{handle} (maintain)")
+            log_person(f"  [ok]   + @{handle} ({permission})")
             added += 1
         else:
             log_err(f"  ! could not add @{handle} (not a real account?)")
@@ -1300,10 +1317,17 @@ def provision_all(
                 if gspec.has_feedback_issue and group
                 else solo_body
             )
+        # The shape in the one line faculty read in the run log. Only the two that are
+        # NOT the default say anything: `private` is what a reader already assumes, and a
+        # note on every handout is a note nobody reads on the one that matters.
+        shape_note = ""
+        if gspec.visibility == "public":
+            shape_note = " as PUBLIC repos"
+        elif gspec.visibility_is_students:
+            shape_note = " as private repos their students may publish"
         log_step(
             f"Releasing {slug} to {cohort_org}: freeze cohort template, then provision "
-            f"{what}{' as PUBLIC repos' if gspec.visibility == 'public' else ''}"
-            f"{' + solution' if solution else ''}"
+            f"{what}{shape_note}{' + solution' if solution else ''}"
         )
         if dry_run:
             log(f"    DRY-RUN  cohort template {cohort_org}/{slug}")
