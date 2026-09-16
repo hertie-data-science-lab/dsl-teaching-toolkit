@@ -1116,7 +1116,7 @@ def test_provision_all_records_handout_under_schedule_key_and_survives_site_fail
     captured: dict[str, str] = {}
     monkeypatch.setattr(
         "dsl_course.schedule.record_handout",
-        lambda org, slug, *a: captured.__setitem__("key", slug),
+        lambda org, slug, *a, **k: captured.update(key=slug, **k),
     )
     monkeypatch.setattr(assign, "ensure_cohort_template", lambda *a: "group-project")
     monkeypatch.setattr(assign, "provision_one", lambda *a, **k: "ok")
@@ -1132,6 +1132,8 @@ def test_provision_all_records_handout_under_schedule_key_and_survives_site_fail
         "COURSE", "assignment-4-project-f2026", "COHORT", roster_path=path
     )
     assert captured["key"] == "project"  # the schedule key, not "group-project"
+    # ...and the template, so a fabricated entry can be tied back to the assignment.
+    assert captured["source_repo"] == "assignment-4-project-f2026"
     assert rc == 1  # the site failure was counted, not raised as a traceback
 
 
@@ -2354,7 +2356,9 @@ def _external(monkeypatch, tmp_path, *, rows=(), recorded=False, group=""):
     monkeypatch.setattr(assign, "generate_from_template", boom)
     monkeypatch.setattr(
         "dsl_course.schedule.record_handout",
-        lambda org, slug, stamp=None: effects["handout"].append(slug),
+        lambda org, slug, stamp=None, source_repo="": effects["handout"].append(
+            (slug, source_repo)
+        ),
     )
     monkeypatch.setattr(
         "dsl_course.site.sync_site",
@@ -2382,7 +2386,7 @@ def test_an_external_handout_creates_no_repos_and_still_records_itself(
     assert out["result"] == (0, True)
     # The schedule is what the site reads to publish the brief: there is no cohort
     # template repo for `discovery.handed_out_assignments` to find.
-    assert out["handout"] == ["assignment-1"]
+    assert out["handout"] == [("assignment-1", "assignment-1-f2026")]
     assert out["marker"] == [("assignment-1", 1)]
     assert out["site"] == ["COHORT"]
     assert gradebooks == ["COHORT"]

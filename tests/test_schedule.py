@@ -1386,6 +1386,37 @@ def test_insert_handout_distinguishes_declining_from_the_write_once_no_op():
     assert _insert_handout(recorded, "assignment-1", "2026-10-01T09:00") is None
 
 
+def test_a_fabricated_entry_names_the_template_it_was_handed_out_from():
+    # The manual button on a template the plan does not name. Everything that starts from
+    # a template finds its entry by matching `course_source_repo` - the site's brief, the
+    # grading sheet, collect - and the parser drops an entry that declares none, so a
+    # fabricated row without it is a row nothing can tie to the assignment it records. The
+    # due date is still the operator's to add; the entry is valid the moment they do.
+    import yaml
+
+    from dsl_course.schedule import _DUE_TODO, _insert_handout, parse
+
+    text = _insert_handout(
+        "timezone: Europe/Berlin\n",
+        "assignment-9",
+        "2026-09-22T14:05",
+        "assignment-9-f2026",
+    )
+    assert "    course_source_repo: assignment-9-f2026\n" in text
+    dated = text.replace(_DUE_TODO, "due_datetime: 2026-10-13")
+    entry = parse(yaml.safe_load(dated)).assignments["assignment-9"]
+    assert entry.course_source_repo == "assignment-9-f2026"
+    assert entry.handout_datetime is not None
+    # ...and into an existing block, matched to that block's own ENTRY indent.
+    text = _insert_handout(
+        "assignments:\n    assignment-1:\n        due_datetime: 2026-10-13\n",
+        "assignment-9",
+        "2026-09-22T14:05",
+        "assignment-9-f2026",
+    )
+    assert "    assignment-9:\n      course_source_repo: assignment-9-f2026\n" in text
+
+
 def test_record_handout_says_so_loudly_when_the_file_shape_defeats_the_edit(
     monkeypatch, capsys
 ):

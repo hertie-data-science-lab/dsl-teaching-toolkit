@@ -1094,6 +1094,12 @@ def _release_external(
     find), a grading sheet with every unit in it, a private gradebook per student for the
     feedback to land in, and the site.
 
+    One gap, and it is visible rather than silent: a template the plan does not name at all
+    - the manual button on an unscheduled assignment - gets a FABRICATED entry with no
+    `due_datetime`, which the parser drops, so nothing can read the pin and the brief waits.
+    The cohort's own digest asks for that due date by mail the same day, and the brief
+    appears on the next sync after it is added.
+
     Returns `(exit code, whether this run handed anything out)`, like `provision_all`.
     """
     # Read BEFORE anything is written, stamped after: a tick that could not finish redoes
@@ -1101,7 +1107,7 @@ def _release_external(
     first = not handout_recorded(cohort_org, slug)
     # The schedule is the one record of WHEN each assignment went out, whether the cron
     # released it or a person pressed the button - exactly as on the github path.
-    schedule.record_handout(cohort_org, key)
+    schedule.record_handout(cohort_org, key, source_repo=template)
     failed = False
     if first and group:
         # The Join-team form's mirror: a group assignment forms teams whether or not it
@@ -1430,8 +1436,11 @@ def provision_all(
     # fills the field the dispatcher didn't. record_handout keys on the schedule KEY, not the
     # cohort-side name: when `cohort_dest_repo` is set the two differ, and passing the name
     # made it miss the real entry and append a bogus duplicate block (dropping its due date).
+    # `source_repo` is only used where there is no entry at all - a manual release of a
+    # template the plan does not name - so the row it fabricates can be tied back to the
+    # assignment it records.
 
-    schedule.record_handout(cohort_org, key)
+    schedule.record_handout(cohort_org, key, source_repo=template)
 
     changed = any(k != "skipped" for k in results)
 
