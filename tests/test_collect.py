@@ -127,7 +127,7 @@ def test_the_shape_of_an_assignment_is_read_off_two_keys(capsys):
 def test_a_visibility_the_toolkit_cannot_act_on_falls_back_to_private(capsys):
     spec = collect.parse_grading_spec("visibility: internal\n")
     assert spec.visibility == "private"
-    assert "is not one of private/public" in capsys.readouterr().err
+    assert "is not one of private/public/student_choice" in capsys.readouterr().err
 
 
 def test_public_is_read_back_and_takes_the_feedback_issue_away(capsys):
@@ -141,14 +141,26 @@ def test_public_is_read_back_and_takes_the_feedback_issue_away(capsys):
     assert capsys.readouterr().err == ""
 
 
-def test_a_visibility_the_handout_cannot_create_is_refused_as_a_word(capsys):
-    # A value enters the vocabulary when the engine can ACT on it, so `student_choice` -
-    # the repo starts private and the student publishes it themselves - is refused by the
-    # plain `_one_of` rejection until its phase ships. That sentence names the words that
-    # do work, which is what a file carrying it needs to hear.
+def test_student_choice_is_read_back_and_hands_the_flag_to_the_student(capsys):
+    # The repo is created private like any other; what is different is WHO owns the flag
+    # afterwards. One predicate answers that, in `course.py` and nowhere else, so every
+    # exemption `student_choice` earns asks the same question. No Feedback issue either:
+    # a thread in a repo the student may publish tomorrow is a publishable mark.
     spec = collect.parse_grading_spec("visibility: student_choice\n")
-    assert spec.visibility == "private" and spec.has_feedback_issue
-    assert "is not one of private/public" in capsys.readouterr().err
+    assert spec.visibility == "student_choice"
+    assert spec.submit_shape == "github-student-choice"
+    assert spec.visibility_is_students
+    assert not spec.has_feedback_issue
+    assert spec.collects_commits and spec.creates_unit_repos
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("visibility", course.VISIBILITIES)
+def test_only_student_choice_takes_the_visibility_out_of_the_toolkits_hands(visibility):
+    # Over the vocabulary itself: a word added to it without deciding this question would
+    # silently inherit "the toolkit owns it", which is the answer that re-privatises a
+    # student's portfolio repo every quarter of an hour.
+    assert course.visibility_is_students(visibility) is (visibility == "student_choice")
 
 
 @pytest.mark.parametrize("submit_via", course.SUBMIT_VIA)

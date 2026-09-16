@@ -66,6 +66,7 @@ from .course import (
     resolve_is_group,
     submission_repo,
     submit_shape,
+    visibility_is_students,
 )
 from .discovery import (
     classify_repos,
@@ -244,6 +245,11 @@ class _Shape:
     def creates_unit_repos(self) -> bool:
         """Whether each unit has a repo of its own to name, link to and grant on."""
         return creates_unit_repos(self.submit_via)
+
+    @property
+    def visibility_is_students(self) -> bool:
+        """Whether the STUDENT owns this repo's visibility rather than the toolkit."""
+        return visibility_is_students(self.visibility)
 
 
 @dataclass(frozen=True)

@@ -92,11 +92,11 @@ SANDBOX_USER = "dsl-sandbox"
 # offers, and a form offering a word the reader would refuse is a form that lies.
 SUBMIT_VIA = ("github", "external")
 # Who may read a unit's repo. `private` is the default and what every assignment gets until
-# an instructor says otherwise; `public` is portfolio work, world-readable from handout.
-# Same rule as `SUBMIT_VIA`: a word enters this tuple when the handout can CREATE it, so
-# `student_choice` (the repo starts private and the student publishes it themselves) joins
-# in the phase that implements it, and `internal` if the plan ever buys an Enterprise.
-VISIBILITIES = ("private", "public")
+# an instructor says otherwise; `public` is portfolio work, world-readable from handout;
+# `student_choice` starts private and hands the flag to the student, who may publish their
+# own work once it has been marked. Same rule as `SUBMIT_VIA`: a word enters this tuple
+# when the handout can CREATE it, so `internal` joins if the plan ever buys an Enterprise.
+VISIBILITIES = ("private", "public", "student_choice")
 ASSIGNMENT_TYPES = ("individual", "group")
 # How a group assignment's teams come about. `none` is NOT one of them: it is the answer
 # an INDIVIDUAL assignment gives, which is why the Join-team form can refuse a slug
@@ -124,6 +124,18 @@ FORMATS = ("ipynb", "py", "rmd", "qmd", "latex", NO_STARTER)
 # The starters an instructor may actually name, `none` being the answer that means none of
 # them: the words the New assignment box offers and the ones `scaffold` refuses back to.
 STARTER_FORMATS = tuple(f for f in FORMATS if f != NO_STARTER)
+
+
+def visibility_is_students(visibility: str) -> bool:
+    """Whether the toolkit does NOT own this repo's visibility - the student does.
+
+    THE question behind every exemption `student_choice` earns: the repo is created
+    private and the student is its admin, so what GitHub says about it later is their
+    answer and not the file's. The word is spelt HERE and nowhere else, so an exemption
+    cannot be written that agrees with this one only by coincidence - and so a second
+    student-owned visibility (an Enterprise `internal` the student may flip) widens every
+    one of them at once."""
+    return visibility == "student_choice"
 
 
 def has_feedback_issue(submit_via: str, visibility: str) -> bool:
@@ -156,18 +168,23 @@ def creates_unit_repos(submit_via: str) -> bool:
 def submit_shape(submit_via: str, visibility: str) -> str:
     """The ONE word the cohort site branches an assignment on.
 
-    `github-private`, `github-public`, `external` today. The two axes are orthogonal in the
-    config and are not on the page: a template that asked "which `submit_via`, and then
-    which `visibility`?" had to be re-opened for every shape that is neither, and each of
-    the four places that asked drifted from the others. So the pair is collapsed HERE,
-    beside the predicates it is derived from, and the theme carries one `case`.
+    `github-private`, `github-public`, `github-student-choice`, `external` today. The two
+    axes are orthogonal in the config and are not on the page: a template that asked
+    "which `submit_via`, and then which `visibility`?" had to be re-opened for every shape
+    that is neither, and each of the four places that asked drifted from the others. So
+    the pair is collapsed HERE, beside the predicates it is derived from, and the theme
+    carries one `case`.
 
     A shape that makes no repo per unit names itself and nothing else (`external`, and
     `shared` when its drop box ships) - there is no repo for a visibility to describe, and
-    the parse drops the key there anyway."""
+    the parse drops the key there anyway.
+
+    Kebab throughout, whatever the config words look like: this is a word a THEME reads,
+    and one shape spelt `github-student_choice` beside `github-public` is a `when` arm
+    somebody eventually mistypes."""
     if not creates_unit_repos(submit_via):
-        return submit_via
-    return f"{submit_via}-{visibility}"
+        return submit_via.replace("_", "-")
+    return f"{submit_via}-{visibility}".replace("_", "-")
 
 
 # The two answers the New materials repo form asks about PUBLISHING, out of which
