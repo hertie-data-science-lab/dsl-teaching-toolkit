@@ -177,13 +177,47 @@ def test_the_feedback_channel_over_every_pair_the_vocabulary_allows(
     )
 
 
+def test_shared_collects_commits_without_a_repo_per_unit(capsys):
+    # The whole of what the third word means, in the predicates every consumer asks
+    # rather than in the word itself: there ARE commits to time (a folder in the drop box
+    # is pushed to), there is no repo per unit to name or grant on, and there is a repo -
+    # so the topics, the faculty floor and the visibility digest all still apply.
+    spec = collect.parse_grading_spec("submit_via: shared\n")
+    assert spec.submit_via == "shared" and spec.submit_shared
+    assert spec.collects_commits
+    assert not spec.creates_unit_repos
+    assert spec.creates_repos
+    # No Feedback issue: the drop box is the whole cohort's, so nothing about one
+    # student's marking may be written in it.
+    assert not spec.has_feedback_issue
+    assert spec.submit_shape == "shared"
+    assert capsys.readouterr().err == ""
+
+
+def test_a_shared_drop_box_is_private_whatever_the_file_says(capsys):
+    # One repo holds the whole cohort's work and no student can opt out of being in it.
+    spec = collect.parse_grading_spec("submit_via: shared\nvisibility: public\n")
+    assert spec.visibility == "private"
+    assert "one repo holds the whole cohort's work" in capsys.readouterr().err
+
+
+def test_a_shared_assignment_drops_a_submit_url_like_a_github_one(capsys):
+    # `submit_url` is the address of the place work is handed in INSTEAD of GitHub, so a
+    # shape that collects commits has no use for it - the same drop `github` gets.
+    spec = collect.parse_grading_spec(
+        "submit_via: shared\nsubmit_url: https://moodle.example.edu/x\n"
+    )
+    assert spec.submit_url == ""
+    assert "only read for `submit_via: external`" in capsys.readouterr().err
+
+
 def test_a_submit_via_the_engine_cannot_act_on_is_refused_as_a_typo(capsys):
     # The dropdown offers exactly what the reader takes (`course.SUBMIT_VIA`), so a word
     # the engine cannot act on is not in the vocabulary at all and reads as a misspelling.
-    spec = collect.parse_grading_spec("submit_via: shared\n")
+    spec = collect.parse_grading_spec("submit_via: dropbox\n")
     assert spec.submit_via == "github"
-    assert "is not one of github/external" in capsys.readouterr().err
-    assert "shared" not in course.SUBMIT_VIA
+    assert "is not one of github/external/shared" in capsys.readouterr().err
+    assert "dropbox" not in course.SUBMIT_VIA
 
 
 def test_visibility_says_nothing_about_an_assignment_that_creates_no_repo(capsys):
@@ -5507,7 +5541,7 @@ def test_a_value_that_will_not_grade_as_written_cites_the_line_in_the_template()
 def test_the_fix_names_the_vocabulary_the_key_accepts():
     fault = next(f for f in _spec_faults() if f.field == "submit_via")
     assert fault.fix() == (
-        "correct the value on the line above (allowed: github/external)"
+        "correct the value on the line above (allowed: github/external/shared)"
     )
     # A key the toolkit has no reader for has no value to correct: the KEY is the mistake.
     unknown = next(f for f in _spec_faults() if f.field == "mystery")

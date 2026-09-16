@@ -59,6 +59,7 @@ from .course import (
     VISIBILITIES,
     collects_commits,
     course_phrase,
+    creates_repos,
     creates_unit_repos,
     feedback_issue_body,
     has_feedback_issue,
@@ -228,6 +229,12 @@ class _Shape:
         return self.submit_via == "external"
 
     @property
+    def submit_shared(self) -> bool:
+        """Handed in by pushing into a folder of ONE private drop box the whole cohort
+        shares, rather than into a repo of the unit's own."""
+        return self.submit_via == "shared"
+
+    @property
     def submit_shape(self) -> str:
         """The one word the cohort site branches this assignment on."""
         return submit_shape(self.submit_via, self.visibility)
@@ -246,6 +253,11 @@ class _Shape:
     def creates_unit_repos(self) -> bool:
         """Whether each unit has a repo of its own to name, link to and grant on."""
         return creates_unit_repos(self.submit_via)
+
+    @property
+    def creates_repos(self) -> bool:
+        """Whether the handout creates anything at all for the work to land in."""
+        return creates_repos(self.submit_via)
 
     @property
     def visibility_is_students(self) -> bool:
@@ -1322,6 +1334,19 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
                 "no repo is created for it - ignored",
             )
         )
+    if via == "shared" and values.get("visibility", "private") != "private":
+        # ONE repo holds the whole cohort's work and no student can opt out of being in
+        # it, so the value is corrected rather than obeyed: a `public` drop box would
+        # publish every student's submission on the strength of one instructor's line.
+        values["visibility"] = "private"
+        dropped.append(
+            Dropped(
+                GRADING_FILE,
+                "visibility",
+                "`visibility:` is not read for a shared drop box - one repo holds the "
+                "whole cohort's work, so v1 keeps it private - ignored",
+            )
+        )
     if via != "external" and values.get("submit_url"):
         values["submit_url"] = ""
         dropped.append(
@@ -1657,8 +1682,9 @@ def _visibility_faults(
     The listing's word against the file's, compared as both are written - they are the same
     vocabulary. A shape whose repos are legitimately a MIXTURE, because the students own
     the flag, is exempted by its own predicate in `course.py`, never by a name spelt
-    here."""
-    if not spec.creates_unit_repos or spec.visibility_is_students:
+    here. `creates_repos` rather than `creates_unit_repos`: a shared drop box is one repo
+    for the whole cohort and `visibility:` describes it exactly as it describes the many."""
+    if not spec.creates_repos or spec.visibility_is_students:
         # `student_choice` says the STUDENT decides, so twenty private repos and four
         # public ones is the assignment working - `course.visibility_is_students`. The
         # thing that CAN be wrong about it is the org, not the file: see

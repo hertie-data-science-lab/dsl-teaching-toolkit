@@ -276,7 +276,8 @@ def _grading_config(
             "submit_via",
             submit_via,
             "github (they push to their repo) | external (handed in elsewhere: Moodle, "
-            "Kaggle, in class - no repo is created)",
+            "Kaggle, in class - no repo is created) | shared (one private repo for the "
+            "whole cohort, each student pushes into their own folder, peers can read it)",
         ),
         # COMMENTED on every shape, `external` included. The value here is a placeholder
         # with the right shape and no meaning, and a live line carrying it would put a
@@ -300,7 +301,7 @@ def _grading_config(
             "portfolio work, no Feedback issue) | student_choice (private, and the "
             "student is its admin: theirs to publish after the grading cutoff, and no "
             "Feedback issue) - read at hand-out only",
-            live=submit_via != "external",
+            live=submit_via == "github",
         ),
         # ONE format, because `grades` reads one: the key is the vocabulary this file
         # teaches, and the only thing it drives - the `completion_check` default - is

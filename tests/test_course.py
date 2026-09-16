@@ -4,7 +4,7 @@ assertions are the whole contract."""
 
 from __future__ import annotations
 
-from dsl_course import course
+from dsl_course import course, discovery
 
 
 def test_session_number_extracts_ordinal_prefix():
@@ -92,3 +92,18 @@ def test_resolve_is_group_precedence():
     # else individual
     assert course.resolve_is_group(force=False, template_type=None) is False
     assert course.resolve_is_group(force=False, template_type="") is False
+
+
+def test_the_shared_drop_box_is_named_off_the_template_and_carries_no_handle():
+    # `<slug>-submissions`, never the bare slug (that is the frozen cohort TEMPLATE), and
+    # never a `<slug>-<handle>`: it is the one submission-repo name a public log may print.
+    assert course.shared_repo("assignment-3") == "assignment-3-submissions"
+    # And it is a name `classify_repos` reads off the template, which is what earns it the
+    # faculty read floor and the public-page exclusion with no rule of its own.
+    derived = discovery.classify_repos(
+        [
+            {"name": "assignment-3", "isTemplate": True},
+            {"name": course.shared_repo("assignment-3"), "isTemplate": False},
+        ]
+    )
+    assert derived[course.shared_repo("assignment-3")] == "assignment-3"
