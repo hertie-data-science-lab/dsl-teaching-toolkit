@@ -423,10 +423,9 @@ def test_every_data_file_a_template_reads_is_one_the_site_has(rel, site_data):
         "announce",
         "repo_url",
         "repo_name",
-        "submit_via",
+        "submit_shape",
         "submit_url",
         "submit_host",
-        "visibility",
         "due_event",
     ],
 )
@@ -450,10 +449,10 @@ def test_an_external_assignments_page_has_no_repo_for_a_profile_to_rewrite(gener
     # no repo at all, at either level, and there is nothing for a profile to substitute
     # into. The due row is a sub-hash that cannot see its parent's fields, hence both.
     page = _front_matter(generated["collections"]["_assignments"]["03-assignment-3.md"])
-    assert page["submit_via"] == "external"
+    assert page["submit_shape"] == "external"
     assert "repo_name" not in page and "repo_url" not in page
     assert page["submit_host"] == "moodle.example.edu"
-    assert page["due_event"]["submit_via"] == "external"
+    assert page["due_event"]["submit_shape"] == "external"
     assert "repo_name" not in page["due_event"]
 
 
@@ -479,17 +478,17 @@ def test_an_external_assignment_is_never_told_to_push(generated):
     arms = [
         _external_arm(
             layout,
-            '{% if page.submit_via == "external" %}',
-            '{% elsif page.visibility == "public" %}',
+            '{% if page.submit_shape == "external" %}',
+            "{% elsif page.repo_url %}",
         ),
         _external_arm(
             layout,
-            '{% if page.submit_via == "external" and page.submit_url %}',
-            '{% elsif page.submit_via != "external" and page.repo_url %}',
+            '{% if page.submit_shape == "external" and page.submit_url %}',
+            '{% elsif page.submit_shape != "external" and page.repo_url %}',
         ),
         _external_arm(
             due_row,
-            '{%- if include.event.submit_via == "external" -%}',
+            '{%- if include.event.submit_shape == "external" -%}',
             "{%- elsif include.event.repo_name -%}",
         ),
     ]
@@ -510,7 +509,7 @@ def test_a_pending_assignment_gets_no_callout_at_all(generated):
         "{% endunless %}", 1
     )[0]
     assert "Handed in outside GitHub" in gated
-    assert "Open your private submission repo" in gated
+    assert "Open your submission repo" in gated
     pending = _front_matter(
         generated["collections"]["_assignments"]["05-assignment-5.md"]
     )
@@ -523,18 +522,23 @@ def test_a_public_assignments_page_warns_before_the_first_push(generated):
     # the page and not in the brief. It is also the one with no Feedback issue, which is
     # why it - alone - names the gradebook.
     page = _front_matter(generated["collections"]["_assignments"]["04-assignment-4.md"])
-    assert page["visibility"] == "public"
-    assert page["due_event"]["visibility"] == "public"
+    assert page["submit_shape"] == "github-public"
+    assert page["due_event"]["submit_shape"] == "github-public"
     assert page["repo_name"] == "assignment-4-<your-handle>"
     layout = _liquid_templates()["_layouts/assignment.html"]
-    assert 'elsif page.visibility == "public"' in layout
+    assert '{% when "github-public" %}' in layout
     flat = " ".join(layout.split())
     assert "is <b>public</b>: anyone on the internet can read it." in flat
     assert (
         "your private gradebook <code>grades-&lt;your-handle&gt;</code>, not here."
         in flat
     )
-    assert "Open your private submission repo" in layout  # the private arm is untouched
+    # One button line for every shape that has a repo, and the `case` branches only the
+    # sentence - so the `data-dsl-repo-url` contract is written once and cannot drift.
+    repo_arm = _external_arm(layout, "{% elsif page.repo_url %}", "{% endunless %}")
+    assert repo_arm.count("data-dsl-repo-url") == 1
+    assert repo_arm.count("{% when ") == 1  # public; private is the `else`
+    assert "Your work goes in your private repo" in flat
 
 
 def test_a_pending_external_assignments_page_offers_nowhere_to_go(generated):
@@ -542,8 +546,8 @@ def test_a_pending_external_assignments_page_offers_nowhere_to_go(generated):
     # name and not yet an address to name either - the page must say only that.
     page = _front_matter(generated["collections"]["_assignments"]["05-assignment-5.md"])
     assert page["handout_pending"] is True
-    assert page["submit_via"] == "external"
-    assert not {"repo_name", "repo_url", "submit_url", "visibility"} & set(page)
+    assert page["submit_shape"] == "external"
+    assert not {"repo_name", "repo_url", "submit_url"} & set(page)
     assert not {"repo_name", "submit_url"} & set(page["due_event"])
 
 

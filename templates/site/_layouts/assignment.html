@@ -48,12 +48,13 @@ title: page.title
     assignment is pending - there is nothing at the other end of it yet.
     {%- endcomment -%}
     {%- comment -%}
-    `submit_via` (site.py, off the assignment's own grading_config.yml) is the SHAPE:
-    `external` is handed in off GitHub - Moodle, Kaggle, in class - and NO repo is created
-    for it at all. So there is nothing to open and nothing to name: the brief below says
-    where the work goes, and `submit_url` puts a button on it when the assignment names an
-    address. This block used to print off `repo_url` alone, so a Moodle assignment told the
-    whole cohort that a push to `main` was its submission.
+    `submit_shape` (site.py, off `course.submit_shape` and so off the assignment's own
+    grading_config.yml) is the SHAPE in one word - `external`, `github-private`,
+    `github-public`. `external` is handed in off GitHub - Moodle, Kaggle, in class - and NO
+    repo is created for it at all. So there is nothing to open and nothing to name: the
+    brief below says where the work goes, and `submit_url` puts a button on it when the
+    assignment names an address. This block used to print off `repo_url` alone, so a Moodle
+    assignment told the whole cohort that a push to `main` was its submission.
 
     `escape`: `repo_name` is a SHAPE, `<slug>-<your-handle>`, and those angle brackets make
     `<your-handle>` an unknown HTML tag that the browser silently drops - so the name
@@ -73,33 +74,37 @@ title: page.title
     repos it was given, and this would be telling those students their own repo is not
     there.
 
-    `visibility` (site.py, off the same grading_config.yml) branches the GitHub half in
-    two. A `public` assignment is portfolio work - a hackathon, a showcase - and the whole
-    internet can read the repo from the moment it is handed out, so the callout that a
-    student reads BEFORE their first push is where that has to be said; saying it in the
-    brief alone leaves it to whoever wrote the brief. It also has no Feedback issue
-    (`course.has_feedback_issue`: a thread in a public repo is a published mark), which is
-    why this is the one callout that names the gradebook.
+    The button and its two data attributes are written ONCE for every shape that has a
+    repo, and the `case` below branches only the SENTENCE: the link is the same link
+    whoever may read the repo, and a shape that copied it carried its own copy of the
+    open_in.html contract to keep in step. A `github-public` assignment is portfolio work -
+    a hackathon, a showcase - and the whole internet can read the repo from the moment it
+    is handed out, so the callout a student reads BEFORE their first push is where that has
+    to be said; saying it in the brief alone leaves it to whoever wrote the brief. It also
+    has no Feedback issue (`course.has_feedback_issue`: a thread in a public repo is a
+    published mark), which is why that arm is the one that names the gradebook.
     {%- endcomment -%}
     {% unless page.handout_pending %}
-    {% if page.submit_via == "external" or page.repo_url %}
+    {% if page.submit_shape == "external" %}
     <div class="callout">
-      {% if page.submit_via == "external" %}
       {% if page.submit_url %}
       <p><a class="btn" target="_blank" rel="noopener" href="{{ page.submit_url }}">Submit on {{ page.submit_host }}</a></p>
       {% endif %}
       <p>Handed in outside GitHub. See the brief for what to hand in.</p>
-      {% elsif page.visibility == "public" %}
+    </div>
+    {% elsif page.repo_url %}
+    <div class="callout">
       <p><a class="btn" data-dsl-repo-url target="_blank" rel="noopener" href="{{ page.repo_url }}">Open your submission repo on GitHub</a></p>
+      {% case page.submit_shape %}
+      {% when "github-public" %}
       <p>Your repo <code data-dsl-repo>{{ page.repo_name | escape }}</code> is <b>public</b>: anyone on the internet can
       read it. Push to <code>main</code> as usual, but commit nothing you would not publish and no data you were told
       to keep private. Your grade and feedback arrive in your private gradebook <code>grades-&lt;your-handle&gt;</code>,
       not here.</p>
       {% else %}
-      <p><a class="btn" data-dsl-repo-url target="_blank" rel="noopener" href="{{ page.repo_url }}">Open your private submission repo on GitHub</a></p>
-      <p>Your work goes in <code data-dsl-repo>{{ page.repo_name | escape }}</code>. Clone it, commit as you go, and
-      push to <code>main</code> - that push is your submission.</p>
-      {% endif %}
+      <p>Your work goes in your private repo <code data-dsl-repo>{{ page.repo_name | escape }}</code>. Clone it, commit
+      as you go, and push to <code>main</code> - that push is your submission.</p>
+      {% endcase %}
     </div>
     {% endif %}
     {% endunless %}
@@ -139,11 +144,11 @@ title: page.title
   And again under the brief, quietly: a student who has just finished reading the task is
   at the point of starting it, and should not have to scroll back up for the link.
   {%- endcomment -%}
-  {% if page.submit_via == "external" and page.submit_url %}
+  {% if page.submit_shape == "external" and page.submit_url %}
   <p class="post-meta">
     Hand in at <a target="_blank" rel="noopener" href="{{ page.submit_url }}">{{ page.submit_host }}</a>.
   </p>
-  {% elsif page.submit_via != "external" and page.repo_url %}
+  {% elsif page.submit_shape != "external" and page.repo_url %}
   <p class="post-meta">
     Submit by pushing to <code>main</code> in
     <a data-dsl-repo-url target="_blank" rel="noopener" href="{{ page.repo_url }}"><code data-dsl-repo>{{ page.repo_name | escape }}</code></a>.

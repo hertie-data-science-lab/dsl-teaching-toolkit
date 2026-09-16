@@ -27,14 +27,14 @@ the plan's); the link only once the assignment has handed out and there is somet
 other end of it. `escape`, because the shape's `<your-handle>` would otherwise read as a
 tag and vanish.
 
-`submit_via` (site.py, off the assignment's own grading_config.yml) is the SHAPE:
-`external` is handed in off GitHub - Moodle, Kaggle, in class - and NO repo is created for
-it at all, so there is no name to print here. `submit_url` is the address the assignment
-names, and is written only once the brief is out. This row said "Submit via <repo>" for
-those too, which is the one thing there is not.
+`submit_shape` (site.py, off `course.submit_shape`) is the SHAPE in one word: `external`
+is handed in off GitHub - Moodle, Kaggle, in class - and NO repo is created for it at all,
+so there is no name to print here. `submit_url` is the address the assignment names, and is
+written only once the brief is out. This row said "Submit via <repo>" for those too, which
+is the one thing there is not.
 {%- endcomment -%}
 <div class="col col-4 markdown-content" data-label="Details">
-    {%- if include.event.submit_via == "external" -%}
+    {%- if include.event.submit_shape == "external" -%}
     Handed in outside GitHub
     {%- if include.event.submit_url %} - <a href="{{ include.event.submit_url }}">{{ include.event.submit_host }}</a>
     {%- else %} - see the brief
@@ -45,10 +45,10 @@ those too, which is the one thing there is not.
     {%- else %} <code>{{ include.event.repo_name | escape }}</code>
     {%- endif -%}
     {%- comment -%}
-    `visibility` rides on the sub-hash for the same reason the repo name does. One word,
+    The shape rides on the sub-hash for the same reason the repo name does. One word,
     because the row is a glance: the assignment's own page carries the sentence about what
     a public repo means for what a student may commit into it.
     {%- endcomment -%}
-    {%- if include.event.visibility == "public" %} (public){%- endif -%}
+    {%- if include.event.submit_shape == "github-public" %} (public){%- endif -%}
     {%- endif -%}
 </div>

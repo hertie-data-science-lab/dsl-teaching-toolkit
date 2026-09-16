@@ -32,7 +32,6 @@ from .course import (
     MATERIALS_REPO_PREFIX,
     NO_STARTER,
     NOTHING_PUBLIC,
-    OFFERED_VISIBILITIES,
     PUBLIC_DIRS,
     PUBLIC_HTML_PDF,
     PUBLIC_TYPES,
@@ -40,6 +39,7 @@ from .course import (
     STARTER_FORMATS,
     SUBMIT_VIA,
     TEAM_FORMATIONS,
+    VISIBILITIES,
     term_tag,
 )
 
@@ -1621,7 +1621,7 @@ on:
         description: "9. Also run hidden tests at the cutoff. Seeds tests/ on the solution branch for you to fill; each submission's pass count automatically appears on the grading sheet as a first pass for graders - not shown to students"
         type: boolean
         default: false
-{_choice_input("visibility", "10. Who may read each student's repo. private = the student and the teaching team; public = the whole internet, for portfolio work such as a hackathon - there is then no Feedback issue, and marks go only to the student's private gradebook. Read when the repo is created: editing it later changes nothing", list(OFFERED_VISIBILITIES), "private", required=False)}
+{_choice_input("visibility", "10. Who may read each student's repo. private = the student and the teaching team; public = the whole internet, for portfolio work such as a hackathon - there is then no Feedback issue, and marks go only to the student's private gradebook. Read when the repo is created: editing it later changes nothing", list(VISIBILITIES), "private", required=False)}
 
 {_PERMISSIONS_JOBS}{_CHECK_TEAM}
   scaffold:

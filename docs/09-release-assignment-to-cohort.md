@@ -56,12 +56,11 @@ world-readable - portfolio work such as a hackathon. There is then **no Feedback
 and feedback go to their private `grades-<handle>` gradebook, and the assignment's page on
 the cohort site says the repo is public before they push anything into it.
 
-Each public repo gets **secret scanning and push protection** turned on at creation. If a
-student pushes something that looks like a credential, GitHub refuses the push and prints a
-link; opening it lets them say why they are pushing it, which unblocks that push. Tell them
-to rotate the credential rather than bypass the block. On GitHub Free these features exist
-for public repositories only, so a refusal to enable them is a warning and never fails the
-hand-out.
+GitHub turns **secret scanning and push protection** on for a public repository itself, so
+every one of these repos has both from the moment it is created. If a student pushes
+something that looks like a credential, GitHub refuses the push and prints a link; opening
+it lets them say why they are pushing it, which unblocks that push. Tell them to rotate the
+credential rather than bypass the block.
 
 ## Group or individual?
 

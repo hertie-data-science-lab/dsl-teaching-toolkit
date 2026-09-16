@@ -166,14 +166,12 @@ Two settings in `grading_config.yml`, and everything else follows from them.
 | | `external` | Handed in off GitHub. **No repo is created.** Nothing is collected, nothing is timed, and the grading sheet has no `info:` block. |
 | `submit_url` | an `https://` address | `external` only: puts a **Submit on \<host\>** button on the assignment's page and its due row. Without one the page says to read the brief. |
 | `visibility` | `private` (default) | Only the student and the teaching team can read their repo. |
-| | `public` | Every student's repo is world-readable from hand-out. |
+| | `public` | Every student's repo is world-readable from hand-out - portfolio work such as a hackathon. |
 
-`visibility: private` (default) or `public`. `public` makes every student's repo
-world-readable from handout; pick it for portfolio work such as a hackathon. A public repo
-gets no Feedback issue: marks and feedback go only to the student's private
-`grades-<handle>` repo. Students who want their own work public on a `private` assignment
-publish a copy under their own account (the gradebook README tells them how); the org's
-copy stays private.
+A `public` repo gets **no Feedback issue**: marks and feedback go only to the student's
+private `grades-<handle>` repo. Students who want their own work public on a `private`
+assignment publish a copy under their own account (the gradebook README tells them how);
+the org's copy stays private.
 
 `visibility` is read when each repo is **created**. Editing it after the assignment has
 gone out changes nothing on GitHub, so the cohort's *grading_config.yml* digest reports the

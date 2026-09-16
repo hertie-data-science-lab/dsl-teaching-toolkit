@@ -93,16 +93,10 @@ SANDBOX_USER = "dsl-sandbox"
 SUBMIT_VIA = ("github", "external")
 # Who may read a unit's repo. `private` is the default and what every assignment gets until
 # an instructor says otherwise; `public` is portfolio work, world-readable from handout.
-# `student_choice` - the repo starts private and the student may publish it themselves - is
-# READ but not yet acted on: the reader refuses it back to `private` with a sentence saying
-# so, exactly as `public` was refused until this shipped. Room for `internal` (visible to
-# an Enterprise, invisible to the world) if the plan ever buys it.
-VISIBILITIES = ("private", "public", "student_choice")
-# The visibilities the handout can actually CREATE, which is what the New assignment
-# dropdown offers and what `scaffold` refuses an answer back to - `STARTER_FORMATS`'
-# relationship to `FORMATS`. A form offering a word the reader would drop is a form that
-# lies, so `student_choice` joins this tuple in the phase that implements it.
-OFFERED_VISIBILITIES = tuple(v for v in VISIBILITIES if v != "student_choice")
+# Same rule as `SUBMIT_VIA`: a word enters this tuple when the handout can CREATE it, so
+# `student_choice` (the repo starts private and the student publishes it themselves) joins
+# in the phase that implements it, and `internal` if the plan ever buys an Enterprise.
+VISIBILITIES = ("private", "public")
 ASSIGNMENT_TYPES = ("individual", "group")
 # How a group assignment's teams come about. `none` is NOT one of them: it is the answer
 # an INDIVIDUAL assignment gives, which is why the Join-team form can refuse a slug
@@ -157,6 +151,23 @@ def creates_unit_repos(submit_via: str) -> bool:
     Not the same question as `collects_commits`: a shared drop box collects commits into
     one repo for the whole cohort, not one per unit."""
     return submit_via == "github"
+
+
+def submit_shape(submit_via: str, visibility: str) -> str:
+    """The ONE word the cohort site branches an assignment on.
+
+    `github-private`, `github-public`, `external` today. The two axes are orthogonal in the
+    config and are not on the page: a template that asked "which `submit_via`, and then
+    which `visibility`?" had to be re-opened for every shape that is neither, and each of
+    the four places that asked drifted from the others. So the pair is collapsed HERE,
+    beside the predicates it is derived from, and the theme carries one `case`.
+
+    A shape that makes no repo per unit names itself and nothing else (`external`, and
+    `shared` when its drop box ships) - there is no repo for a visibility to describe, and
+    the parse drops the key there anyway."""
+    if not creates_unit_repos(submit_via):
+        return submit_via
+    return f"{submit_via}-{visibility}"
 
 
 # The two answers the New materials repo form asks about PUBLISHING, out of which

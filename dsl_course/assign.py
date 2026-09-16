@@ -24,10 +24,10 @@ NOTHING: no cohort template, no repo, no Feedback issue, no solution push. It st
 the handout and writes the grading sheet, the gradebooks and the site, which is everything
 a handout owes the cohort around the work itself.
 
-For `visibility: public` it creates the same repos world-readable - portfolio work - with
-secret scanning and push protection on, and no Feedback issue: nothing about a student's
-marking may be written where the internet can read it, so their feedback goes to their
-private gradebook alone. The cohort template stays private either way.
+For `visibility: public` it creates the same repos world-readable - portfolio work - and
+opens no Feedback issue: nothing about a student's marking may be written where the
+internet can read it, so their feedback goes to their private gradebook alone. The cohort
+template stays private either way.
 
 Usage:
     python3 -m dsl_course.assign \\
@@ -87,7 +87,6 @@ from .releaseignore import RELEASEIGNORE, deny_for, excluded_in_tree
 from .repos import (
     add_collaborator,
     default_branch,
-    enable_secret_scanning,
     generate_from_template,
     repo_exists,
     set_repo_topics,
@@ -740,11 +739,10 @@ def provision_one(
     """Generate one submission repo and grant its members access.
 
     `visibility` is the assignment's own (`grading_config.yml`), and is acted on at CREATE
-    only: `POST .../generate` takes `private` and nothing else, so a `public` assignment's
-    repo is born private and flipped a moment later. A repo that already exists is never
-    re-PATCHed - the tick re-fires every handed-out assignment, so that would nightly undo
-    a deliberate change, and an edit to `visibility:` after hand-out is reported by the
-    cohort's `grading_config.yml` digest instead.
+    only - see `repos.set_visibility` for why a public repo is born private. A repo that
+    already exists is never re-PATCHed: the tick re-fires every handed-out assignment, so
+    that would nightly undo a deliberate change, and an edit to `visibility:` after
+    hand-out is reported by the cohort's `grading_config.yml` digest instead.
 
     `existing` is the cohort's repos off ONE listing (`_org_listing`), keyed by name;
     membership in it answers "does this repo already exist?" without a GET per student,
@@ -803,20 +801,19 @@ def provision_one(
         return "failed-create"
     else:
         log_person(f"  [ok] created {cohort_org}/{repo}")
-        if visibility == "public":
-            # Generated private a line ago, because that is the only thing the generate
-            # endpoint can be told - so `public` is this PATCH and nothing else. It is
-            # COUNTED (`failed-visibility` below) because a repo the instructor said was
-            # portfolio work, left private, is not the assignment they handed out; but it
-            # withholds NOTHING - the repo exists, the students still get their access and
-            # their solution, and the next manual Release assignment repairs the flag.
-            if set_visibility(cohort_org, repo, "public", person=True):
-                # After the flip, never before: on GitHub Free these features exist for
-                # public repos only, so the same call against the private repo this was a
-                # moment ago is a 422. A refusal is a warning inside `repos`.
-                enable_secret_scanning(cohort_org, repo)
-            else:
-                visibility_failed = True
+        # The flip `repos.set_visibility` describes. It is COUNTED
+        # (`failed-visibility` below) because a repo the instructor said was portfolio
+        # work, left private, is not the assignment they handed out; but it withholds
+        # NOTHING - the repo exists, the students still get their access and their
+        # solution, and the next manual Release assignment repairs the flag.
+        #
+        # Secret scanning and its push protection are NOT asked for here: GitHub turns
+        # both on for a public repository by default, so a PATCH would only ever repeat
+        # what is already true.
+        if visibility == "public" and not set_visibility(
+            cohort_org, repo, "public", person=True
+        ):
+            visibility_failed = True
         _tag_submission(cohort_org, repo, slug, set())
         # The Feedback issue, on the CREATE path only. It is where every receipt and,
         # eventually, the grade is posted, so the student is told at handout where to
@@ -1305,7 +1302,7 @@ def provision_all(
             )
         log_step(
             f"Releasing {slug} to {cohort_org}: freeze cohort template, then provision "
-            f"{what}{' as PUBLIC repos' if gspec.is_public else ''}"
+            f"{what}{' as PUBLIC repos' if gspec.visibility == 'public' else ''}"
             f"{' + solution' if solution else ''}"
         )
         if dry_run:

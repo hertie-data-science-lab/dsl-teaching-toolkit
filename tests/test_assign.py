@@ -2535,7 +2535,7 @@ def test_an_unscheduled_external_release_is_refused_and_writes_nothing(
 @pytest.fixture
 def _public_writes(monkeypatch, _provisioned):
     """Every write `provision_one` makes on the create path, recorded by name."""
-    seen: dict = {"generated": [], "visibility": [], "scanning": [], "granted": []}
+    seen: dict = {"generated": [], "visibility": [], "granted": []}
     monkeypatch.setattr(
         assign,
         "generate_from_template",
@@ -2556,11 +2556,6 @@ def _public_writes(monkeypatch, _provisioned):
             seen["visibility"].append((repo, vis)) or True
         ),
     )
-    monkeypatch.setattr(
-        assign,
-        "enable_secret_scanning",
-        lambda org, repo: seen["scanning"].append(repo) or True,
-    )
     return seen
 
 
@@ -2576,23 +2571,19 @@ def _one_public(**kwargs) -> str:
     )
 
 
-def test_a_public_repo_is_generated_private_then_flipped_and_scanned(_public_writes):
+def test_a_public_repo_is_generated_private_then_flipped(_public_writes):
     # `POST /repos/{o}/{r}/generate` carries `private` and no `visibility`, so this is the
-    # only route to a public repo - and secret scanning comes AFTER the flip, because on
-    # Free the feature exists for public repositories only.
+    # only route to a public repo.
     assert _one_public(visibility="public") == "ok"
     assert [g["private"] for g in _public_writes["generated"]] == [True]
     assert _public_writes["visibility"] == [("assignment-1-ada-l", "public")]
-    assert _public_writes["scanning"] == ["assignment-1-ada-l"]
     # The student's own permission is untouched by any of it.
     assert _public_writes["granted"] == [("ada-l", "maintain")]
 
 
-def test_a_private_assignment_patches_no_visibility_and_asks_for_no_scanning(
-    _public_writes,
-):
+def test_a_private_assignment_patches_no_visibility(_public_writes):
     assert _one_public() == "ok"
-    assert _public_writes["visibility"] == [] and _public_writes["scanning"] == []
+    assert _public_writes["visibility"] == []
 
 
 def test_a_repo_that_already_exists_is_never_re_patched(_public_writes, monkeypatch):
@@ -2601,7 +2592,7 @@ def test_a_repo_that_already_exists_is_never_re_patched(_public_writes, monkeypa
     # and the cohort's grading_config.yml digest is what reports the disagreement instead.
     monkeypatch.setattr(assign, "repo_exists", lambda org, repo: True)
     assert _one_public(visibility="public", touch_existing=False) == "skipped"
-    assert _public_writes["visibility"] == [] and _public_writes["scanning"] == []
+    assert _public_writes["visibility"] == []
 
 
 def test_a_failed_visibility_patch_is_counted_and_withholds_nothing(
@@ -2621,9 +2612,6 @@ def test_a_failed_visibility_patch_is_counted_and_withholds_nothing(
     assert status == "failed-visibility"
     assert _public_writes["granted"] == [("ada-l", "maintain")]
     assert pushed == ["assignment-1-ada-l"]
-    # And it never asks for secret scanning on a repo that is still private: a 422 per
-    # student per tick for the rest of the term.
-    assert _public_writes["scanning"] == []
     assert "assignment-1-ada-l" not in capsys.readouterr().out
 
 

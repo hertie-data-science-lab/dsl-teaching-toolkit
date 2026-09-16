@@ -362,9 +362,9 @@ def test_the_gradebook_readme_is_exactly_the_page_the_spec_shows():
         "\n"
         "## Keeping your work\n"
         "\n"
-        "Your assignment repos are private to you and the teaching team and stay readable "
-        "after the course ends. To show one publicly, publish a copy under your own "
-        "account; the original stays private.\n"
+        "Your assignment repos stay readable after the course ends, and unless the "
+        "assignment says otherwise they are private to you and the teaching team. To show "
+        "one publicly, publish a copy under your own account; the original is untouched.\n"
         "\n"
         "```\n"
         "git clone https://github.com/<cohort-org>/<slug>-<your-handle>\n"
@@ -588,19 +588,3 @@ def test_load_sheets_reads_every_sheet_in_a_classroom_config_checkout(tmp_path):
 
 def test_load_sheets_is_empty_where_no_assignment_has_been_handed_out(tmp_path):
     assert load_sheets(tmp_path) == {}
-
-
-def test_the_starter_gradebook_says_it_is_the_only_channel_some_shapes_have():
-    # The first file a student opens, and for an assignment handed in off GitHub - or in a
-    # shared or public repo - the only place their feedback ever appears. It also answers
-    # the question `student_choice` was dropped rather than answer: how to show the work.
-    starter = grades._STARTER_README
-    assert (
-        "Feedback for assignments handed in outside GitHub, in a shared repo or in a "
-        "public repo appears here and nowhere else." in starter
-    )
-    assert "## Keeping your work" in starter
-    assert (
-        "git remote set-url origin https://github.com/<you>/<new-public-repo>"
-        in starter
-    )

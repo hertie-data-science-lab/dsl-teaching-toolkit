@@ -3,8 +3,6 @@ create actually means."""
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from dsl_course import repos
@@ -111,44 +109,6 @@ def test_set_visibility_patches_the_one_field_and_says_nothing_public_on_failure
     out = capsys.readouterr()
     assert "assignment-1-ada" not in out.out + out.err
     assert "could not set a repo's visibility" in out.err
-
-
-def test_secret_scanning_sends_a_nested_body_over_stdin_as_a_patch(monkeypatch):
-    # `security_and_analysis` is nested, which `--field` cannot express - and the explicit
-    # `--method PATCH` is also what keeps the call inside the write pacer.
-    seen: dict = {}
-
-    def fake_gh(*args, **kwargs):
-        seen["args"] = args
-        seen["stdin"] = kwargs.get("stdin")
-        return 0, ""
-
-    monkeypatch.setattr(repos, "gh", fake_gh)
-    assert repos.enable_secret_scanning("Cohort-f2026", "assignment-1-ada") is True
-    assert seen["args"][:5] == (
-        "api",
-        "--method",
-        "PATCH",
-        "repos/Cohort-f2026/assignment-1-ada",
-        "--input",
-    )
-    body = json.loads(seen["stdin"])["security_and_analysis"]
-    # Both halves: scanning finds a committed credential, push protection is what stops it
-    # reaching a world-readable repo at all.
-    assert body["secret_scanning"]["status"] == "enabled"
-    assert body["secret_scanning_push_protection"]["status"] == "enabled"
-
-
-def test_a_refused_secret_scanning_patch_is_a_warning_that_names_nobody(
-    monkeypatch, capsys
-):
-    # On some plans the feature is not available at all, and the repo is handed out by the
-    # time this runs - so it is never a counted failure, and never a name in a public log.
-    monkeypatch.setattr(repos, "gh", lambda *a, **k: (1, "gh: HTTP 422"))
-    assert repos.enable_secret_scanning("Cohort-f2026", "assignment-1-ada") is False
-    out = capsys.readouterr()
-    assert "[warn]" in out.out and "secret scanning" in out.out
-    assert "assignment-1-ada" not in out.out + out.err
 
 
 def test_one_repo_read_answers_every_question_about_it(monkeypatch):

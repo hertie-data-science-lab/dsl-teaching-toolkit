@@ -956,9 +956,9 @@ def test_new_assignment_button_asks_for_the_whole_assignment():
     assert inputs["type"]["options"] == list(course.ASSIGNMENT_TYPES)
     assert inputs["team_formation"]["options"] == list(course.TEAM_FORMATIONS)
     assert inputs["submit_via"]["options"] == list(course.SUBMIT_VIA)
-    # Only what the handout can CREATE: `student_choice` is vocabulary the reader accepts
-    # and refuses back to `private`, and a dropdown offering it would be a form that lies.
-    assert inputs["visibility"]["options"] == list(course.OFFERED_VISIBILITIES)
+    # The vocabulary itself: a word enters it when the handout can CREATE it, so the
+    # dropdown and the reader can never disagree about what is on offer.
+    assert inputs["visibility"]["options"] == list(course.VISIBILITIES)
     assert inputs["visibility"]["default"] == "private"
     # Hand-marking is the default, so `tests/` is seeded only when someone asks for it.
     assert inputs["autograde"]["type"] == "boolean"

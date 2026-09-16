@@ -37,7 +37,6 @@ from .course import (
     MATERIALS_REPO_PREFIX,
     NO_STARTER,
     NOTHING_PUBLIC,
-    OFFERED_VISIBILITIES,
     PROPOSAL_BRANCH_PREFIX,
     PUBLIC_ALL_FILES,
     PUBLIC_DIRS,
@@ -55,6 +54,7 @@ from .course import (
     SYLLABUS_SAMPLE_FILE,
     TEAM_FORMATIONS,
     UPSTREAM_BRANCH,
+    VISIBILITIES,
     pages_repo,
 )
 from .derive import BEGIN_SOLUTION, END_SOLUTION, SOLUTION_CHUNK_OPT
@@ -1724,7 +1724,7 @@ def main() -> int:
     )
     pa.add_argument(
         "--visibility",
-        choices=list(OFFERED_VISIBILITIES),
+        choices=list(VISIBILITIES),
         default="private",
         help="public = every student's repo is world-readable from hand-out (portfolio "
         "work); there is then no Feedback issue and feedback goes to the gradebook. Read "

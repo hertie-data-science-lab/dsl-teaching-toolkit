@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 import yaml
+from conftest import repo_row
 
 from dsl_course import collect, course, gh_contents, ghcli, grades
 from dsl_course.faults import Severity
@@ -126,7 +127,7 @@ def test_the_shape_of_an_assignment_is_read_off_two_keys(capsys):
 def test_a_visibility_the_toolkit_cannot_act_on_falls_back_to_private(capsys):
     spec = collect.parse_grading_spec("visibility: internal\n")
     assert spec.visibility == "private"
-    assert "is not one of private/public/student_choice" in capsys.readouterr().err
+    assert "is not one of private/public" in capsys.readouterr().err
 
 
 def test_public_is_read_back_and_takes_the_feedback_issue_away(capsys):
@@ -134,24 +135,20 @@ def test_public_is_read_back_and_takes_the_feedback_issue_away(capsys):
     # thing that follows from it is derived, never declared: marks and receipts have
     # nowhere private to go, so the gradebook carries them instead.
     spec = collect.parse_grading_spec("visibility: public\n")
-    assert spec.visibility == "public" and spec.is_public
+    assert spec.visibility == "public" and spec.submit_shape == "github-public"
     assert not spec.has_feedback_issue
     assert spec.collects_commits and spec.creates_unit_repos
     assert capsys.readouterr().err == ""
 
 
-def test_student_choice_is_accepted_vocabulary_and_refused_until_it_is_implemented(
-    capsys,
-):
-    # The word is in the vocabulary, so a file naming it is answered about the SHAPE
-    # rather than about spelling - but the handout creates a private repo the student
-    # cannot publish whatever it says, so reading it back would promise something nothing
-    # delivers.
+def test_a_visibility_the_handout_cannot_create_is_refused_as_a_word(capsys):
+    # A value enters the vocabulary when the engine can ACT on it, so `student_choice` -
+    # the repo starts private and the student publishes it themselves - is refused by the
+    # plain `_one_of` rejection until its phase ships. That sentence names the words that
+    # do work, which is what a file carrying it needs to hear.
     spec = collect.parse_grading_spec("visibility: student_choice\n")
     assert spec.visibility == "private" and spec.has_feedback_issue
-    assert (
-        "`visibility: student_choice` is not supported yet" in capsys.readouterr().err
-    )
+    assert "is not one of private/public" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("submit_via", course.SUBMIT_VIA)
@@ -962,7 +959,7 @@ def _stub_snapshot_write(
     monkeypatch.setattr(
         collect,
         "listing_by_name",
-        lambda org: {r: {"name": r, "pushed_at": p} for r, p in (pushed or {}).items()},
+        lambda org: {r: repo_row(r, pushed_at=p) for r, p in (pushed or {}).items()},
     )
     monkeypatch.setattr(
         collect, "_push_activity", lambda org, repo: (activity or {}).get(repo, [])
@@ -3525,11 +3522,11 @@ def _sheet_env(
         collect,
         "listing_by_name",
         lambda org: {
-            repo: {
-                "name": repo,
-                "pushed_at": (pushed or {}).get(repo, ""),
-                "visibility": (visibility or {}).get(repo, "private"),
-            }
+            repo: repo_row(
+                repo,
+                pushed_at=(pushed or {}).get(repo, ""),
+                visibility=(visibility or {}).get(repo, "private"),
+            )
             for repo, _unit, _members in targets
         },
     )
@@ -4681,9 +4678,7 @@ def test_a_refresh_reads_the_listing_its_caller_holds_and_takes_none(monkeypatch
         lambda org: pytest.fail("the sheet refresh listed the org for itself"),
     )
     posted = _receipt_env(monkeypatch)
-    rows = {
-        "assignment-1-ada-l": {"name": "assignment-1-ada-l", "visibility": "public"}
-    }
+    rows = {"assignment-1-ada-l": repo_row("assignment-1-ada-l", visibility="public")}
     _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN), listing=rows)
     # And it is those rows that decide it: a repo the listing says is PUBLIC is no place
     # to post a student's submission times into.
@@ -5603,8 +5598,6 @@ def _visibility_run(monkeypatch, config, rows, *, handed_out=HANDED_OUT, dest=No
 
 
 def _cohort_rows(*repos: tuple[str, str], template="a3"):
-    from tests.conftest import repo_row
-
     return [repo_row(template, isTemplate=True)] + [
         repo_row(name, visibility=vis) for name, vis in repos
     ]
@@ -5644,8 +5637,6 @@ def test_repos_that_agree_with_the_file_are_no_fault(monkeypatch):
 def test_an_archived_repo_is_nobodys_fault(monkeypatch):
     # A frozen cohort is meant to stay frozen: the repo is read-only and nothing can, or
     # should, move it.
-    from tests.conftest import repo_row
-
     rows = _cohort_rows(("a3-ada", "public"))
     rows.append(repo_row("a3-ben", visibility="private", archived=True))
     found = _visibility_run(monkeypatch, "visibility: public\n", rows)
@@ -5679,35 +5670,27 @@ def test_a_listing_that_could_not_be_read_reports_nothing_and_keeps_the_rest(
     assert [f.field for f in found] == ["mystery"]
 
 
-def test_student_choice_is_exempt_because_a_mixture_is_the_point(monkeypatch):
-    # The students own the flag on that shape, so a cohort of 20 private repos and 4
-    # public ones is the CORRECT state - a fault about it would fire on every tick for
-    # ever. The parse still refuses the word back to `private` until its own phase, which
-    # is why this is asserted against the spec directly: this is the arm that has to hold
-    # the day it stops.
-    spec = dataclasses.replace(
-        grades.parse_grading_spec(""), visibility="student_choice"
+def test_the_listings_own_word_is_what_is_compared(monkeypatch):
+    # Both sides are one of `VISIBILITIES` and are compared as written, so a value the
+    # listing reports that the file cannot hold is a disagreement like any other rather
+    # than something this has to have an opinion about.
+    spec = dataclasses.replace(grades.parse_grading_spec(""), visibility="private")
+    (fault,) = grades._visibility_faults(
+        spec,
+        "a3",
+        "assignment-3-f2026",
+        "Course-Org",
+        {},
+        DUE_AT,
+        [repo_row("a3-ada", visibility="internal")],
     )
-    assert (
-        grades._visibility_faults(
-            spec,
-            "a3",
-            "assignment-3-f2026",
-            "Course-Org",
-            {},
-            DUE_AT,
-            [{"name": "a3-ada", "visibility": "public"}],
-        )
-        == []
-    )
+    assert "1 of 1 are not private" in fault.what
 
 
 def test_the_repos_compared_are_the_ones_this_assignment_generated(monkeypatch):
     # `cohort_dest_repo` renames the cohort side, and a cohort holding both `a3` and
     # `a3-project` must not read one template's repos as the other's - the same rule the
     # faculty floor and the public pages use (`discovery.classify_repos`).
-    from tests.conftest import repo_row
-
     rows = _cohort_rows(("a3-project-ada", "private"), template="a3-project")
     rows += [repo_row("a3", isTemplate=True), repo_row("a3-ada", visibility="public")]
     found = _visibility_run(

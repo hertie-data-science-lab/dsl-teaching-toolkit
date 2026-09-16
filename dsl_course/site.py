@@ -1088,13 +1088,16 @@ def _assignment_entry(
     # the README it otherwise comes from is embargoed until then.
     subtitle = found[1].title if found else ""
     external = spec.submit_external
-    # Where the work goes. `submit_via` is the SHAPE, written whatever the handout state
-    # because it is the plan's and is known before anything ships - the theme branches on
+    # Where the work goes. `submit_shape` is the SHAPE in one word (`course.submit_shape`:
+    # `github-private`, `github-public`, `external`), written whatever the handout state
+    # because it is the plan's and is known before anything ships - the theme `case`s on
     # it, and without it both the page and the due row told a Moodle cohort to submit by
-    # pushing to `main`. An ADDRESS is a place to go NOW, so `repo_url` and `submit_url`
-    # both wait until there is something at the other end of them. `submit_via: external`
-    # creates no repo at all, so there is no name to print for it.
-    repo_lines = [f'submit_via: "{spec.submit_via}"']
+    # pushing to `main`. ONE key and not the `submit_via`/`visibility` pair it is derived
+    # from: the two are orthogonal in the config and are not on the page, and a theme that
+    # branched on both had to be re-opened for every shape that is neither. An ADDRESS is a
+    # place to go NOW, so `repo_url` and `submit_url` both wait until there is something at
+    # the other end of them; a shape that creates no repo has no name to print at all.
+    repo_lines = [f'submit_shape: "{spec.submit_shape}"']
     if external:
         if out and spec.submit_url:
             repo_lines.append(f'submit_url: "{q(spec.submit_url)}"')
@@ -1108,13 +1111,6 @@ def _assignment_entry(
                 f'repo_url: "https://github.com/orgs/{cohort_org}/repositories?q={slug}-"'
             )
         repo_lines.append(f'repo_name: "{q(repo_name)}"')
-        # Beside the name and on the same terms - who may READ that repo is part of its
-        # shape, it is the plan's to declare, and it is known before anything ships. Only
-        # where there IS a repo: `external` creates none, and the parse drops the key
-        # there, so writing it would have the page describe something nobody made. The
-        # theme swaps the whole callout on it, because a world-readable repo has to say so
-        # before a student pushes into it and not after.
-        repo_lines.append(f'visibility: "{spec.visibility}"')
     # Written at BOTH levels: the due row is a sub-hash the theme reaches through
     # `map: "due_event"`, so it cannot see its parent's fields - and the row that tells a
     # student when to submit is the one that should say where.
@@ -1149,8 +1145,7 @@ def _assignment_entry(
             f"_**{title} is not yet released** - the brief appears here when it is._"
             if external
             else f"_**{title} is not yet released** - your "
-            f"{'public' if spec.is_public else 'private'} `{repo_name}` repo appears "
-            f"when it is._"
+            f"{spec.visibility} `{repo_name}` repo appears when it is._"
         )
     title = q(title)
     # After the branch above, which is where a released entry learns its name from the

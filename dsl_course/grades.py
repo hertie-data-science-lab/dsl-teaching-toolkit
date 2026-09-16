@@ -52,7 +52,6 @@ from .course import (
     GRADEBOOK_PREFIX,
     NO_STARTER,
     NO_TEAMS,
-    OFFERED_VISIBILITIES,
     SETTING_PLACEHOLDER,
     SOLUTION_BRANCH,
     SUBMIT_VIA,
@@ -66,6 +65,7 @@ from .course import (
     receipt_body,
     resolve_is_group,
     submission_repo,
+    submit_shape,
 )
 from .discovery import (
     classify_repos,
@@ -119,15 +119,14 @@ _CHANNEL_NOTE = (
     "Feedback for assignments handed in outside GitHub, in a shared repo or in a public "
     "repo appears here and nowhere else."
 )
-# `student_choice` was dropped as a setting (a repo admin can delete or transfer the repo,
-# and the org switches that would forbid it are web-only), so the answer to "can I show
-# this to an employer?" is a recipe rather than a knob - and it belongs where the student
-# is already looking.
+# A cohort org is closed out at the end of the term, so the answer to "can I show this to
+# an employer?" is a recipe rather than a setting - and it belongs where the student is
+# already looking.
 _KEEPING_YOUR_WORK = (
     "## Keeping your work\n\n"
-    "Your assignment repos are private to you and the teaching team and stay readable "
-    "after the course ends. To show one publicly, publish a copy under your own account; "
-    "the original stays private.\n\n"
+    "Your assignment repos stay readable after the course ends, and unless the assignment "
+    "says otherwise they are private to you and the teaching team. To show one publicly, "
+    "publish a copy under your own account; the original is untouched.\n\n"
     "```\n"
     "git clone https://github.com/<cohort-org>/<slug>-<your-handle>\n"
     "cd <slug>-<your-handle>\n"
@@ -227,13 +226,9 @@ class _Shape:
         return self.submit_via == "external"
 
     @property
-    def is_public(self) -> bool:
-        """Whether the handout makes each unit's repo world-readable.
-
-        Both halves, because only one of them is a repo: `visibility:` describes a repo,
-        and a shape that creates none has nothing for it to describe (the parse drops it
-        there, and this asks anyway rather than depending on that)."""
-        return self.creates_unit_repos and self.visibility == "public"
+    def submit_shape(self) -> str:
+        """The one word the cohort site branches this assignment on."""
+        return submit_shape(self.submit_via, self.visibility)
 
     @property
     def has_feedback_issue(self) -> bool:
@@ -1315,21 +1310,6 @@ def _cross_check(values: dict, dropped: list[str]) -> None:
                 "no repo is created for it - ignored",
             )
         )
-    if values.get("visibility") == "student_choice":
-        # Accepted vocabulary, unimplemented shape: the handout creates a private repo
-        # whatever this says, so reading it back would have the sheet, the site and the
-        # digest all describing a repo nobody created. The word is in the vocabulary
-        # already so that the file which carries it is REPORTED rather than read as a
-        # typo; it leaves this list the moment the handout can act on it.
-        values["visibility"] = "private"
-        dropped.append(
-            Dropped(
-                GRADING_FILE,
-                "visibility",
-                "`visibility: student_choice` is not supported yet - using `private`",
-                OFFERED_VISIBILITIES,
-            )
-        )
     if via != "external" and values.get("submit_url"):
         values["submit_url"] = ""
         dropped.append(
@@ -1597,21 +1577,18 @@ def _visibility_faults(
 ) -> list[ConfigFault]:
     """`visibility:` against the repos this assignment actually handed out, `rows`.
 
-    The value is read at CREATE and nowhere else - `POST .../generate` makes a private repo
-    and the handout flips it - so editing the line afterwards is a silent no-op: the file
-    says `public`, the cohort's work stays private, and every page the toolkit writes
-    describes repos that do not exist. Nothing else notices, which is why this is a fault
-    and not a log line.
+    The value is read at CREATE and nowhere else (see `repos.set_visibility`), so editing
+    the line afterwards is a silent no-op: the file says `public`, the cohort's work stays
+    private, and every page the toolkit writes describes repos that do not exist. Nothing
+    else notices, which is why this is a fault and not a log line.
 
-    Only the visibilities that make a UNIFORM set of repos are compared, and
-    `student_choice` is deliberately not one: the students own the flag there, so a mixture
-    is the CORRECT state and a fault about it would fire on every tick for ever. The parse
-    refuses that word back to `private` until its own phase ships, so the exemption is
-    named here rather than left to that - it is what has to hold the day it stops."""
-    if not spec.creates_unit_repos or spec.visibility == "student_choice":
+    The listing's word against the file's, compared as both are written - they are the same
+    vocabulary. A shape whose repos are legitimately a MIXTURE, because the students own
+    the flag, is exempted by its own predicate in `course.py` when it ships, never by a
+    name spelt here."""
+    if not spec.creates_unit_repos:
         return []
-    want_private = spec.visibility == "private"
-    wrong = [r for r in rows if listed_is_private(r) is not want_private]
+    wrong = [r for r in rows if r.get("visibility") != spec.visibility]
     if not wrong:
         return []
     return [
