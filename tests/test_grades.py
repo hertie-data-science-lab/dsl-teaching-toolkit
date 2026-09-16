@@ -51,34 +51,54 @@ def test_a_cohort_with_no_roster_rows_yet_is_a_skip_not_a_failure(monkeypatch, c
     assert capsys.readouterr().err == ""
 
 
-def test_one_run_creates_at_most_the_cap_and_says_how_many_are_left(
-    monkeypatch, capsys
-):
+def test_one_run_stops_at_its_deadline_and_says_how_many_are_left(monkeypatch, capsys):
     # Four API calls per new gradebook, on a nightly job with a 30-minute bound: a large
     # cohort's FIRST night would spend all of it here, and a job that times out has
-    # recorded nothing about where it got to. Nothing is lost - the next run starts from
-    # the rest - so the run stays green and says the count.
+    # recorded nothing about where it got to. What has to be bounded is the WALL CLOCK, so
+    # the budget is a deadline rather than a guess at how many creations fit in one.
+    # Nothing is lost - the next run starts from the rest - so it stays green and counts.
     monkeypatch.delenv("DSL_VERBOSE", raising=False)
-    rows = "".join(
-        f"\ns{n}@uni.edu,S{n},enrolled,s{n},{n},dsl-{n}"
-        for n in range(grades.MAX_NEW_GRADEBOOKS + 5)
-    )
+    rows = "".join(f"\ns{n}@uni.edu,S{n},enrolled,s{n},{n},dsl-{n}" for n in range(5))
     monkeypatch.setattr(
         grades.roster, "load", lambda org: roster.parse(ROSTER_HEADER + rows + "\n")
     )
     made: list[str] = []
+    monkeypatch.setattr(grades, "listing_by_name", lambda org: {})
+    # A clock that jumps a minute per gradebook, so the third student is already past a
+    # 2-minute budget. `time.monotonic` is read once before the loop and once per student.
+    ticks = iter(range(0, 6000, 60))
+    monkeypatch.setattr(grades.time, "monotonic", lambda: next(ticks))
     monkeypatch.setattr(
         grades,
         "provision_one",
         lambda org, handle, existing=None: made.append(handle) or "ok",
     )
-    # An existing gradebook costs nothing, so the cap counts CREATIONS: the listing is
-    # what says which those are.
-    assert grades.ensure_gradebooks("COHORT", existing={"grades-s0": {}}) == 0
-    assert made[0] == "s0" and len(made) == grades.MAX_NEW_GRADEBOOKS + 1
+    assert grades.ensure_gradebooks("COHORT", budget_minutes=2) == 0
+    assert made == ["s0", "s1"]
     out = capsys.readouterr().out
-    assert "4 more gradebook(s) on the next run" in out
-    assert "s61" not in out  # a count, never a handle
+    assert "3 more gradebook(s) on the next run" in out
+    assert "2 created here" in out  # `ok` is provision_one's word for a creation
+    assert "s2" not in out  # a count, never a handle
+
+
+def test_the_deadline_does_not_stop_a_run_that_is_keeping_up(monkeypatch, capsys):
+    # A cohort whose gradebooks all exist costs almost nothing per student, so the budget
+    # must never be what decides that some of them wait for tomorrow.
+    monkeypatch.delenv("DSL_VERBOSE", raising=False)
+    rows = "".join(f"\ns{n}@uni.edu,S{n},enrolled,s{n},{n},dsl-{n}" for n in range(200))
+    monkeypatch.setattr(
+        grades.roster, "load", lambda org: roster.parse(ROSTER_HEADER + rows + "\n")
+    )
+    made: list[str] = []
+    monkeypatch.setattr(grades, "listing_by_name", lambda org: {})
+    monkeypatch.setattr(
+        grades,
+        "provision_one",
+        lambda org, handle, existing=None: made.append(handle) or "skipped",
+    )
+    assert grades.ensure_gradebooks("COHORT") == 0
+    assert len(made) == 200
+    assert "on the next run" not in capsys.readouterr().out
 
 
 def test_ensure_gradebooks_names_no_student_in_a_public_log(monkeypatch, capsys):
@@ -438,8 +458,9 @@ def test_email_updates_matches_the_roster_case_insensitively(monkeypatch):
 
 
 def _ensure_run(monkeypatch, listing, handles=("ada-l", "bob-b")):
-    """`ensure_gradebooks` over `handles`, with `listing` (or an Exception) standing in
-    for the org listing. Returns (the orgs listed, the gradebooks created)."""
+    """`ensure_gradebooks` over `handles`, with `listing` (or None for one that could not
+    be read) standing in for the org listing. Returns (the orgs listed, the gradebooks
+    created)."""
     students = roster.parse(
         ROSTER_HEADER
         + "\n"
@@ -452,13 +473,12 @@ def _ensure_run(monkeypatch, listing, handles=("ada-l", "bob-b")):
 
     def fake_listing(org):
         listed.append(org)
-        if isinstance(listing, Exception):
-            raise listing
-        return listing
+        # None is `discovery.listing_by_name`'s answer when the listing could not be read.
+        return None if listing is None else {r["name"]: r for r in listing}
 
     created: list[str] = []
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
-    monkeypatch.setattr(grades, "list_org_repos", fake_listing)
+    monkeypatch.setattr(grades, "listing_by_name", fake_listing)
     monkeypatch.setattr(
         grades, "create_repo", lambda org, repo, **k: created.append(repo) or True
     )
@@ -490,9 +510,7 @@ def test_a_failed_listing_falls_back_to_probing_each_gradebook(monkeypatch):
     monkeypatch.setattr(
         grades, "repo_exists", lambda org, repo: probed.append(repo) or False
     )
-    listed, created = _ensure_run(
-        monkeypatch, RuntimeError("could not list repos in COHORT: 502")
-    )
+    listed, created = _ensure_run(monkeypatch, None)
     assert listed == ["COHORT"]
     assert probed == ["grades-ada-l", "grades-bob-b"]
     assert created == ["grades-ada-l", "grades-bob-b"]
@@ -505,7 +523,7 @@ def test_a_dry_run_lists_nothing(monkeypatch):
     )
     monkeypatch.setattr(grades.roster, "load", lambda org: students)
     monkeypatch.setattr(
-        grades, "list_org_repos", lambda org: pytest.fail("a dry run listed the org")
+        grades, "listing_by_name", lambda org: pytest.fail("a dry run listed the org")
     )
     assert grades.ensure_gradebooks("COHORT", dry_run=True) == 0
 
@@ -634,7 +652,7 @@ def _distribute(
     # The cohort listing distribute takes to check what each repo's visibility REALLY is.
     # None is "could not be read", which is the optimistic default every other reader of
     # this question takes, and what every test that does not care about it gets.
-    monkeypatch.setattr(grades, "_existing_repos", lambda org: listed)
+    monkeypatch.setattr(grades, "listing_by_name", lambda org: listed)
     monkeypatch.setattr(grades, "course_org_for_cohort", lambda org: "COURSE")
     monkeypatch.setattr(grades, "_grading_text", lambda org, tpl: grading)
     monkeypatch.setattr(

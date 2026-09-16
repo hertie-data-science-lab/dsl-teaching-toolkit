@@ -175,6 +175,26 @@ def list_org_repos(org: str) -> list[dict]:
         raise RuntimeError(f"unparseable repo listing for {org}: {out[:200]}") from exc
 
 
+def listing_by_name(org: str) -> dict[str, dict] | None:
+    """`{repo name: its listing row}` for a whole org off ONE paginated listing, or None
+    when the listing could not be read.
+
+    The shape every unattended pass wants from `list_org_repos`: "is this repo there, and
+    what does GitHub say about it?" asked of a hundred names at once, rather than a GET
+    apiece. The scheduler takes one of these per cohort at the start of a tick and hands it
+    to every pass that asks a question of it (the freeze's `pushed_at`, the receipts'
+    `visibility`, the digest's hand-out check, the gradebooks' existence).
+
+    None rather than an exception, and None rather than `{}`: every caller has its own
+    answer to "we could not look" - probe that one repo after all, report nothing, assume
+    private - and none of them may read a failed listing as an empty org."""
+    try:
+        return {row["name"]: row for row in list_org_repos(org)}
+    except RuntimeError as exc:
+        log_err(f"could not list {org}'s repos: {exc}")
+        return None
+
+
 def _registry_fault(what: str) -> ConfigFault:
     """The cohort registry, unusable - what a human is asked to fix.
 

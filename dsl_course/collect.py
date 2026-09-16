@@ -124,7 +124,7 @@ from .course import (
     submission_repo,
 )
 from .derive import DeriveError, Filtered, filter_questions
-from .discovery import list_org_repos
+from .discovery import listing_by_name
 from .fs import copy_tree
 from .gh_contents import (
     blob_sha,
@@ -954,6 +954,7 @@ def snapshot_assignment(
     is_group: bool,
     teams_key: str | None = None,
     tz: str | None = None,
+    listing: dict[str, dict] | None = None,
 ) -> SnapshotResult:
     """Freeze, at a server-chosen MOMENT, the commit each of `slug`'s submission repos will
     be graded at. Write-once: an existing snapshot is never re-taken or overwritten, so a
@@ -971,7 +972,15 @@ def snapshot_assignment(
     `is_group` is REQUIRED (keyword-only): it decides which repos are frozen, so a silent
     default would let a forgetful future caller pin individual repos for a group assignment.
     The caller resolves it once, upstream, via `resolve_is_group` - it is never guessed here
-    from student-writable teams.csv."""
+    from student-writable teams.csv.
+
+    `listing` is the cohort's repos keyed by name, off the ONE listing the caller's tick
+    already holds (`discovery.listing_by_name`). It is read for `pushed_at` alone - the
+    server's word on when each repo last received anything, which is what a pin chosen on a
+    date the student wrote is checked against - so an empty one costs only the note beside
+    each row. None means no caller handed one down and this takes its own; `{}` is a
+    listing that was taken and could not be read, and the rows simply carry `commit`, as
+    they always did."""
     if load_snapshots(cohort_org, slug) is not None:
         log_skip(f"snapshot {snapshot_path(slug)}")
         return SnapshotResult.PRESENT
@@ -989,11 +998,8 @@ def snapshot_assignment(
         )
         return SnapshotResult.NOTHING_TO_FREEZE
     recorded_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    # One listing for the whole cohort, and the only reason to take it: `pushed_at` is the
-    # server's word on when each repo last received anything, and the pin is chosen on a
-    # date the student wrote. Best-effort - without it the rows simply carry `commit`, as
-    # they always did.
-    listing = _cohort_listing(cohort_org)
+    if listing is None:
+        listing = listing_by_name(cohort_org) or {}
     moment = local_deadline(deadline, tz)
     rows: list[tuple[str, str, str, str, str]] = []
     any_present = False
@@ -1200,24 +1206,6 @@ def _quiet_since(pushed_at: str, recorded: object, checked: object = None) -> bo
         return True
     looked = _parse_iso(str(checked)) if checked else None
     return looked is not None and pushed < looked.replace(**to_minute)
-
-
-def _cohort_listing(cohort_org: str) -> dict[str, dict]:
-    """`{repo: its listing row}` for the whole cohort, from ONE listing.
-
-    Two of this module's questions are answered off the same rows, so they are read once
-    and handed down rather than each taking a listing of its own: `pushed_at` is the
-    server's word on when a repo last received anything, which is what a pin - a date the
-    student wrote - is checked against, and `visibility` is what says whether a repo is
-    still a private place to post a receipt into.
-
-    Best-effort: an unreadable listing is an empty one, and both readers have a safe answer
-    for a repo it does not mention (read that repo after all; assume it is private)."""
-    try:
-        return {row["name"]: row for row in list_org_repos(cohort_org)}
-    except RuntimeError as exc:
-        log(f"  (no repo listing this tick - re-reading each submission: {exc})")
-        return {}
 
 
 def _pushed_at(listing: dict[str, dict], repo: str) -> str:
@@ -1442,6 +1430,7 @@ def sync_sheet(
     units: list[tuple[str, list[str]]] | None = None,
     autograde: dict[str, str] | None = None,
     completion: dict[str, str] | None = None,
+    listing: dict[str, dict] | None = None,
     dry_run: bool = False,
 ) -> SheetWrite:
     """Write `grading_sheets/<slug>.yml` for this assignment, creating it if it is not
@@ -1456,7 +1445,13 @@ def sync_sheet(
     Nothing is derived before the due date (there is nothing to derive, and a handout must
     not cost an API call per student), nothing at all for an externally submitted
     assignment, and nothing once the sheet is FROZEN. The write itself is skipped when the
-    rendered text hashes to what the repo already holds, so the hourly tick is free."""
+    rendered text hashes to what the repo already holds, so the hourly tick is free.
+
+    `listing` is the cohort's repos keyed by name, off the ONE listing the caller's tick
+    already holds (`discovery.listing_by_name`): which of them has moved, and which of them
+    is still private enough to post a receipt into. None means no caller handed one down -
+    a button press, an autograde run - and this takes its own, and only if it is going to
+    derive anything at all."""
     gspec = load_grading_spec(course_org, template)
     spec = sheet_spec(sched, key, slug, gspec, is_group)
     path = grades.sheet_path(slug)
@@ -1518,11 +1513,12 @@ def sync_sheet(
     info_updates: dict[str, dict] = {}
     pins: dict[str, tuple[str, str]] = {}
     notes: dict[str, str] = {}
-    # ONE listing for the whole cohort, taken here rather than inside the pin pass because
-    # the receipts read it too - which of these repos has moved, and which of them is still
-    # private enough to post into. The freeze pays for it as well, where it used to take
-    # none: one paginated listing against a GET per submission repo it would otherwise need.
-    listing = _cohort_listing(cohort_org) if derive else {}
+    # The caller's listing, or one of our own where there is no caller to have taken it -
+    # and only where something is going to be derived off it.
+    if not derive:
+        listing = {}
+    elif listing is None:
+        listing = listing_by_name(cohort_org) or {}
     if derive and phase is SheetPhase.FREEZING:
         rows = load_snapshot_rows(cohort_org, slug)
         if rows is None:

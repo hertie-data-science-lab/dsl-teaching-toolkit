@@ -961,7 +961,7 @@ def _stub_snapshot_write(
     monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: existing)
     monkeypatch.setattr(
         collect,
-        "_cohort_listing",
+        "listing_by_name",
         lambda org: {r: {"name": r, "pushed_at": p} for r, p in (pushed or {}).items()},
     )
     monkeypatch.setattr(
@@ -3523,15 +3523,15 @@ def _sheet_env(
     written: list[tuple[str, str]] = []
     monkeypatch.setattr(
         collect,
-        "list_org_repos",
-        lambda org: [
-            {
+        "listing_by_name",
+        lambda org: {
+            repo: {
                 "name": repo,
                 "pushed_at": (pushed or {}).get(repo, ""),
                 "visibility": (visibility or {}).get(repo, "private"),
             }
             for repo, _unit, _members in targets
-        ],
+        },
     )
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: grading)
     monkeypatch.setattr(
@@ -4652,7 +4652,7 @@ def _receipt_env(monkeypatch) -> list[tuple[str, str, bool]]:
     return posted
 
 
-def _refresh(monkeypatch, *, now, dry_run=False):
+def _refresh(monkeypatch, *, now, dry_run=False, **kw):
     return collect.sync_sheet(
         "Course",
         "Cohort",
@@ -4663,7 +4663,31 @@ def _refresh(monkeypatch, *, now, dry_run=False):
         is_group=False,
         now=now,
         dry_run=dry_run,
+        **kw,
     ).written
+
+
+def test_a_refresh_reads_the_listing_its_caller_holds_and_takes_none(monkeypatch):
+    # The tick takes ONE listing of the cohort and hands it down; a pass that took its own
+    # here made the cost grow with the number of assignments rather than of cohorts.
+    _sheet_env(
+        monkeypatch,
+        targets=SOLO_TARGETS[:1],
+        pins={"assignment-1-ada-l": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
+    )
+    monkeypatch.setattr(
+        collect,
+        "listing_by_name",
+        lambda org: pytest.fail("the sheet refresh listed the org for itself"),
+    )
+    posted = _receipt_env(monkeypatch)
+    rows = {
+        "assignment-1-ada-l": {"name": "assignment-1-ada-l", "visibility": "public"}
+    }
+    _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN), listing=rows)
+    # And it is those rows that decide it: a repo the listing says is PUBLIC is no place
+    # to post a student's submission times into.
+    assert posted == []
 
 
 def test_the_first_refresh_after_the_due_date_tells_everyone_what_was_recorded(
@@ -4972,7 +4996,7 @@ def test_a_repo_missing_from_the_listing_is_treated_as_private(monkeypatch):
         targets=SOLO_TARGETS[:1],
         pins={"assignment-1-ada-l": collect.Pin(SHA, "2026-10-03T20:14:00Z")},
     )
-    monkeypatch.setattr(collect, "list_org_repos", lambda org: [])
+    monkeypatch.setattr(collect, "listing_by_name", lambda org: {})
     posted = _receipt_env(monkeypatch)
     _refresh(monkeypatch, now=datetime(2026, 10, 5, tzinfo=BERLIN))
     assert [repo for repo, _body, _dry in posted] == ["assignment-1-ada-l"]
@@ -5509,7 +5533,7 @@ def _collect_configs(monkeypatch, text=BROKEN_CONFIG, grading=None, legacy=None)
     monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: legacy)
     found: list = []
     grades.grading_config_faults(
-        "Course-Org", "Cohort-Org", _sched_one_assignment(grading), found
+        "Course-Org", _sched_one_assignment(grading), found, {}
     )
     return found
 
@@ -5540,9 +5564,7 @@ def test_a_template_that_could_not_be_read_reports_none_of_them(monkeypatch):
     monkeypatch.setattr(grades, "_grading_text", _boom)
     found: list = []
     with pytest.raises(RuntimeError):
-        grades.grading_config_faults(
-            "Course-Org", "Cohort-Org", _sched_one_assignment(), found
-        )
+        grades.grading_config_faults("Course-Org", _sched_one_assignment(), found, {})
     assert found == []
 
 
@@ -5556,22 +5578,14 @@ HANDED_OUT = datetime(2026, 9, 29, 9, 0, tzinfo=BERLIN_TZ)
 
 
 def _visibility_run(monkeypatch, config, rows, *, handed_out=HANDED_OUT, dest=None):
-    """`grading_config_faults` over one handed-out assignment and a cohort listing.
+    """`grading_config_faults` over one handed-out assignment and the tick's listing.
 
-    `rows=None` is a listing that could not be READ."""
+    `rows=None` is a listing that could not be READ - which is what the tick hands down as
+    None."""
     from dsl_course.schedule import AssignmentEntry
-
-    listings: list[str] = []
-
-    def fake_listing(org):
-        listings.append(org)
-        if rows is None:
-            raise RuntimeError("rate-limited")
-        return list(rows)
 
     monkeypatch.setattr(grades, "_grading_text", lambda course, template: config)
     monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
-    monkeypatch.setattr(grades, "list_org_repos", fake_listing)
     sched = Schedule(
         assignments={
             "a3": AssignmentEntry(
@@ -5583,8 +5597,9 @@ def _visibility_run(monkeypatch, config, rows, *, handed_out=HANDED_OUT, dest=No
         }
     )
     found: list = []
-    grades.grading_config_faults("Course-Org", "Cohort-Org", sched, found)
-    return found, listings
+    listing = None if rows is None else {r["name"]: r for r in rows}
+    grades.grading_config_faults("Course-Org", sched, found, listing)
+    return found
 
 
 def _cohort_rows(*repos: tuple[str, str], template="a3"):
@@ -5596,7 +5611,7 @@ def _cohort_rows(*repos: tuple[str, str], template="a3"):
 
 
 def test_a_public_assignment_whose_repos_are_private_is_a_fault(monkeypatch):
-    found, listings = _visibility_run(
+    found = _visibility_run(
         monkeypatch,
         "visibility: public\n",
         _cohort_rows(("a3-ada", "private"), ("a3-ben", "public")),
@@ -5610,18 +5625,17 @@ def test_a_public_assignment_whose_repos_are_private_is_a_fault(monkeypatch):
     assert "ada" not in fault.what + fault.fix()
     # It bites when the assignment is graded, like every other value in this file.
     assert fault.fires == DUE_AT
-    assert listings == ["Cohort-Org"]
 
 
 def test_a_private_assignment_whose_repos_are_public_is_the_same_fault(monkeypatch):
     # The other direction, and the one that matters most: `public` was edited back to
     # `private` and the cohort's work is still world-readable.
-    (fault,), _ = _visibility_run(monkeypatch, "", _cohort_rows(("a3-ada", "public")))
+    (fault,) = _visibility_run(monkeypatch, "", _cohort_rows(("a3-ada", "public")))
     assert "1 of 1 are not private" in fault.what
 
 
 def test_repos_that_agree_with_the_file_are_no_fault(monkeypatch):
-    found, _ = _visibility_run(
+    found = _visibility_run(
         monkeypatch, "visibility: public\n", _cohort_rows(("a3-ada", "public"))
     )
     assert found == []
@@ -5634,37 +5648,35 @@ def test_an_archived_repo_is_nobodys_fault(monkeypatch):
 
     rows = _cohort_rows(("a3-ada", "public"))
     rows.append(repo_row("a3-ben", visibility="private", archived=True))
-    found, _ = _visibility_run(monkeypatch, "visibility: public\n", rows)
+    found = _visibility_run(monkeypatch, "visibility: public\n", rows)
     assert found == []
 
 
-def test_an_assignment_that_has_not_handed_out_costs_no_listing(monkeypatch):
-    # The listing is lazy and taken at most once per tick: a plan whose assignments are
-    # all still ahead pays nothing at all for this check.
-    found, listings = _visibility_run(
+def test_an_assignment_that_has_not_handed_out_is_never_asked_about(monkeypatch):
+    # A plan whose assignments are all still ahead has nothing to compare a file against.
+    found = _visibility_run(
         monkeypatch,
         "visibility: public\n",
         _cohort_rows(("a3-ada", "private")),
         handed_out=None,
     )
-    assert found == [] and listings == []
+    assert found == []
 
 
 def test_an_assignment_that_creates_no_repos_is_never_asked_about(monkeypatch):
-    found, listings = _visibility_run(
+    found = _visibility_run(
         monkeypatch, "submit_via: external\n", _cohort_rows(("a3-ada", "private"))
     )
-    assert found == [] and listings == []
+    assert found == []
 
 
 def test_a_listing_that_could_not_be_read_reports_nothing_and_keeps_the_rest(
-    monkeypatch, capsys
+    monkeypatch,
 ):
     # "We could not look" is not "they agree" - and it is not worth dropping the whole
     # file's digest for either, since every other fault in it was read from the template.
-    found, _ = _visibility_run(monkeypatch, "visibility: public\nmystery: 4\n", None)
+    found = _visibility_run(monkeypatch, "visibility: public\nmystery: 4\n", None)
     assert [f.field for f in found] == ["mystery"]
-    assert "could not list" in capsys.readouterr().err
 
 
 def test_student_choice_is_exempt_because_a_mixture_is_the_point(monkeypatch):
@@ -5684,9 +5696,7 @@ def test_student_choice_is_exempt_because_a_mixture_is_the_point(monkeypatch):
             "Course-Org",
             {},
             DUE_AT,
-            lambda: (_ for _ in ()).throw(
-                AssertionError("an exempt assignment is never listed")
-            ),
+            [{"name": "a3-ada", "visibility": "public"}],
         )
         == []
     )
@@ -5700,7 +5710,7 @@ def test_the_repos_compared_are_the_ones_this_assignment_generated(monkeypatch):
 
     rows = _cohort_rows(("a3-project-ada", "private"), template="a3-project")
     rows += [repo_row("a3", isTemplate=True), repo_row("a3-ada", visibility="public")]
-    found, _ = _visibility_run(
+    found = _visibility_run(
         monkeypatch, "visibility: public\n", rows, dest="a3-project"
     )
     (fault,) = found

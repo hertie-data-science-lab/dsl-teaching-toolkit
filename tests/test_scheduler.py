@@ -60,6 +60,23 @@ def _verdict(
 
 
 @pytest.fixture(autouse=True)
+def tick_listings(monkeypatch):
+    """The ONE listing of the cohort `run` takes at the start of each tick, stubbed empty.
+
+    A real paginated `gh api`, which `conftest` refuses - so every `run` test below would
+    otherwise fail on the listing rather than on what it is about. Tests that care what is
+    IN it stub the consumer's own name; this fixture hands back the orgs it was taken for,
+    in order, which is how "once per cohort, never once per assignment" is asserted."""
+    listed: list[str] = []
+    monkeypatch.setattr(
+        scheduler.discovery,
+        "listing_by_name",
+        lambda org: listed.append(org) or {},
+    )
+    return listed
+
+
+@pytest.fixture(autouse=True)
 def cadence_calls(monkeypatch):
     """Stub the whole cadence surface and hand the test what was asked of it.
 
@@ -326,7 +343,7 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "dsl_course.scheduler.provision_all",
-        lambda master_org, template, cohort_org, solution=False, touch_existing=True, scheduled=False, slug="": (
+        lambda master_org, template, cohort_org, solution=False, touch_existing=True, scheduled=False, slug="", listing=None: (
             (
                 calls.append(
                     (
@@ -344,7 +361,10 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
         ),
     )
     r = _r("s", WHEN, assignment="assignment-2-f2026", assignment_slug="assignment-2")
-    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == (0, True)
+    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r, None) == (
+        0,
+        True,
+    )
     # The hourly path never re-touches an existing repo (the manual button does), says it
     # is the cron - a group handout with no teams yet then waits instead of going red -
     # and names WHICH entry it is firing, since two may hand out from one template.
@@ -362,7 +382,10 @@ def test_execute_nondeploy_assignment_calls_provision_all(monkeypatch):
     # scheduled solution can never diverge from what include_solution does by hand.
     r = _r("s", WHEN, assignment="assignment-2-f2026", assignment_slug="assignment-2")
     r.assignment_solution = True
-    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r) == (0, True)
+    assert scheduler._execute_nondeploy("Course-Org", "Cohort-Org", r, None) == (
+        0,
+        True,
+    )
     assert calls[1] == (
         "Course-Org",
         "assignment-2-f2026",
@@ -1104,7 +1127,7 @@ def _stub_snapshots(monkeypatch, existing: set[str]):
         "snapshot_assignment",
         # `is_group` is REQUIRED (no default), so a scheduler that stopped passing it fails
         # these tests loudly instead of silently freezing every assignment as individual.
-        lambda org, slug, deadline, *, is_group, teams_key=None, tz=None: (
+        lambda org, slug, deadline, *, is_group, teams_key=None, tz=None, listing=None: (
             taken.append((org, slug, deadline, teams_key))
             or scheduler.SnapshotResult.WRITTEN
         ),
@@ -1220,7 +1243,7 @@ def test_run_reports_a_failed_snapshot(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
-        lambda org, slug, deadline, *, is_group, teams_key=None, tz=None: (
+        lambda org, slug, deadline, *, is_group, teams_key=None, tz=None, listing=None: (
             scheduler.SnapshotResult.FAILED
         ),
     )
@@ -1352,7 +1375,7 @@ def _only_snapshots_taken(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
-        lambda org, slug, dl, *, is_group, teams_key=None: (
+        lambda org, slug, dl, *, is_group, teams_key=None, listing=None: (
             scheduler.SnapshotResult.WRITTEN
         ),
     )
@@ -1384,6 +1407,68 @@ def test_the_sheet_refresh_runs_from_the_due_date_not_the_cutoff(monkeypatch):
         "Course-Org", "Cohort-f2026", datetime(2026, 10, 14, tzinfo=timezone.utc)
     )
     assert refreshed == [("assignment-1", "assignment-1")]
+
+
+def test_a_tick_takes_one_cohort_listing_and_hands_it_to_every_pass(monkeypatch):
+    # The freeze's `pushed_at`, the sheet refresh's receipts, the grading-config digest's
+    # "what did this assignment actually hand out?" and the shape of handout that creates
+    # no repos all ask the same org the same question. Each used to take a listing of its
+    # own, so the cost grew with the number of ASSIGNMENTS a cohort carries; it is now one
+    # per cohort per tick, and it is the SAME rows every pass reads.
+    rows = {"a-ada": {"name": "a-ada", "visibility": "private"}}
+    taken: list[str] = []
+    monkeypatch.setattr(
+        scheduler.discovery,
+        "listing_by_name",
+        lambda org: taken.append(org) or rows,
+    )
+    seen: dict[str, object] = {}
+
+    def _snapshot(org, slug, dl, *, is_group, teams_key=None, tz=None, listing=None):
+        seen["snapshot"] = listing
+        return scheduler.SnapshotResult.WRITTEN
+
+    def _sheet(course, cohort, sched, key, slug, template, **kw):
+        seen["sheet"] = kw.get("listing")
+        return collect_mod.SheetWrite(True)
+
+    def _provision(master, template, cohort, **kw):
+        seen["handout"] = kw.get("listing")
+        return 0, False
+
+    monkeypatch.setattr(scheduler, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(scheduler, "snapshot_assignment", _snapshot)
+    monkeypatch.setattr(scheduler, "sync_sheet", _sheet)
+    monkeypatch.setattr(scheduler, "provision_all", _provision)
+    monkeypatch.setattr(
+        scheduler,
+        "grading_config_faults",
+        lambda course, sched, found, listing: seen.update(digest=listing),
+    )
+    monkeypatch.setattr(scheduler, "_assignment_template", lambda org, slug, entry: "t")
+    monkeypatch.setattr(scheduler, "has_autograde_results", lambda org, slug: True)
+    handed = AssignmentEntry(
+        course_source_repo="a-f2026",
+        handout_datetime=datetime(2026, 10, 1, 9, 0, tzinfo=BERLIN),
+        due_datetime=datetime(2026, 10, 30, 23, 59, tzinfo=BERLIN),
+    )
+    monkeypatch.setattr(
+        scheduler.schedule,
+        "load",
+        lambda cohort: _assignments(
+            **{
+                "assignment-1": _due(5),  # deadline passed: frozen this tick
+                "assignment-2": _due(13, grading_day=20),  # due passed, cutoff has not
+                "assignment-3": handed,  # handed out, so its release re-fires
+            }
+        ),
+    )
+    scheduler.run(
+        "Course-Org", "Cohort-f2026", datetime(2026, 10, 14, tzinfo=timezone.utc)
+    )
+    assert taken == ["Cohort-f2026"], "one listing per cohort, not one per assignment"
+    assert set(seen) == {"snapshot", "sheet", "digest", "handout"}
+    assert all(v is rows for v in seen.values())
 
 
 def test_a_frozen_assignments_sheet_is_left_to_the_cutoff(monkeypatch):
@@ -1701,7 +1786,7 @@ def test_run_re_sorts_handouts_into_the_release_plan(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
-        lambda org, slug, dl, *, is_group, teams_key=None: (
+        lambda org, slug, dl, *, is_group, teams_key=None, listing=None: (
             scheduler.SnapshotResult.WRITTEN
         ),
     )
@@ -2660,7 +2745,7 @@ def _real_snapshot_then_autograde(monkeypatch, targets):
         "_snapshot_sha",
         lambda org, repo, deadline, at="": collect_mod.Pin(absent=True),
     )
-    monkeypatch.setattr(collect_mod, "_cohort_listing", lambda org: {})
+    monkeypatch.setattr(collect_mod, "listing_by_name", lambda org: {})
 
     def no_write(*a, **k):
         raise AssertionError("nothing may be written when there is nothing to freeze")
@@ -2853,7 +2938,7 @@ def _config_preflight(
     monkeypatch.setattr(
         scheduler,
         "grading_config_faults",
-        lambda course, cohort, sched, found: found.extend(spec_faults or []),
+        lambda course, sched, found, listing: found.extend(spec_faults or []),
     )
     monkeypatch.setattr(
         scheduler.config_digest,

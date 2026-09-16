@@ -1080,6 +1080,7 @@ def provision_all(
     touch_existing: bool = True,
     scheduled: bool = False,
     slug: str = "",
+    listing: dict[str, dict] | None = None,
 ) -> tuple[int, bool]:
     """Freeze the cohort template, then provision a repo per unit (student, or team).
 
@@ -1104,7 +1105,14 @@ def provision_all(
     answer it: it knows which release it is firing. The button asks nobody - a template
     two entries hand out from is refused below, because they make different repos for
     different students and keep separate grades, and guessing is a whole cohort's work in
-    the wrong place."""
+    the wrong place.
+
+    `listing` is the cohort's repos keyed by name, off the ONE listing the caller's tick
+    already holds (`discovery.listing_by_name`), and it is what the shape that creates NO
+    repos runs on - its sheet and its gradebooks. The arm that DOES create repos takes its
+    own a moment before it creates them (`_org_listing`) and uses that instead: the repos
+    and gradebooks this very tick has already made for an earlier assignment are in it, and
+    a listing taken before any of that would have this one try to create them again."""
     if master_org == cohort_org:
         log_err("master-org and cohort-org must differ.")
         return 1, False
@@ -1256,7 +1264,8 @@ def provision_all(
     # act on. What a handout owes the cohort AROUND the work is the tail, which both share.
     units: list[tuple[str, list[str], str | None]] = []
     results: dict[str, int] = {}
-    existing: dict[str, dict] | None = None
+    # The caller's listing until the repo-creating arm takes its own fresher one below.
+    existing: dict[str, dict] | None = listing
     solution_unavailable = False
     if not gspec.creates_unit_repos:
         log_step(
@@ -1310,13 +1319,16 @@ def provision_all(
 
         # ONE listing of the cohort, taken before anything is created, answers "is it
         # already there?" for the template below, for every unit in stage 2, and for the
-        # gradebooks in the tail.
-        listing = _org_listing(cohort_org)
-        existing = {r["name"]: r for r in listing} if listing is not None else None
+        # gradebooks in the tail. Taken HERE and not handed down from the tick: a tick
+        # fires every handed-out release, so the repos and gradebooks an earlier assignment
+        # in this same tick has just created have to be in it, or this one creates them
+        # again and counts the 422s as failures.
+        own = _org_listing(cohort_org)
+        existing = {r["name"]: r for r in own} if own is not None else None
 
         # Stage 1: freeze the cohort-level template.
         cohort_template = ensure_cohort_template(
-            master_org, template, cohort_org, slug, listing
+            master_org, template, cohort_org, slug, own
         )
         if cohort_template is None:
             log_err("could not create the cohort assignment template.")
@@ -1393,6 +1405,7 @@ def provision_all(
             is_group=group,
             now=datetime.now(timezone.utc),
             units=sheet_units,
+            listing=existing,
         )
         sheet_written = sheet.written
         if not sheet.written:

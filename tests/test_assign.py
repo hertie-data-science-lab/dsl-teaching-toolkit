@@ -141,6 +141,37 @@ def test_the_grading_sheet_is_created_at_handout_with_one_row_per_student(
     assert sheet["units"] == [("ada-l", ["ada-l"]), ("ben-k", ["ben-k"])]
 
 
+def test_the_repo_shape_re_lists_for_itself_rather_than_read_the_ticks_rows(
+    tmp_path, monkeypatch, sheet_writes
+):
+    # A tick fires every handed-out release, so the repos and gradebooks an EARLIER
+    # assignment in the same tick has just created have to be in the rows this one reads -
+    # off a listing taken before any of that, it would create them again and count the
+    # refusals as failures. So the arm that creates repos lists for itself, a moment
+    # before it creates them, whatever the tick hands down.
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    listed: list[str] = []
+    monkeypatch.setattr(assign, "list_org_repos", lambda org: listed.append(org) or [])
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: "ok")
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+
+    assign.provision_all(
+        "COURSE",
+        "assignment-1-f2026",
+        "COHORT",
+        roster_path=path,
+        listing={"assignment-1-ada-l": {"name": "assignment-1-ada-l"}},
+    )
+
+    assert listed == ["COHORT"]
+    ((sheet,),) = (sheet_writes,)
+    assert sheet["listing"] == {}, "the tick's stale rows were used after all"
+
+
 def test_a_handout_that_provisioned_nothing_does_not_rewrite_the_sheet(
     tmp_path, monkeypatch, sheet_writes
 ):
@@ -2404,6 +2435,29 @@ def test_an_external_handout_creates_no_repos_and_still_records_itself(
     assert gradebooks == ["COHORT"]
     ((sheet,),) = (sheet_writes,)
     assert sheet["units"] == [("ada-l", ["ada-l"])]
+
+
+def test_an_external_handout_runs_on_the_ticks_listing_and_takes_none(
+    tmp_path, monkeypatch, sheet_writes, gradebooks
+):
+    # Nothing is created, so there is nothing fresher to see: the sheet and the gradebooks
+    # read the rows the tick already holds, and this shape lists the org not at all.
+    rows = {"grades-ada-l": {"name": "grades-ada-l", "topics": ["gradebook"]}}
+    monkeypatch.setattr(
+        assign,
+        "list_org_repos",
+        lambda org: pytest.fail("an external handout listed the org for itself"),
+    )
+    given: list = []
+    monkeypatch.setattr(
+        assign.grades,
+        "ensure_gradebooks",
+        lambda org, dry_run=False, existing=None: given.append(existing) or 0,
+    )
+    out = _external(monkeypatch, tmp_path, listing=rows)
+    assert out["result"] == (0, True)
+    ((sheet,),) = (sheet_writes,)
+    assert sheet["listing"] is rows and given == [rows]
 
 
 def test_a_second_tick_of_an_external_handout_hands_nothing_out_again(

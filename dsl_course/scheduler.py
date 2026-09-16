@@ -210,7 +210,10 @@ def describe(release: Release, now: datetime | None = None) -> list[str]:
 
 
 def _execute_nondeploy(
-    course_org: str, cohort_org: str, release: Release
+    course_org: str,
+    cohort_org: str,
+    release: Release,
+    listing: dict[str, dict] | None,
 ) -> tuple[int, bool]:
     """Run one release's non-deploy action (an assignment handout, and once its
     `solution_datetime` has passed, the model solution with it). Deploys are batched
@@ -236,6 +239,9 @@ def _execute_nondeploy(
             # template, and the tick knows which it is firing - so it says, rather than
             # letting the far end pick the first and hand out the other one's repos.
             slug=release.assignment_slug,
+            # The tick's listing, for the shape that creates no repos: its sheet and its
+            # gradebooks are all it has. The arm that creates repos re-lists for itself.
+            listing=listing,
         )
         if failed != 0:
             errors += 1
@@ -255,13 +261,18 @@ def _snapshot_passed_deadlines(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
+    listing: dict[str, dict] | None = None,
 ) -> int:
     """Freeze every passed-deadline assignment that has no snapshot yet. Write-once: an
     assignment already frozen is skipped silently, so this is a no-op on every tick after
     the first. Returns the error count.
 
     What was frozen is NOT returned: the snapshot file itself is the handoff to the
-    autograde phase, which runs in another job (and so another process) entirely."""
+    autograde phase, which runs in another job (and so another process) entirely.
+
+    `listing` is the tick's own (see `run`), read for `pushed_at`. `{}` is the degraded
+    answer a listing that could not be read leaves behind, and the freeze goes on without
+    it - which is why every assignment frozen in one tick shares one listing or none."""
     errors = 0
     for slug, deadline in due_snapshots(course_org, sched, now):
         entry = sched.assignments[slug]
@@ -293,6 +304,7 @@ def _snapshot_passed_deadlines(
             is_group=is_group,
             teams_key=slug,
             tz=sched.timezone,
+            listing=listing or {},
         )
         if result is SnapshotResult.FAILED:
             errors += 1
@@ -382,7 +394,11 @@ def _autograde_passed_deadlines(
 
 
 def _run_releases(
-    course_org: str, cohort_org: str, due: list[Release], now: datetime
+    course_org: str,
+    cohort_org: str,
+    due: list[Release],
+    now: datetime,
+    listing: dict[str, dict] | None = None,
 ) -> int:
     """Fire every due release's due actions, then sync the site once. Returns the error
     count. `now` gates each action individually: a deploy with its own deploy_datetime
@@ -408,7 +424,7 @@ def _run_releases(
                 + (" + solution" if release.assignment_solution else "")
             )
             handout_errors, handout_changed = _execute_nondeploy(
-                course_org, cohort_org, release
+                course_org, cohort_org, release, listing
             )
             errors += handout_errors
             # Only a handout that PROVISIONED something has anything new to show the site.
@@ -609,7 +625,12 @@ def _preflight_sources(
     return 0
 
 
-def _config_faults(course_org: str, cohort_org: str, sched: schedule.Schedule) -> dict:
+def _config_faults(
+    course_org: str,
+    cohort_org: str,
+    sched: schedule.Schedule,
+    listing: dict[str, dict] | None = None,
+) -> dict:
     """Every hand-edited file in this cohort's classroom-config EXCEPT schedule.yml, and
     what is wrong with each. `{digest: faults}`, and a file left OUT of it is one this tick
     could not read.
@@ -673,7 +694,7 @@ def _config_faults(course_org: str, cohort_org: str, sched: schedule.Schedule) -
     # and holds them overnight without knowing anything about this file in particular.
     collect(
         config_digest.GRADING_CONFIG,
-        lambda found: grading_config_faults(course_org, cohort_org, sched, found),
+        lambda found: grading_config_faults(course_org, sched, found, listing),
     )
     return out
 
@@ -746,6 +767,7 @@ def _preflight_configs(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
+    listing: dict[str, dict] | None = None,
 ) -> int:
     """Check every hand-edited file in this cohort's classroom-config and keep one digest
     issue per file in step. Always returns 0.
@@ -760,7 +782,7 @@ def _preflight_configs(
     itself. The signature keeps its int so the caller's `errors +=` reads the same as
     every other phase."""
     local = schedule.in_cohort_zone(sched, now)
-    for spec, faults in _config_faults(course_org, cohort_org, sched).items():
+    for spec, faults in _config_faults(course_org, cohort_org, sched, listing).items():
         if faults:
             log_step(
                 f"{len(faults)} entr(y/ies) in {cohort_org}/{spec.file} the toolkit "
@@ -843,6 +865,7 @@ def _refresh_sheets(
     sched: schedule.Schedule,
     now: datetime,
     dry_run: bool,
+    listing: dict[str, dict] | None = None,
 ) -> int:
     """Keep every open assignment's grading sheet current: one pass, after the freeze.
 
@@ -853,7 +876,10 @@ def _refresh_sheets(
 
     A sheet that does not exist yet is CREATED - an assignment handed out before this pass
     shipped (or one whose handout ran before the sheet had rows) gets one on the next
-    tick rather than never."""
+    tick rather than never.
+
+    `listing` is the tick's own (see `run`): every sheet refreshed in one pass reads the
+    same rows, where each used to take a listing of its own."""
     sealed = {
         schedule.cohort_name(slug, sched.assignments[slug])
         for slug, _ in due_snapshots(course_org, sched, now)
@@ -884,6 +910,7 @@ def _refresh_sheets(
             template,
             is_group=is_group,
             now=now,
+            listing=listing or {},
         ).written:
             errors += 1
     return errors
@@ -1120,13 +1147,17 @@ def _release_phase(
     now: datetime,
     dry_run: bool,
     verdict: cadence.Verdict | None = None,
+    listing: dict[str, dict] | None = None,
 ) -> int:
     """Snapshot every passed deadline, refresh every open grading sheet, pre-flight the
     plan's sources, and fire everything now due. Returns the error count. No grading: see
     `_autograde_passed_deadlines`.
 
     `verdict` is the cadence reading `main` took once for the whole course; None means this
-    invocation does not report lateness at all (see `main`)."""
+    invocation does not report lateness at all (see `main`).
+
+    `listing` is this tick's one listing of the cohort (see `run`), handed to each pass
+    below in the order they already run in. None means it could not be read."""
     # Re-sorted, not just concatenated: the synthesised handouts carry their own datetimes
     # and would otherwise land after every scheduled release whatever their date.
     releases = sorted(
@@ -1165,11 +1196,13 @@ def _release_phase(
     # Freeze passed deadlines FIRST: server-timed, and before anything grades against the
     # snapshot. Independent of the release plan - a cohort can pin due dates without
     # scheduling a single release.
-    errors += _snapshot_passed_deadlines(course_org, cohort_org, sched, now, dry_run)
+    errors += _snapshot_passed_deadlines(
+        course_org, cohort_org, sched, now, dry_run, listing
+    )
     # Then the sheets, in the same pass and straight after: the freeze has just settled
     # every assignment past its cutoff, and everything else that is past its DUE date
     # gets its `info:` refreshed here.
-    errors += _refresh_sheets(course_org, cohort_org, sched, now, dry_run)
+    errors += _refresh_sheets(course_org, cohort_org, sched, now, dry_run, listing)
     # Look AHEAD as well as at what is due: a deploy whose source was never staged fails
     # at its moment, which is far too late to write the thing. This is the only unattended
     # surface that notices - the commit-time validator only ever runs when someone edits
@@ -1181,7 +1214,7 @@ def _release_phase(
     # enrolled from, a people.yml entry that grants nothing, a teams.csv row that will not
     # materialise. Each has its own digest issue and its own mail, and none of them can
     # red this run either.
-    errors += _preflight_configs(course_org, cohort_org, sched, now, dry_run)
+    errors += _preflight_configs(course_org, cohort_org, sched, now, dry_run, listing)
 
     if dry_run:
         for release in due:
@@ -1198,7 +1231,7 @@ def _release_phase(
     elif not due:
         log_ok("nothing due.")
     else:
-        errors += _run_releases(course_org, cohort_org, due, now)
+        errors += _run_releases(course_org, cohort_org, due, now, listing)
     return errors
 
 
@@ -1228,7 +1261,22 @@ def run(
     # plan. (Individually DROPPED entries were always advisory - the rest of the plan runs.)
     errors = 0
     if release:
-        errors += _release_phase(course_org, cohort_org, sched, now, dry_run, verdict)
+        # ONE listing of the cohort for the whole tick, taken here at the start of it and
+        # handed to every pass that asks a question of the org: the freeze's `pushed_at`,
+        # the sheet refresh's receipts, the grading-config digest's "what did this
+        # assignment actually hand out?", and the shape of handout that creates no repos.
+        # Each used to take one of its own, so the cost grew with the number of ASSIGNMENTS
+        # a cohort carries rather than with the number of cohorts. The one arm that still
+        # lists for itself is the repo-creating handout, which needs rows newer than this
+        # (see `assign.provision_all`).
+        #
+        # None is "we could not look", and it is the answer each pass reads in its own way:
+        # the digest reports nothing, the freeze and the sheets go on without `pushed_at`.
+        # Not taken for the autograde phase, which asks the org nothing.
+        listing = discovery.listing_by_name(cohort_org)
+        errors += _release_phase(
+            course_org, cohort_org, sched, now, dry_run, verdict, listing
+        )
         # Last of the release pass: the cohort's own end. A release due today ships
         # first, and then - on the day - the whole org is frozen behind it.
         errors += _archive_phase(course_org, cohort_org, sched, now, dry_run)

@@ -26,12 +26,12 @@ import re
 import sys
 import tempfile
 import textwrap
+import time
 from collections import Counter
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from functools import cache, partial
+from functools import cache
 from pathlib import Path
 from typing import Self
 from urllib.parse import urlsplit
@@ -71,7 +71,7 @@ from .discovery import (
     classify_repos,
     course_name_for_cohort,
     course_org_for_cohort,
-    list_org_repos,
+    listing_by_name,
     org_meta,
 )
 from .faults import ConfigFault
@@ -1474,7 +1474,7 @@ def grading_spec_faults(
     course_org: str,
     text: str,
     fires: datetime | None,
-    handed_out: Callable[[], list[dict] | None] | None = None,
+    handed_out: list[dict] | None = None,
 ) -> list[ConfigFault]:
     """Everything in ONE `grading_config.yml` the parse had to refuse, as faults.
 
@@ -1482,9 +1482,10 @@ def grading_spec_faults(
     that knows the vocabulary each key accepts, and a fault that paraphrased it would be a
     second, slightly different answer about what is allowed.
 
-    `handed_out` answers "which repos did this assignment actually create?" when there are
-    any to compare the file against - one more fault, off the SAME parse, because parsing
-    a second time here would log every refused line in this file twice."""
+    `handed_out` is the repos this assignment actually created, off the caller's listing:
+    one more fault, off the SAME parse, because parsing a second time here would log every
+    refused line in this file twice. None means there is nothing to compare the file
+    against - the assignment has not gone out, or the listing could not be read."""
     try:
         spec = parse_grading_spec(text)
     except yaml.YAMLError as exc:
@@ -1515,7 +1516,7 @@ def grading_spec_faults(
         for dropped in spec.dropped
         if isinstance(dropped, Dropped)
     ]
-    if handed_out is not None:
+    if handed_out:
         faults += _visibility_faults(
             spec, slug, template, course_org, lines, fires, handed_out
         )
@@ -1536,7 +1537,7 @@ def _spec_fix(dropped: Dropped) -> str:
 
 
 def grading_config_faults(
-    course_org: str, cohort_org: str, sched, found: list[ConfigFault]
+    course_org: str, sched, found: list[ConfigFault], listing: dict[str, dict] | None
 ) -> None:
     """Every assignment this cohort's plan declares, and everything in its definition that
     will not grade as written.
@@ -1546,13 +1547,19 @@ def grading_config_faults(
     anyway). An assignment with neither has no moment, and its faults simply sit in the
     issue.
 
-    `cohort_org` IS read, for one check: an assignment whose `visibility:` no longer
-    describes the repos it handed out (see `_visibility_faults`). Everything else here is
+    `listing` is the COHORT's repos keyed by name, off the one listing the tick already
+    holds, and it is read for one check: an assignment whose `visibility:` no longer
+    describes the repos it handed out (see `_visibility_faults`). None is "we could not
+    look", and that check reports nothing - it is not worth dropping a whole file's digest
+    for, since every other fault in it was read from the template. Everything else here is
     the definition alone, which lives in the course org. Nothing is appended until every
     template has been read: a read that failed is "we could not look", and the digest
     closes what it is not handed."""
     faults: list[ConfigFault] = []
-    listed = _CohortRepos(cohort_org)
+    # THE submission-repo rule over the whole listing, computed once for the plan rather
+    # than once per assignment: it sorts every repo in the org, and a cohort carrying six
+    # assignments used to pay for that six times over the same rows.
+    derived = classify_repos(list(listing.values())) if listing else {}
     for slug, entry in sorted(sched.assignments.items()):
         template = entry.course_source_repo
         if not template:
@@ -1562,59 +1569,21 @@ def grading_config_faults(
         if text is None:
             faults += _undeclared_faults(slug, template, course_org, fires)
             continue
-        # Nothing to compare a file against until the assignment has gone out, which is
-        # also what keeps the listing above from being taken at all on most plans.
-        handed_out = (
-            partial(listed.generated_from, schedule.cohort_name(slug, entry))
-            if entry.handout_datetime is not None
-            else None
-        )
+        # Nothing to compare a file against until the assignment has gone out. Archived
+        # repos are left out: one is read-only and a finished cohort is meant to stay
+        # frozen, so nothing it says can be anybody's fault.
+        handed_out = None
+        if listing is not None and entry.handout_datetime is not None:
+            name = schedule.cohort_name(slug, entry)
+            handed_out = [
+                r
+                for r in listing.values()
+                if derived.get(r["name"]) == name and not r.get("archived")
+            ]
         faults += grading_spec_faults(
             slug, template, course_org, text, fires, handed_out
         )
     found.extend(faults)
-
-
-class _CohortRepos:
-    """The cohort's repos, listed at most ONCE per tick and only if something asks.
-
-    A lazy listing rather than an argument, because only one check in this file needs it
-    and most plans never reach it: an assignment still ahead of its hand-out, or one that
-    creates no repos, is answered without any of this. The first caller pays one paginated
-    `GET /orgs/{org}/repos` - two requests for a cohort of a hundred repos, four times an
-    hour - and every later assignment in the same plan reuses it.
-
-    A listing that could not be READ answers None, and the caller reports nothing: "we
-    could not look" is not "they agree", and it is not worth dropping a whole file's digest
-    for either, since every other fault in it was read from the template."""
-
-    def __init__(self, cohort_org: str) -> None:
-        self._org = cohort_org
-        self._rows: list[dict] | None = None
-        self._looked = False
-
-    def generated_from(self, name: str) -> list[dict] | None:
-        """The LIVE repos generated from one cohort-side assignment template, or None.
-
-        `discovery.classify_repos` is the same rule the faculty floor and the public pages
-        use, so a cohort holding both `assignment-4` and `assignment-4-project` sorts the
-        same way here as it does everywhere else. Archived repos are left out: one is
-        read-only and a finished cohort is meant to stay frozen, so nothing it says can be
-        anybody's fault."""
-        if not self._looked:
-            self._looked = True
-            try:
-                self._rows = list_org_repos(self._org)
-            except RuntimeError as exc:
-                log_err(f"could not list {self._org}'s repos: {exc}")
-        if self._rows is None:
-            return None
-        derived = classify_repos(self._rows)
-        return [
-            r
-            for r in self._rows
-            if derived.get(r["name"]) == name and not r.get("archived")
-        ]
 
 
 def _visibility_faults(
@@ -1624,9 +1593,9 @@ def _visibility_faults(
     course_org: str,
     lines: dict[tuple[str, ...], int],
     fires: datetime | None,
-    handed_out: Callable[[], list[dict] | None],
+    rows: list[dict],
 ) -> list[ConfigFault]:
-    """`visibility:` against the repos this assignment actually handed out.
+    """`visibility:` against the repos this assignment actually handed out, `rows`.
 
     The value is read at CREATE and nowhere else - `POST .../generate` makes a private repo
     and the handout flips it - so editing the line afterwards is a silent no-op: the file
@@ -1641,9 +1610,6 @@ def _visibility_faults(
     named here rather than left to that - it is what has to hold the day it stops."""
     if not spec.creates_unit_repos or spec.visibility == "student_choice":
         return []
-    rows = handed_out()
-    if not rows:
-        return []  # nothing handed out yet, or the listing could not be read
     want_private = spec.visibility == "private"
     wrong = [r for r in rows if listed_is_private(r) is not want_private]
     if not wrong:
@@ -3077,25 +3043,6 @@ def sheet_slugs(cohort_org: str) -> list[str]:
     return sorted(n[:-4] for n in out.splitlines() if n.endswith(".yml"))
 
 
-def _existing_repos(cohort_org: str) -> dict[str, dict] | None:
-    """The cohort's repos off ONE paginated listing keyed by name, or None when it could
-    not be read.
-
-    Asking `repo_exists` per student cost a GET per student on every nightly sync, for a
-    question one listing answers for the whole cohort. None falls the caller back to that
-    probe: the listing is an optimisation, not a new way for a sync to fail.
-
-    Each row carries the repo's `topics`, which is what lets `_tag_gradebook` converge a
-    missing stamp on an existing gradebook without a read of its own."""
-    try:
-        return {r["name"]: r for r in list_org_repos(cohort_org)}
-    except RuntimeError as exc:
-        log_err(
-            f"could not list {cohort_org}'s repos - falling back to a probe per repo: {exc}"
-        )
-        return None
-
-
 def _tag_gradebook(cohort_org: str, repo: str, have: set[str]) -> None:
     """Stamp `gradebook` on one private gradebook repo. Checked.
 
@@ -3128,8 +3075,8 @@ def provision_one(
 ) -> str:
     """Ensure a private grades-<handle> repo exists with the student as read collaborator.
 
-    `existing` is the cohort's repos off ONE listing (`_existing_repos`), keyed by name;
-    membership in it answers "is this gradebook already there?" without a GET per student,
+    `existing` is the cohort's repos off ONE listing (`discovery.listing_by_name`), keyed
+    by name; membership in it answers "is this gradebook already there?" without a GET per student,
     and each row carries the `topics` that `_tag_gradebook` converges off. None - no
     listing to hand - falls back to probing this one repo, and skips that convergence
     rather than paying a read per student for it."""
@@ -3188,16 +3135,21 @@ def provision_one(
     return "failed-no-collaborator"
 
 
-# How many gradebooks one run may CREATE. Four API calls each (create, README, topics,
-# faculty grant), and this now runs on the nightly Sync membership, whose job has a
-# 30-minute bound: a 300-student cohort's first night would spend the whole of it here and
-# a job that times out has recorded nothing about where it got to. Repos already there cost
-# nothing, so every later run starts from where this one stopped.
-MAX_NEW_GRADEBOOKS = 60
+# How long one run may spend provisioning gradebooks before it stops and leaves the rest
+# to the next one. A DEADLINE rather than a count of creations: what has to be bounded is
+# the wall clock of a job (the nightly Sync membership has a 30-minute one), and four API
+# calls per new gradebook take as long as the write pacer and the day's rate limit make
+# them - so a count is a guess at that and this is the thing itself. A run that stops here
+# has recorded everything it did; repos already there cost almost nothing, so the next run
+# starts from where this one left off.
+GRADEBOOK_BUDGET_MINUTES = 10
 
 
 def ensure_gradebooks(
-    cohort_org: str, dry_run: bool = False, existing: dict[str, dict] | None = None
+    cohort_org: str,
+    dry_run: bool = False,
+    existing: dict[str, dict] | None = None,
+    budget_minutes: float = GRADEBOOK_BUDGET_MINUTES,
 ) -> int:
     """Provision one private gradebook repo per onboarded enrolled student. Idempotent.
 
@@ -3211,10 +3163,11 @@ def ensure_gradebooks(
     None means take one here. Every caller but the nightly sync has just listed the org for
     its own reasons, and a second listing per release run answers the same question twice.
 
-    At most `MAX_NEW_GRADEBOOKS` are CREATED per run, and only where the listing says which
-    those are - a run that could not list the org falls back to a probe per student and
-    cannot tell a creation from a skip until it has paid for it. The rest wait for the next
-    run, which is one nightly sync away.
+    `budget_minutes` bounds the WALL CLOCK: once it is spent this stops and says how many
+    students are left, and they wait for the next run - one nightly sync away. It applies
+    whether or not there was a listing to say which students still need one, which is the
+    point: a run that could not list the org probes per student, and that is exactly the
+    run most likely to overrun the job it sits in.
 
     A roster that is absent or empty is a SKIP, not a failure, for the reason
     `sync_roster.sync` gives: an empty roster is a freshly bootstrapped cohort and a
@@ -3242,32 +3195,28 @@ def ensure_gradebooks(
     # ONE listing of the cohort answers "is it already there?" for every student below.
     # A dry run creates nothing, so it needs no answer.
     if existing is None and not dry_run:
-        existing = _existing_repos(cohort_org)
+        existing = listing_by_name(cohort_org)
     results: dict[str, int] = {}
-    creating = 0
     deferred = 0
+    started = time.monotonic()
     for s in onboarded:
         if dry_run:
             log_person(f"    DRY-RUN  {cohort_org}/{GRADEBOOK_PREFIX}{s.github_handle}")
             continue
-        if (
-            existing is not None
-            and f"{GRADEBOOK_PREFIX}{s.github_handle}" not in existing
-        ):
-            if creating >= MAX_NEW_GRADEBOOKS:
-                deferred += 1
-                continue
-            creating += 1
+        if time.monotonic() - started > budget_minutes * 60:
+            deferred += 1
+            continue
         status = provision_one(cohort_org, s.github_handle, existing)
         results[status] = results.get(status, 0) + 1
     if dry_run:
         return 0
     if deferred:
         # A COUNT, and green: nothing is lost, and the students who do have one were all
-        # reconciled. The next run creates the next batch.
+        # reconciled. `ok` is `provision_one`'s word for a gradebook it CREATED, so the
+        # line says what the budget actually bought. The next run takes the next batch.
         log(
-            f"  ({deferred} more gradebook(s) on the next run - one run creates at most "
-            f"{MAX_NEW_GRADEBOOKS})"
+            f"  ({deferred} more gradebook(s) on the next run - {results.get('ok', 0)} "
+            f"created here, and one run spends at most {budget_minutes:g} minute(s) on it)"
         )
     log_ok(f"Done - {json.dumps(results)}")
     return 1 if any(k.startswith("failed") for k in results) else 0
@@ -3613,7 +3562,7 @@ def distribute(
     # have a gradebook?" below and, in stage 1, "is this submission repo there at all, and
     # does GitHub say it is private?" - which is what a `visibility:` edited after handout
     # would otherwise make a silent no-op. A dry run writes nothing and needs neither.
-    listed = None if dry_run else _existing_repos(cohort_org)
+    listed = None if dry_run else listing_by_name(cohort_org)
     provisioning_failed = bool(
         ensure_gradebooks(cohort_org, dry_run=dry_run, existing=listed)
     )
