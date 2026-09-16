@@ -13,7 +13,15 @@ from pathlib import Path
 
 import pytest
 
-from dsl_course import access, bootstrap_course, course, gh_contents, ghcli, scaffold
+from dsl_course import (
+    access,
+    bootstrap_course,
+    course,
+    discovery,
+    gh_contents,
+    ghcli,
+    scaffold,
+)
 from tests.conftest import repo_row
 
 
@@ -166,6 +174,17 @@ def test_the_floor_is_write_where_faculty_author_and_read_elsewhere():
     # An unplaceable listing reads as a cohort: only a listing that positively says
     # "course" earns the write-everywhere floor.
     assert access.faculty_floor("materials", None) is access.FACULTY_READ_ACCESS
+    # A PUBLIC submission repo (`visibility: public`) is a student repo like any other:
+    # the floor is computed off the NAME, never off who can read it, so a portfolio
+    # assignment does not quietly earn faculty a push on a student's work.
+    listing = [
+        repo_row("assignment-1", isTemplate=True),
+        repo_row("assignment-1-ada", visibility="public"),
+    ]
+    assert "assignment-1-ada" in discovery.student_repo_names(listing)
+    assert (
+        access.faculty_floor("assignment-1-ada", "cohort") is access.FACULTY_READ_ACCESS
+    )
     # And a protected repo takes read whatever the tier says.
     assert (
         access.faculty_floor("grades-ada", "course", frozenset({"grades-ada"}))

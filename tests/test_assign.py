@@ -2463,3 +2463,132 @@ def test_an_unscheduled_external_release_is_refused_and_writes_nothing(
     assert out["handout"] == [] and out["site"] == []
     assert sheet_writes == [] and gradebooks == []
     assert "due_datetime" in capsys.readouterr().err
+
+
+# ------------------------------------------------- an assignment handed out in the open
+#
+# `visibility: public` creates the same repos world-readable. Two things follow, and both
+# are DERIVED: the generate endpoint takes `private` and nothing else, so the repo is born
+# private and flipped; and nothing about a student's marking may be written where the
+# internet can read it, so there is no Feedback issue.
+
+
+@pytest.fixture
+def _public_writes(monkeypatch, _provisioned):
+    """Every write `provision_one` makes on the create path, recorded by name."""
+    seen: dict = {"generated": [], "visibility": [], "scanning": [], "granted": []}
+    monkeypatch.setattr(
+        assign,
+        "generate_from_template",
+        lambda **k: seen["generated"].append(k) or True,
+    )
+    monkeypatch.setattr(assign, "grant_faculty", lambda *a, **k: None)
+    monkeypatch.setattr(
+        assign,
+        "add_collaborator",
+        lambda org, repo, handle, permission="", person=False: (
+            seen["granted"].append((handle, permission)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        assign,
+        "set_visibility",
+        lambda org, repo, vis, person=False: (
+            seen["visibility"].append((repo, vis)) or True
+        ),
+    )
+    monkeypatch.setattr(
+        assign,
+        "enable_secret_scanning",
+        lambda org, repo: seen["scanning"].append(repo) or True,
+    )
+    return seen
+
+
+def _one_public(**kwargs) -> str:
+    return assign.provision_one(
+        "COURSE",
+        "assignment-1",
+        "COHORT",
+        "assignment-1-ada-l",
+        ["ada-l"],
+        "assignment-1",
+        **kwargs,
+    )
+
+
+def test_a_public_repo_is_generated_private_then_flipped_and_scanned(_public_writes):
+    # `POST /repos/{o}/{r}/generate` carries `private` and no `visibility`, so this is the
+    # only route to a public repo - and secret scanning comes AFTER the flip, because on
+    # Free the feature exists for public repositories only.
+    assert _one_public(visibility="public") == "ok"
+    assert [g["private"] for g in _public_writes["generated"]] == [True]
+    assert _public_writes["visibility"] == [("assignment-1-ada-l", "public")]
+    assert _public_writes["scanning"] == ["assignment-1-ada-l"]
+    # The student's own permission is untouched by any of it.
+    assert _public_writes["granted"] == [("ada-l", "maintain")]
+
+
+def test_a_private_assignment_patches_no_visibility_and_asks_for_no_scanning(
+    _public_writes,
+):
+    assert _one_public() == "ok"
+    assert _public_writes["visibility"] == [] and _public_writes["scanning"] == []
+
+
+def test_a_repo_that_already_exists_is_never_re_patched(_public_writes, monkeypatch):
+    # The scheduler re-fires every handed-out assignment four times an hour. A PATCH here
+    # would undo, on every one of them, a visibility somebody had deliberately changed -
+    # and the cohort's grading_config.yml digest is what reports the disagreement instead.
+    monkeypatch.setattr(assign, "repo_exists", lambda org, repo: True)
+    assert _one_public(visibility="public", touch_existing=False) == "skipped"
+    assert _public_writes["visibility"] == [] and _public_writes["scanning"] == []
+
+
+def test_a_failed_visibility_patch_is_counted_and_withholds_nothing(
+    _public_writes, monkeypatch, capsys
+):
+    # A repo the instructor said was portfolio work, left private, is not the assignment
+    # they handed out - so it is counted, and `provision_all`'s exit predicate keys on the
+    # `failed` prefix. But the repo EXISTS and the student has it, so nothing else is
+    # withheld: the access grant still happens, and so does the solution push.
+    monkeypatch.setattr(assign, "set_visibility", lambda *a, **k: False)
+    pushed: list[str] = []
+    monkeypatch.setattr(assign, "_wait_for_content", lambda *a, **k: True)
+    monkeypatch.setattr(
+        assign, "push_solution", lambda org, repo, d: pushed.append(repo) or True
+    )
+    status = _one_public(visibility="public", sol_dir=Path("/nowhere"))
+    assert status == "failed-visibility"
+    assert _public_writes["granted"] == [("ada-l", "maintain")]
+    assert pushed == ["assignment-1-ada-l"]
+    # And it never asks for secret scanning on a repo that is still private: a 422 per
+    # student per tick for the rest of the term.
+    assert _public_writes["scanning"] == []
+    assert "assignment-1-ada-l" not in capsys.readouterr().out
+
+
+def test_a_public_handout_opens_no_feedback_issue(
+    tmp_path, monkeypatch, feedback_issues, sheet_writes, gradebooks
+):
+    # There is nowhere private to write a mark in a repo the world can read, so the thread
+    # is not opened at all and the private gradebook carries the feedback instead.
+    monkeypatch.setattr(
+        assign,
+        "load_grading_spec",
+        lambda org, template: grades.parse_grading_spec("visibility: public\n"),
+    )
+    monkeypatch.setattr(
+        assign, "ensure_cohort_template", lambda *a, **k: "assignment-1"
+    )
+    seen: list[dict] = []
+    monkeypatch.setattr(assign, "provision_one", lambda *a, **k: seen.append(k) or "ok")
+    monkeypatch.setattr("dsl_course.schedule.record_handout", lambda *a, **k: None)
+    monkeypatch.setattr("dsl_course.site.sync_site", lambda *a, **k: None)
+    path = _roster_file(tmp_path, "ada@uni.edu,Ada,enrolled,ada-l,42,dsl-abc")
+    assert assign.provision_all(
+        "COURSE", "assignment-1-f2026", "COHORT", roster_path=path
+    ) == (0, True)
+    assert feedback_issues == []
+    assert [k["feedback_body"] for k in seen] == [""]
+    assert [k["visibility"] for k in seen] == ["public"]

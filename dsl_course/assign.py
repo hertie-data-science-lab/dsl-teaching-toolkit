@@ -24,6 +24,11 @@ NOTHING: no cohort template, no repo, no Feedback issue, no solution push. It st
 the handout and writes the grading sheet, the gradebooks and the site, which is everything
 a handout owes the cohort around the work itself.
 
+For `visibility: public` it creates the same repos world-readable - portfolio work - with
+secret scanning and push protection on, and no Feedback issue: nothing about a student's
+marking may be written where the internet can read it, so their feedback goes to their
+private gradebook alone. The cohort template stays private either way.
+
 Usage:
     python3 -m dsl_course.assign \\
         --master-org TEST-HERTIE-COURSE --course-source-repo assignment-1-f2026 \\
@@ -82,9 +87,11 @@ from .releaseignore import RELEASEIGNORE, deny_for, excluded_in_tree
 from .repos import (
     add_collaborator,
     default_branch,
+    enable_secret_scanning,
     generate_from_template,
     repo_exists,
     set_repo_topics,
+    set_visibility,
     topic_name,
 )
 from .workflows_place import NEVER_IN_STUDENT_REPOS
@@ -728,8 +735,16 @@ def provision_one(
     touch_existing: bool = True,
     existing: dict[str, dict] | None = None,
     feedback_body: str = "",
+    visibility: str = "private",
 ) -> str:
     """Generate one submission repo and grant its members access.
+
+    `visibility` is the assignment's own (`grading_config.yml`), and is acted on at CREATE
+    only: `POST .../generate` takes `private` and nothing else, so a `public` assignment's
+    repo is born private and flipped a moment later. A repo that already exists is never
+    re-PATCHed - the tick re-fires every handed-out assignment, so that would nightly undo
+    a deliberate change, and an edit to `visibility:` after hand-out is reported by the
+    cohort's `grading_config.yml` digest instead.
 
     `existing` is the cohort's repos off ONE listing (`_org_listing`), keyed by name;
     membership in it answers "does this repo already exist?" without a GET per student,
@@ -756,6 +771,7 @@ def provision_one(
         repo in existing if existing is not None else repo_exists(cohort_org, repo)
     )
     feedback_failed = False
+    visibility_failed = False
     if existed:
         log_person(f"  [skip] repo {cohort_org}/{repo}")
         # Converge the stamp off the listing row that already answered "does it exist?",
@@ -787,6 +803,20 @@ def provision_one(
         return "failed-create"
     else:
         log_person(f"  [ok] created {cohort_org}/{repo}")
+        if visibility == "public":
+            # Generated private a line ago, because that is the only thing the generate
+            # endpoint can be told - so `public` is this PATCH and nothing else. It is
+            # COUNTED (`failed-visibility` below) because a repo the instructor said was
+            # portfolio work, left private, is not the assignment they handed out; but it
+            # withholds NOTHING - the repo exists, the students still get their access and
+            # their solution, and the next manual Release assignment repairs the flag.
+            if set_visibility(cohort_org, repo, "public", person=True):
+                # After the flip, never before: on GitHub Free these features exist for
+                # public repos only, so the same call against the private repo this was a
+                # moment ago is a 422. A refusal is a warning inside `repos`.
+                enable_secret_scanning(cohort_org, repo)
+            else:
+                visibility_failed = True
         _tag_submission(cohort_org, repo, slug, set())
         # The Feedback issue, on the CREATE path only. It is where every receipt and,
         # eventually, the grade is posted, so the student is told at handout where to
@@ -884,6 +914,8 @@ def provision_one(
             return "failed-no-access"
         if not team_ok:
             return "failed-team-members"
+        if visibility_failed:
+            return "failed-visibility"
         if feedback_failed:
             return "failed-no-feedback-issue"
         return "skipped" if existed else "ok"
@@ -911,6 +943,8 @@ def provision_one(
         # A repo nobody can open is a failed handout - "failed" is what the exit code
         # keys on (see provision_all), so the run goes red rather than quietly ok.
         return "failed-no-collaborator"
+    if visibility_failed:
+        return "failed-visibility"
     if feedback_failed:
         return "failed-no-feedback-issue"
     return "skipped" if existed else "ok"
@@ -1243,17 +1277,27 @@ def provision_all(
         # A provisioning unit is (repo_name, [member handles], team slug), and each carries
         # the body its Feedback issue is opened with. Both are names for a repo, so both
         # belong to the only shape that creates one.
-        solo_body = "" if group else grades.feedback_body(spec)
+        #
+        # No body at all where the shape HAS no Feedback issue - a `public` repo is not a
+        # place to write a student's marks - and `provision_one` opens one only for a unit
+        # it was given a body for. The derived rule decides it, so nothing here re-states
+        # which shapes have a thread and which do not.
+        solo_body = (
+            grades.feedback_body(spec) if gspec.has_feedback_issue and not group else ""
+        )
         feedback_bodies: dict[str, str] = {}
         for unit, members in sheet_units:
             repo = submission_repo(slug, unit)
             units.append((repo, members, teams.team_slug(key, unit) if group else None))
             feedback_bodies[repo] = (
-                grades.feedback_body(spec, unit, members) if group else solo_body
+                grades.feedback_body(spec, unit, members)
+                if gspec.has_feedback_issue and group
+                else solo_body
             )
         log_step(
             f"Releasing {slug} to {cohort_org}: freeze cohort template, then provision "
-            f"{what}{' + solution' if solution else ''}"
+            f"{what}{' as PUBLIC repos' if gspec.is_public else ''}"
+            f"{' + solution' if solution else ''}"
         )
         if dry_run:
             log(f"    DRY-RUN  cohort template {cohort_org}/{slug}")
@@ -1310,6 +1354,7 @@ def provision_all(
                     touch_existing=touch_existing,
                     existing=existing,
                     feedback_body=feedback_bodies.get(repo, ""),
+                    visibility=gspec.visibility,
                 )
                 results[status] = results.get(status, 0) + 1
 
