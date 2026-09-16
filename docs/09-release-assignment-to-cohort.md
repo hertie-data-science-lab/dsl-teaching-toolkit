@@ -62,6 +62,23 @@ something that looks like a credential, GitHub refuses the push and prints a lin
 it lets them say why they are pushing it, which unblocks that push. Tell them to rotate the
 credential rather than bypass the block.
 
+### An assignment the students may publish themselves
+
+`visibility: student_choice` in the template's `grading_config.yml` hands out the same
+**private** repos, but makes the student - or every member of a team - **admin** of their
+own, which is the only permission that carries GitHub's visibility switch. There is no
+Feedback issue (the repo may be public tomorrow): marks and feedback go to their private
+`grades-<handle>` gradebook.
+
+Until the assignment's **grading cutoff** the scheduler puts any of these repos back to
+private on its next tick, and the assignment's page on the cohort site says so. After the
+cutoff nothing touches the flag again: the repo is theirs to publish.
+
+One-time setup on the cohort org, by hand (these are web-only settings - no API sets them):
+Settings → Member privileges → **Allow members to change repository visibilities** ON,
+**Allow members to delete or transfer repositories** OFF. The cohort's *grading_config.yml*
+digest issue reports it while either is wrong.
+
 ## Group or individual?
 
 The shape is the template's own declaration - `type:` in the `grading_config.yml` on its

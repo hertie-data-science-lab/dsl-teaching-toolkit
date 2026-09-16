@@ -37,8 +37,10 @@ Live example: [`example-course/course-org/assignment-1-f2026/`](../example-cours
       - `autograde` (off by default; on seeds a `tests/` stub on `solution` for you to
         fill, and each submission's pass count appears on the grading sheet as a first
         pass for graders - never shown to students)
-      - `visibility` = who may read each student's repo: `private` (default) or `public`.
-        Read when the repo is created, so editing it afterwards moves nothing
+      - `visibility` = who may read each student's repo: `private` (default), `public`, or
+        `student_choice` (private, and the student is its admin: theirs to publish once the
+        grading cutoff has passed). Read when the repo is created, so editing it afterwards
+        moves nothing
    - Everything else - the team cap, the late window, the penalty - comes from
      `assignment_defaults:` in the course org's `.github/dsl-course.yml` and is written
      into the assignment's own `grading_config.yml`, where you can revise it per assignment.
@@ -167,15 +169,22 @@ Two settings in `grading_config.yml`, and everything else follows from them.
 | `submit_url` | an `https://` address | `external` only: puts a **Submit on \<host\>** button on the assignment's page and its due row. Without one the page says to read the brief. |
 | `visibility` | `private` (default) | Only the student and the teaching team can read their repo. |
 | | `public` | Every student's repo is world-readable from hand-out - portfolio work such as a hackathon. |
+| | `student_choice` | Created **private**, with the student (or every member of a team) as its **admin**. After the grading cutoff they may publish it themselves from the repo's Settings; before it, the scheduler puts any published repo back to private. |
 
-A `public` repo gets **no Feedback issue**: marks and feedback go only to the student's
-private `grades-<handle>` repo. Students who want their own work public on a `private`
-assignment publish a copy under their own account (the gradebook README tells them how);
-the org's copy stays private.
+A `public` or `student_choice` repo gets **no Feedback issue**: marks and feedback go only
+to the student's private `grades-<handle>` repo. Students who want their own work public on
+a `private` assignment publish a copy under their own account (the gradebook README tells
+them how); the org's copy stays private.
 
 `visibility` is read when each repo is **created**. Editing it after the assignment has
 gone out changes nothing on GitHub, so the cohort's *grading_config.yml* digest reports the
-disagreement until the line and the repos say the same thing again.
+disagreement until the line and the repos say the same thing again. `student_choice` is
+exempt from that check - a mixture is what it is for - and is checked against the ORG
+instead: it needs **Allow members to change repository visibilities** ON and **Allow
+members to delete or transfer repositories** OFF (cohort org → Settings → Member
+privileges, set by hand once - see the
+[deployment checklist](DEPLOYMENT-CHECKLIST.md#cohort-setup-per-year)). The same digest
+faults while either is wrong.
 
 The **Feedback issue** - the thread the receipts and the final comment appear in - exists
 only where there is a private repo of the student's own to put it in, so an `external`

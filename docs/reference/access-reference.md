@@ -115,6 +115,12 @@ A `visibility: public` assignment changes who may READ a submission repo and not
 floor is computed off the repo's NAME, so `instructors` still hold **read** and never push on a
 student's work, and the student still holds `maintain` on their own.
 
+A `visibility: student_choice` assignment changes the STUDENT's grant and nothing else: they
+hold **admin** on their own repo (or their team does, on a group one) so that they can publish
+it after the grading cutoff. The faculty floor is unchanged - still read, never push, on a
+student's work - and the floor never demotes the student either, so the admin grant stands for
+the life of the cohort.
+
 ## The four `instructors` teams
 
 Four different teams share the word "instructors" - they are not interchangeable. The first names
@@ -144,7 +150,10 @@ record who's on it elsewhere. Route FA (faculty assistant) and TA access through
 - **Students hold `maintain` on their own submission repo** and read on their own
   `grades-<handle>`; nowhere else, so no faculty workflow is visible or runnable for them.
   `maintain` does not include changing a repo's visibility, so a `public` assignment's repos
-  are public because the assignment said so and stay that way.
+  are public because the assignment said so and stay that way. The one exception is
+  `visibility: student_choice`, where the grant is **admin** precisely so that the student can
+  change it - bounded by the org's own Member privileges settings and by the scheduler, which
+  re-privatises such a repo until the grading cutoff ([03](../03-add-assignment-to-course.md)).
 - **New members must accept a one-time org invite** - membership shows `pending` until they do.
 - **Nobody ever holds the bot token.** Every workflow runs server-side under `DSL_BOT_TOKEN`; the
   actor's own permissions are only ever used as the gate.
