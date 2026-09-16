@@ -5474,3 +5474,139 @@ def test_a_template_that_could_not_be_read_reports_none_of_them(monkeypatch):
             "Course-Org", "Cohort-Org", _sched_one_assignment(), found
         )
     assert found == []
+
+
+# --------------------------- `visibility:` against the repos the assignment handed out
+#
+# The value is read when each repo is CREATED and nowhere else, so an edit after hand-out
+# moves nothing: the file says one thing, the cohort's repos are another, and every page
+# the toolkit writes describes repos that do not exist. Nothing else notices.
+
+HANDED_OUT = datetime(2026, 9, 29, 9, 0, tzinfo=BERLIN_TZ)
+
+
+def _visibility_run(monkeypatch, config, rows, *, handed_out=HANDED_OUT, dest=None):
+    """`grading_config_faults` over one handed-out assignment and a cohort listing.
+
+    `rows=None` is a listing that could not be READ."""
+    from dsl_course.schedule import AssignmentEntry
+
+    listings: list[str] = []
+
+    def fake_listing(org):
+        listings.append(org)
+        if rows is None:
+            raise RuntimeError("rate-limited")
+        return list(rows)
+
+    monkeypatch.setattr(grades, "_grading_text", lambda course, template: config)
+    monkeypatch.setattr(grades, "get_file_content", lambda *a, **k: None)
+    monkeypatch.setattr(grades, "list_org_repos", fake_listing)
+    sched = Schedule(
+        assignments={
+            "a3": AssignmentEntry(
+                course_source_repo="assignment-3-f2026",
+                cohort_dest_repo=dest,
+                due_datetime=DUE_AT,
+                handout_datetime=handed_out,
+            )
+        }
+    )
+    found: list = []
+    grades.grading_config_faults("Course-Org", "Cohort-Org", sched, found)
+    return found, listings
+
+
+def _cohort_rows(*repos: tuple[str, str], template="a3"):
+    from tests.conftest import repo_row
+
+    return [repo_row(template, isTemplate=True)] + [
+        repo_row(name, visibility=vis) for name, vis in repos
+    ]
+
+
+def test_a_public_assignment_whose_repos_are_private_is_a_fault(monkeypatch):
+    found, listings = _visibility_run(
+        monkeypatch,
+        "visibility: public\n",
+        _cohort_rows(("a3-ada", "private"), ("a3-ben", "public")),
+    )
+    (fault,) = found
+    assert fault.field == "visibility"
+    assert "1 of 2 are not public" in fault.what
+    assert "read when each repo is CREATED" in fault.what
+    # A COUNT and never a name: this sentence reaches a public run log, a digest issue and
+    # an email alike, and a submission repo is `<slug>-<handle>`.
+    assert "ada" not in fault.what + fault.fix()
+    # It bites when the assignment is graded, like every other value in this file.
+    assert fault.fires == DUE_AT
+    assert listings == ["Cohort-Org"]
+
+
+def test_a_private_assignment_whose_repos_are_public_is_the_same_fault(monkeypatch):
+    # The other direction, and the one that matters most: `public` was edited back to
+    # `private` and the cohort's work is still world-readable.
+    (fault,), _ = _visibility_run(monkeypatch, "", _cohort_rows(("a3-ada", "public")))
+    assert "1 of 1 are not private" in fault.what
+
+
+def test_repos_that_agree_with_the_file_are_no_fault(monkeypatch):
+    found, _ = _visibility_run(
+        monkeypatch, "visibility: public\n", _cohort_rows(("a3-ada", "public"))
+    )
+    assert found == []
+
+
+def test_an_archived_repo_is_nobodys_fault(monkeypatch):
+    # A frozen cohort is meant to stay frozen: the repo is read-only and nothing can, or
+    # should, move it.
+    from tests.conftest import repo_row
+
+    rows = _cohort_rows(("a3-ada", "public"))
+    rows.append(repo_row("a3-ben", visibility="private", archived=True))
+    found, _ = _visibility_run(monkeypatch, "visibility: public\n", rows)
+    assert found == []
+
+
+def test_an_assignment_that_has_not_handed_out_costs_no_listing(monkeypatch):
+    # The listing is lazy and taken at most once per tick: a plan whose assignments are
+    # all still ahead pays nothing at all for this check.
+    found, listings = _visibility_run(
+        monkeypatch,
+        "visibility: public\n",
+        _cohort_rows(("a3-ada", "private")),
+        handed_out=None,
+    )
+    assert found == [] and listings == []
+
+
+def test_an_assignment_that_creates_no_repos_is_never_asked_about(monkeypatch):
+    found, listings = _visibility_run(
+        monkeypatch, "submit_via: external\n", _cohort_rows(("a3-ada", "private"))
+    )
+    assert found == [] and listings == []
+
+
+def test_a_listing_that_could_not_be_read_reports_nothing_and_keeps_the_rest(
+    monkeypatch, capsys
+):
+    # "We could not look" is not "they agree" - and it is not worth dropping the whole
+    # file's digest for either, since every other fault in it was read from the template.
+    found, _ = _visibility_run(monkeypatch, "visibility: public\nmystery: 4\n", None)
+    assert [f.field for f in found] == ["mystery"]
+    assert "could not list" in capsys.readouterr().err
+
+
+def test_the_repos_compared_are_the_ones_this_assignment_generated(monkeypatch):
+    # `cohort_dest_repo` renames the cohort side, and a cohort holding both `a3` and
+    # `a3-project` must not read one template's repos as the other's - the same rule the
+    # faculty floor and the public pages use (`discovery.classify_repos`).
+    from tests.conftest import repo_row
+
+    rows = _cohort_rows(("a3-project-ada", "private"), template="a3-project")
+    rows += [repo_row("a3", isTemplate=True), repo_row("a3-ada", visibility="public")]
+    found, _ = _visibility_run(
+        monkeypatch, "visibility: public\n", rows, dest="a3-project"
+    )
+    (fault,) = found
+    assert "1 of 1 are not public" in fault.what

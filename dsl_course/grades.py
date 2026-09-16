@@ -27,10 +27,11 @@ import sys
 import tempfile
 import textwrap
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from functools import cache
+from functools import cache, partial
 from pathlib import Path
 from typing import Self
 from urllib.parse import urlsplit
@@ -66,6 +67,7 @@ from .course import (
     submission_repo,
 )
 from .discovery import (
+    classify_repos,
     course_name_for_cohort,
     course_org_for_cohort,
     list_org_repos,
@@ -1453,12 +1455,17 @@ def grading_spec_faults(
     course_org: str,
     text: str,
     fires: datetime | None,
+    handed_out: Callable[[], list[dict] | None] | None = None,
 ) -> list[ConfigFault]:
     """Everything in ONE `grading_config.yml` the parse had to refuse, as faults.
 
     The parse's own sentences, in the words it already logs them in: it is the one place
     that knows the vocabulary each key accepts, and a fault that paraphrased it would be a
-    second, slightly different answer about what is allowed."""
+    second, slightly different answer about what is allowed.
+
+    `handed_out` answers "which repos did this assignment actually create?" when there are
+    any to compare the file against - one more fault, off the SAME parse, because parsing
+    a second time here would log every refused line in this file twice."""
     try:
         spec = parse_grading_spec(text)
     except yaml.YAMLError as exc:
@@ -1475,7 +1482,7 @@ def grading_spec_faults(
             )
         ]
     lines = key_lines(text)
-    return [
+    faults = [
         _spec_fault(
             slug,
             template,
@@ -1489,6 +1496,11 @@ def grading_spec_faults(
         for dropped in spec.dropped
         if isinstance(dropped, Dropped)
     ]
+    if handed_out is not None:
+        faults += _visibility_faults(
+            spec, slug, template, course_org, lines, fires, handed_out
+        )
+    return faults
 
 
 def _spec_fix(dropped: Dropped) -> str:
@@ -1515,12 +1527,13 @@ def grading_config_faults(
     anyway). An assignment with neither has no moment, and its faults simply sit in the
     issue.
 
-    `cohort_org` is not read - the definition lives in the course org - and is taken all
-    the same, because every collector in `scheduler._config_faults` is asked the same
-    question and one that quietly dropped an argument would read as a different kind of
-    check. Nothing is appended until every template has been read: a read that failed is
-    "we could not look", and the digest closes what it is not handed."""
+    `cohort_org` IS read, for one check: an assignment whose `visibility:` no longer
+    describes the repos it handed out (see `_visibility_faults`). Everything else here is
+    the definition alone, which lives in the course org. Nothing is appended until every
+    template has been read: a read that failed is "we could not look", and the digest
+    closes what it is not handed."""
     faults: list[ConfigFault] = []
+    listed = _CohortRepos(cohort_org)
     for slug, entry in sorted(sched.assignments.items()):
         template = entry.course_source_repo
         if not template:
@@ -1530,8 +1543,110 @@ def grading_config_faults(
         if text is None:
             faults += _undeclared_faults(slug, template, course_org, fires)
             continue
-        faults += grading_spec_faults(slug, template, course_org, text, fires)
+        # Nothing to compare a file against until the assignment has gone out, which is
+        # also what keeps the listing above from being taken at all on most plans.
+        handed_out = (
+            partial(listed.generated_from, schedule.cohort_name(slug, entry))
+            if entry.handout_datetime is not None
+            else None
+        )
+        faults += grading_spec_faults(
+            slug, template, course_org, text, fires, handed_out
+        )
     found.extend(faults)
+
+
+class _CohortRepos:
+    """The cohort's repos, listed at most ONCE per tick and only if something asks.
+
+    A lazy listing rather than an argument, because only one check in this file needs it
+    and most plans never reach it: an assignment still ahead of its hand-out, or one that
+    creates no repos, is answered without any of this. The first caller pays one paginated
+    `GET /orgs/{org}/repos` - two requests for a cohort of a hundred repos, four times an
+    hour - and every later assignment in the same plan reuses it.
+
+    A listing that could not be READ answers None, and the caller reports nothing: "we
+    could not look" is not "they agree", and it is not worth dropping a whole file's digest
+    for either, since every other fault in it was read from the template."""
+
+    def __init__(self, cohort_org: str) -> None:
+        self._org = cohort_org
+        self._rows: list[dict] | None = None
+        self._looked = False
+
+    def generated_from(self, name: str) -> list[dict] | None:
+        """The LIVE repos generated from one cohort-side assignment template, or None.
+
+        `discovery.classify_repos` is the same rule the faculty floor and the public pages
+        use, so a cohort holding both `assignment-4` and `assignment-4-project` sorts the
+        same way here as it does everywhere else. Archived repos are left out: one is
+        read-only and a finished cohort is meant to stay frozen, so nothing it says can be
+        anybody's fault."""
+        if not self._looked:
+            self._looked = True
+            try:
+                self._rows = list_org_repos(self._org)
+            except RuntimeError as exc:
+                log_err(f"could not list {self._org}'s repos: {exc}")
+        if self._rows is None:
+            return None
+        derived = classify_repos(self._rows)
+        return [
+            r
+            for r in self._rows
+            if derived.get(r["name"]) == name and not r.get("archived")
+        ]
+
+
+def _visibility_faults(
+    spec: GradingSpec,
+    slug: str,
+    template: str,
+    course_org: str,
+    lines: dict[tuple[str, ...], int],
+    fires: datetime | None,
+    handed_out: Callable[[], list[dict] | None],
+) -> list[ConfigFault]:
+    """`visibility:` against the repos this assignment actually handed out.
+
+    The value is read at CREATE and nowhere else - `POST .../generate` makes a private repo
+    and the handout flips it - so editing the line afterwards is a silent no-op: the file
+    says `public`, the cohort's work stays private, and every page the toolkit writes
+    describes repos that do not exist. Nothing else notices, which is why this is a fault
+    and not a log line.
+
+    Only the visibilities that make a UNIFORM set of repos are compared. `student_choice` -
+    which the parse refuses back to `private` until its own phase - is deliberately outside
+    that set: the students own the flag there, so a mixture is the correct state and a
+    fault about it would fire on every tick for ever."""
+    if not spec.creates_unit_repos or spec.visibility not in OFFERED_VISIBILITIES:
+        return []
+    rows = handed_out()
+    if not rows:
+        return []  # nothing handed out yet, or the listing could not be read
+    want_private = spec.visibility == "private"
+    wrong = [r for r in rows if listed_is_private(r) is not want_private]
+    if not wrong:
+        return []
+    return [
+        _spec_fault(
+            slug,
+            template,
+            course_org,
+            fires,
+            # A COUNT and never a name: a submission repo is `<slug>-<handle>`, and this
+            # sentence is repeated into a public run log, a digest issue and an email.
+            f"`visibility: {spec.visibility}` does not describe the repos this assignment "
+            f"handed out - {len(wrong)} of {len(rows)} are not {spec.visibility}. The "
+            f"value is read when each repo is CREATED, so editing it afterwards moves "
+            f"nothing on its own",
+            field="visibility",
+            lineno=lines.get(("visibility",)),
+            fix=f"set `visibility:` back to what those repos are, or make each of them "
+            f"{spec.visibility} by hand from its GitHub Settings - the toolkit never "
+            f"re-opens a repo it has already created",
+        )
+    ]
 
 
 def _undeclared_faults(
