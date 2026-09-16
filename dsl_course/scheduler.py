@@ -294,7 +294,11 @@ def _snapshot_passed_deadlines(
         # A template that cannot be found leaves it individual, which is the parse's
         # default anyway.
         template = _assignment_template(course_org, slug, entry)
-        is_group = bool(template) and load_grading_spec(course_org, template).is_group
+        # The SHAPE, off the same one read: which repos are frozen (one per unit, or one
+        # drop box with a folder each) and whether each pin is narrowed to a folder. A
+        # template that cannot be found leaves both at the parse's own defaults.
+        gspec = load_grading_spec(course_org, template) if template else None
+        is_group = gspec is not None and gspec.is_group
         # `name` names the repos, `slug` (the schedule key) is what teams.csv is keyed on.
         # A FAILED freeze counts; NOTHING_TO_FREEZE (nobody handed out yet) does not, and
         # neither writes a snapshot file - which is what keeps the autograde phase off an
@@ -307,6 +311,7 @@ def _snapshot_passed_deadlines(
             teams_key=slug,
             tz=sched.timezone,
             listing=listing,
+            shared=gspec is not None and gspec.submit_shared,
         )
         if result is SnapshotResult.FAILED:
             errors += 1

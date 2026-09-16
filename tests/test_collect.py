@@ -416,17 +416,21 @@ def test_snapshot_csv_round_trips_and_keeps_a_blank_sha():
     # it and grading falls back to the student-datable pin for exactly the repos where a
     # backdated commit would be most valuable.
     rows = [
-        ("assignment-1-ben", "", "2026-10-16T00:04:12+00:00", "", ""),
+        ("assignment-1-ben", "", "2026-10-16T00:04:12+00:00", "", "", "", ""),
         (
             "assignment-1-anna",
             SHA,
             "2026-10-16T00:04:12+00:00",
             "2026-10-15T21:40:00Z",
             "commit",
+            "",
+            "",
         ),
     ]
     text = collect.dump_snapshots(rows)
-    assert text.splitlines()[0] == "repo,sha,recorded_at,submitted_at,submitted_source"
+    assert text.splitlines()[0] == (
+        "repo,sha,recorded_at,submitted_at,submitted_source,path,note"
+    )
     assert text.splitlines()[1].startswith("assignment-1-anna,")  # repo-sorted, stable
     assert collect.parse_snapshots(text) == {
         "assignment-1-anna": SHA,
@@ -1013,12 +1017,12 @@ def _stub_snapshot_write(
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=False, teams_key=None: [
+        lambda org, slug, is_group=False, teams_key=None, **k: [
             (r, r.split("-")[-1], []) for r in pins
         ],
     )
     monkeypatch.setattr(
-        collect, "_snapshot_sha", lambda org, repo, deadline, at="": pins[repo]
+        collect, "_snapshot_sha", lambda org, repo, deadline, at="", **k: pins[repo]
     )
     monkeypatch.setattr(
         collect,
@@ -1379,7 +1383,7 @@ def _stub_collect(monkeypatch, snapshots, grading: str | None = None):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: [
+        lambda org, slug, is_group=None, teams_key=None, **k: [
             (f"{slug}-{h}", h, [h]) for h in ("anna", "ben", "cara")
         ],
     )
@@ -1406,7 +1410,7 @@ def test_collect_with_no_targets_at_all_records_the_skip(monkeypatch, capsys):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: [],
+        lambda org, slug, is_group=None, teams_key=None, **k: [],
     )
     marked: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -1428,7 +1432,7 @@ def test_the_cron_path_waits_instead_of_recording_a_no_targets_skip(
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: [],
+        lambda org, slug, is_group=None, teams_key=None, **k: [],
     )
 
     def boom(*a, **k):
@@ -1448,7 +1452,7 @@ def test_an_unwritten_no_targets_marker_goes_red(monkeypatch):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: [],
+        lambda org, slug, is_group=None, teams_key=None, **k: [],
     )
     monkeypatch.setattr(collect, "mark_not_autograded", lambda *a, **k: False)
     assert collect.collect("Course", "assignment-1-f2026", "Cohort") == 1
@@ -1496,7 +1500,7 @@ def test_collect_told_which_entry_keys_everything_on_that_entry(monkeypatch):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: (
+        lambda org, slug, is_group=None, teams_key=None, **k: (
             asked.append((slug, teams_key)) or []
         ),
     )
@@ -1536,7 +1540,7 @@ def test_collect_looks_teams_up_by_the_schedule_key_not_the_cohort_name(monkeypa
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: (
+        lambda org, slug, is_group=None, teams_key=None, **k: (
             asked.append((slug, teams_key)) or []
         ),
     )
@@ -1600,7 +1604,7 @@ def test_collect_resolves_the_cohort_type_from_the_entry_not_the_cohort_name(
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: (
+        lambda org, slug, is_group=None, teams_key=None, **k: (
             kinds.append(is_group) or [(f"{slug}-team-x", "team-x", ["anna", "ben"])]
         ),
     )
@@ -1725,7 +1729,7 @@ def test_collect_with_nothing_gradable_records_a_skip_and_succeeds(monkeypatch, 
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: [
+        lambda org, slug, is_group=None, teams_key=None, **k: [
             (f"{slug}-team-x", "team-x", [])
         ],
     )
@@ -3137,7 +3141,7 @@ def test_snapshot_assignment_requires_and_passes_is_group_through(monkeypatch):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group, teams_key=None: seen.append(is_group) or [],
+        lambda org, slug, is_group, teams_key=None, **k: seen.append(is_group) or [],
     )
     collect.snapshot_assignment("Cohort", "assignment-1", "2026-11-15", is_group=False)
     collect.snapshot_assignment("Cohort", "assignment-1", "2026-11-15", is_group=True)
@@ -3512,7 +3516,7 @@ def test_an_unwritten_nothing_gradable_marker_goes_red(monkeypatch, capsys):
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group=None, teams_key=None: [
+        lambda org, slug, is_group=None, teams_key=None, **k: [
             (f"{slug}-team-x", "team-x", [])
         ],
     )
@@ -3578,14 +3582,16 @@ def _sheet_env(
     )
     monkeypatch.setattr(collect.grades, "_grading_text", lambda org, template: grading)
     monkeypatch.setattr(
-        collect, "submission_targets", lambda org, slug, is_group, key=None: targets
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group, key=None, **k: targets,
     )
     monkeypatch.setattr(collect, "get_file_with_sha", lambda org, repo, path: existing)
     monkeypatch.setattr(collect, "load_snapshot_rows", lambda org, slug: rows)
     monkeypatch.setattr(
         collect,
         "_snapshot_sha",
-        lambda org, repo, deadline: (pins or {}).get(repo, collect.Pin()),
+        lambda org, repo, deadline, **k: (pins or {}).get(repo, collect.Pin()),
     )
     monkeypatch.setattr(
         collect, "get_file_content", lambda org, repo, path, ref="": contributions
@@ -4105,7 +4111,7 @@ def _read_repos(monkeypatch, env_pins=None) -> list[str]:
     """Record which repos the refresh actually asks the commits API about."""
     asked: list[str] = []
 
-    def fake(org, repo, deadline):
+    def fake(org, repo, deadline, **k):
         asked.append(repo)
         return (env_pins or {}).get(repo, collect.Pin())
 
@@ -4176,7 +4182,7 @@ def test_a_refresh_whose_lookups_failed_leaves_the_sheet_alone(monkeypatch):
         raise AssertionError("a partial read must not be written")
 
     _sheet_env(monkeypatch, targets=SOLO_TARGETS)
-    monkeypatch.setattr(collect, "_snapshot_sha", lambda org, repo, deadline: None)
+    monkeypatch.setattr(collect, "_snapshot_sha", lambda org, repo, deadline, **k: None)
     monkeypatch.setattr(collect, "put_file", boom)
     assert not collect.sync_sheet(
         "Course",
@@ -4978,7 +4984,9 @@ def test_a_refresh_that_derives_nothing_leaves_a_duplicated_unit_alone(monkeypat
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda org, slug, is_group, key=None: collect.one_per_unit(targets + targets),
+        lambda org, slug, is_group, key=None, **k: collect.one_per_unit(
+            targets + targets
+        ),
     )
     monkeypatch.setattr(
         collect,
@@ -5228,7 +5236,9 @@ def _checkout(monkeypatch, files: dict[str, str]):
         collect, "_pin_commit", lambda wd, deadline, snapshot=None: "abc"
     )
     monkeypatch.setattr(
-        collect, "submission_targets", lambda *a: [("a1-alice", "alice", ["alice"])]
+        collect,
+        "submission_targets",
+        lambda *a, **k: [("a1-alice", "alice", ["alice"])],
     )
     monkeypatch.setattr(
         collect, "load_snapshots", lambda org, slug: {"a1-alice": "abc"}
@@ -5296,7 +5306,7 @@ def test_an_export_that_never_started_costs_one_copy_not_the_whole_pass(
     monkeypatch.setattr(
         collect,
         "submission_targets",
-        lambda *a: [("a1-alice", "alice", ["alice"]), ("a1-ben", "ben", ["ben"])],
+        lambda *a, **k: [("a1-alice", "alice", ["alice"]), ("a1-ben", "ben", ["ben"])],
     )
     monkeypatch.setattr(
         collect,
@@ -5923,3 +5933,362 @@ def test_an_assignment_that_has_created_no_repos_yet_never_reads_the_org(monkeyp
         rows=[repo_row("a3", isTemplate=True)],
     )
     assert reads == []
+
+
+# ------------------------------------------------------- one drop box, a folder per unit
+#
+# `submit_via: shared` hands every unit the SAME repo and one folder inside it. Three
+# things follow: the targets all name that repo, each pin is narrowed to the unit's own
+# folder AND to a commit one of its members made, and the snapshot rows key on the folder
+# because the repo can no longer tell two of them apart.
+
+
+def _folder_commits(monkeypatch, per_path: dict[str, list[str]]):
+    """Answer the commits API per `path=` filter. Returns the queries it was asked."""
+    asked: list[tuple[str, ...]] = []
+
+    def fake_gh(*args, **k):
+        asked.append(args)
+        path = next(
+            (a.split("=", 1)[1] for a in args if a.startswith("path=")),
+            "",
+        )
+        return 0, "\n".join(per_path.get(path, []))
+
+    monkeypatch.setattr(collect, "gh", fake_gh)
+    return asked
+
+
+def test_shared_targets_all_name_the_one_drop_box(monkeypatch, capsys):
+    monkeypatch.setattr(collect.roster, "load", lambda org: _STUDENTS)
+    monkeypatch.setattr(collect.teams, "load", lambda org: {})
+    assert collect.submission_targets("Cohort", "assignment-3", False, shared=True) == [
+        ("assignment-3-submissions", "anna-adams", ["anna-adams"]),
+        ("assignment-3-submissions", "ben-baker", ["ben-baker"]),
+    ]
+    # The unit keys still tell the rows apart, which is what `one_per_unit` keys on - so
+    # one repo named twice is not a duplicate.
+    assert "duplicate" not in capsys.readouterr().err
+
+
+def test_shared_group_targets_name_the_drop_box_once_per_team(monkeypatch):
+    monkeypatch.setattr(collect.roster, "load", lambda org: _STUDENTS)
+    monkeypatch.setattr(
+        collect.teams,
+        "load",
+        lambda org: {"assignment-3": {"alpha": ["anna-adams"], "beta": ["ben-baker"]}},
+    )
+    assert collect.submission_targets("Cohort", "assignment-3", True, shared=True) == [
+        ("assignment-3-submissions", "alpha", ["anna-adams"]),
+        ("assignment-3-submissions", "beta", ["ben-baker"]),
+    ]
+
+
+def test_a_folder_is_pinned_to_its_own_members_newest_commit(monkeypatch):
+    # The folders are a convention, not a boundary: every student has push on the whole
+    # drop box. So the pin is the newest commit in the folder that a MEMBER made - pinning
+    # a classmate's commit would time one student's submission by another's push.
+    asked = _folder_commits(
+        monkeypatch,
+        {
+            "ada-l/": [
+                _commits_line(
+                    sha="new", committed="2026-10-12T09:00:00Z", author="ada-l"
+                )
+            ]
+        },
+    )
+    assert collect._snapshot_sha(
+        "Cohort",
+        "assignment-3-submissions",
+        "2026-10-13",
+        path="ada-l/",
+        members=["ada-l"],
+    ) == collect.Pin("new", "2026-10-12T09:00:00Z")
+    # The query says which folder, and asks for more than one commit - the walk needs them.
+    assert "path=ada-l/" in asked[0]
+    assert f"per_page={collect._COMMIT_PAGE}" in asked[0]
+
+
+def test_a_folder_a_classmate_touched_last_pins_the_member_and_says_so(monkeypatch):
+    # Both halves matter. The pin is the unit's own work, so the mark is theirs; and the
+    # note is on the sheet, because who else has been writing in there is a thing a grader
+    # decides about rather than a thing the toolkit can correct.
+    _folder_commits(
+        monkeypatch,
+        {
+            "ada-l/": [
+                _commits_line(
+                    sha="theirs", committed="2026-10-12T10:00:00Z", author="ben-k"
+                ),
+                _commits_line(
+                    sha="mine", committed="2026-10-12T09:00:00Z", author="ada-l"
+                ),
+            ]
+        },
+    )
+    pin = collect._snapshot_sha(
+        "Cohort",
+        "assignment-3-submissions",
+        "2026-10-13",
+        path="ada-l/",
+        members=["ada-l"],
+    )
+    assert pin == collect.Pin(
+        "mine", "2026-10-12T09:00:00Z", note=collect.OUTSIDE_TOUCH_NOTE
+    )
+
+
+def test_a_folder_with_no_commit_by_a_member_is_no_submission(monkeypatch):
+    # Somebody else put a file in this student's folder and the student never pushed. That
+    # is not a submission, and recording it as one would grade a classmate's work as theirs.
+    _folder_commits(
+        monkeypatch,
+        {
+            "ada-l/": [
+                _commits_line(sha="theirs", author="ben-k"),
+            ]
+        },
+    )
+    assert (
+        collect._snapshot_sha(
+            "Cohort",
+            "assignment-3-submissions",
+            "2026-10-13",
+            path="ada-l/",
+            members=["ada-l"],
+        )
+        == collect.Pin()
+    )
+
+
+def test_a_group_folder_takes_any_member_of_the_team(monkeypatch):
+    _folder_commits(
+        monkeypatch,
+        {
+            "alpha/": [
+                _commits_line(
+                    sha="bens", committed="2026-10-12T10:00:00Z", author="ben-k"
+                )
+            ]
+        },
+    )
+    assert collect._snapshot_sha(
+        "Cohort",
+        "assignment-3-submissions",
+        "2026-10-13",
+        path="alpha/",
+        members=["ada-l", "ben-k"],
+    ) == collect.Pin("bens", "2026-10-12T10:00:00Z")
+
+
+def _shared_snapshot(monkeypatch, pins: dict, pushed=""):
+    """`snapshot_assignment` over a shared drop box. Returns the CSV it wrote."""
+    written: list[tuple[str, str]] = []
+    drop_box = "assignment-3-submissions"
+    monkeypatch.setattr(collect, "load_snapshots", lambda org, slug: None)
+    monkeypatch.setattr(
+        collect,
+        "listing_by_name",
+        lambda org: {drop_box: repo_row(drop_box, pushed_at=pushed)},
+    )
+    monkeypatch.setattr(collect, "_push_activity", lambda org, repo: [])
+    monkeypatch.setattr(
+        collect,
+        "submission_targets",
+        lambda org, slug, is_group=False, teams_key=None, **k: [
+            (drop_box, unit, [unit]) for unit in pins
+        ],
+    )
+    monkeypatch.setattr(
+        collect,
+        "_snapshot_sha",
+        lambda org, repo, deadline, at="", *, path="", members=None: pins[
+            path.strip("/")
+        ],
+    )
+    monkeypatch.setattr(
+        collect,
+        "put_file",
+        lambda org, repo, path, content, msg, **kw: (
+            written.append((path, content.decode())) or True
+        ),
+    )
+    collect.snapshot_assignment(
+        "Cohort",
+        "assignment-3",
+        "2026-10-15T23:59:00+02:00",
+        is_group=False,
+        shared=True,
+    )
+    return written[0][1] if written else ""
+
+
+def test_a_shared_snapshot_records_one_row_per_folder_of_the_one_repo(monkeypatch):
+    text = _shared_snapshot(
+        monkeypatch,
+        {
+            "ada-l": collect.Pin(SHA, "2026-10-12T08:00:00Z"),
+            "ben-k": collect.Pin(),
+        },
+    )
+    rows = collect.parse_snapshot_rows(text)
+    # Keyed on the FOLDER: both rows carry the same repo, so the repo cannot tell them
+    # apart and `unit` is what every reader keys on.
+    assert set(rows) == {"ada-l", "ben-k"}
+    assert rows["ada-l"].repo == "assignment-3-submissions"
+    assert rows["ada-l"].path == "ada-l/" and rows["ada-l"].sha == SHA
+    assert rows["ben-k"].sha == ""
+    assert collect.parse_snapshots(text) == {"ada-l": SHA, "ben-k": ""}
+
+
+def test_a_shared_snapshot_never_calls_a_whole_cohort_suspect(monkeypatch):
+    # `pushed_at` is the REPO's last push, and the repo is everybody's: one student pushing
+    # a minute after the deadline would otherwise mark every folder in the cohort as a
+    # commit dated before the push that delivered it.
+    text = _shared_snapshot(
+        monkeypatch,
+        {"ada-l": collect.Pin(SHA, "2026-10-12T08:00:00Z")},
+        pushed="2026-10-16T09:00:00Z",
+    )
+    assert collect.parse_snapshot_rows(text)["ada-l"].submitted_source == "commit"
+
+
+def test_a_shared_snapshot_carries_the_outside_toucher_note(monkeypatch):
+    # Recorded at the freeze because the sheet is sealed off the snapshot afterwards and
+    # this is the only pass that looks.
+    text = _shared_snapshot(
+        monkeypatch,
+        {
+            "ada-l": collect.Pin(
+                SHA, "2026-10-12T08:00:00Z", note=collect.OUTSIDE_TOUCH_NOTE
+            )
+        },
+    )
+    assert collect.parse_snapshot_rows(text)["ada-l"].note == collect.OUTSIDE_TOUCH_NOTE
+
+
+def test_a_snapshot_written_before_folders_existed_still_parses():
+    # Write-once and never backfilled: the Maths f2026 snapshots have five columns, and a
+    # reader that needed seven would strand the cohort that owns them. A row with no `path`
+    # is a repo of its own and keys on its own name, exactly as it always did.
+    text = (
+        "repo,sha,recorded_at,submitted_at,submitted_source\n"
+        f"assignment-1-anna,{SHA},2026-10-16T00:04:12+00:00,2026-10-15T21:40:00Z,push\n"
+        "assignment-1-ben,,2026-10-16T00:04:12+00:00,,\n"
+    )
+    rows = collect.parse_snapshot_rows(text)
+    assert set(rows) == {"assignment-1-anna", "assignment-1-ben"}
+    assert rows["assignment-1-anna"].sha == SHA
+    assert rows["assignment-1-anna"].path == "" and rows["assignment-1-anna"].note == ""
+    assert rows["assignment-1-anna"].unit == "assignment-1-anna"
+    assert collect.parse_snapshots(text)["assignment-1-ben"] == ""
+
+
+_DROP_BOX = "assignment-3-submissions"
+
+
+def _shared_sheet(monkeypatch, *, targets, rows):
+    """`sync_sheet` over a FROZEN shared assignment. Returns the text it wrote."""
+    written = _sheet_env(
+        monkeypatch,
+        targets=targets,
+        grading=GRADING_YML + "submit_via: shared\n",
+        rows=rows,
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 12, tzinfo=BERLIN),
+    ).written
+    ((_path, text),) = written
+    return grades.parse_sheet(text)
+
+
+def test_a_shared_sheet_keys_its_rows_on_the_folder_not_the_repo(monkeypatch):
+    # One repo, two units: each unit's pin has to be looked up under its OWN key or both
+    # rows read as the same submission.
+    sheet = _shared_sheet(
+        monkeypatch,
+        targets=[(_DROP_BOX, "ada-l", ["ada-l"]), (_DROP_BOX, "ben-k", ["ben-k"])],
+        rows={
+            "ada-l": collect.SnapshotRow(
+                repo=_DROP_BOX,
+                sha=SHA,
+                submitted_at="2026-10-03T20:14:00Z",
+                submitted_source="push",
+                path="ada-l/",
+            ),
+            "ben-k": collect.SnapshotRow(repo=_DROP_BOX, path="ben-k/"),
+        },
+    )
+    assert (
+        sheet["submissions"]["ada-l"]["info"]["submitted"] == "2026-10-03T22:14+02:00"
+    )
+    assert not sheet["submissions"]["ben-k"]["info"].get("submitted")
+
+
+def test_a_shared_sheet_carries_the_outside_toucher_note_into_info(monkeypatch):
+    # Both notes can apply to one row - a folder last touched by an outsider whose own pin
+    # GitHub could not time - and a grader is owed both.
+    sheet = _shared_sheet(
+        monkeypatch,
+        targets=[(_DROP_BOX, "ada-l", ["ada-l"])],
+        rows={
+            "ada-l": collect.SnapshotRow(
+                repo=_DROP_BOX,
+                sha=SHA,
+                submitted_at="2026-10-03T20:14:00Z",
+                submitted_source=collect.SUBMITTED_SOURCE_COMMIT,
+                path="ada-l/",
+                note=collect.OUTSIDE_TOUCH_NOTE,
+            )
+        },
+    )
+    note = sheet["submissions"]["ada-l"]["info"]["submitted_note"]
+    assert collect.OUTSIDE_TOUCH_NOTE in note and "no push record matched" in note
+
+
+def test_a_shared_assignment_posts_no_receipts(monkeypatch):
+    # `has_feedback_issue` is false for it - one repo the whole cohort reads has nowhere
+    # private to acknowledge a push - so nothing is ever opened or posted into.
+    targets = [(_DROP_BOX, "ada-l", ["ada-l"])]
+    _sheet_env(
+        monkeypatch,
+        targets=targets,
+        grading=GRADING_YML + "submit_via: shared\n",
+        rows={
+            "ada-l": collect.SnapshotRow(
+                repo=_DROP_BOX,
+                sha=SHA,
+                submitted_at="2026-10-03T20:14:00Z",
+                path="ada-l/",
+            )
+        },
+    )
+    # AFTER `_sheet_env`, whose own no-op receipt stubs this must win over.
+    monkeypatch.setattr(
+        collect.grades,
+        "ensure_feedback_issue",
+        lambda *a, **k: pytest.fail("a shared drop box has no Feedback issue"),
+    )
+    monkeypatch.setattr(
+        collect.grades,
+        "post_receipt",
+        lambda *a, **k: pytest.fail("a shared drop box has nowhere to post a receipt"),
+    )
+    assert collect.sync_sheet(
+        "Course",
+        "Cohort",
+        _sched(),
+        "assignment-1",
+        "assignment-1",
+        "assignment-1-f2026",
+        is_group=False,
+        now=datetime(2026, 10, 12, tzinfo=BERLIN),
+    ).written

@@ -1128,7 +1128,7 @@ def _stub_snapshots(monkeypatch, existing: set[str]):
         "snapshot_assignment",
         # `is_group` is REQUIRED (no default), so a scheduler that stopped passing it fails
         # these tests loudly instead of silently freezing every assignment as individual.
-        lambda org, slug, deadline, *, is_group, teams_key=None, tz=None, listing=None: (
+        lambda org, slug, deadline, *, is_group, teams_key=None, **k: (
             taken.append((org, slug, deadline, teams_key))
             or scheduler.SnapshotResult.WRITTEN
         ),
@@ -1244,7 +1244,7 @@ def test_run_reports_a_failed_snapshot(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "snapshot_assignment",
-        lambda org, slug, deadline, *, is_group, teams_key=None, tz=None, listing=None: (
+        lambda org, slug, deadline, *, is_group, teams_key=None, **k: (
             scheduler.SnapshotResult.FAILED
         ),
     )
@@ -1435,7 +1435,7 @@ def test_a_tick_takes_one_cohort_listing_and_hands_it_to_every_pass(monkeypatch,
     )
     seen: dict[str, object] = {}
 
-    def _snapshot(org, slug, dl, *, is_group, teams_key=None, tz=None, listing=None):
+    def _snapshot(org, slug, dl, *, is_group, teams_key=None, listing=None, **k):
         seen["snapshot"] = listing
         return scheduler.SnapshotResult.WRITTEN
 
@@ -2756,12 +2756,12 @@ def _real_snapshot_then_autograde(monkeypatch, targets):
     monkeypatch.setattr(
         collect_mod,
         "submission_targets",
-        lambda org, slug, is_group, teams_key=None: targets,
+        lambda org, slug, is_group, teams_key=None, **k: targets,
     )
     monkeypatch.setattr(
         collect_mod,
         "_snapshot_sha",
-        lambda org, repo, deadline, at="": collect_mod.Pin(absent=True),
+        lambda org, repo, deadline, at="", **k: collect_mod.Pin(absent=True),
     )
     monkeypatch.setattr(collect_mod, "listing_by_name", lambda org: {})
 
